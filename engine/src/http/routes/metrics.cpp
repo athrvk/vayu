@@ -104,8 +104,8 @@ constexpr auto BUCKET_MAX_KEYS =
 std::to_array<std::string_view> ({ "latency_p50_ms", "latency_p95_ms",
 "latency_p99_ms", "current_concurrency", "backpressure" });
 
-/// The tick keys a `MetricTickBucket` averages (`current_rps` since #2547,
-/// `window_avg_in_flight` since #2821, the rest since #2393).
+/// The tick keys a `MetricTickBucket` averages (`current_rps`, #2547;
+/// `window_avg_in_flight`, #2821; the rest, #2393).
 constexpr auto BUCKET_MEAN_KEYS =
 std::to_array<std::string_view> ({ "current_rps", "current_send_rate",
 "window_avg_in_flight", "window_avg_latency_ms", "window_avg_queue_wait_ms" });

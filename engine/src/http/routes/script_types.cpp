@@ -578,9 +578,7 @@ struct Signature {
  * `pm.cookies.jar().get(url: string, name: string, ...)` - so reading from the
  * first `(` finds the empty one in `jar()`: an empty parameter list, whose
  * closing paren is immediately followed by `.get`, so the return type is
- * dropped too. Every `pm.cookies.jar().*` member was declared as a
- * no-argument `void`, which is not merely wrong but inverted - the editor said
- * "takes nothing" about a method that requires a URL.
+ * dropped too.
  *
  * So the search is anchored to the member name, and falls back to the first
  * `(` only when the detail does not restate it.
@@ -748,10 +746,7 @@ std::string field_type (const std::string& detail) {
     }
 
     // `T | undefined` is T, optional - so the suffix is split off and put back
-    // rather than every pair being listed. The list form had `string |
-    // undefined` and not `number | undefined`, which silently declared
-    // `pm.info.iteration` as `void` and made `pm.info.iteration + 1` an error
-    // in the editor.
+    // rather than every pair being listed.
     const auto [stripped, optional] = split_optional_suffix (base);
     base                            = stripped;
 
@@ -1024,9 +1019,8 @@ std::string chain_member_doc (const std::vector<ChainEntry>& entries) {
  * Every non-function member is the chain: a chain word hands the expectation
  * back, and so does a terminal getter - `expect_true` returns
  * `expect_chained (...)`, not `undefined`, so `.to.be.true.and.equal(1)` runs.
- * Typing the two alike is what retires the "chain vocabulary" the table could
- * not carry: the distinction was only ever needed to keep one of them off
- * `void`. Every call returns the chain too, whatever its own entry documents,
+ * Typing the two alike needs no "chain vocabulary" in the table. Every call
+ * returns the chain too, whatever its own entry documents,
  * because `expect_chained` is the one thing every matcher returns.
  */
 std::string render_chain_member (const std::string& name,

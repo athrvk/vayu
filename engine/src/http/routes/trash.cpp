@@ -9,9 +9,7 @@
  * @brief `GET /trash`, `POST /trash/:id/restore`, `DELETE /trash/:id` - what
  *        soft delete left recoverable (issue #988).
  *
- * Deleting a collection used to be irreversible, with the confirm dialog as the
- * entire safety net: one misclick destroyed a subtree and nothing in the engine
- * could give it back. `Database::delete_collection`, `delete_request`,
+ * `Database::delete_collection`, `delete_request`,
  * `delete_environment` (#2970), `delete_request_example` (a user's own
  * example, #2971) and `delete_client_certificate` (#2973) now stamp rows
  * instead of removing them, and these three routes are the whole of what that

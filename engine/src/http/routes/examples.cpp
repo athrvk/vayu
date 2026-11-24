@@ -9,8 +9,7 @@
  * @brief Saved example responses, nested under their request (issue #481).
  *
  * An example is the response an importer found next to a request - Postman's
- * `item.response[]`, an OpenAPI operation's `responses` - which until now had
- * nowhere to live and was dropped at parse time. It is owned by exactly one
+ * `item.response[]`, an OpenAPI operation's `responses`. It is owned by exactly one
  * request, so every path here is nested under `/requests/:id`: the owner is
  * checked before anything else, and an example whose `request_id` disagrees
  * with the path is a 404 rather than a cross-request write.
@@ -413,7 +412,7 @@ void record_saved_response (vayu::db::RequestExample& x, const SavedFrom& saved)
  * `request_example::MAX_BODY_BYTES`.
  * `origin` is validated against its two values by `apply_origin_field` above,
  * and defaults to `import` on create - the honest answer for every caller that
- * does not claim otherwise, since import wrote every row until #588.
+ * does not claim otherwise (#588).
  * `bodyTruncated` takes the plain boolean rule: nothing can validate it, since
  * only the client that captured the response knows whether it was cut, and the
  * stored body is a legitimate length either way.
@@ -685,8 +684,7 @@ const std::string& example_id) {
  *
  * **An imported example is tombstoned rather than trashed** (issue #722). A
  * spec sync replaces every `origin="import"` row of a request it applies any
- * change to, so a removed row came back on the next rename-only sync and the
- * delete this route performs was not a decision that lasted. Keeping the row
+ * change to, so without a tombstone a removed row returns on the next sync. Keeping the row
  * as a tombstone (`suppressed`) is what records the decision - the sync reads
  * them and leaves that status alone.
  *

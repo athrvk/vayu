@@ -364,7 +364,7 @@ bool has_non_null (const nlohmann::json& json, const char* key) {
 
 /**
  * @brief Read a payload's `stream` flag and its caps (issue #573), for both
- *        `POST /execute` and - since #576 - `POST /runs`.
+ *        `POST /execute` and `POST /runs` (#576).
  *
  * Non-static: sse_stream_test.cpp drives it directly, the suite having no
  * in-process HTTP route harness. See routes.hpp for the refusal set.
@@ -650,8 +650,7 @@ const vayu::http::BoundColumnNames& bound_columns) {
     // why: `parse_auth` warns on an unresolved `inherit`, and the build is
     // about to parse the very same block, so a second parse would double every
     // such warning on the ordinary send. A block spelling no token at all -
-    // which is every ordinary send - is answered here, unparsed, exactly as the
-    // `has_row` test used to answer it (issue #1055).
+    // which is every ordinary send - is answered here, unparsed (issue #1055).
     if (!vayu::core::first_token_in (auth_json)) {
         return out;
     }
@@ -992,8 +991,7 @@ const nlohmann::json& elements = nlohmann::json::array ()) {
     if (validation) {
         response_json["validation"] = vayu::core::build_validation_payload (*validation);
     }
-    // Merged in at the top level, which is where every client has read these
-    // four keys since before there was a second placement for them. The node
+    // Merged in at the top level, where every client reads these four keys. The node
     // arrives built, because the caller hands the *same* object to
     // `record_design_result` for the trace's `scripts` key - one object, two
     // homes, so a key can never mean one thing live and another restored.
@@ -1061,10 +1059,9 @@ std::optional<std::string> check_ramp_duration_field (const nlohmann::json& conf
     ramp->dump () + ")";
 }
 
-// `constant_rps` with no positive rate used to run the closed-loop path at the
-// default concurrency while its stored config and report still said
-// `constant_rps` (#1893). Read through `requested_rps`, the executor's own
-// reading of the two fields, after the table has proved both are numbers.
+// `constant_rps` needs a positive rate (#1893). Read through `requested_rps`,
+// the executor's own reading of the two fields, after the table has proved
+// both are numbers.
 std::optional<std::string> check_constant_rps_rate (const nlohmann::json& config) {
     const auto mode = config.find ("mode");
     if (mode == config.end () || *mode != "constant_rps" ||
@@ -1077,9 +1074,8 @@ std::optional<std::string> check_constant_rps_rate (const nlohmann::json& config
            "'constant_concurrency' with 'concurrency'.";
 }
 
-// The converse (#2396): a rate on any other mode switched `constant_concurrency`
-// to open loop and throttled every other mode's workers, while the config and
-// report still named the declared mode. An absent mode is `constant_rps`, as
+// The converse (#2396): a rate on any other mode would switch it to open loop.
+// An absent mode is `constant_rps`, as
 // `LoadStrategy::create` reads it, so it may carry a rate; an unrecognised one
 // may not.
 std::optional<std::string> check_rate_only_on_constant_rps (const nlohmann::json& config) {
@@ -1215,16 +1211,10 @@ size_t max_trace_body_bytes) {
     /*
      * Both scripts' assertions, each carrying the script that made it.
      *
-     * This listed the post-request script's alone, on the reading that "a
-     * pre-request script runs before there is anything to assert about". That
-     * is true of the *response* and not of everything a script asserts: a
-     * pre-request script may call `pm.sendRequest`, and asserting on what came
-     * back - a token fetch that failed, a fixture that is not there - is the
-     * one place to catch it before the request goes out. `pm.test` is bound in
-     * both phases and has always recorded there, and `describe_failed_tests`
-     * fails a scenario step on a pre-request assertion, so listing the post
-     * phase alone left a step failed by an assertion no surface could name
-     * (issue #810).
+     * `pm.test` is bound in both phases and records in both: a pre-request
+     * script may call `pm.sendRequest` and assert on what came back, and
+     * `describe_failed_tests` fails a scenario step on a pre-request assertion,
+     * so the list carries both phases' (issue #810).
      *
      * `source` is the same field `consoleLogs` carries below, spelled the same
      * two ways, because it answers the same question about the same pair of
@@ -1257,8 +1247,8 @@ size_t max_trace_body_bytes) {
     /*
      * Combine console output from both scripts.
      *
-     * `source` is a field rather than the `"[pre] "` text prefix this used to
-     * carry: the prefix was indistinguishable from a script that logged a line
+     * `source` is a field rather than a `"[pre] "` text prefix: a prefix is
+     * indistinguishable from a script that logged a line
      * beginning with those six characters, and adding a second prefix for the
      * level would have doubled that ambiguity instead of removing it.
      *
@@ -1394,9 +1384,8 @@ std::optional<double> script_ms) {
             trace["validation"] = vayu::core::build_validation_payload (*validation);
         }
 
-        // Every design send that ran scripts, not only a streaming one (#725):
-        // a buffered send's results used to reach the live body and stop there,
-        // so a restored Tests tab could not tell "passed" from "never ran".
+        // Every design send that ran scripts, not only a streaming one (#725), so a
+        // restored Tests tab can tell "passed" from "never ran".
         // Only when the run had scripts at all - an empty node would put a
         // Tests pane's worth of nothing on every stored send.
         if (scripts.is_object () && !scripts.empty ()) {
@@ -1492,10 +1481,9 @@ const vayu::core::MonitorLimits& monitor_limits) {
 
     // `stream` and its caps are read through the *same* parser `POST /execute`
     // uses (issue #576): one description of how a stream is declared, so the
-    // two endpoints cannot drift on the spelling, the types or the ranges. It
-    // was refused outright here through phase 3 (#573) because a load run's
-    // completion accounting has no place for a response that never ends - what
-    // changed is that a load stream now always ends, by a cap resolved below.
+    // two endpoints cannot drift on the spelling, the types or the ranges. A load
+    // stream always ends, by a cap resolved below: a load run's completion
+    // accounting has no place for a response that never ends (#573).
     //
     // The `transient` rule inside that parser is unreachable from here: a run
     // carrying `transient` was already rejected above. A collection run reads
@@ -2013,8 +2001,7 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
     // load run's.
     const vayu::core::IterationBinding binding{ data_row.value ? &*data_row.value : nullptr,
         /*row_index=*/0, vayu::core::IterationIdentity{} };
-    // Both halves through the one binder both load paths drive, rather than the
-    // two calls and the row test this used to spell itself: the order is the
+    // Both halves through the one binder both load paths drive: the order is the
     // whole of what makes a deferred credential correct, and a second copy of
     // it here would be a copy that stops receiving that one's fixes. The
     // credentials half is a no-op for the ordinary send, whose auth the build
@@ -2022,12 +2009,7 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
     //
     // `row_columns` - not the two-argument overload's own empty default - so a
     // bare `{{username}}` binds from the row here exactly as it does on both
-    // load paths (issue #1007). Omitting it left every bare-spelled column
-    // token unrecognised as bindable (`is_bound_column_name` reads nothing out
-    // of an empty set), so it survived the bind untouched and reached the wire
-    // as literal `{{column}}` text - a single send's `{{data.column}}` still
-    // worked, since that namespace is always bindable, which is what made the
-    // gap invisible on a full collection or load run (both already pass this).
+    // load paths (issue #1007).
     //
     // Credentials that also wait on the pre-request script (issue #2473) take
     // the row here and are applied after the script, by the exchange.
@@ -2713,8 +2695,7 @@ std::chrono::steady_clock::time_point handler_start) {
 
     // Built once, then sent *and* stored (#725). The live body and the
     // trace's `scripts` node are the same object, so a restored Tests tab
-    // shows the assertions this send actually made rather than the
-    // empty-state that used to make "passed" and "never ran" identical.
+    // shows the assertions this send actually made.
     const nlohmann::json scripts = build_script_result_node (exchange.pre_script_result,
     exchange.post_script_result, send.script_config.max_trace_body_bytes);
     // Every compiled element's outcome (issue #1514) - `extract.*` /

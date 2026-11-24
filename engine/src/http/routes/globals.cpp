@@ -86,9 +86,8 @@ const std::function<void ()>& before_write) {
  * addressed by the same id, so `POST /globals` saves it whole. That makes every
  * write a "create" as far as the one null-vs-absent rule is concerned (issue
  * #95, helpers in routes.hpp): absent and `null` both mean the default, `{}`.
- * A `null` once stored the text `null`, which `GET /globals` read back as no
- * globals at all; the shared helper is what keeps this resource from drifting
- * from the other three again.
+ * A stored text `null` would read back as no globals at all; the shared helper
+ * keeps this resource from drifting from the other three.
  *
  * **The read, the precondition and the write are one lock scope**: a client
  * that merges across two round trips (MCP's `update_globals`) closes its own

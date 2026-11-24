@@ -102,8 +102,7 @@ void register_health_routes (RouteContext& ctx) {
         // Called inline: the callback only signals the daemon's wait, and the
         // teardown that follows cannot overtake this response - `server.stop()`
         // joins httplib's worker pool, and this handler's worker writes the
-        // 200 before it returns to the pool. The 100 ms sleep that used to sit
-        // here bought nothing that ordering does not already guarantee.
+        // 200 before it returns to the pool.
         if (ctx.on_shutdown) {
             vayu::utils::log_debug ("http", "Invoking shutdown callback");
             ctx.on_shutdown ();

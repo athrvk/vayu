@@ -10,10 +10,7 @@
  *        collection bound to it (issue #654's comparison, moved engine-side by
  *        #854).
  *
- * The read half of the sync. `POST /specs/sync` has always applied a diff
- * atomically and decided nothing: the renderer worked out what moved and the
- * engine wrote exactly what it was told, which put the whole Sync section out of
- * reach of everything that is not the Spec tab - MCP first among them. The rule
+ * The read half of the sync. The rule
  * itself is `core/spec_diff.hpp`; this is the one way to ask it, and it owns the
  * three things a caller must not be trusted with:
  *

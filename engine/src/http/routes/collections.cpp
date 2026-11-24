@@ -410,9 +410,7 @@ bool is_create) {
         // "Append after the current siblings" *is* this field's default, so the
         // one null-vs-absent rule lands all three of these on it: create (absent
         // or null), a reparent that states no order, and an explicit null on
-        // update ("reset to the default"). Null used to reset to 0 instead,
-        // which collided with the first sibling rather than resetting anything;
-        // a reparent used to keep a position from the list it had just left.
+        // update ("reset to the default").
         // The siblings are the parent's requests too (#2535). On a create the
         // id is not stored yet, so excluding it is a no-op there.
         if (auto outcome = append_sibling_order (db, c.parent_id, c.order, c.id); !outcome) {
@@ -491,10 +489,8 @@ bool is_create) {
  * Testable core of POST /collections - **create only**, returning
  * {http_status, json_body}.
  *
- * POST used to be a silent upsert, so a stale or typo'd id quietly created a
- * second record instead of failing, and an id collision merged two records into
- * one. Now an id that already exists is a 409 and the caller is told to use
- * PUT; POST only ever creates. A body `id` is rejected outright (#97) - the
+ * An id that already exists is a 409 and the caller is told to use PUT; POST
+ * only ever creates. A body `id` is rejected outright (#97) - the
  * engine owns id generation, and bulk import wires a tree together with the
  * temp ids of `POST /import/apply` (#96) rather than pre-assigning real ones.
  *
@@ -694,8 +690,7 @@ const std::function<void ()>& before_write) {
  * The write carries every field the body did not name, read a moment earlier,
  * so two PUTs interleaved as read, read, write, write leave the second writer's
  * stale copy of the untouched fields on top of the first writer's changes -
- * silently, on both sides. That window used to sit between `get_collection`
- * here and `create_collection` inside the lock.
+ * silently, on both sides.
  *
  * @param if_match The request's `If-Match`, judged inside the same scope; a
  *        row it no longer names is a 412 (#2433).

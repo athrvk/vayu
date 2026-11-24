@@ -47,9 +47,7 @@ namespace vayu::http::routes {
  * A missing request is a *definitive* 404, never a transport failure. That
  * distinction is the whole point of the endpoint: the app reads a single
  * request by id, so a real 404 means "deleted" and a 5xx means "engine
- * unreachable" - two states the previous collection-list scan could not tell
- * apart, because one swallowed list failure looked identical to "not in any
- * list". Present -> 200 with the same serialized shape a list entry carries
+ * unreachable". Present -> 200 with the same serialized shape a list entry carries
  * (`serialize(const db::Request&)`), so the client transforms it identically -
  * with one deliberate exception (issue #1485): this route never substitutes a
  * default for a column over the field cap, so it carries no `truncatedFields`
@@ -903,10 +901,8 @@ const std::string& collection_id) {
  * highest held by any sibling, sub-folders included (#2535), so a created or
  * duplicated request lands at the *end* of its collection.
  *
- * It used to default to 0 (`apply_int_field`), which tied every UI-created
- * request with every other and meant the stored column encoded nothing. The
- * moment explicit orders existed - the first drag - every new request would
- * have jumped to the top.
+ * A default of 0 (`apply_int_field`) would tie every UI-created request with
+ * every other, and the first drag would jump every new request to the top.
  *
  * Applied here rather than in `apply_request_fields` for the reason
  * `reject_missing_collection` is: bulk import cannot scan rows it has yet to

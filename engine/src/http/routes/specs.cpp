@@ -126,10 +126,8 @@ nlohmann::ordered_json* document_out) {
  *
  * One definition of that shape for the two routes that have one: `POST
  * /specs/diff` reports it, so a caller can see what an apply would write, and
- * `POST /specs/sync` writes it (issue #869). It used to be the diff's alone, and
- * the caller echoed the rows back into the sync payload - which made a client
- * able to state examples the document does not describe, and made the shape
- * something two sides had to keep agreeing about.
+ * `POST /specs/sync` writes it (issue #869), so a caller cannot state examples the
+ * document does not describe.
  *
  * `documented` is the field that decides whether the row carries a
  * `Content-Type` at all: a `204 No Content` documents nothing and still becomes

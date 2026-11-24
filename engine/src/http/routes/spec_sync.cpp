@@ -29,9 +29,7 @@
  * - **The examples written are the ones the stored document documents** (issue
  *   #869). The payload carries a decision per updated request - refresh this
  *   request's imported examples, or leave them - and the rows come off the
- *   document this call is storing. A caller used to send the rows themselves,
- *   having read them out of the diff two calls earlier, which made it possible
- *   to write examples for responses the document does not describe.
+ *   document this call is storing, so none is written for a response it does not describe.
  *
  * Deliberately **not** an extension of `/import/apply`: that route creates, and
  * only creates, which is what lets it assign every id and validate a payload
@@ -418,9 +416,7 @@ const std::unordered_set<int>& suppressed_statuses = {}) {
  *
  * A sync writes the examples the document describes rather than rows the caller
  * states: the payload carries the *decision* - refresh this request's imported
- * examples, or leave them - and the rows come from here. Before that, a client
- * could write example rows the document does not describe, and the responses it
- * was echoing back had come from the engine on the diff two calls earlier.
+ * examples, or leave them - and the rows come from here.
  *
  * **Read on the first request that needs it, then reused.** A sync that ticks no
  * examples - a binding move, a rename with the examples left alone - pays
@@ -768,9 +764,8 @@ struct SyncPlan {
  * same `core::safe_spec_apply` whose answer `POST /specs/diff` reports per
  * entry. It exists because those rules - never overwrite a field somebody
  * edited, never delete, leave a request nothing can be told apart about
- * alone - used to live in the renderer alone, which put every apply out of
- * reach of anything that is not the Spec tab and made any second caller a
- * second opinion about which of a user's fields a sync may destroy.
+ * alone - live in the engine so any caller, not only the Spec tab, gets one
+ * answer about which of a user's fields a sync may destroy.
  *
  * Mutually exclusive with the row sections rather than merged with them: a
  * payload that stated both would be two answers to one question, and there
@@ -1179,8 +1174,7 @@ SyncPlan& plan) {
  * request's imported examples from the document being stored, and absent - or
  * false - leaves every one of them alone. Absence is the default because it is
  * the state that touches nothing: a caller that forgets the key leaves a user's
- * rows where they are, where a forgotten list used to mean "the document
- * documents nothing".
+ * rows where they are.
  */
 RouteResult
 read_examples_decision (const nlohmann::json& item, const std::string& id, bool& refresh) {

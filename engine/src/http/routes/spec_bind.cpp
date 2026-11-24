@@ -11,9 +11,7 @@
  *        transaction (issue #862).
  *
  * A bind is three writes: the document, the binding that moves to it, and the
- * stamps. The renderer did all three itself and got away with it, barely - but
- * two of the three rules it had to hold are ones a client must not be trusted
- * with, and both had already been bugs.
+ * stamps. Two of the three rules are ones a client must not be trusted with.
  *
  * - **Stamping goes both ways** (issue #718). After a bind, a request's
  *   `specOperation` is the operation it matched in the bound document, or

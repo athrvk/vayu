@@ -84,9 +84,7 @@ void add_target_rps (nlohmann::json& dst, const nlohmann::json& src) {
 // both normalize to the literal string "auto" instead of being omitted, which
 // would misrepresent "nothing was recorded" as "we lost it".
 //
-// Do not read that as "the run executed at auto". A load run stored before this
-// branch hardcoded CURL_HTTP_VERSION_2TLS, and every run before it went out as
-// HTTP/1.1 regardless because nghttp2 was not linked. "auto" here means the
+// Do not read that as "the run executed at auto": "auto" here means the
 // snapshot names no protocol, not that one was chosen. Never call src["httpVersion"].get<std::string>() here -
 // an explicit null throws.
 void add_http_version (nlohmann::json& dst, const nlohmann::json& src) {
@@ -631,7 +629,7 @@ ReportExtras& extras) {
     summary["connection_replays"].is_number ()) {
         extras.connection_replays = summary["connection_replays"].get<size_t> ();
     }
-    // Written together since #2392, so one key stands for the three.
+    // Written together (#2392), so one key stands for the three.
     if (summary.contains ("sending_duration") && summary["sending_duration"].is_number ()) {
         SendingTotals sending;
         read_number (summary, "sending_duration", sending.sending_duration_s);
@@ -1100,9 +1098,9 @@ const std::optional<std::string>& before) {
  * at its call site below for why.
  *
  * `summaries` spares the poll the work it would otherwise repeat: this is the
- * endpoint a visible history surface re-asks every 5s, and each call used to
- * re-parse every row's immutable `config_snapshot` to rebuild the summary the
- * previous call had already built (#1150), and a terminal load run's stored
+ * endpoint a visible history surface re-asks every 5s, and without it each call
+ * re-parses every row's immutable `config_snapshot` to rebuild the summary the
+ * previous call already built (#1150), and a terminal load run's stored
  * summary is just as fixed. It is a parameter rather than a detail of this
  * function so a caller - a test included - owns the cache's lifetime and two
  * of them never share one.
@@ -1453,10 +1451,9 @@ const std::string& body) {
 /**
  * Testable core of DELETE /runs/:id, returning {http_status, json_body}.
  *
- * Deleting a run that is still executing used to remove its rows while its
- * detached worker kept writing new metrics and results against the same id -
- * permanently orphaned rows, and a run that partially "un-deleted" itself as it
- * finished. So an active run is stopped first: the stop is signalled the same
+ * An active run is stopped first, or its detached worker would keep writing new
+ * metrics and results against the same id - permanently orphaned rows, a run
+ * that partially "un-deletes" itself as it finishes. The stop is signalled the same
  * way POST /runs/:id/stop signals it, and the delete waits for the worker to
  * hand the run over to the retained map, which it only does after its last
  * database write.
@@ -2100,7 +2097,7 @@ double target_rps) {
         json_report["stream"] = extras.stream;
     }
 
-    // `count` is exact for a run stored since #2399 and `tracesStored` is the
+    // `count` is exact for a run stored after #2399 and `tracesStored` is the
     // sample of it the run kept. `percentage` divides by every completion,
     // failed ones included, though only a success can be slow.
     if (report.slow_threshold_ms > 0) {

@@ -2971,11 +2971,8 @@ nlohmann::json get_script_completions () {
     { "sortText", "2_to_deep_equal" }, { "filterText", ".to.deep.equal" } });
 
     // The rest of what the `deep` documentation above claims. `deep` is a
-    // flag-setting getter on the one chain object, so the runtime has always
-    // answered these - but the completion table listed `deep` with `equal`
-    // alone, and the generated declarations are derived from the table, so
-    // `pm.expect(value).to.deep.include({ a: 1 })` - the docs' own line - was
-    // "Property 'include' does not exist" in the editor. Spelled as chai
+    // flag-setting getter on the one chain object, so the runtime answers these; the
+    // generated declarations are derived from the table, so each is listed. Spelled as chai
     // spells them, since the getters commute and a pasted Postman script uses
     // chai's order.
     completions.push_back ({ { "label", "to.deep.include" },

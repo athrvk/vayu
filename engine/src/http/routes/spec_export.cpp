@@ -10,8 +10,8 @@
  *        (issue #630's exporter, moved engine-side by #855).
  *
  * The assembly is `core/openapi_export.hpp`; this is the one way to ask for it,
- * and it owns the three reads the renderer used to make itself - the subtree's
- * requests, every request's stored examples, and the bound document - because
+ * and it owns the three reads - the subtree's requests, every request's stored
+ * examples, and the bound document - because
  * each of them is a place a caller could get the answer subtly wrong:
  *
  * - **Which requests are exported.** The whole subtree of the named collection,
@@ -204,9 +204,7 @@ std::vector<std::string> folder_names_of (const std::vector<vayu::db::Collection
 /**
  * The auth an `inherit` request sends, resolved through @p chain by the one
  * rule `POST /compose` applies (`resolve_inherited_auth`: the nearest level
- * with a credential, `noauth` ending the walk). Without it a request under a
- * folder that sets its own auth was exported as though it sent the root
- * collection's.
+ * with a credential, `noauth` ending the walk).
  */
 vayu::core::ExportAuth inherited_auth_of (const std::vector<vayu::db::Collection>& chain) {
     const nlohmann::json resolved = resolve_inherited_auth (chain);
