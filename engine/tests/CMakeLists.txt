@@ -101,7 +101,12 @@ add_executable(vayu_tests
     requests_route_test.cpp
     examples_route_test.cpp
     specs_route_test.cpp
+    runs_route_report_sections_test.cpp
+    runs_route_report_summary_test.cpp
+    runs_route_report_test.cpp
+    runs_route_rows_test.cpp
     runs_route_test.cpp
+    runs_route_write_test.cpp
     collections_route_test.cpp
     resource_write_route_test.cpp
     error_shape_route_test.cpp
