@@ -6,7 +6,6 @@
  */
 
 /**
- * @file platform_windows.cpp
  * @brief Windows platform implementations
  */
 
@@ -118,7 +117,6 @@ bool write_pid_to_lock (LockHandle handle) {
     SetFilePointer (handle, 0, nullptr, FILE_BEGIN);
     SetEndOfFile (handle);
 
-    // Write PID
     std::string pid = std::to_string (get_process_id ()) + "\n";
     DWORD written   = 0;
     if (!WriteFile (handle, pid.c_str (), static_cast<DWORD> (pid.length ()),
@@ -185,7 +183,6 @@ bool create_directory (const std::string& path) {
 void ensure_directory (const std::string& path) {
     DWORD attribs = GetFileAttributesA (path.c_str ());
     if (attribs == INVALID_FILE_ATTRIBUTES) {
-        // Directory doesn't exist, create it
         if (!CreateDirectoryA (path.c_str (), nullptr)) {
             DWORD error = GetLastError ();
             if (error != ERROR_ALREADY_EXISTS) {
@@ -456,10 +453,6 @@ std::vector<std::string> local_ipv4_addresses () {
     }
     return addresses;
 }
-
-// The 1 ms timer request used to live here, held for the process' whole life.
-// It is `HighResolutionTimerScope` in high_resolution_timer.cpp now, taken by
-// each run and released with it (issue #1161).
 
 // ============================================================================
 // Thread Scheduling

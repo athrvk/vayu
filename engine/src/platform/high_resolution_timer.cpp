@@ -6,7 +6,6 @@
  */
 
 /**
- * @file high_resolution_timer.cpp
  * @brief The refcounted 1 ms timer request, and the one OS call behind it
  *
  * Portable on purpose, unlike its two neighbours in this directory: the

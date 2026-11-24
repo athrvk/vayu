@@ -6,48 +6,24 @@
  */
 
 /**
- * UrlBar Component
+ * One row: the method and URL as one field, then Send and Load Test as an attached pair.
  *
- * One row: the method and URL as a single field, then Send and Load Test as one
- * attached pair.
- *
- * **Three controls became two.** The method was a separate `w-[76px]` dropdown,
- * sized for OPTIONS and therefore wasting ~40px on every GET, and it cost the
- * row an extra border and an extra gap on top of that. It now sits inside the
- * URL field's own border, which is where it belongs - the verb and the address
- * are one thought, and a browser puts its protocol chip in the same place.
- *
- * **Send and Load Test are attached rather than adjacent.** They were two
- * separate buttons at two different type sizes (13px and 12px), which is the
- * signature of two controls styled at different times rather than a pair
- * designed together. Joining a filled button to an outlined one usually reads
- * as a seam between two materials; it works here because both members are on
- * the same accent - Send takes `--primary-fill` with a white label, Load Test
- * takes `--primary` at 12% with `--primary-text` - so the join is a step in
- * weight inside one colour. The shared edge is Load Test's own border with a
- * transparent left, which keeps both heights identical without a doubled line.
- *
- * **Both shortcuts are now real, and both are on hover.** Send has always been
- * Cmd/Ctrl+Enter and said so nowhere; Load Test had none. They come from
- * `constants/shortcuts.ts`, so the label and the handler cannot disagree.
- *
- * **Controls are `h-control`** (issue #1679 - were `h-8`, which had itself
- * replaced `h-[34px]`, a value that appeared nowhere else in the codebase).
- * `h-8` looked like the app's own step and stopped being one the moment
- * `--spacing` moved to the 3px rhythm for #1670: it resolved to 27px, not the
- * 28px this file's own numbers assumed - the same drift the type scale has a
- * guard for, just not one written down as a mistake before now. The row
- * states its own floor directly, `min-h-band-md` (40px, issue #1688 - it was
- * an arbitrary bracketed literal), rather than deriving it from a control height
- * plus padding that could drift again: this is one band doing real work
- * continuously, not a permanent empty one.
- *
- * **No icons and no inline keycaps.** Both were tried and both cost width in
- * the one row that has none to spare: the lightning bolt and the triangle each
- * added ~20px, and `Ctrl+Shift+↵` as a cap added ~70px to a nine-character
- * label. The pair is ~140px now against ~186px before, and a tooltip carries
- * the chord for free. The running state keeps a single pulsing dot, because a
- * live run is the one thing here that a static colour cannot say.
+ * - **The method sits inside the URL field's border**: verb and address are one thought, as a
+ *   browser's protocol chip is, and a separate dropdown sized for OPTIONS wasted ~40px on every GET
+ *   plus a border and a gap.
+ * - **Send and Load Test are attached.** A filled button joined to an outlined one usually reads as
+ *   a seam between materials; here both are the accent (Send `--primary-fill` with a white label,
+ *   Load Test `--primary` at 12% with `--primary-text`), so the join is a step in weight within one
+ *   colour. The shared edge is Load Test's own border with a transparent left, keeping both heights
+ *   equal with no doubled line.
+ * - **Both shortcuts show on hover**, from `constants/shortcuts.ts`, so label and handler agree.
+ * - **Controls are `h-control`** (#1679). `h-8` looked like the app's step but resolved to 27px,
+ *   not 28px, once `--spacing` moved to the 3px rhythm (#1670). The row states its floor,
+ *   `min-h-band-md` (40px, #1688), rather than a control height plus padding that could drift.
+ * - **No icons and no inline keycaps**: in the one row without spare width, each icon cost ~20px
+ *   and a `Ctrl+Shift+↵` cap ~70px on a nine-character label (the pair is ~140px, against ~186px);
+ *   a tooltip carries the chord free. A running state keeps one pulsing dot: a live run is the one
+ *   thing a static colour cannot say.
  */
 
 import { useEffect, useState } from "react";
@@ -70,18 +46,12 @@ import SendWithRowDialog from "./SendWithRowDialog";
 import UrlInput from "./UrlInput";
 
 /**
- * A button plus the shortcut that fires it, on hover.
- *
- * The chord was tried *inside* the buttons first, as a keycap, and it made them
- * far too wide - `Ctrl+Shift+↵` is eleven characters riding a label of nine, in
- * a row whose whole complaint is that the URL does not get enough of it. A
- * tooltip costs zero width and is where a shortcut conventionally lives.
- *
- * The `Kbd` primitive is not used for the chord here either: it is a keycap
- * built for `--muted` on a panel, and `TooltipContent` paints `--primary-fill`
- * with a white label, so a cap would be a grey chip stamped on the accent.
- * `TooltipHint` is the one tint that reads on that fill; a hand-written 70%
- * alpha measured 2.50:1 on Sunset (`tooltip-hint-contrast.test.ts`).
+ * A button plus its shortcut, on hover. A keycap inside the button made it far too wide
+ * (`Ctrl+Shift+↵` is eleven characters on a nine-character label, in a row short of URL width); a
+ * tooltip costs nothing and is where shortcuts live. Not `Kbd`: a keycap for `--muted` on a panel,
+ * while `TooltipContent` paints `--primary-fill` with a white label, so it would be a grey chip on
+ * the accent. `TooltipHint` is the one tint that reads there; a hand-written 70% alpha measured
+ * 2.50:1 on Sunset (`tooltip-hint-contrast.test.ts`).
  */
 export function Hint({
 	chord,
@@ -122,31 +92,26 @@ export default function UrlBar() {
 		lastRowIndex,
 		rememberRowIndex,
 	} = useRequestBuilderContext();
-	// The builder's Load test asks this same gate, so the button never offers a
-	// start the click would refuse.
+	// The builder's Load test asks this same gate, so the button never offers a start a click would
+	// refuse.
 	const loadRunGate = useCanStartLoadRun();
 	const runningRun = loadRunGate.ok ? null : loadRunGate.running;
 	const openTab = useTabsStore((s) => s.openTab);
 
 	/*
-	 * A step of a collection run pointed here (issue #730): "Repro row 501"
-	 * opened this request, and the row it bound travels in the tabs store
-	 * because `openTab` can only name a request. Acting on it is selecting that
-	 * row and showing the list on it - the failing step is then one click from
-	 * being sent again, which is the dead end the issue is about.
-	 *
-	 * Taken once: the intent has to survive this tab being opened for the first
-	 * time, and a later visit to the same request must not re-open the list on a
-	 * choice made ten minutes ago. Taken whether or not this request can bind
-	 * rows at all - a request outside a data-driven collection has no picker.
+	 * A collection-run step pointed here (#730): "Repro row 501" opened this request, and the row
+	 * travels in the tabs store since `openTab` names only a request. Acting on it selects the row
+	 * and opens the list on it, so the failing step is one click from resending. Taken once: it
+	 * must survive the tab's first open, and a later visit must not reopen the list on an old
+	 * choice. Taken whether or not the request binds rows (outside a data-driven collection there
+	 * is no picker).
 	 */
 	const [rowMenuOpen, setRowMenuOpen] = useState(false);
 	const dataRowRequested = useTabsStore(
 		(s) => s.navIntent?.kind === "dataRow" && s.navIntent.target === request.id
 	);
 	const takeNavIntent = useTabsStore((s) => s.takeNavIntent);
-	// The same condition the caret is rendered on (`showRowCaret` below): while a
-	// stream is open Send is Stop and there is no picker to show.
+	// The caret's condition (`showRowCaret`): with a stream open Send is Stop, with no picker.
 	const canBindRows = rows.available && !isStreaming;
 	useEffect(() => {
 		if (!dataRowRequested || !request.id) return;
@@ -162,17 +127,11 @@ export default function UrlBar() {
 	const canExecute = !isExecuting && request.url.trim().length > 0;
 
 	/*
-	 * Send owns both outer corners when it is alone in the group.
-	 *
-	 * `canStartLoadTest` is false for a detached copy of a past design run, so
-	 * the second member is absent entirely - and an attached group whose only
-	 * member keeps a squared-off right edge looks broken rather than deliberate.
-	 * This is the state most likely to be missed, which is why the existing
-	 * guard in UrlBar.test.tsx covers it.
-	 *
-	 * The row caret is a third possible member and takes the right corner off
-	 * Send when it is present, so the rule is "Send is alone" rather than "there
-	 * is no Load Test".
+	 * Send owns both outer corners when alone in the group. `canStartLoadTest` is false for a
+	 * detached past design run, so the second member is absent, and a lone member with a square
+	 * right edge looks broken; UrlBar.test.tsx guards this easily missed state. The row caret is a
+	 * third possible member and takes Send's right corner, so the rule is "Send is alone", not "no
+	 * Load Test".
 	 */
 	const showRowCaret = canBindRows;
 	const sendAlone = !canStartLoadTest && !showRowCaret;
@@ -180,50 +139,40 @@ export default function UrlBar() {
 	return (
 		<div className="flex min-h-band-md flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 border-b border-rule bg-panel shrink-0">
 			{/*
-			    One field holding both the method and the URL.
-			    `border-input`, not `border-border`. This is a text field, and
-			    `--input` exists precisely so a field has an edge - measured in the
-			    running app, `--border` on `--card` is **1.003**, meaning the
-			    most-used control in Vayu had no visible boundary in dark mode
-			    beyond the card-on-panel step, which is itself only 1.09.
+			 * One field for method and URL, on `border-input`, not `border-border`: `--input`
+			 * exists so a field has an edge, and `--border` on `--card` measured **1.003**, leaving
+			 * the most-used control without a visible boundary in dark mode beyond the 1.09
+			 * card-on-panel step.
 			 */}
 			<div
 				className={cn(
-					// `bg-card surface-card`, the pair. `surface-card` sets the
-					// background *and* declares the `--rule` that reads on it, but a
-					// `bg-*` utility beside it wins the cascade - so both are written,
-					// per docs/design-system/feedback-and-dashboard.md. The separator below inherits `--rule`
-					// from here.
-					// `min-w-[12rem]` is the field's floor (#3494): below it the Send group
-					// wraps to a second line (the row is `flex-wrap`) rather than the URL
-					// being squeezed to a sliver in a narrow pane or at a 200% scale.
+					// `bg-card surface-card`, the pair: `surface-card` sets the background *and*
+					// declares `--rule`, but a `bg-*` utility beside it wins the cascade, so both
+					// are written (docs/design-system/feedback-and-dashboard.md); the separator
+					// below inherits `--rule`. `min-w-[12rem]` is the field's floor (#3494): below
+					// it the Send group wraps (the row is `flex-wrap`) rather than squeezing the
+					// URL to a sliver in a narrow pane or at 200% scale.
 					"flex flex-1 min-w-[12rem] items-center h-control rounded-md bg-card surface-card",
 					"border border-input transition-colors focus-within:border-primary"
 				)}
 			>
 				<MethodSelector />
 				{/*
-				    The hairline between the two halves of the field.
-				    `border-rule`, not `bg-border`. This rule sits on `--card`, and
-				    `--border` *is* `--card` in dark - measured 1.01, i.e. absent -
-				    while reading 1.30 in light. That asymmetry is exactly the defect
-				    the surface/rule contract exists to remove: `surface-card` above
-				    resolves `--rule` to `--border` in light and `--border-strong` in
-				    dark, so this lands at 1.30 / 1.27 instead of 1.30 / 1.01.
-
-				    `h-5`, not full height: a full-height rule would read as a wall
-				    between two controls, which is what this stopped being.
+				 * The hairline between the field's halves. `border-rule`, not `bg-border`: on
+				 * `--card`, `--border` *is* `--card` in dark (1.01, absent) while 1.30 in light,
+				 * the asymmetry the surface/rule contract removes; `surface-card` resolves `--rule`
+				 * to `--border` in light and `--border-strong` in dark, so 1.30 / 1.27. `h-5`, not
+				 * full height: a full rule reads as a wall between two controls.
 				 */}
 				<span aria-hidden="true" className="h-5 w-0 shrink-0 border-l border-rule" />
 				<UrlInput className="flex-1 min-w-0 h-full border-0 bg-transparent px-3 text-sm font-mono shadow-none rounded-none focus-within:ring-0" />
 			</div>
 
 			{/*
-			    Cancel for a buffered send in flight (#3352), beside the disabled
-			    Send rather than in its place: the pair keeps its position, so a
-			    second press aimed at Send cannot land on Cancel. Click-only, like
-			    Stop. `DialogCancelButton` because it is the one control that draws
-			    the word (`dialog-cancel.test.ts`), at the pair's type size.
+			 * Cancel for a buffered send in flight (#3352), beside the disabled Send, not in its
+			 * place: the pair keeps its position, so a second press aimed at Send cannot hit
+			 * Cancel. Click-only, like Stop. `DialogCancelButton`, the one control that draws the
+			 * word (`dialog-cancel.test.ts`), at the pair's type size.
 			 */}
 			{canCancelSend && (
 				<DialogCancelButton
@@ -232,28 +181,18 @@ export default function UrlBar() {
 				/>
 			)}
 
-			{/* Send + Load Test, attached. The corner rules are spelled per member
-			    rather than on the group, because the group has a one-member state
-			    and the rules differ between them. */}
+			{/*
+			 * Send + Load Test, attached. Corner rules are per member, not on the group, since the
+			 * group has a one-member state.
+			 */}
 			<div className="flex shrink-0">
 				{/*
-				 * While a stream is open, Send *is* Stop (issue #574).
-				 *
-				 * Not a second button beside it: a stream ends by being stopped or
-				 * by hitting one of the engine's bounds, and sending again while
-				 * one is open is not a thing this surface offers - the run being
-				 * replaced is exactly the one you would be stopping. So the one
-				 * control does the one available action, on the error tokens
-				 * because stopping is a destructive verb, with the load button's
-				 * live dot for the same reason it has one: a stream is *live*, and
-				 * no static colour says so.
-				 *
-				 * The chord follows the button (#935). It is inert for the life of the
-				 * stream; the handler in `RequestBuilderLayout` gates on `isStreaming` the way
-				 * this gates on it.
-				 *
-				 * No `Hint` wrapper, then, because there is no chord to advertise:
-				 * Stop is deliberately click-only, stopping being destructive.
+				 * While a stream is open, Send *is* Stop (#574): a stream ends by being stopped or
+				 * by an engine bound, and sending again would replace the very run you would stop.
+				 * So one control does the one action, on the error tokens (a destructive verb),
+				 * with the load button's live dot (a stream is *live*). The chord follows the
+				 * button (#935): inert while streaming, as `RequestBuilderLayout`'s handler gates
+				 * on `isStreaming`. No `Hint`: Stop is deliberately click-only, being destructive.
 				 */}
 				{isStreaming ? (
 					<button
@@ -277,34 +216,29 @@ export default function UrlBar() {
 						<button
 							onClick={() => void executeRequest()}
 							disabled={!canExecute}
-							// `LabelSwap` renders its live text through a keyed child the
-							// icon-button-labels scan can't see past a component boundary
-							// - the button reads as name-less to the source scan even
-							// though a screen reader announces it fine. The label mirrors
-							// what's already on screen rather than adding new copy.
+							// `LabelSwap` renders through a keyed child the icon-button-labels scan
+							// cannot see past, so the button reads name-less to the scan though a
+							// screen reader announces it. The label mirrors the visible text,
+							// adding no copy.
 							aria-label={isExecuting ? "Sending…" : "Send"}
 							className={cn(
 								"h-control px-4 inline-flex items-center gap-1.5 shrink-0",
 								"bg-primary-fill text-white text-xs font-semibold font-[inherit]",
 								"border border-primary-fill",
 								/*
-								 * There was no hover state at all. `hover:bg-primary-fill-hover`
-								 * is the `Button` primitive's own `default` variant - these are
-								 * hand-rolled so the pair can share an edge, which means they
-								 * carry the convention rather than inherit it. The border moves
-								 * with the fill, or a lighter ring appears around a darkening
+								 * `hover:bg-primary-fill-hover` is the `Button` primitive's
+								 * `default` variant; these are hand-rolled to share an edge, so
+								 * they carry the convention rather than inherit it. The border
+								 * moves with the fill, or a lighter ring shows around a darkening
 								 * button.
 								 */
 								"hover:bg-primary-fill-hover hover:border-primary-fill-hover",
 								"disabled:opacity-50 disabled:hover:bg-primary-fill",
-								// Hand-rolled rather than the `Button` primitive (see the
-								// comment above), so it doesn't carry `[data-slot="button"]`
-								// and misses the baseline's `scale` press-feedback transition -
-								// added explicitly here instead, at the same duration as the
-								// colour properties rather than the baseline's separate 100ms:
-								// splitting `scale` into its own duration needs a second
-								// `transition-property` utility, and two of those on one
-								// element silently replace each other rather than merging.
+								// Hand-rolled, so without `[data-slot="button"]` it misses the
+								// baseline's `scale` press feedback, added here at the colours'
+								// duration rather than the baseline's 100ms: a separate `scale`
+								// duration needs a second `transition-property` utility, and two on
+								// one element replace each other silently.
 								"transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]",
 								sendAlone ? "rounded-md" : "rounded-l-md rounded-r-none"
 							)}
@@ -317,10 +251,11 @@ export default function UrlBar() {
 					</Hint>
 				)}
 
-				{/* Send's caret: the same verb, bound to one row of the collection's
-				    data file. Absent unless a contract and a declared file are both
-				    in scope, and never while a stream is open - Send is Stop there,
-				    and a caret on Stop would offer to start what it is ending. */}
+				{/*
+				 * Send's caret: the same verb bound to one row of the collection's data file. Only
+				 * with a contract and a declared file in scope, never while streaming: Send is
+				 * Stop, and a caret would offer to start what it ends.
+				 */}
 				{showRowCaret && (
 					<SendWithRowDialog
 						rows={rows}
@@ -334,16 +269,17 @@ export default function UrlBar() {
 					/>
 				)}
 
-				{/* Hidden entirely when the builder cannot load test - a detached copy
-				    of a past design run has no load-test handler, so showing the
-				    button (or a disabled one) would only mislead. */}
+				{/*
+				 * Hidden when the builder cannot load test (a detached past design run): even a
+				 * disabled button would mislead.
+				 */}
 				{canStartLoadTest &&
 					(runningRun ? (
-						/* While a run holds the stream this becomes a shortcut to it
-						   (the gate is `canStartLoadRun`), on the status tokens
-						   rather than the accent - it is reporting a state, not
-						   offering the same action, and the colour is what says so
-						   now that the icon is gone. */
+						/*
+						 * While a run holds the stream this is a shortcut to it (gate:
+						 * `canStartLoadRun`), on the status tokens, not the accent: it reports a
+						 * state rather than offering the action, and colour says so.
+						 */
 						<button
 							onClick={() => openTab(runningRunTab(runningRun))}
 							className={cn(
@@ -354,8 +290,10 @@ export default function UrlBar() {
 								"rounded-r-md rounded-l-none"
 							)}
 						>
-							{/* The one mark kept: a run is *live*, and a static green
-							    tint alone does not say so. */}
+							{/*
+							 * The one mark kept: a run is *live*, and a static green tint does not
+							 * say so.
+							 */}
 							<span
 								aria-hidden="true"
 								className="size-1.5 rounded-full bg-status-success animate-pulse"
@@ -370,21 +308,19 @@ export default function UrlBar() {
 								className={cn(
 									"h-control px-4 inline-flex items-center shrink-0",
 									"text-xs font-semibold font-[inherit]",
-									// A tint steps *up* rather than down: `--primary-tint` to
-									// `--primary-tint-hover` is the same "one more step of itself"
-									// that `--primary-fill-hover` gives the solid fill. Opaque
-									// tokens, not an alpha of the accent: the label sits on this
-									// ground, and an alpha lands wherever the accent puts it.
+									// A tint steps *up*: `--primary-tint` to `--primary-tint-hover`
+									// is the "one more step of itself" `--primary-fill-hover` gives
+									// the fill. Opaque tokens, not an accent alpha: the label sits
+									// on it, and an alpha lands wherever the accent puts it.
 									"text-primary-text bg-primary-tint hover:bg-primary-tint-hover",
-									// The join: this member's own border, with the shared
-									// edge transparent. Two adjacent 1px borders would draw
-									// a 2px line and make the pair a pixel taller than Send.
+									// The join: this member's border with the shared edge
+									// transparent; two adjacent 1px borders would draw 2px and make
+									// the pair a pixel taller than Send.
 									"border border-primary/45 border-l-transparent",
 									"rounded-r-md rounded-l-none",
 									"disabled:opacity-50 disabled:hover:bg-primary-tint",
-									// Hand-rolled, same as Send beside it - see Send's own
-									// comment above for why `scale` needs its own
-									// transition-property here rather than the baseline's.
+									// Hand-rolled like Send; see Send's comment for why `scale`
+									// shares its transition-property.
 									"transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98]"
 								)}
 							>

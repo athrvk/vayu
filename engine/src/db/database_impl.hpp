@@ -8,7 +8,6 @@
  */
 
 /**
- * @file database_impl.hpp
  * @brief The sqlite_orm storage mapping and `Database::Impl`, shared by
  *        every translation unit under `engine/src/db/` (issue #1614).
  *
@@ -923,13 +922,12 @@ struct Database::Impl {
         // connection sqlite_orm shares for the length of a transaction safe.
         storage.open_forever ();
 
-        // Durability, applied here rather than in `Database::init` - which is
-        // where it used to be applied *only* (issue #838).
+        // Durability, applied here rather than in `Database::init` (issue #838).
         //
         // Everything before `init` runs on whatever SQLite defaults to, and
         // SQLite defaults to a rollback journal at `synchronous=FULL`. That
         // covered the two `sync_schema` passes the constructor makes and the
-        // ~66 separate commits `seed_default_config` used to write, so every
+        // ~66 separate commits `seed_default_config` wrote, so every
         // database this engine has ever opened paid a full fsync barrier per
         // statement for the whole of its startup, at settings its own
         // `dbSynchronous` entry did not ask for. Nothing chose that; it was

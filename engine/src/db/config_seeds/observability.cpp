@@ -29,8 +29,7 @@ std::string log_level_options_json () {
 // OBSERVABILITY (observability)
 // What a run measures and what the dashboard's live charts are fed: the
 // server-vitals monitor, the live-metrics topic, and the per-phase timing
-// histograms. What a run *stores* is Data & retention - the two were one
-// category holding 24 of 48 entries until #586.
+// histograms. What a run *stores* is Data & retention (#586).
 // =============================================================================
 void seed_observability (ConfigSeeder& seed, int64_t now) {
     // Server-vitals monitor. All three are read per run - a change applies to

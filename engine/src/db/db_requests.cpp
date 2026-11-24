@@ -6,7 +6,6 @@
  */
 
 /**
- * @file db_requests.cpp
  * @brief Requests and their saved examples (issue #481), plus bulk import
  * (issue #96) (issue #1614).
  */
@@ -384,8 +383,8 @@ bool Database::request_example_id_taken (const std::string& id) {
 }
 
 // Soft delete (#2971): the row is stamped, not removed. A user's example is the
-// one thing on a request a person makes by hand that a delete used to destroy
-// outright; now it waits in `GET /trash` like the request it hangs under.
+// one thing on a request a person makes by hand that a hard delete would destroy
+// outright; it waits in `GET /trash` like the request it hangs under.
 void Database::delete_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Deleting request example (soft)", { { "id", id } });
