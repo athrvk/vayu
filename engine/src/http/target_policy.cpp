@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief The per-payload host rule a send or run is held to (issue #2521).
- */
+/** The per-payload host rule a send or run is held to (issue #2521). */
 
 #include "vayu/http/target_policy.hpp"
 
