@@ -31,6 +31,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <format>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -1376,6 +1378,456 @@ TEST_F (ElementKindsTest, AnAssertJsonSchemaThatCannotRunErrorsAndFailsItsTest) 
         SCOPED_TRACE (config.dump ());
         const auto run =
         run_after_recording (one_element (assert_jsonschema_of (config)));
+
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "error");
+        ASSERT_FALSE (message_of (run.outcomes[0]).empty ());
+        ASSERT_EQ (run.tests.size (), 1u);
+        EXPECT_FALSE (run.tests[0].passed);
+        EXPECT_EQ (run.tests[0].error_message, message_of (run.outcomes[0]));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// assert.snapshot (#3807). Mutation check: compare the lists in order (return
+// a difference when `order` differs in `snapshot_drift`) and the reorder cases
+// go red; drop "inputSchema" from `TOOL_FIELDS` and the changed-schema cases
+// do; make the element record every verdict as a pass and the failing cases,
+// the unreadable-body case and the no-list cases do.
+// ---------------------------------------------------------------------------
+
+nlohmann::json assert_snapshot_of (nlohmann::json config) {
+    return nlohmann::json{ { "id", "n1" }, { "kind", "assert.snapshot" },
+        { "config", std::move (config) } };
+}
+
+/// A server's whole JSON-RPC answer to a list method (#3762: the reply is the
+/// body the elements read).
+std::string list_reply (const std::string& key, const nlohmann::json& items) {
+    return nlohmann::json{ { "jsonrpc", "2.0" }, { "id", 1 },
+        { "result", { { key, items } } } }
+    .dump ();
+}
+
+nlohmann::json tool_item (const std::string& name, const std::string& type = "string") {
+    return { { "name", name }, { "description", "does " + name },
+        { "inputSchema",
+        { { "type", "object" }, { "properties", { { "x", { { "type", type } } } } },
+        { "required", nlohmann::json::array ({ "x" }) } } } };
+}
+
+const nlohmann::json& three_tools () {
+    static const nlohmann::json tools = nlohmann::json::array (
+    { tool_item ("alpha"), tool_item ("beta"), tool_item ("gamma") });
+    return tools;
+}
+
+nlohmann::json tools_snapshot (const nlohmann::json& baseline) {
+    return assert_snapshot_of ({ { "baseline", baseline } });
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotPassesTheSameListInAnyOrder) {
+    const auto reordered = nlohmann::json::array (
+    { three_tools ()[2], three_tools ()[0], three_tools ()[1] });
+    // Member order is no more a difference than item order: the reply writes
+    // each tool's members backwards.
+    std::string backwards = "[";
+    for (const auto& tool : reordered) {
+        std::string members;
+        for (auto member = tool.rbegin (); member != tool.rend (); ++member) {
+            members += (members.empty () ? "" : ",") +
+            nlohmann::json (member.key ()).dump () + ":" + member.value ().dump ();
+        }
+        backwards += (backwards.size () > 1 ? ",{" : "{") + members + "}";
+    }
+    backwards += "]";
+    response = ok_json_response (
+    200, R"({"jsonrpc":"2.0","id":1,"result":{"tools":)" + backwards + "}}");
+
+    const auto run =
+    run_after_recording (one_element (tools_snapshot (three_tools ())));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "ok") << message_of (run.outcomes[0]);
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_TRUE (run.tests[0].passed);
+    EXPECT_EQ (run.tests[0].name, "tools/list matches the snapshot");
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotReadsMembersOutsideItsFieldsAsNoDifference) {
+    auto live = three_tools ();
+    for (auto& tool : live) {
+        tool["_meta"] = { { "ts", 1 } };
+        tool["icons"] = nlohmann::json::array ();
+    }
+    response = ok_json_response (200, list_reply ("tools", live));
+
+    EXPECT_EQ (run_after (one_element (tools_snapshot (three_tools ())))[0].status, "ok");
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotNamesARemovedTool) {
+    response = ok_json_response (200,
+    list_reply ("tools", nlohmann::json::array ({ three_tools ()[0], three_tools ()[2] })));
+
+    const auto run =
+    run_after_recording (one_element (tools_snapshot (three_tools ())));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_EQ (message_of (run.outcomes[0]), "tools/list changed: removed 'beta'");
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_FALSE (run.tests[0].passed);
+    EXPECT_EQ (run.tests[0].error_message, message_of (run.outcomes[0]));
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotReportsARenamedToolAsRemovedAndAdded) {
+    auto live       = three_tools ();
+    live[1]["name"] = "beta2";
+    response        = ok_json_response (200, list_reply ("tools", live));
+
+    const auto run =
+    run_after_recording (one_element (tools_snapshot (three_tools ())));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_EQ (message_of (run.outcomes[0]), "tools/list changed: removed 'beta'; added 'beta2'");
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotNamesTheToolAndPointerOfAChangedInputSchema) {
+    auto live                                         = three_tools ();
+    live[2]["inputSchema"]["properties"]["x"]["type"] = "integer";
+    response = ok_json_response (200, list_reply ("tools", live));
+
+    const auto run =
+    run_after_recording (one_element (tools_snapshot (three_tools ())));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "tools/list changed: 'gamma' differs at /inputSchema/properties/x/type");
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotNamesWhereTheDifferenceIsPerFieldKind) {
+    struct Edit {
+        const char* what;
+        std::function<void (nlohmann::json&)> apply;
+        std::string pointer;
+    };
+    const std::vector<Edit> edits = {
+        { "description", [] (auto& tool) { tool["description"] = "new"; }, "/description" },
+        { "a field that appears", [] (auto& tool) { tool["title"] = "T"; }, "/title" },
+        { "a field that disappears",
+        [] (auto& tool) { tool.erase ("description"); }, "/description" },
+        { "annotations",
+        [] (auto& tool) { tool["annotations"] = { { "readOnlyHint", true } }; }, "/annotations" },
+        // An array inside a field is a value: reordered, it differs.
+        { "an array reordered",
+        [] (auto& tool) {
+            tool["inputSchema"]["required"] = nlohmann::json::array ({ "y", "x" });
+        },
+        "/inputSchema/required/0, /inputSchema/required/1" },
+        { "an array that grows",
+        [] (auto& tool) { tool["inputSchema"]["required"].push_back ("y"); },
+        "/inputSchema/required/1" },
+    };
+    for (const auto& edit : edits) {
+        SCOPED_TRACE (edit.what);
+        auto live = three_tools ();
+        edit.apply (live[0]);
+        response = ok_json_response (200, list_reply ("tools", live));
+
+        const auto run =
+        run_after_recording (one_element (tools_snapshot (three_tools ())));
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "failed");
+        EXPECT_EQ (message_of (run.outcomes[0]),
+        "tools/list changed: 'alpha' differs at " + edit.pointer);
+    }
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotEscapesAPointerAndKeepsTheMessageOnOneLine) {
+    auto baseline = nlohmann::json::array ({ tool_item ("a\nb") });
+    baseline[0]["inputSchema"]["properties"] = { { "a/b", { { "type", "string" } } },
+        { "m~n", { { "type", "string" } } } };
+    auto live                                           = baseline;
+    live[0]["inputSchema"]["properties"]["a/b"]["type"] = "integer";
+    live[0]["inputSchema"]["properties"]["m~n"]["type"] = "integer";
+    response = ok_json_response (200, list_reply ("tools", live));
+
+    const auto run = run_after_recording (one_element (tools_snapshot (baseline)));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "tools/list changed: 'a?b' differs at /inputSchema/properties/a~1b/type, "
+    "/inputSchema/properties/m~0n/type");
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotCapsWhatItListsAndCountsTheRest) {
+    constexpr size_t FINDINGS = vayu::core::constants::elements::MAX_SNAPSHOT_FINDINGS;
+    constexpr size_t POINTERS = vayu::core::constants::elements::MAX_SNAPSHOT_POINTERS;
+    auto live = nlohmann::json::array ();
+    for (size_t i = 0; i < FINDINGS + 2; ++i) {
+        live.push_back (tool_item (std::format ("t{:02}", i)));
+    }
+    response = ok_json_response (200, list_reply ("tools", live));
+
+    auto run =
+    run_after_recording (one_element (tools_snapshot (nlohmann::json::array ())));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_TRUE (message_of (run.outcomes[0]).ends_with ("added 't09' (2 more)"))
+    << message_of (run.outcomes[0]);
+    EXPECT_EQ (message_of (run.outcomes[0]).find ("t10"), std::string::npos);
+
+    // One tool differing in more places than a message names.
+    auto wide = tool_item ("w");
+    auto next = wide;
+    for (size_t i = 0; i < POINTERS + 2; ++i) {
+        wide["annotations"][std::format ("k{}", i)] = 0;
+        next["annotations"][std::format ("k{}", i)] = 1;
+    }
+    response =
+    ok_json_response (200, list_reply ("tools", nlohmann::json::array ({ next })));
+    run = run_after_recording (
+    one_element (tools_snapshot (nlohmann::json::array ({ wide }))));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "tools/list changed: 'w' differs at /annotations/k0, /annotations/k1, "
+    "/annotations/k2, and 2 more");
+}
+
+// A server's name or pointer key can be any length. Mutation check: return
+// the text whole from `one_line` and both lengths below blow the bound.
+TEST_F (ElementKindsTest, AssertSnapshotBoundsTheNameAndPointerItQuotes) {
+    constexpr size_t BOUND = vayu::core::constants::elements::MAX_SNAPSHOT_FRAGMENT_CHARS;
+    // Two-byte characters, so a cut by bytes would land inside one.
+    std::string long_name;
+    for (size_t i = 0; i < BOUND + 50; ++i) {
+        long_name += "\xC3\xA9";
+    }
+    std::string kept;
+    for (size_t i = 0; i < BOUND; ++i) {
+        kept += "\xC3\xA9";
+    }
+    response = ok_json_response (200,
+    list_reply ("tools", nlohmann::json::array ({ tool_item (long_name) })));
+
+    auto run = run_after_recording (one_element (
+    tools_snapshot (nlohmann::json::array ({ tool_item ("alpha") }))));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "tools/list changed: removed 'alpha'; added '" + kept + "...'");
+
+    // The pointer is cut as a whole, so the key that overruns it is the one
+    // that is shortened.
+    const std::string long_key (BOUND + 100, 'k');
+    auto baseline = nlohmann::json::array ({ tool_item ("alpha") });
+    auto live     = baseline;
+    baseline[0]["annotations"][long_key] = 0;
+    live[0]["annotations"][long_key]     = 1;
+    response = ok_json_response (200, list_reply ("tools", live));
+
+    run = run_after_recording (one_element (tools_snapshot (baseline)));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    const std::string pointer = ("/annotations/" + long_key).substr (0, BOUND);
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "tools/list changed: 'alpha' differs at " + pointer + "...");
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotLeavesAFragmentAtTheBoundWhole) {
+    constexpr size_t BOUND = vayu::core::constants::elements::MAX_SNAPSHOT_FRAGMENT_CHARS;
+    const std::string name (BOUND, 'n');
+    response = ok_json_response (200, list_reply ("tools", nlohmann::json::array ()));
+
+    const auto run = run_after_recording (
+    one_element (tools_snapshot (nlohmann::json::array ({ tool_item (name) }))));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (message_of (run.outcomes[0]), "tools/list changed: removed '" + name + "'");
+}
+
+// null is a value, so a field the baseline holds as null and the reply omits
+// (or the reverse) is a difference, at the top level and inside a field.
+// Mutation check: have `project` or `diff_objects` skip a null member and
+// each of these goes green on a changed list.
+TEST_F (ElementKindsTest, AssertSnapshotReadsNullAgainstMissingAsADifference) {
+    struct Case {
+        const char* what;
+        std::function<void (nlohmann::json&, bool)> set;
+        std::string pointer;
+    };
+    // `holds_null` says which side carries the null; the other omits it.
+    const std::vector<Case> cases = {
+        { "a field",
+        [] (auto& tool, bool holds_null) {
+            if (holds_null) {
+                tool["title"] = nullptr;
+            }
+        },
+        "/title" },
+        { "a member inside a field",
+        [] (auto& tool, bool holds_null) {
+            tool["annotations"] = nlohmann::json::object ();
+            if (holds_null) {
+                tool["annotations"]["readOnlyHint"] = nullptr;
+            }
+        },
+        "/annotations/readOnlyHint" },
+    };
+    for (const auto& c : cases) {
+        for (const bool baseline_holds_null : { true, false }) {
+            SCOPED_TRACE (std::string (c.what) +
+            (baseline_holds_null ? ", null in the baseline" : ", null in the reply"));
+            auto baseline = nlohmann::json::array ({ tool_item ("alpha") });
+            auto live     = baseline;
+            c.set (baseline[0], baseline_holds_null);
+            c.set (live[0], !baseline_holds_null);
+            response = ok_json_response (200, list_reply ("tools", live));
+
+            const auto run =
+            run_after_recording (one_element (tools_snapshot (baseline)));
+            ASSERT_EQ (run.outcomes.size (), 1u);
+            EXPECT_EQ (run.outcomes[0].status, "failed");
+            EXPECT_EQ (message_of (run.outcomes[0]),
+            "tools/list changed: 'alpha' differs at " + c.pointer);
+        }
+    }
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotKeysResourcesByUriAndPromptsByName) {
+    const nlohmann::json resources = nlohmann::json::array (
+    { { { "uri", "file:///a" }, { "name", "A" }, { "mimeType", "text/plain" } },
+    { { "uri", "file:///b" }, { "name", "A" }, { "mimeType", "text/plain" } } });
+    const nlohmann::json prompts = nlohmann::json::array ({ { { "name", "review" },
+    { "arguments", nlohmann::json::array ({ { { "name", "code" }, { "required", true } } }) } } });
+
+    // Two resources share a `name`, so only `uri` can tell them apart.
+    response = ok_json_response (200, list_reply ("resources", resources));
+    EXPECT_EQ (run_after (one_element (assert_snapshot_of (
+               { { "method", "resources/list" }, { "baseline", resources } })))[0]
+               .status,
+    "ok");
+
+    auto moved           = resources;
+    moved[1]["mimeType"] = "text/csv";
+    response = ok_json_response (200, list_reply ("resources", moved));
+    auto run = run_after_recording (one_element (assert_snapshot_of (
+    { { "method", "resources/list" }, { "baseline", resources } })));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "resources/list changed: 'file:///b' differs at /mimeType");
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_EQ (run.tests[0].name, "resources/list matches the snapshot");
+
+    response = ok_json_response (200, list_reply ("prompts", prompts));
+    EXPECT_EQ (run_after (one_element (assert_snapshot_of (
+               { { "method", "prompts/list" }, { "baseline", prompts } })))[0]
+               .status,
+    "ok");
+
+    auto changed                           = prompts;
+    changed[0]["arguments"][0]["required"] = false;
+    response = ok_json_response (200, list_reply ("prompts", changed));
+    run      = run_after_recording (one_element (
+    assert_snapshot_of ({ { "method", "prompts/list" }, { "baseline", prompts } })));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "prompts/list changed: 'review' differs at /arguments/0/required");
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotReadsTheListNamedByMethodNotAnother) {
+    // A tools reply under `resources/list` holds no `result.resources`.
+    response = ok_json_response (200, list_reply ("tools", three_tools ()));
+
+    const auto run = run_after_recording (one_element (assert_snapshot_of (
+    { { "method", "resources/list" }, { "baseline", nlohmann::json::array () } })));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "failed");
+    EXPECT_EQ (message_of (run.outcomes[0]),
+    "resources/list changed: the reply holds no 'result.resources' list");
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotNeverPassesAnUnreadableBody) {
+    for (const auto& [label, body] : unreadable_bodies ()) {
+        SCOPED_TRACE (label);
+        response = ok_json_response (200, body);
+
+        const auto run = run_after_recording (
+        one_element (tools_snapshot (nlohmann::json::array ())));
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "failed");
+        EXPECT_EQ (message_of (run.outcomes[0]), UNREADABLE);
+        ASSERT_EQ (run.tests.size (), 1u);
+        EXPECT_FALSE (run.tests[0].passed);
+    }
+}
+
+// An empty baseline is a real snapshot (a server with no tools), so a reply
+// that does not carry the list at all must not read as "equal".
+TEST_F (ElementKindsTest, AssertSnapshotNeverPassesAReplyWithoutTheList) {
+    const std::vector<std::string> replies = {
+        R"({"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"no"}})",
+        R"({"jsonrpc":"2.0","id":1,"result":{}})",
+        R"({"jsonrpc":"2.0","id":1,"result":{"tools":{}}})",
+        R"({"jsonrpc":"2.0","id":1,"result":[]})",
+        R"([])",
+        R"(null)",
+    };
+    for (const auto& reply : replies) {
+        SCOPED_TRACE (reply);
+        response = ok_json_response (200, reply);
+
+        const auto run = run_after_recording (
+        one_element (tools_snapshot (nlohmann::json::array ())));
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "failed");
+        EXPECT_EQ (message_of (run.outcomes[0]),
+        "tools/list changed: the reply holds no 'result.tools' list");
+        ASSERT_EQ (run.tests.size (), 1u);
+        EXPECT_FALSE (run.tests[0].passed);
+    }
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotFailsOnAnItemItCannotIdentify) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        { R"([{"description":"x"}])", "item 1 must be an object with a text 'name'" },
+        { R"([{"name":7}])", "item 1 must be an object with a text 'name'" },
+        { R"(["alpha"])", "item 1 must be an object with a text 'name'" },
+        { R"([{"name":"a"},{"name":"a"}])", "names 'a' more than once" },
+    };
+    for (const auto& [items, reason] : cases) {
+        SCOPED_TRACE (items);
+        response = ok_json_response (
+        200, R"({"jsonrpc":"2.0","id":1,"result":{"tools":)" + items + "}}");
+
+        const auto run = run_after_recording (
+        one_element (tools_snapshot (nlohmann::json::array ())));
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "failed");
+        EXPECT_NE (message_of (run.outcomes[0]).find (reason), std::string::npos)
+        << message_of (run.outcomes[0]);
+    }
+}
+
+TEST_F (ElementKindsTest, AssertSnapshotReadsToolsWhenNoMethodIsNamed) {
+    response = ok_json_response (200, list_reply ("tools", three_tools ()));
+
+    const auto run = run_after_recording (
+    one_element (assert_snapshot_of ({ { "baseline", three_tools () } })));
+    ASSERT_EQ (run.outcomes.size (), 1u);
+    EXPECT_EQ (run.outcomes[0].status, "ok") << message_of (run.outcomes[0]);
+    EXPECT_EQ (run.tests[0].name, "tools/list matches the snapshot");
+}
+
+// Validation refuses each of these; a row stored before it did still reaches
+// the pipeline and keeps the `error` outcome with a failed test beside it.
+TEST_F (ElementKindsTest, AnAssertSnapshotThatCannotRunErrorsAndFailsItsTest) {
+    response = ok_json_response (200, list_reply ("tools", three_tools ()));
+    const std::vector<nlohmann::json> cases = {
+        nlohmann::json::object (),
+        { { "baseline", "not a list" } },
+        { { "baseline", nlohmann::json::array ({ 7 }) } },
+        { { "baseline", nlohmann::json::array ({ { { "description", "no name" } } }) } },
+        { { "baseline", nlohmann::json::array ({ { { "name", "a" } }, { { "name", "a" } } }) } },
+        { { "method", "logging/list" }, { "baseline", nlohmann::json::array () } },
+    };
+    for (const auto& config : cases) {
+        SCOPED_TRACE (config.dump ());
+        const auto run = run_after_recording (one_element (assert_snapshot_of (config)));
 
         ASSERT_EQ (run.outcomes.size (), 1u);
         EXPECT_EQ (run.outcomes[0].status, "error");

@@ -132,6 +132,20 @@ describe("ElementOutcomes", () => {
 		}
 	});
 
+	// #3807: `assert.snapshot` reports its drift as one engine-written line naming
+	// the item and the JSON Pointer; the row shows it as it came, with no
+	// component of its own.
+	it("prints an assert.snapshot drift line verbatim", () => {
+		const message =
+			"tools/list changed: removed 'a'; added 'b'; 'c' differs at /inputSchema/properties/x/type";
+		render(
+			<ElementOutcomes
+				outcomes={[row({ kind: "assert.snapshot", outcome: "failed", message })]}
+			/>
+		);
+		expect(screen.getByText(message)).toBeTruthy();
+	});
+
 	// Two assertions of one kind were told apart only by a message the row cut
 	// short (issue #3051): the name and the origin are what distinguish them.
 	it("tells two outcomes of one kind apart by their names and origins", () => {

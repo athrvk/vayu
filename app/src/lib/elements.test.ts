@@ -418,6 +418,10 @@ describe("missingOperand", () => {
 		["assert.jsonschema", { schema: "" }],
 		["assert.jsonschema", { schema: null }],
 		["assert.jsonschema", { schema: [] }],
+		// Typed text that is not JSON is stored as a string; a lone object is no list.
+		["assert.snapshot", { baseline: "[" }],
+		["assert.snapshot", { baseline: { name: "a" } }],
+		["assert.snapshot", { method: "tools/list", baseline: null }],
 		["control.throughput", {}],
 		["control.throughput", { perUser: false }],
 		["timer.think", {}],
@@ -446,6 +450,11 @@ describe("missingOperand", () => {
 		["assert.jsonschema", { schema: false }],
 		// An absent `schema` is `missingRequiredKeys`' to report, not this rule's.
 		["assert.jsonschema", {}],
+		["assert.snapshot", { baseline: [{ name: "a" }] }],
+		// A server that answers no items has a baseline of none; an absent one is
+		// `missingRequiredKeys`' to report, not this rule's.
+		["assert.snapshot", { method: "prompts/list", baseline: [] }],
+		["assert.snapshot", {}],
 		["control.throughput", { percent: 50 }],
 		["control.throughput", { everyN: 2, perUser: false }],
 		["timer.think", { ms: 0 }],

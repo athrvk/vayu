@@ -222,6 +222,12 @@ void SseStreamContext::close (SseEndReason reason) {
     closed_.store (true, std::memory_order_release);
 }
 
+void SseStreamContext::note_transfer_start () {
+    int64_t unset = 0;
+    transfer_started_at_ms_.compare_exchange_strong (
+    unset, now_ms (), std::memory_order_release, std::memory_order_relaxed);
+}
+
 SseEndReason SseStreamContext::end_reason () const {
     std::optional<SseEndReason> recorded;
     {
@@ -420,6 +426,9 @@ nlohmann::json stream_trace_node (const SseStreamContext& context) {
     node["endReason"]     = to_string (context.end_reason ());
     node["maxEventBytes"] = context.limits.max_event_bytes;
     node["receivedAt"]    = context.stored_arrivals ();
+    if (const int64_t started_at = context.transfer_started_at_ms (); started_at > 0) {
+        node["startedAt"] = started_at;
+    }
     if (context.text_path) {
         node["streamTextPath"] = *context.text_path;
     }
@@ -453,6 +462,9 @@ const nlohmann::json& stored) {
     std::span<const int64_t> (arrivals), text_path ? &*text_path : nullptr);
     node["endReason"] =
     stored.value ("endReason", std::string (to_string (SseEndReason::Error)));
+    if (const auto started_at = stored.find ("startedAt"); started_at != stored.end ()) {
+        node["startedAt"] = *started_at;
+    }
     return node;
 }
 
@@ -993,6 +1005,8 @@ McpReplyStream* mcp_reply) {
     }
 
     const auto submitted_at = std::chrono::steady_clock::now ();
+    // Before the first hop, so a redirect chain's later hops do not move it.
+    context.note_transfer_start ();
     const StreamChainOutcome outcome = run_stream_chain (curl, state, chain, errors);
     const auto completion = std::chrono::steady_clock::now ();
     // Onto the response the stored trace is built from (`build_result_trace`):

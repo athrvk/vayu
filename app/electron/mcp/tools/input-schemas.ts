@@ -447,6 +447,18 @@ export const collectionStreamEventsInput = streamEventsSchema
 		"Event cap on each streaming step's stream; a step whose saved request does not stream ignores it. Defaults to the engine's sseMaxStreamEvents."
 	);
 
+/**
+ * `run_request`'s own statement of the stream text path, not an `asOn` pointer:
+ * `create_request` is a write tool and a read-only session lists none, so a
+ * pointer there would dangle (`tool-list-budget.test.ts`).
+ */
+export const streamTextPathSendInput = z
+	.string()
+	.optional()
+	.describe(
+		"Ad-hoc send (`url`) with `stream: true` only: JSONPath read off each streamed event's JSON `data`, such as `$.choices[0].delta.content` or `$.delta.text`; the joined reply returns as `text`. Ignored without `stream: true`. A saved request sent by id uses its stored path."
+	);
+
 export const maxStreamEventsInput = z
 	.number()
 	.int()

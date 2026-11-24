@@ -99,6 +99,6 @@ export interface UnifiedResponseViewerProps {
 	 * Shaped as the engine serves it on `GET /runs/:id/samples` - a load sample
 	 * carries no `endReason`, so this asks for none.
 	 */
-	events?: Omit<RunResultStreamEvents, "endReason"> | null;
+	events?: Omit<RunResultStreamEvents, "endReason" | "startedAt"> | null;
 	className?: string;
 }

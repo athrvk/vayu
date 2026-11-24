@@ -8,9 +8,9 @@
  */
 
 #include <algorithm>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <string_view>
 #include <tuple>
@@ -32,9 +32,11 @@ namespace vayu::db {
  * The highest `order` a row stores (#3451). The column is an `int`, and an
  * append takes one past the highest sibling, so this is where appending stops
  * (`Database::next_sibling_order`) instead of wrapping to a negative slot that
- * sorts first.
+ * sorts first. `INT_MAX`, not `numeric_limits::max ()`: a test target
+ * includes `windows.h` without `NOMINMAX` (`core/constants.hpp` says why),
+ * whose `max` macro breaks the call under MSVC.
  */
-inline constexpr int MAX_SIBLING_ORDER = std::numeric_limits<int>::max ();
+inline constexpr int MAX_SIBLING_ORDER = INT_MAX;
 
 /**
  * @p value as an `order` a row can store, a JSON integer from 0 to
