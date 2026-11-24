@@ -32,9 +32,10 @@ namespace vayu::db {
  * The highest `order` a row stores (#3451). The column is an `int`, and an
  * append takes one past the highest sibling, so this is where appending stops
  * (`Database::next_sibling_order`) instead of wrapping to a negative slot that
- * sorts first.
+ * sorts first. `max` is parenthesized because a test target includes
+ * `windows.h` without `NOMINMAX` (`core/constants.hpp` says why).
  */
-inline constexpr int MAX_SIBLING_ORDER = std::numeric_limits<int>::max ();
+inline constexpr int MAX_SIBLING_ORDER = (std::numeric_limits<int>::max) ();
 
 /**
  * @p value as an `order` a row can store, a JSON integer from 0 to
