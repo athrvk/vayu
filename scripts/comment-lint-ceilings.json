@@ -159,17 +159,7 @@
     "engine/include/vayu/utils/id.hpp": 1,
     "engine/include/vayu/utils/reentrant.hpp": 1,
     "engine/include/vayu/utils/stop_signal.hpp": 1,
-    "engine/src/db/config_seeds/general.cpp": 3,
-    "engine/src/db/config_seeds/network.cpp": 1,
-    "engine/src/db/config_seeds/observability.cpp": 1,
-    "engine/src/db/config_seeds/seed.hpp": 3,
-    "engine/src/db/config_seeds/services.cpp": 2,
-    "engine/src/db/database_impl.hpp": 2,
-    "engine/src/db/db_config.cpp": 1,
-    "engine/src/db/db_maintenance.cpp": 2,
-    "engine/src/db/db_requests.cpp": 1,
     "engine/src/http/routes/script_types.cpp": 1,
-    "engine/src/platform/platform_windows.cpp": 1,
     "engine/src/runtime/script_engine.cpp": 1
   }
 }
