@@ -11,7 +11,7 @@
  *
  * These are what an importer found next to the request and, until the engine
  * had a table for them, threw away: Postman's saved responses, an OpenAPI
- * operation's documented ones - and, since #588, the responses a user kept from
+ * operation's documented ones - and the responses a user kept from
  * the response viewer. It is also the list of what a mock server for this
  * collection will answer with, the first row of a matched request being the one
  * it serves, which is why the stored order is preserved rather than re-sorted
@@ -144,7 +144,7 @@ function ExampleRow({
 					)}
 					{/*
 					 * Where the row came from (issue #722). The engine has
-					 * recorded it since #588 and the two kinds behave
+					 * recorded it and the two kinds behave
 					 * differently - a sync rewrites the imported rows of a
 					 * request it applies any change to, and never the saved
 					 * ones - so leaving the asymmetry invisible made the list

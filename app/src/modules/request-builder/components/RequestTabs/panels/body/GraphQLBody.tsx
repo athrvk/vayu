@@ -270,15 +270,10 @@ function PaneTitle({ children, collapsed }: { children: string; collapsed?: bool
  *
  * **It sits at the Query header's left edge because that is the edge the pane
  * arrives at.** The explorer is the first panel of the horizontal group below,
- * so it opens to the *left* of these editors, while the control that opened it
- * used to sit at the far right of this header drawing a `PanelRightOpen` - a
- * user reaching for the side the pane appears on found nothing, and the icon
- * named the opposite side outright (#1224).
+ * so it opens to the *left* of these editors (#1224).
  *
  * **The same three parts render whether the pane is open or closed.** Only the
- * toggle's icon and label flip. The layout used to be a different shape per
- * state - a chip here while closed, a badge and two icons in the pane's header
- * while open - which taught a position and then abandoned it.
+ * toggle's icon and label flip.
  *
  * **Nothing here is hover-revealed.** #455 made "no duplicated Refresh"
  * structural by moving the only one into the explorer, which left a blind
@@ -888,8 +883,7 @@ export function GraphQLBody({
 			{/*
 			 * A hairline, and no grip. This splits one editor from another *inside*
 			 * the box; the handle below the box resizes the whole thing and carries
-			 * the grip. They used to be identical - two 6px grey bars doing different
-			 * jobs with nothing to tell them apart.
+			 * the grip.
 			 */}
 			<ResizableHandle className="h-px w-full cursor-row-resize bg-rule hover:bg-primary transition-colors" />
 
