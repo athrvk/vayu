@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pipeline.cpp
  * @brief `compile_elements` and `ElementPipeline::run` (issue #1514): turning
  *        a resolved `elements` array into compiled behaviour and running it
  *        at one phase of a step.
