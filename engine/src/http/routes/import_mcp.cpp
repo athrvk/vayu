@@ -33,10 +33,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -47,6 +49,15 @@ namespace vayu::http::routes {
 std::pair<int, nlohmann::json> import_mcp_response (const nlohmann::json& body,
 const vayu::http::TransportPolicy& transport,
 const std::atomic<bool>* cancel);
+
+/// The same import under the whole-import bounds a test names, so a refusal
+/// at either is reached without waiting out or sending `TOTAL_TIMEOUT_MS` /
+/// `MAX_TOTAL_BYTES`.
+std::pair<int, nlohmann::json> import_mcp_response (const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel,
+std::chrono::milliseconds total_timeout,
+std::size_t max_total_bytes);
 
 /// The client config and the request every call of an import of @p body is
 /// sent under, for the wiring test; nothing for a refused body. The bounds are
@@ -84,6 +95,22 @@ struct McpImportTarget {
     Include include;
 };
 
+/// What one import may still spend, across every call it makes.
+struct ImportBudget {
+    std::chrono::steady_clock::time_point deadline;
+    std::chrono::milliseconds total{ 0 };
+    std::size_t max_bytes = 0;
+    std::size_t bytes     = 0;
+    std::size_t items     = 0;
+};
+
+/// The connection, the request and the budget every call of one import shares.
+struct McpSession {
+    vayu::http::Client client;
+    vayu::Request base;
+    ImportBudget budget;
+};
+
 /// One call and how the reply reader read it.
 struct McpCall {
     vayu::Response response;
@@ -119,6 +146,12 @@ Refusable<std::string> read_url (const nlohmann::json& body) {
     auto text = url->get<std::string> ();
     if (auto problem = vayu::http::unsendable_scheme (text)) {
         return route_error (400, "Invalid 'url': " + *problem);
+    }
+    // Every generated request stores the URL, so a password in it would be
+    // stored as many times as the server lists entries.
+    const auto host = vayu::http::url_host_span (text);
+    if (host && text.find ('@') < host->begin) {
+        return route_error (400, "Invalid 'url': put credentials in auth or headers, not the URL");
     }
     if (vayu::http::url_scheme (text).empty ()) {
         return route_error (400, "Invalid 'url': must be the server's http or https URL");
@@ -234,23 +267,48 @@ Refusable<McpImportTarget> read_target (const nlohmann::json& body) {
     return target;
 }
 
-McpCall send_call (vayu::http::Client& client,
-const vayu::Request& base,
-std::string_view method,
-ordered_json params) {
-    vayu::Request request = base;
-    ordered_json call     = ordered_json::object ();
-    call["method"]        = std::string (method);
-    call["params"]        = std::move (params);
-    request.body.content  = call.dump ();
+RouteError deadline_refusal (const ImportBudget& budget, std::string_view method) {
+    return route_error (502,
+    "The import ran past its " + std::to_string (budget.total.count ()) +
+    " ms total at " + std::string (method) + ", the longest one import takes")
+    .error ();
+}
+
+/// One call, sent within what is left of the import's deadline and counted
+/// against its byte budget.
+Refusable<McpCall>
+send_call (McpSession& session, std::string_view method, ordered_json params) {
+    ImportBudget& budget = session.budget;
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds> (
+    budget.deadline - std::chrono::steady_clock::now ());
+    if (remaining.count () <= 0) {
+        return std::unexpected (deadline_refusal (budget, method));
+    }
+    vayu::Request request = session.base;
+    request.timeout_ms    = static_cast<int> (
+    std::min<long long> (limits::CALL_TIMEOUT_MS, remaining.count ()));
+    ordered_json call    = ordered_json::object ();
+    call["method"]       = std::string (method);
+    call["params"]       = std::move (params);
+    request.body.content = call.dump ();
 
     McpCall sent;
-    auto result = client.send (request);
+    auto result = session.client.send (request);
     if (result.is_ok ()) {
         sent.response = std::move (result).value ();
     } else {
         sent.response.error_code    = result.error ().code;
         sent.response.error_message = result.error ().message;
+    }
+    if (sent.response.error_code == ErrorCode::Timeout &&
+    std::chrono::steady_clock::now () >= budget.deadline) {
+        return std::unexpected (deadline_refusal (budget, method));
+    }
+    budget.bytes += sent.response.body.size ();
+    if (budget.bytes > budget.max_bytes) {
+        return route_error (413,
+        "The server's replies came to more than " +
+        std::to_string (budget.max_bytes) + " bytes, the most one import reads");
     }
     sent.reply = read_mcp_reply (request, sent.response);
     return sent;
@@ -298,10 +356,12 @@ std::optional<ordered_json> call_result (const McpCall& call) {
 
 /// `serverInfo.name` from `server/discover`, or empty when the server is
 /// older than the method or names nothing. Any other failure fails the import.
-Refusable<std::string>
-discover_server_name (vayu::http::Client& client, const vayu::Request& base) {
-    const McpCall call =
-    send_call (client, base, "server/discover", ordered_json::object ());
+Refusable<std::string> discover_server_name (McpSession& session) {
+    auto sent = send_call (session, "server/discover", ordered_json::object ());
+    if (!sent) {
+        return std::unexpected (sent.error ());
+    }
+    const McpCall& call = *sent;
     if (discovery_unanswered (call)) {
         return std::string ();
     }
@@ -329,23 +389,27 @@ ordered_json* page_rows (ordered_json& result, const char* key) {
 
 /// Every entry @p list answers, following `nextCursor` until a page carries
 /// none; nothing for a `may_be_unknown` method the server does not know.
-/// @p items counts entries across the whole import against `MAX_ITEMS`.
-Refusable<std::optional<ordered_json>> list_all (vayu::http::Client& client,
-const vayu::Request& base,
-const ListMethod& list,
-std::size_t& items) {
+/// A cursor the server hands back a second time is refused: the list would
+/// never end. Entries count against `MAX_ITEMS` across the whole import.
+Refusable<std::optional<ordered_json>> list_all (McpSession& session, const ListMethod& list) {
     const std::string method (list.method);
     const auto no_list = [&] {
         return route_error (502, method + " answered with no '" + list.key + "' list");
     };
     ordered_json entries = ordered_json::array ();
     std::optional<std::string> cursor;
+    std::set<std::string> sent_cursors;
     for (std::size_t pages = 0; pages < limits::MAX_PAGES; ++pages) {
         ordered_json params = ordered_json::object ();
         if (cursor) {
             params["cursor"] = *cursor;
+            sent_cursors.insert (*cursor);
         }
-        const McpCall call = send_call (client, base, list.method, std::move (params));
+        auto sent = send_call (session, list.method, std::move (params));
+        if (!sent) {
+            return std::unexpected (sent.error ());
+        }
+        const McpCall& call = *sent;
         if (pages == 0 && list.may_be_unknown && is_method_not_found (call)) {
             return std::optional<ordered_json> ();
         }
@@ -361,8 +425,8 @@ std::size_t& items) {
         if (rows == nullptr) {
             return no_list ();
         }
-        items += rows->size ();
-        if (items > limits::MAX_ITEMS) {
+        session.budget.items += rows->size ();
+        if (session.budget.items > limits::MAX_ITEMS) {
             return route_error (413,
             "The server lists more than " + std::to_string (limits::MAX_ITEMS) +
             " tools, resources and prompts, the most one import reads");
@@ -376,6 +440,10 @@ std::size_t& items) {
             return std::optional<ordered_json> (std::in_place, std::move (entries));
         }
         cursor = next->get<std::string> ();
+        if (sent_cursors.contains (*cursor)) {
+            return route_error (502,
+            method + " repeated a cursor it had already been sent, so the list would never end");
+        }
     }
     return route_error (502,
     method + " still had a nextCursor after " +
@@ -399,8 +467,8 @@ struct ListStep {
 };
 
 Refusable<vayu::core::McpServerListing>
-read_listing (vayu::http::Client& client, const McpImportTarget& target) {
-    auto name = discover_server_name (client, target.base);
+read_listing (McpSession& session, const McpImportTarget& target) {
+    auto name = discover_server_name (session);
     if (!name) {
         return std::unexpected (name.error ());
     }
@@ -410,19 +478,18 @@ read_listing (vayu::http::Client& client, const McpImportTarget& target) {
     listing.headers = target.caller_headers;
     listing.bearer  = target.bearer;
 
-    using Listing     = vayu::core::McpServerListing;
-    const auto steps  = std::to_array<ListStep> ({
+    using Listing    = vayu::core::McpServerListing;
+    const auto steps = std::to_array<ListStep> ({
     { target.include.tools, &TOOLS_LIST, &Listing::tools },
     { target.include.resources, &RESOURCES_LIST, &Listing::resources },
     { target.include.resources, &TEMPLATES_LIST, &Listing::resource_templates },
     { target.include.prompts, &PROMPTS_LIST, &Listing::prompts },
     });
-    std::size_t items = 0;
     for (const auto& step : steps) {
         if (!step.included) {
             continue;
         }
-        auto entries = list_all (client, target.base, *step.list, items);
+        auto entries = list_all (session, *step.list);
         if (!entries) {
             return std::unexpected (entries.error ());
         }
@@ -468,19 +535,35 @@ const std::atomic<bool>* cancel) {
  *                  `import_fetch`'s is.
  * @param cancel    `RouteContext::server_stopping` (#2683).
  * @return {http_status, json_body}: 200 with the tree; 400 for a body that
- *         names no usable server, headers or auth; 413 for a reply over
- *         `MAX_REPLY_BYTES` or a listing over `MAX_ITEMS`; 502 for a call
- *         that failed, a reply with no list, or a list past `MAX_PAGES`.
+ *         names no usable server, headers or auth, or a URL with userinfo;
+ *         413 for a reply over `MAX_REPLY_BYTES`, replies over
+ *         `MAX_TOTAL_BYTES` or a listing over `MAX_ITEMS`; 502 for a call
+ *         that failed, a reply with no list, a repeated cursor, a list past
+ *         `MAX_PAGES` or an import past `TOTAL_TIMEOUT_MS` (a timeout is a
+ *         `502` here, as on `POST /import/fetch`).
  */
 std::pair<int, nlohmann::json> import_mcp_response (const nlohmann::json& body,
 const vayu::http::TransportPolicy& transport,
 const std::atomic<bool>* cancel) {
+    return import_mcp_response (body, transport, cancel,
+    std::chrono::milliseconds (limits::TOTAL_TIMEOUT_MS), limits::MAX_TOTAL_BYTES);
+}
+
+std::pair<int, nlohmann::json> import_mcp_response (const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel,
+std::chrono::milliseconds total_timeout,
+std::size_t max_total_bytes) {
     auto target = read_target (body);
     if (!target) {
         return as_response (target.error ());
     }
-    vayu::http::Client client (mcp_client_config (transport, cancel));
-    auto listing = read_listing (client, *target);
+    McpSession session{ vayu::http::Client (mcp_client_config (transport, cancel)),
+        target->base,
+        ImportBudget{ .deadline = std::chrono::steady_clock::now () + total_timeout,
+        .total     = total_timeout,
+        .max_bytes = max_total_bytes } };
+    auto listing = read_listing (session, *target);
     if (!listing) {
         return as_response (listing.error ());
     }

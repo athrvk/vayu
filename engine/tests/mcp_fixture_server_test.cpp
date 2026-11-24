@@ -129,6 +129,24 @@ TEST_F (McpFixtureServerTest, ACursorTheFixtureNeverIssuedIsRefused) {
     }
 }
 
+TEST_F (McpFixtureServerTest, ARepeatingServerAnswersACursorWithTheSameCursor) {
+    server_.set_tools (tools_named (5), 2);
+    server_.repeat_tools_cursor ();
+
+    const auto first = send ("tools/list");
+    ASSERT_TRUE (first);
+    const std::string cursor =
+    response_of (first).at ("result").at ("nextCursor");
+    EXPECT_EQ (cursor, "cursor-2");
+    for (int again = 0; again < 2; ++again) {
+        const auto reply = send ("tools/list", { { "cursor", cursor } });
+        ASSERT_TRUE (reply);
+        const json result = response_of (reply).at ("result");
+        EXPECT_EQ (result.at ("tools").at (0).at ("name"), "tool_2");
+        EXPECT_EQ (result.at ("nextCursor"), cursor);
+    }
+}
+
 TEST_F (McpFixtureServerTest, TheFirstToolsPageArrivesAsAnEventStreamWhenAsked) {
     server_.set_tools (tools_named (3), 2);
     server_.first_tools_page_as_event_stream ();

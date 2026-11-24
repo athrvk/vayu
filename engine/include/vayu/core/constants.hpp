@@ -1365,6 +1365,11 @@ constexpr size_t MAX_PAGES = 100;
 /// The most entries (tools, resources, templates and prompts together) one
 /// import reads, each of which becomes a stored request.
 constexpr size_t MAX_ITEMS = 10000;
+/// The whole import's bound, every call together: without it a server could
+/// hold one request open for `MAX_PAGES` calls of `CALL_TIMEOUT_MS` each.
+constexpr long long TOTAL_TIMEOUT_MS = 120000;
+/// The most reply bytes one import reads, every call together.
+constexpr size_t MAX_TOTAL_BYTES = size_t{ 32 } * 1024 * 1024;
 } // namespace import_mcp
 
 /**

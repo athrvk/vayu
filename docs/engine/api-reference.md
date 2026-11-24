@@ -5062,7 +5062,7 @@ In order:
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `url` | string, **required** | The server's endpoint, `http` or `https`. Every generated request's `url`. |
+| `url` | string, **required** | The server's endpoint, `http` or `https`, with no `user:password@` (a `400`: put credentials in `auth` or `headers`). Stored as given in every generated request's `url`, so a key in its query string is stored too. |
 | `headers` | `[{name, value}]` or object | Sent on every call, read by the rule [`POST /execute`](#post-execute) reads them by: a name is trimmed and must be a token, a value cannot hold CR, LF or NUL. |
 | `auth` | `{mode: "bearer", token}` | The shape a saved request's auth has. Written as `Authorization: Bearer <token>` (trimmed), unless `headers` already names `Authorization`, which wins. No other mode. |
 | `include` | object | `tools` (default `true`), `resources` and `prompts` (default `false`), each a boolean. An unknown member, and an `include` that leaves nothing included, is a `400`. |
@@ -5096,27 +5096,35 @@ disabled, so the request says which header the server wanted without holding or
 sending it; every other line is carried as sent.
 
 **Bounds.** The server is one a user typed, so each call is held on every side
-(`constants::import_mcp`): a reply of at most 4 MiB, a total of 20 seconds per
-call (an event stream a server keeps open ends there), no redirect followed, at
-most 100 pages per list and 10,000 entries across the import. An engine
-shutdown cancels a call in flight. Vayu's own engine and MCP ports are refused
+(`constants::import_mcp`): a reply of at most 4 MiB and 32 MiB of replies
+across the import, 20 seconds per call (an event stream a server keeps open
+ends there) and 120 seconds for the whole import (a call is given no more than
+what is left), no redirect followed, at most 100 pages per list, a list that
+hands back a cursor it was already sent stopped at once, and 10,000 entries
+across the import. An engine shutdown cancels a call in flight. Vayu's own engine and MCP ports are refused
 as on every send path ([Reserved local ports](#reserved-local-ports)); every
 other loopback server is reachable. The transfer leaves through the
 [transport policy](#proxy-settings). Header and token values are never logged.
 
 **Errors:**
-- `400` `Invalid 'url': ...`, `Invalid 'headers': ...`, `Invalid 'auth': ...`,
-  `Invalid 'include': ...`, or `Body must be a JSON object`; nothing is sent.
-- `413` `<method> failed: <reason>` for a reply over 4 MiB, or
-  `The server lists more than 10000 tools, resources and prompts, the most one import reads`.
+- `400` `Invalid 'url': ...` (`Invalid 'url': put credentials in auth or
+  headers, not the URL` for a URL with userinfo), `Invalid 'headers': ...`,
+  `Invalid 'auth': ...`, `Invalid 'include': ...`, or `Body must be a JSON
+  object`; nothing is sent.
+- `413` `<method> failed: <reason>` for a reply over 4 MiB,
+  `The server's replies came to more than 33554432 bytes, the most one import reads`,
+  or `The server lists more than 10000 tools, resources and prompts, the most one import reads`.
 - `502` `<method> failed: <reason>`, where the reason is the reply reader's own
   message: `server supports 2025-11-25, 2025-06-18; this request is 2026-07-28`
   for a version refusal, `insufficient_scope: needs "<scopes>"` for a `403`
   naming them, `HTTP 400 with no JSON-RPC error: the server looks legacy-era
   ...` for a legacy server's list call, a transfer's own error (a refused
   connection, a timeout, a reserved port).
-- `502` `<method> answered with no '<key>' list`, or
-  `<method> still had a nextCursor after 100 pages, the most one import follows`.
+- `502` `<method> answered with no '<key>' list`,
+  `<method> repeated a cursor it had already been sent, so the list would never end`,
+  or `<method> still had a nextCursor after 100 pages, the most one import follows`.
+- `502` `The import ran past its 120000 ms total at <method>, the longest one import takes`:
+  a timeout is a `502` here, as it is on `POST /import/fetch`.
 
 ### POST /import
 

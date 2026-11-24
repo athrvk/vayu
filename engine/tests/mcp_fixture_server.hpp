@@ -178,6 +178,14 @@ class McpFixtureServer {
         settings_.first_tools_page_stream = on;
     }
 
+    /// Answers a `tools/list` page asked for by a cursor with that same cursor
+    /// as its `nextCursor`, as a server stuck on one page would; the first
+    /// page names the second as usual.
+    void repeat_tools_cursor (bool on = true) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.repeat_tools_cursor = on;
+    }
+
     /// What `resources/list` answers; one page, no cursor.
     void set_resources (nlohmann::json resources) {
         std::lock_guard<std::mutex> lock (mutex_);
@@ -248,6 +256,7 @@ class McpFixtureServer {
         nlohmann::json tools              = nlohmann::json::array ();
         std::size_t tools_page_size       = 0;
         bool first_tools_page_stream      = false;
+        bool repeat_tools_cursor          = false;
         nlohmann::json resources          = nlohmann::json::array ();
         nlohmann::json resource_templates = nlohmann::json::array ();
         nlohmann::json prompts            = nlohmann::json::array ();
@@ -432,8 +441,9 @@ class McpFixtureServer {
     const Settings& settings) {
         const std::size_t total = settings.tools.size ();
         std::size_t offset      = 0;
-        if (const auto cursor =
-            string_at (call, nlohmann::json::json_pointer ("/params/cursor"))) {
+        const auto cursor =
+        string_at (call, nlohmann::json::json_pointer ("/params/cursor"));
+        if (cursor) {
             const auto start = cursor_offset (*cursor, total, settings.tools_page_size);
             if (!start) {
                 return error_frame (id, -32602, "Invalid cursor: " + *cursor);
@@ -448,7 +458,9 @@ class McpFixtureServer {
             page.push_back (settings.tools.at (at));
         }
         nlohmann::json result{ { "tools", std::move (page) } };
-        if (end < total) {
+        if (cursor && settings.repeat_tools_cursor) {
+            result["nextCursor"] = *cursor;
+        } else if (end < total) {
             result["nextCursor"] = cursor_at (end);
         }
         return result_frame (id, std::move (result));

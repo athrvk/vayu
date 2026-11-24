@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -51,6 +52,11 @@ namespace vayu::http::routes {
 std::pair<int, nlohmann::json> import_mcp_response (const nlohmann::json& body,
 const vayu::http::TransportPolicy& transport,
 const std::atomic<bool>* cancel);
+std::pair<int, nlohmann::json> import_mcp_response (const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel,
+std::chrono::milliseconds total_timeout,
+std::size_t max_total_bytes);
 std::optional<std::pair<vayu::http::ClientConfig, vayu::Request>>
 import_mcp_call_shape (const nlohmann::json& body,
 const vayu::http::TransportPolicy& transport,
@@ -72,6 +78,14 @@ namespace limits = vayu::core::constants::import_mcp;
 std::pair<int, json> import_from (const json& body) {
     return vayu::http::routes::import_mcp_response (
     body, vayu::http::TransportPolicy{}, nullptr);
+}
+
+/// An import under whole-import bounds the test names.
+std::pair<int, json> import_within (const json& body,
+std::chrono::milliseconds total_timeout,
+std::size_t max_total_bytes) {
+    return vayu::http::routes::import_mcp_response (body,
+    vayu::http::TransportPolicy{}, nullptr, total_timeout, max_total_bytes);
 }
 
 json body_for (const McpFixtureServer& server) {
@@ -357,6 +371,62 @@ TEST (ImportMcpRoute, AListPastThePageCapFailsNamingIt) {
     EXPECT_EQ (server.tools_list_cursors ().size (), limits::MAX_PAGES);
 }
 
+// Mutation check: drop the `sent_cursors` test in `list_all` and the import
+// asks for the same page until the page cap.
+TEST (ImportMcpRoute, ARepeatedCursorFailsTheListAtTheFirstRepeat) {
+    McpFixtureServer server;
+    server.set_tools (tools_named (numbered_names (5)), 2);
+    server.repeat_tools_cursor ();
+    const auto [status, body] = import_from (body_for (server));
+    EXPECT_EQ (status, 502) << body.dump ();
+    EXPECT_EQ (message_of (body),
+    "tools/list repeated a cursor it had already been sent, so the list would "
+    "never end");
+    EXPECT_EQ (server.tools_list_cursors (),
+    (std::vector<std::optional<std::string>>{ std::nullopt, "cursor-2" }));
+}
+
+// Every reply here is a few hundred bytes, under the cap alone; their sum is
+// not. Mutation check: make `budget.bytes +=` an assignment and the import
+// reads every page and answers 200.
+TEST (ImportMcpRoute, RepliesPastTheWholeImportByteCapFailNamingIt) {
+    constexpr std::size_t cap = 1000;
+    McpFixtureServer server;
+    server.set_tools (tools_named (numbered_names (40)), 2);
+    const auto [status, body] =
+    import_within (body_for (server), std::chrono::milliseconds (60000), cap);
+    EXPECT_EQ (status, 413) << body.dump ();
+    EXPECT_EQ (message_of (body), "The server's replies came to more than 1000 bytes, the most one import reads");
+    EXPECT_GT (server.tools_list_cursors ().size (), 1U);
+    EXPECT_LT (server.tools_list_cursors ().size (), 20U);
+}
+
+// Driven with a spent deadline rather than by waiting one out. Mutation check:
+// drop the `remaining` test in `send_call` and the import answers 200.
+TEST (ImportMcpRoute, AnImportPastItsTotalDeadlineFailsBeforeTheNextCall) {
+    McpFixtureServer server;
+    server.set_tools (tools_named ({ "a" }));
+    const auto [status, body] = import_within (
+    body_for (server), std::chrono::milliseconds (0), limits::MAX_TOTAL_BYTES);
+    EXPECT_EQ (status, 502) << body.dump ();
+    EXPECT_EQ (message_of (body),
+    "The import ran past its 0 ms total at server/discover, the longest one "
+    "import takes");
+    EXPECT_EQ (server.requests (), 0U);
+}
+
+TEST (ImportMcpRoute, AUrlsQueryIsKeptAsGiven) {
+    McpFixtureServer server;
+    server.set_tools (tools_named ({ "a" }));
+    const std::string url       = server.url () + "?tenant=acme";
+    const auto [status, result] = import_from (json{ { "url", url } });
+    ASSERT_EQ (status, 200) << result.dump ();
+    const json request = folder_of (result, "Tools").at ("requests").at (0);
+    EXPECT_EQ (request.at ("url"), url);
+    EXPECT_EQ (request.at ("params").at (0).at ("key"), "tenant");
+    EXPECT_EQ (request.at ("params").at (0).at ("value"), "acme");
+}
+
 TEST (ImportMcpRoute, AListingPastTheItemCapFailsNamingIt) {
     McpFixtureServer server;
     server.set_tools (tools_named (numbered_names (limits::MAX_ITEMS + 1)));
@@ -429,6 +499,10 @@ TEST (ImportMcpRoute, ABodyThatNamesNoUsableServerIsRefusedBeforeAnyCall) {
         { json::object (), "Invalid 'url'" },
         { json{ { "url", "ftp://127.0.0.1/mcp" } }, "Invalid 'url'" },
         { json{ { "url", "127.0.0.1/mcp" } }, "Invalid 'url'" },
+        // Mutation check: drop the userinfo test in `read_url` and this one
+        // is sent.
+        { json{ { "url", "http://user:pw@127.0.0.1/mcp" } },
+        "put credentials in auth or headers, not the URL" },
         { json{ { "url", url }, { "include", { { "tool", true } } } }, "unknown member 'tool'" },
         { json{ { "url", url }, { "include", { { "tools", "yes" } } } }, "Invalid 'include.tools'" },
         { json{ { "url", url }, { "include", { { "tools", false } } } }, "nothing is included" },
