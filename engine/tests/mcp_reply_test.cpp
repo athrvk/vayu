@@ -90,6 +90,12 @@ Response reply (int status, const std::string& content_type, std::string body) {
     return response;
 }
 
+Response reply_challenged (int status, const std::string& challenge, std::string body = "Forbidden") {
+    auto response = reply (status, "text/plain", std::move (body));
+    response.headers["www-authenticate"] = challenge;
+    return response;
+}
+
 std::string event (const std::string& data) {
     return "event: message\ndata: " + data + "\n\n";
 }
@@ -267,6 +273,92 @@ TEST (McpReplyReader, AnyOtherStatusWithoutAJsonRpcErrorIsTransport) {
     read_mcp_reply (mcp_request (), reply (502, "text/html", "<h1>Bad gateway</h1>"));
     EXPECT_EQ (read.error_class, McpErrorClass::Transport);
     EXPECT_EQ (read.message, "HTTP 502 with no JSON-RPC response");
+}
+
+// #3795: a 401 or 403 whose Bearer challenge says `insufficient_scope` names
+// the scope the token needs, in the reply's own failure and still Transport.
+// Mutation check: skip `classify_bearer_challenge` in
+// `insufficient_scope_message` and every named-scope assertion reddens.
+TEST (McpReplyReader, AnInsufficientScopeChallengeNamesTheScopeTheTokenNeeds) {
+    constexpr const char* CHALLENGE =
+    R"(Bearer realm="mcp", error="insufficient_scope", scope="db:read db:write db:read")";
+    for (const int status : { 401, 403 }) {
+        const auto read =
+        read_mcp_reply (mcp_request (), reply_challenged (status, CHALLENGE));
+        EXPECT_EQ (read.error_class, McpErrorClass::Transport) << status;
+        EXPECT_EQ (read.message, R"(insufficient_scope: needs "db:read db:write")") << status;
+    }
+}
+
+TEST (McpReplyReader, AnInsufficientScopeChallengeThatNamesNoScopeSaysSo) {
+    const auto read = read_mcp_reply (mcp_request (),
+    reply_challenged (403, R"(Bearer error="insufficient_scope")"));
+    EXPECT_EQ (read.error_class, McpErrorClass::Transport);
+    EXPECT_EQ (read.message,
+    "insufficient_scope: the token lacks a scope the server did not name");
+}
+
+// What the server wrote is cut to a message-sized quote.
+TEST (McpReplyReader, ANamedScopeIsBoundedLikeAnyServerText) {
+    const std::string scope (5000, 's');
+    const auto read = read_mcp_reply (mcp_request (),
+    reply_challenged (403, R"(Bearer error="insufficient_scope", scope=")" + scope + "\""));
+    EXPECT_EQ (read.error_class, McpErrorClass::Transport);
+    EXPECT_LT (read.message.size (), 600u) << read.message.size ();
+    EXPECT_NE (read.message.find ("..."), std::string::npos);
+}
+
+// Only `insufficient_scope` is a scope to name; the statuses, headers and
+// challenges around it keep the message they always had.
+TEST (McpReplyReader, ARefusalThatIsNotAnInsufficientScopeKeepsItsMessage) {
+    struct Case {
+        int status;
+        std::optional<std::string> challenge;
+        std::string message;
+    };
+    const std::vector<Case> cases = {
+        { 401, R"(Bearer error="invalid_token")", "HTTP 401 with no JSON-RPC response" },
+        { 403, R"(Basic realm="mcp")", "HTTP 403 with no JSON-RPC response" },
+        { 403, std::nullopt, "HTTP 403 with no JSON-RPC response" },
+        { 401, R"(Bearer realm="mcp")", "HTTP 401 with no JSON-RPC response" },
+        { 500, R"(Bearer error="insufficient_scope", scope="db:write")",
+        "HTTP 500 with no JSON-RPC response" },
+    };
+    for (const auto& refusal : cases) {
+        auto response = reply (refusal.status, "text/plain", "Forbidden");
+        if (refusal.challenge) {
+            response.headers["www-authenticate"] = *refusal.challenge;
+        }
+        const auto read = read_mcp_reply (mcp_request (), response);
+        EXPECT_EQ (read.error_class, McpErrorClass::Transport) << refusal.message;
+        EXPECT_EQ (read.message, refusal.message);
+    }
+}
+
+// The same rule on the two other ways a non-2xx reply is judged: a JSON-RPC
+// result under it, and an event stream that carries no response. A JSON-RPC
+// error is the server's own answer and stays Protocol.
+TEST (McpReplyReader, TheScopeIsNamedWhateverShapeTheRefusalTakes) {
+    constexpr const char* CHALLENGE = R"(Bearer error="insufficient_scope", scope="db:write")";
+    auto result = reply_challenged (403, CHALLENGE, kResultFrame);
+    result.headers["content-type"] = "application/json";
+    EXPECT_EQ (read_mcp_reply (mcp_request (), result).message,
+    R"(insufficient_scope: needs "db:write")");
+    result.headers.erase ("www-authenticate");
+    EXPECT_EQ (read_mcp_reply (mcp_request (), result).message,
+    "HTTP 403 answered with a JSON-RPC result");
+
+    auto stream = reply_challenged (403, CHALLENGE, progress ());
+    stream.headers["content-type"] = "text/event-stream";
+    EXPECT_EQ (read_mcp_reply (mcp_request (), stream).message,
+    R"(insufficient_scope: needs "db:write")");
+
+    auto error                    = reply_challenged (403, CHALLENGE,
+    R"({"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"Forbidden"}})");
+    error.headers["content-type"] = "application/json";
+    const auto refused            = read_mcp_reply (mcp_request (), error);
+    EXPECT_EQ (refused.error_class, McpErrorClass::Protocol);
+    EXPECT_EQ (refused.message, "JSON-RPC error -32001: Forbidden");
 }
 
 TEST (McpReplyReader, AFailedTransferIsTransportInItsOwnWords) {
@@ -497,6 +589,27 @@ TEST (McpReplyLoadTally, AFailureUnderAFailureStatusIsCountedOnceAndNamedOnItsTr
     }
 }
 
+// #3795: the scope reaches the trace a load run keeps, and the 403 is still the
+// one status the run counts: nothing is retried and no error is added.
+TEST (McpReplyLoadTally, AnInsufficientScopeIsNamedOnTheTraceAndTheStatusStillCounts) {
+    auto response =
+    reply_challenged (403, R"(Bearer error="insufficient_scope", scope="db:write")");
+    attach_mcp_reply (mcp_request (), response);
+    const auto context  = handled (response);
+    const auto& metrics = *context->metrics_collector;
+    EXPECT_EQ (metrics.total_errors (), 0u);
+    EXPECT_TRUE (metrics.error_type_counts ().empty ());
+    EXPECT_EQ (metrics.status_code_distribution ().at (403), 1u);
+
+    const auto& kept = metrics.exemplar_results ();
+    ASSERT_EQ (kept.size (), 1u);
+    const auto trace = json::parse (kept.front ().trace_data);
+    const auto mcp   = trace.value ("mcp", json::object ());
+    EXPECT_EQ (mcp.value ("errorClass", ""), "transport") << trace.dump ();
+    EXPECT_EQ (mcp.value ("message", ""), R"(insufficient_scope: needs "db:write")")
+    << trace.dump ();
+}
+
 // ---------------------------------------------------------------------------
 // The design send, buffered: `execute_exchange`, which a collection run's
 // sequential steps share.
@@ -626,6 +739,20 @@ TEST_F (McpReplyExchangeTest, AVersionRefusalAndALegacyServerAreNamed) {
     EXPECT_NE (legacy.response.mcp_reply->message.find ("legacy-era"), std::string::npos);
     // No retry and no fallback: the one modern request is all that was sent.
     EXPECT_EQ (server_->requests (), 2u);
+}
+
+// #3795: the design send and a collection run's step name the scope the 403
+// asks for, and ask the server once.
+TEST_F (McpReplyExchangeTest, AnInsufficientScopeIsNamedOnTheFailedTest) {
+    server_->reply_with (McpReplyShape::Json, McpReplyOutcome::InsufficientScope);
+    const auto exchange = send ();
+    EXPECT_EQ (exchange.response.status_code, 403);
+    const auto* test = failure_test_of (exchange.post_script_result);
+    ASSERT_NE (test, nullptr);
+    EXPECT_FALSE (test->passed);
+    EXPECT_EQ (test->error_message,
+    R"(transport failure: insufficient_scope: needs "db:read db:write")");
+    EXPECT_EQ (server_->requests (), 1u);
 }
 
 // ---------------------------------------------------------------------------
@@ -812,6 +939,17 @@ TEST_F (McpReplyStreamTest, AStreamEndedBeforeTheResponseIsTransportAndAPlainStr
     }
 }
 
+// The streamed send reads its reply through the same function.
+TEST_F (McpReplyStreamTest, AnInsufficientScopeIsNamedOnAStreamedSend) {
+    server_->reply_with (McpReplyShape::EventStream, McpReplyOutcome::InsufficientScope);
+    const auto trace = stream (json::array ());
+    EXPECT_EQ (mcp_node_of (trace).value ("message", ""), R"(insufficient_scope: needs "db:read db:write")")
+    << trace.dump (2);
+    const auto test = test_named (trace, "MCP reply");
+    ASSERT_FALSE (test.is_null ()) << trace.dump (2);
+    EXPECT_FALSE (test["passed"].get<bool> ());
+}
+
 // ---------------------------------------------------------------------------
 // Runs: a collection run's sequential steps, a scenario load run and a
 // single-request load run.
@@ -943,6 +1081,7 @@ class McpReplyRunTest : public ::testing::Test {
             config["requestElements"] = elements;
         }
         const std::string run_id = "run_mcp_load_" + std::to_string (++runs_);
+        last_load_run_id_        = run_id;
         run_row (run_id, RunType::Load, config);
         core::RunManager manager;
         EXPECT_TRUE (manager.start_run (run_id, config, *db_));
@@ -961,6 +1100,7 @@ class McpReplyRunTest : public ::testing::Test {
     std::unique_ptr<db::Database> db_;
     std::unique_ptr<McpFixtureServer> server_;
     size_t runs_ = 0;
+    std::string last_load_run_id_;
 };
 
 /// The `passed` count a load summary's element row for @p id reports.
@@ -1138,6 +1278,39 @@ TEST_F (McpReplyRunTest, AStreamEndedBeforeTheResponseIsASingleRequestLoadRunsTr
             }
         }
     }
+}
+
+// #3795: a run of a refused call names the scope on what it keeps, counts the
+// 403 as the status it is, and asks the server once per iteration.
+TEST_F (McpReplyRunTest, AnInsufficientScopeIsNamedByACollectionRun) {
+    server_->reply_with (McpReplyShape::Json, McpReplyOutcome::InsufficientScope);
+    const auto rows = run_sequentially ({});
+    ASSERT_EQ (rows.size (), ITERATIONS);
+    for (const auto& row : rows) {
+        EXPECT_NE (row.error.find (R"(insufficient_scope: needs "db:read db:write")"),
+        std::string::npos)
+        << row.error;
+        EXPECT_EQ (mcp_node_of (json::parse (row.trace_data)).value ("errorClass", ""),
+        "transport");
+    }
+    EXPECT_EQ (server_->requests (), ITERATIONS);
+}
+
+TEST_F (McpReplyRunTest, AnInsufficientScopeIsNamedByASingleRequestLoadRun) {
+    server_->reply_with (McpReplyShape::Json, McpReplyOutcome::InsufficientScope);
+    auto summary = run_single_request_load ({});
+    EXPECT_EQ (summary["status_codes"]["403"], ITERATIONS) << summary.dump ();
+    EXPECT_FALSE (summary.value ("error_types", json::object ()).contains ("mcp_transport"))
+    << summary.dump ();
+    EXPECT_EQ (server_->requests (), ITERATIONS);
+
+    size_t named = 0;
+    for (const auto& row : db_->get_results (last_load_run_id_)) {
+        const auto trace = json::parse (row.trace_data);
+        const auto mcp   = trace.value ("mcp", json::object ());
+        named += mcp.value ("message", "") == R"(insufficient_scope: needs "db:read db:write")";
+    }
+    EXPECT_GT (named, 0u) << summary.dump ();
 }
 
 } // namespace

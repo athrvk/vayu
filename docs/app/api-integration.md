@@ -182,6 +182,19 @@ Elements section as any other `assert.*` outcome does. The builder offers it in 
 Assert group, with a multi-line schema field; see the Shared ElementList section of
 `COMPONENTS.md`.
 
+**`assert.snapshot` (#3807)** holds the items a list method answers to a recorded
+`baseline`: `method` is `tools/list` (default), `resources/list` or `prompts/list`,
+`baseline` is the array the list held, and a single-request run's `requestElements`
+accepts it. The renderer sends it as any element (`config: {method?, baseline}`)
+and offers it in the Assert group with a multi-line baseline field. Its one
+app-side behaviour is the **Use the current reply as the baseline** action on the
+Elements tab: it extracts `result.<tools|resources|prompts>` from the Response
+pane's body (a JSON-RPC object or an event stream ending in one) and writes the
+list into the element's `config.baseline`; the engine is not called. A comparison
+that fails arrives as one `assert.snapshot` outcome message
+(`tools/list changed: removed 'a'; added 'b'; 'c' differs at /inputSchema/...`).
+The engine's rules are in `docs/engine/elements.md`.
+
 **`unresolved` comes back, never goes out** (#2356). The engine sends a file
 reference only when its path was picked on this machine or lies under a folder
 allowed in Settings > Files ([allowed folders](#allowed-folders)), and decides
@@ -1126,7 +1139,9 @@ the three closed-loop modes: `constant_concurrency` and `ramp_up` send
 `duration` (and, for the ramp, `startConcurrency` and `rampUpDuration`, camelCase
 with `"Ns"` strings), while `iterations` sends the top-level total of passes and
 no `duration`; the top-level `iterations` is distinct from `scenario.iterations`,
-which is sent only when Load test is off. `constant_rps`, and
+which is sent only when Load test is off. Top-level `retryAfterBackoff` and `retryAfterMaxMs` (#3799, the
+engine's wait-out-`Retry-After` option) ride the load fields too, as a pair and
+only when the dialog's **Wait out Retry-After** switch is on. `constant_rps`, and
 any non-zero `rps`/`targetRps` on any mode, is a `400`: an open-loop arrival
 rate over a multi-step sequence is an arrival-rate executor the engine does not
 implement, and it is refused rather than quietly run closed-loop. Such a run's
@@ -1489,7 +1504,8 @@ blank, and once the sign-in succeeds the form writes exactly those into the stor
 config (`discoveredValues` and `withDiscoveredValues`, `services/oauth/discovery.ts`)
 and names them in `discoveredFields`. From then on the stored config holds ordinary
 endpoints and a client id, so the cache key, a refresh, a Send and a run read it like
-any other and need no discovery; `cache-key.ts` is unchanged. `issuer` is not stored.
+any other and need no discovery (while `discoverUrl` stays on, a refresh and a run still
+refuse a token endpoint that is, or resolves to, a loopback or link-local address, #3800; choosing another grant in the form drops `discoverUrl` and `discoveredFields`); `cache-key.ts` is unchanged. `issuer` is not stored.
 A config with discovery on and no cache key yet (`awaitsDiscovery`) has no token to
 look up: the token row offers the sign-in under `oauth2SignInKey` (`discover:<url>`),
 and the load-test guards say to sign in first. `missingOAuth2Fields` asks such a config
@@ -1789,7 +1805,10 @@ Send does not - and only the last two steps differ:
    fetches `GET /runs/:id/report` and `restore-response.ts` maps the trace's
    `events` node and its `response.body` - the stream's bytes, stored once and
    read back into that list by the engine (#3770) - onto the response, which is
-   the record from then on. One fetch is enough: the engine sends `complete` only after the post-request
+   the record from then on. The node also carries `startedAt` (epoch ms, the
+   clock of each item's `receivedAt`, #3805) when the engine knew when the
+   transfer began; a row stored before it, or a stream refused before it began,
+   has none. One fetch is enough: the engine sends `complete` only after the post-request
    script has run and the run row and trace are stored (#3239).
 
 **The stream text path** (issue #3773) is the request's declared JSONPath for
@@ -1812,6 +1831,25 @@ present only when a path was declared; a captured load sample carries both the
 same way. The renderer joins live `text` itself in `execution-events-store`
 (`streamText`), and `restore-response.ts` carries the stored string, which wins
 at the swap.
+
+**The first content marker** (issue #3774) is the request's declared literal
+for the first token: the bytes a load run watches each stream's raw wire for, so
+the report's `stream.timeToFirstMatch` (and the `streamTimeToFirstMatchP95Ms`
+budget) times the first content and not a preamble event, which
+`timeToFirstEvent` reads as near zero. It is stored beside the path
+(`requests.stream_first_content_marker`; `streamFirstContentMarker` on
+`POST`/`PUT /requests`, `null` clears, an absent key keeps), held as a string
+(empty is none) and, unlike the path, **never trimmed**, since the engine
+matches its bytes as written. The Settings tab offers two presets
+(`content_block_delta`, `"delta":{"content":"`) and any literal typed in, with
+the caveat that the match is on the raw stream, so a server's JSON spacing and
+escaping decide what it must say. Only a load run times a stream to it (a Send
+checks the field and times nothing), so `streamFirstContentMarkerOf`
+(`utils/execute-mapping.ts`) adds it to the load run's `POST /runs` payload
+alone, from the request and never the load dialog, and only while the request
+streams; the engine refuses one beside a buffered request, and Event stream
+going off empties it (`streamPatch`) with the path. A Vayu export carries it in
+its settings and the importer reads it back.
 
 **A different `EventSource` from the `SSEClient` singleton below.** That client
 belongs to load and scenario runs, is a single connection whose lifetime is the
@@ -2637,7 +2675,12 @@ than the server - and `timeToFirstEvent` (issue #3234), the wait from submitting
 the request to each stream's first event. That is not `phases.firstByte`, which
 ends at the response headers: a gateway that answers `200` at once and then
 thinks reads fast there and slow here. It is absent when no stream delivered a
-timed event. Two more optional blocks (issue #3776) say how each stream paced
+timed event, and it stops at the first event of any kind, so an API that opens
+with a preamble event (Anthropic's `message_start`, an OpenAI role-only chunk)
+reads near zero on it. `timeToFirstMatch` (issue #3774) is the same clock stopped
+at the request's first content marker, so that API's first token reads as its
+real wait; it is absent, never `0`, when no stream matched, and a request that
+declares no marker has none. Two more optional blocks (issue #3776) say how each stream paced
 its events, each a `StreamDistribution` (`{p50, p95, p99, max, count}`) over the
 streams that had two timed events to measure between: `maxEventGap`, the
 largest pause between two consecutive events in a stream, in milliseconds, and
@@ -2721,7 +2764,7 @@ derived from the steps it actually sent.
 
 **Stream budgets** (issue #3234): `streamTimeToFirstEventP95Ms` (a ceiling on
 `stream.timeToFirstEvent.p95`, ms) and `streamEventsPerSecondMin` (a floor on
-`stream.eventsPerSecond`) judge the report's `stream` section, which only a
+`stream.eventsPerSecond`), and the third below, judge the report's `stream` section, which only a
 streaming request's load run and a collection run with a streaming step
 (#3235, design or load) have. On any other run the engine reports them not evaluated,
 and that counts as failed, so the dialog treats them as a property of the
@@ -2734,6 +2777,17 @@ next streaming request, and is not named as carried over).
 the run sends streams, so it offers, checks and sends them only then. A streaming request's latency budgets
 read on each stream's full duration, from sending the request to the stream
 closing, and the section says so under the p99 field.
+
+`streamTimeToFirstMatchP95Ms` (issue #3774, "Time to first match p95 at most")
+is the third `streamOnly` budget, a ceiling on `stream.timeToFirstMatch.p95`: the
+first-token budget, since a budget on `timeToFirstEvent` passes whatever a
+preamble API's first token costs. It is offered for any streaming request
+(the dialog does not read the request's marker), so its hint says the request
+must declare a first content marker; a run where no stream matched has no
+figure, and the engine reports the budget not evaluated, which counts as failed,
+never as a pass. `StreamMetrics` draws the figure as a **first match** row, only
+when the report carries it; the live panel stays on the first event, because a
+live frame carries no match.
 
 **`custom.<name>.<stat>` budgets** (issue #1579) are the only dynamic thing the
 block can carry: a ceiling on a value the run records
@@ -2785,8 +2839,21 @@ back, so the controls are hidden in that mode (`appliesRetryAfter` in
 closed-loop run. The cap range, 1-3600000, is the engine's exactly
 (`load-test.engine-parity.test.ts`) and a value outside it blocks Start. The
 run's `RunConfigSection` reads the snapshot back as a **Retry-After** row ("Waited,
-up to N ms"), shown only when the option was on. `RunCollectionDialog` has no
-control for it; a collection run gets it through MCP's `start_load_run`.
+up to N ms"), shown only when the option was on.
+
+`RunCollectionDialog` offers the same two controls once **Load test** is on
+(`#run-collection-retry-after`, `#run-collection-retry-after-max`;
+[#3799](https://github.com/athrvk/vayu/issues/3799)). Both dialogs draw them
+from one component, `RetryAfterFields.tsx`, which owns the `appliesRetryAfter`
+guard and takes an `idPrefix` so the ids never collide. The scenario's pair
+lives in its profile state (`ScenarioLoadProfile`), starting at
+`LOAD_TEST_DEFAULTS` on every open like the rest of that dialog, and
+`scenarioLoadFields` puts `retryAfterBackoff: true` and `retryAfterMaxMs` in the
+top-level payload only while the switch is on, so the dashboard's seed carries
+them and `RunConfigSection` shows the row for a collection run too. The cap's
+range check is `retryAfterCapError` (`profile.ts`), shared by both dialogs'
+validation. A design-mode collection run sends neither key. MCP's
+`start_load_run` is the other writer.
 
 #### Dialog ceilings are a user setting
 

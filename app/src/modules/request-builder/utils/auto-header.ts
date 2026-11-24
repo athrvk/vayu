@@ -38,7 +38,12 @@
  */
 
 import type { AutoHeaderSource, KeyValueEntry, KeyValueItem } from "@/types";
-import { ACCEPT_HEADER, DEFAULT_STREAM_TEXT_PATH, SSE_ACCEPT } from "@/constants/request";
+import {
+	ACCEPT_HEADER,
+	DEFAULT_STREAM_FIRST_CONTENT_MARKER,
+	DEFAULT_STREAM_TEXT_PATH,
+	SSE_ACCEPT,
+} from "@/constants/request";
 import { generateId } from "@/lib/id";
 
 /** Case-insensitive header-name match, on the trimmed key. */
@@ -119,12 +124,14 @@ export function switchAutoHeader(
 
 /**
  * What the Event stream setting changes on a request: the flag, its `Accept`
- * row and, going off, the stream text path (#3773).
+ * row and, going off, the stream text path (#3773) and first content marker
+ * (#3774).
  */
 export interface StreamPatch {
 	stream: boolean;
 	headers: KeyValueItem[];
 	streamTextPath?: string;
+	streamFirstContentMarker?: string;
 }
 
 /**
@@ -138,14 +145,21 @@ export interface StreamPatch {
  * request without the header a stream server negotiates on.
  */
 export function streamPatch(
-	request: { headers: KeyValueItem[]; streamTextPath?: string },
+	request: {
+		headers: KeyValueItem[];
+		streamTextPath?: string;
+		streamFirstContentMarker?: string;
+	},
 	on: boolean
 ): StreamPatch {
 	const next = switchAutoHeader(ACCEPT_HEADER, on ? SSE_ACCEPT : null, request.headers, "stream");
 	const patch: StreamPatch = { stream: on, headers: next.headers };
-	// A path belongs to a stream: the engine refuses one stored beside a
-	// buffered request, so the field empties with the toggle rather than the
-	// save sending a pair it would refuse.
-	if (!on && request.streamTextPath) patch.streamTextPath = DEFAULT_STREAM_TEXT_PATH;
+	// A path and a marker belong to a stream: the engine refuses one stored
+	// beside a buffered request, so the fields empty with the toggle rather
+	// than the save sending a pair it would refuse.
+	if (on) return patch;
+	if (request.streamTextPath) patch.streamTextPath = DEFAULT_STREAM_TEXT_PATH;
+	if (request.streamFirstContentMarker)
+		patch.streamFirstContentMarker = DEFAULT_STREAM_FIRST_CONTENT_MARKER;
 	return patch;
 }

@@ -92,6 +92,49 @@ describe("summarizeElement - assert.jsonschema", () => {
 	});
 });
 
+describe("summarizeElement - assert.snapshot", () => {
+	const k = kind({
+		kind: "assert.snapshot",
+		configSchema: {
+			type: "object",
+			properties: { method: { type: "string", default: "tools/list" } },
+		},
+	});
+	// Large enough that printing it would be the whole row.
+	const baseline = [{ name: "search", inputSchema: { type: "object", required: ["query"] } }];
+
+	it("counts the recorded items for the default method, never printing them", () => {
+		const summary = summarizeElement(element("assert.snapshot", { baseline }), k);
+		expect(summary).toBe("tools/list - 1 item");
+		expect(summary).not.toContain("search");
+	});
+
+	it("names the element's own method and pluralises the count", () => {
+		expect(
+			summarizeElement(
+				element("assert.snapshot", {
+					method: "prompts/list",
+					baseline: [{ name: "a" }, { name: "b" }],
+				}),
+				k
+			)
+		).toBe("prompts/list - 2 items");
+		expect(
+			summarizeElement(
+				element("assert.snapshot", { method: "resources/list", baseline: [] }),
+				k
+			)
+		).toBe("resources/list - 0 items");
+	});
+
+	it("falls back to the kind's description until there is a baseline array", () => {
+		expect(summarizeElement(element("assert.snapshot", {}), k)).toBe(k.description);
+		expect(summarizeElement(element("assert.snapshot", { baseline: "[" }), k)).toBe(
+			k.description
+		);
+	});
+});
+
 describe("summarizeElement - assert.jsonpath", () => {
 	const k = kind({ kind: "assert.jsonpath" });
 

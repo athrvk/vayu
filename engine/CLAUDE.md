@@ -508,7 +508,7 @@ Key endpoints:
 | GET | `/runs/:runId/monitor` | The server-vitals samples scraped during the run (#2611), same envelope; `maxPoints` folds it server-side too, each series to its bucket max (`MonitorSampleBucket`) |
 | DELETE | `/runs` | Clear run history (#2429): every run except pinned baselines and runs still `running`/`pending`, through retention's batched pass (`Database::clear_runs`); answers `{deleted, keptPinned, deletedIds}`. `DELETE /runs/:runId` still deletes whatever it names, pinned or not |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
-| POST | `/oauth2/step-up` | Classify a 401/403's `WWW-Authenticate` (`classify_bearer_challenge`, `oauth_discovery.hpp`, #3766): `{stepUp, error, requiredScopes, scope, description}`, `scope` the held scopes plus the required ones; classifies only, never retries or re-authorizes |
+| POST | `/oauth2/step-up` | Classify a 401/403's `WWW-Authenticate` (`classify_bearer_challenge`, `oauth_discovery.hpp`, #3766): `{stepUp, error, requiredScopes, scope, description}`, `scope` the held scopes plus the required ones; classifies only, never retries or re-authorizes. The `mcp` reply reader (`mcp_reply.cpp`, #3795) is its one other caller: a 401/403 reply naming `insufficient_scope` says which scope in the failed reply's message, with no retry and the status counts unchanged |
 | GET | `/health` | Health check: `status`, `version`, `workers`, `dataDir` (the absolute data directory, `core::absolute_data_dir`, so a client can tell its own engine from another's, #3328) and, after a startup recovery, `recovery` |
 | GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding`, an opt-in correlation id and, when `sendExpectContinue` is on, the `Expect: 100-continue` libcurl may add above 1 MiB (#2468), so a client renders them instead of re-deriving them. `?scope=design\|load` (default `design`, anything else a `400`) names which send is being described, because a load run resolves compression from its own key (#1338) |
 | POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (#987); no restore endpoint, see `docs/engine/architecture.md` |
@@ -777,7 +777,9 @@ logged as a warning: it means a client skipped composition.
   of the held length), which `cap_trace_bodies` keeps (#3423). The bytes are
   stored once: the trace's `events` node is a sidecar (`stream_trace_node`:
   `totalEvents`, `endReason`, `maxEventBytes`, one `receivedAt` per kept
-  event), and every reader of a stored trace (`report_result_node`,
+  event, and `startedAt` - the transfer's start, stamped before the first hop
+  by `note_transfer_start`, absent when unknown and never `0`, #3805), and
+  every reader of a stored trace (`report_result_node`,
   `attach_design_result`) serves the list parsed back from the stored body by
   `expand_stored_stream_events`, the `stream_events_node` the post-request
   script is bound to. A send's `streamTextPath` (#3773) is stored in that
@@ -817,6 +819,17 @@ logged as a warning: it means a client skipped composition.
   longer reads it, #3770): the tally counts nothing for any other reply, leaves its
   `stream_events` absent, and a duration cap that ends one is a `Timeout`
   (`StreamTally::unannounced_cap_error`), never a capped success.
+  A first content marker (#3774) is `StreamBounds::first_content_marker`, a
+  `StreamContentMarker` (`http/stream_content_marker.hpp`) compiled once and
+  shared: the tally scans an announced reply's raw bytes with it until the
+  first match, keeping one integer of state, and stamps
+  `Response::stream_first_match_ms`, the report's `stream.timeToFirstMatch`
+  and the `streamTimeToFirstMatchP95Ms` budget. It is stored and read exactly
+  as `streamTextPath` is (`requests.stream_first_content_marker`, held to
+  `stream_first_content_marker_problem`; a by-id compose carries it beside
+  `stream: true`; `compile_stream_content_marker` builds it per step in
+  `step_stream_bounds` and per run in `single_request_stream_bounds`; a
+  collection run refuses a top-level one). A design send only checks it.
   The report gains a `stream` section, absent for runs that did not stream. A
   load stream's events are parsed back, never stored twice (#657): the sample
   body already *is* the `text/event-stream` bytes, and `GET /runs/:id/samples`

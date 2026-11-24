@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+	LOAD_TEST_DEFAULTS,
 	LOAD_TEST_LIMITS,
 	resolveLoadTestLimits,
 	DEFAULT_LOAD_TEST_CEILINGS,
@@ -54,6 +55,34 @@ describe("scenarioLoadFields", () => {
 		const fields = scenarioLoadFields(profile({ mode: "iterations", iterations: 60 }));
 		expect(fields).toEqual({ mode: "iterations", concurrency: 10, iterations: 60 });
 		expect(fields).not.toHaveProperty("duration");
+	});
+});
+
+describe("scenarioLoadFields and Retry-After back-off (#3799)", () => {
+	it("starts from the engine's defaults, which send nothing", () => {
+		expect(SCENARIO_PROFILE_DEFAULTS).toMatchObject({
+			retryAfterBackoff: LOAD_TEST_DEFAULTS.RETRY_AFTER_BACKOFF,
+			retryAfterMaxMs: LOAD_TEST_DEFAULTS.RETRY_AFTER_MAX_MS,
+		});
+		const fields = scenarioLoadFields(profile());
+		expect(fields).not.toHaveProperty("retryAfterBackoff");
+		expect(fields).not.toHaveProperty("retryAfterMaxMs");
+	});
+
+	it("omits the cap with the option off, even one the user had typed", () => {
+		const fields = scenarioLoadFields(profile({ retryAfterMaxMs: 2500 }));
+		expect(fields).not.toHaveProperty("retryAfterBackoff");
+		expect(fields).not.toHaveProperty("retryAfterMaxMs");
+	});
+
+	it("sends the option and its cap together once on, in every scenario mode", () => {
+		for (const mode of ["constant_concurrency", "iterations", "ramp_up"] as const) {
+			expect(
+				scenarioLoadFields(
+					profile({ mode, retryAfterBackoff: true, retryAfterMaxMs: 2500 })
+				)
+			).toMatchObject({ retryAfterBackoff: true, retryAfterMaxMs: 2500 });
+		}
 	});
 });
 
@@ -111,6 +140,24 @@ describe("scenarioProfileError", () => {
 		expect(ramp({ startConcurrency: 0 })).toMatch(/at least 1/);
 		expect(ramp({ startConcurrency: 11, concurrency: 10 })).toMatch(/ramp down/);
 		expect(ramp({})).toBeNull();
+	});
+
+	describe("the Retry-After cap (#3799)", () => {
+		const withCap = (retryAfterMaxMs: number, retryAfterBackoff = true) =>
+			scenarioProfileError(profile({ retryAfterBackoff, retryAfterMaxMs }), limits);
+		const { MIN, MAX } = LOAD_TEST_LIMITS.RETRY_AFTER_MAX_MS;
+
+		it("refuses a cap outside the engine's range or fractional, naming the field", () => {
+			for (const cap of [0, MIN - 1, MAX + 1, 1.5, NaN]) {
+				expect(withCap(cap)).toMatch(/Longest Retry-After wait/);
+			}
+			expect(withCap(MIN)).toBeNull();
+			expect(withCap(MAX)).toBeNull();
+		});
+
+		it("ignores a cap the run would not send", () => {
+			expect(withCap(0, false)).toBeNull();
+		});
 	});
 
 	it("does not apply the ramp rules to the other modes", () => {

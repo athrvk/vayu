@@ -227,7 +227,11 @@ consumes it.
   attached. The cumulative tiles read that frame (the history buffer is trimmed
   by the live window); the first-event tile reads the latest frame carrying
   `stream_time_to_first_event`, as the sequence panel does, and is omitted until
-  one exists. It counts finished streams only and is not the First byte phase.
+  one exists. It counts finished streams only and is not the First byte phase,
+  and it stays on the first event: a preamble API reads near zero on it, and
+  the first-token figure (`stream.timeToFirstMatch`, #3774) is report-only,
+  drawn as `StreamMetrics`' First match row, because a live frame carries no
+  match.
   The events/sec chart plots `events_per_second` (`pickEventsPerSecond`), the
   trailing-window rate, with a gap for a frame that holds none.
 - **Row 3 reads the latest gate frame from `historicalMetrics`, never the newest

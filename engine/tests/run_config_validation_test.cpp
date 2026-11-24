@@ -600,6 +600,34 @@ TEST (RunConfigValidation, AStreamTextPathIsReadOnASingleRequestRunAndRefusedOnA
     EXPECT_FALSE (validate_run_config (cleared).has_value ());
 }
 
+// A single-request run takes `streamFirstContentMarker` (#3774) by
+// `POST /execute`'s rules; a collection run's steps each watch for their own
+// stored one, so a top-level marker there is refused. Mutation check: drop the
+// marker refusal in `read_collection_run_stream_caps` and the collection run
+// is accepted.
+TEST (RunConfigValidation, AFirstContentMarkerIsReadOnASingleRequestRunAndRefusedOnACollectionRun) {
+    auto load                        = valid_config ();
+    load["stream"]                   = true;
+    load["streamFirstContentMarker"] = "content_block_delta";
+    EXPECT_FALSE (validate_run_config (load).has_value ());
+
+    auto buffered                        = valid_config ();
+    buffered["streamFirstContentMarker"] = "content_block_delta";
+    expect_rejected (buffered, "streamFirstContentMarker");
+
+    auto empty                        = load;
+    empty["streamFirstContentMarker"] = "";
+    expect_rejected (empty, "streamFirstContentMarker");
+
+    auto collection                        = collection_run_config ();
+    collection["streamFirstContentMarker"] = "content_block_delta";
+    expect_rejected (collection, "streamFirstContentMarker");
+
+    auto cleared                        = collection_run_config ();
+    cleared["streamFirstContentMarker"] = nullptr;
+    EXPECT_FALSE (validate_run_config (cleared).has_value ());
+}
+
 TEST (RunConfigValidation, CapsWithoutStreamAreAcceptedOnACollectionRun) {
     auto config                   = collection_run_config ();
     config["maxStreamDurationMs"] = 30000;

@@ -391,6 +391,7 @@ export const thresholdsInput = z
 		minThroughputRps: z.number().positive().max(1_000_000_000).optional(),
 		maxAssertionFailureRatePct: z.number().min(0).max(100).optional(),
 		streamTimeToFirstEventP95Ms: z.number().positive().max(86_400_000).optional(),
+		streamTimeToFirstMatchP95Ms: z.number().positive().max(86_400_000).optional(),
 		streamEventsPerSecondMin: z.number().positive().max(1_000_000_000).optional(),
 		// Not a budget - whether a missed one fails the run, not itself
 		// measured against anything, so it is excluded from the
@@ -415,7 +416,7 @@ export const thresholdsInput = z
 	})
 	.optional()
 	.describe(
-		"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Also accepts `custom.<name>.<stat>` for a declared metric.record name, `<stat>` one of p50/p95/p99/max/rate/value. `maxAssertionFailureRatePct` judges the worse of the exact inline assertions and the sampled `pm.test` replay; its check names both (`assertionsExact`, `assertionsSampled`, `sampleRate`). `streamTimeToFirstEventP95Ms` (ceiling, ms) and `streamEventsPerSecondMin` (floor) judge a streaming run's `stream` section; on any other run they are not evaluated and count as failed. Omit for a run that is measured but not judged."
+		"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Also accepts `custom.<name>.<stat>` for a declared metric.record name, `<stat>` one of p50/p95/p99/max/rate/value. `maxAssertionFailureRatePct` judges the worse of the exact inline assertions and the sampled `pm.test` replay; its check names both (`assertionsExact`, `assertionsSampled`, `sampleRate`). `streamTimeToFirstEventP95Ms` and `streamTimeToFirstMatchP95Ms` (ceilings, ms; the latter needs the request's `streamFirstContentMarker`) and `streamEventsPerSecondMin` (floor) judge a streaming run's `stream` section; on any other run they are not evaluated and count as failed. Omit for a run that is measured but not judged."
 	);
 
 export const streamInput = z
@@ -444,6 +445,18 @@ export const collectionStreamEventsInput = streamEventsSchema
 	.optional()
 	.describe(
 		"Event cap on each streaming step's stream; a step whose saved request does not stream ignores it. Defaults to the engine's sseMaxStreamEvents."
+	);
+
+/**
+ * `run_request`'s own statement of the stream text path, not an `asOn` pointer:
+ * `create_request` is a write tool and a read-only session lists none, so a
+ * pointer there would dangle (`tool-list-budget.test.ts`).
+ */
+export const streamTextPathSendInput = z
+	.string()
+	.optional()
+	.describe(
+		"Ad-hoc send (`url`) with `stream: true` only: JSONPath read off each streamed event's JSON `data`, such as `$.choices[0].delta.content` or `$.delta.text`; the joined reply returns as `text`. Ignored without `stream: true`. A saved request sent by id uses its stored path."
 	);
 
 export const maxStreamEventsInput = z
@@ -773,6 +786,16 @@ export function requestSettingsInput(statedOn?: string) {
 					"null clears it."
 				)
 			),
+		streamFirstContentMarker: z
+			.string()
+			.nullable()
+			.optional()
+			.describe(
+				described(
+					"Raw bytes a load run times each stream to (timeToFirstMatch), such as `content_block_delta`; 1-256 bytes. Needs `stream: true`.",
+					"null clears it."
+				)
+			),
 		verifySSL: z
 			.boolean()
 			.optional()
@@ -799,6 +822,7 @@ export const REQUEST_SETTINGS_KEYS = [
 	"httpVersion",
 	"stream",
 	"streamTextPath",
+	"streamFirstContentMarker",
 	"verifySSL",
 ] as const;
 

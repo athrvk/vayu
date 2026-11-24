@@ -543,6 +543,43 @@
     "configSchema": {
       "additionalProperties": false,
       "properties": {
+        "baseline": {
+          "description": "The items the list held when it was recorded. Only the fields a client reads are compared (a tool's name, title, description, inputSchema, outputSchema and annotations), items are matched by name (uri for resources) so their order does not matter, and a difference names the item and the JSON Pointer where it differs.",
+          "title": "Baseline",
+          "type": "array"
+        },
+        "method": {
+          "default": "tools/list",
+          "description": "Which list the reply holds: tools, resources or prompts. The reply is the server's answer to that method.",
+          "enum": [
+            "tools/list",
+            "resources/list",
+            "prompts/list"
+          ],
+          "title": "List",
+          "type": "string"
+        }
+      },
+      "required": [
+        "baseline"
+      ],
+      "type": "object"
+    },
+    "description": "Fails the step when the items an MCP list method returns differ from a recorded baseline, naming what was added, removed or changed.",
+    "hotPathClass": "declarative",
+    "kind": "assert.snapshot",
+    "label": "Assert list snapshot",
+    "phases": [
+      "step.after"
+    ],
+    "version": 1
+  },
+  {
+    "category": "assert",
+    "collectionOnly": false,
+    "configSchema": {
+      "additionalProperties": false,
+      "properties": {
         "field": {
           "default": "body",
           "description": "Which part of the response to check: body, headers, url or status.",

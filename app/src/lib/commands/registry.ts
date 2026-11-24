@@ -81,6 +81,7 @@ import {
 import { closeTabFromKeyboard } from "@/components/layout/tab-focus";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
+import { LLM_REQUEST_TEMPLATES } from "@/modules/welcome/llm-request-presets";
 import { navigateHistory } from "@/lib/navigate-history";
 import { runExportActions, runExportVerb } from "@/lib/run-export-formats";
 import { openSettingsTab, revealSettingsCategory } from "./reveal-settings";
@@ -125,6 +126,16 @@ const ACTION_COMMANDS: readonly Command[] = [
 		available: (ctx) => ctx.surfaces !== undefined,
 		perform: (ctx) => ctx.surfaces?.newRequest(),
 	},
+	...LLM_REQUEST_TEMPLATES.map(({ id, preset }): Command => ({
+		id: `new-request-${id}`,
+		title: `New request: ${preset.name}`,
+		keywords: ["llm", "ai", "template", "stream", "openai", "anthropic", "chat"],
+		group: "action",
+		icon: Plus,
+		// Same host requirement as "New request": the flow can ask which collection.
+		available: (ctx) => ctx.surfaces !== undefined,
+		perform: (ctx) => ctx.surfaces?.newRequest(preset),
+	})),
 	{
 		id: "import-collection",
 		title: "Import collection",

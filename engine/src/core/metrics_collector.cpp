@@ -412,6 +412,8 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
         run_id_, "event", "carry event totals only");
         stream_first_event_histogram_ = new_stream_histogram (HISTOGRAM_MAX_LATENCY_US,
         run_id_, "first-event", "carry no time to first event");
+        stream_first_match_histogram_ = new_stream_histogram (HISTOGRAM_MAX_LATENCY_US,
+        run_id_, "first-match", "carry no time to first match");
         stream_max_gap_histogram_ = new_stream_histogram (HISTOGRAM_MAX_LATENCY_US,
         run_id_, "event gap", "carry no largest event gap");
         stream_rate_histogram_ =
@@ -482,7 +484,8 @@ MetricsCollector::~MetricsCollector () {
             histogram = nullptr;
         }
     }
-    for (auto* histogram : { &stream_events_histogram_, &stream_first_event_histogram_,
+    for (auto* histogram : { &stream_events_histogram_,
+         &stream_first_event_histogram_, &stream_first_match_histogram_,
          &stream_max_gap_histogram_, &stream_rate_histogram_ }) {
         if (*histogram != nullptr) {
             hdr_close (*histogram);
@@ -1241,7 +1244,7 @@ double duration_s) {
         { "p50", stream.events.p50 }, { "p90", stream.events.p90 },
         { "p95", stream.events.p95 }, { "p99", stream.events.p99 },
         { "count", stream.events.count } } } };
-    // Absent until a stream measured it, never zeros (#3234, #3776).
+    // Absent until a stream measured it, never zeros (#3234, #3774, #3776).
     const auto put_measured = [&out] (const char* key,
                               const MetricsCollector::Percentiles& figure) {
         if (figure.count > 0) {
@@ -1250,6 +1253,7 @@ double duration_s) {
         }
     };
     put_measured ("timeToFirstEvent", stream.time_to_first_event);
+    put_measured ("timeToFirstMatch", stream.time_to_first_match);
     put_measured ("maxEventGap", stream.max_event_gap);
     put_measured ("eventRate", stream.event_rate);
     return out;
@@ -1263,6 +1267,7 @@ const Response& response) {
     return MetricsCollector::StreamCompletion{ .events = *response.stream_events,
         .capped           = response.stream_capped,
         .first_event_ms   = response.stream_first_event_ms,
+        .first_match_ms   = response.stream_first_match_ms,
         .max_event_gap_ms = response.stream_max_event_gap_ms,
         .event_rate       = response.stream_event_rate };
 }
@@ -1302,6 +1307,10 @@ void MetricsCollector::record_stream_completion (const StreamCompletion& complet
         record_if_allocated (stream_first_event_histogram_,
         histogram_latency_us (*first_event_ms, 1));
     }
+    if (const auto& first_match_ms = completion.first_match_ms) {
+        record_if_allocated (stream_first_match_histogram_,
+        histogram_latency_us (*first_match_ms, 1));
+    }
     if (const auto& gap_ms = completion.max_event_gap_ms) {
         record_if_allocated (stream_max_gap_histogram_, histogram_latency_us (*gap_ms, 1));
     }
@@ -1328,6 +1337,7 @@ std::optional<MetricsCollector::StreamTotals> MetricsCollector::stream_totals ()
     totals.capped       = stream_capped_.load (std::memory_order_relaxed);
     totals.events = percentiles_of (stream_events_histogram_, stream_events_read);
     totals.time_to_first_event = percentiles_of (stream_first_event_histogram_);
+    totals.time_to_first_match = percentiles_of (stream_first_match_histogram_);
     totals.max_event_gap       = percentiles_of (stream_max_gap_histogram_);
     totals.event_rate = percentiles_of (stream_rate_histogram_, stream_rate_read);
     return totals;

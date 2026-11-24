@@ -582,6 +582,37 @@ TEST (StreamFlag, ATextPathWithoutTheFlagIsRefused) {
     EXPECT_NE (flag.error.find ("streamTextPath"), std::string::npos) << flag.error;
 }
 
+// `POST /execute` takes a first content marker (#3774) beside a stream, so a
+// by-id compose's payload sends as it is, and refuses one it could not use: a
+// 400 naming the field, never the constructor's `invalid_argument` as a 500.
+// Mutation check: drop `check_stream_first_content_marker` from
+// `read_stream_flag` and the bad markers pass.
+TEST (StreamFlag, AFirstContentMarkerIsCheckedBesideTheFlag) {
+    const auto flag = read_stream_flag (json{
+    { "stream", true }, { "streamFirstContentMarker", "content_block_delta" } });
+    EXPECT_TRUE (flag.ok) << flag.error;
+    EXPECT_TRUE (read_stream_flag (
+    json{ { "stream", true }, { "streamFirstContentMarker", nullptr } })
+    .ok);
+
+    constexpr std::size_t LIMIT = vayu::core::constants::sse::MAX_FIRST_CONTENT_MARKER_BYTES;
+    for (const json& marker : { json (""), json (7),
+         json (std::string (LIMIT + 1, 'x')), json (std::string ("a\0b", 3)) }) {
+        SCOPED_TRACE (marker.dump ());
+        const auto bad = read_stream_flag (
+        json{ { "stream", true }, { "streamFirstContentMarker", marker } });
+        EXPECT_FALSE (bad.ok);
+        EXPECT_NE (bad.error.find ("streamFirstContentMarker"), std::string::npos)
+        << bad.error;
+    }
+
+    const auto buffered =
+    read_stream_flag (json{ { "streamFirstContentMarker", "content_block_delta" } });
+    EXPECT_FALSE (buffered.ok);
+    EXPECT_NE (buffered.error.find ("streaming request only"), std::string::npos)
+    << buffered.error;
+}
+
 // ---------------------------------------------------------------------------
 // The config reader
 // ---------------------------------------------------------------------------
@@ -1425,8 +1456,9 @@ SseEndReason::Completed, "completed" },
 class SseTraceTest : public ::testing::TestWithParam<SseTraceCase> {};
 
 // What the trace stores is the sidecar alone (#3770): one arrival time per kept
-// event and no list, which the stored body holds. Mutation check: push an
-// arrival past the cap in `record_event` and the first case keeps nine.
+// event and no list, which the stored body holds, and the transfer's start when
+// one began (#3805). Mutation check: push an arrival past the cap in
+// `record_event` and the first case keeps nine.
 TEST_P (SseTraceTest, StoresArrivalsUpToTheCapAndNoList) {
     const auto& c = GetParam ();
     vayu::http::SseLimits limits;
@@ -1440,8 +1472,15 @@ TEST_P (SseTraceTest, StoresArrivalsUpToTheCapAndNoList) {
     }
     context.close (c.end_reason);
 
+    // No transfer began, so there is no start to store.
+    EXPECT_FALSE (
+    vayu::http::stream_trace_node (context).contains ("startedAt"));
+    context.note_transfer_start ();
+
     const auto node = vayu::http::stream_trace_node (context);
     EXPECT_FALSE (node.contains ("items")) << node.dump ();
+    ASSERT_TRUE (node.contains ("startedAt")) << node.dump ();
+    EXPECT_GT (node["startedAt"].get<int64_t> (), 0);
     EXPECT_EQ (node["receivedAt"].size (),
     std::min (static_cast<std::size_t> (c.event_count), c.cap));
     EXPECT_EQ (node["totalEvents"], c.event_count);
@@ -1482,18 +1521,26 @@ SseTraceTest,
 // ---------------------------------------------------------------------------
 
 /// A stored design-stream trace: @p body as its response and a sidecar of
-/// @p total events, the first of which arrived at 1000, 1001, ...
-json stored_stream_trace (const std::string& body, int64_t total, std::size_t kept) {
+/// @p total events, the first of which arrived at 1000, 1001, ... The sidecar
+/// carries `startedAt` only when @p started_at is given.
+json stored_stream_trace (const std::string& body,
+int64_t total,
+std::size_t kept,
+std::optional<int64_t> started_at = std::nullopt) {
     std::vector<int64_t> arrivals (kept);
     std::iota (arrivals.begin (), arrivals.end (), int64_t{ 1000 });
-    return json{ { "response", { { "body", body }, { "bodyBytes", body.size () } } },
+    json trace{ { "response", { { "body", body }, { "bodyBytes", body.size () } } },
         { "events",
         { { "totalEvents", total }, { "endReason", "completed" },
         { "maxEventBytes", sse_constants::MAX_EVENT_BYTES }, { "receivedAt", arrivals } } } };
+    if (started_at) {
+        trace["events"]["startedAt"] = *started_at;
+    }
+    return trace;
 }
 
 TEST (StoredStreamEvents, AreParsedFromTheBodyAndPairedWithTheirArrivals) {
-    auto trace = stored_stream_trace ("data: a\n\nid: 7\ndata: b\n\n", 2, 2);
+    auto trace = stored_stream_trace ("data: a\n\nid: 7\ndata: b\n\n", 2, 2, 990);
     vayu::http::expand_stored_stream_events (trace);
 
     const auto& events = trace["events"];
@@ -1505,8 +1552,20 @@ TEST (StoredStreamEvents, AreParsedFromTheBodyAndPairedWithTheirArrivals) {
     EXPECT_EQ (events["totalEvents"], 2);
     EXPECT_FALSE (events["eventsTruncated"].get<bool> ());
     EXPECT_EQ (events["endReason"], "completed");
+    EXPECT_EQ (events.value ("startedAt", int64_t{ -1 }), 990);
     EXPECT_FALSE (events.contains ("receivedAt"));
     EXPECT_FALSE (events.contains ("maxEventBytes"));
+}
+
+// A row stored before `startedAt` existed is served without it, never with a
+// 0 the reader would take for the epoch. Mutation check: write
+// `node["startedAt"]` unconditionally in `stream_events_node` and this fails.
+TEST (StoredStreamEvents, ASidecarWithoutAStartIsServedWithoutOne) {
+    auto trace = stored_stream_trace ("data: a\n\n", 1, 1);
+    vayu::http::expand_stored_stream_events (trace);
+
+    EXPECT_EQ (trace["events"]["items"].size (), 1u);
+    EXPECT_FALSE (trace["events"].contains ("startedAt")) << trace["events"].dump ();
 }
 
 /// `stored_stream_trace` of the chat completion, its sidecar naming the
@@ -3009,6 +3068,10 @@ TEST_F (StreamExecuteTest, AnEventStreamStoresItsBytesOnceAsTheBody) {
     EXPECT_EQ (trace["events"]["totalEvents"], 100);
     EXPECT_EQ (trace["events"]["receivedAt"].size (), 100u);
     EXPECT_FALSE (trace["events"].contains ("items"));
+    // Ordering only: the transfer began before its first event arrived.
+    const auto started_at = trace["events"].value ("startedAt", int64_t{ 0 });
+    EXPECT_GT (started_at, 0) << trace["events"].dump ();
+    EXPECT_LE (started_at, trace["events"]["receivedAt"][0].get<int64_t> ());
 
     const auto rows = db_->get_results (run_id);
     ASSERT_EQ (rows.size (), 1u);
@@ -3141,6 +3204,9 @@ TEST_F (StreamExecuteTest, TheResultsRouteServesEachStreamsBytesAndItsLiveEvents
         EXPECT_FALSE (trace["events"]["eventsTruncated"].get<bool> ());
         EXPECT_EQ (trace["events"]["endReason"], "completed");
         EXPECT_FALSE (trace["events"].contains ("receivedAt"));
+        ASSERT_TRUE (trace["events"].contains ("startedAt")) << trace["events"].dump (2);
+        EXPECT_LE (trace["events"]["startedAt"].get<int64_t> (),
+        items[0]["receivedAt"].get<int64_t> ());
     }
 
     // `GET /runs/:runId`'s `result`, which History seeds a design run from,
@@ -3151,6 +3217,7 @@ TEST_F (StreamExecuteTest, TheResultsRouteServesEachStreamsBytesAndItsLiveEvents
     json payload = json::object ();
     vayu::json::attach_design_result (payload, *run, db_->get_results (first_run));
     EXPECT_EQ (payload["result"]["trace"]["events"], first["events"]);
+    EXPECT_TRUE (payload["result"]["trace"]["events"].contains ("startedAt"));
 }
 
 // The event cap stops the transfer inside a chunk that held three events, and

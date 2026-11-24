@@ -168,6 +168,26 @@ describe("streamPatch", () => {
 		);
 	});
 
+	// Same rule for the first content marker (#3774). Mutation check: drop the
+	// marker branch and the first case has no `streamFirstContentMarker` key.
+	it("empties a declared first content marker when the stream goes off, and leaves none alone", () => {
+		const marker = "content_block_delta";
+		const declared = { headers: [], streamFirstContentMarker: marker };
+		expect(streamPatch(declared, false).streamFirstContentMarker).toBe("");
+		expect(streamPatch(declared, true)).not.toHaveProperty("streamFirstContentMarker");
+		expect(
+			streamPatch({ headers: [], streamFirstContentMarker: "" }, false)
+		).not.toHaveProperty("streamFirstContentMarker");
+	});
+
+	it("empties the text path and the marker together", () => {
+		const patch = streamPatch(
+			{ headers: [], streamTextPath: "$.delta.text", streamFirstContentMarker: "x" },
+			false
+		);
+		expect(patch).toMatchObject({ streamTextPath: "", streamFirstContentMarker: "" });
+	});
+
 	it("keeps an Accept the user wrote, on and off", () => {
 		const theirs = [row("r1", "Accept", "application/json")];
 

@@ -37,6 +37,12 @@ import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import { runExportActions, type RunExportAction } from "@/lib/run-export-formats";
+import {
+	ANTHROPIC_MESSAGES_PRESET,
+	LLM_REQUEST_TEMPLATES,
+	OPENAI_CHAT_COMPLETION_PRESET,
+} from "@/modules/welcome/llm-request-presets";
+import type { RequestPreset } from "@/hooks/useNewRequest";
 import type { Collection } from "@/types";
 
 const COLLECTION: Collection = { id: "c1", name: "Payments" } as Collection;
@@ -146,6 +152,7 @@ describe("availability", () => {
 	it("hides everything that needs a host the caller has not offered", () => {
 		const ids = availableCommands(baseCommandContext()).map((c) => c.id);
 		expect(ids).not.toContain("new-request");
+		for (const { id } of LLM_REQUEST_TEMPLATES) expect(ids).not.toContain(`new-request-${id}`);
 		expect(ids).not.toContain("run-collection");
 		expect(ids).not.toContain("toggle-theme");
 		expect(ids).not.toContain("run-load-test");
@@ -473,6 +480,33 @@ describe("performing", () => {
 		};
 		commandById("send-request").perform(ctx);
 		expect(sent).toBe(1);
+	});
+
+	it.each([
+		["new-request-chat-completion", OPENAI_CHAT_COMPLETION_PRESET],
+		["new-request-messages", ANTHROPIC_MESSAGES_PRESET],
+	])("%s asks the host for a request from its template, once a host is offered", (id, preset) => {
+		const requested: (RequestPreset | undefined)[] = [];
+		const ctx: CommandContext = {
+			...fullContext(),
+			surfaces: { ...surfaces(), newRequest: (p) => requested.push(p) },
+		};
+
+		expect(availableCommands(ctx).map((c) => c.id)).toContain(id);
+		expect(commandTitle(commandById(id), ctx)).toBe(`New request: ${preset.name}`);
+		commandById(id).perform(ctx);
+
+		expect(requested).toEqual([preset]);
+	});
+
+	it("keeps the plain new-request command blank", () => {
+		const requested: (RequestPreset | undefined)[] = [];
+		const ctx: CommandContext = {
+			...fullContext(),
+			surfaces: { ...surfaces(), newRequest: (p) => requested.push(p) },
+		};
+		commandById("new-request").perform(ctx);
+		expect(requested).toEqual([undefined]);
 	});
 
 	it("hands the collection to the host rather than running it itself", () => {

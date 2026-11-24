@@ -210,6 +210,24 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		expect(buffered).not.toContain("streamTextPathOf");
 	});
 
+	/**
+	 * The first content marker (issue #3774) has the same load and save hops,
+	 * and an execute hop on the load run alone: a Send checks the field and
+	 * times nothing with it, so only `handleConfirmLoadTest` states it, through
+	 * `streamFirstContentMarkerOf`, which also withholds it from a request that
+	 * does not stream.
+	 */
+	it("loads the first content marker from the saved request and persists it on save", () => {
+		expect(hops(source ?? "", "fetchedRequest", "streamFirstContentMarker")).toBe(1);
+		expect(hops(source ?? "", "request", "streamFirstContentMarker")).toBe(1);
+	});
+
+	it("states the first content marker on the load run only", () => {
+		const src = source ?? "";
+		const sends = src.match(/\.\.\.streamFirstContentMarkerOf\((\w+)\)/g) ?? [];
+		expect(sends).toEqual(["...streamFirstContentMarkerOf(pendingLoadTestRequest)"]);
+	});
+
 	it("declares stream on the buffered execute rather than letting it default", () => {
 		expect(source).toContain("stream: false");
 	});

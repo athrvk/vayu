@@ -6,15 +6,20 @@
  */
 
 import { useRef, useCallback, useEffect, useMemo, useState } from "react";
-import { Folder, Plus, FolderPlus, Loader2, Download } from "lucide-react";
+import { ChevronDown, Folder, Plus, FolderPlus, Loader2, Download } from "lucide-react";
 import { useTabsStore, useImportModalStore, useSessionStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import { useCollectionsQuery, useMultipleCollectionRequests } from "@/queries";
 import { useNewRequest } from "@/hooks/useNewRequest";
 import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
 import { resolveNewRequestTarget } from "@/modules/welcome/targetCollection";
+import { LLM_REQUEST_TEMPLATES } from "@/modules/welcome/llm-request-presets";
 import {
 	Button,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
 	Input,
 	Tooltip,
 	TooltipContent,
@@ -357,6 +362,35 @@ export default function CollectionTree() {
 								: "Add request"}
 						</TooltipContent>
 					</Tooltip>
+					<DropdownMenu>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant="ghost"
+										size="icon"
+										disabled={isAddingRequest}
+										aria-label="New request from a template"
+									>
+										<ChevronDown className="size-icon" />
+									</Button>
+								</DropdownMenuTrigger>
+							</TooltipTrigger>
+							<TooltipContent>New request from a template</TooltipContent>
+						</Tooltip>
+						<DropdownMenuContent align="end">
+							{LLM_REQUEST_TEMPLATES.map(({ id, preset }) => (
+								<DropdownMenuItem
+									key={id}
+									onSelect={() =>
+										newRequest(preset, { collectionId: tabCollection?.id })
+									}
+								>
+									{preset.name}
+								</DropdownMenuItem>
+							))}
+						</DropdownMenuContent>
+					</DropdownMenu>
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button

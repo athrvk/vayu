@@ -406,6 +406,69 @@ TEST_F (ElementsRegistryTest, AnAssertJsonSchemaThatCanRunIsAccepted) {
 }
 
 // ---------------------------------------------------------------------------
+// assert.snapshot (#3807). Mutation check: drop its `validate_config` and each
+// refusal below that the config schema does not already make is accepted.
+// ---------------------------------------------------------------------------
+
+TEST_F (ElementsRegistryTest, AnAssertSnapshotThatCannotRunIsRefusedNamingTheField) {
+    struct Refused {
+        json config;
+        std::string field;
+    };
+    const std::vector<Refused> cases = {
+        { json::object (), "is required" },
+        // The schema's own errors name the property by its title.
+        { { { "baseline", "x" } }, "'Baseline' must be a list" },
+        { { { "baseline", json::object () } }, "'Baseline' must be a list" },
+        { { { "baseline", json::array ({ 7 }) } },
+        "'baseline' item 1 must be an object with a text 'name'" },
+        { { { "baseline", json::array ({ { { "description", "d" } } }) } },
+        "'baseline' item 1 must be an object with a text 'name'" },
+        { { { "baseline", json::array ({ { { "name", 3 } } }) } },
+        "'baseline' item 1 must be an object with a text 'name'" },
+        { { { "baseline",
+          json::array ({ { { "name", "a" } }, { { "name", "b" } }, { { "name", "a" } } }) } },
+        "'baseline' names 'a' more than once" },
+        // Resources are identified by `uri`; a `name` alone is not one.
+        { { { "method", "resources/list" },
+          { "baseline", json::array ({ { { "name", "a" } } }) } },
+        "'baseline' item 1 must be an object with a text 'uri'" },
+        { { { "method", "tools/call" }, { "baseline", json::array () } },
+        "'List' must be one of [tools/list, resources/list, prompts/list]" },
+        { { { "baseline", json::array () }, { "path", "$.x" } }, "item 1" },
+    };
+    for (const auto& [config, field] : cases) {
+        const auto reason = validate_entry (entry_of ("assert.snapshot", config));
+        ASSERT_HAS_VALUE (reason) << config.dump ();
+        EXPECT_NE (reason->find (field), std::string::npos)
+        << config.dump () << ": " << *reason;
+    }
+}
+
+TEST_F (ElementsRegistryTest, AnAssertSnapshotThatCanRunIsAccepted) {
+    const json tools = json::array ({ { { "name", "a" } }, { { "name", "b" } } });
+    const std::vector<json> configs = {
+        { { "baseline", tools } },
+        { { "method", "tools/list" }, { "baseline", tools } },
+        // A server with nothing to list is a snapshot too.
+        { { "baseline", json::array () } },
+        { { "method", "resources/list" },
+        { "baseline", json::array ({ { { "uri", "file:///a" } } }) } },
+        { { "method", "prompts/list" }, { "baseline", tools } },
+        // The same name under two resources' uris is not a duplicate.
+        { { "method", "resources/list" },
+        { "baseline",
+        json::array ({ { { "uri", "u1" }, { "name", "n" } },
+        { { "uri", "u2" }, { "name", "n" } } }) } },
+    };
+    for (const auto& config : configs) {
+        const auto reason = validate_entry (entry_of ("assert.snapshot", config));
+        EXPECT_FALSE (reason.has_value ())
+        << config.dump () << ": " << reason.value_or ("");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // A setting the engine accepted and then ignored is refused naming the field
 // (#3055). Mutation check: drop the `validate_config` of `control.throughput`,
 // `timer.think` or `assert.contains`, or `variable_name_problem` from an
@@ -655,6 +718,7 @@ TEST_F (ElementsRegistryTest, TheCatalogueDeclaresTheDefaultEachKindRuns) {
         { "assert.contains", "negate", false },
         { "assert.jsonpath", "negate", false },
         { "assert.jsonschema", "source", "body" },
+        { "assert.snapshot", "method", "tools/list" },
         { "extract.json", "scope", "collection" },
         { "extract.regex", "scope", "collection" },
         { "extract.header", "scope", "collection" },

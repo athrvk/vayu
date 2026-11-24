@@ -8,10 +8,11 @@
 /**
  * @file assert_kinds.cpp
  * @brief `assert.status`, `assert.jsonpath`, `assert.jsonschema`,
- *        `assert.contains`, `assert.duration`, `assert.size` (issue #1514;
- *        `assert.jsonschema` #3806).
+ *        `assert.snapshot`, `assert.contains`, `assert.duration`,
+ *        `assert.size` (issue #1514; `assert.jsonschema` #3806,
+ *        `assert.snapshot` #3807).
  *
- * All six run in `step.after` and report through the same channel a `pm.test`
+ * All seven run in `step.after` and report through the same channel a `pm.test`
  * call does: one `TestResult` appended to `ElementContext::post_script_result`
  * regardless of the verdict, so `classify_step`'s `describe_failed_tests` and
  * the SSE frame's `tests` tally count a declarative assertion exactly as they
@@ -21,6 +22,7 @@
 
 #include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
+#include "vayu/core/list_snapshot.hpp"
 #include "vayu/core/schema_validation.hpp"
 #include "vayu/http/request_composer.hpp"
 
@@ -486,6 +488,90 @@ class AssertJsonSchemaElement final : public Element {
 };
 
 // ---------------------------------------------------------------------------
+// assert.snapshot (#3807) - the items an MCP list method answers against a
+// recorded baseline, so a server that renames a tool or changes its input
+// schema fails the step. A generic kind rather than an MCP-only one: the
+// registry has no protocol gate, and a kind that read `result.tools` on any
+// other reply would only report that the list is missing. What is compared,
+// and how, is `core/list_snapshot.hpp`.
+// ---------------------------------------------------------------------------
+
+/// The list `method` names (the default when it is absent), or why it names
+/// none.
+std::expected<const SnapshotList*, std::string> snapshot_list_of (
+const nlohmann::json& config) {
+    const auto method = config.find ("method");
+    if (method == config.end ()) {
+        return find_snapshot_list (element_defaults::ASSERT_SNAPSHOT_METHOD);
+    }
+    const SnapshotList* list =
+    method->is_string () ? find_snapshot_list (method->get<std::string> ()) : nullptr;
+    if (list != nullptr) {
+        return list;
+    }
+    std::string offered;
+    for (const auto& known : snapshot_lists ()) {
+        offered += (offered.empty () ? "'" : ", '") + std::string (known.method) + "'";
+    }
+    return std::unexpected ("'method' must be one of " + offered);
+}
+
+/// What `assert.snapshot`'s config leaves it nothing to compare with: a method
+/// that names no list, or no baseline that can be compared against.
+std::optional<std::string> assert_snapshot_problem (const nlohmann::json& config) {
+    const auto list = snapshot_list_of (config);
+    if (!list) {
+        return list.error ();
+    }
+    const auto baseline = config.find ("baseline");
+    if (baseline == config.end ()) {
+        return "'baseline' is required - record the items " +
+        std::string ((*list)->method) + " answers";
+    }
+    return snapshot_baseline_problem (*baseline, **list);
+}
+
+class AssertSnapshotElement final : public Element {
+    public:
+    /// The config is judged once here: `assert_snapshot_problem` indexes the
+    /// whole baseline, which a step that runs many times must not repeat.
+    explicit AssertSnapshotElement (nlohmann::json config)
+    : config_ (std::move (config)), problem_ (assert_snapshot_problem (config_)) {
+        if (const auto list = snapshot_list_of (config_)) {
+            list_ = *list;
+        }
+        name_ = (list_ != nullptr ? std::string (list_->method) : std::string ("the list")) +
+        " matches the snapshot";
+    }
+
+    [[nodiscard]] Phase phase () const override {
+        return Phase::StepAfter;
+    }
+
+    void apply (ElementContext& ctx) override {
+        if (problem_) {
+            record_unrunnable_assertion (ctx, name_, "assert.snapshot: " + *problem_);
+            return;
+        }
+        const nlohmann::ordered_json* body = ensure_parsed_body (ctx);
+        if (body == nullptr) {
+            record_assertion (ctx, name_, false,
+            std::string (constants::elements::BODY_UNREADABLE_MESSAGE));
+            return;
+        }
+        // No problem means the method named a list and the baseline exists.
+        const auto drift = snapshot_drift (*list_, *body, config_.at ("baseline"));
+        record_assertion (ctx, name_, !drift, drift.value_or (""));
+    }
+
+    private:
+    nlohmann::json config_;
+    std::optional<std::string> problem_;
+    const SnapshotList* list_ = nullptr;
+    std::string name_;
+};
+
+// ---------------------------------------------------------------------------
 // assert.contains - `field` (body | headers | url | status), `text`, `mode`
 // (contains | equals | matches), `negate`.
 // ---------------------------------------------------------------------------
@@ -840,6 +926,49 @@ ElementKind make_assert_jsonschema_kind () {
         "Draft-07 is evaluated; a keyword from a later draft is not, and "
         "a schema that uses one fails the assertion naming it." } } } } },
         { "required", nlohmann::json::array ({ "schema" }) },
+        { "additionalProperties", false },
+    };
+    return kind;
+}
+
+ElementKind make_assert_snapshot_kind () {
+    ElementKind kind;
+    kind.kind    = "assert.snapshot";
+    kind.version = 1;
+    kind.phases  = { Phase::StepAfter };
+    kind.label   = "Assert list snapshot";
+    kind.description =
+    "Fails the step when the items an MCP list method returns differ from a "
+    "recorded baseline, naming what was added, removed or changed.";
+    kind.category = "assert";
+    kind.hot_path = HotPathClass::Declarative;
+    kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
+        return std::make_unique<AssertSnapshotElement> (config);
+    };
+    kind.validate_config   = assert_snapshot_problem;
+    nlohmann::json methods = nlohmann::json::array ();
+    for (const auto& list : snapshot_lists ()) {
+        methods.push_back (list.method);
+    }
+    kind.config_schema = {
+        { "type", "object" },
+        { "properties",
+        { { "method",
+          { { "type", "string" }, { "enum", std::move (methods) },
+          { "default", element_defaults::ASSERT_SNAPSHOT_METHOD }, { "title", "List" },
+          { "description",
+          "Which list the reply holds: tools, resources or prompts. The "
+          "reply is the server's answer to that method." } } },
+        { "baseline",
+        { { "type", "array" }, { "title", "Baseline" },
+        { "description",
+        "The items the list held when it was recorded. Only the fields a "
+        "client reads are compared (a tool's name, title, description, "
+        "inputSchema, outputSchema and annotations), items are matched by "
+        "name (uri for resources) so their order does not matter, and a "
+        "difference names the item and the JSON Pointer where it "
+        "differs." } } } } },
+        { "required", nlohmann::json::array ({ "baseline" }) },
         { "additionalProperties", false },
     };
     return kind;

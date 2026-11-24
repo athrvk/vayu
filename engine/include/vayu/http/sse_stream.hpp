@@ -57,6 +57,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/live_claim.hpp"
 #include "vayu/http/sse_parser.hpp"
+#include "vayu/http/stream_content_marker.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
@@ -151,6 +152,15 @@ const vayu::StreamBounds& defaults);
  */
 [[nodiscard]] std::shared_ptr<const vayu::StreamTextPath>
 compile_stream_text_path (std::string_view path);
+
+/**
+ * @p marker compiled once for every transfer a run's stream sends (#3774):
+ * null when it is empty, which `StreamContentMarker` refuses and only a
+ * hand-edited row can hold once the write routes have checked it; it reads
+ * as no marker.
+ */
+[[nodiscard]] std::shared_ptr<const StreamContentMarker>
+compile_stream_content_marker (std::string_view marker);
 
 /**
  * One live stream: the ring its events land in, its termination reason, and the
@@ -255,6 +265,14 @@ class SseStreamContext {
         return completed_at_ms_.load (std::memory_order_acquire);
     }
 
+    /// Stamp the moment the transfer began, once: a repeat keeps the first.
+    void note_transfer_start ();
+    /// 0 until `note_transfer_start`; a stream refused before its transfer
+    /// began never has one.
+    [[nodiscard]] int64_t transfer_started_at_ms () const {
+        return transfer_started_at_ms_.load (std::memory_order_acquire);
+    }
+
     /// How many upstream events this stream received, including those the ring
     /// has since evicted and those the trace will not store.
     [[nodiscard]] int64_t total_events () const {
@@ -289,6 +307,7 @@ class SseStreamContext {
     std::atomic<std::size_t> published_count_{ 0 };
     std::atomic<bool> closed_{ false };
     std::atomic<int64_t> completed_at_ms_{ 0 };
+    std::atomic<int64_t> transfer_started_at_ms_{ 0 };
     std::atomic<int64_t> total_events_{ 0 };
     /// Guarded by `mutex_`; empty until `record_end` or `close`.
     std::optional<SseEndReason> end_reason_;
@@ -310,15 +329,18 @@ class SseStreamContext {
  *        everything about its events that its bytes cannot say (#3770).
  *
  * `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...],
- * streamTextPath?}`, and no list. The stream's bytes are the trace's response
- * body, so the list is parsed back from them when the trace is read
- * (`expand_stored_stream_events`) rather than stored a second time (#657).
- * `receivedAt` holds one arrival time per event the stored cap kept, which
- * also bounds how many events the parse may report; `maxEventBytes` is the
- * per-event cap the live parser ran under, so the parse back cuts an event
- * where the live one did whatever the setting says by then. `streamTextPath`
- * is the declared path (#3773), so the parse back derives each `text` and the
- * joined `streamText` from the bytes rather than from a stored copy.
+ * streamTextPath?, startedAt?}`, and no list. `startedAt` is when the transfer
+ * began (epoch ms, the clock `receivedAt` reads), absent for a stream that never
+ * began one, so a reader can tell the wait for the first event from the stream's
+ * whole span. The stream's bytes are the trace's response body, so the list is
+ * parsed back from them when the trace is read (`expand_stored_stream_events`)
+ * rather than stored a second time (#657). `receivedAt` holds one arrival time
+ * per event the stored cap kept, which also bounds how many events the parse may
+ * report; `maxEventBytes` is the per-event cap the live parser ran under, so the
+ * parse back cuts an event where the live one did whatever the setting says by
+ * then. `streamTextPath` is the declared path (#3773), so the parse back derives
+ * each `text` and the joined `streamText` from the bytes rather than from a
+ * stored copy.
  */
 [[nodiscard]] nlohmann::json stream_trace_node (const SseStreamContext& context);
 
@@ -402,11 +424,13 @@ const std::vector<vayu::core::detail::JsonPathStep>* text_path = nullptr);
  * @brief The `events` node a design stream's reader sees: the list parsed from
  *        @p body, paired with what @p stored (a `stream_trace_node`) recorded.
  *
- * `{items, totalEvents, eventsTruncated, endReason, streamText?}`, each item
- * carrying its `receivedAt`, and its `text` when @p stored names a
- * `streamTextPath`. The completion pass binds it for the post-request script and
- * `expand_stored_stream_events` builds it again from the stored trace, so the
- * script and every later reader parse one set of bytes by one rule.
+ * `{items, totalEvents, eventsTruncated, endReason, streamText?, startedAt?}`,
+ * each item carrying its `receivedAt`, and its `text` when @p stored names a
+ * `streamTextPath`; `startedAt` is copied from @p stored when it has one, so a
+ * row stored without it is served without it. The completion pass binds it for
+ * the post-request script and `expand_stored_stream_events` builds it again from
+ * the stored trace, so the script and every later reader parse one set of bytes
+ * by one rule.
  */
 [[nodiscard]] nlohmann::json stream_events_node (std::string_view body,
 bool body_complete,

@@ -23,8 +23,8 @@
  * request-scoped event stream of two progress notifications and then the
  * response, that stream cut before the response, or progress notifications
  * that never end - and what it says: the result, a tool error, a JSON-RPC
- * error, a `-32022` version refusal, or the plain `400` a legacy-era server
- * answers a modern request with.
+ * error, a `-32022` version refusal, the plain `400` a legacy-era server
+ * answers a modern request with, or a `403` naming the scope the token lacks.
  *
  * The tool it knows is `execute_sql`, whose `region` argument the schema
  * mirrors as `Mcp-Param-Region` (`execute_sql_tool_json`).
@@ -78,7 +78,12 @@ enum class McpReplyOutcome : std::uint8_t {
     RpcError,
     UnsupportedVersion,
     LegacyBadRequest,
+    /// A `403` whose `WWW-Authenticate` asks for `INSUFFICIENT_SCOPES` (#3795).
+    InsufficientScope,
 };
+
+/// The scopes the fixture's `403 insufficient_scope` challenge names.
+inline constexpr std::string_view INSUFFICIENT_SCOPES = "db:read db:write";
 
 class McpFixtureServer {
     public:
@@ -237,6 +242,7 @@ class McpFixtureServer {
             break;
         case McpReplyOutcome::Result:
         case McpReplyOutcome::LegacyBadRequest:
+        case McpReplyOutcome::InsufficientScope:
             frame["result"] = { { "content",
                                 { { { "type", "text" }, { "text", MCP_RESULT_TEXT } } } },
                 { "isError", false } };
@@ -296,6 +302,14 @@ class McpFixtureServer {
         if (outcome == McpReplyOutcome::LegacyBadRequest) {
             res.status = 400;
             res.set_content ("Bad Request: No valid session ID provided", "text/plain");
+            return;
+        }
+        if (outcome == McpReplyOutcome::InsufficientScope) {
+            res.status = 403;
+            res.set_header ("WWW-Authenticate",
+            "Bearer error=\"insufficient_scope\", scope=\"" +
+            std::string (INSUFFICIENT_SCOPES) + "\"");
+            res.set_content ("Forbidden", "text/plain");
             return;
         }
         const auto call = nlohmann::json::parse (req.body, nullptr, false);

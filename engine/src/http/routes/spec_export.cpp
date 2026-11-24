@@ -351,17 +351,18 @@ const std::vector<vayu::db::Collection>& chain) {
     if (entry.auth.mode == "inherit") {
         entry.auth = inherited_auth_of (chain);
     }
-    entry.elements           = exported_elements (row.elements);
-    entry.follow_redirects   = row.follow_redirects;
-    entry.max_redirects      = row.max_redirects;
-    entry.timeout_ms         = row.timeout_ms;
-    entry.http_version       = row.http_version;
-    entry.verify_ssl         = row.verify_ssl;
-    entry.stream             = row.stream;
-    entry.stream_text_path   = row.stream_text_path;
-    entry.folder_path        = folder_names_of (chain);
-    entry.mock_response_mode = row.mock_response_mode;
-    entry.order              = row.order;
+    entry.elements                    = exported_elements (row.elements);
+    entry.follow_redirects            = row.follow_redirects;
+    entry.max_redirects               = row.max_redirects;
+    entry.timeout_ms                  = row.timeout_ms;
+    entry.http_version                = row.http_version;
+    entry.verify_ssl                  = row.verify_ssl;
+    entry.stream                      = row.stream;
+    entry.stream_text_path            = row.stream_text_path;
+    entry.stream_first_content_marker = row.stream_first_content_marker;
+    entry.folder_path                 = folder_names_of (chain);
+    entry.mock_response_mode          = row.mock_response_mode;
+    entry.order                       = row.order;
     for (const auto& example : db.get_request_examples (row.id)) {
         if (row.mock_response_mode == "fixed" && row.mock_example_id &&
         *row.mock_example_id == example.id) {

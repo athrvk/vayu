@@ -121,6 +121,7 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"disableUrlEncoding",
 	"stream",
 	"streamTextPath",
+	"streamFirstContentMarker",
 ];
 
 /**

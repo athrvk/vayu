@@ -144,6 +144,7 @@ json snapshot (vayu::db::Database& db, const std::string& root_id, bool is_root 
         { "maxRedirects", row.max_redirects }, { "timeout", timeout },
         { "httpVersion", row.http_version }, { "verifySSL", row.verify_ssl },
         { "stream", row.stream }, { "streamTextPath", row.stream_text_path.value_or ("") },
+        { "streamFirstContentMarker", row.stream_first_content_marker.value_or ("") },
         { "mockResponseMode", row.mock_response_mode },
         { "mockExample", fixed }, { "examples", std::move (examples) } });
     }
@@ -543,7 +544,7 @@ TEST_F (SpecExportRouteTest, RoundTripsEveryFieldOfAFreeFormCollection) {
     // Mutation check (#2937): drop `timeout` from `settings_object_of`, from
     // `settings_of` or from `import_apply_payload`'s carried keys and "Get
     // user" comes back with no timeout; the same for its `streamTextPath`
-    // (#3773).
+    // (#3773) and its `streamFirstContentMarker` (#3774).
     auto [root_status, root_body] = routes::update_collection_response (
     *db_, root_, json::parse (R"json({"description":"Root **notes**",
         "variables":{"baseUrl":{"value":"https://api.example.com","enabled":true},
@@ -573,7 +574,7 @@ TEST_F (SpecExportRouteTest, RoundTripsEveryFieldOfAFreeFormCollection) {
         "auth":{"mode":"inherit"},
         "elements":[{"id":"el_3","kind":"assert.status","enabled":true,"config":{"in":[200]}}],
         "followRedirects":false,"maxRedirects":3,"timeout":2500,"httpVersion":"http2","verifySSL":false,"stream":true,
-        "streamTextPath":"$.delta.text"})json"));
+        "streamTextPath":"$.delta.text","streamFirstContentMarker":"content_block_delta"})json"));
     ASSERT_EQ (get_status, 200) << get_body.dump ();
     const std::string get_id = get_body.value ("id", std::string{});
     add_example (get_id, json::parse (R"({"name":"Found","status":200,"body":"{\"id\":1}",
