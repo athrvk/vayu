@@ -3017,10 +3017,10 @@ nlohmann::json& json) {
 /**
  * Rejects an unauthorizable run before creating it, and warms the token cache
  * so the worker's `apply_auth` hits it. Single-request only: a scenario payload
- * has no run-level `auth`, each step's resolved (or refused with a
- * 400) at plan time. A token endpoint @p target_policy refuses is a 400 under
- *      the policy's code, before anything is posted (#2521); a payload with its
- *      own Authorization header fetches no token (#3202).
+ * has no run-level `auth`, each step's resolved (or refused with a 400) at plan
+ * time. A token endpoint @p target_policy refuses is a 400 under the policy's
+ * code, before anything is posted (#2521); a payload with its own Authorization
+ * header fetches no token (#3202).
  */
 std::optional<RouteError> preflight_run_auth (RouteContext& ctx,
 const nlohmann::json& json,
