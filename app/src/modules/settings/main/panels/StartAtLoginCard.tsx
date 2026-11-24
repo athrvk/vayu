@@ -6,8 +6,6 @@
  */
 
 /**
- * StartAtLoginCard
- *
  * The switch for opening Vayu when the user signs in to their computer
  * (issue #2098).
  *

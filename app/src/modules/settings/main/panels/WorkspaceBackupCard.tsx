@@ -6,8 +6,6 @@
  */
 
 /**
- * WorkspaceBackupCard
- *
  * One button that asks the engine for a snapshot of the workspace, and the path
  * it wrote (issue #987).
  *

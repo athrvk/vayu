@@ -97,8 +97,8 @@ export type ColorRole =
  */
 export const ROLE_TOKEN: Record<ColorRole, string> = {
 	/*
-	 * The series tier, not the banner/button tokens these roles used to point
-	 * at. `--warning` measured 2.14 on a light plot and `--destructive` 1.73 on
+	 * The series tier, not the banner/button tokens. `--warning` measured 2.14 on a
+	 * light plot and `--destructive` 1.73 on
 	 * a dark one - in dark it is a deep red chosen to carry a white button
 	 * label, which all but vanishes on a near-black plot. The role names stay
 	 * generic because they are: `success` is also p50, `warning` also p95.

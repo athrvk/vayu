@@ -6,8 +6,6 @@
  */
 
 /**
- * FilesPanel
- *
  * The folders a request-body file may be sent from without a per-file pick.
  *
  * **The rule, in the words the user sees:** Vayu sends a file you chose in
