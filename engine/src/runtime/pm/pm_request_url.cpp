@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief `pm.request`, its `Url` object, `pm.info` and the pre-request write-back.
- */
+/** `pm.request`, its `Url` object, `pm.info` and the pre-request write-back. */
 
 #include "pm_auth.hpp"
 #include "pm_internal.hpp"
@@ -39,57 +37,45 @@ namespace vayu::runtime::pm_detail {
 // ============================================================================
 
 /**
- * @brief What `pm.request.url` is, behind the members a script reads.
+ * What `pm.request.url` is, behind the members a script reads: the `Url` object
+ * a lifted Postman script expects (#991), with `url.query.get(...)`,
+ * `url.getPath()`, `url.host` and the rest, built in
+ * `build_request_url_members`. Here lives the identity, which three surfaces
+ * read without the members: the `pm.request` write-back, the jar methods and
+ * `pm.sendRequest`, each documented as taking `pm.request.url`.
  *
- * `pm.request.url` is the `Url` object a lifted Postman script expects (#991) -
- * `url.query.get(...)`,
- * `url.getPath()`, `url.host` and the rest. The members are built in
- * `build_request_url_members` further down; what lives up here is the
- * *identity*, which three surfaces read without them: the `pm.request`
- * write-back, the jar methods and `pm.sendRequest` all had "is this a string?"
- * as their entire type check, and each of them is documented as taking
- * `pm.request.url`.
- *
- * `text` is authoritative and `parts` is derived from it. `built` says whether
- * the JS members have been materialised yet: a script that never mentions the
- * URL never pays for the parse, which is why the property is an accessor rather
- * than a plain member (see `install_request_url`).
+ * `text` is authoritative and `parts` derived from it. `built` says whether the
+ * JS members exist yet: a script never mentioning the URL never pays for the
+ * parse, which is why the property is an accessor (`install_request_url`).
  */
 struct RequestUrlState {
     std::string text;
     vayu::http::UrlParts parts;
     bool built = false;
-    // A member was written to, so `parts` is ahead of `text` (issue #1040).
-    // The composition is deferred to whoever needs the whole URL next, and -
-    // more to the point - **never happens at all** for a URL nobody edited,
-    // which is what keeps `getQueryString()` byte-exact against the wire and
-    // keeps a read-only script's request identical to the one it was handed.
+    // A member was written, so `parts` is ahead of `text` (#1040). Composition
+    // is deferred to the next reader of the whole URL and never happens for a
+    // URL nobody edited, which keeps `getQueryString()` byte-exact against the
+    // wire and a read-only script's request identical to the one it was handed.
     bool dirty = false;
 };
 
 namespace {
 
 /**
- * @brief Bring the URL up to date with whatever the script did to its members,
- *        and answer the whole URL (issue #1040).
- *
- * Two kinds of edit reach here by two routes. `query.add` and the
- * `protocol`/`port`/`hash` setters are methods, so they update the parts and
- * set `dirty` themselves. `path` and `host` are plain JS arrays a script
- * mutates in place, and nothing tells us when that happened - so they are
- * **read back** here and compared, which is the same rule
- * `apply_pm_request_writeback` already follows for `pm.request.headers`: the
- * object the script holds is what is sent, read at the moment it is needed.
- *
- * Comparing rather than assuming is what keeps the promise that matters: a
- * script that only *read* the URL leaves `dirty` false, nothing is composed,
- * and the request goes out as the exact bytes it arrived as - which is what
- * `getQueryString()` being byte-exact against the wire depends on.
+ * Brings the URL up to date with what the script did to its members, and
+ * answers the whole URL (#1040). `query.add` and the `protocol` / `port` /
+ * `hash` setters are methods that update the parts and set `dirty`; `path` and
+ * `host` are plain JS arrays mutated in place with no notice, so they are read
+ * back here and compared, `apply_pm_request_writeback`'s rule for
+ * `pm.request.headers`: the object the script holds is what is sent, read when
+ * needed. Comparing rather than assuming leaves `dirty` false for a script that
+ * only read the URL, so the request goes out as the exact bytes it arrived as,
+ * which `getQueryString()`'s byte-exactness depends on.
  *
  * @return why the members could not be read, or nullopt when @p state is
- *         current. Never throws: three of the four callers want a JS
- *         exception and the fourth wants a write-back reason, so the message
- *         is handed back rather than raised.
+ *         current. Never throws: three of the four callers want a JS exception
+ *         and the fourth a write-back reason, so the message is handed back
+ *         rather than raised.
  */
 std::optional<std::string>
 refresh_url_from_members (JSContext* ctx, JSValueConst url, RequestUrlState& state) {
@@ -118,8 +104,8 @@ refresh_url_from_members (JSContext* ctx, JSValueConst url, RequestUrlState& sta
             segments.reserve (static_cast<size_t> (length < 0 ? 0 : length));
             for (int64_t i = 0; i < length; i++) {
                 ScopedValue element (ctx, JS_GetPropertyInt64 (ctx, list.get (), i));
-                // A number is taken - pushing an id onto a path is the obvious
-                // case. An object, an array or a hole is refused rather than
+                // A number is taken (pushing an id onto a path is the obvious
+                // case); an object, array or hole is refused rather than
                 // reaching the wire as "[object Object]" or "undefined".
                 if (!JS_IsString (element.get ()) && !JS_IsNumber (element.get ())) {
                     return "pm.request.url." + std::string (member) + " takes strings, got " +
@@ -147,9 +133,9 @@ refresh_url_from_members (JSContext* ctx, JSValueConst url, RequestUrlState& sta
     return std::nullopt;
 }
 
-/// The whole URL for a caller with no way to report a bad member - the parts
-/// stay as they were and the text is whatever was last composed, which is the
-/// URL the write-back will refuse by name a moment later.
+/// The whole URL for a caller with no way to report a bad member: the parts
+/// stay as they were and the text is the last composed, the URL the write-back
+/// then refuses by name.
 const std::string&
 request_url_current_text (JSContext* ctx, JSValueConst url, RequestUrlState& state) {
     (void)refresh_url_from_members (ctx, url, state);
@@ -187,14 +173,12 @@ RequestUrlState* request_url_state (JSValueConst value) {
 namespace {
 
 /**
- * @brief What `pm.request.body` carries (issue #1003).
- *
- * `body` is the composed body, which is where the mode and the field lists are
- * read from; `text` is the string view (`script_body_view`) the object answers
- * every string context with, and the one thing the write-back reads back. A
- * `.raw` assignment moves `text` and nothing else - the write-back applies it
- * through the same rules a whole-string assignment goes through, so there is one
- * definition of what assigning a body means rather than two.
+ * What `pm.request.body` carries (#1003). `body` is the composed body, the
+ * source of the mode and field lists; `text` is the string view
+ * (`script_body_view`) the object answers every string context with, and the
+ * one thing the write-back reads back. A `.raw` assignment moves `text` only:
+ * the write-back applies it by the whole-string assignment's rules, one
+ * definition of assigning a body.
  */
 struct RequestBodyState {
     Body body;
@@ -233,17 +217,13 @@ RequestBodyState* request_body_state (JSValueConst value) {
 } // namespace
 
 /**
- * @brief The text an assertion should read a string-like target as.
- *
- * A JS string, and the two objects that replaced one on `pm.request`: the Url
- * (#991) and the RequestBody (#1003). Both are documented as still behaving as
- * the string they replaced, and `pm.expect(pm.request.url).to.include(...)` is
- * the idiom in this repo's own docs and tests - a verdict that silently flipped
- * to failing is the worst thing an assertion can do, so the two are named here
- * rather than left to whichever branch an object falls into.
- *
- * Only these three. Coercing *any* object would make
- * `pm.expect({}).to.include('object')` pass.
+ * The text an assertion reads a string-like target as: a JS string, or one of
+ * the two objects that replaced one on `pm.request`, the Url (#991) and the
+ * RequestBody (#1003). Both are documented as behaving as the string they
+ * replaced, and `pm.expect(pm.request.url).to.include(...)` is the idiom in
+ * this repo's docs and tests: a verdict silently flipping to failing is the
+ * worst thing an assertion can do. Only these three: coercing any object would
+ * make `pm.expect({}).to.include('object')` pass.
  */
 std::optional<std::string> expect_string_like (JSContext* ctx, JSValueConst value) {
     if (auto* url = request_url_state (value)) {
@@ -259,17 +239,12 @@ std::optional<std::string> expect_string_like (JSContext* ctx, JSValueConst valu
 }
 
 /**
- * @brief The URL a value carries, for the surfaces documented as taking
- *        `pm.request.url`.
- *
- * A JS string is itself; a Url object is the string it was built from. Anything
- * else is `nullopt` - the caller says so in its own words, because
- * "pm.sendRequest was given a number" and "jar().set needs a URL" are different
- * sentences about the same refusal.
- *
- * Deliberately *not* "any object, via toString": `pm.request.url = {}` would
- * then become the string `[object Object]` and reach the wire, which is exactly
- * the silent-wrong-request class this program exists to close.
+ * The URL a value carries, for the surfaces documented as taking
+ * `pm.request.url`: a JS string is itself, a Url object its built string,
+ * anything else `nullopt`, which the caller words itself ("pm.sendRequest was
+ * given a number" and "jar().set needs a URL" are different sentences). Not
+ * "any object, via toString": `pm.request.url = {}` would reach the wire as
+ * `[object Object]`, the silent-wrong-request class this program closes.
  */
 std::optional<std::string>
 script_url_text (JSContext* ctx, JSValueConst value, std::string* out_error) {
@@ -277,11 +252,10 @@ script_url_text (JSContext* ctx, JSValueConst value, std::string* out_error) {
         return js_to_string (ctx, value);
     }
     if (auto* state = request_url_state (value)) {
-        // A member the script left in a state the URL cannot be built from is
-        // reported by name, through @p out_error where the caller has one -
-        // "pm.request.url.path takes strings, got object at index 2" says more
-        // than "this is not a URL", and the caller that reports it is the
-        // write-back, which is where every other pm.request refusal surfaces.
+        // A member left unbuildable is reported by name through @p out_error
+        // where the caller has one: "pm.request.url.path takes strings, got
+        // object at index 2" says more than "this is not a URL", and that
+        // caller is the write-back, where every pm.request refusal surfaces.
         if (auto reason = refresh_url_from_members (ctx, value, *state)) {
             if (out_error != nullptr) {
                 *out_error = std::move (*reason);
@@ -297,9 +271,9 @@ namespace {
 
 /**
  * The name a binary body's file goes by in a script: its declared `fileName`,
- * else the last segment of its path - the rule `declared_file_name` applies to
- * a form-data file part. Never the path itself, which is one machine's
- * filesystem and can carry a user name (issue #411).
+ * else its path's last segment (`declared_file_name`'s rule for a form-data
+ * file part), never the path, which is one machine's filesystem and can carry a
+ * user name (#411).
  */
 std::string body_file_name (const FileRef& file) {
     FormField part;
@@ -309,27 +283,20 @@ std::string body_file_name (const FileRef& file) {
 }
 
 /**
- * The string `pm.request.body` shows, and the yardstick the write-back measures
- * an edit against - one function so the two cannot disagree about what a body
- * looks like as a string.
+ * The string `pm.request.body` shows and the yardstick the write-back measures
+ * an edit against, one function so the two agree. A content mode is its
+ * content; `x-www-form-urlencoded` the exact wire body; `form-data` a rendering
+ * of the parts, not the bytes sent: libcurl generates a multipart boundary at
+ * transfer time, so no faithful string exists before the send, and `content`
+ * alone would give every form body `""`, like no body at all.
  *
- * For a content mode it is the content itself. For `x-www-form-urlencoded` it
- * is the exact wire body. For `form-data` it is a rendering of the parts and
- * *not* the bytes sent: a multipart envelope carries a boundary libcurl
- * generates at transfer time, so no faithful string exists before the send.
- * Reading `content` alone - which is what this replaced - handed every form
- * body `""`, indistinguishable from a request with no body at all.
- *
- * The two form modes take different renderers because only one of them is
- * reversible: the urlencoded view *is* the wire body and parses straight back
- * through `parse_urlencoded`, so it must stay a plain `key=value` list, while
- * form-data names its file parts (`key=@filename`) because encoding one as a
- * pair loses it (issue #411). A file part is only ever valid under form-data,
- * so this split costs the urlencoded body nothing.
- *
- * A `binary` body reads as `@<fileName>`, the spelling a form-data file part
- * already uses: its bytes are a file the script never sees, and its path is
- * never disclosed (see `body_file_name`).
+ * The form modes take different renderers because only one is reversible: the
+ * urlencoded view is the wire body and parses back through `parse_urlencoded`,
+ * so it stays a plain `key=value` list, while form-data names its file parts
+ * (`key=@filename`), which a pair would lose (#411). A file part is valid only
+ * under form-data, so this costs urlencoded nothing. A `binary` body reads as
+ * `@<fileName>`, a file part's spelling: the script never sees its bytes, and
+ * its path is never disclosed (`body_file_name`).
  */
 std::string script_body_view (const Body& body) {
     if (body.mode == BodyMode::FormData) {
@@ -345,33 +312,26 @@ std::string script_body_view (const Body& body) {
 } // namespace
 
 /**
- * Which of the request's header records a script shows.
+ * Which of the request's header records a script shows. The two differ (#483):
+ * `request->headers` is what the request was composed with;
+ * `response->request_headers` is what was sent: that map minus headers the
+ * transfer suppresses, plus those the engine derives at curl setup (the
+ * body-implied `Content-Type`, `application/json` for GraphQL,
+ * `application/x-www-form-urlencoded` for a form; the default `User-Agent`). A
+ * test asking which Content-Type went out for a GraphQL body asks about the
+ * sent record; the composed map cannot answer, as nobody wrote that header.
  *
- * Two records of "the request's headers" exist and they are not the same set
- * (issue #483). `request->headers` is what the request was *composed* with;
- * `response->request_headers` is what was *sent* - that same map minus the
- * headers the transfer suppresses, plus the ones the engine derives at curl
- * setup: the body-implied `Content-Type` (GraphQL -> `application/json`, Form
- * -> `application/x-www-form-urlencoded`) and the default `User-Agent`. A test
- * script asking which Content-Type went out for a GraphQL body is asking about
- * the second, and the composed map structurally cannot answer - nobody wrote
- * that header down, the engine derived it precisely so the user would not have
- * to. It read `undefined` and the assertion went red on a request that went
- * out right.
+ * So a **test** script reads the sent record and a **pre-request** script the
+ * composed map, a forced split: before the send no sent record exists, and the
+ * pre-request object is the one `apply_pm_request_writeback` applies back, so
+ * showing it another set would make `delete` act on headers the request never
+ * carried.
  *
- * So a **test** script reads the sent record and a **pre-request** script reads
- * the composed map. That split is forced, not preferred: before the send there
- * is no sent record to read, and the pre-request object is the one
- * `apply_pm_request_writeback` applies back onto the request, so showing it
- * anything other than the composed set would make `delete` operate on headers
- * the request never carried.
- *
- * The fallback is load-bearing rather than defensive padding. A load run's
- * deferred validation rebuilds its `Response` from a sampled response
- * (`run_manager.cpp`), which records no sent headers at all; seeding from that
- * empty map would take `pm.request.headers` from "missing the two derived
- * entries" to "empty", a worse answer than the one this fixes. An empty sent
- * record means nothing was recorded, never that nothing was sent.
+ * The fallback is load-bearing: a load run's deferred validation rebuilds its
+ * `Response` from a sampled response (`run_manager.cpp`) recording no sent
+ * headers, and seeding from that empty map would make `pm.request.headers`
+ * empty. An empty sent record means nothing was recorded, never that nothing
+ * was sent.
  */
 const HeaderList& script_request_header_lines (const ContextData& data) {
     if (data.response != nullptr && !data.response->request_headers.empty ()) {
@@ -395,15 +355,12 @@ Headers script_request_header_view (const ContextData& data) {
 
 void build_request_url_members (JSContext* ctx, JSValue url, RequestUrlState& state);
 
-// `this` is the Url object every one of these was reached through. A method
-// pulled off it and called bare has no state, which is a script error rather
-// than an engine one - the same rule the header methods follow.
-//
-// The parts are built here rather than assumed: today the only way a script can
-// hold this object is through the accessor, which builds - but `getHost()`
-// reading unbuilt parts would answer `""` for a real host, and a rule that
-// holds only because of how the object is reached today is one a later change
-// breaks silently. Built already, this costs a branch.
+// `this` is the Url object each of these was reached through; a method called
+// bare has no state, a script error, as for the header methods. The parts are
+// built here rather than assumed: the only way to hold this object is the
+// building accessor, but `getHost()` reading unbuilt parts would answer `""`
+// for a real host, and a rule resting on how the object is reached breaks
+// silently with a later change. Built already, this costs a branch.
 RequestUrlState* url_state_of_this (JSContext* ctx, JSValueConst this_val, const char* member) {
     auto* state = request_url_state (this_val);
     if (!state) {
@@ -414,11 +371,9 @@ RequestUrlState* url_state_of_this (JSContext* ctx, JSValueConst this_val, const
     if (!state->built) {
         build_request_url_members (ctx, this_val, *state);
     }
-    // And up to date with the arrays a script may have mutated since. Without
-    // this, `path.push(...)` followed by `getPath()` in the same script reads
-    // the parts as they were parsed and answers the pre-edit path - the reads
-    // have to follow the writes, or a script that edits and then signs would
-    // sign a URL it is not sending.
+    // And current with arrays the script mutated since: without this,
+    // `path.push(...)` then `getPath()` answers the pre-edit path, and a script
+    // that edits and then signs would sign a URL it is not sending.
     if (auto reason = refresh_url_from_members (ctx, this_val, *state)) {
         JS_ThrowTypeError (ctx, "%s", reason->c_str ());
         return nullptr;
@@ -427,15 +382,13 @@ RequestUrlState* url_state_of_this (JSContext* ctx, JSValueConst this_val, const
 }
 
 /**
- * The whole URL, and the single answer behind every string context.
- *
- * `toString`, `valueOf`, `toJSON` and `@@toPrimitive` all land here, so
- * concatenation, a template literal, `==` against a string, `JSON.stringify`
- * and `String.prototype`'s generic methods (which coerce through
- * `ToString(this)`) keep behaving the way they did when this was a string.
- * `@@toPrimitive`'s hint argument is ignored on purpose: a URL has one
- * primitive form, and answering a number hint with anything else would make
- * `+url` a different kind of surprise.
+ * The whole URL, the one answer behind every string context: `toString`,
+ * `valueOf`, `toJSON` and `@@toPrimitive` land here, so concatenation, a
+ * template literal, `==` against a string, `JSON.stringify` and
+ * `String.prototype`'s generic methods (coercing through `ToString(this)`)
+ * behave as they did on a string. `@@toPrimitive`'s hint is ignored on purpose:
+ * a URL has one primitive form, and another answer to a number hint would make
+ * `+url` a different surprise.
  */
 JSValue js_url_to_string (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
@@ -509,14 +462,10 @@ js_url_part_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
 }
 
 /**
- * `url.update(newUrl)` - Postman's spelling of a whole-URL write, and the same
- * write `pm.request.url = '...'` performs.
- *
- * Mutates in place rather than handing back a new object, because Postman's
- * does: a script that held a reference to the URL before the update has to see
- * the update through it, or the write-back and the script disagree about what
- * is being sent. Member mutation (pushing to `path`, editing a query member) is
- * out of scope for v1 and documented as such.
+ * `url.update(newUrl)`: Postman's whole-URL write, the one
+ * `pm.request.url = '...'` performs. In place, not a new object, as Postman's
+ * is: a script holding the URL from before must see the update through it, or
+ * the write-back and the script disagree on what is sent.
  */
 JSValue js_url_update (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     auto* state = url_state_of_this (ctx, this_val, "update");
@@ -536,18 +485,17 @@ JSValue js_url_update (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
     return JS_UNDEFINED;
 }
 
-/// The Url object a query method was bound to. Query methods hang off
-/// `url.query`, so `this` is that sub-object and the URL comes through the
-/// bound data instead - one source of truth for the parsed params rather than a
-/// second copy living on the query object.
+/// The Url object a query method was bound to: `this` is the `url.query`
+/// sub-object, so the URL comes through the bound data, one source of truth for
+/// the parsed params rather than a copy on the query object.
 RequestUrlState* url_state_of_query (JSContext* ctx, JSValue* func_data, const char* member) {
     auto* state = request_url_state (func_data[0]);
     if (!state) {
         JS_ThrowInternalError (ctx, "pm.request.url.query.%s lost its URL", member);
         return nullptr;
     }
-    // Same reason the url's own methods refresh: a `path.push` before a
-    // `query.get` must not leave the two members describing different URLs.
+    // As for the url's own methods: a `path.push` before a `query.get` must not
+    // leave the two members describing different URLs.
     if (auto reason = refresh_url_from_members (ctx, func_data[0], *state)) {
         JS_ThrowTypeError (ctx, "%s", reason->c_str ());
         return nullptr;
@@ -602,13 +550,10 @@ find_query_param (const RequestUrlState& state, const QueryParamName& name) {
 }
 
 /**
- * `query.get(name)` - the *first* match's value, `null` when the name is absent
- * and `null` for a bare `?flag` that carries no value.
- *
- * First rather than last: postman-collection's `PropertyList.one` answers with
- * the first, and a duplicated query key is exactly where a "last wins" guess
- * would silently sign the wrong string. `toObject()` is the last-wins view, and
- * it says so.
+ * `query.get(name)`: the first match's value, `null` when the name is absent or
+ * for a bare `?flag`. First, as postman-collection's `PropertyList.one`
+ * answers: a duplicated key is where a "last wins" guess would silently sign
+ * the wrong string. `toObject()` is the last-wins view, and says so.
  */
 JSValue js_url_query_get (JSContext* ctx,
 JSValueConst this_val,
@@ -662,11 +607,9 @@ JSValue query_member_list (JSContext* ctx, const RequestUrlState& state) {
 }
 
 /**
- * `query.all()` - every param, in wire order, duplicates kept.
- *
- * The canonicalization workhorse this whole issue exists for: an HMAC over a
- * sorted query has to see the parameters as they were sent, which is the one
- * view a `{name: value}` map cannot give.
+ * `query.all()`: every param in wire order, duplicates kept, the
+ * canonicalization workhorse: an HMAC over a sorted query must see the params
+ * as sent, which a `{name: value}` map cannot give.
  */
 JSValue js_url_query_all (JSContext* ctx,
 JSValueConst this_val,
@@ -727,13 +670,11 @@ JSValue* func_data) {
 }
 
 /**
- * @brief Refuse a member edit on a URL that has no members (issue #1040).
- *
- * `parse_url_parts` leaves every part empty for a URL it cannot read, so a
- * write there would compose a plausible URL out of nothing - `://` and whatever
- * was pushed - and send it. There is no honest edit to make, so it is an error
- * rather than a no-op. A `{{baseUrl}}/...` URL is not that case: its token is
- * read as the host (#3454).
+ * Refuses a member edit on a URL with no members (#1040): `parse_url_parts`
+ * leaves every part empty for an unreadable URL, so a write would compose a
+ * plausible URL from nothing (`://` and what was pushed) and send it. No honest
+ * edit exists, so it is an error, not a no-op. A `{{baseUrl}}/...` URL is not
+ * this case: its token reads as the host (#3454).
  */
 bool require_parsed_url (JSContext* ctx, const RequestUrlState& state, const char* member) {
     if (state.parts.parsed) {
@@ -746,9 +687,9 @@ bool require_parsed_url (JSContext* ctx, const RequestUrlState& state, const cha
     return false;
 }
 
-/// A member write happened, so the parts are ahead of the text. What follows
-/// from that - recomposing the raw query string and the URL - is
-/// `refresh_url_from_members`' job, at the moment someone needs the whole URL.
+/// A member write happened, so the parts are ahead of the text; recomposing the
+/// raw query and the URL is `refresh_url_from_members`' job when someone needs
+/// the whole URL.
 void mark_url_edited (RequestUrlState& state) {
     state.dirty = true;
 }
@@ -797,10 +738,10 @@ vayu::http::UrlQueryParam& out) {
     return true;
 }
 
-/// Encoded here, as the send would write it (issue #1773): the rows hold wire
-/// bytes, so `all` and `getQueryString()` read what goes out. Postman adds a
-/// row and `normalizeParam` writes it, so the per-row rule applies. A request
-/// that sends its URL as typed keeps the row as typed.
+/// Encoded as the send would write it (#1773): the rows hold wire bytes, so
+/// `all` and `getQueryString()` read what goes out. Postman adds a row and
+/// `normalizeParam` writes it, so the per-row rule applies; a request sending
+/// its URL as typed keeps the row as typed.
 void encode_query_param_for_wire (JSContext* ctx, vayu::http::UrlQueryParam& param) {
     if (!script_query_is_encoded (ctx)) {
         return;
@@ -813,10 +754,9 @@ void encode_query_param_for_wire (JSContext* ctx, vayu::http::UrlQueryParam& par
     }
 }
 
-/// `add` appends even when the key is already there - a query may repeat a key,
-/// and `all()` exists because of it. `upsert` is the "one of these" spelling:
-/// it replaces the first match in place, keeping wire position, and appends
-/// when there is none.
+/// `add` appends even when the key exists (a query may repeat one, which is why
+/// `all()` exists); `upsert` replaces the first match in place, keeping wire
+/// position, and appends when there is none.
 enum QueryWriter : int { QUERY_ADD, QUERY_UPSERT };
 
 JSValue js_url_query_add (JSContext* ctx,
@@ -859,9 +799,9 @@ JSValue* func_data) {
     return JS_UNDEFINED;
 }
 
-/// `remove(name)` takes **every** parameter of that name, not the first: a
-/// caller removing `page` and getting one of two back has removed nothing they
-/// can observe, and would have to loop to find that out.
+/// `remove(name)` takes **every** param of that name: a caller removing `page`
+/// and getting one of two back has removed nothing observable, and would have
+/// to loop to find out.
 JSValue js_url_query_remove (JSContext* ctx,
 JSValueConst this_val,
 int argc,
@@ -913,9 +853,9 @@ JSValue* func_data) {
 }
 
 // ----------------------------------------------------------------------------
-// The rest of the PropertyList reads: each, map, filter, find, one, indexOf, idx
-// (#3462). All of them answer over the `all()` rows, so a member handed to a
-// callback is the `{ key, value }` a script already knows.
+// The rest of the PropertyList reads (each, map, filter, find, one, indexOf,
+// idx; #3462), all over the `all()` rows, so a callback gets the
+// `{ key, value }` a script already knows.
 // ----------------------------------------------------------------------------
 
 /// The four reads that hand every member to a callback.
@@ -940,17 +880,14 @@ uint32_t& next) {
 }
 
 /**
- * `query.each(fn, thisArg)`, `map`, `filter` and `find` - Postman's walks over
- * the params, handing the callback `(member, index, list)` with the optional
- * second argument as its `this`, the arguments the header object's `each`
- * already gives.
- *
- * `each` returns undefined and walks every member (a `false` answer does not
- * stop it, as on the header object); `map` the answers, `filter` the members
- * answered truthy, `find` the first such member or `undefined`. The list is
- * built before the first call, so a callback that edits the URL cannot shorten
- * or lengthen the walk under it. A throw out of the callback is the script's
- * own and ends the walk as it was thrown.
+ * `query.each(fn, thisArg)`, `map`, `filter` and `find`: Postman's walks,
+ * handing the callback `(member, index, list)` with the second argument as
+ * `this`, as the header object's `each` does. `each` returns undefined and
+ * visits every member (a `false` answer does not stop it, as on the header
+ * object); `map` returns the answers, `filter` the members answered truthy,
+ * `find` the first such member or `undefined`. The list is built before the
+ * first call, so a callback editing the URL cannot change the walk under it; a
+ * throw from the callback is the script's and ends the walk.
  */
 JSValue js_url_query_walk (JSContext* ctx,
 JSValueConst this_val,
@@ -1031,13 +968,11 @@ const std::optional<std::string>& value) {
 }
 
 /**
- * `query.indexOf(item)` - the position in `all()`, `-1` when absent.
- *
- * Postman finds a member by identity in its own list. The members handed out
- * here are built per call, so identity would answer `-1` for a member of this
- * very list. A `{ key, value }` is matched on both, which is what tells the
- * rows of a repeated key apart (`page=2&page=3`: the second `page` is 1); a
- * name is matched on the key alone, as `one` finds it.
+ * `query.indexOf(item)`: the position in `all()`, `-1` when absent. Postman
+ * finds a member by identity, but these members are built per call, so identity
+ * would answer `-1` for this very list's member. A `{ key, value }` matches on
+ * both, telling a repeated key's rows apart (`page=2&page=3`: the second `page`
+ * is 1); a name matches the key alone, as `one` finds it.
  */
 JSValue js_url_query_index_of (JSContext* ctx,
 JSValueConst this_val,
@@ -1339,11 +1274,11 @@ JSValue build_query_object (JSContext* ctx, JSValue url, const RequestUrlState& 
         JS_NewCFunctionData (ctx, method.fn, method.length, method.magic, 1, &url));
     }
 
-    // Deliberately no `members` array beside them. Postman's PropertyList has
-    // one, but a copy of it here would be a second view of the same params;
-    // `all()` is that view, and every walking read (`each`, `map`, `filter`,
-    // `find`) hands out the same `{ key, value }` rows. They are plain objects,
-    // not Postman's QueryParam objects with methods of their own.
+    // No `members` array beside them: Postman's PropertyList has one, but here
+    // it would be a second view of the params. `all()` is that view, and every
+    // walk (`each`, `map`, `filter`, `find`) hands out the same
+    // `{ key, value }` rows, plain objects, not Postman's QueryParam objects
+    // with methods.
     return query;
 }
 
@@ -1359,16 +1294,13 @@ JSValue string_array (JSContext* ctx, const std::vector<std::string>& values) {
 }
 
 /**
- * @brief Parse `state.text` and (re)define the members a script reads.
- *
- * Called on the first read of `pm.request.url` and again after every write to
- * it, so the members and the string can never disagree. Redefining rather than
- * patching: a URL with no fragment must not keep the previous URL's `hash`.
- *
- * A URL the parser cannot read leaves every part empty (see `parse_url_parts`)
- * and the string intact. That is deliberate: `toString()` still answers, so a
- * script reading the whole URL is unaffected, while a script reading parts of
- * an unparseable URL gets nothing rather than a plausible half.
+ * Parses `state.text` and (re)defines the members a script reads, on the first
+ * read of `pm.request.url` and after every write, so members and string cannot
+ * disagree. Redefined, not patched: a URL with no fragment must not keep the
+ * previous `hash`. An unreadable URL leaves every part empty
+ * (`parse_url_parts`) and the string intact on purpose: `toString()` still
+ * answers, while a script reading parts gets nothing rather than a plausible
+ * half.
  */
 /// Which single-string part an accessor reads and writes.
 enum UrlStringPart : int { URL_PART_PROTOCOL, URL_PART_PORT, URL_PART_HASH };
@@ -1403,13 +1335,10 @@ JSValue* func_data) {
 }
 
 /**
- * `url.protocol = 'http'`, `url.port = '8443'`, `url.hash = 'top'`.
- *
- * Accessors rather than plain data properties for the reason the segment lists
- * are proxies: a writable data property would take the assignment and reach
- * nothing. There is no read-only-member case to preserve here - a test script's
- * pm.request is a record nothing writes back, which is a property of the hook,
- * not of the member.
+ * `url.protocol = 'http'`, `url.port = '8443'`, `url.hash = 'top'`, as
+ * accessors because a writable data property would take the assignment and
+ * reach nothing. No read-only case to keep: a test script's `pm.request` is a
+ * record nothing writes back, a property of the hook, not the member.
  */
 JSValue js_url_string_part_set (JSContext* ctx,
 JSValueConst this_val,
@@ -1432,9 +1361,8 @@ JSValue* func_data) {
     }
     std::string value = js_to_string (ctx, argv[0]);
     if (magic == URL_PART_PROTOCOL && value.empty ()) {
-        // Every other part may legitimately be cleared; a URL with no scheme is
-        // one `parse_url_parts` would refuse to read back unless a token
-        // stood in for it.
+        // Every other part may be cleared; a URL with no scheme is one
+        // `parse_url_parts` would not read back unless a token stood in for it.
         return JS_ThrowTypeError (ctx, "pm.request.url.protocol must not be empty");
     }
     url_string_part (*state, magic) = std::move (value);
@@ -1442,10 +1370,9 @@ JSValue* func_data) {
     return JS_UNDEFINED;
 }
 
-/// `url.length` - the current URL's length, and read-only. A setter that threw
-/// would be noise; one that silently accepted would be the defect this whole
-/// issue is about, so the property simply has no setter and an assignment is
-/// the ordinary JavaScript no-op for that.
+/// `url.length`: the current URL's length, read-only. A throwing setter would
+/// be noise and a silently accepting one this issue's defect, so it has no
+/// setter, and an assignment is JavaScript's ordinary no-op.
 JSValue js_url_length_get (JSContext* ctx,
 JSValueConst this_val,
 int argc,
@@ -1471,12 +1398,11 @@ void build_request_url_members (JSContext* ctx, JSValue url, RequestUrlState& st
     state.built = true;
     state.dirty = false;
 
-    // **Defined, not set.** The prototype here is `String.prototype`, which is
-    // itself a String object holding "" - so it carries a non-writable own
-    // `length`, and a plain `JS_SetPropertyStr` (which is `[[Set]]`, and walks
-    // the chain) is *refused* by it. Defining puts the property on this object
-    // and never consults the prototype, which is what every member wants
-    // anyway: these are the URL's own facts, not writes through to something.
+    // **Defined, not set.** The prototype is `String.prototype`, a String
+    // object holding "" with a non-writable own `length`, so
+    // `JS_SetPropertyStr` (`[[Set]]`, walking the chain) is refused by it.
+    // Defining puts the property on this object without consulting the
+    // prototype, as every member wants: these are the URL's own facts.
     const auto define = [&] (const char* name, JSValue value) {
         JS_DefinePropertyValueStr (ctx, url, name, value, JS_PROP_C_W_E);
     };
@@ -1495,19 +1421,16 @@ void build_request_url_members (JSContext* ctx, JSValue url, RequestUrlState& st
     URL_PART_PROTOCOL);
     define_accessor ("port", js_url_string_part_get, js_url_string_part_set, URL_PART_PORT);
     define_accessor ("hash", js_url_string_part_get, js_url_string_part_set, URL_PART_HASH);
-    // `length` is defined rather than left as one of the documented breaks,
-    // because the alternative is not "absent": inherited from that same String
-    // prototype it answers `0` - a plausible number for a URL that is not
-    // empty, which is the silent-wrong-answer class this program exists to
-    // close. One property, and `url.length` means what it always did.
+    // `length` is defined, not left a documented break: inherited from that
+    // String prototype it would answer `0`, a plausible number for a non-empty
+    // URL, the silent-wrong-answer class this program closes.
     define_accessor ("length", js_url_length_get, nullptr, 0);
-    // Plain arrays, not accessors and not proxies: `pm.request.headers` is
-    // already the object the write-back *reads back*, and the same rule answers
-    // every spelling of a segment edit at once - push, splice, index
-    // assignment, a length truncation, or replacing the array outright. A
-    // proxy would have intercepted each write instead, and `JS_IsArray`
-    // answers on the class id, so `pm.expect(url.host).to.include(...)` would
-    // have stopped seeing an array at all. See `refresh_url_from_members`.
+    // Plain arrays, not accessors or proxies: like `pm.request.headers`, they
+    // are read back by the write-back, which answers every segment edit at once
+    // (push, splice, index assignment, length truncation, a replaced array). A
+    // proxy would intercept each write, and `JS_IsArray` answers on the class
+    // id, so `pm.expect(url.host).to.include(...)` would no longer see an array
+    // (`refresh_url_from_members`).
     define ("host", string_array (ctx, state.parts.host));
     define ("path", string_array (ctx, state.parts.path));
     define ("query", build_query_object (ctx, url, state));
@@ -1534,8 +1457,7 @@ JSValue new_request_url (JSContext* ctx, std::string text) {
     }
     auto* state = new RequestUrlState{ std::move (text), {}, false };
     if (JS_SetOpaque (url, state) < 0) {
-        // The object is not of this class, so the finalizer will never run and
-        // nothing else would free the state.
+        // The object is not of this class, so no finalizer will free the state.
         delete state;
         JS_FreeValue (ctx, url);
         return JS_EXCEPTION;
@@ -1591,13 +1513,10 @@ JSValue* func_data) {
 }
 
 /**
- * `pm.request.url = '...'` - the write that shipped, still working, still
- * feeding `apply_pm_request_writeback`.
- *
- * Refuses anything that is neither a string nor a Url object *at the assignment
- * itself*, rather than letting the write-back reject it several lines later:
- * the script author is told which line was wrong, and a test script - which has
- * no write-back to be rejected by - stops silently accepting a number.
+ * `pm.request.url = '...'`, feeding `apply_pm_request_writeback`. Anything
+ * neither a string nor a Url object is refused at the assignment, not by the
+ * write-back lines later: the author is told which line was wrong, and a test
+ * script, with no write-back to reject it, does not silently accept a number.
  */
 JSValue js_request_url_set (JSContext* ctx,
 JSValueConst this_val,
@@ -1625,18 +1544,13 @@ JSValue* func_data) {
 }
 
 /**
- * @brief Install `pm.request.url` as the accessor pair over a Url object.
- *
- * An accessor rather than a plain member for two reasons. The parse is paid on
- * the first *read*, so a script that never mentions the URL - most scripts -
- * costs one object allocation and nothing else. And a write goes through the
- * setter, so `pm.request.url = 'https://...'` leaves a Url object behind rather
- * than replacing the object with a bare string, which is what would make
- * `pm.request.url = x; pm.request.url.query.get('a')` throw.
- *
- * Enumerable, like every other member of `pm.request`: `JSON.stringify` and
- * `console.log` have to keep showing the URL, and the object's own `toJSON`
- * makes that the string it always was.
+ * Installs `pm.request.url` as the accessor pair over a Url object. The parse
+ * is paid on the first read, so a script never mentioning the URL (most) costs
+ * one allocation; a write goes through the setter, leaving a Url object rather
+ * than a bare string, which would make
+ * `pm.request.url = x; pm.request.url.query.get('a')` throw. Enumerable like
+ * every `pm.request` member, so `JSON.stringify` and `console.log` show the
+ * URL, the string its `toJSON` answers.
  */
 void install_request_url (JSContext* ctx, JSValue request, const std::string& url_text) {
     JSValue url = new_request_url (ctx, url_text);
@@ -1669,27 +1583,19 @@ enum BodyMember : std::uint8_t {
 };
 
 /**
- * @brief The Postman mode name this body reads as.
+ * The Postman mode name this body reads as. Five, the shapes a script can act
+ * on: a string to parse, a pair list, a multipart part list, a GraphQL
+ * operation and a file. Vayu's other content modes (`json`, `text`, `xml`,
+ * `jsonrpc`, `mcp`) carry one string, which is `raw`, so a lifted
+ * `body.mode === 'raw'` guard holds for each.
  *
- * Five names, because those are the five shapes a script can *act* on: a string
- * it can parse, a pair list, a multipart part list, a GraphQL operation and a
- * file. Vayu's other content modes - `json`, `text`, `xml`, `jsonrpc`, `mcp` -
- * each carry their body as one string, which is what `raw` means, so a lifted
- * `body.mode === 'raw'` guard answers true for every one of them.
- *
- * `graphql` was the third name for the whole of #1003, because Postman's mode
- * promises a `{query, variables}` member and this engine stores a GraphQL body
- * as one string that may be an envelope or a bare document. What #1111 found is
- * that the pair is *derivable* from that string by a rule the engine already
- * owns - `graphql_body.hpp`'s classifier, the one the send itself goes through
- * - so the member has something to fill it from after all. See
- * `body_graphql_view`.
- *
- * A `binary` body is Postman's fifth mode, `file`: one file sent as the whole
- * body. Postman's `file` member promises `src`, the path, which this one never
- * answers - a path is one machine's filesystem, and a form-data file part is
- * held to the same rule (issue #411, `declared_file_name`). It answers
- * `{name, size?}` instead (`body_file_view`).
+ * `graphql` promises a `{query, variables}` member while the engine stores one
+ * string, an envelope or a bare document; the pair is derivable by the rule the
+ * send uses, `graphql_body.hpp`'s classifier (#1111; `body_graphql_view`). A
+ * `binary` body is Postman's `file`: one file as the whole body. Postman's
+ * `file` member promises `src`, the path, never answered here (a path is one
+ * machine's filesystem, the form-data file part's rule, #411,
+ * `declared_file_name`); it answers `{name, size?}` (`body_file_view`).
  */
 const char* postman_body_mode (BodyMode mode) {
     switch (mode) {
@@ -1727,11 +1633,10 @@ JSValue body_field_entry (JSContext* ctx, const FormField& field, bool multipart
     };
     define_text ("key", field.key);
     if (multipart && field.type == FormFieldType::File) {
-        // No `value` at all, rather than the `""` a file part's `value` holds:
-        // an empty string here reads as a text field that happens to be empty,
-        // which is the one distinction `render_form_data_parts` exists to keep
-        // (issue #411). What a script may see is the name the *server* is told,
-        // never the path - see `declared_file_name`.
+        // No `value` at all, not the `""` a file part holds: an empty string
+        // reads as an empty text field, the distinction
+        // `render_form_data_parts` keeps (#411). A script sees the name the
+        // server is told, never the path (`declared_file_name`).
         define ("type", JS_NewString (ctx, "file"));
         define_text ("fileName", vayu::http::declared_file_name (field));
     } else {
@@ -1740,21 +1645,20 @@ JSValue body_field_entry (JSContext* ctx, const FormField& field, bool multipart
             define ("type", JS_NewString (ctx, "text"));
         }
     }
-    // Disabled rows are listed rather than dropped, unlike the string view: the
-    // list is what a script inspects the *request* with, and a row it cannot see
-    // is one it would re-add. The flag is what says the row is not sent.
+    // Disabled rows are listed, unlike in the string view: a script inspects
+    // the request with this list, and a row it cannot see is one it would
+    // re-add. The flag says the row is not sent.
     define ("disabled", JS_NewBool (ctx, !field.enabled));
     (void)JS_PreventExtensions (ctx, entry);
     return entry;
 }
 
 /**
- * @brief The read-only list `.urlencoded` / `.formdata` answer with.
- *
- * Not extensible, and its entries not writable, so `push`, `splice` and a field
- * assignment throw instead of editing a list nothing reads back. #1003 keeps the
- * write surface exactly as it shipped - a whole-body string, or `.raw` - and a
- * list that quietly accepted edits would be the silent-wrong shape again.
+ * The read-only list `.urlencoded` / `.formdata` answer with: not extensible,
+ * entries not writable, so `push`, `splice` and a field assignment throw rather
+ * than edit a list nothing reads back. Writes go through a whole-body string,
+ * `.raw` or `update ()`; a list quietly accepting edits would be the
+ * silent-wrong shape again.
  */
 JSValue body_field_list (JSContext* ctx, const std::vector<FormField>& fields, bool multipart) {
     JSValue list  = JS_NewArray (ctx);
@@ -1767,36 +1671,26 @@ JSValue body_field_list (JSContext* ctx, const std::vector<FormField>& fields, b
 }
 
 /**
- * @brief `.graphql` - Postman's `{query, variables}`, read off the one string.
+ * `.graphql`: Postman's `{query, variables}`, read off the one string. A
+ * GraphQL body is either the `{"query": ...}` envelope the request builder
+ * writes or the bare document an agent or `curl` hands over, and
+ * `graphql_body.hpp` decides which; this asks that classifier, not a copy, so
+ * `.graphql.query` is the query the send carries (a copy could call one body an
+ * envelope here and a document at the wire). Three answers:
  *
- * A GraphQL body is stored as one string that is allowed to be either the
- * `{"query": ...}` envelope the request builder writes or the bare document an
- * agent or a `curl` caller hands over, and `graphql_body.hpp` is what decides
- * which. This asks *that* classifier rather than a second copy of the rule, so
- * `.graphql.query` is the query the send would carry - a copy could call the
- * same body an envelope here and a document at the wire, which is the one
- * failure adding this member could introduce.
+ * - A readable envelope: its `query`, and `variables` when it has them.
+ * - A bare document: `{query: <the document>}`, what wrapping it sends.
+ * - Object-shaped text that does not parse (an unresolved `{{token}}`, a typo)
+ *   or nests past `constants::request_body::MAX_JSON_DEPTH`: **undefined**.
+ *   `graphql_wire_body` passes it through rather than guessing, and a pair
+ *   invented here would be that guess; `.raw` still carries the string.
  *
- * Three answers, one per case the classifier separates:
- *
- * - A readable envelope: its own `query`, and `variables` when it carries them.
- * - A bare document: `{query: <the document>}` - what wrapping it would send.
- * - Object-shaped text that does not parse (an envelope whose `{{token}}` went
- *   unresolved, or a mistyped one), or that nests deeper than
- *   `constants::request_body::MAX_JSON_DEPTH` levels: **undefined**.
- *   `graphql_wire_body` passes that through untouched rather than guessing at
- *   it, and any pair invented here would be the guess it refuses. `.raw` still
- *   carries the string, so the body is described as unreadable rather than
- *   hidden.
- *
- * An empty body answers `undefined` for the reason the header gives: empty in,
- * empty out, and `{query: ""}` would give a bodiless request a query.
- *
- * `variables` is the JSON value the envelope carries, where Postman's is the
- * *text* of its variables editor - a divergence rather than an oversight: Vayu
- * never stored that text, and serializing one here would invent whitespace and
- * key order the user never wrote, which is the thing `graphql_wire_body`
- * refuses to do at the wire. `docs/app/pm-api-compatibility.md` states it.
+ * An empty body answers `undefined`: `{query: ""}` would give a bodiless
+ * request a query. `variables` is the envelope's JSON value, where Postman's is
+ * its editor's text, a deliberate divergence: Vayu never stored that text, and
+ * serializing one would invent whitespace and key order the user never wrote,
+ * which `graphql_wire_body` refuses at the wire
+ * (`docs/app/pm-api-compatibility.md`).
  */
 JSValue body_graphql_view (JSContext* ctx, const std::string& text) {
     if (text.empty ()) {
@@ -1821,28 +1715,25 @@ JSValue body_graphql_view (JSContext* ctx, const std::string& text) {
         // on the shape alone, and there is nothing under the shape to read.
         return JS_UNDEFINED;
     }
-    // The body is a string field the request-body depth bound (#2417) never
-    // looks inside, and the `dump` below recurses (#2672). An envelope nested
-    // past the bound is unreadable, the answer `graphql_get_parameters` gives
-    // it too, so the two readers of one body still agree.
+    // A string field the request-body depth bound (#2417) never looks inside,
+    // and the `dump` below recurses (#2672). Past the bound is unreadable, as
+    // `graphql_get_parameters` answers, so the two readers agree.
     if (vayu::json::exceeds_depth (document, vayu::core::constants::request_body::MAX_JSON_DEPTH)) {
         return JS_UNDEFINED;
     }
-    // QuickJS is handed what nlohmann *read*, never the bytes it read them from.
-    // The two are not the same grammar - a leading byte-order mark is nlohmann's
-    // to skip and `JSON.parse`'s to reject - so parsing the body twice lets the
-    // send carry a query this member answers `undefined` about. Only one reader
-    // of a body may have an opinion, and it is the one the send asks; the dump
-    // is a transport between them, not a second reading.
+    // QuickJS gets what nlohmann read, never the bytes it read them from: the
+    // grammars differ (a leading BOM is nlohmann's to skip and `JSON.parse`'s
+    // to reject), so parsing twice would let the send carry a query this member
+    // calls `undefined`. One reader has an opinion, the one the send asks; the
+    // dump only transports.
     const std::string canonical =
     document.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
     JSValue envelope = JS_ParseJSON (
     ctx, canonical.c_str (), canonical.size (), "<pm.request.body.graphql>");
     if (JS_IsException (envelope)) {
-        // Not reachable through any body: `canonical` is what nlohmann just
-        // serialized, and `replace` leaves it valid JSON even for a lone UTF-8
-        // continuation byte. Handled rather than assumed, because the
-        // alternative is a parse error escaping a getter.
+        // Unreachable: `canonical` is nlohmann's own output, and `replace`
+        // keeps it valid JSON even for a lone continuation byte. Handled so no
+        // parse error escapes a getter.
         JS_FreeValue (ctx, envelope);
         JSValue pending = JS_GetException (ctx);
         JS_FreeValue (ctx, pending);
@@ -1850,10 +1741,9 @@ JSValue body_graphql_view (JSContext* ctx, const std::string& text) {
     }
     JSValue query = JS_GetPropertyStr (ctx, envelope, "query");
     if (!JS_IsString (query)) {
-        // Also not reachable: the classifier returned true on a parse that was
-        // not discarded, which is exactly its "object with a string `query`"
-        // case, and the round trip above preserves the type. Restated as a
-        // guard rather than assumed, so the function stays total.
+        // Unreachable too: the classifier returned true on an undiscarded
+        // parse, its "object with a string `query`" case, and the round trip
+        // keeps the type; a guard keeps the function total.
         JS_FreeValue (ctx, query);
         JS_FreeValue (ctx, envelope);
         return JS_UNDEFINED;
@@ -1873,10 +1763,9 @@ JSValue body_graphql_view (JSContext* ctx, const std::string& text) {
 }
 
 /**
- * @brief `.file` - a binary body's file as a script may see it: `{name}`, plus
- * `size` once the send has measured the file (`FileRef::sha256` is set by the
- * same step). Never `src`: see `postman_body_mode`. Frozen, like every other
- * descriptive member.
+ * `.file`: a binary body's file as a script may see it, `{name}` plus `size`
+ * once the send has measured the file (the step that sets `FileRef::sha256`).
+ * Never `src` (`postman_body_mode`); frozen like every descriptive member.
  */
 JSValue body_file_view (JSContext* ctx, const FileRef& file) {
     JSValue view           = JS_NewObject (ctx);
@@ -1906,12 +1795,9 @@ std::vector<FormField> current_form_fields (const RequestBodyState& state) {
 }
 
 /**
- * The body as a string, and the single answer behind every string context.
- *
- * `toString`, `valueOf`, `toJSON` and `@@toPrimitive` all land here, for the
- * reason `js_url_to_string` gives: concatenation, a template literal, `==`
- * against a string, `JSON.stringify` and `String.prototype`'s generic methods
- * keep behaving the way they did when this was a string.
+ * The body as a string, the one answer behind every string context (`toString`,
+ * `valueOf`, `toJSON`, `@@toPrimitive`), for `js_url_to_string`'s reason:
+ * string operations keep working as they did on a string.
  */
 JSValue js_body_to_string (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
@@ -1940,10 +1826,8 @@ JSValue* func_data) {
     case BODY_MODE:
         return JS_NewString (ctx, postman_body_mode (state->body.mode));
     // `.raw` is the string view for **every** mode, where Postman leaves it
-    // undefined for the two form ones. That is the divergence #411 already
-    // decided: a form body reading as nothing is indistinguishable from a
-    // request with no body, and this object exists to add answers rather than
-    // take one back.
+    // undefined for the two form modes: the divergence #411 decided, as a form
+    // body reading as nothing is indistinguishable from no body.
     case BODY_RAW:
         return JS_NewStringLen (ctx, state->text.data (), state->text.size ());
     case BODY_URLENCODED:
@@ -1954,9 +1838,9 @@ JSValue* func_data) {
         return state->body.mode == BodyMode::FormData ?
         body_field_list (ctx, state->body.fields, /*multipart=*/true) :
         JS_UNDEFINED;
-    // Read off `text` rather than `body.content`, so a script that assigned
-    // `.raw` reads the pair its *new* string carries. One string, one answer -
-    // the two disagreeing would be `.graphql` describing a body no longer sent.
+    // Read off `text`, not `body.content`, so after a `.raw` assignment it
+    // reads the new string's pair: the two disagreeing would describe a body no
+    // longer sent.
     case BODY_GRAPHQL:
         return state->body.mode == BodyMode::GraphQL ?
         body_graphql_view (ctx, state->text) :
@@ -1965,10 +1849,10 @@ JSValue* func_data) {
         return state->body.mode == BodyMode::Binary ?
         body_file_view (ctx, state->body.file) :
         JS_UNDEFINED;
-    // Defined rather than left to the prototype, for the reason #991 gives
-    // about the URL's: `String.prototype` is a String object holding `""`, so
-    // an inherited `length` answers 0 - a plausible number for a body that is
-    // not empty, and `docs/engine/scripting/console-and-examples.md` sets Content-Length from it.
+    // Defined, not inherited, as for the URL (#991): `String.prototype` holds
+    // `""`, so an inherited `length` answers 0, plausible for a non-empty body,
+    // and `docs/engine/scripting/console-and-examples.md` sets Content-Length
+    // from it.
     case BODY_LENGTH:
         return JS_NewInt64 (ctx, static_cast<int64_t> (state->text.size ()));
     default: return JS_UNDEFINED;
@@ -1987,11 +1871,9 @@ JSValue* func_data) {
         return JS_ThrowTypeError (ctx, "not a pm.request.body object");
     }
     if (magic != BODY_RAW) {
-        // The members that *describe* the body rather than carry it. Refused at
-        // the assignment rather than ignored: a script that set `.mode` or
-        // rebuilt `.urlencoded` would otherwise send the body it started with
-        // and be told nothing, which is the exact silent-wrong shape this
-        // program exists to close.
+        // Members describing the body rather than carrying it, refused at the
+        // assignment, not ignored: a script setting `.mode` or rebuilding
+        // `.urlencoded` would send the original body and be told nothing.
         return JS_ThrowTypeError (ctx,
         "pm.request.body.%s is read-only - assign pm.request.body or "
         "pm.request.body.raw to change what is sent, or edit the request's "
@@ -2003,10 +1885,9 @@ JSValue* func_data) {
         return JS_ThrowTypeError (ctx, "pm.request.body.raw must be assigned a string, got %s",
         argc > 0 ? js_type_name (ctx, argv[0]) : "no value");
     }
-    // Only the view moves. What assigning a body *means* - the untouched rule,
-    // the urlencoded parse-back, the form-data refusal - is the write-back's,
-    // and is reached identically whether the script assigned `.raw` or the whole
-    // body. One definition, not two.
+    // Only the view moves: what assigning a body means (the untouched rule, the
+    // urlencoded parse-back, the form-data refusal) is the write-back's,
+    // reached alike from `.raw` or a whole-body assignment.
     state->text = js_to_string (ctx, argv[0]);
     return JS_UNDEFINED;
 }
@@ -2019,9 +1900,9 @@ JSValue* func_data) {
 /// The string view a description stands for, or why it was refused.
 using BodyText = std::expected<std::string, std::string>;
 
-/// A mode a description may name and a script still cannot set, with what to
-/// do instead. No string view carries a multipart part or a file, and a
-/// GraphQL body is one string that `.raw` already takes as its envelope.
+/// A mode a description may name but a script cannot set, with what to do
+/// instead: no string view carries a multipart part or a file, and a GraphQL
+/// body is one string `.raw` already takes as its envelope.
 struct UnsettableBodyMode {
     const char* mode;
     const char* instead;
@@ -2033,13 +1914,11 @@ constexpr auto UNSETTABLE_BODY_MODES = std::to_array<UnsettableBodyMode> ({
 });
 
 /**
- * Whether @p mode may describe a body whose mode is @p current.
- *
- * The write-back keeps a request's body mode (`apply_pm_request_writeback`),
- * so a description naming another mode would be sent as the one the request
- * already has: `{mode: 'raw'}` on a urlencoded body would be parsed back into
- * form fields. Refused instead. A request with no body takes `raw`, which it
- * sends as text - the rule a string assignment follows.
+ * Whether @p mode may describe a body whose mode is @p current. The write-back
+ * keeps a request's body mode (`apply_pm_request_writeback`), so a description
+ * naming another would be sent as the current one (`{mode: 'raw'}` on a
+ * urlencoded body would be parsed back into fields); refused instead. A
+ * bodyless request takes `raw`, sent as text, as a string assignment is.
  */
 std::expected<void, std::string>
 check_settable_body_mode (const std::string& mode, BodyMode current, const char* label) {
@@ -2135,14 +2014,11 @@ BodyText urlencoded_description_text (JSContext* ctx, JSValueConst description, 
 }
 
 /**
- * @brief The string view Postman's body description means for a body of mode
- *        @p current.
- *
- * `body.update ()` takes the description and a lifted script assigns one to
- * `pm.request.body`. Both land on the string view (`RequestBodyState::text`)
- * the write-back already reads, so a description means exactly what assigning
- * its string would, and there is still one definition of what writing a body
- * means. @p label names the surface in every refusal.
+ * The string view Postman's body description means for a body of mode
+ * @p current. `body.update ()` takes a description and a lifted script assigns
+ * one to `pm.request.body`; both land on the string view
+ * (`RequestBodyState::text`) the write-back reads, so a description means what
+ * assigning its string would. @p label names the surface in refusals.
  */
 BodyText body_description_text (JSContext* ctx,
 JSValueConst description,
@@ -2204,15 +2080,12 @@ JSValue js_body_update (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 }
 
 /**
- * @brief A RequestBody object over @p body, with the Postman members on it.
- *
- * A plain property on `pm.request` rather than #991's accessor pair, and the one
- * place this shape departs from that precedent. The URL needed an accessor so
- * that `pm.request.url = x` left a Url object behind; for the body, a string
- * assignment leaving a plain string *is* the shipped contract, and `null` and
- * `delete` both mean "send no body" - an accessor would have to carry an
- * emptied-state flag to keep saying so, machinery bought for a chained access
- * nothing asks for.
+ * A RequestBody object over @p body, with the Postman members. A plain property
+ * on `pm.request`, not #991's accessor pair, the one departure from that
+ * precedent: the URL needed an accessor so `pm.request.url = x` left a Url
+ * object; for the body, a string assignment leaving a plain string is the
+ * contract, and `null` and `delete` mean "send no body", which an accessor
+ * would need an emptied-state flag to keep saying.
  */
 JSValue new_request_body (JSContext* ctx, const Body& body) {
     JSValue object = JS_NewObjectClass (ctx, request_body_class_id);
@@ -2221,8 +2094,7 @@ JSValue new_request_body (JSContext* ctx, const Body& body) {
     }
     auto* state = new RequestBodyState{ body, script_body_view (body) };
     if (JS_SetOpaque (object, state) < 0) {
-        // The object is not of this class, so the finalizer will never run and
-        // nothing else would free the state.
+        // The object is not of this class, so no finalizer will free the state.
         delete state;
         JS_FreeValue (ctx, object);
         return JS_EXCEPTION;
@@ -2243,10 +2115,9 @@ JSValue new_request_body (JSContext* ctx, const Body& body) {
     JS_PROP_CONFIGURABLE);
     JS_FreeAtom (ctx, to_primitive);
 
-    // Accessors, not values: a read is answered from the state, and a write
-    // reaches it or is refused by name. `this` carries the state, so the pair
-    // needs no bound data - and a getter pulled off the object and called on
-    // something else finds no state and throws rather than reading one.
+    // Accessors: a read comes from the state, a write reaches it or is refused
+    // by name. `this` carries the state, so no bound data, and a getter called
+    // on another object finds no state and throws.
     const auto define_accessor = [&] (const char* name, int magic) {
         JSAtom atom = JS_NewAtom (ctx, name);
         JS_DefinePropertyGetSet (ctx, object, atom,
@@ -2278,17 +2149,13 @@ bool is_body_description (JSContext* ctx, JSValueConst value) {
 }
 
 /**
- * @brief The body text a value carries, the sibling of `script_url_text`, for a
- *        request whose body mode is @p current.
- *
- * A JS string is itself; a RequestBody object is the string view it holds, which
- * a `.raw` assignment has already moved; Postman's `{mode, raw}` description is
- * the view it stands for (`body_description_text`). Anything else is refused.
- *
- * Deliberately *not* "any object, via toString": `pm.request.body = {}` would
- * then become the string `[object Object]` and reach the wire, which is exactly
- * the silent-wrong-request class this program exists to close. A description is
- * an explicit shape, recognised by its `mode`, and read member by member.
+ * The body text a value carries, `script_url_text`'s sibling, for a request
+ * whose body mode is @p current: a JS string is itself, a RequestBody its
+ * string view (which a `.raw` assignment moved), Postman's `{mode, raw}`
+ * description the view it stands for (`body_description_text`); anything else
+ * is refused. Not "any object, via toString", for `script_url_text`'s reason; a
+ * description is an explicit shape, recognised by `mode` and read member by
+ * member.
  */
 BodyText script_body_text (JSContext* ctx, JSValueConst value, BodyMode current) {
     if (JS_IsString (value)) {
@@ -2322,12 +2189,10 @@ bool request_this_is_usable (JSContext* ctx, JSValueConst this_val, const char* 
 }
 
 /**
- * `this.<member>.<method> (...args)`, for a Request method that is its
- * member's method under Postman's other name.
- *
- * Looked up at call time rather than bound at setup, so a script that replaced
- * `pm.request.headers` with an object of its own is told so, rather than
- * writing to the object it replaced - which the write-back no longer reads.
+ * `this.<member>.<method> (...args)`, for a Request method that is a member's
+ * method under Postman's other name. Looked up at call time, not bound at
+ * setup, so a script that replaced `pm.request.headers` is told so rather than
+ * writing to an object the write-back no longer reads.
  */
 JSValue call_member_method (JSContext* ctx,
 JSValueConst request,
@@ -2358,10 +2223,10 @@ JSValueConst* argv) {
     return JS_Call (ctx, fn.get (), target.get (), argc, argv);
 }
 
-/// A Request method that is one of its members' methods by another name.
-/// `addHeader` is `upsert`, not `add` (#3131): a lifted script calls it on a
-/// header the request may already carry, and Postman's appended duplicate has
-/// nowhere to live in a request that holds one value per name.
+/// A Request method that is a member's method by another name. `addHeader` is
+/// `upsert`, not `add` (#3131): a lifted script calls it on a header the
+/// request may carry, and a duplicate has nowhere to live in one value per
+/// name.
 struct RequestAlias {
     const char* name;
     const char* member;
@@ -2448,12 +2313,12 @@ JSValue request_json_body (JSContext* ctx, JSValueConst body) {
 }
 
 /**
- * `toJSON ()` - the request as a plain object: `url`, `method`, `header`,
- * `body` (absent when there is none) and the `auth` the script assigned
- * (absent when it assigned none), read from `pm.request` as it stands, so
- * it describes what the write-back would send. `url` is the string, the answer
- * `pm.request.url.toJSON ()` gives, where Postman's is its Url object's parts.
- * Being `toJSON`, it is also what `JSON.stringify (pm.request)` writes.
+ * `toJSON ()`: the request as a plain object (`url`, `method`, `header`, `body`
+ * when there is one, the assigned `auth` when there is one), read from
+ * `pm.request` as it stands, so it describes what the write-back would send.
+ * `url` is the string `pm.request.url.toJSON ()` gives, where Postman's is its
+ * Url object's parts. As `toJSON`, it is what `JSON.stringify (pm.request)`
+ * writes.
  */
 JSValue js_request_to_json (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
@@ -2549,11 +2414,11 @@ JSValue authorize_using_description (JSContext* ctx, JSValueConst type, JSValueC
 }
 
 /**
- * `authorizeUsing (type, options?)` - Postman's setter for the request's auth,
- * which assigns `pm.request.auth`. `null` removes an assigned one, so the
- * request's own auth applies again. Read here by the reader the write-back
- * uses, so a type it would refuse throws at the call, naming itself, where
- * Postman ignores the call and sends the request unauthenticated.
+ * `authorizeUsing (type, options?)`: Postman's auth setter, assigning
+ * `pm.request.auth`; `null` removes an assigned one, so the request's own auth
+ * applies again. Read by the write-back's reader, so a type it would refuse
+ * throws at the call, naming itself, where Postman ignores the call and sends
+ * the request unauthenticated.
  */
 JSValue js_request_authorize_using (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (!request_this_is_usable (ctx, this_val, "authorizeUsing")) {
@@ -2638,7 +2503,7 @@ void install_request_methods (JSContext* ctx, JSValue request) {
 void setup_pm_request (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
 
-    // Free old request object if it exists to prevent memory leak
+    // A pooled context still holds the previous execution's object; free it.
     JSValue old_request = JS_GetPropertyStr (ctx, pm, "request");
     if (!JS_IsUndefined (old_request)) {
         JS_FreeValue (ctx, old_request);
@@ -2653,9 +2518,9 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
         JS_SetPropertyStr (ctx, request, "method",
         JS_NewString (ctx, to_string (data->request->method)));
 
-        // pm.request.headers - the object the write-back reads, so its methods
-        // and plain assignment reach the same property set. Which set that is
-        // depends on the hook - see script_request_header_view.
+        // The object the write-back reads, so its methods and plain assignment
+        // reach one property set; which set depends on the hook
+        // (`script_request_header_view`).
         JSValue headers = JS_NewObject (ctx);
         install_header_methods (ctx, headers, /*mutators=*/true);
         for (const auto& [key, value] : script_request_header_view (*data)) {
@@ -2663,20 +2528,17 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
         }
         JS_SetPropertyStr (ctx, request, "headers", headers);
 
-        // pm.request.body - Postman's RequestBody object, not the string it used
-        // to be (issue #1003). It still *reads* as that string in every context
-        // JavaScript allows, and the string is still what an assignment means.
-        // A bodyless request defines no property at all, so
-        // `typeof pm.request.body` stays the way a script tells "no body" from
-        // "a body that happens to be empty".
+        // Postman's RequestBody object (#1003), still reading as its string in
+        // every context JavaScript allows, and the string is what an assignment
+        // means. A bodyless request defines no property, so
+        // `typeof pm.request.body` tells "no body" from "an empty body".
         if (data->request->body.mode != BodyMode::None) {
             JSValue body = new_request_body (ctx, data->request->body);
             if (JS_IsException (body)) {
-                // Defining the exception sentinel as a property would make
-                // `pm.request.body` an object no read can touch. A request with
-                // no reachable body reads as one with no body, which is the
-                // failure this can degrade to honestly. Same guard, same
-                // reason, as install_request_url.
+                // The exception sentinel as a property would make
+                // `pm.request.body` an object no read can touch; an unreachable
+                // body reads as none, the honest degradation, as in
+                // `install_request_url`.
                 JS_FreeValue (ctx, body);
             } else {
                 JS_SetPropertyStr (ctx, request, "body", body);
@@ -2690,22 +2552,19 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
 }
 
 /**
- * `pm.info` - what request this script is attached to, and which hook it is.
- *
- * Rebuilt per execution alongside pm.request / pm.response, because contexts
- * are pooled: an object left over from the previous script would report the
- * previous request's name. A field with no value is left off the object
- * entirely, so a script reads `undefined` rather than an empty string that
- * looks like an answer.
+ * `pm.info`: which request this script is attached to, and which hook. Rebuilt
+ * per execution with pm.request / pm.response because contexts are pooled, and
+ * a leftover would report the previous request's name. A field with no value is
+ * left off, so a script reads `undefined`, not an empty string that looks like
+ * an answer.
  *
  * `iteration` and `vu` are present wherever a real one exists: a scenario run's
- * steps, a load run's sampled response (issue #994), and a send that bound a
- * data row, which is row 0 of 1. `iterationCount` is narrower - the scenario
- * runner's total, or that send's `1` - and no load run sets it: a
- * duration-bounded one has no total, and a field readable from one load shape
- * and not another is worse than one that is never readable there. An ordinary
- * Send sets none of the three, so the script reads `undefined` (see
- * ScriptContext).
+ * steps, a load run's sampled response (#994), and a send that bound a data row
+ * (row 0 of 1). `iterationCount` is narrower (the scenario runner's total, or
+ * that send's `1`): no load run sets it, since a duration-bounded one has no
+ * total and a field readable from one load shape and not another is worse than
+ * one never readable there. An ordinary Send sets none of the three
+ * (`ScriptContext`).
  */
 void setup_pm_info (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
@@ -2771,12 +2630,11 @@ void setup_pm_info (JSContext* ctx, JSValue pm) {
 // pm.request write-back (pre-request scripts)
 // ============================================================================
 
-// Read a header object into `out`, naming it @p label in every message it can
-// reject with. Two callers - the pm.request write-back and pm.sendRequest's
-// object header form - because the rules below (empty name, non-primitive
-// value, a case-insensitive clash) are properties of HTTP headers rather than
-// of either surface. @p suggest_delete adds the removal hint that only means
-// something for a live pm.request.headers object.
+// Reads a header object into `out`, naming it @p label in every refusal. Two
+// callers, the pm.request write-back and pm.sendRequest's object header form,
+// because the rules (empty name, non-primitive value, a case-insensitive clash)
+// belong to HTTP headers, not either surface. @p suggest_delete adds the
+// removal hint that means something only for a live pm.request.headers.
 // @return why the headers were rejected, or nullopt when `out` is filled.
 std::optional<std::string> read_header_object (JSContext* ctx,
 JSValueConst js_headers,
@@ -2805,19 +2663,18 @@ Headers& out) {
         }
 
         ScopedValue value (ctx, JS_GetProperty (ctx, js_headers, props[i].atom));
-        // A header field-name cannot be empty, and a value that is not a
-        // primitive has no honest wire form. Both are refused by name rather
-        // than dropped, because a silently missing header is the very defect
-        // this write-back exists to fix.
+        // An empty field-name, or a value with no honest wire form, is refused
+        // by name, not dropped: a silently missing header is the defect this
+        // write-back exists to fix.
         if (key.empty ()) {
             error = std::string (label) + " has an empty header name";
         } else if (JS_IsString (value.get ()) || JS_IsNumber (value.get ()) ||
         JS_IsBool (value.get ())) {
-            // JS object keys are case-sensitive; HTTP header names are not. So
-            // `Authorization` and `authorization` are two properties over there
-            // and one header over here, and whichever enumerated last would
-            // silently win. Which one the script meant is unknowable, and one
-            // of them is an Authorization header - refuse instead of guessing.
+            // JS keys are case-sensitive, HTTP names not: `Authorization` and
+            // `authorization` are two properties there and one header here, and
+            // the last enumerated would silently win. Which was meant is
+            // unknowable, and one is an Authorization header, so refuse rather
+            // than guess.
             if (auto clash = out.find (key); clash != out.end () && clash->first != key) {
                 error = std::string (label) + " has both '" + clash->first +
                 "' and '" + key +
@@ -2848,12 +2705,11 @@ namespace {
 
 /**
  * The script's single-valued header object applied back onto the request's
- * lines (issue #2466). A name whose value the script left as it read it keeps
- * every line it had, in place and in its own spelling, so a repeated header
- * survives a script that never touched it - the same "unchanged means
- * untouched" rule the body follows below. A changed name becomes one line
- * where its first line was; a removed name loses every line; a new one is
- * appended.
+ * lines (#2466). A name whose value the script left as read keeps every line it
+ * had, in place and spelling, so a repeated header survives a script that never
+ * touched it (the body's "unchanged means untouched" rule). A changed name
+ * becomes one line where its first was; a removed name loses every line; a new
+ * one is appended.
  */
 HeaderList apply_script_headers (const HeaderList& lines, const Headers& written) {
     const Headers shown = lines.folded ();
@@ -2950,15 +2806,13 @@ bool remove_last_query_pair (std::string& url, const vayu::http::UrlQueryParam& 
 }
 
 /**
- * Take off @p staged the credential the engine applied to @p before, so the
- * script's own auth replaces it rather than landing beside it.
- *
- * Only what the engine wrote, and only while the script left it as it read
- * it: `Request::auth_header` names the header and `auth_query_param` the query
- * pair. A value the script wrote itself under either is the script's, and a
- * header the engine did not write - typed on the request, or skipped by
- * `apply_auth` because one was there - is not touched, so it still wins over
- * the assigned auth as it wins over the request's own (#2475).
+ * Takes off @p staged the credential the engine applied to @p before, so the
+ * script's own auth replaces it rather than landing beside it: only what the
+ * engine wrote (`Request::auth_header` the header, `auth_query_param` the query
+ * pair), and only while the script left it as read. A value the script wrote
+ * under either is the script's, and a header the engine did not write (typed on
+ * the request, or skipped by `apply_auth` because one was there) is untouched,
+ * so it wins over the assigned auth as over the request's own (#2475).
  */
 void drop_engine_credential (const Request& before, const Headers& written, Request& staged) {
     if (!before.auth_header.empty ()) {
@@ -2982,11 +2836,11 @@ void drop_engine_credential (const Request& before, const Headers& written, Requ
 }
 
 /**
- * A `pm.request.auth` the script assigned, composed onto @p staged in place of
- * the engine's: read by `pm.sendRequest`'s reader, resolved against the
- * scopes as the script left them, then applied by `apply_auth`. Undefined or
- * null - never assigned, deleted, or `authorizeUsing (null)` - leaves the
- * request's own auth as it is, which is what an absent auth means in Postman.
+ * A script-assigned `pm.request.auth`, composed onto @p staged in place of the
+ * engine's: read by `pm.sendRequest`'s reader, resolved against the scopes as
+ * the script left them, applied by `apply_auth`. Undefined or null (never
+ * assigned, deleted, or `authorizeUsing (null)`) leaves the request's own auth,
+ * what an absent auth means in Postman.
  */
 std::optional<std::string> apply_script_auth (JSContext* ctx,
 JSValueConst js_auth,
@@ -3016,27 +2870,24 @@ Request& staged) {
 } // namespace
 
 /**
- * @brief Apply the script's `pm.request` back onto the request that will be sent.
+ * Applies the script's `pm.request` back onto the request to be sent. The JS
+ * object is authoritative, not a diff: its header set at return is the wire set
+ * (a name left as read keeps its repeated lines, `apply_script_headers`), so
+ * `delete pm.request.headers['Authorization']` removes an engine-applied header
+ * and dropping `pm.request.body` drops the body; the one rule true for a script
+ * that replaces `pm.request` wholesale.
  *
- * The JS object is authoritative, not a diff: the header set it holds when the
- * script returns is the header set that goes on the wire (a name it left as
- * it read it keeps its repeated lines, `apply_script_headers`), so
- * `delete pm.request.headers['Authorization']` removes an engine-applied
- * header, and dropping `pm.request.body` drops the body. That is the only rule
- * that stays true for a script which replaces `pm.request` wholesale.
+ * Precedence over engine-applied auth falls out of the ordering:
+ * `build_request` resolves auth before the script runs, so the script sees the
+ * real outgoing set and writes later. Auth waiting on the script
+ * (`apply_late_auth`: a credential naming a variable, or any `{{name}}` of a
+ * request a pre-request script runs before, #2521) is applied after it, so the
+ * script's set lacks that header and a header it sets still wins. An assigned
+ * `pm.request.auth` replaces the engine's credential and stops the deferred one
+ * (`apply_script_auth`).
  *
- * Precedence over engine-applied auth falls out of the ordering rather than
- * being a special case: `build_request` resolves auth into the request before
- * the script runs, so the script sees the real outgoing set and its writes are
- * simply later. Auth that waits on the script (`apply_late_auth`: a credential
- * naming a variable, or any `{{name}}` of a request a pre-request script runs
- * before, #2521) is applied after it, so the script's set lacks that header and
- * a header the script sets still wins. An assigned `pm.request.auth` replaces
- * the engine's credential and stops the deferred one (`apply_script_auth`).
- *
- * All-or-nothing. Every field is staged and validated before anything is
- * committed, so a script that sets a good header and a bad method sends
- * neither instead of half of what it asked for.
+ * All-or-nothing: every field is staged and validated before anything commits,
+ * so a good header and a bad method send neither.
  *
  * @return why the write-back was rejected, or nullopt when it was applied.
  */
@@ -3056,9 +2907,9 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
 
     Request staged = request;
 
-    // Either shape: the Url object `pm.request.url` normally holds, or a plain
-    // string, which is what a script that replaced `pm.request` wholesale with
-    // an object literal leaves there. Both are the URL; neither is a diff.
+    // Either shape: the Url object `pm.request.url` normally holds, or the
+    // plain string a script that replaced `pm.request` with a literal leaves;
+    // both are the URL, neither a diff.
     ScopedValue js_url (ctx, JS_GetPropertyStr (ctx, js_request.get (), "url"));
     std::string url_error;
     auto url_text = script_url_text (ctx, js_url.get (), &url_error);
@@ -3079,9 +2930,9 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
         std::string (js_type_name (ctx, js_method.get ()));
     }
     std::string method_text = js_to_string (ctx, js_method.get ());
-    // `pm.request.method = 'post'` means POST. Upper-casing is a normalisation
-    // of a value the script clearly meant, not the silent acceptance of a
-    // wrong one - an unrecognised verb below still fails loudly.
+    // `pm.request.method = 'post'` means POST: normalising a value plainly
+    // meant, not accepting a wrong one; an unrecognised verb still fails
+    // loudly.
     method_text = vayu::utils::ascii_upper (method_text);
     if (auto parsed = parse_method (method_text)) {
         staged.method = *parsed;
@@ -3107,56 +2958,51 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
     !staged_text) {
         return std::move (staged_text.error ());
     } else {
-        // Any shape: the RequestBody object `pm.request.body` normally holds, a
-        // plain string or a Postman description, which is what an assignment
-        // leaves there. Each is the body as a string, and all three mean the
-        // same thing from here on.
+        // Any shape (the RequestBody object, a plain string, a Postman
+        // description) is the body as a string, the same from here on.
         std::string body_text = std::move (*staged_text);
-        // Every other member of pm.request is authoritative rather than a diff:
-        // whatever the object holds is what is sent. `body` cannot be read that
-        // way for a form mode, because the string the script was handed is a
-        // *view* of the fields - applying it back unconditionally would rewrite
-        // the field list of every request whose script merely read the body
-        // (dropping the disabled rows the view leaves out), and would refuse
-        // every form-data request outright. So an unchanged string means
-        // untouched, and the body is left exactly as it stands.
+        // Every other member is authoritative, but `body` cannot be for a form
+        // mode: its string is a view of the fields, and applying it back would
+        // rewrite the field list of every request whose script merely read the
+        // body (dropping the disabled rows the view omits) and refuse every
+        // form-data request. So an unchanged string means untouched, and the
+        // body stays as it stands.
         const bool untouched = staged.body.mode != BodyMode::None &&
         body_text == script_body_view (staged.body);
         if (untouched) {
-            // Nothing to apply. The wire outcome is identical either way for a
-            // content mode; for a form mode this is what keeps a read-only
-            // script from rewriting the body it only looked at.
+            // Nothing to apply: the wire outcome is identical for a content
+            // mode, and for a form mode this keeps a read-only script from
+            // rewriting the body.
         } else if (staged.body.mode == BodyMode::FormData) {
-            // One of the two modes whose string view is not what goes on the
-            // wire (binary is the other), so it cannot take a string back.
-            // Parsing one into text parts would also be the wrong shape the
-            // moment a part can be a file (issue #393): a script appending a
-            // field would silently drop the upload. Refused rather than applied
-            // to a body the transfer layer would then ignore.
+            // One of the two modes whose view is not the wire (binary is the
+            // other), so it cannot take a string back, and text parts would be
+            // the wrong shape once a part can be a file (#393): an appended
+            // field would drop the upload. Refused rather than applied to a
+            // body the transfer ignores.
             return std::string (
             "pm.request.body cannot be assigned on a form-data request: its "
             "parts are multipart, not a string - edit the request's form "
             "fields, or delete pm.request.body to send no body");
         } else if (staged.body.mode == BodyMode::Binary) {
-            // The body is a file, and a script never chooses which: the string
-            // view names it, and a string written back would be sent as
-            // nothing at all, since this mode sends `file` and not `content`.
+            // The body is a file a script never chooses: the view names it, and
+            // a string written back would send nothing, as this mode sends
+            // `file`, not `content`.
             return std::string (
             "pm.request.body cannot be assigned on a binary request: its body "
             "is a file, not a string - choose the file in the request, or "
             "delete pm.request.body to send no body");
         } else if (staged.body.mode == BodyMode::Form) {
-            // The string view is the wire body here, so it parses straight back
-            // into the fields the transfer layer reads. `content` is cleared to
-            // hold the type's invariant: exactly one of the two carries a body.
+            // The view is the wire body here, so it parses straight back into
+            // the fields; `content` is cleared to keep the invariant that
+            // exactly one carries a body.
             staged.body.fields = vayu::http::parse_urlencoded (body_text);
             staged.body.content.clear ();
         } else {
             staged.body.content = std::move (body_text);
             if (staged.body.mode == BodyMode::None) {
-                // A body on a request that had none: Text is the mode that means
-                // "this string, as written". The send derives `text/plain` for
-                // it unless the script set a Content-Type (issue #2464).
+                // A body on a bodyless request: Text means "this string, as
+                // written", sent as `text/plain` unless the script set a
+                // Content-Type (#2464).
                 staged.body.mode = BodyMode::Text;
             }
         }
