@@ -6,7 +6,6 @@
  */
 
 /**
- * @file log-reader.ts
  * @brief The main-process reader behind the Logs tab (#3635): a listing of
  *        `<data-dir>/logs/`, a bounded page merged across files (backward, or
  *        forward from a jump), and a polling tail.

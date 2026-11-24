@@ -6,7 +6,6 @@
  */
 
 /**
- * @file log-ipc.ts
  * @brief The two IPC channels #1558 adds: `log:record` (renderer -> main,
  *        one-way - the `runs:progress` / `icon:signal` shape - forwarding a
  *        `error-logger.ts` record onto the app's `"renderer"` logger) and

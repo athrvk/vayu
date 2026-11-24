@@ -80,8 +80,8 @@ export const ENGINE_LOCK_FILE = "vayu.lock";
 /**
  * Subdirectories the engine creates inside its data dir, named here because the
  * app shows both paths in Settings - General and the engine is what defines
- * them (`engine/src/daemon.cpp:113-114`). Renaming one there without changing
- * it here shows the user a directory that does not exist.
+ * them (`run_daemon` in `engine/src/daemon.cpp`). Renaming one there without
+ * changing it here shows the user a directory that does not exist.
  */
 export const ENGINE_LOGS_DIR = "logs";
 export const ENGINE_DB_DIR = "db";
@@ -263,8 +263,6 @@ export const TITLEBAR_HEIGHT_BY_PLATFORM = {
  * centres on (`headerHeight / 2 - MACOS_TRAFFIC_LIGHTS_HEIGHT / 2`); it is a
  * convention rather than a published Apple figure, so it is named here to be
  * adjusted in one place if it proves wrong on a real machine.
- *
- * The original formula used 16, which was wrong in the other direction.
  */
 export const TRAFFIC_LIGHT_FRAME_HEIGHT = 14;
 /**
