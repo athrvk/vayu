@@ -6,16 +6,15 @@
  */
 
 /**
- * Says aloud that a run started, and how it ended (#3498). The pill, the
- * banner and the run tab change only on screen, and a run is long enough that
- * the user is often on another tab by the time it ends.
+ * Says aloud that a run started, and how it ended (#3498). The pill, the banner and the run tab
+ * change only on screen, and a run is long enough that the user is often on another tab when it
+ * ends.
  *
- * Mounted once by `Shell`, not by the dashboard or the run tab: only one tab's
- * surface is mounted at a time and the history view remounts per run, and a
- * live region has to be in the DOM, empty, before the change it announces. It
- * is therefore an `sr-only` region rather than the visible line, the deliberate
- * exception to `docs/design-system/accessibility.md`'s rule. Polite, for the reason
- * `ResponseAnnouncer` gives.
+ * Mounted once by `Shell`, not by the dashboard or the run tab: only one tab's surface is mounted
+ * at a time, the history view remounts per run, and a live region has to be in the DOM, empty,
+ * before the change it announces. Hence an `sr-only` region, not the visible line, the deliberate
+ * exception to `docs/design-system/accessibility.md`'s rule. Polite, for `ResponseAnnouncer`'s
+ * reason.
  */
 
 import { useState } from "react";
@@ -56,9 +55,9 @@ export function RunAnnouncer() {
 		endedAs,
 	};
 
-	// React's adjust-state-during-render pattern, as in `ResponseAnnouncer`: the
-	// first render records where the runs stand and says nothing, and each later
-	// move is compared with the last one heard.
+	// React's adjust-state-during-render pattern, as in `ResponseAnnouncer`: the first render
+	// records where the runs stand and says nothing; each later move is compared with the last one
+	// heard.
 	const [heard, setHeard] = useState<Heard>({ dashboard, scenario, message: "", seq: 0 });
 	const moved =
 		heard.dashboard.runId !== dashboard.runId ||
