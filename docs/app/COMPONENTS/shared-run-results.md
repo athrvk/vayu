@@ -283,11 +283,10 @@ reading of the same run and the aggregate of both, since a script sees one
 response at a time and cannot assert a p99.
 
 The history detail's Overview renders it, and the dashboard shows that same
-Overview for a finished run (#2220). Until #726 only the dashboard's own report
-view did, and the dashboard is mounted **only while a run is being watched**,
-so a run reopened from History showed thresholds, status codes and schema verdicts and never said whether its
+Overview for a finished run (#2220). The dashboard is mounted **only while a run is being watched**,
+so were it the only place to show the Overview, a run reopened from History would show thresholds, status codes and schema verdicts and never say whether its
 assertions had run at all: a run that failed 13 of 100 sampled test executions
-read exactly like one that asserted nothing, precisely where someone audits
+would read exactly like one that asserted nothing, precisely where someone audits
 results.
 
 **The named failures are the History half only.** The engine records them on a
