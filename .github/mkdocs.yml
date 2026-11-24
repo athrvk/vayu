@@ -153,7 +153,6 @@ nav:
       - Overview: app/architecture.md
       - Design System: design-system.md
       - UX Writing: ux-writing.md
-      - State Management: app/state-management.md
       - Variables: app/variable-resolution.md
       - Data-Driven Runs: app/data-driven-runs.md
       - OpenAPI Collections: app/openapi.md
@@ -222,6 +221,22 @@ nav:
           - "Shared: Variable Input": app/COMPONENTS/shared-variable-input.md
           - UI Primitives: app/COMPONENTS/ui-primitives.md
           - Patterns and State: app/COMPONENTS/patterns.md
+      - State Management:
+          - Overview: app/state-management/index.md
+          - Tabs, Layout and Session Stores: app/state-management/tabs-layout-session.md
+          - Data File, Spec File and Recovery Stores: app/state-management/data-and-spec-files.md
+          - Engine, Response and Console Stores: app/state-management/engine-and-response.md
+          - Save and Entity Draft Stores: app/state-management/save-and-drafts.md
+          - Preference Stores: app/state-management/preferences.md
+          - Dashboard and Live Run Stores: app/state-management/run-live-state.md
+          - Notice, Menu and Modal Stores: app/state-management/notices-and-menus.md
+          - Module-Local Stores: app/state-management/module-local-stores.md
+          - TanStack Query Hooks: app/state-management/query-hooks.md
+          - Query Keys and Cache Policy: app/state-management/query-keys.md
+          - Engine and Variable Hooks: app/state-management/engine-and-variable-hooks.md
+          - RequestBuilderContext: app/state-management/request-builder-context.md
+          - Save and Draft Hooks: app/state-management/draft-hooks.md
+          - Flows and Best Practices: app/state-management/flows-and-practices.md
       - MCP Internals: engine/mcp/internals.md
 
 markdown_extensions:

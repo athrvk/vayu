@@ -9,7 +9,7 @@
  * The renderer state docs name real hooks and real constants. They have to stay
  * real.
  *
- * `docs/app/state-management.md` had drifted into documenting three hooks that
+ * `docs/app/state-management/` had drifted into documenting three hooks that
  * do not exist (`useSSE`, `useEngine().startLoadTest`, `useStopRunMutation`), a
  * fourth that never did (`useCollectionQuery`), and a `HISTORICAL_METRICS_CAP`
  * asserted four times across two files - all of it read as authoritative,
@@ -63,7 +63,7 @@ const DOCS = DOC_READING_GUARDS.rendererState.paths.flatMap(pagesOf);
 const [ENGINE_CONSTANTS, CURL_VERSION_MAP] = ENGINE_READING_GUARDS.rendererStateOwners.paths;
 const OWNED_ELSEWHERE: Record<string, string> = {
 	// The renderer's DEFAULT_MAX_RETAINED_TICKS and this are one number in two
-	// places, and state-management.md says so - so it has to still be there.
+	// places, and state-management/run-live-state.md says so - so it has to still be there.
 	DEFAULT_MAX_LIVE_TICKS: ENGINE_CONSTANTS,
 	// api-integration/endpoints.md explains which libcurl constant `httpVersion: "http2"`
 	// becomes; the mapping is the engine's.
