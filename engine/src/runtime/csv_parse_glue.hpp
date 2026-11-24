@@ -8,7 +8,6 @@
  */
 
 /**
- * @file csv_parse_glue.hpp
  * @brief The factory around the vendored `csv-parse/lib/sync`
  *        (engine/vendor/csv-parse, #2653).
  *

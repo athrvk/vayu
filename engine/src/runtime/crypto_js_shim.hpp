@@ -8,7 +8,6 @@
  */
 
 /**
- * @file crypto_js_shim.hpp
  * @brief The `crypto-js` the `require()` shelf hands out (#2578): Vayu's own
  *        code with crypto-js's shape, not the library.
  *
