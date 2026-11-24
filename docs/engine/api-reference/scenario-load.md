@@ -222,7 +222,7 @@ One entry per declared `control.transaction` name that closed at least once this
 `unresolvedTokens` (issue #1503) counts, per step, how many of its executions sent a `{{token}}` composition the residual-token pass still could not answer
 - issue #1495 added a real resolution attempt here (against the executing virtual user's own scope overlay, see [`elements.md`](../elements.md#load-paths)), but the load path's rule is unchanged: never refused, only counted, so a name still unanswered (or a header-name collision the attempt itself produced) goes on the wire regardless.
 `preRequestScript` is `"skipped"` for a step whose `script.pre` did not run inline this run and absent otherwise - a step whose `script.pre` did run inline reports its real outcome in `elements` instead, never both.
-Neither `unresolvedTokens` nor `preRequestScript` ever fails the run by itself; both also feed the top-level `warnings` array below.
+Neither `unresolvedTokens` nor `preRequestScript` ever fails the run by itself; both also feed the top-level `warnings` array ([Collection run verdicts](collection-runs.md), under `warnings`).
 `extractorMisses` (#3053) counts the step's extractions that found nothing and so unset their variable, across every virtual user and iteration; it is absent at 0.
 A miss is filed under its element's `missing` too (or `skipped`, for an optional `extract.json` that could not read the body), and a miss a `default` answered is neither: the rule is in [`elements.md`](../elements.md#kinds).
 
@@ -237,14 +237,16 @@ A miss is filed under its element's `missing` too (or `skipped`, for an optional
 **`tests`, `postRequestScript(s)` and `preRequestScript(s)` are refused outright** (`refuse_legacy_script_fields`), the same rule `POST /execute`, `PUT /requests/:id` and `PUT /collections/:id` already applied since issue #1514 - a payload carrying any of the five names (a real value, not `null`) is a `400`, before the run row exists.
 The name it points a caller at depends on the shape:
 `requestElements` for a single target (this endpoint's own `elements` means the run-level override, not a script source, and pointing there would send a caller straight into a second refusal), plain `elements` for a scenario (its steps read theirs off the bound collection's stored elements, which no field on this payload can name more precisely).
-`POST /runs` was the one route that still read the old names on a single target - it had nothing else to run a script through until its own element pipeline existed - and issue #1594 closed that gap: `requestElements` (above) is a single target's own script slot now, the same way a scenario's steps already read theirs off the plan's compiled elements.
+`POST /runs` was the one route that still read the old names on a single target - it had nothing else to run a script through until its own element pipeline existed - and issue #1594 closed that gap:
+[`requestElements`](load-runs.md#the-requestelements-array-a-single-request-runs-own-step-level-elements) is a single target's own script slot now, the same way a scenario's steps already read theirs off the plan's compiled elements.
 A caller still sending `tests` gets the same refusal every other route already gives; MCP's `start_load_run` never sends it - it folds the agent-facing `postRequestScript` / `tests` argument into a `script.post` entry of `requestElements` client-side (see [mcp/request-composition.md](../mcp/request-composition.md#request-composition)).
 
 **A `script.pre` element only reaches the wire when it is marked to.**
 The ad-hoc `preRequestScript(s)` field itself is refused (see above, same as `tests`) - a pre-request script only ever rides as a stored `script.pre` element now, on either run shape.
 Unmarked (`config.inline` unset, no `elements.scripts: "allInline"` override), it never runs - there is no pre-request replay to defer it to, unlike `script.post` - so a request that signs itself in one is sent unsigned.
 Since issue #1503 this is no longer silent on the scenario shape: a step whose request carries an un-inlined pre-request script reports `preRequestScript: "skipped"` on its `scenario.steps` entry, and the run's `warnings` array carries one line naming how many steps did.
-The single-target shape reports the same fact differently (see `requestElements` above): an un-inlined `script.pre` element's own entry in `summary["elements"]` counts every submission under `skipped` (never `deferred`, which is only for a `script.post` the replay runs) instead of a separate warning line.
+The single-target shape reports the same fact differently (see [`requestElements`](load-runs.md#the-requestelements-array-a-single-request-runs-own-step-level-elements)):
+an un-inlined `script.pre` element's own entry in `summary["elements"]` counts every submission under `skipped` (never `deferred`, which is only for a `script.post` the replay runs) instead of a separate warning line.
 
 **Accepted ranges.**
 The numeric config is range-checked **before the run row is created**, so a rejected request leaves no `pending` row behind.

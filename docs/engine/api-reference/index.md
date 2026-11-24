@@ -171,7 +171,7 @@ The pre-consolidation paths served as deprecated aliases for a release cycle and
 | 429 | A start refused at its cap: `oauth2_authorize_limit_reached` (16 unsettled sign-in attempts), `mock_issuer_limit_reached` (8 mock issuers) |
 | 500 | Internal server error, including a storage failure that is neither a full disk nor a lock ([resource writes](resource-writes.md#a-storage-failure-is-not-a-400)) |
 | 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
-| 503 | Engine is shutting down (`POST /runs`, see below), or the database stayed locked past its busy timeout (a resource write; carries `Retry-After: 1`) |
+| 503 | Engine is shutting down (`POST /runs`, [Shutdown](scenario-load.md#scenario-load-runs)), or the database stayed locked past its busy timeout (a resource write; carries `Retry-After: 1`) |
 | 504 | OAuth 2.0 token endpoint did not answer within the `defaultTimeout` setting (`/oauth2/token`, `oauth2_timeout`) |
 | 507 | The disk holding the data is full (a resource write, `insufficient_storage`) |
 

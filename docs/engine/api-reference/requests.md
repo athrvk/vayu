@@ -269,7 +269,7 @@ the last two are `413` over the field cap.
 on an unrecognized `method`, on a `params` / `headers` entry that is not `{key: string, value: string, enabled: bool}`, on a `methodSource` that is not `"graphql"` or `null`,
 on a `mockResponseMode` that is not `"first"` / `"fixed"` / `"random"`, on a `mockExampleId` that is not a non-empty string or `null`,
 on an `order` that is not an integer from `0` to `2147483647` or an append that finds no slot left ([Ordering](resource-writes.md#ordering)), on an `auth` whose `mode` is not a [known one](resource-writes.md#auth-modes) (#3464), or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body names the field and lists the valid values);
-`413` naming the field, its size and the cap, when a serialized `params` / `headers` / `body` / `auth` is over the engine's field cap (issue #1485, [see below](resource-writes.md#a-stored-json-field-has-a-write-time-cap)).
+`413` naming the field, its size and the cap, when a serialized `params` / `headers` / `body` / `auth` is over the engine's field cap (issue #1485, [see Resource writes](resource-writes.md#a-stored-json-field-has-a-write-time-cap)).
 
 A storage failure answers `507`, `503` or `500`, never `400` - see [A storage failure is not a 400](resource-writes.md#a-storage-failure-is-not-a-400).
 
@@ -324,7 +324,7 @@ So a changed credential never leaves the old one behind in the stored block, whi
 `400` on a malformed `If-Match`, on a `null` `collectionId` / `name` / `method` / `url`, a `collectionId` naming a collection that does not exist, an unrecognized `method`, a malformed `params` / `headers` entry,
 a malformed `specOperation`, a `methodSource` that is not `"graphql"` or `null`, a `mockResponseMode` that is not `"first"` / `"fixed"` / `"random"`, a `mockExampleId` that is not a non-empty string or `null`,
 an `auth` whose `mode` is not a [known one](resource-writes.md#auth-modes) (#3464), a malformed protocol setting (see [POST /requests](#post-requests)), or an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`;
-`413` naming the field, its size and the cap, when a serialized `params` / `headers` / `body` / `auth` is over the engine's field cap (issue #1485, [see below](resource-writes.md#a-stored-json-field-has-a-write-time-cap)).
+`413` naming the field, its size and the cap, when a serialized `params` / `headers` / `body` / `auth` is over the engine's field cap (issue #1485, [see Resource writes](resource-writes.md#a-stored-json-field-has-a-write-time-cap)).
 
 A storage failure answers `507`, `503` or `500`, never `400` - see [A storage failure is not a 400](resource-writes.md#a-storage-failure-is-not-a-400).
 

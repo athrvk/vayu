@@ -155,7 +155,7 @@ With no think time it equals the virtual user count.
 It is a number, `0` for a window with nothing in flight, never `null`.
 Before issue #3567 the same key held the latency the window's completions carried divided by its span, which read `0` while a request longer than the window was still open and spiked when it completed; rows stored before the change keep that value under the same key.
 The live frame of the same tick carries the same five values as `currentRps`, `currentSendRate`, `windowAvgInFlight`, `windowAvgLatencyMs` and `windowAvgQueueWaitMs`.
-`current_concurrency` and `backpressure` are instantaneous: see the live frame's `activeConnections` and `backpressure` [below](live-metrics.md#get-runsrunidlive), which they equal.
+`current_concurrency` and `backpressure` are instantaneous: see the live frame's `activeConnections` and `backpressure` ([`GET /runs/:runId/live`](live-metrics.md#get-runsrunidlive)), which they equal.
 A run whose virtual users wait in step aliases them between 0 and the user count, which is what `window_avg_in_flight` answers instead.
 `send_rate` and `throughput` are **cumulative**: requests sent and completed since load start, divided by the time since load start, so they flatten a change of rate the window shows within a second.
 A tick stored before issue #2393 has none of the three new keys, and its `current_rps` divided the completions since the previous row by the time since it.

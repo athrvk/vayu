@@ -497,7 +497,7 @@ A partial report of a running load run reads it from the live counter, and a col
 
 `summary.partial` (`true`) marks a run the engine died under, whose figures are its last persisted tick's; `summary.summaryMissing` (`true`) marks a failed load run with no summary at all, whose counts are not a measurement.
 Neither report has a `latency` block (issue #2938).
-Each flag is absent otherwise, never `false`; "A run the engine died under" above says what each figure then holds.
+Each flag is absent otherwise, never `false`; the "A run the engine died under" paragraph of [`GET /runs/:runId/report`](runs.md#get-runsrunidreport) says what each figure then holds.
 
 `summary.httpVersionDowngraded` is the count of this run's transfers that asked for HTTP/2 and negotiated something older - see [`httpVersionDowngraded` on a response](execute.md#post-execute).
 A collection run counts its sent requests the same way (#3262, [Scenario runs](scenario-runs.md#scenario-runs)); a collection run stored by an engine older than that fix reads `0` here although its steps' traces may say otherwise.
@@ -573,7 +573,7 @@ It is absent on reports served by an engine older than 0.15.0.
 The rows are listed by `timestamp`, not by `id`.
 
 `metadata.configuration` carries the load-test tuning knobs present in the snapshot (`mode`, `duration`, `concurrency`, `iterations`, `startConcurrency`, `rampUpDuration`, `timeout`, `comment`, `followRedirects`, `maxRedirects` - each omitted when absent, and recording what the run was sent, never a default the engine filled in; issue #2437) plus `httpVersion`,
-which is always present with the same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see above), and `acceptEncoding` (issue #1488) and `expectContinue` (issue #2516),
+which is always present with the same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see [`GET /runs`](runs.md#get-runs)), and `acceptEncoding` (issue #1488) and `expectContinue` (issue #2516),
 read out of the snapshot's `defaultHeaders` and omitted on the same terms as `GET /runs`'s `summary` key `acceptEncoding` (`expectContinue` is on the report only, not in the list row: only the comparison reads it).
 `rps` in the raw snapshot is renamed to `targetRps` here, and `rps` is read first (`targetRps` is the rate only when `rps` is absent, null or zero), as in `GET /runs`'s `summary`.
 `dataRowCount` is the size of the data set a run bound, and `dataFileName` / `dataFileHash` (issue #2051) the file it came from, by display name and SHA-256 of its bytes, never its path, with `dataFileCastNumbers: true` (issue #2540) when that file's numbers were read as numbers.

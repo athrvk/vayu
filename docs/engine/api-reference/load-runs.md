@@ -522,7 +522,7 @@ A collection edited mid-run therefore cannot change the sequence underneath itse
 
 **A valid block answers `202 {runId}`** and creates a run with `type: "scenario"` - unless a load `mode` sits beside it, which makes it a [scenario load run](scenario-load.md#scenario-load-runs) with `type: "load"` instead.
 The lifecycle is a load run's either way - the run is registered, streams over [`GET /runs/:runId/live`](live-metrics.md#get-runsrunidlive), stops through [`POST /runs/:runId/stop`](runs.md#post-runsrunidstop) and reports through [`GET /runs/:runId/report`](runs.md#get-runsrunidreport) - and only the executor differs.
-See [Scenario runs](scenario-runs.md#scenario-runs) below for what it does while it runs and what it leaves behind.
+See [Scenario runs](scenario-runs.md#scenario-runs) for what it does while it runs and what it leaves behind.
 
 **Every rejection is a `400`** with `error.code: "invalid_scenario"`, raised before any run row exists - an empty or oversized sequence is never silently run as a smaller one:
 

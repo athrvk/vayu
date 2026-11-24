@@ -312,7 +312,7 @@ See [scripting.md](../scripting.md#script-identity-pminfo).
 Absent, `null` or non-boolean all mean `false`, and that default is a security control rather than a convenience (issue #302): Vayu's MCP target allowlist is checked in the MCP server, before it calls this endpoint, and held by the engine to the URL a send is about to dial ([`targetPolicy`](#post-execute)), so a request issued from inside a script with `pm.sendRequest` never passes either.
 Denying unless a caller asks means a client that forgets gets a script that cannot send rather than unchecked egress.
 The app's Send and load runs send `true`; the MCP server never does.
-`POST /runs` reads the same field for a `script.post` element's deferred validation (its `requestElements`, below), so one script behaves the same on both.
+`POST /runs` reads the same field for a `script.post` element's deferred validation (its [`requestElements`](load-runs.md#the-requestelements-array-a-single-request-runs-own-step-level-elements)), so one script behaves the same on both.
 Read **before** the `stream` branch, so a streaming send's scripts are governed by it exactly as a buffered send's are - the app sends it on both halves of Send (issue #653).
 See [scripting.md](../scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
@@ -376,7 +376,7 @@ This is what was *requested*; the response's own `httpVersion` (below) reports w
 The renderer always sends this field on every execute, never eliding it even when it equals the default - the same rule `followRedirects` follows, and for the same reason: an omitted field lets an engine-side default win silently.
 MCP's saved-request paths get the same guarantee from `POST /compose`, which always emits a stored request's execution options;
 its two ad-hoc tools (`run_request` / `start_load_run`) forward `httpVersion` only when the caller supplies it, since there is no saved request behind an ad-hoc call for an omission to silently override (see [mcp/request-composition.md](../mcp/request-composition.md#request-composition)).
-It governs **both** Send and load test - `POST /requests`/`PUT /requests/:id` is where a request's protocol is actually stored (see [Requests](requests.md#requests) above); `POST /runs` (below) is simply the run-shaped way of stating the same field, not a second store.
+It governs **both** Send and load test - `POST /requests`/`PUT /requests/:id` is where a request's protocol is actually stored (see [Requests](requests.md#requests)); [`POST /runs`](load-runs.md#post-runs) is simply the run-shaped way of stating the same field, not a second store.
 
 **Response:**
 ```json
