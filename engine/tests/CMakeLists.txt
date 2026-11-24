@@ -385,6 +385,15 @@ endif()
 # its own executables with. It is address space reserved, committed lazily.
 if(MSVC)
     target_link_options(vayu_tests PRIVATE /STACK:8388608)
+    # `NOMINMAX` is PRIVATE to `vayu_core` (`engine/CMakeLists.txt`), so a test
+    # translation unit that reaches `windows.h` through `curl.h` or `httplib.h`
+    # ahead of an engine header sees `min` and `max` as macros, and every
+    # unparenthesized `std::min` or `numeric_limits<T>::max ()` in a header
+    # fails with C2589. Defining it here covers the whole target; the
+    # per-file `#ifndef NOMINMAX` guards stay valid beside it. This target
+    # builds no PCH on MSVC, so the macro-parity check that keeps the define
+    # off `vayu_core`'s consumers does not apply.
+    target_compile_definitions(vayu_tests PRIVATE NOMINMAX)
 endif()
 
 # The test binary needs the manifest for two reasons: any test that opens a
