@@ -351,6 +351,7 @@ Either way a merge with nothing to merge would narrow trust to the pasted certif
 
 `CURLSSLOPT_NATIVE_CA` asks the backend to keep consulting the OS store.
 It is set unconditionally on Windows, where it is the anchor source, and on macOS, where the Keychain backs the file; on Linux it is set whenever a bundle is in force, and the merge above is what carries the guarantee.
+Apple's SecTrust, which the macOS Keychain check uses, refuses a `CURLOPT_CRLFILE`, so the engine never sets one: it would break every macOS send.
 
 **What the Windows certificate store does not give you.**
 OpenSSL reads it through the Windows crypto API rather than being the OS verifier, so three things Schannel did on its own do not happen:

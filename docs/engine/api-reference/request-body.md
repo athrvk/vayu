@@ -313,6 +313,10 @@ A **binary body** of at most 4 MiB is read through it in that pass and its bytes
 A **form part's** file is read from it by every transfer of the send or run.
 A path a data row binds is the exception: it is checked when the run starts but opened per submission, through the same check again, so a large data file holds no file open per row.
 A streamed body's or a part's length is the one the open saw; a file truncated below it under the open handle fails the transfer.
+**What the open does not cover.**
+`O_NOFOLLOW` covers the last path component only, so a parent directory swapped for a link between the canonicalisation and the open is followed.
+Windows opens the canonical path following a final reparse point, because a cloud placeholder is one.
+A data-bound path's recorded `size` and `sha256` are the plan's read, while each request streams what its own open finds.
 A part with no declared Content-Type is typed by its filename's extension, then its path's, from libcurl's table (`gif`, `jpg`, `jpeg`, `png`, `svg`, `txt`, `htm`, `html`, `pdf`, `xml`), else `application/octet-stream`.
 A **disabled** file part is neither checked nor sent.
 

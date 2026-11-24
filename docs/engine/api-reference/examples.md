@@ -102,6 +102,7 @@ the attributes are read as RFC 6265 and Postman's cookie store read them: an emp
 `responseTime` (whole milliseconds) and `body` (`null`).
 When it would be over the 1 MiB cap (a large request body) the example is still created, without it, and a warning is logged; the export then regenerates those members.
 `PUT` ignores a `savedFrom` key.
+`POST /import/apply` does not read it either: it describes a live send, so the create route alone takes it.
 
 `postmanResponse` is what the Postman importer sends (schema version 2): the `item.response[]` entry as JSON **text** in the source's member order, `name` and `body` replaced by `null` placeholders.
 A string rather than an object so the order survives a parse into sorted JSON on the way here; it must parse as a JSON object, and it is capped at 1 MiB.
