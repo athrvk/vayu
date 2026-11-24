@@ -208,7 +208,7 @@ Lossy / dropped, summary:
 
 ## Malformed exports
 
-Insomnia itself only emits arrays and string mime types, so the shapes below mean a hand-edited or script-mangled file. Each throws `Error("Malformed Insomnia export: <detail>")`, which `ImportModal` shows verbatim - previously they surfaced as a raw `TypeError` ("Cannot read properties of undefined (reading 'map')") or, for a cycle, a `RangeError`. Nothing is persisted either way: the parse happens before any write.
+Insomnia itself only emits arrays and string mime types, so the shapes below mean a hand-edited or script-mangled file. Each throws `Error("Malformed Insomnia export: <detail>")`, which `ImportModal` shows verbatim, rather than a raw `TypeError` ("Cannot read properties of undefined (reading 'map')") or, for a cycle, a `RangeError`. Nothing is persisted either way: the parse happens before any write.
 
 | Input | Detail |
 |-------|--------|

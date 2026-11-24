@@ -37,7 +37,7 @@ A value composition did substitute is finished text and is never re-resolved - s
   **Absent or `null` means no dataset: composition resolves exactly as it did before this field existed.**
   Refused with `400` `invalid_compose_request` when the field is present and not an array, or holds an entry that is not a string or is the empty string.
   A `data.`-prefixed entry is accepted but redundant - the reserved namespace answers that spelling first regardless of whether it is also listed here, so either way it is deferred.
-  See [`{{data.*}}` puts the row into the request itself](scenario-runs.md#scenario-runs) and [D18](../../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007) for the precedence this buys.
+  See [`{{data.*}}` puts the row into the request itself](scenario-runs.md#scenario-runs) and [D18](../../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment) for the precedence this buys.
 
 - **`deferDynamicVariables`** (issue #995) says this payload is being composed for a **run**, which will send it many times.
   A generator resolved here would be one value repeated by every iteration of every virtual user - the uniqueness `{{$randomUUID}}` is written for, lost exactly where concurrency makes collisions matter -

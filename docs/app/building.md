@@ -298,7 +298,7 @@ neither reads this file, so a new alias has to be added in all three.
 - Target: ES2020
 - Lib: stated rather than inherited, and identical to the renderer's - `ES2020`
   alone would leave out `ErrorOptions` (see the renderer config above). Stating
-  it drops three entries `target: ES2020` used to imply through
+  it drops three entries `target: ES2020` implies through
   `lib.es2020.full`: `ScriptHost` and `WebWorker.ImportScripts`, which describe
   environments the main process is not, and `DOM.AsyncIterable`, which types
   `for await` over a DOM stream - `electron/` does none of the three, and
@@ -433,25 +433,23 @@ Key settings in `vite.config.ts`:
 - **Code Splitting**: no manual chunk groups, deliberately (#1147). What defers
   a chunk here is a dynamic import - `React.lazy` on the tab surfaces,
   `ensureMonaco()` on the editor - and rolldown's own chunking does the rest.
-  The `react-vendor` and `charts` groups that used to sit here were measured
-  against it and moved nothing: same 132 chunks, same 14.9MB total, the same
+  Groups for `react-vendor` and `charts` were measured
+  against it and moved nothing: the same chunks, the same total size, the same
   modules behind the same lazy boundaries. A packaged app loads from asar, so
   there is no cross-release HTTP cache for a vendor chunk to hit either. Adding
-  a group for monaco was worse than inert - the named group turned the 3.7MB
+  a group for monaco was worse than inert - the named group turned the
   editor chunk into a `modulepreload` in `dist/index.html`, back onto the
-  startup path #1146 had taken it off. Read `dist/index.html`'s preload list,
+  startup path that #1146 keeps it off. Read `dist/index.html`'s preload list,
   not just chunk sizes, before adding a group here
 - **Monaco's entry is composed, not the package root** (`src/lib/monaco-setup.ts`):
   the editor core, the two language services the app drives, and one Monarch
-  grammar per language id it can open - rather than the package root's ~85
+  grammar per language id it can open - rather than all of the package root's
   grammars and four language services. The CSS and HTML language services
   reach their workers through `new Worker(new URL(…))` in monaco's own
-  `workerManager`, so importing the root shipped `css.worker` (1.0MB) and
-  `html.worker` (0.7MB) in every installer that nothing could reach. Composing
-  the entry took `dist/` from 17.2MB to 14.9MB with startup unchanged: those
-  two workers are 1.8MB of the 2.2MB, the rest being the ~79 unused Monarch
-  grammars, the non-worker halves of the CSS and HTML language services, and
-  the LSP client.
+  `workerManager`, so importing the root ships `css.worker` and
+  `html.worker` in every installer that nothing can reach. Composing the entry
+  leaves out those two workers, the unused Monarch grammars, the non-worker
+  halves of the CSS and HTML language services, and the LSP client.
   `src/lib/monaco-setup.contributions.test.ts` builds a fixture from that
   file's own import list and asserts the emitted worker set (#1147). The
   specifiers themselves are monaco 0.56's supported entry points - `editor`,

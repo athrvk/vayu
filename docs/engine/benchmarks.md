@@ -378,9 +378,8 @@ arm's own runs vary by more than either effect being looked for.
 
 ### Per-iteration generators: also inside this host's noise (2026-08-28, engine 0.23.0)
 
-The `{{$guid}}` family generates per iteration on the load path since issue
-#995, where it used to be resolved once at composition and repeated for the
-whole run. It is the same shape of change the identity was, one step more
+The `{{$guid}}` family generates per iteration on the load path (issue
+#995), not once at composition and repeated for the whole run. It is the same shape of change the identity was, one step more
 expensive: a generator has to *run* per occurrence per iteration, where the
 identity substitutes two integers the executor is already holding.
 
@@ -430,9 +429,9 @@ be pinned. Same host caveat as the section above: a 4-core container running the
 Go mock server beside the engine, where a single arm's own runs vary by more
 than either effect being looked for.
 
-### SSE frame counting: not yet measured (issue #576)
+### SSE frame counting: not yet measured
 
-Streaming under load puts a second thing on the write callback's hot path: an
+Streaming under load (issue #576) puts a second thing on the write callback's hot path: an
 `SseFrameCounter` fed every byte of every streaming transfer. It is a per-byte
 loop over a few-byte state machine with no allocation and no string building -
 a scan, not a parse - and it runs **only** for transfers carrying
@@ -1018,9 +1017,8 @@ cause is not isolated. Three candidates are ruled out by measurement:
 
 What remains untested: Electron's own CPU use, and the app engine's much larger
 DB (200-run retention plus a prune pass after every run) versus a fresh scratch
-DB. Note this is the same direction as, but far smaller than, the 30-40% UI
-contention figure this page previously carried - that larger figure was not
-reproduced and should not be quoted.
+DB. Note this is the same direction as, but far smaller than, a 30-40% UI
+contention figure that was not reproduced and should not be quoted.
 
 ## Config semantics: live, restart-gated, and retired
 
@@ -1040,7 +1038,7 @@ Every entry below was verified by locating the read site in the engine source.
 | `dbSynchronous`, `dbBusyTimeout`, `dbCacheSize` | `db/db_maintenance.cpp` (`init`) | DB open. **Restart required.** All three are per-connection state, applied at startup to the one connection the storage holds open for its lifetime (and `dbCacheSize` to any other it opens) |
 | `logLevel`, `maxLogFileBytes` | `daemon.cpp` (applied to `utils/logger.cpp`) | Daemon start, just after the database opens. **Restart required.** The lines written before that point are the ones the file sink's default level allows |
 
-The dead entries this table used to list - `maxConnections` and `statsInterval`,
+The retired entries, which this table does not list - `maxConnections` and `statsInterval`,
 plus `tcpKeepAliveIdle` / `tcpKeepAliveInterval`, `maxJsonFieldSize`, the three
 `sse*` keys, and the three database PRAGMAs with no tuning story
 (`dbTempStore`, `dbMmapSize`, `dbWalAutocheckpoint`) - were retired in
@@ -1132,16 +1130,16 @@ the last requests answer.
 
 The pacing thread is the only limiter on a `constant_rps` run
 ([#2801](https://github.com/athrvk/vayu/issues/2801)). The event-loop workers
-used to hold a token bucket at the same rate as well, split `targetRps ÷
-workers`; the bucket re-anchors on every take while the pacer's schedule is
-absolute, so the two drifted, and a submission that reached its worker ahead of
-the worker's token waited inside the request's queue wait. At 2 req/s against
-a 300 ms mock on 4 workers that wait climbed from 0.2 ms to 12.9 ms over 34 s,
+hold no token bucket at the same rate: one split `targetRps ÷
+workers` re-anchors on every take while the pacer's schedule is
+absolute, so the two drift, and a submission that reaches its worker ahead of
+the worker's token waits inside the request's queue wait. Measured with a bucket,
+at 2 req/s against a 300 ms mock on 4 workers that wait climbed from 0.2 ms to 12.9 ms over 34 s,
 reset and climbed again (`avgQueueWaitMs` 4.79, p99 315.1 ms against the
 server's 300.8); with no bucket, 40 s at the same rate and target read
-0.29 ms, flat, and p99 301.8 ms, while 50 and 500 req/s still sent the rate they asked for. What the
-bucket also did was meter a catch-up burst after a pacing stall; that burst is
-now bounded by the pacer's 100 ms catch-up window (#2911) and `maxInFlight`.
+0.29 ms, flat, and p99 301.8 ms, while 50 and 500 req/s still sent the rate they asked for. A
+bucket would also meter a catch-up burst after a pacing stall; that burst is
+bounded by the pacer's 100 ms catch-up window (#2911) and `maxInFlight`.
 
 **How a tick waits.** Rate fidelity is not arrival *regularity*, and the two
 have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)
@@ -1164,10 +1162,10 @@ different way: Windows' and Linux's `spin_tail_us` are flat constants
 (2000us, measured; 150us, a placeholder pending real hardware), but macOS's
 is `min (remaining / 9 + 60, 1100)` - proportional to the remaining tick up
 to the ~1100us plateau XNU's timer-coalescing leeway produces, real-measured
-on an Apple M3 Pro (see the 2026-09-15 section above). Below the spin
-threshold the tick used to sleep its whole remainder and land late by the
-sleep's overshoot, which the next tick paid back as a double dispatch. The
-overshoot now lands inside the tail instead of inside the arrival gap, and
+on an Apple M3 Pro (see the 2026-09-15 section above). A tick that slept
+its whole remainder below the spin threshold would land late by the
+sleep's overshoot, which the next tick pays back as a double dispatch. The
+overshoot lands inside the tail instead of inside the arrival gap, and
 the spin is bounded by the tail rather than by the tick, so its cost does not
 grow as the target rate falls.
 
