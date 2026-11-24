@@ -1696,7 +1696,7 @@ most of the lint time:
 | File | Analyzer | Whole file, default | Whole file, `dynamic` |
 |------|----------|---------------------|-----------------------|
 | `import_parse_test.cpp` | 258 s to 26 s | 306 s | 75 s |
-| `script_engine_test.cpp` | 560 s to 42 s | 604 s | 78 s |
+| `script_engine_test.cpp` (measured as one file, before it became the twelve `script_engine_*_test.cpp` files) | 560 s to 42 s | 604 s | 78 s |
 
 Both the hook and CI read that file, so they stay in agreement.
 `engine/src` keeps the default: it has no such fan-out, and

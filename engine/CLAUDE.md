@@ -241,6 +241,13 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   unbuilt test file reports nothing (#668). The list lives there and not in
   `engine/CMakeLists.txt` because that file is a `sanitizers.yml` trigger
   path (#970); keep routine edits out of it.
+- **A suite that outgrows one file keeps its name** and moves its fixture to a
+  header, with the cases spread by area: `ScriptEngineTest` is defined once in
+  `tests/script_engine_fixture.hpp` and its cases live in
+  `tests/script_engine_*_test.cpp` by `pm.*` area (#3852). The suite name is
+  what `vayu_scratch_database_suites`, ctest regexes and `--gtest_filter` key
+  on, so a rename makes them silently stop matching; a helper two of the files
+  read goes in that header too, in `vayu::tests`.
 - **A test waits on a condition with `vayu::tests::wait_until`**
   (`engine/tests/wait_until.hpp`), never on a `sleep_for` followed by an
   assertion. Its deadline (`WAIT_DEADLINE`, 20s) only bounds how long a broken
