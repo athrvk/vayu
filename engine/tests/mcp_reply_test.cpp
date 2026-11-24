@@ -1120,8 +1120,10 @@ TEST_F (McpReplyRunTest, AStreamEndedBeforeTheResponseIsASingleRequestLoadRunsTr
     for (const auto& ending : stream_endings ()) {
         server_->reply_with (ending.shape);
         for (const bool as_mcp : { true, false }) {
-            auto summary = run_single_request_load ({},
-            streaming (as_mcp ? mcp_payload (*server_) : plain_payload (*server_), ending));
+            const json payload =
+            as_mcp ? mcp_payload (*server_) : plain_payload (*server_);
+            auto summary = run_single_request_load (
+            {}, std::optional<json>{ streaming (payload, ending) });
             EXPECT_EQ (summary["stream"]["completions"], ITERATIONS)
             << ending.end_reason << ": " << summary.dump ();
             EXPECT_EQ (summary["stream"]["capped"], ending.capped ? ITERATIONS : 0)
