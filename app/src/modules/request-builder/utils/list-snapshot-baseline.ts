@@ -13,7 +13,7 @@
  *
  * The reply is the JSON-RPC envelope the Response pane holds, either one JSON
  * object or an event stream. The engine's own reply reader
- * (`docs/engine/api-reference.md#the-mcp-reply`) is the authority on which
+ * (`docs/engine/api-reference/request-body.md#the-mcp-reply`) is the authority on which
  * message is the answer: the last `message` event that is a JSON-RPC response
  * carrying the request's `id`. The app does not know that id, so it reads a
  * stream only when its responses all share one `id`, and skips events named
