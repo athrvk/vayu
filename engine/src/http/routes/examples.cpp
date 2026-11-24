@@ -6,13 +6,11 @@
  */
 
 /**
- * @brief Saved example responses, nested under their request (issue #481).
- *
- * An example is the response an importer found next to a request - Postman's
- * `item.response[]`, an OpenAPI operation's `responses`. It is owned by exactly one
- * request, so every path here is nested under `/requests/:id`: the owner is
- * checked before anything else, and an example whose `request_id` disagrees
- * with the path is a 404 rather than a cross-request write.
+ * Saved example responses, nested under their request (#481). An example is the
+ * response an importer found beside a request (Postman's `item.response[]`, an
+ * OpenAPI operation's `responses`), owned by exactly one request, so every path
+ * is under `/requests/:id`: the owner is checked first, and an example whose
+ * `request_id` disagrees with the path is a 404, not a cross-request write.
  */
 
 #include "vayu/core/constants.hpp"
@@ -39,11 +37,9 @@ namespace vayu::http::routes {
 namespace {
 
 /**
- * 404 for "no such request", shared by every route here.
- *
- * The owner check runs before the example lookup on purpose: `GET
- * /requests/gone/examples/exa_1` must answer "no such request" rather than
- * silently reading an example whose owner has been deleted.
+ * The 404 for "no such request", shared by every route here and run before the
+ * example lookup, so `GET /requests/gone/examples/exa_1` says "no such request"
+ * rather than reading an example whose owner was deleted.
  */
 RouteResult reject_missing_request (vayu::db::Database& db, const std::string& request_id) {
     if (db.get_request (request_id).has_value ()) {
@@ -53,10 +49,8 @@ RouteResult reject_missing_request (vayu::db::Database& db, const std::string& r
 }
 
 /**
- * Loads an example and proves it belongs to @p request_id.
- *
- * An example that exists under another request answers 404, not 200 or 403:
- * from this path's point of view the resource genuinely does not exist, and
+ * Loads an example and proves it belongs to @p request_id. One under another
+ * request is a 404, not a 200 or 403: from this path it does not exist, and
  * saying otherwise would leak which ids are taken.
  */
 RouteResult load_owned_example (vayu::db::Database& db,
@@ -73,10 +67,9 @@ vayu::db::RequestExample& out) {
 
 /**
  * The `order` a new example takes when the caller states none: one past the
- * highest among the request's current examples, so a created example lands at
- * the end. The same scan `Database::next_sibling_order` does for requests, and for the
- * same reason - defaulting every row to 0 would make the column encode nothing
- * and hand the position back to the id tiebreak.
+ * highest of the request's examples, so it lands at the end, as
+ * `Database::next_sibling_order` does for requests: defaulting to 0 would make
+ * the column encode nothing and hand position back to the id tiebreak.
  */
 int next_example_order (vayu::db::Database& db, const std::string& request_id) {
     int max_order = -1;
@@ -92,13 +85,11 @@ bool order_is_defaulted (const nlohmann::json& json) {
 }
 
 /**
- * The null-vs-absent rule for `origin`, with the value checked against the two
- * the column accepts (issue #588).
- *
- * A rejected value is a 400 rather than a silent fall back to the default, on
- * the `apply_http_version_field` reasoning: an unrecognised origin stored as
+ * The null-vs-absent rule for `origin`, checked against the column's two values
+ * (#588). A rejected value is a 400, not a fallback to the default
+ * (`apply_http_version_field`'s reasoning): an unrecognised origin stored as
  * `import` would hand a user-saved example to the next spec sync to overwrite,
- * and a typo is a payload bug worth naming rather than absorbing.
+ * and a typo is a payload bug worth naming.
  */
 RouteResult apply_origin_field (const nlohmann::json& json, std::string& out, bool is_create) {
     namespace example_bounds = vayu::core::constants::request_example;
@@ -128,15 +119,12 @@ RouteResult apply_origin_field (const nlohmann::json& json, std::string& out, bo
 }
 
 /**
- * The null-vs-absent rule for `specExampleKey` (issue #1457): the `examples`
- * map key an OpenAPI import took this example from.
- *
- * Engine-side provenance, not a field the renderer ever sends - only the two
- * import writers (`POST /import/apply`, `POST /specs/sync`) name it, through
- * the same applier every other example write goes through. Nothing here
- * validates the value beyond the shape: a stale key the document no longer
- * declares is not this applier's to catch, since it can only be judged
- * against the document at export time.
+ * The null-vs-absent rule for `specExampleKey` (#1457): the `examples` map key
+ * an OpenAPI import took this example from. Engine-side provenance the renderer
+ * never sends: only the two import writers (`POST /import/apply`,
+ * `POST /specs/sync`) name it, through this shared applier. Only the shape is
+ * checked: a key the document no longer declares can be judged only against the
+ * document, at export time.
  */
 void apply_spec_example_key_field (const nlohmann::json& json,
 std::optional<std::string>& out,
@@ -154,16 +142,12 @@ bool is_create) {
 
 /**
  * `postmanResponse` (schema version 2): the Postman saved response an import
- * took this example from, as JSON text.
- *
- * A string rather than an object on purpose: the export writes the members
- * back in the order the source wrote them, and a body parsed into
- * `nlohmann::json` on its way here has already sorted them. Only an import
- * writes it - on create a string must parse as a JSON object within
- * `MAX_POSTMAN_RESPONSE_BYTES` - and an update may only clear it: the value
- * records what a file said, which no edit made in Vayu can author, and the
- * export already regenerates whatever an edit to `status` or `headers` makes
- * stale.
+ * took this example from, as JSON text. A string because the export writes the
+ * members back in the source's order, which a body parsed into `nlohmann::json`
+ * has already sorted. Only an import writes it (on create, a string parsing as
+ * a JSON object within `MAX_POSTMAN_RESPONSE_BYTES`), and an update may only
+ * clear it: it records what a file said, which no edit in Vayu can author, and
+ * the export regenerates what an edit to `status` or `headers` makes stale.
  */
 RouteResult apply_postman_response_field (const nlohmann::json& json,
 std::optional<std::string>& out,
@@ -311,10 +295,10 @@ vayu::core::PostmanExportRequest& out) {
 /**
  * `savedFrom` (#1763), create-only: the executed request and reason phrase a
  * save in the app hands over, from which the engine builds the example's
- * `postman_response` itself. Absent or null is no record. Read after
+ * `postman_response`; absent or null is no record. Read after
  * `apply_request_example_fields`, never inside it: it describes a live send,
- * which an import has none of, so `POST /import/apply` does not take it.
- * `postmanResponse` beside it would be two writers of one column, a 400.
+ * which an import lacks, so `POST /import/apply` does not take it.
+ * `postmanResponse` beside it is two writers of one column, a 400.
  */
 RouteResult read_saved_from (const nlohmann::json& json, std::optional<SavedFrom>& out) {
     const auto found = json.find ("savedFrom");
@@ -400,27 +384,22 @@ void record_saved_response (vayu::db::RequestExample& x, const SavedFrom& saved)
 } // namespace
 
 /**
- * Applies an example write onto @p x under the one null-vs-absent rule (see
- * routes.hpp), returning the 400 body on a rejected field.
+ * Applies an example write onto @p x under the one null-vs-absent rule
+ * (routes.hpp), answering the 400 body on a rejected field.
  *
- * `name` has no default and so rejects absent-on-create and null on either
- * verb, matching every other resource's required fields. `status` is validated
- * rather than clamped: a stored 0 or 700 would be re-served verbatim by a mock
- * server, and a status nobody can send is a payload bug worth naming. A 1xx is
- * refused too (#3117): it is an interim response, never the final one a mock
- * answers with. The body cap is a 400 for the same reason - see
- * `request_example::MAX_BODY_BYTES`.
- * `origin` is validated against its two values by `apply_origin_field` above,
- * and defaults to `import` on create - the honest answer for every caller that
- * does not claim otherwise (#588).
- * `bodyTruncated` takes the plain boolean rule: nothing can validate it, since
- * only the client that captured the response knows whether it was cut, and the
- * stored body is a legitimate length either way.
- * `postmanResponse` is create-only and cleared by `null` on update - see
- * `apply_postman_response_field`.
+ * `name` has no default, so it refuses absent-on-create and null on either
+ * verb. `status` is validated, not clamped: a mock server re-serves a stored 0
+ * or 700 verbatim, and a status nobody can send is a payload bug. A 1xx is
+ * refused too (#3117): an interim response, never the final one a mock answers
+ * with. The body cap is a 400 likewise (`request_example::MAX_BODY_BYTES`).
+ * `origin` is held to its two values (`apply_origin_field`) and defaults to
+ * `import` on create, the honest answer for a caller that claims nothing else
+ * (#588). `bodyTruncated` takes the plain boolean rule: only the capturing
+ * client knows whether it was cut. `postmanResponse` is create-only, cleared by
+ * `null` on update (`apply_postman_response_field`).
  *
- * Declared in routes.hpp because `POST /import/apply` applies the same fields
- * to every example nested in a bulk payload.
+ * Declared in routes.hpp because `POST /import/apply` applies it to every
+ * example nested in a bulk payload.
  */
 RouteResult apply_request_example_fields (vayu::db::RequestExample& x,
 const nlohmann::json& json,
@@ -459,9 +438,8 @@ bool is_create) {
         return outcome;
     }
     apply_int_field (json, "order", x.order, 0, is_create);
-    // Defaults to false, which is the honest answer for every caller that does
-    // not claim otherwise: only the client that captured the response knows it
-    // was cut, and no later read of the row can tell (issue #659).
+    // False unless claimed: only the client that captured the response knows it
+    // was cut, and no later read of the row can tell (#659).
     apply_bool_field (json, "bodyTruncated", x.body_truncated, false, is_create);
     apply_spec_example_key_field (json, x.spec_example_key, is_create);
     if (auto outcome = apply_postman_response_field (json, x.postman_response, is_create);
@@ -472,12 +450,10 @@ bool is_create) {
 }
 
 /**
- * Testable core of GET /requests/:id/examples - the request's examples oldest
- * first, or a 404 when the request itself does not exist.
- *
- * An empty array and "no such request" are deliberately different answers: a
- * client that gets `[]` knows the request has no examples yet, which is what
- * the app's Examples tab shows before an import brings any.
+ * Testable core of GET /requests/:id/examples: the request's examples in list
+ * order (`order`, `created_at`, `id`), or a 404 when the request does not
+ * exist. `[]` and "no such request" differ: `[]` is a request with no examples
+ * yet, what the Examples tab shows before an import brings any.
  */
 std::pair<int, nlohmann::json> list_request_examples_response (vayu::db::Database& db,
 const std::string& request_id) {
@@ -492,12 +468,10 @@ const std::string& request_id) {
 }
 
 /**
- * Testable core of POST /requests/:id/examples - **create only**, matching the
- * repo's verb split (#95): the engine assigns the id (#97), so a body `id` is a
- * 400 and the 409 only ever guards a `generate_id` collision.
- *
- * The per-request count cap is checked here rather than in the field applier,
- * because it is a property of the owner rather than of the payload - bulk
+ * Testable core of POST /requests/:id/examples, **create only** (#95): the
+ * engine assigns the id (#97), so a body `id` is a 400 and the 409 guards only
+ * a `generate_id` collision. The per-request count cap is checked here, not in
+ * the field applier: it is the owner's property, not the payload's, and bulk
  * import counts its own slice against the same limit.
  */
 std::pair<int, nlohmann::json> create_request_example_response (vayu::db::Database& db,
@@ -550,10 +524,8 @@ const nlohmann::json& json) {
     return { 200, vayu::json::serialize (x) };
 }
 
-/**
- * The read-merge-write of PUT /requests/:id/examples/:exampleId, run under the
- * caller's lock.
- */
+/// The read-merge-write of PUT /requests/:id/examples/:exampleId, run under the
+/// caller's lock.
 static std::pair<int, nlohmann::json> update_request_example_locked (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id,
@@ -588,17 +560,16 @@ const std::function<void ()>& before_write) {
 }
 
 /**
- * Testable core of PUT /requests/:id/examples/:exampleId - **update only**,
- * merge-patch, 404 on a missing example rather than a silent create.
+ * Testable core of PUT /requests/:id/examples/:exampleId, **update only**,
+ * merge-patch, a 404 on a missing example rather than a create.
  *
- * **The read, the merge and the write are one lock scope** (#1440), for the
- * reason `update_request_response` states. The ownership check is inside it
- * too: an example reached through the wrong request is a 404, and a check that
- * released the lock before the write would answer for a row a concurrent
+ * **The read, the merge and the write are one lock scope** (#1440), for
+ * `update_request_response`'s reason, the ownership check included: a check
+ * released before the write would answer for a row a concurrent
  * `delete_request` cascade could take in between.
  *
- * @param if_match The request's `If-Match`, judged inside the same scope; a
- *        row it no longer names is a 412 (#2433).
+ * @param if_match The request's `If-Match`, judged inside the same scope; a row
+ *        it no longer names is a 412 (#2433).
  * @param before_write Test seam, invoked inside the lock scope with the merged
  *        row staged and immediately before it is written; see
  *        `update_request_response` for why it is an overload.
@@ -654,10 +625,8 @@ const std::string& example_id) {
     db.save_request (request);
 }
 
-/**
- * The check-and-write of DELETE /requests/:id/examples/:exampleId, run under the
- * caller's lock.
- */
+/// The check-and-write of DELETE /requests/:id/examples/:exampleId, run under
+/// the caller's lock.
 static std::pair<int, nlohmann::json> delete_request_example_locked (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id) {
@@ -682,19 +651,17 @@ const std::string& example_id) {
 /**
  * Testable core of DELETE /requests/:id/examples/:exampleId.
  *
- * **An imported example is tombstoned rather than trashed** (issue #722). A
- * spec sync replaces every `origin="import"` row of a request it applies any
- * change to, so without a tombstone a removed row returns on the next sync. Keeping the row
- * as a tombstone (`suppressed`) is what records the decision - the sync reads
- * them and leaves that status alone.
+ * **An imported example is tombstoned, not trashed** (#722): a spec sync
+ * replaces every `origin="import"` row of a request it changes, so a removed
+ * row would return on the next sync; the `suppressed` tombstone records the
+ * decision, and the sync leaves that status alone.
  *
  * **A user's own example goes to the trash** (#2971): nothing re-creates one,
- * so the delete is the only copy of the decision and the row is the only copy
- * of the response; `POST /trash/:id/restore` brings it back. Either way the
- * answer is the same, because from the caller's side it is: the example is
- * gone from every read. A request whose `mockExampleId` named it loses the
- * pointer too, and a restore does not put it back. The check and the
- * writes are one lock scope, so the origin read is the origin acted on.
+ * so the row is the only copy of the response, and `POST /trash/:id/restore`
+ * brings it back. The answer is the same either way: the example is gone from
+ * every read. A request whose `mockExampleId` named it loses the pointer, and a
+ * restore does not put it back. The check and the writes are one lock scope, so
+ * the origin read is the origin acted on.
  */
 std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
@@ -708,8 +675,8 @@ const std::string& example_id) {
 void register_request_example_routes (RouteContext& ctx) {
     /**
      * GET /requests/:id/examples
-     * Lists a request's saved example responses, oldest first (created_at, then
-     * id). Path params: id - the owning request.
+     * Lists a request's saved example responses in list order (`order`, then
+     * created_at, then id). Path params: id - the owning request.
      * Returns: an array of example objects, or 404 if the request does not exist.
      */
     ctx.server.Get (R"(/requests/([^/]+)/examples)",

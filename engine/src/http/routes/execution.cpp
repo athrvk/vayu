@@ -6,13 +6,10 @@
  */
 
 /**
- * @brief Request execution routes (Design mode & Load test)
- *
- * HTTP Status Code Philosophy:
- * - Engine returns 200 if it successfully processed the request (regardless of server response)
- * - Engine returns 400 for malformed requests (invalid JSON, missing fields)
- * - Engine returns 500 only for internal engine failures (should be rare)
- * - Server's HTTP status code is always in the response body, never translated to engine status
+ * POST /execute and POST /runs. The engine's status describes its own work: 200
+ * whenever it processed the request, whatever the target answered (that status
+ * is in the body, never translated), a 4xx for a request it refuses, a 5xx only
+ * for its own failure.
  */
 
 #include <algorithm>
@@ -59,21 +56,14 @@
 
 namespace vayu::http::routes {
 
-// Resolve what a script reads as `pm.info.requestName` for a POST /execute
-// payload (issue #300). Two sources, in order:
-//
-// 1. The payload's own `requestName`. This is the inline path: the renderer
-//    sends editor state, which may be unsaved or a detached replay copy, and
-//    therefore carries a name no stored row has. `POST /compose` puts the
-//    stored name here too on its by-id path, so a composed payload arrives
-//    already carrying it.
-// 2. The row named by `requestId`, for a caller that linked a saved request
-//    without sending its name (MCP's run_request does exactly this).
-//
-// An empty name is not a name: it resolves to absent, so a script's
-// `typeof pm.info.requestName === "undefined"` answers truthfully rather than
-// seeing "". An unknown `requestId` is not an error here - the run row already
-// tolerates one - it just yields no name.
+// What a script reads as `pm.info.requestName` for a POST /execute payload
+// (#300). First the payload's `requestName`: inline editor state may be unsaved
+// or a detached replay with no stored row, and `POST /compose` puts the stored
+// name there on its by-id path. Then the row named by `requestId`, for a caller
+// linking a saved request without its name (MCP's run_request). An empty name
+// resolves to absent, so `typeof pm.info.requestName === "undefined"` holds; an
+// unknown `requestId` yields no name, not an error, as the run row tolerates
+// one.
 RequestNameResolution resolve_script_request_name (vayu::db::Database& db,
 const nlohmann::json& json,
 const std::optional<std::string>& request_id) {
@@ -108,64 +98,36 @@ const std::optional<std::string>& request_id) {
     return resolved;
 }
 
-// Stamp a freshly built run row's timestamps. `end_time` is seeded to
-// `start_time`: a crashed run reports a zero duration, which is honest about
-// knowing nothing, where the restart time would span the downtime. A load or
-// collection run's move from Pending to Running clears the seed so a live
-// report measures up to now, and `reconcile_orphaned_runs` gives a row with no
-// end its `start_time` again (#3340); a design send, inserted Running, keeps it
-// until its terminal move stamps now. Both insert sites (design and load) go
-// through here so the invariant has one home; `Run::end_time` still defaults
-// to 0 as the backstop for any future one.
+// `end_time` is seeded to `start_time`, so a crashed run reports a zero
+// duration, not one spanning the downtime. A load or collection run's move to
+// Running clears the seed so a live report measures to now, and
+// `reconcile_orphaned_runs` gives a row with no end its `start_time` again
+// (#3340); a design send, inserted Running, keeps it until its terminal move.
+// Both insert sites go through here; `Run::end_time`'s 0 default is the
+// backstop.
 void seed_run_times (vayu::db::Run& run, int64_t started_at) {
     run.start_time = started_at;
     run.end_time   = started_at;
 }
 
-// Validate and normalize the optional "httpVersion" on a POST /runs body.
-// Absent leaves `json` untouched: the request's own httpVersion field, read
-// like any other field by build_request/deserialize_request further down the
-// pipeline, decides. This is NOT a per-run override - the request builder's
-// Settings tab holds the single protocol control and it governs Send and load
-// test alike. The field exists on this payload because that is how a run
-// states its protocol at all, the same way it states its redirect policy, and
-// because MCP's ad-hoc runs have no saved request to read one from. It never
-// touches the stored request - `json` here is the handler's local copy of the
-// request body, not anything persisted.
+// Validates a POST /runs body's optional `httpVersion`. This is how a run
+// states its protocol (as it states its redirect policy; MCP's ad-hoc runs have
+// no saved request), not a per-run override: the Settings tab's one control
+// governs Send and load alike. `json` is the handler's copy; nothing stored is
+// touched.
 //
-// Present is validated through apply_http_version_field/http_version_valid_list
-// (the same helpers Task 5's CRUD routes use - see routes.hpp), so a typo'd
-// protocol name is a 400 naming the field and the valid values, rather than
-// deserialize_request's lenient string-to-Auto coercion, which exists to keep
-// a corrupted *stored* row executable and is the wrong behavior for a
-// hand-crafted /runs body.
+// Absent, or `null` (erased, so two outcomes, not three), leaves the protocol
+// to the request field `deserialize_request` reads. Erasing rather than seeding
+// `DEFAULT_HTTP_VERSION` ends at `Auto` either way today (the only
+// `httpVersion` in play is the client's; no stored one is read here), but keeps
+// deferring once a config-backed default is resolved at this layer. A run has
+// no stored field, so the null-resets-to-default rule does not apply.
 //
-// An explicit `null` is erased, making it behave exactly like an absent key,
-// so this function has two outcomes rather than three.
-//
-// Be precise about why, because the obvious justification is wrong: there is
-// no stored-request lookup in this pipeline. `build_request` deserializes the
-// same POST body this function mutates, so the only `httpVersion` in play is
-// the one the client sent (clients send the whole request here, the same way
-// they do followRedirects/maxRedirects). The `db.get_request` calls further
-// down this file read `collection_id` to persist collection variables; they
-// never read `http_version`.
-//
-// So today, erasing and writing the seed are indistinguishable: both end at
-// `Auto`, because `Request::http_version`'s default member initializer is
-// `DEFAULT_HTTP_VERSION` - the very value the seed would have written. That
-// equivalence is incidental, and erasing is what keeps it from becoming a bug.
-// The moment a config-backed default is resolved at this layer, writing a seed
-// would start pinning a concrete value onto a run that asked for none, while
-// erasing keeps deferring to whatever decides later.
-//
-// This is also why CLAUDE.md's null-means-reset-to-default rule does not apply:
-// that rule resets a *stored* field on POST/PUT of a resource, and a run has no
-// stored field to reset.
-//
-// The validated value is written back onto `json["httpVersion"]` so it reaches
-// deserialize_request as a concrete string; `null` would otherwise hit
-// `.get<std::string>()` there and throw.
+// A present value is held to `apply_http_version_field` (routes.hpp): a typo is
+// a 400 naming the field and the valid values, not `deserialize_request`'s
+// lenient coercion to `Auto`, which exists for a corrupted stored row. The
+// validated string is written back because `null` would throw at
+// `.get<std::string> ()` there.
 RouteResult normalize_run_http_version (nlohmann::json& json) {
     if (!json.contains ("httpVersion")) {
         return {};
@@ -174,10 +136,8 @@ RouteResult normalize_run_http_version (nlohmann::json& json) {
         json.erase ("httpVersion");
         return {};
     }
-    // Both early returns above mean the key is present and non-null by now, so
-    // the two branches of apply_http_version_field that consume `seed` are
-    // unreachable from here. The argument is required by the signature; it does
-    // not select behaviour at this call site.
+    // Present and non-null by now, so the branches that consume `seed` are
+    // unreachable; the signature requires it.
     std::string version;
     if (auto outcome = apply_http_version_field (json, "httpVersion", version,
         vayu::to_string (vayu::DEFAULT_HTTP_VERSION), /*is_create=*/false);
@@ -189,23 +149,15 @@ RouteResult normalize_run_http_version (nlohmann::json& json) {
 }
 
 /**
- * @brief Replace a scenario run's raw `scenario` block with its step manifest.
+ * Replaces a scenario run's raw `scenario` block with its step manifest.
+ * `sanitize_config_snapshot` only withholds credentials; the block also carries
+ * the `data` rows, user data never snapshotted (the manifest keeps their
+ * count), and the manifest records each step's stored URL, so an `apikey` in
+ * the query cannot reach the run store. A non-JSON snapshot (passed through by
+ * the sanitizer) is left alone: there is no request in it.
  *
- * `sanitize_config_snapshot` keeps the composed request with its credentials
- * withheld, which is not enough here: the block as sent carries the
- * `data` rows, which are user data of unknown sensitivity and are deliberately
- * never snapshotted (only their count survives, on the manifest). The manifest
- * also records the **stored** URL per step rather than the composed one, so a
- * step whose auth is `apikey` with `in: "query"` cannot put a live key in the
- * run store.
- *
- * A snapshot that is not JSON (which `sanitize_config_snapshot` passes through
- * verbatim) is left alone rather than being rebuilt from nothing - there is no
- * request in it to describe.
- *
- * Non-static: run_row_seed_test.cpp drives it directly, because "the composed
- * plan is never persisted" is a security property and deserves a test that does
- * not need a run to exist.
+ * Non-static so `run_row_seed_test.cpp` can pin "the composed plan is never
+ * persisted", a security property, without a run.
  */
 std::string scenario_snapshot (const std::string& sanitized, const nlohmann::json& manifest) {
     nlohmann::json parsed;
@@ -242,45 +194,34 @@ ExecuteFlag read_execute_flag (const nlohmann::json& json, const char* key, bool
 } // namespace
 
 /**
- * @brief Read `POST /execute`'s `transient` flag (issue #382).
+ * `POST /execute`'s `transient` flag (#382): the request runs in full (same
+ * composition, cookie jar, scripts, response) but records nothing: no run row,
+ * no trace, no retention prune. GraphQL schema introspection is a background
+ * fetch; recorded, it would put runs nobody made in History, write post-auth
+ * headers to disk and evict real runs through the prune.
  *
- * A transient execution runs the request in full - same composition, same
- * cookie jar, same scripts, same response - but records nothing: no run row, no
- * result trace, no retention prune. It exists because GraphQL schema
- * introspection is a background fetch, not something the user sent: filing it
- * as a design run put runs nobody made into History, snapshotted the
- * post-auth request headers into a result trace on disk, and evicted real runs
- * through the count-based retention prune.
+ * Absent and `null` mean `false`. A non-boolean is a 400, not a silent `false`:
+ * a client sending `"true"` asks for privacy it would not get. (Stricter than
+ * `allowScriptRequests`, whose non-boolean-means-no only denies a capability.)
  *
- * Absent and `null` both mean `false`: recording is the default, and only a
- * caller that explicitly asks opts out. A present non-boolean is a **400**
- * rather than a silent `false` - a client that sends `"true"` is asking for
- * privacy it would not get, and that must not fail quietly. (This is stricter
- * than `allowScriptRequests`, whose non-boolean-means-no is safe in the other
- * direction: it denies a capability rather than granting exposure.)
- *
- * Non-static: transient_execute_test.cpp drives it directly.
+ * Non-static for `transient_execute_test.cpp`.
  */
 ExecuteFlag read_transient_flag (const nlohmann::json& json) {
     return read_execute_flag (json, "transient", false);
 }
 
 /**
- * @brief Read `POST /execute`'s `persistVariables` flag (#1904).
- *
- * Absent and `null` mean `true`, so every existing caller keeps writing back
- * what its scripts set. A non-boolean is a 400 for the reason `transient`'s
- * is: a caller sending `"false"` believes nothing reaches disk.
+ * `POST /execute`'s `persistVariables` flag (#1904). Absent and `null` mean
+ * `true`, so existing callers keep writing back what scripts set; a non-boolean
+ * is a 400, since a caller sending `"false"` believes nothing reaches disk.
  */
 ExecuteFlag read_persist_variables_flag (const nlohmann::json& json) {
     return read_execute_flag (json, "persistVariables", true);
 }
 
 /**
- * @brief Read `POST /execute`'s `includeParsedBody` flag (issue #2544).
- *
- * Absent and `null` mean `true`, so every existing caller keeps its `body`. A
- * non-boolean is a 400 by the rule the two flags above share.
+ * `POST /execute`'s `includeParsedBody` flag (#2544). Absent and `null` mean
+ * `true`, so existing callers keep `body`; a non-boolean is a 400.
  */
 ExecuteFlag read_include_parsed_body_flag (const nlohmann::json& json) {
     return read_execute_flag (json, "includeParsedBody", true);
@@ -363,11 +304,9 @@ bool has_non_null (const nlohmann::json& json, const char* key) {
 } // namespace
 
 /**
- * @brief Read a payload's `stream` flag and its caps (issue #573), for both
- *        `POST /execute` and `POST /runs` (#576).
- *
- * Non-static: sse_stream_test.cpp drives it directly, the suite having no
- * in-process HTTP route harness. See routes.hpp for the refusal set.
+ * A payload's `stream` flag and caps (#573), for `POST /execute` and
+ * `POST /runs` (#576); the refusal set is in routes.hpp. Non-static for
+ * `sse_stream_test.cpp`, which has no in-process route harness.
  */
 StreamFlag read_stream_flag (const nlohmann::json& json) {
     StreamFlag flag;
@@ -376,9 +315,9 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
     if (field != json.end () && !field->is_null ()) {
         if (!field->is_boolean ()) {
             flag.ok = false;
-            // Stricter than a silent false, and for the loudest of the reasons:
-            // a caller that sends `"true"` would get a buffered send and wait
-            // for a response the endpoint never finishes.
+            // Not a silent false: a caller sending `"true"` would get a
+            // buffered send and wait for a response the endpoint never
+            // finishes.
             flag.error = "'stream' must be a boolean (got " +
             std::string (field->type_name ()) + ")";
             return flag;
@@ -391,10 +330,9 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
         return flag;
     }
 
-    // A cap on a non-streaming payload is refused too. It reads as a bound the
-    // caller expects to apply, and silently ignoring it is how an unbounded run
-    // gets mistaken for a capped one. A text path likewise reads as a promise
-    // of `text` that a buffered send has no events to keep.
+    // A cap or text path on a non-streaming payload is refused: ignoring a cap
+    // lets an unbounded run pass for a capped one, and a buffered send has no
+    // events to honour a text path with.
     if (!flag.value) {
         if (flag.max_duration_ms || flag.max_events) {
             flag.ok = false;
@@ -588,12 +526,8 @@ std::optional<std::string> refuse_top_level_data_file (const nlohmann::json& jso
 
 } // namespace
 
-/**
- * @brief Read `POST /execute`'s `data` row (issue #601).
- *
- * Non-static: send_with_row_test.cpp drives it directly, the suite having no
- * in-process HTTP route harness. See routes.hpp for what the field means.
- */
+/// `POST /execute`'s `data` row (#601); the field's meaning is in routes.hpp.
+/// Non-static for `send_with_row_test.cpp` (no in-process route harness).
 DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
     DataRow row;
     const auto field = json.find ("data");
@@ -602,10 +536,9 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
     }
     if (!field->is_object ()) {
         row.ok = false;
-        // Named as an object of name/value pairs rather than "an object",
-        // because the near miss is an *array* - the shape `scenario.data` takes
-        // - and a caller that sent one has to hear that a single send binds one
-        // row, not a set.
+        // Says "name/value pairs" because the near miss is an array (the
+        // `scenario.data` shape), and that caller must hear a send binds one
+        // row.
         row.error = "'data' must be an object of name/value pairs (got " +
         std::string (field->type_name ()) +
         "). A single send binds one row; a set of rows is a collection run.";
@@ -620,9 +553,8 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
         return row;
     }
 
-    // The same bound a run's whole data set is measured against, applied to the
-    // one row this endpoint takes. Measured before the row is kept, so an
-    // oversized payload is refused rather than held.
+    // The run data set's bound, applied to this one row before it is kept, so
+    // an oversized payload is refused rather than held.
     const size_t bytes = field->dump ().size ();
     if (bytes > max_bytes) {
         row.ok    = false;
@@ -636,21 +568,17 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
     return row;
 }
 
-/**
- * @brief How a send-with-row resolves its credentials (issue #642).
- *
- * Non-static: send_with_row_test.cpp drives it directly. See routes.hpp for the
- * contract and for why the ordinary send is untouched.
- */
+/// How a send-with-row resolves its credentials (#642); the contract, and why
+/// the ordinary send is untouched, are in routes.hpp. Non-static for
+/// `send_with_row_test.cpp`.
 SendRowAuth plan_send_row_auth (const nlohmann::json& json,
 const vayu::http::BoundColumnNames& bound_columns) {
     SendRowAuth out;
     const auto auth_json = json.value ("auth", nlohmann::json ());
-    // Asked of the payload's own JSON before anything is parsed, and this is
-    // why: `parse_auth` warns on an unresolved `inherit`, and the build is
-    // about to parse the very same block, so a second parse would double every
-    // such warning on the ordinary send. A block spelling no token at all -
-    // which is every ordinary send - is answered here, unparsed (issue #1055).
+    // Asked of the raw JSON first: `parse_auth` warns on an unresolved
+    // `inherit` and the build parses this block again, so a second parse would
+    // double that warning. A block with no token (every ordinary send) is
+    // answered unparsed (#1055).
     if (!vayu::core::first_token_in (auth_json)) {
         return out;
     }
@@ -675,12 +603,9 @@ const vayu::http::BoundColumnNames& bound_columns) {
     return out;
 }
 
-/**
- * @brief Read `POST /runs`' top-level `data` rows (issue #993).
- *
- * Non-static: load_data_test.cpp drives it directly, the suite having no
- * in-process HTTP route harness. See routes.hpp for what the field means.
- */
+/// `POST /runs`' top-level `data` rows (#993); the field's meaning is in
+/// routes.hpp. Non-static for `load_data_test.cpp` (no in-process route
+/// harness).
 LoadDataRows read_load_data_set (const nlohmann::json& json,
 const vayu::core::ScenarioLimits& limits,
 bool is_scenario) {
@@ -688,11 +613,10 @@ bool is_scenario) {
     const auto field       = json.find ("data");
     const bool carries_set = field != json.end () && !field->is_null ();
 
-    // A collection run states its rows inside the block that names the
-    // collection, and the two are bound differently - one row per iteration
-    // shared by every step there, one per submission here. Refused rather than
-    // silently ignored: a caller that sent rows and had them dropped would read
-    // a run of literal `{{data.*}}` tokens as the feature working.
+    // A collection run states its rows in the block naming the collection,
+    // bound one per iteration across its steps rather than one per submission.
+    // Refused, not ignored: dropped rows would read as literal `{{data.*}}`
+    // tokens working.
     if (carries_set && is_scenario) {
         out.ok    = false;
         out.error = "'data' is the single-request form of a data set. A "
@@ -716,9 +640,8 @@ bool is_scenario) {
     }
     if (carries_set) {
         set = std::make_unique<vayu::core::LoadDataSet> ();
-        // The same reader the scenario block goes through, so the two shapes
-        // cannot come to disagree about what a row is or which limit refuses
-        // it.
+        // The scenario block's reader, so the two shapes agree on what a row is
+        // and which limit refuses it.
         if (auto reason =
             vayu::core::read_data_rows (*field, limits, "data", set->rows)) {
             out.ok    = false;
@@ -729,24 +652,20 @@ bool is_scenario) {
         set->file          = std::move (file);
     }
 
-    // A scenario load run's credentials are its steps', resolved when the plan
-    // was: there is no single request here whose build could defer, and asking
-    // would refuse a top-level oauth2 block no step uses.
+    // A scenario's credentials are its steps', resolved with the plan: no
+    // single request here could defer, and asking would refuse a top-level
+    // oauth2 block no step uses.
     if (is_scenario) {
         out.set = std::move (set);
         return out;
     }
 
-    // How the credentials resolve, decided here because it is the *build* that
-    // would otherwise encode them out of reach - the same call, and the same
-    // reasoning, as a send that carries one row (issue #642). The refusal it
-    // can carry is an oauth2 config carrying a token deferral would bind, which
-    // no deferral can serve.
-    //
-    // Asked of every run rather than only of one carrying rows (issue #1055):
-    // a credential spelling `{{$vu}}` defers without a set behind it, and it is
-    // this call that finds out. A run whose credentials spell no token parses
-    // nothing here and resolves its auth in the build, as it always did.
+    // Decided here because the build would otherwise encode the credentials out
+    // of reach, as for a one-row send (#642); the refusal it can carry is an
+    // oauth2 config holding a token deferral would bind, which no deferral can
+    // serve. Asked of every run, not only one with rows (#1055): `{{$vu}}`
+    // defers without a set. Credentials spelling no token parse nothing here
+    // and resolve in the build.
     const auto bound_columns = set ? set->bound_columns : vayu::http::BoundColumnNames{};
     auto row_auth = plan_send_row_auth (json, bound_columns);
     if (!row_auth.ok) {
@@ -778,25 +697,15 @@ bool is_scenario) {
 }
 
 /**
- * @brief Replace a single-request run's `data` rows with their count in the
- *        stored snapshot (issue #993).
+ * Replaces a single-request run's `data` rows with `dataRowCount` in the stored
+ * snapshot (#993): rows are user data never snapshotted, as in
+ * `scenario_snapshot`. The count, `dataFileName` / `dataFileHash` when a file
+ * was named (#2051) and `dataFileCastNumbers` when numbers were cast (#2540)
+ * are written from the validated set, not left to what the sanitizer kept. A
+ * non-JSON snapshot is left alone.
  *
- * `sanitize_config_snapshot` keeps the composed request with its credentials
- * withheld, which is not enough here for the reason `scenario_snapshot`
- * exists: the rows are user data of unknown sensitivity and are deliberately
- * never snapshotted. `dataRowCount` is what survives, exactly as it does on a
- * scenario manifest, so a stored run still says it was data-driven and how
- * large the set was - beside the file's `dataFileName` / `dataFileHash` when
- * the caller named one (issue #2051) and `dataFileCastNumbers` when it read
- * numbers as numbers (issue #2540), written from the validated set rather than
- * left to whatever the sanitizer kept of the body.
- *
- * A snapshot that is not JSON (which `sanitize_config_snapshot` passes through
- * verbatim) is left alone - there is nothing in it to rewrite.
- *
- * Non-static: run_row_seed_test.cpp declares and drives it, the way it does
- * `scenario_snapshot`, because "the rows are never persisted" is a privacy
- * property and deserves a test that does not need a run to exist.
+ * Non-static so `run_row_seed_test.cpp` can pin "the rows are never persisted"
+ * without a run.
  */
 std::string load_data_snapshot (const std::string& sanitized,
 const vayu::core::LoadDataSet& data) {
@@ -816,30 +725,20 @@ const vayu::core::LoadDataSet& data) {
 }
 
 /**
- * @brief Record the run's resolved default-header decisions in the stored
- *        snapshot (issue #1488), so a baseline pinned before a config change
- *        - an engine upgrade that flipped `loadNegotiateCompression`'s
- *        default included - stays distinguishable from a run recorded after.
+ * Records the run's resolved default-header decisions in the stored snapshot
+ * (#1488), so a baseline pinned before a config change (an engine upgrade
+ * flipping `loadNegotiateCompression`'s default included) stays distinguishable
+ * from a later run. `default_headers.hpp`'s "nothing here is stored" means the
+ * saved request, where a default written back would replay a frozen
+ * `X-Request-ID` (#1229); this is what the run decided, read by a later report
+ * and never by a send.
  *
- * `default_headers.hpp` documents "nothing here is stored", about the
- * request a user saves: applying a default at send time and then writing it
- * back into the saved request is what let a load run replay a frozen
- * `X-Request-ID` (issue #1229). This is a different fact - what the *run*
- * decided, kept only for a later run's report to compare itself against, and
- * never read back into a send. `userAgent` is the resolved value verbatim,
- * since it can itself change across an engine upgrade; `requestId` and
- * `acceptEncoding` collapse to booleans, because a comparison needs to know
- * whether each was negotiated, not the exact header name or the
- * content-encoding list libcurl advertised. `expectContinue` (issue #2516) is
- * the policy's own boolean: whether libcurl was allowed to add `Expect:
- * 100-continue` above 1 MiB, which changes what a large-body run measures.
- *
- * A snapshot that is not JSON (which `sanitize_config_snapshot` passes
- * through verbatim) is left alone, matching `scenario_snapshot` and
- * `load_data_snapshot` beside it.
- *
- * Non-static: run_row_seed_test.cpp declares and drives it directly, the way
- * it does its two siblings above.
+ * `userAgent` is verbatim, as it can change across upgrades; `requestId` and
+ * `acceptEncoding` are booleans, since a comparison needs whether each was
+ * negotiated; `expectContinue` (#2516) is whether libcurl could add
+ * `Expect: 100-continue` above 1 MiB, which changes what a large-body run
+ * measures. A non-JSON snapshot is left alone. Non-static for
+ * `run_row_seed_test.cpp`.
  */
 std::string with_default_headers_snapshot (const std::string& snapshot,
 const vayu::http::DefaultHeaderPolicy& header_policy) {
@@ -862,15 +761,10 @@ const vayu::http::DefaultHeaderPolicy& header_policy) {
 }
 
 /**
- * @brief Which compression key a run's `config_snapshot` decision should read
- *        (issue #1488): `Load` for anything the event loop drives (a plain
- *        load run or a scenario with a load mode), `Design` for a sequential
- *        collection run, which negotiates the way any other collection send
- *        does. Extracted so the branch does not add to
- *        `handle_start_load_test`'s own cognitive complexity.
- *
- * Non-static: run_row_seed_test.cpp declares and drives it directly, the way
- * it does the other snapshot helpers above.
+ * The compression key a run's snapshot reads (#1488): `Load` for anything the
+ * event loop drives (a load run, or a scenario with a load mode), `Design` for
+ * a sequential collection run, which negotiates like any collection send.
+ * Non-static for `run_row_seed_test.cpp`.
  */
 vayu::http::DefaultHeaderScope compression_scope_of (vayu::RunType type) {
     return type == vayu::RunType::Load ? vayu::http::DefaultHeaderScope::Load :
@@ -880,16 +774,10 @@ vayu::http::DefaultHeaderScope compression_scope_of (vayu::RunType type) {
 namespace {
 
 /**
- * @brief The stored `config_snapshot` for a run, with whatever this run's shape
- *        deliberately keeps out of it already out (issue #993).
- *
- * The two rewrites are exclusive by construction - a scenario run states its
- * work as a collection and refuses a `data` block beside it - so which one
- * applies is a property of the payload rather than a decision the caller makes.
- * It lives here rather than inline in `handle_start_load_test` because both
- * arms are the same rule (a shape whose payload carries user data of unknown
- * sensitivity is stored described rather than verbatim), and the route reads
- * better asking for the snapshot than spelling the choice out a third time.
+ * The stored `config_snapshot`, with what the run's shape keeps out already out
+ * (#993). The two rewrites are exclusive (a scenario run refuses a `data` block
+ * beside it), so the payload picks one, not the caller; both are one rule: a
+ * payload carrying user data is stored described, not verbatim.
  */
 std::string run_config_snapshot (const std::string& body,
 bool is_scenario,
@@ -904,25 +792,20 @@ const std::vector<std::string>& secret_values) {
     if (is_scenario) {
         shaped = scenario_snapshot (sanitized, scenario_manifest);
     } else if (data != nullptr && !data->rows.empty ()) {
-        // The rows out, their count in - the same rule the scenario manifest
-        // keeps, and for the same reason (issue #993).
+        // The rows out, their count in, as on a scenario manifest (#993).
         shaped = load_data_snapshot (sanitized, *data);
     }
     return with_default_headers_snapshot (shaped, header_policy);
 }
 
 /**
- * @brief The secret-flagged variable values a `POST /runs` snapshot is masked
- *        against (#1803): globals, the run's environment, and the collection
- *        chain of the request the run links - or, for a scenario, the chain of
- *        every folder a step sits in plus the run collection's own (#3270).
- *
- * A recursive scenario composes each step through its own folder's chain
- * (#3248), so a secret on a sub-folder below the run collection reaches the
- * run's values and is not on the run collection's chain. The union is
- * deduplicated by value; globals and the environment come with every load.
- *
- * A single-request run's chain is @p collection_id, `read_run_scope`'s answer.
+ * The secret-flagged values a `POST /runs` snapshot is masked against (#1803):
+ * globals, the run's environment and the linked request's collection chain
+ * (@p collection_id, `read_run_scope`'s answer), or for a scenario the chain of
+ * every folder a step sits in plus the run collection's (#3270). A recursive
+ * scenario composes each step through its own folder's chain (#3248), so a
+ * sub-folder's secret reaches the values without being on the run collection's
+ * chain. Deduplicated by value.
  */
 std::vector<std::string> run_snapshot_secrets (vayu::db::Database& db,
 const vayu::db::Run& run,
@@ -946,12 +829,9 @@ const vayu::core::ScenarioExecution* scenario) {
     return { unique_values.begin (), unique_values.end () };
 }
 
-/**
- * @brief The row-set limits a single-request run's `data` block is held to.
- *
- * The same two config rows the scenario path reads, so one payload cannot be
- * refused for a size the other would accept.
- */
+/// The row-set limits a single-request run's `data` is held to: the scenario
+/// path's two config rows, so neither payload is refused at a size the other
+/// accepts.
 vayu::core::ScenarioLimits load_data_limits (vayu::db::Database& db) {
     vayu::core::ScenarioLimits limits;
     limits.max_data_rows =
@@ -963,10 +843,9 @@ vayu::core::ScenarioLimits load_data_limits (vayu::db::Database& db) {
     return limits;
 }
 
-/// Every compiled element's outcome (issue #1514), the same array
-/// `record_design_result` also writes - one object, two homes, on the
-/// `build_script_result_node` precedent. Empty for an exchange with no
-/// elements.
+/// Every compiled element's outcome (#1514), the array `record_design_result`
+/// also stores (one object, two homes, as `build_script_result_node`); empty
+/// when the exchange has no elements.
 nlohmann::json build_element_outcomes_node (
 const std::vector<vayu::core::ElementOutcome>& outcomes) {
     nlohmann::json node = nlohmann::json::array ();
@@ -976,25 +855,22 @@ const std::vector<vayu::core::ElementOutcome>& outcomes) {
     return node;
 }
 
-// Build the final response JSON with script results
 nlohmann::json build_response_json (const vayu::Response& response,
 bool include_parsed_body,
 const nlohmann::json& scripts,
 const std::optional<vayu::core::ValidationVerdict>& validation,
 const nlohmann::json& elements = nlohmann::json::array ()) {
     nlohmann::json response_json = vayu::json::serialize (response, include_parsed_body);
-    // The schema verdict (#628), on the same terms as the script keys below:
-    // one builder, and the stored trace gets the *same* object, so a restored
-    // response cannot show a different verdict than the live one did. Absent
-    // entirely for an unbound collection - `std::nullopt` here is the "never
-    // judged against a contract" state, not a failure.
+    // The schema verdict (#628), like the script keys: one builder, and the
+    // stored trace gets the same object, so a restored response cannot show
+    // another verdict. Absent for an unbound collection: `std::nullopt` means
+    // never judged, not a failure.
     if (validation) {
         response_json["validation"] = vayu::core::build_validation_payload (*validation);
     }
-    // Merged in at the top level, where every client reads these four keys. The node
-    // arrives built, because the caller hands the *same* object to
-    // `record_design_result` for the trace's `scripts` key - one object, two
-    // homes, so a key can never mean one thing live and another restored.
+    // Merged at the top level, where every client reads these four keys. The
+    // caller hands `record_design_result` the same node for the trace's
+    // `scripts`, so a key cannot mean one thing live and another restored.
     response_json.update (scripts);
     if (elements.is_array () && !elements.empty ()) {
         response_json["elements"] = elements;
@@ -1002,10 +878,9 @@ const nlohmann::json& elements = nlohmann::json::array ()) {
     return response_json;
 }
 
-// Reject a duration-shaped field that is present but not a positive magnitude
-// with an optional ms/s/m/h unit. Absent or null is always fine - every such
-// field has a default. Shared by `duration` and `stepDuration` rather than
-// copied, so the two cannot drift into accepting different spellings.
+// Refuses a duration field that is present but not a positive magnitude with an
+// optional ms/s/m/h unit; absent or null is fine, as each has a default. Shared
+// by `duration` and `stepDuration` so they accept the same spellings.
 std::optional<std::string>
 check_duration_field (const nlohmann::json& config, const char* key) {
     if (!config.contains (key) || config[key].is_null ()) {
@@ -1016,9 +891,9 @@ check_duration_field (const nlohmann::json& config, const char* key) {
         return std::string ("'") + key + "' must be a string with a unit, e.g. \"60s\" (got " +
         std::string (value.type_name ()) + ")";
     }
-    // Accept an optional unit: the unit-aware parser is #126's, and a bare
-    // "60" is what a client that never read the docs sends. This only has to
-    // separate "parses to something positive" from "wedges the run".
+    // The unit is optional: the parser is unit-aware (#126) and a bare "60" is
+    // what a client that never read the docs sends. This only separates "parses
+    // positive" from "wedges the run".
     static const std::regex duration_pattern (
     R"(^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h)?\s*$)", std::regex::icase);
     std::smatch match;
@@ -1029,9 +904,9 @@ check_duration_field (const nlohmann::json& config, const char* key) {
         "(got \"" +
         text + "\")";
     }
-    // The regex already proved group 1 is a plain decimal, so `stod` cannot
-    // fail on it - but this guard exists precisely because a conversion threw
-    // somewhere nobody was catching, so it stays total here too.
+    // The regex proved group 1 a plain decimal, so `stod` cannot fail; the
+    // guard stays because an uncaught conversion throw is what this check
+    // exists to stop.
     double magnitude = 0.0;
     try {
         magnitude = std::stod (match[1].str ());
@@ -1044,10 +919,9 @@ check_duration_field (const nlohmann::json& config, const char* key) {
     return std::nullopt;
 }
 
-// `rampUpDuration` is held to what its reader accepts rather than to the rule
-// above: zero is an instant ramp, and a JSON number is seconds. Asked of the
-// reader itself (`duration_value_ms`) so the 400 and the run cannot disagree
-// about a spelling.
+// `rampUpDuration` follows its reader, not the rule above: zero is an instant
+// ramp and a JSON number is seconds. Asked of `duration_value_ms` itself so the
+// 400 and the run agree on a spelling.
 std::optional<std::string> check_ramp_duration_field (const nlohmann::json& config) {
     const auto ramp = config.find ("rampUpDuration");
     if (ramp == config.end () || ramp->is_null () ||
@@ -1074,10 +948,9 @@ std::optional<std::string> check_constant_rps_rate (const nlohmann::json& config
            "'constant_concurrency' with 'concurrency'.";
 }
 
-// The converse (#2396): a rate on any other mode would switch it to open loop.
-// An absent mode is `constant_rps`, as
-// `LoadStrategy::create` reads it, so it may carry a rate; an unrecognised one
-// may not.
+// The converse (#2396): a rate on another mode would switch it to open loop. An
+// absent mode is `constant_rps` (as `LoadStrategy::create` reads it) and may
+// carry a rate; an unrecognised one may not.
 std::optional<std::string> check_rate_only_on_constant_rps (const nlohmann::json& config) {
     if (!(vayu::core::requested_rps (config) > 0.0) ||
     vayu::core::is_constant_rps_mode (config)) {
@@ -1094,14 +967,13 @@ std::optional<std::string> check_rate_only_on_constant_rps (const nlohmann::json
     mode_name + "' set 'concurrency' instead, or send a rate of 0.";
 }
 
-// `carriedBudgets` (#2195) is a label list the engine stores and echoes and
-// never interprets, so the bounds only keep a client from parking an unbounded
-// payload in the snapshot and every report: the app names one metric key per
-// carried-over budget, far fewer than this. A length is bytes of UTF-8 (what
-// the parser hands over), not characters. The byte bound must admit every key
-// the app can build: `custom.<name>.<stat>` with a name of 100 UTF-16 units at
-// up to 3 bytes each is about 320 bytes, and a key refused here fails a run
-// start over a field that never changes the run.
+// `carriedBudgets` (#2195) is a label list stored and echoed, never
+// interpreted: the bounds only keep an unbounded payload out of the snapshot
+// and every report (the app sends one metric key per carried budget, far fewer
+// than 64). A length is UTF-8 bytes, not characters, and must admit every key
+// the app builds: `custom.<name>.<stat>` with a 100-unit name at 3 bytes a unit
+// is about 320 bytes, and a refusal fails a run start over a field that never
+// changes the run.
 constexpr std::size_t MAX_CARRIED_BUDGETS      = 64;
 constexpr std::size_t MAX_CARRIED_BUDGET_BYTES = 512;
 
@@ -1199,27 +1071,18 @@ size_t max_trace_body_bytes) {
 
 } // namespace
 
-/**
- * @brief Build the script-result keys - see routes.hpp for why one builder
- *        serves both the live response body and the stored trace.
- */
+/// The script-result keys; routes.hpp says why one builder serves the live body
+/// and the stored trace.
 nlohmann::json build_script_result_node (const vayu::ScriptResult& pre_script_result,
 const vayu::ScriptResult& post_script_result,
 size_t max_trace_body_bytes) {
     nlohmann::json node = nlohmann::json::object ();
 
     /*
-     * Both scripts' assertions, each carrying the script that made it.
-     *
-     * `pm.test` is bound in both phases and records in both: a pre-request
-     * script may call `pm.sendRequest` and assert on what came back, and
-     * `describe_failed_tests` fails a scenario step on a pre-request assertion,
-     * so the list carries both phases' (issue #810).
-     *
-     * `source` is the same field `consoleLogs` carries below, spelled the same
-     * two ways, because it answers the same question about the same pair of
-     * scripts. Order is execution order - pre before test - so the list reads
-     * as the run happened.
+     * Both scripts' assertions, pre before test (execution order), each with
+     * its `source`, spelled as `consoleLogs`' below. A pre-request script may
+     * assert on a `pm.sendRequest` answer and `describe_failed_tests` fails a
+     * scenario step on one, so both phases are listed (#810).
      */
     nlohmann::json test_results = nlohmann::json::array ();
     const auto append_tests     = [&test_results] (const char* source,
@@ -1245,16 +1108,11 @@ size_t max_trace_body_bytes) {
     }
 
     /*
-     * Combine console output from both scripts.
-     *
-     * `source` is a field rather than a `"[pre] "` text prefix: a prefix is
-     * indistinguishable from a script that logged a line
-     * beginning with those six characters, and adding a second prefix for the
-     * level would have doubled that ambiguity instead of removing it.
-     *
-     * A `pm.sendRequest` summary line's `scriptRequest` indexes
-     * `scriptRequests` below, so a test-phase line's moves past the
-     * pre-phase records.
+     * Both scripts' console output. `source` is a field, not a `"[pre] "`
+     * prefix, which a script logging those six characters would be
+     * indistinguishable from. A `pm.sendRequest` summary line's `scriptRequest`
+     * indexes `scriptRequests` below, so a test-phase line's index moves past
+     * the pre-phase records.
      */
     nlohmann::json all_console_output = nlohmann::json::array ();
     const auto append = [&all_console_output] (const char* source,
@@ -1284,7 +1142,6 @@ size_t max_trace_body_bytes) {
         node["scriptRequests"] = std::move (records);
     }
 
-    // Add script errors if any
     if (!pre_script_result.success && !pre_script_result.error_message.empty ()) {
         node["preScriptError"] = script_error_field (pre_script_result, "pre-request");
     }
@@ -1320,18 +1177,13 @@ const vayu::Response& response) {
 }
 
 /**
- * @brief Record a finished design execution against its run row.
+ * Records a finished design execution against its run row (declared in
+ * routes.hpp). Every `POST /execute` path (auth failure, completed exchange,
+ * the streaming worker's completion) goes through here, so "transient leaves no
+ * trace" is decided once. The Send's `log_design_outcome` record is written
+ * here too, before that rule: a transient Send is logged, without a `runId`.
  *
- * Declared in routes.hpp. Every `POST /execute` call site - the auth-failure
- * path, the completed-exchange path and the streaming worker's completion
- * callback - goes through here, so "transient leaves no trace" is decided in
- * exactly one place rather than guarded three times at the call sites. The
- * Send's outcome record (`log_design_outcome`) is written here for the same
- * reason, before that rule applies: a transient Send is logged too, without a
- * `runId`.
- *
- * Non-static: transient_execute_test.cpp drives it against a real database,
- * the suite having no in-process HTTP route harness.
+ * Non-static for `transient_execute_test.cpp`, against a real database.
  */
 std::optional<int> record_design_result (vayu::db::Database& db,
 const std::optional<std::string>& run_id,
@@ -1361,9 +1213,9 @@ std::optional<double> script_ms) {
         db_result.latency_ms  = response.timing.total_ms;
         db_result.error       = has_error ? response.error_message : "";
 
-        // Build the full-fidelity trace, then cap the request/response bodies at
-        // the configured limit so one large exchange cannot bloat the DB forever.
-        // When a body is cut, cap_trace_bodies records bodyTruncated/bodyBytes.
+        // Bodies are capped at the configured limit so one large exchange
+        // cannot bloat the DB; `cap_trace_bodies` records `bodyTruncated` /
+        // `bodyBytes` on a cut.
         nlohmann::json trace = build_result_trace (request, response);
         if (engine_ms) {
             trace["engineMs"] = *engine_ms;
@@ -1376,18 +1228,17 @@ std::optional<double> script_ms) {
         static_cast<int> (vayu::core::constants::json::MAX_TRACE_BODY_BYTES)));
         vayu::json::cap_trace_bodies (trace, max_trace_body_bytes);
 
-        // The verdict the live response carried, stored verbatim rather than
-        // recomputed at restore time: `responseFromRunResult` and
-        // `responseFromExecuteResult` are the named copy-does-not-receive-the-fix
-        // pair, and a second computation here is exactly how they would drift.
+        // Stored verbatim, not recomputed at restore: `responseFromRunResult`
+        // and `responseFromExecuteResult` are a named copy pair, and a second
+        // computation is how they would drift.
         if (validation) {
             trace["validation"] = vayu::core::build_validation_payload (*validation);
         }
 
-        // Every design send that ran scripts, not only a streaming one (#725), so a
-        // restored Tests tab can tell "passed" from "never ran".
-        // Only when the run had scripts at all - an empty node would put a
-        // Tests pane's worth of nothing on every stored send.
+        // Every design send that ran scripts, streaming or not (#725), so a
+        // restored Tests tab tells "passed" from "never ran"; none without
+        // scripts, where an empty node would store a Tests pane of nothing on
+        // every send.
         if (scripts.is_object () && !scripts.empty ()) {
             trace["scripts"] = scripts;
         }
@@ -1401,19 +1252,19 @@ std::optional<double> script_ms) {
             trace["events"] = stream->events;
         }
 
-        // A header value off the wire, or the wire request's body, can carry a
-        // byte that is not UTF-8 - dump with error_handler_t::replace so it
-        // becomes U+FFFD instead of throwing (import.cpp uses the same guard).
+        // A wire header value or request body can hold non-UTF-8 bytes:
+        // `replace` makes them U+FFFD instead of throwing (import.cpp's guard
+        // too).
         db_result.trace_data =
         trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
         result_id = db.add_result (db_result);
 
-        // A stream names its own terminal status: one the user stopped is
+        // A stream names its terminal status: one the user stopped is
         // `Stopped`, which neither the response nor the error flag can say.
         // Only from Running: a buffered send has no context for
         // `POST /runs/:id/stop` to signal, so a Stop there writes the row
-        // itself, as `stop_if_caller_left` does for a caller that hung up,
-        // and it stands over the exchange recorded above.
+        // itself (as `stop_if_caller_left` does for a caller that hung up) and
+        // stands over the exchange recorded above.
         vayu::RunStatus status = vayu::RunStatus::Completed;
         if (stream) {
             status = stream->status;
@@ -1422,9 +1273,9 @@ std::optional<double> script_ms) {
         }
         db.transition_run_status (*run_id, { vayu::RunStatus::Running }, status);
 
-        // A design run reached a terminal status - trim the run history so
-        // per-request clicks do not accumulate forever (retention knobs, or 0
-        // to disable). Best-effort: a prune failure must not fail the request.
+        // Prune on each terminal design run so per-request sends do not
+        // accumulate (retention settings; 0 disables). Best-effort: a prune
+        // failure never fails the request.
         try {
             db.prune_runs_configured ();
         } catch (const std::exception& e) {
@@ -1446,20 +1297,17 @@ std::optional<double> script_ms) {
 }
 
 /**
- * @brief Validate a POST /runs config before the run row is created.
+ * Validates a POST /runs config before the run row is created. Each field is
+ * read with `config.value (...)` and cast to `size_t` or fed to a modulo on a
+ * detached worker with no `catch` above, where out of range is a dead daemon:
+ * `success_sample_rate: 0` is `% 0` (SIGFPE), `concurrency: -1` pre-allocates
+ * ~1.8e19 curl handles, `timeout: 0` never expires a transfer, and a
+ * JSON-number `duration` throws from `RunContext`'s constructor after the row
+ * exists, stranding it `pending`. So it runs in the route, before `create_run`:
+ * a rejected request leaves no trace. Non-static for
+ * `run_config_validation_test.cpp`.
  *
- * Every field below is read downstream with `config.value (...)` and cast to
- * `size_t` or fed to a modulo, in code that runs on a detached worker thread
- * with no `catch` above it. Out of range there is not a bad run, it is a dead
- * daemon: `success_sample_rate: 0` is `% 0` (SIGFPE), `concurrency: -1` becomes
- * ~1.8e19 eagerly pre-allocated curl handles, `timeout: 0` leaves transfers
- * that never expire, and a JSON-number `duration` throws out of `RunContext`'s
- * constructor *after* the run row exists, stranding it `pending` forever.
- *
- * So this runs in the route, before `create_run`: a rejected request must leave
- * no trace. Non-static - `run_config_validation_test.cpp` drives it directly.
- *
- * @return The reason the config is invalid, or `std::nullopt` if it is usable.
+ * @return why the config is invalid, or `std::nullopt` if it is usable.
  */
 std::optional<std::string> validate_run_config (const nlohmann::json& config,
 const vayu::core::MonitorLimits& monitor_limits) {
@@ -1467,27 +1315,23 @@ const vayu::core::MonitorLimits& monitor_limits) {
         return "Run config must be a JSON object";
     }
 
-    // `transient` belongs to `POST /execute` alone (issue #382). A load or
-    // scenario run *is* its run row - the run id is the return value, and the
-    // live-metrics stream, the report and the scenario step store all key off
-    // it - so there is nothing coherent for the flag to mean here. Rejected
-    // rather than ignored: a caller that sends it believes this run will leave
-    // no trace, and it is about to leave a large one.
+    // `transient` is `POST /execute`'s alone (#382): a load or scenario run is
+    // its run row (the id is the answer, and live metrics, the report and the
+    // step store key off it), so the flag means nothing here. Refused, not
+    // ignored: the caller believes the run leaves no trace, and it leaves a
+    // large one.
     if (config.contains ("transient") && !config["transient"].is_null ()) {
         return "'transient' is not valid on a run - it applies to POST "
                "/execute "
                "only, because a run is identified by the row it creates";
     }
 
-    // `stream` and its caps are read through the *same* parser `POST /execute`
-    // uses (issue #576): one description of how a stream is declared, so the
-    // two endpoints cannot drift on the spelling, the types or the ranges. A load
-    // stream always ends, by a cap resolved below: a load run's completion
-    // accounting has no place for a response that never ends (#573).
-    //
-    // The `transient` rule inside that parser is unreachable from here: a run
-    // carrying `transient` was already rejected above. A collection run reads
-    // the caps alone, for the steps whose stored request streams (#3235).
+    // `stream` and its caps go through `POST /execute`'s parser (#576), so the
+    // two endpoints agree on spelling, types and ranges. A load stream always
+    // ends, by a cap resolved below: load completion accounting has no place
+    // for an endless response (#573). The parser's `transient` rule is
+    // unreachable (refused above). A collection run reads the caps alone, for
+    // steps whose stored request streams (#3235).
     const bool is_collection_run =
     config.contains ("scenario") && !config["scenario"].is_null ();
     if (const auto stream = is_collection_run ? read_collection_run_stream_caps (config) :
@@ -1496,10 +1340,9 @@ const vayu::core::MonitorLimits& monitor_limits) {
         return stream.error;
     }
 
-    // The duration-shaped fields are the only non-numeric ones here, and the
-    // only ones whose bad value throws rather than miscomputes: they are read
-    // as strings by `duration_field_ms`, which rejects an unknown unit at run
-    // time - far too late, since the run row already exists by then.
+    // The duration fields are the only non-numeric ones and the only ones whose
+    // bad value throws rather than miscomputes: `duration_field_ms` refuses an
+    // unknown unit at run time, after the row exists.
     for (const char* key : { "duration", "stepDuration" }) {
         if (auto reason = check_duration_field (config, key)) {
             return reason;
@@ -1572,12 +1415,11 @@ const vayu::core::MonitorLimits& monitor_limits) {
         return reason;
     }
 
-    // Each is read as a boolean only after the run row exists - by RunContext's
-    // constructor via `config.value (..., bool)`, which throws `type_error.302`
-    // on a string, or by the scenario runner - which is the stranded-`pending`
-    // failure this whole function is here to prevent. Absent and `null` both
-    // mean "use the default", matching the null-vs-absent rule the resource
-    // routes follow.
+    // Each is read as a boolean only after the row exists (`RunContext`'s
+    // constructor through `config.value (..., bool)`, which throws
+    // `type_error.302` on a string, or the scenario runner): the
+    // stranded-`pending` failure this function prevents. Absent and `null` mean
+    // the default, as on the resource routes.
     for (const char* key : { "phase_histograms", "save_timing_breakdown", "capture_response_bodies",
          "stream_metrics", "failOnSchemaError", "stopOnError", "retryAfterBackoff" }) {
         const auto it = config.find (key);
@@ -1587,10 +1429,9 @@ const vayu::core::MonitorLimits& monitor_limits) {
         }
     }
 
-    // `thresholds` is the one nested object here, so it gets its own pass
-    // rather than a row in the flat table above. The rule lives with the
-    // evaluator (`core/threshold_eval.cpp`), which reads the same metric table
-    // - a budget this accepts is one the run will actually judge.
+    // `thresholds`, nested, gets its own pass. Its rule lives with the
+    // evaluator (`core/threshold_eval.cpp`), which reads the same metric table,
+    // so a budget accepted here is one the run judges.
     if (auto reason = vayu::core::validate_thresholds (config)) {
         return reason;
     }
@@ -1598,11 +1439,9 @@ const vayu::core::MonitorLimits& monitor_limits) {
         return reason;
     }
 
-    // `monitor` is the other nested object, and its rule lives with the scrape
-    // loop for the same reason: `core/monitor.cpp` holds one description of the
-    // block, so a field this accepts is one the run will actually read. Its two
-    // movable limits arrive resolved from the caller, which is what keeps this
-    // function - and the core it delegates to - free of a `Database`.
+    // `monitor`'s rule lives with the scrape loop (`core/monitor.cpp`) for the
+    // same reason. Its two movable limits arrive resolved from the caller,
+    // keeping this function and that core free of a `Database`.
     if (auto reason = vayu::core::validate_monitor_config (config, monitor_limits)) {
         return reason;
     }
@@ -1611,17 +1450,15 @@ const vayu::core::MonitorLimits& monitor_limits) {
 }
 
 /**
- * Start a run whose row `create_run` has already written, and never answer
- * anything but a 202 while that row is still `pending` (#1893): nothing would
- * ever move it again. A refusal (the daemon is draining its workers) is a 503
- * and a throw out of the start (the run context's constructor reads the
- * config) is a 500 naming it; both fail the row first, guarded the way
- * `refuse_stream_before_it_opens` guards it.
+ * Starts a run whose row `create_run` wrote, answering nothing but a 202 while
+ * that row is `pending` (#1893), since nothing would move it again. A refusal
+ * (the daemon draining its workers) is a 503 and a throw from the start (the
+ * run context's constructor reads the config) a 500 naming it; both fail the
+ * row first, guarded as `refuse_stream_before_it_opens` guards it.
  *
- * Non-static: run_config_validation_test.cpp drives it with a start that
- * throws, because no payload `validate_run_config` accepts reaches a throw in
- * that constructor. The catch is the net under the validator, not a path a
- * client can take.
+ * Non-static: `run_config_validation_test.cpp` drives it with a throwing start,
+ * because no payload `validate_run_config` accepts reaches a throw there. The
+ * catch is the net under the validator, not a client path.
  */
 std::optional<RouteError> start_created_run (vayu::db::Database& db,
 const std::string& run_id,
@@ -1650,18 +1487,16 @@ const std::function<bool ()>& start) {
 }
 
 /**
- * Run @p send, everything a design send does once its run row exists, so that
- * a throw out of it fails that row and answers a JSON error (#2458). Without
- * this the exception reached httplib, which answers a bodiless 500, and the
- * row stayed `running` whenever the throw came before `record_design_result`.
- * The row is failed even when the result was already recorded: the caller
- * got no response, and a row saying `completed` would contradict that. That
- * Completed-to-Failed edge is the one move out of a terminal status (#3340);
- * a row that is `stopped` or `failed` already says the send did not succeed.
+ * Runs @p send, everything a design send does once its row exists, so a throw
+ * fails that row and answers a JSON error (#2458) rather than httplib's
+ * bodiless 500 over a row left `running`. The row is failed even when the
+ * result was recorded: the caller got no response, and `completed` would
+ * contradict that. Completed to Failed is the one move out of a terminal status
+ * (#3340); a `stopped` or `failed` row already says the send did not succeed.
  *
- * Non-static: execute_binary_body_test.cpp drives it with a send that throws,
- * because no payload reaches a throw past the fixes #2458 made. The catch is
- * the net under them, on the `start_created_run` precedent.
+ * Non-static: `execute_binary_body_test.cpp` drives it with a throwing send,
+ * because no payload reaches a throw past #2458's fixes; the catch is the net
+ * under them, as in `start_created_run`.
  */
 void guard_recorded_send (vayu::db::Database& db,
 httplib::Response& res,
@@ -1725,9 +1560,9 @@ struct DesignSend {
     /// every recording step keys off that.
     std::optional<std::string> run_id;
     vayu::Request request;
-    /// This send's resolved, compiled element list (issue #1514) - the
-    /// payload's `elements` field, compiled once. `script.pre` / `script.post`
-    /// are the only script source left; a plain empty vector runs nothing.
+    /// The payload's `elements`, resolved and compiled once (#1514);
+    /// `script.pre` / `script.post` are the only script source, and an empty
+    /// vector runs nothing.
     std::shared_ptr<const std::vector<vayu::core::CompiledElement>> elements;
     std::optional<std::string> script_request_name;
     std::string cookie_scope;
@@ -1761,9 +1596,8 @@ ScriptVariableScopes load_send_scopes (vayu::db::Database& db, const DesignSend&
 }
 
 
-/// What a pre-row refusal of `POST /execute` answers with: the message, and the
-/// code when the refusal has one (`invalid_header_name`). A bare message
-/// converts, so a refusal with no code is written as it always was.
+/// What a pre-row refusal of `POST /execute` answers with: the message and,
+/// when it has one, the code (`invalid_header_name`). A bare message converts.
 struct ExecuteRefusal {
     std::string message;
     std::string code;
@@ -1802,18 +1636,13 @@ bool is_collection_origin (const nlohmann::json& entry) {
 }
 
 /**
- * `POST /execute`'s inline `elements` against the registry, the check
- * `POST /requests` and `POST /runs` make (#3052).
- *
- * The list is a composed one: collection and folder entries ride beside the
- * request's own. An entry a collection level contributes is judged as a
- * collection's (`script.setup` is allowed there, and a duplicated collection
- * repeats ids across levels, so each is checked alone); everything else is
- * judged together as a request's, which is what `POST /requests` does. A
- * refusal's `Item N` therefore counts within the entries judged together.
- *
- * Ids the caller left off are stamped into @p json, so the send compiles
- * the list that was validated.
+ * `POST /execute`'s inline `elements` against the registry, as `POST /requests`
+ * and `POST /runs` check them (#3052). The list is composed: an entry a
+ * collection level contributes is judged as a collection's (`script.setup` is
+ * allowed there, and a duplicated collection repeats ids across levels, so each
+ * is checked alone); the rest are judged together as a request's, so a
+ * refusal's `Item N` counts within those. Ids the caller left off are stamped
+ * into @p json, so the send compiles the list that was validated.
  *
  * @return the refusal, or nothing for an absent or null `elements`.
  */
@@ -1843,14 +1672,10 @@ std::optional<std::string> validate_execute_elements (nlohmann::json& json) {
 }
 
 /**
- * Everything `POST /execute` reads and can refuse before any run row exists.
- *
- * Each refusal here is a 400 with nothing recorded behind it - the rule the
- * whole pre-row section is ordered by: a request that could not be flagged,
- * bound or built must leave no trace of an execution that never happened.
- *
- * A buffered send's @p caller_watch starts before the build, so an OAuth 2.0
- * token the build acquires stops for a caller that has gone too (#3383).
+ * Everything `POST /execute` reads and can refuse before any run row exists:
+ * each refusal is a 400 with nothing recorded, the rule this section is ordered
+ * by. A buffered send's @p caller_watch starts before the build, so an OAuth
+ * 2.0 token the build acquires stops for a departed caller too (#3383).
  *
  * @return the message (and code, when it has one) to answer with, already
  *         logged, or nothing.
@@ -1870,9 +1695,8 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
     }
     nlohmann::json json = std::move (*parsed);
 
-    // Read before anything is built or written, with the other pre-row
-    // validation: a malformed flag must be a 400, not a run the caller
-    // believed would leave no trace.
+    // Pre-row: a malformed flag is a 400, not a run the caller believed would
+    // leave no trace.
     const auto transient = read_transient_flag (json);
     if (!transient.ok) {
         vayu::utils::log_warning ("http", "POST /execute - " + transient.error);
@@ -1890,9 +1714,8 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
         return include_parsed_body.error;
     }
 
-    // Beside the transient flag and for the same reason: `stream` changes
-    // the execution model, so a malformed one must be a 400 before anything
-    // is built or written rather than a send the caller did not ask for.
+    // Pre-row too: `stream` changes the execution model, so a malformed one is
+    // a 400, not a send the caller did not ask for.
     auto stream = read_stream_flag (json);
     if (!stream.ok) {
         vayu::utils::log_warning ("http", "POST /execute - " + stream.error);
@@ -1914,10 +1737,9 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
             std::string (vayu::http::INVALID_TARGET_POLICY_CODE) };
     }
 
-    // Scripts are elements now (issue #1514's clean cut, no transitional
-    // alias): a caller still sending `preRequestScript` / `postRequestScript`
-    // / `tests` is refused before anything is built or written, exactly as
-    // the two write routes refuse them.
+    // Scripts are elements (#1514, no alias): `preRequestScript` /
+    // `postRequestScript` / `tests` are refused before anything is built or
+    // written, as the two write routes refuse them.
     if (auto refusal = refuse_legacy_script_fields (json)) {
         vayu::utils::log_warning ("http", "POST /execute - " + *refusal);
         return refusal;
@@ -1928,10 +1750,8 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
         return refusal;
     }
 
-    // The row this send binds, if the caller named one (issue #601). Read
-    // here with the other pre-row validation for the reason the bind below
-    // is also placed before the run record: a request whose tokens could
-    // not bind must leave no trace of an execution that never happened.
+    // The bound row (#601), read pre-row like the bind below: a request whose
+    // tokens cannot bind leaves no trace.
     auto data_row = read_data_row (json,
     static_cast<size_t> (ctx.db.get_config_int ("maxScenarioDataBytes",
     static_cast<int> (vayu::core::constants::scenario::MAX_DATA_BYTES))));
@@ -1940,14 +1760,11 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
         return data_row.error;
     }
 
-    // How the credentials resolve, decided before the build because it is
-    // the build that would otherwise encode them out of reach (issue #642).
-    // The refusal it can carry - an oauth2 config with a data token - is a
-    // 400 here, beside the row's own, and for the same reason: nothing has
-    // been recorded or sent yet.
-    // The one row's own columns, exactly as `bind_data_row` reads them below:
-    // a credential spelled `{{username}}` binds from the row for the same
-    // reason one spelled `{{data.username}}` does (issue #1007).
+    // Decided before the build, which would otherwise encode the credentials
+    // out of reach (#642); its refusal (an oauth2 config with a data token) is
+    // a 400 beside the row's own, as nothing is recorded or sent yet. The row's
+    // columns are read as `bind_data_row` reads them, so `{{username}}` binds
+    // from the row as `{{data.username}}` does (#1007).
     const auto row_columns = data_row.value ?
     vayu::core::bound_columns_of (*data_row.value) :
     vayu::http::BoundColumnNames{};
@@ -1964,11 +1781,10 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
         return reason;
     }
 
-    // Build the request once: deserialize + timeout + auth. A malformed
-    // payload fails here (before any run record is created); an auth
-    // failure is surfaced after the run exists (below). Credentials
-    // carrying a `{{data.*}}` are the one case the build leaves alone - the
-    // bind below applies them once the row has reached them.
+    // Deserialize, timeout and auth, once. A malformed payload fails before any
+    // run record; an auth failure surfaces after the run exists (below).
+    // Credentials carrying `{{data.*}}` are left to the bind below, once the
+    // row has reached them.
     const int request_timeout_ms = resolve_request_timeout_ms (json, ctx.db);
     if (!stream.value) {
         caller_watch.emplace (req.is_connection_closed, ctx.server_stopping);
@@ -1985,34 +1801,25 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
         return ExecuteRefusal{ built.error_message, built.detail_code };
     }
 
-    // Bind the row into what composition left written, before anything is
-    // recorded or sent. A failure here is a `400` with the binder's own
-    // message - it names the token, the row and the row's columns, which is
-    // what lets the request be fixed without opening the file - and the
-    // partially bound request is discarded rather than sent
-    // (scenario_data.hpp). Nothing runs, so nothing is recorded: the
-    // refusal precedes the run row exactly as the flag checks above do.
-    // The identity binds here too, and for every send rather than only for one
-    // carrying a row (issue #994): a single send is a run of one, so `{{$vu}}`
-    // and `{{$iteration}}` answer `1` and `0` - the numbers this same request
-    // would carry as the first iteration of a load run - instead of reaching
-    // the wire written as they stand. The scan costs a request that spells
-    // neither one walk of its fields, at the design path's rate rather than a
-    // load run's.
+    // Binds the row into what composition left written, before anything is
+    // recorded or sent. A failure is a 400 with the binder's message (it names
+    // the token, the row and its columns, so the request can be fixed without
+    // opening the file), the partly bound request is discarded
+    // (scenario_data.hpp), and no run row exists, as for the flag checks. The
+    // identity binds for every send (#994): a single send is a run of one, so
+    // `{{$vu}}` and `{{$iteration}}` answer `1` and `0`, as on a load run's
+    // first iteration, rather than reaching the wire as written. A request
+    // spelling neither costs one walk of its fields.
     const vayu::core::IterationBinding binding{ data_row.value ? &*data_row.value : nullptr,
         /*row_index=*/0, vayu::core::IterationIdentity{} };
-    // Both halves through the one binder both load paths drive: the order is the
-    // whole of what makes a deferred credential correct, and a second copy of
-    // it here would be a copy that stops receiving that one's fixes. The
-    // credentials half is a no-op for the ordinary send, whose auth the build
-    // already applied.
-    //
-    // `row_columns` - not the two-argument overload's own empty default - so a
-    // bare `{{username}}` binds from the row here exactly as it does on both
-    // load paths (issue #1007).
-    //
-    // Credentials that also wait on the pre-request script (issue #2473) take
-    // the row here and are applied after the script, by the exchange.
+    // Both halves go through the binder both load paths drive: the order is
+    // what makes a deferred credential correct, and a copy here would stop
+    // receiving its fixes. The credentials half is a no-op for the ordinary
+    // send, whose auth the build applied. `row_columns`, not the overload's
+    // empty default, so a bare `{{username}}` binds from the row as on both
+    // load paths (#1007). Credentials that also wait on the pre-request script
+    // (#2473) take the row here and are applied after the script, by the
+    // exchange.
     const auto fields = vayu::core::tokenize_bindable_fields (built.request, row_columns);
     auto bound = row_auth.after_scripts ?
     vayu::core::bind_iteration_holding_auth (
@@ -2039,18 +1846,14 @@ std::optional<vayu::http::DisconnectWatch>& caller_watch) {
 }
 
 /**
- * The run row this execution carries, and the persisted half of it.
- *
- * Built even for a transient execution, because it is also how the handler
- * carries scope: `load_send_scopes` reads its `environment_id` beside
- * `collection_id` (and `persist_script_variables` writes back to the rows that
- * load named), and the cookie scope comes from the same field. Only the
- * *persisted* half - the id, the config snapshot, the create - is conditional,
- * so a transient execution resolves variables and cookies exactly as a
- * recorded one does.
- *
- * Only refuses the payload; the create is the route's, because a database
- * that refuses the row is a 500, not a 400 (#2353).
+ * The run row this execution carries, and its persisted half. Built even for a
+ * transient execution, because it carries scope: `load_send_scopes` reads its
+ * `environment_id` beside `collection_id` (and `persist_script_variables`
+ * writes back to the rows that load named), and the cookie scope comes from the
+ * same field. Only the persisted half (id, config snapshot, create) is
+ * conditional, so a transient execution resolves variables and cookies as a
+ * recorded one does. The create is the route's: a database refusing the row is
+ * a 500, not a 400 (#2353).
  *
  * @return the message to answer 400 with, already logged, or nothing.
  */
@@ -2078,9 +1881,8 @@ DesignSend& send) {
     send.run.origin        = payload.origin.kind;
     send.run.origin_client = payload.origin.client;
 
-    // What the scripts below read as `pm.info.requestName`. Resolved here,
-    // with the rest of the payload validation, so a malformed field is a
-    // 400 before any run row exists.
+    // `pm.info.requestName`, resolved with the payload validation so a
+    // malformed field is a 400 before any run row exists.
     auto resolved_name = resolve_script_request_name (ctx.db, json, send.run.request_id);
     if (!resolved_name.ok) {
         vayu::utils::log_warning ("http", "POST /execute - " + resolved_name.error);
@@ -2088,10 +1890,9 @@ DesignSend& send) {
     }
     send.script_request_name = std::move (resolved_name.name);
 
-    // The persisted half of the run row, skipped entirely when the caller
-    // asked for a transient execution. The config snapshot is built here
-    // rather than above because it is storage, not scope: sanitizing a
-    // payload nobody will store is work with no reader.
+    // The persisted half, skipped for a transient execution. The snapshot is
+    // built here, not above, because it is storage, not scope: nobody reads a
+    // sanitized payload that is never stored.
     if (!payload.transient) {
         send.run.id = vayu::utils::generate_id ("run_");
         const auto max_snapshot_body_bytes =
@@ -2103,7 +1904,6 @@ DesignSend& send) {
         send.run_id = send.run.id;
     }
 
-    // Log request details
     vayu::utils::log_info ("http", "Design Mode send",
     { { "runId", send.run_id.value_or ("none (transient)") },
     { "method", json.value ("method", "UNKNOWN") }, { "url", json.value ("url", "UNKNOWN") },
@@ -2111,21 +1911,19 @@ DesignSend& send) {
     { "environmentId", send.run.environment_id.value_or ("none") },
     { "elements", send.elements ? send.elements->size () : 0 } });
 
-    // Which jar this execution reads and writes: one per environment, with the
-    // no-environment jar for a request sent without one. Resolved once here so
-    // the send, the pre-request script's `pm.sendRequest` and both scripts'
-    // `pm.cookies` cannot disagree about which session they are looking at. See
-    // cookie_jar.hpp for the scope decision.
+    // One jar per environment, the no-environment jar without one, resolved
+    // once so the send, the pre-request script's `pm.sendRequest` and both
+    // scripts' `pm.cookies` see one session (the scope decision:
+    // cookie_jar.hpp).
     send.cookie_scope =
     send.run.environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
 
-    // What both scripts run under. Read here rather than inside each path
-    // because it is four config lookups; the QuickJS runtime itself - the part
-    // that is not free - is still built only where a script exists.
+    // Four config lookups, read once for both paths; the QuickJS runtime, the
+    // costly part, is built only where a script exists.
     send.script_config = vayu::core::read_script_config (ctx.db);
-    // Payload-level, not config-level: whether a script may send is a property
-    // of *who asked for this execution*, not of the installation. Absent means
-    // no - see ScriptConfig::allow_send_request.
+    // Payload-level: whether a script may send belongs to who asked for this
+    // execution, not to the installation. Absent means no
+    // (`ScriptConfig::allow_send_request`).
     send.script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
     // A send stores one trace, and its scripts' requests ride it (#3633).
     vayu::core::record_script_requests (send.script_config, ctx.db);
@@ -2150,17 +1948,11 @@ void persist_send_variables (vayu::db::Database& db, const ScriptVariableScopes&
 }
 
 /**
- * Refuse a streaming send before its stream opens, failing the run row behind
- * it.
- *
- * By the time either refusal is reached the row exists and nothing is going to
- * consume it, so it is failed here rather than left `running` forever - guarded,
- * because a throw while recording that would cost the caller the answer as well
- * as the stream.
- *
- * One helper for both refusals - the draining daemon's, and the header-name
- * ones the residual pass reports (#1051, #1084) - because they are the same three
- * statements, and a second copy is one that stops receiving this one's fixes.
+ * Refuses a streaming send before its stream opens. The row exists and nothing
+ * will consume it, so it is failed rather than left `running`, guarded, since a
+ * throw while recording would cost the caller the answer as well. One helper
+ * for the draining daemon's refusal and the residual pass's header-name ones
+ * (#1051, #1084), so a copy cannot miss a fix.
  */
 void refuse_stream_before_it_opens (RouteContext& ctx,
 httplib::Response& res,
@@ -2181,12 +1973,11 @@ std::string_view code = {}) {
 }
 
 /**
- * Give a stream @p jar, carrying the pre-request script's @p writes - or, for
- * a request with `disableCookies` (issue #1765), no jar at all, answering the
- * writes for the caller to apply once the stream has started, because no
- * transfer will carry them. Exactly once either way, the same rule the
- * buffered path follows in `execute_exchange`, and never for a stream the
- * manager refuses to start - the jar-on writes go with the refused spec.
+ * Gives a stream @p jar carrying the pre-request script's @p writes or, with
+ * `disableCookies` (#1765), no jar, answering the writes for the caller to
+ * apply once the stream starts, as no transfer will carry them. Exactly once
+ * either way, as `execute_exchange` does, and never for a stream the manager
+ * refuses: the jar-on writes go with the refused spec.
  */
 [[nodiscard]] std::vector<vayu::http::CookieWrite> attach_stream_jar (
 vayu::http::SseStreamRequest& spec,
@@ -2259,82 +2050,60 @@ const nlohmann::json* row_or_null (const std::optional<nlohmann::json>& row) {
 }
 
 /**
- * The streaming half of a design send (issue #573).
- *
- * The same script/send/script ordering a buffered send performs, pulled apart
- * by the transfer that sits between the two halves (issue #575): the
+ * The streaming half of a design send (#573), in the buffered send's
+ * script/send/script order, split by the transfer between them (#575): the
  * pre-request script runs here, before anything is on the wire, so its
  * `pm.request` write-back reaches the stream; the post-request script runs on
- * the worker thread once the stream has terminated, because only then is there
- * a response - and an event list - to assert over.
+ * the worker thread once the stream ends, when there is a response and an event
+ * list to assert over.
  */
 void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignSend& send) {
-    // The same script/send/script ordering a buffered send performs,
-    // pulled apart by the transfer that sits between the two halves
-    // (issue #575). The pre-request script runs here, before anything
-    // is on the wire, so its `pm.request` write-back reaches the
-    // stream; the post-request script runs on the worker thread once
-    // the stream has terminated, because only then is there a response
-    // - and an event list - to assert over.
-    //
-    // The scopes both halves read are loaded once and travel with the
-    // completion callback, so a `pm.environment.set` in the
-    // pre-request script is visible to the post-request script exactly
-    // as it is on the buffered path.
+    // Loaded once and carried by the completion callback, so a pre-request
+    // `pm.environment.set` reaches the post-request script as on the buffered
+    // path.
     ScriptVariableScopes scopes;
     vayu::ScriptResult pre_script_result;
     vayu::ScriptResult post_script_result_placeholder; // unused; step.before touches only pre_script_result
     std::vector<vayu::core::ElementOutcome> pre_element_outcomes;
     std::vector<vayu::http::CookieWrite> pre_cookie_writes;
-    // Resolved once here rather than at each of the three uses below
-    // (the pre-request script's `pm.sendRequest`, the transfer, and
-    // the post-request script's on the worker thread): they are one
-    // stream, and a settings change between them would otherwise send
-    // the two halves out by different routes.
+    // Resolved once for its three uses (the pre-request `pm.sendRequest`, the
+    // transfer, the worker's post-request script): they are one stream, and a
+    // settings change between them would route the halves differently.
     const auto transport = vayu::http::resolve_transport_policy (ctx.db);
-    // Resolved here, beside `transport`, for the same reason and with the same
-    // reach (issue #1229): the transfer below and both scripts' own
-    // `pm.sendRequest` are one send, and a script whose auxiliary request
-    // carried a different default header set from the stream it belongs to
-    // would be the per-path divergence this issue removed.
+    // Beside `transport`, for the same reason (#1229): the transfer and both
+    // scripts' `pm.sendRequest` are one send and carry one default header set.
     const auto default_headers = vayu::http::resolve_default_header_policy (
     ctx.db, vayu::http::DefaultHeaderScope::Design);
-    // The design bound, resolved once here for the same reason `transport` is:
-    // what either script's `pm.sendRequest` may read (issue #1188), and what a
-    // stream whose reply is not `text/event-stream` keeps as its body (#3238).
-    // The stream itself still ends by its event and duration caps, never by a
-    // byte total.
+    // The design bound, once, for the same reason: what either script's
+    // `pm.sendRequest` may read (#1188) and what a stream whose reply is not
+    // `text/event-stream` keeps as its body (#3238). The stream itself ends by
+    // its event and duration caps, never a byte total.
     const size_t script_response_bound = design_response_body_bound (ctx.db);
     // A script's fetch takes the send's resolved timeout (#2833), copied out
     // here because the stream itself sets no whole-transfer deadline and the
     // request is moved into it below.
     const int script_request_timeout_ms = send.request.timeout_ms;
-    // `ElementContext::max_body_bytes` for this stream's own elements (issue
-    // #1514's reopen), resolved once here for the same reason
-    // `script_response_bound` is: the post-request element pass runs on the
-    // worker thread, long after this handler's frame.
+    // `ElementContext::max_body_bytes` for this stream's elements (#1514),
+    // resolved now because the post-request pass runs on the worker thread,
+    // long after this frame.
     const size_t element_body_bytes = element_body_bound (ctx.db);
-    // Loaded whether or not this send carries a script, because the
-    // residual-token pass below reads them too (issue #1008): a `{{token}}`
-    // that resolves on the buffered path and stays literal here would be one
-    // send behaving two ways.
+    // Loaded with or without a script, as the residual-token pass reads them
+    // too (#1008): a `{{token}}` resolving on the buffered path must not stay
+    // literal here.
     scopes = load_send_scopes (ctx.db, send);
 
     static const std::vector<vayu::core::CompiledElement> NO_ELEMENTS;
     const std::vector<vayu::core::CompiledElement>& elements =
     send.elements ? *send.elements : NO_ELEMENTS;
-    // Built only where an element exists - the QuickJS runtime itself is
-    // what is not free, and a `script.pre` element's `apply` is the only
-    // thing here that reaches it.
+    // Only where an element exists: the QuickJS runtime is the costly part, and
+    // a `script.pre` element's `apply` is all that reaches it here.
     std::optional<vayu::runtime::ScriptEngine> script_engine;
     if (!elements.empty ()) {
         script_engine.emplace (send.script_config);
     }
     {
-        // `step.after`'s reference is never read: `run_post_script` is not
-        // called from `step.before`, and the pipeline below runs only that
-        // one phase - the post half runs on the worker thread, in its own
-        // `ElementContext`, once the stream has terminated.
+        // Never read: only `step.before` runs here; the post half runs on the
+        // worker thread in its own `ElementContext` once the stream ends.
         vayu::ScriptResult unread_post_result;
         vayu::core::ElementContext element_ctx{
             .request  = send.request,
@@ -2352,9 +2121,9 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                 pre_ctx.max_response_bytes = script_response_bound;
                 pre_ctx.request_timeout_ms = script_request_timeout_ms;
                 pre_ctx.cancel             = &ctx.server_stopping;
-                // The same row the transfer below carries, on the same
-                // terms as the buffered path: a stream is still one send,
-                // and one send with a row is iteration 0 of 1.
+                // The row the transfer carries, as on the buffered path: a
+                // stream is one send, and one send with a row is iteration 0 of
+                // 1.
                 if (send.data_row) {
                     pre_ctx.iteration_data  = &*send.data_row;
                     pre_ctx.iteration       = 0;
@@ -2386,25 +2155,22 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         element_ctx, elements, pre_element_outcomes);
     }
 
-    // `stream` and `transient` are mutually exclusive - `read_stream_flag`
-    // refuses the pair with a 400 - so a streaming send always has a run row.
-    // The rule holds in `read_execute_payload`, not here, which is what
-    // `invariant_value` is for.
+    // `read_stream_flag` refuses `stream` with `transient`, so a streaming send
+    // always has a row; the rule holds in `read_execute_payload`, hence
+    // `invariant_value`.
     const std::string run_id = vayu::utils::invariant_value (
     send.run_id, "a streaming send has a run row: stream and transient are mutually exclusive");
 
-    // The same pass the buffered send makes between its script and its send
-    // (issue #1008), here because this path runs the pre-request script itself
-    // rather than through `execute_exchange`: a `{{token}}` the script has just
-    // defined resolves before the stream opens.
+    // The pass the buffered send makes between script and send (#1008), here
+    // because this path runs the pre-request script itself: a `{{token}}` the
+    // script just defined resolves before the stream opens.
     if (auto refusal =
         refuse_before_stream (ctx.db, send.request, std::move (send.late_auth),
         scopes, send.target_policy_or_null (), &ctx.server_stopping)) {
-        // What that pass can refuse (issues #1051 and #1084), in the same words
-        // the buffered send refuses it with and under the code composition
-        // refuses it under; what differs is where the caller reads it, this
-        // route not having answered yet. The code rides on the refusal because
-        // naming it here is how it would come to name the wrong rule.
+        // What that pass refuses (#1051, #1084), in the buffered send's words
+        // and composition's code; only where the caller reads it differs, as
+        // this route has not answered yet. The code rides on the refusal
+        // because naming it here is how it would come to name the wrong rule.
         refuse_stream_before_it_opens (
         ctx, res, run_id, 400, refusal->error.message, refusal->code);
         return;
@@ -2423,13 +2189,11 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     spec.text_path       = send.stream.text_path;
     const std::vector<vayu::http::CookieWrite> jarless_writes = attach_stream_jar (
     spec, ctx.cookie_jar, send.cookie_scope, std::move (pre_cookie_writes), jar_off);
-    // Persistence stays the route's decision even though it happens on
-    // the worker thread - `ctx.db` outlives the manager, which is why
-    // the manager is declared before `server_` (see server.hpp).
-    // Copied into the callback rather than borrowed: the post-request
-    // script runs on the worker thread once the stream has terminated,
-    // long after this handler's frame - and its row must be the one the
-    // pre-request script and the transfer used.
+    // Persistence stays the route's though it runs on the worker thread:
+    // `ctx.db` outlives the manager, declared before `server_` for that
+    // (server.hpp). Copied, not borrowed: the post-request script runs after
+    // this frame is gone, and its row must be the one the pre-request script
+    // and transfer used.
     spec.on_complete =
     [&db = ctx.db, &jar = ctx.cookie_jar, id = run_id, cookie_scope = send.cookie_scope,
     run = send.run, script_config = send.script_config, elements = send.elements,
@@ -2454,20 +2218,18 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         !pre_script_result.console_output.empty () ||
         !pre_script_result.script_requests.empty () || !pre_script_result.success;
         if (has_script_output) {
-            // Guarded as a whole: a script surface that threw where
-            // `execute_script` does not catch - building the runtime,
-            // applying a cookie write - must not cost the run its
-            // result row, which is the only record the stream leaves.
+            // Guarded whole: a script surface throwing where `execute_script`
+            // does not catch (building the runtime, applying a cookie write)
+            // must not cost the run its result row, the only record a stream
+            // leaves.
             try {
                 vayu::ScriptResult post_script_result;
                 if (has_element_output) {
                     vayu::runtime::ScriptEngine script_engine (script_config);
                     std::vector<vayu::http::CookieWrite> post_cookie_writes;
-                    // A local, mutable copy rather than casting away `sent` /
-                    // `response`'s const: nothing at `step.after` has a wire
-                    // left to carry a `pm.request` edit back onto, so the
-                    // copy is exactly as meaningful as the reference would
-                    // have been, without a const_cast.
+                    // Mutable copies, not a const_cast: at `step.after` no wire
+                    // is left to carry a `pm.request` edit back to, so a copy
+                    // means as much as the reference.
                     vayu::Request mutable_sent      = sent;
                     vayu::Response mutable_response = response;
                     std::optional<vayu::Response> unwrapped;
@@ -2526,8 +2288,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                     };
                     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter,
                     element_ctx, *elements, element_outcomes);
-                    // Nothing left to carry them - the transfer has
-                    // already captured, exactly as on the buffered path.
+                    // Nothing left to carry them: the transfer has captured, as
+                    // on the buffered path.
                     jar.apply (cookie_scope, post_cookie_writes);
                 }
                 if (mcp_failure) {
@@ -2544,9 +2306,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
             persist_send_variables (db, scopes, persist_variables);
         }
 
-        // No verdict: a stream's body is an event stream, not a
-        // document any response schema describes (see the contract on
-        // the parameter).
+        // No verdict: a stream's body is an event stream, not a document a
+        // response schema describes (the parameter's contract).
         record_design_result (db, id, sent, response, &record, std::nullopt,
         scripts, build_element_outcomes_node (element_outcomes));
     };
@@ -2571,20 +2332,18 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
 }
 
 /**
- * Vayu's own cost for one buffered exchange (issue #2132): the handler's
- * elapsed time since @p handler_start less what Vayu waited on someone else
- * for - the transfer (`wireMs`), the user's scripts (`pm.sendRequest`
- * included) and the OAuth 2.0 provider's token endpoint on a first-use or
- * expired-token fetch (@p auth_fetch_ms; a cached token costs the engine only
- * a lookup and stays in). What remains is request composition, auth, cookies,
- * the element pipeline and assembling the answer.
+ * Vayu's own cost for one buffered exchange (#2132): the handler's time since
+ * @p handler_start less what Vayu waited on others for: the transfer
+ * (`wireMs`), the user's scripts (`pm.sendRequest` included) and an OAuth 2.0
+ * token fetch on first use or expiry (@p auth_fetch_ms; a cached token costs a
+ * lookup and stays in). What remains is composition, auth, cookies, the element
+ * pipeline and assembling the answer.
  *
- * `queueWaitMs` is deliberately left inside it: that is the sliver between
- * the engine's stopwatch and libcurl, engine-side by construction. A design
- * send blocks on no timer (`timer.pacing` never delays a first pass and
- * `timer.think` runs at `step.between`, which `execute_exchange` does not
- * dispatch), so there is no timer wait to subtract. Clamped at zero because
- * the three clocks are read independently.
+ * `queueWaitMs` stays inside: the sliver between the engine's stopwatch and
+ * libcurl is engine-side. A design send waits on no timer (`timer.pacing` never
+ * delays a first pass and `timer.think` runs at `step.between`, which
+ * `execute_exchange` does not dispatch), so none is subtracted. Clamped at zero
+ * because the three clocks are read independently.
  */
 double engine_cost_ms (std::chrono::steady_clock::time_point handler_start,
 const vayu::Response& response,
@@ -2629,12 +2388,12 @@ std::optional<int> result_id) {
 }
 
 /**
- * The buffered half of a design send: pre-request script, send, test script -
- * the sequence a scenario step performs too, which is why it lives in
- * request_exchange.cpp rather than here (issue #353).
+ * The buffered half of a design send: pre-request script, send, test script,
+ * the sequence a scenario step performs too, hence in request_exchange.cpp
+ * (#353).
  *
- * @return the bytes of response body the exchange held, which decide whether
- *         the caller hands the freed heap back (#2544).
+ * @return the response body bytes the exchange held, which decide whether the
+ *         caller hands the freed heap back (#2544).
  */
 [[nodiscard]] std::size_t run_buffered_execution (RouteContext& ctx,
 httplib::Response& res,
@@ -2642,15 +2401,11 @@ DesignSend& send,
 std::chrono::steady_clock::time_point handler_start) {
     vayu::runtime::ScriptEngine script_engine (send.script_config);
 
-    // Load variables. Mutated in place by both scripts, then persisted
-    // once below.
+    // Mutated in place by both scripts, persisted once below.
     auto scopes = load_send_scopes (ctx.db, send);
 
-    // Pre-request script, send, test script - the sequence a scenario step
-    // performs too, which is why it lives in request_exchange.cpp rather
-    // than here (issue #353). `iteration` is left unset for a send carrying
-    // no row: it has no iteration index, and a binding that cannot fail is
-    // worse than a missing one (issue #300).
+    // `iteration` stays unset for a send with no row: it has no iteration
+    // index, and a binding that cannot fail is worse than a missing one (#300).
     ExchangeInputs inputs;
     inputs.request       = std::move (send.request);
     inputs.late_auth     = std::move (send.late_auth);
@@ -2659,9 +2414,8 @@ std::chrono::steady_clock::time_point handler_start) {
     inputs.elements      = send.elements;
     inputs.request_id    = send.run.request_id;
     inputs.request_name  = send.script_request_name;
-    // Read at the point of use, so a settings change applies to the next
-    // send without a restart (issue #705). The body bound is read the same way
-    // and for the same reason (issue #1157).
+    // Read at use, so a settings change applies to the next send without a
+    // restart (#705); the body bound likewise (#1157).
     inputs.transport       = vayu::http::resolve_transport_policy (ctx.db);
     inputs.default_headers = vayu::http::resolve_default_header_policy (
     ctx.db, vayu::http::DefaultHeaderScope::Design);
@@ -2674,11 +2428,8 @@ std::chrono::steady_clock::time_point handler_start) {
     inputs.files = &files;
     if (send.data_row) {
         inputs.iteration_data = &*send.data_row;
-        // Row 0 of 1: a send-with-row *is* an iteration, and the one it is
-        // is the row it bound. This is the exception the comment above
-        // describes - an ordinary Send still leaves both unset, because it
-        // has no row and an invented index would be the binding that cannot
-        // fail (issue #300).
+        // Row 0 of 1: a send-with-row is an iteration, the row it bound. An
+        // ordinary Send leaves both unset (#300, above).
         inputs.iteration       = 0;
         inputs.vu              = vayu::core::SOLE_VIRTUAL_USER;
         inputs.iteration_count = 1;
@@ -2686,36 +2437,32 @@ std::chrono::steady_clock::time_point handler_start) {
     auto exchange = execute_exchange (script_engine, ctx.cookie_jar,
     send.cookie_scope, scopes, std::move (inputs));
 
-    // What the contract says this response should have been (#628).
-    // Resolved from the *stored* request: an unsaved editor request is not
-    // an operation of any document, and inventing a verdict for one would
-    // be a claim about a contract it is not bound by.
+    // What the contract says this response should have been (#628), from the
+    // stored request: an unsaved editor request is no document's operation, and
+    // a verdict for it would claim a contract it is not bound by.
     const auto validation =
     validate_design_response (ctx.db, send.run.request_id, exchange.response);
 
-    // Built once, then sent *and* stored (#725). The live body and the
-    // trace's `scripts` node are the same object, so a restored Tests tab
-    // shows the assertions this send actually made.
+    // Built once, sent and stored (#725): one object, so a restored Tests tab
+    // shows the assertions this send made.
     const nlohmann::json scripts = build_script_result_node (exchange.pre_script_result,
     exchange.post_script_result, send.script_config.max_trace_body_bytes);
-    // Every compiled element's outcome (issue #1514) - `extract.*` /
-    // `assert.*` beside `script.pre` / `script.post`, on the same one-object-
-    // two-homes rule as `scripts` above.
+    // Every compiled element's outcome (#1514), `extract.*` / `assert.*` beside
+    // the scripts, one object in two homes like `scripts`.
     const nlohmann::json elements = build_element_outcomes_node (exchange.element_outcomes);
 
-    // Taken before the write below and stored *and* returned, so the live
-    // body and the restored trace carry one value. Persistence and the final
-    // serialisation therefore fall outside it, by construction.
-    // The build's acquisition or the late one's (#2521): a send has one.
+    // Taken before the write below, then stored and returned, so the live body
+    // and the restored trace carry one value; persistence and the final
+    // serialisation fall outside it. A send has one acquisition: the build's or
+    // the late one's (#2521).
     const double engine_ms = engine_cost_ms (handler_start, exchange.response,
     exchange.script_ms, send.auth_fetch_ms + exchange.auth_fetch_ms);
     // The script time `engineMs` leaves out, reported on its own (#3676): the
     // same reading, so the two never disagree about where the time went.
     const double script_ms = exchange.script_ms;
 
-    // Store result to database (non-blocking, errors logged). A transient
-    // execution stops here: no trace row, so the post-auth headers this
-    // exchange carries never reach disk - and neither do these results.
+    // A failure is logged, not answered. A transient execution records no trace
+    // row, so the post-auth headers and these results never reach disk.
     stop_if_caller_left (ctx.db, send);
     const auto result_id = record_design_result (ctx.db, send.run_id,
     exchange.request, exchange.response,
@@ -2723,8 +2470,7 @@ std::chrono::steady_clock::time_point handler_start) {
 
     persist_send_variables (ctx.db, scopes, send.persist_variables);
 
-    // Build and send response
-    // Engine returns 200 - the server's status is in the response body
+    // 200: the target's status is in the body.
     res.status          = 200;
     nlohmann::json body = build_response_json (
     exchange.response, send.include_parsed_body, scripts, validation, elements);
@@ -2760,14 +2506,13 @@ std::chrono::steady_clock::time_point handler_start) {
 }
 
 /**
- * Answer a build that failed once the run row exists: its auth was not applied
- * (an OAuth 2.0 token not acquired), or the caller's target policy refused the
- * endpoint that token comes from (#2521). A refusal of the second kind answers
- * as a refused final URL does, so a token acquired at the build and one
- * acquired after the script are refused alike: a stream's 400 under the code,
- * a buffered send's `refusalCode`. Otherwise the failed result is recorded
- * against the run and the error returned in the body with its
- * `authErrorCode` (engine returns 200; the status lives in the body).
+ * Answers a build that failed once the run row exists: its auth was not applied
+ * (an OAuth 2.0 token not acquired), or the caller's target policy refused that
+ * token's endpoint (#2521). The second answers as a refused final URL does, so
+ * a token acquired at the build and one after the script are refused alike: a
+ * stream's 400 under the code, a buffered send's `refusalCode`. Otherwise the
+ * failed result is recorded and the error returned with its `authErrorCode`
+ * under a 200.
  */
 void answer_failed_build (RouteContext& ctx,
 httplib::Response& res,
@@ -2811,11 +2556,9 @@ std::chrono::steady_clock::time_point handler_start) {
         return;
     }
 
-    // A streaming request diverges here: there is no synchronous exchange to
-    // run. The transfer moves to a managed consumer worker and the route
-    // answers at once with the run and the URL its events arrive on
-    // (issue #573). `stream` and `transient` are mutually exclusive, so
-    // `run_id` is always set on that path.
+    // A stream has no synchronous exchange: the transfer moves to a managed
+    // consumer worker and the route answers at once with the run and its events
+    // URL (#573). `stream` excludes `transient`, so `run_id` is set.
     if (send.stream.value) {
         run_streaming_execution (ctx, res, send);
         return;
@@ -2829,15 +2572,14 @@ std::chrono::steady_clock::time_point handler_start) {
 }
 
 /**
- * POST /execute
- * Executes a single HTTP request (Design Mode).
+ * POST /execute: one request, Design Mode.
  *
  * Returns:
- * - 200: Request was processed (check response body for server status/errors).
- *        A buffered send whose caller hangs up first is cancelled and its run
- *        recorded `stopped` (#3383).
- * - 400: Invalid request format (malformed JSON, missing required fields)
- * - 500: The run record could not be written, or the send threw after it was
+ * - 200: processed; the target's status and errors are in the body. A
+ *        buffered send whose caller hangs up first is cancelled and recorded
+ *        `stopped` (#3383).
+ * - 400: a malformed request (bad JSON, a missing field)
+ * - 500: the run record could not be written, or the send threw after it was
  *        (`guard_recorded_send` fails the row and names the error)
  */
 void handle_execute_request (RouteContext& ctx,
@@ -2870,13 +2612,12 @@ httplib::Response& res) {
         }
     }
 
-    // Take the request built above. Auth is already resolved into its
-    // headers/url - by the build, or by the bind for credentials that carried
-    // the row - unless a credential waits on the pre-request script (issue
-    // #2473), when the exchange applies it after that script. Either way a
-    // script-set Authorization header overrides the one the Auth tab applied:
-    // the script writes back into this same object, and `apply_auth` skips a
-    // header the request already carries.
+    // Auth is already in the headers/url (the build's, or the bind's for
+    // credentials carrying the row) unless a credential waits on the
+    // pre-request script (#2473), when the exchange applies it after. Either
+    // way a script-set Authorization overrides the Auth tab's: the script
+    // writes into this object, and `apply_auth` skips a header the request
+    // already carries.
     send.request       = std::move (payload.built.request);
     send.auth_fetch_ms = payload.built.auth_fetch_ms;
     send.late_auth     = std::move (payload.late_auth);
@@ -2888,11 +2629,10 @@ httplib::Response& res) {
 
 
 /**
- * Drop every top-level member of a run payload that is `null`, so it reads as
- * absent everywhere downstream (#1893). The validators already treat the two
- * alike, but the run's own readers go through `json::value (key, default)`,
- * which returns the default only for an absent key and throws on a `null` -
- * after the run row exists. Nested objects keep their own rules.
+ * Drops every top-level `null` member of a run payload so it reads as absent
+ * downstream (#1893): the validators treat the two alike, but the run's readers
+ * use `json::value (key, default)`, which defaults only an absent key and
+ * throws on `null`, after the row exists. Nested objects keep their own rules.
  */
 void erase_null_members (nlohmann::json& json) {
     if (!json.is_object ()) {
@@ -2908,16 +2648,13 @@ void erase_null_members (nlohmann::json& json) {
 }
 
 /**
- * The refusal for a data cell nested past the engine's depth bound, read from
- * the two fields that carry rows (#2362): `data` (`invalid_run_config`, like
- * every other refusal of it) and `scenario.data` (`invalid_scenario`).
- *
- * `handle_start_load_test` dumps the whole payload for the stored snapshot
- * before either reader runs, and `dump ()` recurses: a cell nested deep enough
- * crashes the engine there, so the readers' own check comes too late. This
- * runs right after the parse, as `parse_request_json`'s field bound, ahead of
- * the whole body's. Both readers keep the check, so a caller of
- * `resolve_scenario` or `read_load_data_set` is held to it too.
+ * The refusal for a data cell nested past the depth bound, in the two fields
+ * carrying rows (#2362): `data` (`invalid_run_config`, as every refusal of it)
+ * and `scenario.data` (`invalid_scenario`). `handle_start_load_test` dumps the
+ * payload for the snapshot before either reader runs, and `dump ()` recurses,
+ * so a deep cell would crash the engine first: this runs right after the parse,
+ * as `parse_request_json`'s field bound. The readers keep their check for
+ * callers of `resolve_scenario` and `read_load_data_set`.
  */
 RouteResult refuse_overdeep_run_data (const nlohmann::json& json) {
     if (!json.is_object ()) {
@@ -2991,10 +2728,10 @@ bool collection_run) {
 }
 
 /**
- * A single-request run whose payload does not parse because a header name is not
- * a token (`invalid_header_name`, issue #2467), as the message and code to
- * answer 400 with. Any other parse failure stays the run's own build to report,
- * as it always was: this is not the place to start refusing them.
+ * A single-request run payload that fails to parse because a header name is not
+ * a token (`invalid_header_name`, #2467), as the 400's message and code. Any
+ * other parse failure stays the run's own build to report; this is not where to
+ * start refusing them.
  */
 std::optional<std::pair<std::string, std::string>> refuse_invalid_header_name (
 const nlohmann::json& json) {
@@ -3028,18 +2765,10 @@ std::optional<RouteError> refuse_incomplete_single_request (const nlohmann::json
 }
 
 /**
- * POST /runs
- * Starts a load test run (Vayu Mode).
- *
- * Returns:
- * - 202: Load test accepted and started
- * - 400: Invalid request format
- */
-/**
  * Every refusal `POST /runs` makes on the payload alone, before a run row
- * exists - so a rejected request leaves nothing behind. @p origin and
- * @p target_policy receive the payload's `origin` and `targetPolicy`, which are
- * read here because reading them is validating them.
+ * exists, so a rejected request leaves nothing. @p origin and @p target_policy
+ * receive the payload's `origin` and `targetPolicy`: reading them is validating
+ * them.
  */
 std::optional<RouteError> validate_load_request (RouteContext& ctx,
 nlohmann::json& json,
@@ -3072,42 +2801,38 @@ std::optional<vayu::http::TargetPolicy>& target_policy) {
         return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
     }
 
-    // The `elements` override (issue #1495) is validated for both load-run
-    // shapes, not only a scenario's - the validator does not distinguish
-    // them, and since issue #1594 a single-request run's own step pipeline
-    // reads what it resolves to as well.
+    // The `elements` override (#1495) is validated for both load-run shapes:
+    // the validator does not tell them apart, and a single-request run's step
+    // pipeline reads it too (#1594).
     if (auto invalid = vayu::core::validate_elements_run_override (json)) {
         vayu::utils::log_warning (
         "http", "POST /runs - Invalid elements override: " + *invalid);
         return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
     }
 
-    // A single-request run's own place to declare `script.setup` /
-    // `script.teardown` (issue #1573) - refused outright beside `scenario`,
-    // whose collection already has a real `elements` column for this.
+    // A single-request run's place for `script.setup` / `script.teardown`
+    // (#1573), refused beside `scenario`, whose collection has an `elements`
+    // column for it.
     if (auto invalid = vayu::core::validate_lifecycle_elements_run_override (json)) {
         vayu::utils::log_warning (
         "http", "POST /runs - Invalid lifecycleElements: " + *invalid);
         return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
     }
 
-    // A single-request run's own place to declare its request's step-level
-    // elements (issue #1594) - refused outright beside `scenario`, whose
-    // steps already carry their own resolved elements from the plan.
+    // A single-request run's place for its request's step-level elements
+    // (#1594), refused beside `scenario`, whose steps carry their resolved
+    // elements.
     if (auto invalid = vayu::core::validate_request_elements_run_override (json)) {
         vayu::utils::log_warning ("http", "POST /runs - Invalid requestElements: " + *invalid);
         return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
     }
 
     // `preRequestScript(s)` / `postRequestScript(s)` / `tests` are refused
-    // here too now (issue #1594's cut-over): a single-request run's own
-    // script slot is `requestElements`'s `script.pre` / `script.post` now,
-    // so the refusal names that field rather than this endpoint's own
-    // `elements` (the run-level override, a different thing entirely) - a
-    // caller who followed the default message here would land on a second
-    // 400. A scenario run keeps the default: its scripts live on the bound
-    // collection's stored `elements`, which this refusal cannot name any
-    // more precisely than the other routes already do.
+    // (#1594). A single-request run's scripts live in `requestElements`
+    // (`script.pre` / `script.post`), so the refusal names it rather than this
+    // endpoint's run-level `elements` override, where the default message would
+    // land a caller on a second 400. A scenario run keeps the default: its
+    // scripts are the bound collection's stored `elements`.
     if (auto invalid = refuse_legacy_script_fields (
         json, is_scenario ? "elements" : "requestElements")) {
         vayu::utils::log_warning ("http", "POST /runs - " + *invalid);
@@ -3138,9 +2863,8 @@ std::optional<vayu::http::TargetPolicy>& target_policy) {
         }
     }
 
-    // Range-check the numeric config *before* the run row exists, so a
-    // rejected request leaves nothing behind. `invalid_run_config` is the
-    // specific code this failure carries in place of the per-status default.
+    // Range-checked before the row exists, so a rejected request leaves
+    // nothing; `invalid_run_config` replaces the per-status default code.
     if (auto invalid =
         validate_run_config (json, vayu::core::read_monitor_limits (ctx.db))) {
         vayu::utils::log_warning ("http", "POST /runs - Invalid run config: " + *invalid);
@@ -3154,11 +2878,10 @@ std::optional<vayu::http::TargetPolicy>& target_policy) {
         return RouteError{ 400, error_body (400, refusal->message, refusal->code) };
     }
 
-    // Validate/normalize the body's httpVersion, beside the config check
-    // above and for the same reason: both run before run.config_snapshot is
-    // built, so a rejected request leaves no row behind, and the snapshot
-    // still reflects the client's composed body, credentials withheld (it is
-    // built from the body as sent less its nulls, not this normalized `json`).
+    // Beside the config check, for the same reason: both run before the run row
+    // exists, so a rejection leaves none. The snapshot is built from the body
+    // as sent less its nulls (credentials withheld), not from this normalized
+    // `json`.
     if (auto outcome = normalize_run_http_version (json); !outcome) {
         vayu::utils::log_warning ("http",
         "POST /runs - Invalid httpVersion: " + outcome.error ().body.dump ());
@@ -3168,15 +2891,12 @@ std::optional<vayu::http::TargetPolicy>& target_policy) {
 }
 
 /**
- * The scenario block, resolved once - before the first send, and before any run
- * row exists.
- *
- * An unknown collection, an empty sequence or a step that cannot be composed
- * must leave no run behind, and resolution is what finds all three. It resolves
- * exactly once because a collection edited mid-run must not change the sequence
- * underneath itself, and the load-mode executor (phase 6) cannot query SQLite
- * per step per virtual user. The resolved plan is then shared immutably with
- * the run's worker and lives in memory for the run's life and nowhere else.
+ * The scenario block, resolved once, before the first send and any run row. An
+ * unknown collection, an empty sequence or an uncomposable step must leave no
+ * run, and resolution finds all three. Once, because a collection edited
+ * mid-run must not change the sequence under it and the load executor cannot
+ * query SQLite per step per virtual user. The plan is shared immutably with the
+ * run's worker and lives only in memory, for the run's life.
  */
 std::optional<RouteError> resolve_run_scenario (RouteContext& ctx,
 const nlohmann::json& json,
@@ -3218,14 +2938,13 @@ nlohmann::json& scenario_manifest) {
     auto execution     = std::make_shared<vayu::core::ScenarioExecution> ();
     execution->request = std::move (resolved.request);
     execution->plan    = std::move (resolved.plan);
-    // The manifest above was built before this move, and from
-    // `resolved.request` - which carries the row *count* and never the
-    // rows. That is what keeps user data out of `config_snapshot`.
+    // The manifest was built before this move, from `resolved.request`, which
+    // carries the row count and never the rows: that keeps user data out of
+    // `config_snapshot`.
     execution->data_rows = std::move (resolved.data_rows);
-    // The contract this run is measured against, carried to the runner
-    // so coverage counts against the document that was bound when the
-    // plan resolved (issue #629) rather than whatever it is by the time
-    // the run ends. The manifest above already stamped its identity.
+    // The contract this run is measured against, so coverage counts against the
+    // document bound when the plan resolved (#629), not whatever it is when the
+    // run ends. The manifest already stamped its identity.
     execution->spec = std::move (resolved.spec);
     // Every file the steps can send, checked once while resolving.
     execution->files   = std::move (resolved.files);
@@ -3239,13 +2958,10 @@ nlohmann::json& scenario_manifest) {
 }
 
 /**
- * @ref resolve_run_scenario, plus - for a scenario **load** run only - the
- * load-path controller refusal (issue #1515): `control.switch` /
- * `control.loop` need to jump the plan, which a scenario load run's virtual
- * users cannot do (`vayu::core::find_load_incompatible_controller`). Kept as
- * one function, rather than the caller nesting both checks itself, to keep
- * `handle_start_load_test`'s own branching within its cognitive-complexity
- * budget.
+ * @ref resolve_run_scenario, plus, for a scenario load run only, the controller
+ * refusal (#1515): `control.switch` / `control.loop` jump the plan, which a
+ * scenario load run's virtual users cannot do
+ * (`vayu::core::find_load_incompatible_controller`).
  */
 std::optional<RouteError> resolve_and_validate_run_scenario (RouteContext& ctx,
 const nlohmann::json& json,
@@ -3299,15 +3015,12 @@ nlohmann::json& json) {
 }
 
 /**
- * Pre-flight auth: reject an unauthorizable run before creating it, and warm
- * the token cache so the worker's `apply_auth` is a cache hit.
- *
- * A scenario payload carries no run-level `auth` - each step's auth was
- * resolved at plan time, and a step that could not be authorized already failed
- * resolution with a 400 - so this is the single-request path's check alone.
- * An OAuth 2.0 token endpoint @p target_policy refuses is a 400 under the
- * policy's code, before anything is posted (#2521). A payload with its own
- * Authorization header fetches no token (#3202).
+ * Rejects an unauthorizable run before creating it, and warms the token cache
+ * so the worker's `apply_auth` hits it. Single-request only: a scenario payload
+ * has no run-level `auth`, each step's resolved (or refused with a 400) at plan
+ * time. A token endpoint @p target_policy refuses is a 400 under the policy's
+ * code, before anything is posted (#2521); a payload with its own Authorization
+ * header fetches no token (#3202).
  */
 std::optional<RouteError> preflight_run_auth (RouteContext& ctx,
 const nlohmann::json& json,
@@ -3340,7 +3053,6 @@ const vayu::db::Run& run,
 const std::string& run_id,
 const vayu::core::ScenarioExecution* scenario_execution) {
 
-    // Extract duration for logging
     std::string duration_str = "0s";
     if (json.contains ("duration")) {
         if (json["duration"].is_string ()) {
@@ -3370,10 +3082,9 @@ const vayu::core::ScenarioExecution* scenario_execution) {
 }
 
 /**
- * The file rule for a single-request load run, applied before the run row
- * exists (`core::plan_load_files`). Leaves @p out null for a request that names
- * no file, and for one the payload cannot even describe - the run's own build
- * reports that.
+ * The file rule for a single-request load run, before the run row exists
+ * (`core::plan_load_files`). Leaves @p out null for a request naming no file,
+ * and for one the payload cannot describe: the run's own build reports that.
  */
 std::optional<std::string> plan_single_load_files (RouteContext& ctx,
 const nlohmann::json& json,
@@ -3444,6 +3155,16 @@ const char* started_message (bool is_scenario, bool is_scenario_load) {
     return is_scenario ? "Collection run started" : "Load test started";
 }
 
+/**
+ * POST /runs: starts a load test or a collection run.
+ *
+ * Returns:
+ * - 202: accepted and started; the row is `pending`
+ * - 400: the payload is refused, and no run row exists
+ * - 409: the auth pre-flight found a credential missing
+ * - 500: the run record could not be written, or the start threw
+ * - 503: the daemon is draining its workers
+ */
 void handle_start_load_test (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
@@ -3462,16 +3183,14 @@ httplib::Response& res) {
     const std::string snapshot_body = json.dump ();
 
     // A scenario run states its work as an ordered collection, so it has no
-    // single method/url to require and states its iteration count inside
-    // the block. Both checks in `validate_load_request` describe the
-    // single-request payload only; the scenario block's own required fields are
-    // checked by resolve_scenario, beside the shared numeric validation.
+    // single method/url to require and states its iteration count in the block;
+    // `validate_load_request`'s two checks are for the single-request payload,
+    // and `resolve_scenario` checks the block's own fields.
     const bool is_scenario = json.contains ("scenario") && !json["scenario"].is_null ();
-    // A `scenario` block with a load `mode` beside it is a load-mode
-    // scenario: the same plan, driven by virtual users on the event loop
-    // instead of one sequence through the client. Without a mode it is the
-    // design-mode collection run every caller sent before phase 6, so the
-    // absence of `mode` cannot start meaning something new.
+    // A `scenario` with a load `mode` is a load-mode scenario: the same plan,
+    // driven by virtual users on the event loop instead of one sequence through
+    // the client. Without a mode it is the design-mode collection run, a
+    // meaning the absent `mode` must keep.
     const bool is_scenario_load = vayu::core::is_scenario_load_run (json);
 
     RunOrigin origin;
@@ -3497,18 +3216,15 @@ httplib::Response& res) {
         }
     }
 
-    // Create run record
     std::string run_id = vayu::utils::generate_id ("run_");
     vayu::db::Run run;
     run.id = run_id;
-    // A scenario *load* run is a load run whose target happens to be a
-    // sequence: it publishes metric ticks, reports RPS and percentiles, and
-    // stores no per-step `results` rows - so `Scenario`, which is what the
-    // app reads to render a step list instead of the dashboard, would point
-    // every consumer at the wrong view of it. The step breakdown reaches
-    // the report through the summary's `scenario` object instead, and the
-    // snapshot still carries the manifest, so the list row still says which
-    // collection ran.
+    // A scenario load run is a load run whose target is a sequence: it
+    // publishes metric ticks, reports RPS and percentiles and stores no
+    // per-step `results`, so `Scenario`, which makes the app render a step list
+    // instead of the dashboard, would be the wrong view. Its step breakdown
+    // reaches the report through the summary's `scenario` object, and the
+    // snapshot's manifest still names the collection.
     run.type   = (is_scenario && !is_scenario_load) ? vayu::RunType::Scenario :
                                                       vayu::RunType::Load;
     run.status = vayu::RunStatus::Pending;
@@ -3526,9 +3242,9 @@ httplib::Response& res) {
         return;
     }
 
-    // The rows a single-request run binds (issue #993), validated and credential-
-    // planned here for the reason the scenario block is resolved here: a set the
-    // engine cannot read must leave no run row behind.
+    // The rows a single-request run binds (#993), validated and
+    // credential-planned here as the scenario block is resolved here: an
+    // unreadable set leaves no run row.
     auto load_data = read_load_data_set (json, load_data_limits (ctx.db), is_scenario);
     // Every file the run's request can send, checked and read once here too,
     // for the same reason: a file the run cannot send leaves no run row.
@@ -3579,11 +3295,10 @@ httplib::Response& res) {
         return;
     }
 
-    // A load-mode scenario takes the load path: same event loop, metrics
-    // thread, drain and summary as a single-request run, with the virtual-
-    // user state machine in place of a LoadStrategy. Only the design-mode
-    // sequential runner needs the cookie jar, which is why only it is
-    // handed one.
+    // A load-mode scenario takes the load path (event loop, metrics thread,
+    // drain, summary) with the virtual-user state machine in place of a
+    // LoadStrategy. Only the sequential design-mode runner needs, and gets, the
+    // cookie jar.
     const auto start = [&] () {
         return (is_scenario && !is_scenario_load) ?
         ctx.run_manager.start_scenario_run (
