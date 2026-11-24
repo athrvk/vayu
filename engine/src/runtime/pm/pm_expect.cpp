@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief `pm.test` and the `pm.expect` chainable assertions.
- */
+/** `pm.test` and the `pm.expect` chainable assertions. */
 
 #include "pm_internal.hpp"
 
@@ -49,7 +47,7 @@ struct DeltaRecord {
     double real_delta = 0;
 };
 
-// Expectation state stored in JS object
+// Expectation state, held by the JS object.
 struct ExpectState {
     JSValue actual;
     bool negated = false;
@@ -76,8 +74,8 @@ struct ExpectState {
     // ordering matchers then compare the target's length (a Map's or Set's
     // size) instead of the target.
     bool do_length = false;
-    // chai's second argument to `expect(value, message)`, empty when the script
-    // passed one argument. Read only by `throw_expect_failure`. The `{}` keeps
+    // chai's second argument to `expect(value, message)`, empty for one
+    // argument, read only by `throw_expect_failure`. The `{}` keeps
     // `create_expectation`'s two-field aggregate init, which assigns this
     // separately, out of -Wmissing-field-initializers.
     std::string message{};
@@ -88,33 +86,28 @@ struct ExpectState {
     // `pm.response.to.have.responseTime` starts a chain of its own here.
     const char* path = "pm.expect(...)";
     // Whether the unknown-member hook is live. `create_expectation` installs
-    // every member first and sets this last, because defining a property looks
-    // up the existing own property, so a hook armed from the moment the object
-    // existed would reject the chain's own members as they are installed.
+    // every member first and sets this last: defining a property looks up the
+    // existing own property, so a hook armed from the start would reject the
+    // chain's own members as they are installed.
     bool armed = false;
 };
 
-// Names the engine itself probes on an arbitrary value. Answering "no own
-// property" for them keeps JSON.stringify and promise resolution working;
-// reporting them as misspelled assertions would make console.log of an
-// assertion object throw. They are not on Object.prototype, so the prototype
-// check below does not cover them.
+// Names the engine probes on any value. "No own property" for them keeps
+// JSON.stringify and promise resolution working, where reporting them as
+// misspelled assertions would make `console.log` of an assertion throw; they
+// are not on Object.prototype, so the prototype check does not cover them.
 constexpr const char* chain_passthrough_members[] = { "toJSON", "then" };
 
 } // namespace
 
 /**
- * @brief The body every assertion chain's unknown-member hook shares.
- *
- * A name the object does not implement is a misspelled or unimplemented
- * assertion and throws naming @p path; the plumbing a JS runtime probes on an
- * arbitrary value goes on resolving. Answers QuickJS's `get_own_property`
- * convention: 0 to continue the normal lookup, -1 with a pending exception.
- *
- * One copy for both chains and an expectation's matchers: `pm.response.to`,
- * `pm.expect(...)` and `.within` differ only in how each says it is armed and
- * in the path it names, and a second copy of the passthrough rules would be
- * the one that misses the next fix.
+ * The body every assertion chain's unknown-member hook shares: a name the
+ * object does not implement is a misspelled or unimplemented assertion and
+ * throws naming @p path; the plumbing a runtime probes keeps resolving. Answers
+ * QuickJS's `get_own_property` convention: 0 to continue the lookup, -1 with a
+ * pending exception. One copy for `pm.response.to`, `pm.expect(...)` and
+ * `.within`, which differ only in how each is armed and the path it names; a
+ * second copy of the passthrough rules would miss the next fix.
  */
 int report_unknown_chain_member (JSContext* ctx, JSValueConst obj, JSAtom prop, const char* path) {
     // Symbol keys (Symbol.toPrimitive, Symbol.toStringTag) are plumbing too.
@@ -169,19 +162,14 @@ void expect_gc_mark (JSRuntime* rt, JSValueConst val, JS_MarkFunc* mark_func) {
 }
 
 /**
- * @brief Turns an unrecognised member of an expectation into a throw.
- *
- * `pm.expect(x).to.be.NaN` is an expression statement, so a member nothing
- * implements evaluates to `undefined` and asserts nothing - the test reports
- * PASS whatever the value is, which for a matcher that was *meant* to check
- * something is the worst answer an assertion library can give. `pm.response.to`
- * throws by name (#487); this is the same rule for the other chain, and
- * it covers every matcher chai has and Vayu does not, present and future, plus
- * every typo.
- *
- * The state's `armed` flag is what keeps `create_expectation` able to install
- * the chain's own members: defining a property looks the existing one up first,
- * so a hook live from the moment the object existed would reject them.
+ * Turns an unrecognised member of an expectation into a throw.
+ * `pm.expect(x).to.be.NaN` is an expression statement, so an unimplemented
+ * member is `undefined`, asserts nothing, and the test passes whatever the
+ * value: the worst answer for a matcher meant to check something.
+ * `pm.response.to` throws by name (#487); this applies the rule to the other
+ * chain, covering every matcher chai has and Vayu lacks, present and future,
+ * and every typo. The state's `armed` flag lets `create_expectation` install
+ * the chain's own members first (`ExpectState::armed`).
  */
 int expect_unknown_member (JSContext* ctx, JSPropertyDescriptor* desc, JSValueConst obj, JSAtom prop) {
     (void)desc;
@@ -193,10 +181,9 @@ int expect_unknown_member (JSContext* ctx, JSPropertyDescriptor* desc, JSValueCo
     return report_unknown_chain_member (ctx, obj, prop, state->path);
 }
 
-// Value-initialized and then assigned rather than written as a designated
-// initializer, for the reason spelled out at `response_chain_exotic` in
-// pm_response.cpp: naming one of the struct's seven hooks leaves the other six
-// as -Wmissing-field-initializers warnings.
+// Value-initialized, then assigned, not a designated initializer, for
+// `response_chain_exotic`'s reason (pm_response.cpp): naming one of the
+// struct's seven hooks leaves six -Wmissing-field-initializers warnings.
 JSClassExoticMethods expect_exotic = [] {
     JSClassExoticMethods exotic{};
     exotic.get_own_property = expect_unknown_member;
@@ -212,14 +199,13 @@ JSClassDef expect_class = { .class_name = "Expectation",
     .exotic                             = &expect_exotic };
 
 // ----------------------------------------------------------------------------
-// The callable members of an expectation (#2528).
-//
-// A matcher (`equal`, `within`) and a chainable method (`include`, `length`,
-// `a`) are objects of one callable class rather than C functions: a function
-// carries `name`, `length` and Function.prototype's `call` / `apply` / `bind`,
-// so `.include.name` or `.within.foo` evaluated to a value and a paren-less
-// chain reported PASS having asserted nothing (#999). This class has no own
-// properties, and its hook decides every name read off it.
+// The callable members of an expectation (#2528). A matcher (`equal`, `within`)
+// and a chainable method (`include`, `length`, `a`) are objects of one callable
+// class, not C functions: a function carries `name`, `length` and
+// Function.prototype's `call` / `apply` / `bind`, so `.include.name` or
+// `.within.foo` would be a value and a paren-less chain pass having asserted
+// nothing (#999). This class has no own properties; its hook decides every name
+// read off it.
 // ----------------------------------------------------------------------------
 
 JSClassID expect_member_class_id = 0;
@@ -232,8 +218,8 @@ enum class MemberShape {
     Method,
     // chai's chainable method: a call and the rest of the chain. Its prototype
     // is the expectation, which answers or refuses every name but `length`,
-    // which is refused as chai's length guard refuses it: `.include.length`
-    // reads as the matcher `length` and is almost always a mistake.
+    // refused as chai's length guard does: `.include.length` reads as the
+    // matcher `length` and is almost always a mistake.
     Chainable,
 };
 
@@ -291,8 +277,8 @@ JSAtom prop) {
 }
 
 /**
- * @brief A member's call. A matcher keeps the `this` it was called on, which is
- * the expectation or a chainable method standing in for it; a chainable method
+ * A member's call. A matcher keeps the `this` it was called on (the
+ * expectation, or a chainable method standing in for it); a chainable method
  * calls on its prototype, the expectation it was read from.
  */
 JSValue expect_member_call (JSContext* ctx,
@@ -336,13 +322,11 @@ JSClassDef expect_member_class = { .class_name = "ExpectationMember",
 namespace {
 
 /**
- * @brief The expectation a member was reached on, as a new reference, or
- * `undefined`.
- *
- * `this` is the expectation itself, or a chainable method such as `.include`
- * or `.length` read off it, whose prototype is the expectation (see
- * `chainable_method`): `.include.keys(...)` finds `keys` through that prototype
- * and calls it with the chainable method as `this`.
+ * The expectation a member was reached on, as a new reference, or `undefined`.
+ * `this` is the expectation, or a chainable method like `.include` or `.length`
+ * read off it, whose prototype is the expectation (`chainable_method`):
+ * `.include.keys(...)` finds `keys` through it and calls it with the chainable
+ * method as `this`.
  */
 JSValue expectation_object (JSContext* ctx, JSValueConst this_val) {
     if (JS_GetOpaque (this_val, expect_class_id) != nullptr) {
@@ -368,11 +352,11 @@ ExpectState* expectation_state (JSContext* ctx, JSValueConst this_val) {
     return static_cast<ExpectState*> (JS_GetOpaque (expectation.get (), expect_class_id));
 }
 
-// Every callable matcher returns the expectation rather than `undefined`, which
-// is what makes `.and` work: it is a plain passthrough, and the flags a chain
-// has set (`not` included) persist across it exactly as they do in chai. The
-// expectation, never the chainable method `this` may be: `.include.keys('a')`
-// answers the chain, not a function that would call `include` again.
+// Every callable matcher returns the expectation, not `undefined`, which makes
+// `.and` work: a plain passthrough, with the flags a chain set (`not` included)
+// persisting across it as in chai. The expectation, never the chainable method
+// `this` may be: `.include.keys('a')` answers the chain, not a function that
+// would call `include` again.
 JSValue expect_chained (JSContext* ctx, JSValueConst this_val) {
     return expectation_object (ctx, this_val);
 }
@@ -380,32 +364,24 @@ JSValue expect_chained (JSContext* ctx, JSValueConst this_val) {
 } // namespace
 
 /**
- * @brief Throw a failed assertion the way chai does - as an `AssertionError`.
+ * Throws a failed assertion as chai does, as an `AssertionError` (#487): a
+ * `TypeError` would prefix every failure in the report and console with
+ * `TypeError:`, reading as an engine fault, and a script inspecting what it
+ * caught (`e.name === "AssertionError"`) would branch differently than in
+ * Postman. QuickJS has no `AssertionError`, so this is a plain `Error` renamed:
+ * `instanceof Error` holds, `JS_NewError` gives a native backtrace, and
+ * `message` has the native attributes (writable, configurable, **not**
+ * enumerable), so `JSON.stringify(e)` is unchanged. No `AssertionError` global:
+ * chai's lives on `require('chai')` (#2655, a separate library), and a bare
+ * global would be a name Postman scripts cannot rely on.
  *
- * `pm.expect` is chai, and chai reports a broken assertion as an
- * `AssertionError` (issue #487): a `TypeError` would make the report and the
- * console prefix every failure with `TypeError:`, which reads as an engine fault
- * rather than the assertion doing its job, and a script that inspects what it
- * caught - `catch (e) { if (e.name === "AssertionError") ... }` - would take the
- * other branch than it does in Postman.
- *
- * QuickJS has no `AssertionError` class, so the error is a plain `Error` with
- * the name replaced: `instanceof Error` still holds, `JS_NewError` gives it the
- * same backtrace a native throw would, and `message` is defined with the
- * native errors' attributes (writable, configurable, **not** enumerable) so
- * `JSON.stringify(e)` answers what it always did. No `AssertionError` global is
- * exposed - chai's lives on the `chai` module (`require('chai')`, #2655, which
- * is the library itself and shares nothing with this one), and a bare global
- * would be a name Postman scripts cannot rely on either.
- *
- * Only *assertion* failures come through here, and that includes the type
- * checks chai makes as assertions of their own, in both polarities: a
- * `members` target that is not an array, a `length` read off a target with
- * none, an `include` pair chai has no rule for (#2582). A script-text mistake
- * stays a `TypeError`: a matcher called with no argument or a malformed one
- * (`members` given a non-array argument, `keys()` with no names), a misspelled name, and
- * the ordering matchers' refusal of a value that is not a number or a Date.
- * Nothing was asserted; the call itself was wrong.
+ * Only assertion failures come here, including chai's type checks made as
+ * assertions, in both polarities: a non-array `members` target, a `length` read
+ * off a target with none, an `include` pair chai has no rule for (#2582). A
+ * script-text mistake stays a `TypeError`: a matcher called with no or a
+ * malformed argument (`members` given a non-array, `keys()` with no names), a
+ * misspelled name, the ordering matchers' refusal of a non-number, non-Date.
+ * Nothing was asserted; the call was wrong.
  */
 JSValue throw_assertion_failure (JSContext* ctx, const std::string& message) {
     JSValue error = JS_NewError (ctx);
@@ -422,21 +398,14 @@ JSValue throw_assertion_failure (JSContext* ctx, const std::string& message) {
 namespace {
 
 /**
- * @brief Report a failed assertion, prefixed with the expectation's message.
- *
- * chai's `expect(value, message)` puts the script's own words in front of
- * whatever the matcher reports, which is the whole reason to pass one: the
- * generic text ("Expected value to be truthy") says what broke and the prefix
- * says which value it was - the third item in a loop, the MCP path rather than
- * the app path. Postman scripts use the two-argument form routinely.
- *
- * Every matcher throws its failure through here rather than concatenating the
- * prefix itself, so the prefix is one rule in one place: a matcher added later
- * gets it by throwing the way its neighbours do, and cannot report a bare
- * message by forgetting a concatenation. Usage errors - `above()` with no
- * argument, `members()` given a non-array argument - deliberately do **not** come
- * through here: they name a mistake in the script text, not the value under
- * test, and their message already names the matcher that rejected the call.
+ * Reports a failed assertion prefixed with the expectation's message: chai's
+ * `expect(value, message)` puts the script's words before the matcher's (the
+ * generic text says what broke, the prefix which value: the third item in a
+ * loop, the MCP path), a form Postman scripts use routinely. Every matcher
+ * throws through here, so the prefix is one rule: a later matcher gets it by
+ * throwing like its neighbours. Usage errors (`above()` with no argument,
+ * `members()` given a non-array) deliberately do not: they name a script-text
+ * mistake, not the value under test, and already name their matcher.
  */
 JSValue throw_expect_failure (JSContext* ctx, const ExpectState* state, const std::string& failure) {
     if (state != nullptr && !state->message.empty ()) {
@@ -446,18 +415,16 @@ JSValue throw_expect_failure (JSContext* ctx, const ExpectState* state, const st
 }
 
 // ----------------------------------------------------------------------------
-// Value comparison for the equality matchers.
-//
-// `equal` is strict and `eql` is deep, which is why they cannot share one
-// comparison: `expect({a:1}).to.equal({a:1})` must fail (different references)
-// while `expect({a:1}).to.eql({a:1})` passes. Chai draws the line there and
-// Postman scripts are written against chai.
+// Value comparison for the equality matchers. `equal` is strict and `eql` deep,
+// so they cannot share one comparison: `expect({a:1}).to.equal({a:1})` fails
+// (different references) where `.eql` passes, chai's line, which Postman
+// scripts are written against.
 // ----------------------------------------------------------------------------
 
 // `===` without coercion. No strict-equality entry point exists in both
-// vendored runtimes (`JS_IsStrictEqual` is quickjs-ng only; the Unix build is
-// Bellard's), so the rules are applied here: no cross-type equality, `NaN` is
-// not equal to itself, and objects compare by reference.
+// vendored runtimes (`JS_IsStrictEqual` is quickjs-ng's; the Unix build is
+// Bellard's), so the rules are applied here: no cross-type equality, `NaN`
+// unequal to itself, objects by reference.
 bool js_strict_equal (JSContext* ctx, JSValueConst a, JSValueConst b) {
     if (JS_IsNumber (a) || JS_IsNumber (b)) {
         if (!JS_IsNumber (a) || !JS_IsNumber (b)) {
@@ -497,18 +464,15 @@ std::string js_to_json (JSContext* ctx, JSValueConst val) {
     return out;
 }
 
-// The internal class of an object as `Object.prototype.toString` reports it
-// ("[object Date]"). The deep compare needs it because a `Date` or a `Map`
-// keeps its contents outside the own-property list, so comparing enumerable
-// keys alone would report every pair of them equal. `JS_IsDate` / `JS_IsRegExp`
-// exist only in quickjs-ng, so this asks the language instead of the C API.
-//
-// `failed`, when given, is set if the call threw and the exception was left
-// pending for the caller. That distinction matters: an empty tag is otherwise
-// indistinguishable from "a class this does not recognise", and a caller that
-// cannot tell them apart will report a *result* for a comparison that never
-// happened. See js_deep_equal, where exactly that turned a thrown error into a
-// silent "not equal" on one platform (#959).
+// An object's internal class as `Object.prototype.toString` reports it
+// ("[object Date]"). The deep compare needs it: a `Date` or `Map` keeps its
+// contents outside the own-property list, so comparing enumerable keys alone
+// would call every pair equal. `JS_IsDate` / `JS_IsRegExp` exist only in
+// quickjs-ng, so this asks the language. `failed`, when given, is set if the
+// call threw and the exception is left pending: an empty tag otherwise looks
+// like an unrecognised class, and a caller that cannot tell them apart reports
+// a result for a comparison that never happened (#959, a thrown error read as a
+// silent "not equal" on one platform).
 std::string js_class_tag (JSContext* ctx, JSValueConst val, bool* failed = nullptr) {
     if (failed) {
         *failed = false;
@@ -541,10 +505,10 @@ std::string js_class_tag (JSContext* ctx, JSValueConst val, bool* failed = nullp
 
 } // namespace
 
-// How a value reads in an assertion failure. `JS_ToCString` renders every
-// object as "[object Object]", which tells the script author nothing about
-// which key differed; JSON is what they wrote. A RegExp is the exception -
-// JSON renders one as "{}", while its own toString is the pattern.
+// How a value reads in an assertion failure: `JS_ToCString` renders every
+// object "[object Object]", telling the author nothing about which key
+// differed, so JSON, what they wrote; a RegExp excepted, as JSON renders it
+// "{}" and its `toString` is the pattern.
 std::string js_describe (JSContext* ctx, JSValueConst val) {
     if (JS_IsString (val)) {
         return "'" + js_to_string (ctx, val) + "'";
@@ -561,30 +525,19 @@ std::string js_describe (JSContext* ctx, JSValueConst val) {
 
 namespace {
 
-// A cyclic structure would recurse forever. Two things stop it.
+// A cyclic structure would recurse forever; two things stop it. The **cycle
+// check** is the real one: `js_deep_equal` carries the object pair at each
+// level of the path, and a pair already being compared is a cycle, reported
+// where it closes (depth 1 for `a.self = a`). The **depth cap** is a backstop
+// for a structure merely enormous; nothing a script asserts on nests this far.
 //
-// The **cycle check** is the real one: js_deep_equal carries the pair of
-// objects at each level of the current path, and a pair it is already
-// comparing is a cycle by definition. That reports at the depth the cycle
-// actually closes - depth 1 for `a.self = a` - rather than after an arbitrary
-// number of levels.
-//
-// The **depth cap** stays as a backstop for a structure that is merely
-// enormous rather than cyclic. Nothing a script asserts on legitimately nests
-// this far.
-//
-// The cap alone is not enough (#959): it only bounds the C recursion *after* the
-// fact, and 64 frames of this
-// function is a different amount of stack on every toolchain. On MSVC at /Od
-// with AddressSanitizer's redzones the frames are fat enough that QuickJS's
-// own 256 KB stack guard tripped first, inside the JS_Call in js_class_tag -
-// which returned an empty tag, compared equal to the other empty tag, and fell
-// through to "a class I do not recognise" and a plain `return 0`. The pending
-// stack-overflow error was dropped and the caller reported an ordinary
-// "not deeply equal". Same source, same input, a different answer per
-// platform. Detecting the cycle where it closes means the cyclic case never
-// recurses deeply on any toolchain, so the result no longer depends on frame
-// size.
+// The cap alone is not enough (#959): it bounds the recursion after the fact,
+// and 64 frames are a different stack size per toolchain. On MSVC at /Od with
+// ASan's redzones, QuickJS's 256 KB stack guard tripped first, inside
+// `js_class_tag`'s `JS_Call`: an empty tag matched the other empty tag, fell
+// through to "unrecognised class" and `return 0`, dropping the pending
+// overflow, so one input answered differently per platform. Detecting the cycle
+// where it closes keeps the cyclic case shallow on every toolchain.
 constexpr int kDeepEqualMaxDepth = 64;
 
 } // namespace
@@ -609,13 +562,10 @@ bool js_own_enumerable_keys (JSContext* ctx, JSValueConst obj, std::vector<std::
     return true;
 }
 
-// Deep structural equality. Returns 1 (equal), 0 (not equal) or -1 with a
-// pending exception, following the QuickJS convention.
-//
-// This deliberately does not go through `JSON.stringify`, which the previous
-// implementation used: stringify is key-order sensitive ({a:1,b:2} vs {b:2,a:1}
-// compare unequal), silently drops `undefined` members, and cannot see a value
-// it fails to serialise.
+// Deep structural equality: 1 (equal), 0 (not equal) or -1 with a pending
+// exception, the QuickJS convention. Not through `JSON.stringify`, which is
+// key-order sensitive ({a:1,b:2} vs {b:2,a:1} unequal), drops `undefined`
+// members, and cannot see a value it fails to serialise.
 int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, DeepEqualPath& path, ZeroRule zeros) {
     if (depth > kDeepEqualMaxDepth) {
         JS_ThrowRangeError (ctx,
@@ -685,14 +635,13 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
     if (tag != b_tag) {
         return 0;
     }
-    // Both branches below render each side through script the test author may
-    // have written - an own `toJSON`, an overridden `toString` - and both
-    // renderers answer "" when that throws, leaving the exception pending. Two
-    // empty renderings compare *equal*, so a pair of throwing Dates would report a
-    // pass. Neither renderer reports failure, so the context is asked
-    // instead - and asked after each side, because `JS_Throw` replaces the
-    // pending exception, so rendering the second side over a first that threw
-    // would report b's error for a's read.
+    // Both branches render each side through script the author may have written
+    // (an own `toJSON`, an overridden `toString`), and both renderers answer ""
+    // when it throws, leaving the exception pending; two empty renderings
+    // compare equal, so two throwing Dates would pass. The renderers report no
+    // failure, so the context is asked, after each side: `JS_Throw` replaces
+    // the pending exception, so rendering b over an a that threw would report
+    // b's error for a's read.
     if (tag == "[object Date]") {
         // JSON renders a Date as its ISO instant, which is the comparison chai
         // makes (and keeps millisecond resolution, unlike toString).
@@ -718,22 +667,21 @@ int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, De
         return a_source == b_source ? 1 : 0;
     }
     if (tag != "[object Object]" && tag != "[object Array]" && tag != "[object Error]") {
-        // Map, Set, typed arrays and the like hold their contents somewhere a
-        // structural compare cannot see, so every pair would look equal. Report
+        // Map, Set, typed arrays and the like hold their contents where a
+        // structural compare cannot see, so every pair would look equal: report
         // unequal rather than pass silently; reference identity already matched
-        // the only case that is certainly equal.
+        // the certain case.
         return 0;
     }
 
-    // Every read below can run script: a getter the author wrote, or a Proxy
-    // trap - `IsArray` unwraps a proxy, so a proxy of an array reaches this
-    // branch and even its `length` goes through a trap. A read that throws
-    // leaves the exception pending and hands back the exception sentinel, which
-    // is neither a number nor an object, so comparing it reports an ordinary
-    // "not deeply equal" about a read that never happened - #959's shape, one
-    // level down. Each pair stops at the *first* side that throws, because
-    // reading the second would run more script and could replace the error the
-    // script author is owed.
+    // Every read below can run script: an author's getter or a Proxy trap
+    // (`IsArray` unwraps a proxy, so a proxied array lands here and even its
+    // `length` is a trap). A throwing read leaves the exception pending and
+    // returns the sentinel, neither number nor object, so comparing it would
+    // report "not deeply equal" about a read that never happened, #959's shape
+    // one level down. Each pair stops at the first side that throws: reading
+    // the second runs more script and could replace the error the author is
+    // owed.
     if (tag == "[object Array]") {
         ScopedValue a_len_val (ctx, JS_GetPropertyStr (ctx, a, "length"));
         if (JS_IsException (a_len_val.get ())) {
@@ -827,12 +775,10 @@ uint32_t js_array_length (JSContext* ctx, JSValueConst array) {
 }
 
 /**
- * @brief Whether the array @p target holds an element equal to @p needle by the
- * chain's comparison. 1, 0, or -1 with a pending exception.
- *
- * An element behind a getter that throws is a read that did not happen.
- * Handing the exception sentinel to `js_compare_for_chain` would answer "not a
- * member" about it, and under `.not` that is a pass.
+ * Whether the array @p target holds an element equal to @p needle by the
+ * chain's comparison: 1, 0, or -1 with a pending exception. An element behind a
+ * throwing getter is a read that did not happen; the sentinel would answer "not
+ * a member", a pass under `.not`.
  */
 int array_holds (JSContext* ctx, JSValueConst target, JSValueConst needle, bool deep) {
     const uint32_t len = js_array_length (ctx, target);
@@ -850,12 +796,10 @@ int array_holds (JSContext* ctx, JSValueConst target, JSValueConst needle, bool 
 }
 
 /**
- * @brief A Map's or a Set's contents as a new array: what the target's own
- * @p method (`keys` or `values`) iterates, or the exception.
- *
- * A Set's keys are its members, so `keys` reads the same list from either.
- * The target's own method is called, as chai calls the target's own
- * `forEach`.
+ * A Map's or Set's contents as a new array: what the target's own @p method
+ * (`keys` or `values`) iterates, or the exception. A Set's keys are its
+ * members, so `keys` reads the same list from either; the target's own method
+ * is called, as chai calls its own `forEach`.
  */
 JSValue collection_contents (JSContext* ctx, JSValueConst target, const char* method) {
     const ScopedValue read (ctx, JS_GetPropertyStr (ctx, target, method));
@@ -880,16 +824,12 @@ JSValue expect_to_getter (JSContext* ctx, JSValueConst this_val, int argc, JSVal
 }
 
 /**
- * `.not` - negate the rest of this chain.
- *
- * A **set**, not a toggle, which is chai's own rule
- * (`flag(this, 'negate', true)`) and the only one that survives a chain with
- * more than one `.not` in it (issue #883). Toggling made every even-numbered
- * `.not` cancel the one before it, so
- * `expect(x).to.not.include("+").and.to.not.include("/")` asserted that x
- * *does* include "/" - silently, and in whichever direction the author's count
- * of `.not`s happened to fall. Nothing resets the flag between assertions in a
- * chain, so a second `.not` has to be a no-op rather than an inversion.
+ * `.not`: negates the rest of this chain. A **set**, not a toggle, chai's rule
+ * (`flag(this, 'negate', true)`) and the only one surviving more than one
+ * `.not` (#883): toggling would make every even `.not` cancel the previous, so
+ * `expect(x).to.not.include("+").and.to.not.include("/")` would assert x does
+ * include "/". Nothing resets the flag between a chain's assertions, so a
+ * second `.not` is a no-op, not an inversion.
  */
 JSValue expect_not_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
@@ -907,10 +847,10 @@ JSValue expect_be_getter (JSContext* ctx, JSValueConst this_val, int argc, JSVal
     return expect_chained (ctx, this_val);
 }
 
-// The flag-setting chainers: each changes what the matcher at the end of the
-// chain compares, then hands the same expectation back. `any` and `all` are one
-// flag, as in chai, where each clears the other; the later word wins. The index
-// is the magic the getter is registered with.
+// The flag-setting chainers: each changes what the chain's final matcher
+// compares, then hands the expectation back. `any` and `all` are one flag, as
+// in chai, each clearing the other, the later word winning. The index is the
+// getter's registered magic.
 struct FlagChainer {
     const char* name;
     bool ExpectState::* flag;
@@ -937,8 +877,8 @@ expect_flag_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
     return expect_chained (ctx, this_val);
 }
 
-// Shared body of `equal` and `eql`. `always_deep` is what separates them: `eql`
-// is deep whatever the chain said, `equal` is strict unless `deep` set the flag.
+// `equal` and `eql`'s shared body: `eql` is deep whatever the chain said,
+// `equal` strict unless `deep` set the flag.
 JSValue
 expect_equality (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, bool always_deep) {
     if (argc < 1) {
@@ -996,9 +936,8 @@ JSValue expect_exist (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
 }
 
 /**
- * @brief `.to.be.true` / `.to.be.false`: the boolean itself, not its truthiness.
- *
- * chai compares with `=== true` and `=== false`; `.ok` is the coercing matcher
+ * `.to.be.true` / `.to.be.false`: the boolean itself, not its truthiness, as
+ * chai compares with `=== true` / `=== false`; `.ok` is the coercing matcher
  * and keeps `JS_ToBool` (#2523).
  */
 JSValue expect_boolean_literal (JSContext* ctx, JSValueConst this_val, bool expected) {
@@ -1029,23 +968,18 @@ JSValue expect_false (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
 }
 
 /**
- * @brief The value an ordering matcher compares, or nothing.
+ * The value an ordering matcher compares, or nothing. chai orders numbers and
+ * Dates and **type-asserts both sides** rather than coercing:
+ * `expect("5").to.be.above(3)` is an error, not a pass; `ToNumber` would read
+ * "5" as 5, `true` as 1, `[5]` as 5 and `null` as 0, returning a verdict on a
+ * comparison the script never meant. A Date reads as its instant. The kind
+ * comes back with the value because chai compares number with number and Date
+ * with Date, refusing the mixed pair rather than reading the Date as
+ * milliseconds.
  *
- * chai orders numbers and Dates, and **type-asserts both sides** rather than
- * coercing: `expect("5").to.be.above(3)` is an error there, not a pass. Vayu
- * ran both sides through `ToNumber`, which reads "5" as 5, `true` as 1, `[5]`
- * as 5 and `null` as 0 - so a comparison the script never meant returned a
- * verdict, in whichever direction the coercion happened to fall.
- *
- * A Date is read as its instant, which is what `ToNumber` on one answers. The
- * kind comes back with the value because chai compares a number with a number
- * and a Date with a Date, and refuses the mixed pair rather than reading the
- * Date as milliseconds.
- *
- * @p failed is set when *reading* the value raised, and the exception is left
- * pending for the caller. That is #959's rule, written 400 lines above for the
- * deep compare: a value that could not be read must not be reported as "not a
- * number", because the two are different answers and only one of them is true.
+ * @p failed is set when reading the value raised, the exception left pending:
+ * #959's rule for the deep compare, as "could not be read" and "not a number"
+ * are different answers and only one is true.
  */
 enum class OrderingKind { NotOrderable, Number, Date };
 
@@ -1086,11 +1020,9 @@ OrderingValue js_ordering_value (JSContext* ctx, JSValueConst value, bool& faile
 }
 
 /**
- * @brief What `.length` / `.lengthOf` measure on the target.
- *
- * chai reads `length`, except on a Map or a Set, which have none and are
+ * What `.length` / `.lengthOf` measure: `length`, except on a Map or Set,
  * measured by `size`. The descriptor travels with the number so a failure says
- * which of the two it read.
+ * which it read.
  */
 enum class LengthRead { Found, Missing, Failed };
 
@@ -1117,7 +1049,7 @@ LengthSubject read_length_subject (JSContext* ctx, JSValueConst target) {
     ScopedValue measured (ctx, JS_GetPropertyStr (ctx, target, out.descriptor));
     // A measurement the read could not produce is neither absent nor a number:
     // the script's own error is the answer, not the missing-length assertion
-    // and not a comparison against an uninitialised double.
+    // nor a comparison against an uninitialised double.
     if (JS_IsException (measured.get ())) {
         out.status = LengthRead::Failed;
     } else if (JS_IsUndefined (measured.get ())) {
@@ -1146,11 +1078,10 @@ length_read_refusal (JSContext* ctx, const ExpectState& state, const LengthSubje
     subject.descriptor + "'");
 }
 
-// The ordering matchers differ in one comparison and one word, so they are one
-// function reached by magic rather than a copy each - the type assertion above
-// is the same rule in all of them, and another copy of it is the one a later
-// fix would miss. The aliases (`gt`, `greaterThan`, ...) are rows of their own
-// that name the relation they share, so a row is one registered name.
+// The ordering matchers differ in one comparison and one word, so one function
+// reached by magic, not a copy each: the type assertion is the same rule in
+// all, and a copy is what a fix would miss. The aliases (`gt`, `greaterThan`,
+// ...) are rows naming the relation they share, a row per registered name.
 enum class Relation { Above, Below, AtLeast, AtMost, Within };
 
 struct OrderingMatcher {
@@ -1174,11 +1105,10 @@ constexpr auto ordering_matchers = std::to_array<OrderingMatcher> ({
 { "within", "within", Relation::Within },
 });
 
-// The magic a matcher is registered with is its index in that table, and
-// `expect_ordering` reads the same row back. The count is asserted so that a
-// row added to the table is a decision made here, next to `ordering_holds` and
-// the completion entry every registered name needs, rather than one that
-// registers without either: an ordering matcher that silently answered the
+// A matcher's registered magic is its table index, read back by
+// `expect_ordering`. The count is asserted so a new row is a decision made
+// here, beside `ordering_holds` and the completion entry every name needs, not
+// one registered without either: an ordering matcher silently answering the
 // wrong comparison is the failure this file exists to stop.
 static_assert (std::size (ordering_matchers) == 13,
 "a new ordering row needs its completion entry, and an arm in ordering_holds "
@@ -1319,9 +1249,9 @@ expect_ordering (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
     return expect_chained (ctx, this_val);
 }
 
-// Splits a `nested.property` path into its segments: "a.b[0].c" walks a, b, 0,
-// c. Chai's escape form (`a\.b` for a literal dot) is not supported; a path is
-// read left to right and a `[` opens an index.
+// Splits a `nested.property` path into segments ("a.b[0].c" walks a, b, 0, c),
+// left to right, a `[` opening an index. Chai's escape form (`a\.b` for a
+// literal dot) is not supported.
 std::vector<std::string> split_property_path (const std::string& path) {
     std::vector<std::string> segments;
     std::string current;
@@ -1353,9 +1283,9 @@ property_segments (const ExpectState& state, const std::string& name) {
     return state.nested ? split_property_path (name) : std::vector<std::string>{ name };
 }
 
-// chai refuses `nested` with `own` rather than choosing one: an own property
-// at the end of a path is a question neither flag asks. The throw to
-// propagate, nothing when the chain asks one question.
+// chai refuses `nested` with `own` rather than choosing: an own property at a
+// path's end is a question neither flag asks. The throw to propagate, or
+// nothing when the chain asks one question.
 std::optional<JSValue>
 refuse_nested_own (JSContext* ctx, const ExpectState& state, const char* matcher) {
     if (state.nested && state.own) {
@@ -1384,22 +1314,18 @@ std::string property_descriptor (const ExpectState& state) {
 enum class PropertyPresence { Present, Absent, Failed };
 
 /**
- * @brief Whether @p target holds the property @p segments walk to.
+ * Whether @p target holds the property @p segments walk to. The walk stops at
+ * the last segment's parent, so a missing intermediate is a missing property,
+ * not a thrown "cannot read property of undefined"; a plain chain has one
+ * segment. The last is tested with `hasOwnProperty` under @p own, else with
+ * `in`, neither running a getter; when @p value is given and the property is
+ * present, it receives the value as a new reference, the first and only read.
  *
- * Walks to the parent of the last segment, so a missing intermediate is a
- * missing property rather than a thrown "cannot read property of undefined"; a
- * plain chain has exactly one segment. The last one is tested with
- * `hasOwnProperty` under @p own and with `in` otherwise, neither of which runs
- * a getter. When @p value is given and the property is present it receives the
- * value as a new reference, which is the first read of it and the only one.
- *
- * A primitive is read through its wrapper object, as chai reads it
+ * A primitive is read through its wrapper object, as chai does
  * (`name in Object(obj)`, `hasOwnProperty.call(obj, name)`), so `'abc'` has an
- * own `length` and `0`; only `null` and `undefined` hold no property at all.
- *
- * `Failed` leaves the exception pending: a segment behind a getter that throws
- * is a walk that did not finish, and reporting it as absent would make `.not`
- * pass.
+ * own `length` and `0`; only `null` and `undefined` hold nothing. `Failed`
+ * leaves the exception pending: a segment behind a throwing getter is an
+ * unfinished walk, and calling it absent would make `.not` pass.
  */
 PropertyPresence find_chain_property (JSContext* ctx,
 JSValueConst target,
@@ -1449,22 +1375,17 @@ JSValue* value) {
 }
 
 /**
- * @brief chai's `.include` against an object target: subset matching.
+ * chai's `.include` against an object target: subset matching. Every own
+ * enumerable key of @p expected must be on @p target with an equal value by the
+ * chain's rules: `include` strict per key, `deep.include` deep, `own.include`
+ * own properties only, `nested.include` each key a path (chai running
+ * `.property` per key with the flags). 1, 0, or -1 with a pending exception; a
+ * primitive target reads through its wrapper, as chai's per-key assertion does.
  *
- * Every own enumerable key of @p expected must be present on @p target holding
- * an equal value, by the chain's rules - `include` is strict per key,
- * `deep.include` deep, `own.include` reads own properties only and
- * `nested.include` reads each key as a path, which is chai running `.property`
- * per key with the chain's flags. Answers 1, 0, or -1 with a pending exception.
- *
- * A primitive target is read through its wrapper, as chai's per-key property
- * assertion reads it.
- *
- * An expectation with no own enumerable keys is refused rather than matched.
- * chai walks its keys and, finding none, asserts nothing and passes in *both*
- * directions; a computed subset that came out empty is then a green test that
- * compared nothing. A Date, a RegExp and a function all land here, and each of
- * them reads as an assertion while carrying no key to check.
+ * An expectation with no own enumerable keys is refused: chai finds none,
+ * asserts nothing and passes both ways, so an empty computed subset is a green
+ * test that compared nothing. A Date, a RegExp and a function land here, each
+ * reading as an assertion with no key to check.
  */
 int expect_object_subset (JSContext* ctx, const ExpectState& state, JSValueConst expected) {
     std::vector<std::string> keys;
@@ -1483,11 +1404,9 @@ int expect_object_subset (JSContext* ctx, const ExpectState& state, JSValueConst
     }
 
     for (const auto& key : keys) {
-        // A getter that throws is not a mismatch, it is a read that did not
-        // happen: the exception is left pending and reported, rather than
-        // answered as "these differ" - which under `.not` would have been a
-        // pass. Same rule the deep compare states for a class tag it could not
-        // read (#959).
+        // A throwing getter is a read that did not happen, not a mismatch: the
+        // exception is reported, not answered "these differ", which under
+        // `.not` would pass (the deep compare's rule, #959).
         JSValue held_value              = JS_UNDEFINED;
         const PropertyPresence presence = find_chain_property (ctx,
         state.actual, property_segments (state, key), state.own, &held_value);
@@ -1509,12 +1428,10 @@ int expect_object_subset (JSContext* ctx, const ExpectState& state, JSValueConst
 }
 
 /**
- * @brief chai's `include` on a Map or a Set: whether a Map holds @p needle as a
- * *value* (never a key) or a Set as a member.
- *
- * Strictly it is SameValueZero, what `Set.prototype.has` answers, so `NaN`
- * finds `NaN`; under `deep` it is deep-eql. 1, 0, or -1 with a pending
- * exception.
+ * chai's `include` on a Map or Set: whether a Map holds @p needle as a value
+ * (never a key) or a Set as a member. Strictly SameValueZero, what
+ * `Set.prototype.has` answers, so `NaN` finds `NaN`; under `deep`, deep-eql. 1,
+ * 0, or -1 with a pending exception.
  */
 int collection_includes (JSContext* ctx, const ExpectState& state, JSValueConst needle) {
     const ScopedValue values (ctx, collection_contents (ctx, state.actual, "values"));
@@ -1552,14 +1469,11 @@ int refuse_include_combination (JSContext* ctx, const ExpectState& state, JSValu
 }
 
 /**
- * @brief Whether the target holds @p needle, by the rule chai's `include` has
- * for the target's type. 1, 0, or -1 with a pending exception.
- *
- * A Url or RequestBody object reads as the string it stands for: both replaced
- * a string on `pm.request` (#991, #1003) and both are documented as still
- * reading as one (`expect_string_like`). A boxed `String` is a string to chai's
- * type-detect too. @p subject receives what the object branch matched, for the
- * failure: "own properties " when the flags narrowed it, empty otherwise.
+ * Whether the target holds @p needle by chai's `include` rule for its type: 1,
+ * 0, or -1 with a pending exception. A Url or RequestBody reads as its string
+ * (#991, #1003; `expect_string_like`), and a boxed `String` is a string to
+ * chai's type-detect too. @p subject receives what the object branch matched,
+ * for the failure: "own properties " when the flags narrowed it, else empty.
  */
 int include_holds (JSContext* ctx, const ExpectState& state, JSValueConst needle, std::string& subject) {
     if (auto text = expect_string_like (ctx, state.actual)) {
@@ -1624,14 +1538,13 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 
 JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message);
 
-// The expectation `.property(name)` returns: the same chain with the property's
-// value as its subject, so `.that.is.a("number")` and `.and.equal(1)` assert on
-// the value. The flags that describe how a matcher reads its subject (`deep`,
-// `nested`, `own`, `contains`, `any`, `ordered`, `itself`) and the failure
-// message carry over, as they do on chai's one assertion object; `not` does
-// not, because a
-// retarget happens only on a passing positive assertion and the new subject has
-// not been negated by anything.
+// What `.property(name)` returns: the chain with the property's value as its
+// subject, so `.that.is.a("number")` and `.and.equal(1)` assert on the value.
+// The flags describing how a matcher reads its subject (`deep`, `nested`,
+// `own`, `contains`, `any`, `ordered`, `itself`) and the failure message carry
+// over, as on chai's one assertion object; `not` does not, since a retarget
+// happens only on a passing positive assertion and nothing negated the new
+// subject.
 JSValue expect_on_property_value (JSContext* ctx, const ExpectState* state, JSValueConst value) {
     JSValue next = create_expectation (ctx, value, state->message);
     if (JS_IsException (next)) {
@@ -1667,9 +1580,9 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
         return JS_ThrowTypeError (ctx, "property() requires a property name");
     }
 
-    // The value form compares the value and the one-argument form hands it to
-    // the rest of the chain, so both ask the lookup for it; a getter runs once.
-    // `.not.property(name)` asserts absence and has no value to read.
+    // The value form compares the value and the one-argument form hands it on,
+    // so both ask the lookup for it and a getter runs once;
+    // `.not.property(name)` asserts absence and reads no value.
     const bool value_form = argc >= 2;
     const bool retargets  = !value_form && !state->negated;
     JSValue read_value    = JS_UNDEFINED;
@@ -1681,9 +1594,9 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
     }
     bool has_prop = presence == PropertyPresence::Present;
 
-    // A second argument also checks the value. Chai compares it strictly unless
-    // the chain is `deep`, which is why this cannot stringify: two objects with
-    // the same JSON are still different references.
+    // A second argument checks the value too, strictly unless the chain is
+    // `deep`, so not by stringify: two objects with one JSON are different
+    // references.
     if (has_prop && value_form) {
         const int same =
         js_compare_for_chain (ctx, property_value.get (), argv[1], state->deep);
@@ -1723,12 +1636,10 @@ JSValue expect_own_property (JSContext* ctx, JSValueConst this_val, int argc, JS
 }
 
 /**
- * @brief `Object.<function>(...args)` as the new reference it answers, or the
- * exception it raised.
- *
- * The questions chai answers with `Object.isFrozen` and its siblings are the
- * language's own, so they are asked of the language: a sealed or extensible
- * object is not a property list this file could read back.
+ * `Object.<function>(...args)` as its new reference, or the exception it
+ * raised. chai answers with `Object.isFrozen` and its siblings, the language's
+ * own questions, so they are asked of the language: sealed or extensible is no
+ * property list this file could read back.
  */
 JSValue call_object_static (JSContext* ctx, const char* function, int argc, JSValueConst* argv) {
     const ScopedValue global (ctx, JS_GetGlobalObject (ctx));
@@ -1741,14 +1652,12 @@ JSValue call_object_static (JSContext* ctx, const char* function, int argc, JSVa
 }
 
 /**
- * chai's `ownPropertyDescriptor(name[, descriptor])`: the target has an own
- * property of that name and, given a descriptor, its descriptor deeply equals
- * it. Reading the descriptor retargets the chain at it, as `property` retargets
- * at the value, so `.ownPropertyDescriptor("a").that.has.property("writable")`
- * asserts on the descriptor.
- *
- * chai reads a string second argument as the failure message and Vayu has no
- * per-call message on any matcher, so a string there is accepted and not read.
+ * chai's `ownPropertyDescriptor(name[, descriptor])`: the target has that own
+ * property and, given a descriptor, its descriptor deeply equals it. Reading it
+ * retargets the chain at the descriptor, as `property` does at the value, so
+ * `.ownPropertyDescriptor("a").that.has.property("writable")` asserts on it.
+ * chai reads a string second argument as the failure message; Vayu has no
+ * per-call message, so a string there is accepted and unread.
  */
 JSValue expect_own_property_descriptor (JSContext* ctx,
 JSValueConst this_val,
@@ -1818,9 +1727,9 @@ JSValueConst* argv) {
     return expect_on_property_value (ctx, state, actual_descriptor.get ());
 }
 
-// Terminal getters: assert on property access (Chai/Postman paren-less idiom).
-// Each honors the tracked `negated` flag, throws on failure, and returns the
-// expectation object so a chain can continue.
+// Terminal getters assert on property access (the chai / Postman paren-less
+// idiom): each honours `negated`, throws on failure and returns the expectation
+// so the chain continues.
 
 JSValue expect_null_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
@@ -1904,8 +1813,8 @@ JSValue expect_empty_getter (JSContext* ctx, JSValueConst this_val, int argc, JS
         JSPropertyEnum* tab = nullptr;
         uint32_t count      = 0;
         // The key list is what "empty" means for an object, and a proxy's
-        // ownKeys trap can refuse to produce it. Reporting "not empty" for a
-        // list that was never produced is a pass under `.not`.
+        // ownKeys trap can refuse it; "not empty" for a list never produced
+        // would pass under `.not`.
         if (JS_GetOwnPropertyNames (ctx, &tab, &count, state->actual,
             JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0) {
             return JS_EXCEPTION;
@@ -1929,13 +1838,11 @@ JSValue expect_empty_getter (JSContext* ctx, JSValueConst this_val, int argc, JS
 }
 
 /**
- * `.NaN` - chai's rule is `value !== value`, which only a NaN number satisfies.
- *
- * Deliberately not `ToNumber(value)` is NaN: chai reports `expect("foo").to.be
- * .NaN` as a failure, and a matcher that coerced would pass for every string
- * that is not a number. It is a getter rather than a call because chai's is one,
- * which is exactly why its absence was silent - `.to.be.NaN` on an object with
- * no such member is an expression statement evaluating to `undefined`.
+ * `.NaN`: chai's `value !== value`, which only a NaN number satisfies; not
+ * `ToNumber(value)` is NaN, as chai fails `expect("foo").to.be.NaN` and
+ * coercion would pass every non-numeric string. A getter, as chai's is, which
+ * is why its absence was silent: `.to.be.NaN` on an object lacking it evaluates
+ * to `undefined`.
  */
 JSValue expect_nan_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
@@ -2021,10 +1928,9 @@ JSValue expect_arguments_getter (JSContext* ctx, JSValueConst this_val, int argc
     return assert_target_is (ctx, this_val, *state, tag == "[object Arguments]", "arguments");
 }
 
-// `.extensible`, `.sealed` and `.frozen` are what `Object.isExtensible`,
-// `Object.isSealed` and `Object.isFrozen` answer, a primitive included: the
-// language says a primitive is sealed and frozen and not extensible, and chai
-// takes its answer from the same calls.
+// `.extensible`, `.sealed` and `.frozen` answer as `Object.isExtensible`,
+// `isSealed` and `isFrozen` do, a primitive included (sealed, frozen, not
+// extensible), the same calls chai takes its answer from.
 struct ObjectStateMatcher {
     const char* name;
     const char* query;
@@ -2058,8 +1964,8 @@ int magic) {
     ctx, this_val, *state, JS_ToBool (ctx, answer.get ()) == 1, matcher.name);
 }
 
-// Callable matchers documented in pm-api-compatibility.md.
-// `least` and `most` are the other two arms of `expect_ordering` above.
+// Callable matchers documented in pm-api-compatibility.md; `least` and `most`
+// are `expect_ordering`'s other two arms.
 
 JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 1) {
@@ -2096,19 +2002,16 @@ JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
 }
 
 /**
- * @brief What reading a chainable method answers: its call, standing in for the
- * expectation.
- *
- * chai's chainable methods (`length`, `include`, `a` and their spellings) are a
- * call *and* the rest of the chain: `.to.have.length(3)` and
- * `.to.have.length.above(2)` are one member, as are `.to.include(1)` and
- * `.to.include.members([1])`, and `.to.be.an('array')` and
- * `.to.be.an.instanceof(Array)`. The member returned here calls
- * @p member on the expectation, and its prototype is the expectation, so every
- * other member - a matcher, a flag, a language word, the unknown-member hook -
- * is found through it and `expectation_state` resolves `this` back to the
- * state. A fixed list of forwarded members would be a second copy of the chain
- * that misses each member added later.
+ * What reading a chainable method answers: its call, standing in for the
+ * expectation. chai's chainable methods (`length`, `include`, `a` and their
+ * spellings) are a call and the rest of the chain: `.to.have.length(3)` and
+ * `.to.have.length.above(2)` are one member, as are `.to.include(1)` /
+ * `.to.include.members([1])` and `.to.be.an('array')` /
+ * `.to.be.an.instanceof(Array)`. The member calls @p member on the expectation
+ * and has the expectation as prototype, so every other member (a matcher, a
+ * flag, a language word, the unknown-member hook) is found through it and
+ * `expectation_state` resolves `this` back. A fixed list of forwarded members
+ * would be a second copy of the chain, missing each later member.
  */
 JSValue chainable_method (JSContext* ctx, JSValueConst this_val, const ExpectMember& member) {
     ScopedValue expectation (ctx, expectation_object (ctx, this_val));
@@ -2124,15 +2027,13 @@ JSValue chainable_method (JSContext* ctx, JSValueConst this_val, const ExpectMem
 }
 
 /**
- * @brief The name `.a()` / `.an()` compare against, chai's `type-detect` lowered.
- *
- * The primitives and the three shapes a script most often asks about keep
- * their direct reads. Anything else is named by its `Object.prototype.toString`
- * tag, which is what `type-detect` reports for it: `Date`, `RegExp`, `Map`,
- * `Set`, `Error`, `Promise`, `Symbol` and `BigInt` become `date`, `regexp`,
- * `map`, `set`, `error`, `promise`, `symbol` and `bigint`, and a plain object
- * stays `object` (#2528). Answers nothing, with the exception pending, when
- * reading the tag threw.
+ * The name `.a()` / `.an()` compare against: chai's `type-detect`, lowered. The
+ * primitives and the three most-asked shapes keep their direct reads; anything
+ * else is named by its `Object.prototype.toString` tag, as `type-detect`
+ * reports it (`Date`, `RegExp`, `Map`, `Set`, `Error`, `Promise`, `Symbol`,
+ * `BigInt` become `date`, `regexp`, `map`, `set`, `error`, `promise`, `symbol`,
+ * `bigint`; a plain object stays `object`, #2528). Nothing, with the exception
+ * pending, when reading the tag threw.
  */
 std::optional<std::string> expect_type_name (JSContext* ctx, JSValueConst value) {
     if (JS_IsNull (value)) {
@@ -2241,16 +2142,15 @@ JSValue expect_match (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     return expect_chained (ctx, this_val);
 }
 
-// Matchers a Postman suite reaches for.
-// Each one fails loudly on an argument it cannot use, because a matcher that
-// quietly accepts anything is the false-pass this series exists to remove.
+// Matchers a Postman suite reaches for, each failing loudly on an argument it
+// cannot use: a matcher quietly accepting anything is the false pass this
+// series removes.
 
 /**
- * @brief Whether the target relates to one of @p candidates as the chain asks.
- *
- * Plain `oneOf` asks whether the target *is* a candidate. After `include` /
- * `contain` chai asks whether the target *contains* one: a substring of a
- * string, an element of an array. 1, 0, or -1 with a pending exception.
+ * Whether the target relates to one of @p candidates as the chain asks: plain
+ * `oneOf` asks whether it is a candidate; after `include` / `contain`, whether
+ * it contains one (a substring, an array element). 1, 0, or -1 with a pending
+ * exception.
  */
 int one_of_matches (JSContext* ctx, const ExpectState& state, JSValueConst candidates) {
     const std::optional<std::string> text =
@@ -2315,12 +2215,10 @@ JSValue expect_one_of (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
 }
 
 /**
- * @brief Whether the target's own enumerable keys answer the chain's question.
- *
- * Both lists are sorted and @p expected has no duplicates. `have.keys` (and
- * `all.keys`, the default quantifier) means exactly these keys; after
- * `include` / `contain` it means at least these; `any.keys` means at least one
- * of them, whether or not `include` came first, as in chai.
+ * Whether the target's own enumerable keys answer the chain's question. Both
+ * lists are sorted and @p expected has no duplicates. `have.keys` (and
+ * `all.keys`, the default) means exactly these; after `include` / `contain`, at
+ * least these; `any.keys` at least one of them, `include` or not, as in chai.
  */
 bool keys_match (const ExpectState& state,
 const std::vector<std::string>& actual,
@@ -2373,13 +2271,11 @@ struct KeysAnswer {
 };
 
 /**
- * @brief The names an object target's `keys` is asked about, each a string.
- *
- * One plain-object argument stands for its own enumerable keys, chai's
- * `Object.keys` of it; otherwise the names are `key_argument_list`'s. A name
- * that could not be read is not a name: `js_to_string` answers "" for it, and
- * an empty key would be compared against the target's real ones as though the
- * script had asked for it. False with a pending exception.
+ * The names an object target's `keys` is asked about, each a string. One
+ * plain-object argument stands for its own enumerable keys (chai's
+ * `Object.keys` of it); otherwise `key_argument_list`'s. An unreadable name is
+ * no name: `js_to_string` would answer "", compared against the real keys as
+ * though asked for. False with a pending exception.
  */
 bool read_key_names (JSContext* ctx, int argc, JSValueConst* argv, std::vector<std::string>& out) {
     if (argc == 1 && JS_IsObject (argv[0]) && !JS_IsArray (argv[0])) {
@@ -2441,12 +2337,11 @@ object_keys_answer (JSContext* ctx, const ExpectState& state, int argc, JSValueC
 }
 
 /**
- * @brief Whether @p held, a Map's keys or a Set's members, answers `keys` for
- * @p wanted. 1, 0, or -1 with a pending exception.
- *
- * chai compares the values themselves here, never their strings (`===`, or
- * deep-eql under `deep`), so `new Map([[1, 1]])` has the key `1` and not `'1'`.
- * Exactness counts the list as given rather than de-duplicating it.
+ * Whether @p held, a Map's keys or a Set's members, answers `keys` for
+ * @p wanted: 1, 0, or -1 with a pending exception. chai compares the values,
+ * never their strings (`===`, or deep-eql under `deep`), so `new Map([[1, 1]])`
+ * has the key `1`, not `'1'`; exactness counts the list as given, without
+ * de-duplicating.
  */
 int collection_keys_match (JSContext* ctx, const ExpectState& state, JSValueConst held, JSValueConst wanted) {
     const uint32_t wanted_len = js_array_length (ctx, wanted);
@@ -2559,10 +2454,10 @@ int ordered_members_match (JSContext* ctx, const ExpectState& state, JSValueCons
     return 1;
 }
 
-// `members` in any order. Without `contains` each element of @p wanted pairs
-// with an unused element of the target, so duplicates have to match in count
-// and the lengths agree; with it each only has to be present, which is chai's
-// `isSubsetOf` and why `[1, 2].include.members([1, 1])` holds.
+// `members` in any order. Without `contains`, each wanted element pairs with an
+// unused target element, so duplicates match in count and lengths agree; with
+// it each need only be present, chai's `isSubsetOf`, which is why
+// `[1, 2].include.members([1, 1])` holds.
 int unordered_members_match (JSContext* ctx, const ExpectState& state, JSValueConst wanted) {
     const uint32_t actual_len = js_array_length (ctx, state.actual);
     const uint32_t wanted_len = js_array_length (ctx, wanted);
@@ -2647,11 +2542,10 @@ JSValue expect_members (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     return expect_chained (ctx, this_val);
 }
 
-// What chai matches a string or a regular expression against: an `Error`'s
-// `message`, and the thrown value itself for a script that threw something that
-// is not one. `String(err)` is "TypeError: bad input", name included, so
-// comparing it would pass `.to.throw("Error")` for every Error thrown whatever
-// it said, and `.to.throw("TypeError")` on a message that merely mentioned the word.
+// What chai matches a string or regex against: an `Error`'s `message`, or the
+// thrown value itself when it is no Error. `String(err)` is "TypeError: bad
+// input", name included, so comparing it would pass `.to.throw("Error")` for
+// every Error and `.to.throw("TypeError")` on a message merely mentioning it.
 std::string thrown_message (JSContext* ctx, JSValueConst error) {
     if (JS_IsObject (error)) {
         ScopedValue message (ctx, JS_GetPropertyStr (ctx, error, "message"));
@@ -2659,9 +2553,9 @@ std::string thrown_message (JSContext* ctx, JSValueConst error) {
             return js_to_string (ctx, message.get ());
         }
     }
-    // A thrown string is its own message and anything else has none, which is
-    // chai's `check-error.getMessage`. Stringifying the rest instead would make
-    // `.to.throw("4")` pass on `throw 42`.
+    // A thrown string is its own message and anything else has none (chai's
+    // `check-error.getMessage`); stringifying would pass `.to.throw("4")` on
+    // `throw 42`.
     if (JS_IsString (error)) {
         return js_to_string (ctx, error);
     }
@@ -2713,10 +2607,10 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     JSValue result   = JS_Call (ctx, state->actual, JS_UNDEFINED, 0, nullptr);
     const bool threw = JS_IsException (result);
     JS_FreeValue (ctx, result);
-    // A target that ran past the script's deadline did not throw - the engine
-    // stopped it, and the exception it left pending is the abort. Propagate it
-    // as every other surface does; reading it as a satisfied `.throw()` reports
-    // a green verdict about a function that never returned.
+    // A target that ran past the script's deadline did not throw: the engine
+    // stopped it, and the pending exception is the abort. Propagate it, as
+    // every surface does; a satisfied `.throw()` would be a green verdict on a
+    // function that never returned.
     if (threw && script_deadline_expired (ctx)) {
         return JS_EXCEPTION;
     }
@@ -2726,9 +2620,10 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
 
     bool matches      = threw;
     int matcher_index = 0;
-    // chai reads a function argument as the error constructor the throw must be
-    // an instance of, and takes an optional message matcher after it:
-    // `expect(fn).to.throw(TypeError)` is ordinary chai, and what imported scripts carry.
+    // A function argument is the constructor the throw must be an instance of,
+    // with an optional message matcher after it:
+    // `expect(fn).to.throw(TypeError)` is ordinary chai, and what imported
+    // scripts carry.
     if (threw && argc >= 1 && JS_IsFunction (ctx, argv[0])) {
         const int is_instance = JS_IsInstanceOf (ctx, thrown.get (), argv[0]);
         if (is_instance < 0) {
@@ -2738,9 +2633,8 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         matcher_index = 1;
     }
 
-    // The message matcher, whether it is the only argument or the one after a
-    // constructor. A second argument is read rather than dropped: a script that
-    // states the message means it to be checked.
+    // The message matcher, alone or after a constructor; a second argument is
+    // read, not dropped: a script stating the message means it checked.
     if (matches && argc > matcher_index && !JS_IsUndefined (argv[matcher_index])) {
         const int matched = matches_thrown_message (ctx, argv[matcher_index], message);
         if (matched < 0) {
@@ -2751,10 +2645,10 @@ JSValue expect_throw (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
 
     const bool pass = state->negated ? !matches : matches;
     if (!pass) {
-        // The message names what was expected, because with an argument the
-        // bare form contradicts itself: "expected the function to throw, but it
-        // threw RangeError: bad" reads as an engine fault when what failed was
-        // the constructor the script named.
+        // The message names what was expected: with an argument the bare form
+        // contradicts itself ("expected the function to throw, but it threw
+        // RangeError: bad" reads as an engine fault when the named constructor
+        // failed).
         std::string msg = state->negated ?
         "Expected the function to not throw" :
         "Expected the function to throw";
@@ -2907,9 +2801,9 @@ JSValue expect_respond_to (JSContext* ctx, JSValueConst this_val, int argc, JSVa
         js_type_name (ctx, state->actual));
     }
 
-    // chai reads `fn.prototype[method]`, which is a TypeError on a function with
-    // no prototype (an arrow function); answering "does not respond" would make
-    // `.not.respondTo` pass for it.
+    // chai reads `fn.prototype[method]`, a TypeError on a function with no
+    // prototype (an arrow function); "does not respond" would pass
+    // `.not.respondTo` for it.
     const bool through_prototype = JS_IsFunction (ctx, state->actual) && !state->itself;
     const ScopedValue prototype (ctx,
     through_prototype ? JS_GetPropertyStr (ctx, state->actual, "prototype") : JS_UNDEFINED);
@@ -2976,9 +2870,8 @@ JSValue read_delta_subject (JSContext* ctx, JSValueConst subject, const std::str
     return JS_GetPropertyStr (ctx, subject, property->c_str ());
 }
 
-// Only a number measures: chai subtracts, which coerces a numeric string, and a
-// value that is not a number here is NaN, so `.by` on it fails the assertion
-// rather than passing.
+// Only a number measures: chai subtracts, coercing a numeric string, and a
+// non-number is NaN here, so `.by` on it fails rather than passes.
 double delta_number (JSContext* ctx, JSValueConst value) {
     double out = std::nan ("");
     if (JS_IsNumber (value)) {
@@ -2997,13 +2890,10 @@ bool delta_holds (const DeltaRecord& record, bool values_differ) {
 }
 
 /**
- * chai's `change` / `increase` / `decrease`: call the target function and
- * compare what a subject answers before and after. The subject is a function,
- * or an object and the name of one of its properties. The measurement is kept
- * on the chain for a `.by` that follows.
- *
- * The first call of the target is the only one: the subject is read, the target
- * runs once and the subject is read again, so a `.by` re-reads nothing.
+ * chai's `change` / `increase` / `decrease`: calls the target and compares what
+ * a subject (a function, or an object and one property's name) answers before
+ * and after, keeping the measurement for a following `.by`. The target runs
+ * once, between two reads of the subject, so `.by` re-reads nothing.
  */
 JSValue expect_delta (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     const DeltaMatcher& matcher = delta_matchers.at (static_cast<size_t> (magic));
@@ -3150,11 +3040,11 @@ constexpr auto response_measure_nouns =
 std::to_array<const char*> ({ "response time", "response size" });
 
 /**
- * The call half of `responseTime` / `responseSize`, chai-postman's two checks
- * in its order: the measure is a number, then it equals the argument. The
- * first always holds here, so under `not` the call fails whatever it is given
- * - Postman's verdict, kept rather than read as "not equal", which would pass
- * an assertion Postman fails.
+ * The call half of `responseTime` / `responseSize`: chai-postman's two checks
+ * in order, the measure is a number, then it equals the argument. The first
+ * always holds, so under `not` the call fails whatever it is given, Postman's
+ * verdict, kept rather than read as "not equal", which would pass an assertion
+ * Postman fails.
  */
 JSValue
 response_measure_call (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
@@ -3224,9 +3114,9 @@ magic_matchers (const std::array<Row, N>& rows, JSCFunctionMagic* call, int leng
     return members;
 }
 
-// The matchers called as `.equal(v)`. `equal` and `eql` are separate functions
-// on purpose: chai's `equal` is `===` (reference identity for objects) and
-// `eql` is deep, so aliasing them passes assertions Postman fails.
+// The matchers called as `.equal(v)`. `equal` and `eql` are separate on
+// purpose: chai's `equal` is `===` (reference identity) and `eql` deep, so
+// aliasing them passes assertions Postman fails.
 constexpr auto matcher_members = std::to_array<ExpectMember> ({
 matcher_member<expect_equal> ("equal", 1),
 matcher_member<expect_equal> ("eq", 1),
@@ -3263,13 +3153,11 @@ constexpr auto ordering_members = magic_matchers (ordering_matchers, expect_orde
 constexpr auto delta_members = magic_matchers (delta_matchers, expect_delta, 2);
 
 // chai's chainable methods, and the flag reading one sets (none for `a`).
-//
-// `length` / `lengthOf` set chai's `doLength`, which makes the ordering
-// matchers compare the length. `include` / `contain` / `includes` /
-// `contains` set chai's `contains`: `.include.keys` and `.include.members`
-// accept a superset and `.contain.oneOf` asks whether the target contains a
-// candidate. Each flag is set by the read, not by the call, so it holds for
-// the rest of the chain exactly as it does in chai.
+// `length` / `lengthOf` set `doLength`, so the ordering matchers compare the
+// length; `include` / `contain` / `includes` / `contains` set `contains`, so
+// `.include.keys` and `.include.members` accept a superset and `.contain.oneOf`
+// asks whether the target contains a candidate. The read sets the flag, not the
+// call, so it holds for the rest of the chain as in chai.
 struct ChainableMember {
     ExpectMember member;
     bool ExpectState::* flag;
@@ -3339,51 +3227,42 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     state->message = std::move (message);
     JS_SetOpaque (obj, state);
 
-    // Add "to" getter for chaining
     JSAtom to_atom = JS_NewAtom (ctx, "to");
     JS_DefinePropertyGetSet (ctx, obj, to_atom,
     JS_NewCFunction (ctx, expect_to_getter, "to", 0), JS_UNDEFINED, 0);
     JS_FreeAtom (ctx, to_atom);
 
-    // Add "not" getter for negation
     JSAtom not_atom = JS_NewAtom (ctx, "not");
     JS_DefinePropertyGetSet (ctx, obj, not_atom,
     JS_NewCFunction (ctx, expect_not_getter, "not", 0), JS_UNDEFINED, 0);
     JS_FreeAtom (ctx, not_atom);
 
-    // Add "be" getter for chaining
     JSAtom be_atom = JS_NewAtom (ctx, "be");
     JS_DefinePropertyGetSet (ctx, obj, be_atom,
     JS_NewCFunction (ctx, expect_be_getter, "be", 0), JS_UNDEFINED, 0);
     JS_FreeAtom (ctx, be_atom);
 
-    // Add "have" getter for chaining (same as "to")
+    // "have" is "to" again.
     JSAtom have_atom = JS_NewAtom (ctx, "have");
     JS_DefinePropertyGetSet (ctx, obj, have_atom,
     JS_NewCFunction (ctx, expect_to_getter, "have", 0), JS_UNDEFINED, 0);
     JS_FreeAtom (ctx, have_atom);
 
-    // Add "at" getter for chaining (for `.at.least(n)` / `.at.most(n)`)
+    // "at", for `.at.least(n)` / `.at.most(n)`.
     JSAtom at_atom = JS_NewAtom (ctx, "at");
     JS_DefinePropertyGetSet (ctx, obj, at_atom,
     JS_NewCFunction (ctx, expect_to_getter, "at", 0), JS_UNDEFINED, 0);
     JS_FreeAtom (ctx, at_atom);
 
-    // Passthrough chainers. "and" continues a chain after a matcher (which is
-    // why every matcher returns the expectation).
-    //
-    // The rest are chai's language chains (issue #1053): they assert nothing at
-    // all and exist so a chain reads as English - `expect(rows).to.be.an
-    // ('array').that.is.not.empty`. Without them an imported collection written
-    // in the fluent style fails on the *language* rather than on the API under
-    // test, because the unknown-member hook (#999) throws by name on every one of these
-    // words. Each hands the same expectation back, so the
-    // flags a chain has set - `not` included - carry across exactly as they do
-    // for `and`.
-    //
-    // `all`, `any`, `own`, `ordered` and `itself` look like prose and are not:
-    // each changes what a later matcher asserts, so they are flags below rather
-    // than passthroughs.
+    // Passthrough chainers. "and" continues a chain after a matcher (why every
+    // matcher returns the expectation). The rest are chai's language chains
+    // (#1053), asserting nothing so a chain reads as English
+    // (`expect(rows).to.be.an('array').that.is.not.empty`); without them a
+    // fluent imported collection fails on the language, as the unknown-member
+    // hook (#999) throws on each word. Each hands back the expectation, so the
+    // chain's flags, `not` included, carry across as for `and`. `all`, `any`,
+    // `own`, `ordered` and `itself` look like prose but change what a later
+    // matcher asserts, so they are flags below.
     const char* passthrough_chainers[] = { "and", "also", "been", "but", "does",
         "has", "is", "of", "same", "still", "that", "which", "with" };
     for (const char* name : passthrough_chainers) {
@@ -3416,9 +3295,9 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
         JS_FreeAtom (ctx, atom);
     }
 
-    // Terminal matchers assert on access (Chai/Postman paren-less idiom), so
-    // register them as getters rather than function-valued properties - a bare
-    // `.to.be.true` must run the check, not silently return an uncalled function.
+    // Terminal matchers assert on access (the chai / Postman paren-less idiom),
+    // so they are getters, not function-valued properties: a bare `.to.be.true`
+    // must run the check, not return an uncalled function.
     struct TerminalGetter {
         const char* name;
         JSCFunction* fn;
@@ -3464,28 +3343,23 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
 // pm.test, pm.expect and pm.expect.fail
 // ============================================================================
 
-// The three fields a done-style test reports its outcome through. They live on
-// a plain JS object rather than on a C++ struct on `js_pm_test`'s frame,
-// because nothing stops a script from keeping `done` and calling it after
-// `pm.test` has returned - from later in the script, or from a promise job the
-// drain runs after it. Bound to a stack pointer that is a use-after-free;
-// bound to an object the collector owns it is a write nobody reads.
+// The three fields a done-style test reports through, on a plain JS object
+// rather than a C++ struct on `js_pm_test`'s frame: a script can keep `done`
+// and call it after `pm.test` returned (later in the script, or from a promise
+// job the drain runs after). Bound to a stack pointer that is a use-after-free;
+// bound to a collector-owned object it is a write nobody reads.
 constexpr const char* DONE_CALLED  = "called";
 constexpr const char* DONE_FAILED  = "failed";
 constexpr const char* DONE_MESSAGE = "message";
 
 /**
- * @brief The `done` a test callback that declares a parameter is handed.
- *
- * Mocha's contract, which postman-sandbox follows: no argument (or a falsy one)
- * completes the test, and any truthy argument fails it - an `Error` being the
- * documented shape, reported as the text the throw path reports a thrown one
- * with, so the two spellings of "this test failed" read alike. A truthy value
- * never reaches the null and undefined wording `thrown_value_message` adds.
- *
- * A second call is refused rather than allowed to overwrite the first verdict:
- * called twice inside the callback it throws, and the throw fails the test
- * naming what happened, which is what Postman does with it.
+ * The `done` a test callback declaring a parameter gets. Mocha's contract,
+ * which postman-sandbox follows: no (or a falsy) argument completes the test,
+ * any truthy one fails it, an `Error` being the documented shape, reported as
+ * the throw path reports a thrown one so both read alike (a truthy value never
+ * reaches `thrown_value_message`'s null and undefined wording). A second call
+ * is refused rather than overwriting the first verdict: called twice inside the
+ * callback it throws, failing the test by name, as Postman does.
  */
 JSValue js_test_done (JSContext* ctx,
 JSValueConst this_val,
@@ -3514,11 +3388,9 @@ JSValue* func_data) {
 }
 
 /**
- * @brief Whether @p callback declares a parameter, so it wants a `done`.
- *
- * postman-sandbox reads `fn.length` for exactly this, and the two forms report
- * their verdict differently, so the arity is the question that has to be asked
- * before the call rather than inferred from what the call did.
+ * Whether @p callback declares a parameter, so it wants a `done`:
+ * postman-sandbox reads `fn.length` for this, and the two forms report their
+ * verdict differently, so the arity is asked before the call, not inferred.
  *
  * @return the declared arity, or -1 with a pending exception.
  */
@@ -3537,11 +3409,9 @@ int32_t callback_arity (JSContext* ctx, JSValueConst callback) {
 }
 
 /**
- * @brief Record what a done-style callback left behind on @p state.
- *
- * Called only when the callback returned without throwing - a throw is already
- * the verdict, and a test that threw before reaching its `done()` is not also
- * an asynchronous-completion mistake.
+ * Records what a done-style callback left on @p state, only when it returned
+ * without throwing: a throw is already the verdict, and a test that threw
+ * before its `done()` is not also an asynchronous-completion mistake.
  */
 void apply_done_verdict (JSContext* ctx, JSValueConst state, TestResult& result) {
     JSValue called        = JS_GetPropertyStr (ctx, state, DONE_CALLED);
@@ -3549,10 +3419,10 @@ void apply_done_verdict (JSContext* ctx, JSValueConst state, TestResult& result)
     JS_FreeValue (ctx, called);
 
     if (!was_called) {
-        // Postman genuinely waits here; this sandbox does not. The verdict is
-        // taken when the callback returns, and a `done()` left for later - in
-        // a `.then`, after an `await` - only runs once the job queue drains,
-        // after the row was written. Saying so is the honest outcome.
+        // Postman waits here; this sandbox does not. The verdict is taken when
+        // the callback returns, and a `done()` left for later (a `.then`, after
+        // an `await`) runs only when the job queue drains, after the row was
+        // written. Saying so is the honest outcome.
         result.passed = false;
         result.error_message =
         "done() was never called before the callback returned. A done-style "
@@ -3594,8 +3464,8 @@ JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
     TestResult result;
     result.name = test_name;
 
-    // A callback that declares a parameter is asking for the done-style form,
-    // and gets one. One that does not is called exactly as it always was.
+    // A callback declaring a parameter asks for the done-style form; one that
+    // does not is called as before.
     JSValue state = JS_UNDEFINED;
     JSValue done  = JS_UNDEFINED;
     if (arity > 0) {
@@ -3612,7 +3482,6 @@ JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
         }
     }
 
-    // Call the test function
     const AllocationRefusalWatch refusal_watch (ctx);
     JSValue ret = JS_Call (
     ctx, argv[1], JS_UNDEFINED, arity > 0 ? 1 : 0, arity > 0 ? &done : nullptr);
@@ -3640,10 +3509,9 @@ JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
     }
     data->tests.push_back (std::move (result));
 
-    // Postman returns `pm` to make the call chainable ("make it chainable",
-    // verbatim in pmapi-setup-runner), so `pm.test(...).test(...)` runs both.
-    // The `pm` a chain continues on is the one the call was made on, which is
-    // what `this` is for every documented spelling of it.
+    // Postman returns `pm` so `pm.test(...).test(...)` runs both ("make it
+    // chainable", verbatim in pmapi-setup-runner); the chain continues on the
+    // `pm` the call was made on, `this` for every documented spelling.
     return JS_DupValue (ctx, this_val);
 }
 
@@ -3652,11 +3520,10 @@ JSValue js_pm_expect (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
         return JS_ThrowTypeError (ctx, "pm.expect requires a value");
     }
 
-    // chai coerces the message rather than demanding a string, and treats an
-    // absent one and an explicit `undefined` / `null` alike - both are how a
-    // caller that computes the message conditionally spells "no message". A
-    // value whose conversion throws (a Symbol, a throwing `toString`) is a real
-    // error and propagates rather than being swallowed into an empty prefix.
+    // chai coerces the message rather than demanding a string, and reads
+    // absent, `undefined` and `null` alike, how a conditional caller spells "no
+    // message". A throwing conversion (a Symbol, a throwing `toString`) is a
+    // real error and propagates, not swallowed into an empty prefix.
     std::string message;
     if (argc >= 2 && !JS_IsUndefined (argv[1]) && !JS_IsNull (argv[1])) {
         const char* str = JS_ToCString (ctx, argv[1]);
@@ -3671,20 +3538,17 @@ JSValue js_pm_expect (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
 }
 
 /**
- * @brief chai's `expect.fail([message])` - fail here, with this message.
- *
- * It is the one way a script states a failure *as an assertion* rather than as
- * an error: inside `pm.test` both fail the test, and at script level both abort
- * - what differs is the shape the verdict carries, an `AssertionError` with
- * this message rather than the `TypeError` a misuse reports. Reached as a
- * property of the `pm.expect` function itself, which is how chai spells it.
+ * chai's `expect.fail([message])`: fail here, with this message, the one way a
+ * script states a failure as an assertion rather than an error. Inside
+ * `pm.test` both fail the test and at script level both abort; only the
+ * verdict's shape differs, an `AssertionError` with this message, not a
+ * misuse's `TypeError`. Reached as a property of `pm.expect`, chai's spelling.
  *
  * chai's four-argument form (`actual, expected, message, operator`) builds an
- * AssertionError carrying the two values it compared; this AssertionError has
- * nowhere to put them, so that form is refused by name. Reading `actual` as
- * the message instead - what a single-argument implementation would do with
- * `fail(a, b)` - reports the value as the failure text and is the silent-wrong
- * shape this program exists to close.
+ * AssertionError carrying the two compared values, which this one has nowhere
+ * to put, so it is refused by name: reading `actual` as the message (what a
+ * single-argument implementation does with `fail(a, b)`) would report the value
+ * as the failure text, the silent-wrong shape this program closes.
  */
 JSValue js_pm_expect_fail (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
@@ -3717,11 +3581,11 @@ namespace {
 
 /**
  * A script value as the JSON the validator reads: what `JSON.stringify` makes
- * of it, which is the value ajv sees in Postman. That is why a response body
- * comes through here too rather than as its text: JSON.parse reads `1.0` as the
- * integer 1, and nlohmann reading the text would keep a float that
- * `type: "integer"` refuses. nullopt with an exception pending when the value
- * has no JSON form; @p what names the argument in the refusal.
+ * of it, the value ajv sees in Postman. So a response body comes through here,
+ * not as its text: JSON.parse reads `1.0` as the integer 1, and nlohmann on the
+ * text would keep a float that `type: "integer"` refuses. nullopt with an
+ * exception pending when the value has no JSON form; @p what names the argument
+ * in the refusal.
  */
 std::optional<nlohmann::json>
 script_value_as_json (JSContext* ctx, JSValueConst value, const char* what) {
@@ -3789,9 +3653,9 @@ json_schema_failure (JSContext* ctx, JSValueConst document, JSValueConst schema,
     const std::string expected = negated ?
     "Expected data to not satisfy the schema" :
     "Expected data to satisfy the schema";
-    // A keyword the validator cannot evaluate leaves the verdict unknown in
-    // both directions - ignored inside `not` it makes the schema stricter,
-    // anywhere else looser - so neither polarity may pass on it.
+    // A keyword the validator cannot evaluate leaves the verdict unknown both
+    // ways (ignored inside `not` it makes the schema stricter, elsewhere
+    // looser), so neither polarity may pass on it.
     if (!verdict->unevaluated_keywords.empty ()) {
         std::string msg = expected + ", but it " +
         vayu::core::unevaluated_keywords_disclosure (*verdict);
