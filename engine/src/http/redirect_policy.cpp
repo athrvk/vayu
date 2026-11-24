@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief What the engine's own redirect loop decides between two hops.
- */
+/** What the engine's own redirect loop decides between two hops. */
 
 #include "vayu/http/redirect_policy.hpp"
 
