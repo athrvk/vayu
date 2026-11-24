@@ -1,7 +1,7 @@
 /**
  * @file script_engine_request_test.cpp
  * @brief pm.request: write-back, bodies, header methods, the worked examples in
- *        scripting.md and pm.info.
+ *        the scripting guide and pm.info.
  */
 
 #include "vayu/runtime/script_engine.hpp"
@@ -725,7 +725,7 @@ TEST_F (ScriptEngineTest, PreRequestAHeaderNamedLikeAMethodStillReachesTheWire) 
 }
 
 // ============================================================================
-// The worked examples in scripting.md actually run
+// The worked examples in the scripting guide actually run
 // ============================================================================
 //
 // This whole issue existed because the docs taught a pattern the runtime threw
@@ -806,7 +806,7 @@ TEST_F (ScriptEngineTest, DocExampleSetsAQueryParamAcrossItsThreeCases) {
 }
 VAYU_DIAGNOSTIC_POP
 
-// scripting.md's "Sign a request" example, with the timestamp pinned so the
+// The scripting guide's "Sign a request" example, with the timestamp pinned so the
 // signature is reproducible. Until #187 this section taught an FNV-1a checksum
 // and said in as many words that a real HMAC was impossible.
 TEST_F (ScriptEngineTest, DocExampleSignsWithHmac) {

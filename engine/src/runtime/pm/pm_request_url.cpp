@@ -1970,7 +1970,7 @@ JSValue* func_data) {
     // Defined rather than left to the prototype, for the reason #991 gives
     // about the URL's: `String.prototype` is a String object holding `""`, so
     // an inherited `length` answers 0 - a plausible number for a body that is
-    // not empty, and `docs/engine/scripting.md` sets Content-Length from it.
+    // not empty, and `docs/engine/scripting/console-and-examples.md` sets Content-Length from it.
     case BODY_LENGTH:
         return JS_NewInt64 (ctx, static_cast<int64_t> (state->text.size ()));
     default: return JS_UNDEFINED;

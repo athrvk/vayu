@@ -44,7 +44,8 @@ ContextData* execution_context (JSContext* ctx, const char* member) {
         JS_ThrowPlainError (ctx,
         "pm.execution.%s is not available here: a single send has no next "
         "request, and a load run's scripts run after it finishes, against "
-        "recorded responses. See docs/engine/scripting.md.",
+        "recorded responses. See "
+        "docs/engine/scripting/execution-metrics-data.md.",
         member);
         return nullptr;
     }
@@ -152,7 +153,7 @@ ContextData* metrics_context (JSContext* ctx, const char* member) {
         "pm.metrics.%s is not available here: this script has no run to "
         "record into - a bare send, and the deferred replay against a "
         "recorded sample, are not the run itself. See "
-        "docs/engine/scripting.md.",
+        "docs/engine/scripting/execution-metrics-data.md.",
         member);
         return nullptr;
     }

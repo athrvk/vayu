@@ -87,7 +87,7 @@ Add more elements the same way. Common checks for an LLM endpoint:
   ```
 
 The script runs once, after the stream has ended. See
-[`pm.response.events`](../engine/scripting.md#pmresponseevents---a-streamed-runs-events)
+[`pm.response.events`](../engine/scripting/response.md#pmresponseevents---a-streamed-runs-events)
 for the event list, `pm.response.streamText` and the markers that say whether
 the stored list was cut.
 
@@ -176,7 +176,7 @@ if (usage && !pm.response.eventsTruncated) {
 Under a **scenario load run** a script runs after the run, on a sample, unless
 the element's **Run inline** switch is on, and `pm.metrics` throws there. Turn
 **Run inline** on for a script that records a metric. See
-[Custom metrics](../engine/scripting.md#custom-metrics-pmmetrics) for where
+[Custom metrics](../engine/scripting/execution-metrics-data.md#custom-metrics-pmmetrics) for where
 `pm.metrics` is available.
 
 ### Budget the cost

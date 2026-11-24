@@ -214,7 +214,7 @@ TEST_F (ScriptEngineTest, CollectionVariableSetPreservesSecretFlagAndType) {
 // ============================================================================
 //
 // Same reason as the two above: a name that is written down but not installed
-// throws in the user's face, and nothing else notices. `scripting.md` taught
+// throws in the user's face, and nothing else notices. The scripting guide taught
 // `pm.variables` and the Tests panel's quick reference taught
 // `pm.response.headers.get()`; neither had ever existed. `pm.variables` has
 // since been built (#184), so the tests below now pin it as *present* and its
@@ -1004,7 +1004,7 @@ TEST_F (ScriptEngineTest, AScopeTheRunDoesNotCarryBehavesAsEmptyRatherThanThrowi
 }
 
 // `pm.response.body` never existed - `setup_pm_response` binds json(), text(),
-// reason(), size() and headers, and no `body` property - but scripting.md
+// reason(), size() and headers, and no `body` property - but the scripting guide
 // documented it as "Raw body string" for long enough that someone would write
 // it and read `undefined` (issue #112). The doc line is gone; this pins the
 // contract so a future `body` binding has to be a deliberate change that

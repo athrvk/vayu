@@ -146,7 +146,7 @@ names only. The local scope is never stored and never shown in the Variables pan
 lives for one send (pre-request script through test script), for the whole of a
 collection run, for one virtual user's iteration in a scenario load run, and for one
 submission in a single-request load run with `requestElements`. See
-[scripting.md](../engine/scripting.md#the-local-scope-pmvariablesset) for every run
+[scripting/variables.md](../engine/scripting/variables.md#the-local-scope-pmvariablesset) for every run
 shape.
 
 ### `{{templates}}` in scripts (`pm.variables.replaceIn`)
@@ -342,7 +342,7 @@ reason phrase there too, so the two objects called a response do not disagree
 inside one sandbox - `code` is the number on both. Both spellings changed
 together in #1000; a script reading `res.status` as a number wants `res.code`,
 and [the migration
-note](../engine/scripting.md#status-is-the-reason-phrase-code-is-the-number)
+note](../engine/scripting/response.md#status-is-the-reason-phrase-code-is-the-number)
 names the one pattern that degrades silently.
 
 **Every call is listed in the Console, as it is in Postman's** (#3462,
@@ -363,7 +363,7 @@ or credential query value, a redirect hop's included; a server's
 `WWW-Authenticate`, `Proxy-Authenticate` and `Authentication-Info` are shown);
 bodies are kept as sent and received. A load run records no exchange and keeps
 only the line. Both are described under
-[`pm.sendRequest`](../engine/scripting.md#sending-a-request-from-a-script-pmsendrequest).
+[`pm.sendRequest`](../engine/scripting/send-request.md#sending-a-request-from-a-script-pmsendrequest).
 
 **It is bounded three ways, and two of them throw.** The request's timeout is
 clamped to whatever is left of the script's own time budget (`scriptTimeout`,
@@ -473,7 +473,7 @@ is the OAuth 2.0 JWT bearer grant's job, which signs engine-side, not the
 sandbox's: `pm.crypto` does not gain it. `pm.crypto` is SHA-256 and HMAC-SHA256 only; MD5, SHA-1
 and the other SHA-2 hashers are the `crypto-js` shelf's, see
 [The `require` shelf](#the-require-shelf). The engine-side detail is in
-[scripting.md](../engine/scripting.md#what-a-script-can-compute).
+[scripting/sandbox.md](../engine/scripting/sandbox.md#what-a-script-can-compute).
 
 ### The `require` shelf
 
@@ -535,7 +535,7 @@ use runs unchanged. Vayu has no `uuid` global, only `require`.
 First use costs about 1.2 ms (`-O2`) to 2.8 ms (Debug build) per execution,
 nothing until a script requires it. The import's notice does not name a
 `require('uuid')`. The engine-side detail is in
-[scripting.md](../engine/scripting.md#the-require-shelf).
+[scripting/require-shelf.md](../engine/scripting/require-shelf.md#the-require-shelf).
 
 **`lodash`** is npm's `lodash` package (4.18.1), the whole library vendored
 unmodified, and the `_` global is the same object as `require('lodash')`:
@@ -744,7 +744,7 @@ ahead of it has, where Postman would wait five seconds of the script's
 deadline. A `setTimeout` written to delay a request does not; add a Think time
 element (`timer.think`) for that. An interval nothing clears runs until the
 script's deadline stops it, which fails the script. The rules are in
-[scripting.md](../engine/scripting.md#timers-settimeout-and-setinterval).
+[scripting/sandbox.md](../engine/scripting/sandbox.md#timers-settimeout-and-setinterval).
 
 ### `pm.test` runs in either script, and every result says which
 
@@ -775,7 +775,7 @@ the field carries no `scope` and reads as the request's.
 **A load test runs a pre-request script only when it is opted in inline**
 (`config.inline`, set by the **Run inline** switch under the script's editor
 in the Elements tab, or the run's `elements.scripts` override; see
-[load-test scripts](../engine/scripting.md#load-test-scripts)), so a check
+[load-test scripts](../engine/scripting/execution-context.md#load-test-scripts)), so a check
 before the request has nothing to assert on unless the script is inlined.
 
 **It returns `pm`, and a callback that declares a parameter gets a `done`**
@@ -1115,8 +1115,8 @@ the code and a string against the phrase.
 
 Vayu's `status` was the number before #1000, so this is a break for a
 script written against that spelling rather than against Postman.
-`docs/engine/scripting.md` carries [the migration
-note](../engine/scripting.md#status-is-the-reason-phrase-code-is-the-number),
+`docs/engine/scripting/response.md` carries [the migration
+note](../engine/scripting/response.md#status-is-the-reason-phrase-code-is-the-number),
 including the one legacy pattern - arithmetic on `status` - that goes on
 compiling, stops matching, and reports nothing.
 
@@ -1288,7 +1288,7 @@ All three are **absent** on an ordinary response rather than empty, so
 `typeof pm.response.events === 'undefined'` distinguishes "not a stream" from "a
 stream that produced nothing" - the same absent-not-empty rule
 `pm.iterationData` follows. Full reference in
-[scripting.md](../engine/scripting.md#pmresponseevents---a-streamed-runs-events).
+[scripting/response.md](../engine/scripting/response.md#pmresponseevents---a-streamed-runs-events).
 
 ### Redirect hops (`pm.response.redirects`)
 
@@ -1315,7 +1315,7 @@ An empty array means the send was not redirected (or ran with *Follow redirects*
 off). The property is **absent** - `typeof` is `'undefined'` - on a load run's
 scripts and a streamed request's, where redirects are followed but not recorded,
 so `redirects.length === 0` cannot pass over a chain nobody saw. Full reference in
-[scripting.md](../engine/scripting.md#pmresponseredirects---the-hops-a-send-followed).
+[scripting/response.md](../engine/scripting/response.md#pmresponseredirects---the-hops-a-send-followed).
 
 ### Response cookies (`pm.response.cookies`)
 
@@ -1376,7 +1376,7 @@ callback all hand back - carries `name` and `key` (same value, both spellings),
 (booleans), and `expires` (a `Date`, or `null` for a session cookie). Postman's
 `maxAge` and its unmodelled `extensions` are not modelled - the jar does not
 keep them. Full field list in
-[scripting.md](../engine/scripting.md#the-cookie-jar-pmcookies).
+[scripting/cookies.md](../engine/scripting/cookies.md#the-cookie-jar-pmcookies).
 
 The write half is `pm.cookies.jar()`, Postman's own jar object:
 
@@ -1417,7 +1417,7 @@ Divergences from Postman:
   sessions of every host the environment has talked to, and a collection's
   script should not be able to read them all. A redirect's target is not seen,
   so it does not widen the scope. Details in
-  [scripting.md](../engine/scripting.md#reads-are-limited-to-the-requests-site).
+  [scripting/cookies.md](../engine/scripting/cookies.md#reads-are-limited-to-the-requests-site).
 - **`jar.set`, `jar.unset` and `jar.clear(url)` are limited to the same site**
   (#2631). A write whose URL is outside it is refused with a console warning and
   stores or removes nothing, and so is a `set` whose cookie `domain` is outside
@@ -1430,11 +1430,11 @@ Divergences from Postman:
   returns and calls its callback as a stored write would. **A script that logs in
   across hosts by `set`ting a cookie with a foreign `domain` stops working**:
   call the other host through `pm.sendRequest` first and it is in scope. Details
-  in [scripting.md](../engine/scripting.md#writes-are-limited-the-same-way).
+  in [scripting/cookies.md](../engine/scripting/cookies.md#writes-are-limited-the-same-way).
 - **A write is applied after the transfer it was made before**, not the moment
   it is called - so it rides that request and cannot be lost when the response's
   cookies are captured. Details in
-  [scripting.md](../engine/scripting.md#writing-to-the-jar-pmcookiesjar).
+  [scripting/cookies.md](../engine/scripting/cookies.md#writing-to-the-jar-pmcookiesjar).
 - **`jar.clear(url)` matches Postman** - it removes every cookie that URL would
   have carried, which is `unset` with no name to narrow it. **`jar.clear()`
   with no URL is Vayu's own** and empties this environment's jar, because the
@@ -1455,7 +1455,7 @@ Divergences from Postman:
   from a pre-request script leaves the session where the real request finds it.
 - **Load runs have no jar**, and every read and write here throws there rather
   than answering `undefined` - see
-  [scripting.md](../engine/scripting.md#the-cookie-jar-pmcookies).
+  [scripting/cookies.md](../engine/scripting/cookies.md#the-cookie-jar-pmcookies).
 
 ---
 
@@ -1511,7 +1511,7 @@ errors on its own row. A run whose iterations an error cut short says how many s
 that cost as `stepsNotRun`.
 
 Details, including every case that throws, are in
-[scripting.md](../engine/scripting.md#flow-control-pmexecution).
+[scripting/execution-metrics-data.md](../engine/scripting/execution-metrics-data.md#flow-control-pmexecution).
 
 ### Data rows (`pm.iterationData`)
 
@@ -1554,12 +1554,12 @@ Divergences from Postman:
 
 **The same row is also readable by column name through `pm.variables`** while
 it is bound (issue #1007) - see [above](#supported-surface) and
-[scripting.md](../engine/scripting.md#variables-pmvariables) - but
+[scripting/variables.md](../engine/scripting/variables.md#variables-pmvariables) - but
 `pm.iterationData` stays the accessor that reads *only* the row, with none of
 the three scopes behind it.
 
 Details are in
-[scripting.md](../engine/scripting.md#data-rows-pmiterationdata).
+[scripting/execution-metrics-data.md](../engine/scripting/execution-metrics-data.md#data-rows-pmiterationdata).
 
 ### Migrating from Postman
 
@@ -1892,7 +1892,7 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   credential, the reason reported as the pre-request script error in the Console -
   unlike `pm.sendRequest`, which refuses to send a request whose `auth` it cannot
   compose. The full rules are in
-  [scripting.md](../engine/scripting.md#mutating-the-request-pre-request-scripts).
+  [scripting/request-mutation.md](../engine/scripting/request-mutation.md#mutating-the-request-pre-request-scripts).
 - **A value the engine cannot send is refused, not coerced.** `method` must be a string
   (one of the seven verbs); `body` must be a string, the `RequestBody` object
   `pm.request.body` itself holds, or a Postman body description (below) - an object
@@ -1920,7 +1920,7 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   (Postman also takes an object or a property name as the rule), `indexOf` matches a
   `{key, value}` on both fields rather than by identity; and `getRemote()` takes no
   `forcePort`. The full surface and the migration
-  note are in [scripting.md](../engine/scripting.md#url-parts-pmrequesturl).
+  note are in [scripting/request-mutation.md](../engine/scripting/request-mutation.md#url-parts-pmrequesturl).
 - **The URL is writable a member at a time, not only whole** (#1040). `path` and
   `host` are arrays a script mutates in place (`push`, `splice`, index assignment,
   a `length` truncation); `protocol` / `port` / `hash` take an assignment; and the
@@ -1942,7 +1942,7 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   `.length` - and three things changed: `===`, `typeof`, and assigning it straight into a
   header value, refused the same way `pm.request.url` already is. The full surface and the
   migration note are in
-  [scripting.md](../engine/scripting.md#request-object-pmrequest). Reading a form body
+  [scripting/request.md](../engine/scripting/request.md#request-object-pmrequest). Reading a form body
   never rewrites it: an unchanged value means untouched.
 - **All five of Postman's body modes are answered** (#1111). A
   `graphql` body reads `mode === 'graphql'` and answers `body.graphql.query` /
@@ -2157,7 +2157,7 @@ because the runtime has no `fetch` or `URL` and the editor must not offer them (
 timers it does have are declared by the engine's file, with the sandbox's own
 documentation); and `target: ESNext`, because an older lib or target would flag
 `Object.hasOwn`, `Array.prototype.at`, `toSorted`, `Object.groupBy` and
-`Promise.withResolvers`, which quickjs-ng runs fine (see `docs/engine/scripting.md`).
+`Promise.withResolvers`, which quickjs-ng runs fine (see `docs/engine/scripting/limitations.md`).
 
 The newest library members, `RegExp.escape`, `Math.sumPrecise`, `JSON.rawJSON`,
 `JSON.isRawJSON` and the `Uint8Array` base64 and hex methods, are not in the TypeScript
@@ -2186,7 +2186,7 @@ script in this editor produces them:
 is joined to the request's before the engine runs it. That no longer holds: each script
 element runs in a context of its own, so a name declared in the collection's script is
 not visible in the request's (see [Isolation between
-scripts](../engine/scripting.md#isolation-between-scripts)). The deferred load-test
+scripts](../engine/scripting/sandbox.md#isolation-between-scripts)). The deferred load-test
 replay runs each `script.post` element on its own too (#3125).
 
 Un-suppressing `2304` was weighed and declined. Typing an undeclared name would then be
@@ -2199,7 +2199,7 @@ costs more than it returns today:
 - **Four runtime globals are missing from `lib.esnext`** and would each need declaring,
   and holding to the runtime by a test of their own: `queueMicrotask`, `performance`,
   `DOMException` and `InternalError`. A quickjs-ng upgrade can add more.
-- **The examples on this page and in `scripting.md` elide their placeholders** (`value`,
+- **The examples on this page and in the `scripting/` pages elide their placeholders** (`value`,
   `id`, `token`). Compiled as written, the corpus draws 89 diagnostics, all of
   them 2304.
 
@@ -2282,7 +2282,7 @@ going unreported in exchange for not crying wolf on correct code.
 
 `script-typedefs.docs-compile.test.ts` takes **every** ` ```javascript ` block that mentions
 `pm.` in this page and
-[`docs/engine/scripting.md`](../engine/scripting.md), compiles each against the generated
+[`docs/engine/scripting/index.md`](../engine/scripting/index.md), compiles each against the generated
 `.d.ts`, and requires zero errors - with `SCRIPT_COMPILER_OPTIONS` and
 `SUPPRESSED_DIAGNOSTICS` read from `useScriptTypeDefinitions.ts` rather than restated, so
 it checks them the way the editor does. Four defects had survived the engine's
