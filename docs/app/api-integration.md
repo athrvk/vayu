@@ -1504,7 +1504,8 @@ blank, and once the sign-in succeeds the form writes exactly those into the stor
 config (`discoveredValues` and `withDiscoveredValues`, `services/oauth/discovery.ts`)
 and names them in `discoveredFields`. From then on the stored config holds ordinary
 endpoints and a client id, so the cache key, a refresh, a Send and a run read it like
-any other and need no discovery; `cache-key.ts` is unchanged. `issuer` is not stored.
+any other and need no discovery (while `discoverUrl` stays on, a refresh and a run still
+refuse a token endpoint that is, or resolves to, a loopback or link-local address, #3800; choosing another grant in the form drops `discoverUrl` and `discoveredFields`); `cache-key.ts` is unchanged. `issuer` is not stored.
 A config with discovery on and no cache key yet (`awaitsDiscovery`) has no token to
 look up: the token row offers the sign-in under `oauth2SignInKey` (`discover:<url>`),
 and the load-test guards say to sign in first. `missingOAuth2Fields` asks such a config

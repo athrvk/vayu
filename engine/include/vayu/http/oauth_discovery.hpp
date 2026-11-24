@@ -324,8 +324,8 @@ AuthorizationServerMetadataCache& cache = shared_authorization_server_cache ());
  *        URL names neither a loopback nor a link-local host, else none.
  *
  * The one place that decides it, so the discovery's fetches, its client
- * registration and the attempt's code exchange (`InteractiveExchange`) cannot
- * disagree about whether the server is on this machine.
+ * registration and every token request of the config (`post_token_request`)
+ * cannot disagree about whether the server is on this machine.
  */
 [[nodiscard]] std::optional<LocalPeerRule> discovered_peer_rule (const std::string& server_url);
 

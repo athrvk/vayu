@@ -7915,7 +7915,7 @@ timeout setting, and end when the engine stops.
 **A server that is not on this machine reaches nothing on it.** When
 `discoverUrl` names neither a loopback nor a link-local host, a document that
 names such a URL is refused (`oauth_discovery_local_endpoint_refused`), and the
-discovery's fetches, the registration and the callback's code exchange connect
+discovery's fetches, the registration and every token request of the config connect
 to no loopback or link-local address, by the URL or by the address its name
 resolves to. A token endpoint that resolves to one by the time the code
 arrives never receives the code or the PKCE verifier: the attempt fails with
@@ -7924,6 +7924,14 @@ loopback or link-local address - not when the URL names one and not when a host
 name resolves to one`. A typed `accessTokenUrl` is held to the same rule, and a
 proxy you configured is still used. A server on this machine may name anything
 on it.
+
+The rule follows the config, not the attempt: every token request of a config
+that still names `discoverUrl` runs under it - a refresh, `client_credentials`
+and the other headless grants, `/execute`, `/runs` and `POST /oauth2/token` -
+so the refresh token goes to no loopback or link-local peer either, whatever
+`refreshTokenUrl` resolves to after sign-in (#3800). Turning discovery off
+removes `discoverUrl` and with it the rule: the endpoints are then ones you
+typed, and a config with no `discoverUrl` is held to none.
 
 **Two known limitations of a registered client.**
 

@@ -109,9 +109,15 @@ export default function OAuth2Form({
 
 	// The grant has no client secret, so a stored one is dropped with the field:
 	// hidden, it would still be sent as client authentication beside the assertion.
+	// Discovery is offered for the authorization code grant only, and a stored
+	// `discoverUrl` holds every token request of the config to the engine's
+	// local-host rule (#3800): hidden under another grant, with no switch to turn
+	// it off, it would refuse a typed loopback token endpoint unexplained.
 	const selectGrant = (next: OAuth2GrantType) => {
-		if (next !== "jwt_bearer") return set("grantType", next);
-		const { clientSecret: _secret, ...rest } = value;
+		const { discoverUrl: _url, discoveredFields: _found, ...kept } = value;
+		const base = next === "authorization_code" ? value : kept;
+		if (next !== "jwt_bearer") return onChange({ ...base, grantType: next });
+		const { clientSecret: _secret, ...rest } = base;
 		onChange({ ...rest, grantType: next });
 	};
 	const setFallbackExpiry = (seconds: number | undefined) => {
