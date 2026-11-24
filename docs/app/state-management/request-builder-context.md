@@ -109,7 +109,7 @@ GraphQL is sent as a JSON envelope and genuinely needs `Content-Type: applicatio
 Ownership of the row is not a context-level record, `{ requestId, rowId, value }`, held in a ref the provider owns.
 Such a record cannot survive a reload: a fresh mount starts with an empty ref, so a stale auto-written row is then indistinguishable from one the user typed, and neither `withoutContentType` (nothing to remove) nor a later mode switch (an "existing" row, so nothing to add) can tell the difference (issue #1481).
 Ownership lives on the row itself - `KeyValueEntry.source?: HeaderRowSource`, whose `"body-mode" | "stream"` half (`AutoHeaderSource`) is what an app setting writes;
-the third value, `"legacy-default"`, is the engine's own header-strip repair pass marking a row it disabled rather than deleted (issue #1491, `docs/engine/db-schema.md`'s "header-strip pass" section) and is never written from this side.
+the third value, `"legacy-default"`, is the engine's own header-strip repair pass marking a row it disabled rather than deleted (issue #1491, `docs/engine/db-schema/startup-and-recovery.md`'s "header-strip pass" section) and is never written from this side.
 There is no context accessor for either app setting any more;
 `switchAutoHeader` in `modules/request-builder/utils/auto-header.ts` reads and writes the marker directly on the headers array it is handed, once per change:
 it removes the marked row when the new setting does not need that same header, then adds whatever the new setting does need - both halves in one pass over one array, because two `updateField("headers", …)` calls would compute the second against the array they had before the first.

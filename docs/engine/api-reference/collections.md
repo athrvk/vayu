@@ -173,7 +173,7 @@ A `POST /import/apply` collection item carrying either is a `400` with `error.it
 
 Delete a collection and all its requests (cascading delete).
 **The delete is soft** (issue #988): the collection and every descendant are stamped `deleted_at` in a single transaction rather than removed, which is why every read surface stops returning them while [`GET /trash`](trash.md#get-trash) still can.
-The walk terminates even if the stored `parent_id` tree contains a cycle (see [db-schema.md](../db-schema.md) - collections).
+The walk terminates even if the stored `parent_id` tree contains a cycle (see [db-schema/index.md](../db-schema/index.md) - collections).
 
 Restore it with [`POST /trash/:id/restore`](trash.md#post-trashidrestore); destroy it for good with [`DELETE /trash/:id`](trash.md#delete-trashid), which is also what the startup sweep does once `trashRetentionDays` has passed.
 

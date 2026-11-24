@@ -134,7 +134,7 @@ The engine's copy is `engine/include/vayu/db/sibling_order.hpp`; the app's `comp
 A recursive [collection run](load-runs.md#the-scenario-block-collection-runs) walks the same merged list depth-first, a request where it sits and a sub-collection's whole subtree where the sub-collection sits, pinned across both consumers by `engine/tests/fixtures/recursive-run-order-conformance.json`; a mock server's route table and `POST /specs/export` list a subtree in that order too.
 
 A workspace from before schema version 7 numbered the two kinds apart, each from `0`, and showed every sub-collection above every request.
-The version-7 migration moves each collection's requests past its highest sub-collection `order`, so that display survives (`docs/engine/db-schema.md`, Schema versions); rows still tied at the legacy `0` keep it through the tie rule.
+The version-7 migration moves each collection's requests past its highest sub-collection `order`, so that display survives (`docs/engine/db-schema/schema-versions.md`); rows still tied at the legacy `0` keep it through the tie rule.
 
 **Writing.**
 `order` defaults to "append after the current siblings" - one past the highest `order` any sibling of either kind holds:
@@ -220,7 +220,7 @@ The write is therefore rejected rather than stored: `{"variables": 42}` and `{"a
 **`parentId: ""` is the root, the same as `null`** (#3451).
 It is stored as `null` on `POST`/`PUT /collections` (a folder `POST /specs/sync` creates with `""` or `null` lands under the synced collection), and [`POST /reorder`](collections.md#post-reorder) reads it as `null` in a move and in a `normalize` scope, so the tree has one spelling of the root: a collection created with `""` is appended among the roots and lists with them.
 A value that is neither a string nor `null` (`5`, `true`, an object, an array) is a `400` such as `Invalid 'parentId': must be a collection id or null (got number)`.
-Rows an older engine stored with `""` are rewritten to `null` at startup ([the empty-parent pass](../db-schema.md#the-empty-parent-pass-issue-3451)), so a delete and restore of one comes back where it was instead of re-parented to the root.
+Rows an older engine stored with `""` are rewritten to `null` at startup ([the empty-parent pass](../db-schema/startup-and-recovery.md#the-empty-parent-pass)), so a delete and restore of one comes back where it was instead of re-parented to the root.
 
 **A `variables` key must be one a `{{ name }}` token can reach (#3251).**
 A token is looked up with the spaces, tabs, CR and LF around its text cut, so a stored key that is empty, whitespace-only, or differs from its trim can never be referenced.

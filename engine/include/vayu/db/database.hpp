@@ -39,7 +39,7 @@ namespace vayu::db {
  * database with a column it does not map would rebuild the table without it.
  * Also bumped by a migration step that must run once and that an older engine
  * must not read past (4, 6, 7). A database stamped newer than this is refused at startup. The
- * history is in `docs/engine/db-schema.md` (Schema versions):
+ * history is in `docs/engine/db-schema/schema-versions.md`:
  * 1 - scripts folded into `elements` (#1514);
  * 2 - `request_examples.postman_response`; `requests.disable_cookies`,
  *     `disabled_system_headers`, `disable_url_encoding` and

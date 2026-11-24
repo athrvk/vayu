@@ -141,7 +141,7 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `vayu::tests::remove_database_files`** (`tests/temp_database.hpp`): an opened
   database writes six files (#413), so never a hand-written suffix list.
 - **A startup repair pass is scoped, transactional, marked done and backed up
-  first** (#1487, [db-schema](../docs/engine/db-schema.md#the-header-strip-pass-issues-1487-1491)):
+  first** (#1487, [db-schema](../docs/engine/db-schema/startup-and-recovery.md#the-header-strip-pass)):
   `/health` does not answer until `init ()` returns, so select candidates with a
   SQL predicate, rewrite inside one `transaction_guard`, record a done marker,
   and save a `backups/` snapshot first, skipping the pass when the copy cannot
@@ -151,15 +151,15 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   repair pass can read it. Read the data out in a `PRAGMA user_version`-gated
   step ahead of the probe (`migrate_before_sync`, the constructor's first,
   unguarded statement, which refuses a newer database rather than quarantine it)
-  or keep the column mapped ([migrations](../docs/engine/db-schema.md#the-script-to-elements-migration-issue-1514)).
+  or keep the column mapped ([migrations](../docs/engine/db-schema/startup-and-recovery.md#the-script-to-elements-migration)).
 - **Only a corrupt database reaches recovery** (#2420): `classify_probe_failure`
   sorts `SQLITE_CORRUPT` and `SQLITE_NOTADB` as corrupt and anything else (a
   lock, a full disk, a failed migration step) as unavailable, which the
-  constructor throws with every file untouched ([recovery](../docs/engine/db-schema.md#startup-validation-backup-and-recovery)).
+  constructor throws with every file untouched ([recovery](../docs/engine/db-schema/startup-and-recovery.md#startup-validation-backup-and-recovery)).
 - **Any change to `make_vayu_storage`'s mapping bumps `SCHEMA_VERSION`** (#1492),
   an added nullable column included: `sync_schema ()` runs without `preserve`, so
   an older engine would rebuild a table without the column it does not map. The
-  bump is one-way, so it gets a row in [schema versions](../docs/engine/db-schema.md#schema-versions)
+  bump is one-way, so it gets a row in [schema versions](../docs/engine/db-schema/schema-versions.md#schema-versions)
   and a line in the next release's notes; `migrate_before_sync` stamps through
   `stamp_schema_version`, never a literal.
 - **A log call takes a category, never text alone** (#1557,
@@ -391,7 +391,7 @@ composed, and it is pure (sends nothing, no run row): that split is load-bearing
 | `docs/engine/run-export.schema.json` | A member of the run-report export (`core/run_export.cpp`, its comparison `core/run_compare.cpp`); `run_export_schema_test.cpp` validates against it |
 | `docs/engine/architecture.md` | Core engine structure, auth resolution |
 | `docs/engine/elements.md` | The element registry, a kind's config or phase, an element kind, the pipeline that runs one |
-| `docs/engine/db-schema.md` | Schema, migrations, stored JSON |
+| `docs/engine/db-schema/` | Schema, migrations, stored JSON: one page per group of tables, `index.md` names them |
 | `docs/engine/scripting.md` | Script globals, hooks, sandbox limits |
 | `docs/engine/mcp/` | MCP tools or their schemas (the server itself lives in `app/electron/mcp/`); `tools.md` is generated from the registry, so a new tool changes it by `pnpm docs:mcp-tools` from `app/` and no hand-written page |
 | `docs/engine/cli.md` | Flags or subcommands |

@@ -33,7 +33,7 @@ A stopped report without the counts keeps its stored value.
 
 **Skips lower the achievement and are shown beside it** (issue #2911).
 `summary.skippedRequests` is the requests a `constant_rps` pacer owed beyond its 100 ms catch-up window and chose not to send after a stall of the load generator itself, and `summary.stalledMs` the schedule time they cover (`skippedRequests ÷ targetRps`, in ms).
-They are the run's totals, stored as `skipped_requests` / `stalled_ms` in the [summary](../db-schema.md#runs) and on every metric tick, and read as `0` from a summary stored before them (the run skipped nothing, it had no cap to skip under).
+They are the run's totals, stored as `skipped_requests` / `stalled_ms` in the [summary](../db-schema/runs.md#runs) and on every metric tick, and read as `0` from a summary stored before them (the run skipped nothing, it had no cap to skip under).
 `rateControl.achievement` is not adjusted for them: a skipped request was owed and never sent, so `requestsSent / requestsExpected` is the honest share of the plan, and the two counters are what tell a stall from a slow target.
 `sent + skipped + dropped` is `requestsExpected` for a run that reaches its deadline.
 The [run export](export.md#post-exportrun-report) carries both in `report.summary` (optional in its schema, absent from a document written before them); its Markdown and HTML renderings print them as one `Skipped requests` row of the results table when `skippedRequests` is above 0, apart from `maxInFlight` drops, which they do not print (`droppedRequests` has no row).
@@ -78,7 +78,7 @@ Both are absent when the replay logged nothing (`consoleDropped` also when nothi
 The failing assertions are named on one synthetic row of `results[]`, the one whose `trace` carries `failures` (no captured request has it):
 `failures` (each distinct message once, at most 10, a scenario step's name prefixing it), `failureCounts` (how many times each failed), `failuresDistinct` (every distinct message, so `failuresDistinct - failures.length` were turned away), `totalFailed` and `totalPassed` (assertions, each occurrence counted).
 A script failing the same way on every sampled response is one entry with a count, not one entry per sample (#3127).
-`failureCounts` and `failuresDistinct` are absent on a row from an older engine; see [`results`](../db-schema.md#results) for the stored shape.
+`failureCounts` and `failuresDistinct` are absent on a row from an older engine; see [`results`](../db-schema/run-artifacts.md#results) for the stored shape.
 
 **`thresholdValidation`** is one check per declared [budget](load-runs.md#the-thresholds-block-passfail-budgets) with the run's verdict.
 A `maxAssertionFailureRatePct` check also names the two populations it judged (issue #2892): `assertionsSampled` is `testValidation`'s `testsPassed` and `testsFailed`, at `sampleRate`, and `assertionsExact` is the inline assertions counted on every completion that `testValidation` does not see.
@@ -250,7 +250,7 @@ The optional groups are **omitted rather than zeroed**, and the distinction carr
 `levels[]` is one entry per level *judged*, in order - bounded by construction (a search holds tens of levels, not thousands).
 A level that breached once and was re-measured appears twice, at the same concurrency; the level still being measured when the run ended does not appear at all, because it was never judged.
 
-**`auth`** appears only for a run whose OAuth 2.0 credential could be renewed while it ran - a header-placed, expiring token with `autoRefreshToken` on (see [db-schema.md](../db-schema.md#oauth_tokens) for the full eligibility list).
+**`auth`** appears only for a run whose OAuth 2.0 credential could be renewed while it ran - a header-placed, expiring token with `autoRefreshToken` on (see [db-schema/credentials-and-files.md](../db-schema/credentials-and-files.md#oauth_tokens) for the full eligibility list).
 Each entry in `refreshes` is when a renewal landed, in seconds from the run's start.
 `refreshFailures` plus a `lastError` string is the other half of the answer: the run kept sending the credential it had, so 401s in `statusCodes` from that point on are explained here rather than by the target.
 A renewal still in flight when the run ends is cancelled rather than waited out, and is not a failure.
