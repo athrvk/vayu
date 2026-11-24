@@ -353,7 +353,7 @@ schema for the buffered exchange and a streamed read alike.
 tool result, resource and prompt that embeds JSON, because the reader is a
 model's context window and indentation is cost with no reader (about 50% more
 bytes on a nested answer). A result with `structuredContent` sends the same
-document in both places. `tools.test.ts` ("result text is compact JSON") fails
+document in both places. `tools.output-schema.test.ts` ("result text is compact JSON") fails
 when a pretty printer returns to `jsonResult`, `structuredResult` or a tool
 built on them; the resource and prompt sites are not pinned by a test.
 
@@ -1509,7 +1509,7 @@ Notes:
   `inboxStartPayload`, whatever arguments a call carries, so an inbox MCP
   started cannot be reached off this machine - a stated non-goal of epic #753,
   guarded in the one function that builds the body and mutation-checked in
-  `tools.test.ts`. **A stop is not a delete**: `stop_webhook_inbox` frees the
+  `tools/webhook-inbox.tools.test.ts`. **A stop is not a delete**: `stop_webhook_inbox` frees the
   port and leaves every capture readable, while `delete_webhook_inbox` destroys
   them and therefore takes the write toggle *and* a confirmation whose prompt
   names how many captures go with it (read from `GET /inbox` first, the way
@@ -2503,7 +2503,7 @@ a pointer to the resource; `precedenceNote()` builds both pieces from one
 place. The sentence is shorter than the budget guard's repetition limit on
 purpose (see [The size of `tools/list` is
 budgeted](#the-size-of-toolslist-is-budgeted)): it is the one rule restated in
-every one of those tools. A table-driven scan in `tools.test.ts` runs over every variable tool's
+every one of those tools. A table-driven scan in `tools/variables.tools.test.ts` runs over every variable tool's
 description and fails on one that omits the sentence, so a new variable tool
 cannot ship silent about where its tier sits. A client that cannot read
 resources still gets the rules: the server instructions carry the sentence and
@@ -2714,7 +2714,7 @@ before it calls the engine (a delete that reads the row to name it in the
 prompt, a variable scope) words a miss with the same sentence
 (`unknownIdText`), so the text does not depend on which step noticed. Every
 tool with a `<kind>Id` argument declares `notFound` or is on the named
-exemption list in `tools.test.ts` with its reason.
+exemption list in `tools.dispatch.test.ts` with its reason.
 
 Every other engine error is `Engine error (<status>): <body>` with the body on
 one line - JSON re-serialized without indentation, anything else with its
@@ -2735,7 +2735,7 @@ failure carries only the lead ("The engine did not answer within this client's
 | `"safe"` | Repeating the call is safe | Reads and re-applicable writes that do not carry `idempotentHint: true`: `list_request_examples`, `get_live_metrics`, `get_mock_activity`, `get_inbox_captures`, `update_environment`, `update_globals`, `sync_spec`, `bind_spec`, `fetch_oauth2_token` |
 
 A tool annotated `idempotentHint: true` needs no declaration and is told `safe`.
-Any other tool must declare one (`tools.test.ts` scans the registry), because a
+Any other tool must declare one (`tools.failure-classes.test.ts` scans the registry), because a
 tool that declares none falls back to the `never-blind` wording, which sends an
 agent to run history for a call that never wrote a run.
 

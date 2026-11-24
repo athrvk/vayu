@@ -334,7 +334,7 @@ export interface McpTool {
 	/**
 	 * What to tell an agent when this tool's call timed out or was cancelled.
 	 * Declared on every tool without `idempotentHint: true` (a tool that omits
-	 * the hint is not idempotent), which `tools.test.ts` holds. A tool with
+	 * the hint is not idempotent), which `tools.failure-classes.test.ts` holds. A tool with
 	 * `idempotentHint: true` may leave it out and is told `"safe"`; any other
 	 * tool that declares none gets the generic "check run history" wording.
 	 */
@@ -345,7 +345,7 @@ export interface McpTool {
 	 * (#2778). Declared on every tool with a `<kind>Id` argument; one entry per
 	 * kind when the tool takes several, the entry chosen being the one whose
 	 * `noun` the engine's sentence contains. A tool that does not declare it
-	 * answers `Engine error (404): <body>` on one line. `tools.test.ts` scans
+	 * answers `Engine error (404): <body>` on one line. `tools.dispatch.test.ts` scans
 	 * the registry.
 	 */
 	notFound?: NotFoundDeclaration | readonly NotFoundDeclaration[];

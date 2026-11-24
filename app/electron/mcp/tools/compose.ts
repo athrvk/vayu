@@ -160,7 +160,7 @@ export function readRequestOverrides(
  * adds from the run's own `monitor` block. The client name
  * goes as the client sent it; the engine trims and caps it. Every
  * `executeRequest` / `startRun` call in this server goes through here, which
- * `tools.test.ts` checks by scanning for one that does not.
+ * `tools.dispatch.test.ts` checks by scanning for one that does not.
  */
 export function asMcpSend(
 	payload: Record<string, unknown>,
@@ -932,7 +932,7 @@ export function describeLoadShape(shape: LoadShape): string {
  * It is a literal rather than an import because production code in `electron/`
  * may not reach into `src/` - `tsconfig.node.json` withholds the `@/*` mapping
  * on purpose, so the import would not type-check. The copy is kept honest from
- * the test side, the way the dynamic-variable table already is: `tools.test.ts`
+ * the test side, the way the dynamic-variable table already is: `tools/load.tools.test.ts`
  * ties it to the renderer's `LOAD_TEST_LIMITS`, and
  * `src/constants/load-test.engine-parity.test.ts` ties that to this header.
  */

@@ -8,7 +8,7 @@
 /**
  * `boundRunReport` on the `pm.sendRequest` records a stored trace and a
  * `lifecycle` row carry (#3633). The main exchange's bounds are pinned through
- * `get_run_report` in `tools.test.ts`; these cases drive the function itself,
+ * `get_run_report` in `tools/run-request.inline-body-bounds.tools.test.ts`; these cases drive the function itself,
  * since the records add nothing to the dispatch path.
  */
 

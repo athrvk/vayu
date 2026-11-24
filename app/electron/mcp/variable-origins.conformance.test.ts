@@ -19,7 +19,7 @@
  * Drift here would be quiet and expensive - an agent told one variable answers a
  * name while the send uses another - so this file is where the two meet, the way
  * `compare.conformance.test.ts` does for the run diff. It reaches across the
- * boundary the way `tools.test.ts` already reaches for `@/constants`: a test may,
+ * boundary the way `tools/load.tools.test.ts` already reaches for `@/constants`: a test may,
  * production code may not.
  *
  * The cases are the engine's own conformance fixture - the same 40 the engine's

@@ -37,7 +37,7 @@ const LONG_ARGUMENT_CHARS = 80;
 const SHARED_ARGUMENT_DESCRIPTIONS = new Map<string, string>([
 	[
 		environmentIdInput.description ?? "",
-		"#2480: every tool that takes environmentId states the one default at the argument, so a preview and a send cannot come to describe different ones (tools.test.ts pins it)",
+		"#2480: every tool that takes environmentId states the one default at the argument, so a preview and a send cannot come to describe different ones (tools/variables.tools.test.ts pins it)",
 	],
 ]);
 
