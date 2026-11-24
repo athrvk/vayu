@@ -56,6 +56,7 @@ add_executable(vayu_tests
     histogram_ceiling_test.cpp
     execution_trace_test.cpp
     import_route_test.cpp
+    import_mcp_test.cpp
     diagnostics_route_test.cpp
     import_apply_route_test.cpp
     config_route_test.cpp
@@ -257,6 +258,7 @@ add_executable(vayu_tests
     logger_test.cpp
     shutdown_signal_test.cpp
     ../src/http/routes/import.cpp
+    ../src/http/routes/import_mcp.cpp
     ../src/http/routes/diagnostics.cpp
     ../src/http/routes/compose.cpp
     ../src/http/routes/config.cpp
@@ -468,6 +470,7 @@ set(vayu_scratch_database_suites
     IfMatchRouteTest
     IfMatchServerTest
     ImportApplyRouteTest
+    ImportMcpApplyTest
     ImportParseRoute
     InboxListenerTest
     InboxStorageTest

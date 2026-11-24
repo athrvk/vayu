@@ -303,11 +303,14 @@ TEST_F (ServerGateTest, ABodyOverTheCeilingIsRefusedOnAnyRouteFromItsDeclaredLen
 
 TEST_F (ServerGateTest, AnImportBodyOverItsLiveLimitIsRefusedFromItsDeclaredLength) {
     // The default document cap is 10 MiB, so an import body may be 16 MiB.
-    const std::string answer = raw_answer (port_,
-    body_announced_but_unsent (
-    "/import/parse", "Content-Length: " + std::to_string (20U * 1024U * 1024U)));
-    EXPECT_TRUE (answer.starts_with ("HTTP/1.1 413 ")) << answer;
-    EXPECT_NE (answer.find ("maxSpecDocumentBytes"), std::string::npos) << answer;
+    for (const char* path : { "/import/parse", "/import/mcp" }) {
+        const std::string answer = raw_answer (port_,
+        body_announced_but_unsent (
+        path, "Content-Length: " + std::to_string (20U * 1024U * 1024U)));
+        EXPECT_TRUE (answer.starts_with ("HTTP/1.1 413 ")) << path << ": " << answer;
+        EXPECT_NE (answer.find ("maxSpecDocumentBytes"), std::string::npos)
+        << path << ": " << answer;
+    }
 }
 
 TEST_F (ServerGateTest, ABodyWithADeclaredLengthUnderTheCapsReachesItsRoute) {

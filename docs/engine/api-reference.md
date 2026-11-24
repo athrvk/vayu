@@ -141,6 +141,7 @@ as the gate above, before any route runs and before a byte of the body is read
   and are held to a tighter bound that follows the live
   `maxSpecDocumentBytes`, checked first because its message names the setting;
   see the body cap under [POST /import/parse](#post-importparse).
+  `POST /import/mcp` carries no document and is held to the same bound.
 
 Both refusals are the shared error shape, with code `error`. Because the body
 is not read, the engine answers and closes the connection: a client that is
@@ -1448,8 +1449,8 @@ governs what a run measures rather than what it keeps:
 
 Four `network_performance` entries decide how **every** outbound request
 leaves the machine - design sends, load runs, SSE streams, OAuth token
-acquisition, `POST /import/fetch` (which spec re-fetch and `$ref` bundling ride)
-and the monitor scrape alike. They are read at the point of use, so a change
+acquisition, `POST /import/fetch` (which spec re-fetch and `$ref` bundling ride),
+`POST /import/mcp` and the monitor scrape alike. They are read at the point of use, so a change
 applies to the next transfer with no restart; a load run and a collection run
 read the policy **once at run start** and hold it for the run, because libcurl
 reuses a pooled connection only when its proxy configuration matches.
@@ -5009,8 +5010,9 @@ preview tree lists them in the same order.
   `importEnvironments`, `fileName`, `sourceUrl`, `unresolvedRefs`).
 - `413` `Import document is N bytes, over the limit of M (raise the 'maxSpecDocumentBytes' setting to allow more)`.
 
-**Body cap (`POST /import`, `/import/parse`, `/import/document`).** The management
-API buffers a request body before a route sees it, so these three routes are
+**Body cap (`POST /import`, `/import/parse`, `/import/document`,
+`/import/mcp`).** The management
+API buffers a request body before a route sees it, so these four routes are
 bounded from the `Content-Length` header, before the body is read: a body over
 `maxSpecDocumentBytes` plus half again plus 1 MiB (headroom for the JSON string
 escaping of the document) answers `413` `Request body is N bytes, over the limit of
@@ -5021,6 +5023,100 @@ body is refused with `411` like on every route (see
 described below still runs after the parse. A client that streams a very large
 body may see the connection closed rather than the `413`, since the body is not
 read.
+
+### POST /import/mcp
+
+Import from a live MCP server (issue
+[#3838](https://github.com/athrvk/vayu/issues/3838)): ask it what it offers and
+answer the tree [`POST /import/parse`](#post-importparse) answers, so
+[`POST /import/apply`](#post-importapply) persists it unchanged and the import
+preview reads it as any other format. Reads only - nothing is stored.
+
+Every call is a modern-era (`2026-07-28`) Streamable HTTP POST sent as an `mcp`
+body ([The `mcp` body](#the-mcp-body)), so the envelope, `_meta` and the
+derived headers are the ones a saved request sends, and the reply is read by
+the same reader ([The `mcp` reply](#the-mcp-reply)), an event stream included.
+In order:
+
+1. `server/discover`, **best effort**, for the collection's name
+   (`serverInfo.name`). A server older than the method - JSON-RPC `-32601`, or
+   the plain `400` a legacy-era server answers with - is read on and the
+   collection is named after the URL's host. A version refusal (`-32022`) and
+   every other failure (a refused connection, a `401`/`403`, a `5xx`) fail the
+   import.
+2. `tools/list`, then `resources/list` and `resources/templates/list`, then
+   `prompts/list`, each as `include` asks and each **following `nextCursor`**
+   until a page carries none. A server that answers
+   `resources/templates/list` with `-32601` lists no templates; any other
+   failure of a list call fails the import.
+
+**Request:**
+```json
+{
+  "url": "https://mcp.example.com/mcp",
+  "headers": [{ "name": "X-Tenant", "value": "acme" }],
+  "auth": { "mode": "bearer", "token": "..." },
+  "include": { "tools": true, "resources": false, "prompts": false }
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `url` | string, **required** | The server's endpoint, `http` or `https`. Every generated request's `url`. |
+| `headers` | `[{name, value}]` or object | Sent on every call, read by the rule [`POST /execute`](#post-execute) reads them by: a name is trimmed and must be a token, a value cannot hold CR, LF or NUL. |
+| `auth` | `{mode: "bearer", token}` | The shape a saved request's auth has. Written as `Authorization: Bearer <token>` (trimmed), unless `headers` already names `Authorization`, which wins. No other mode. |
+| `include` | object | `tools` (default `true`), `resources` and `prompts` (default `false`), each a boolean. An unknown member, and an `include` that leaves nothing included, is a `400`. |
+
+**Response:** `200` - `{collections, environments, globals, meta}`, the
+`POST /import/parse` shape, `meta.format` `MCP server`. One root collection
+named after the server, holding a folder per included primitive:
+
+| Folder | One request per | Body (`mode: "mcp"`) | Named by |
+|--------|-----------------|----------------------|----------|
+| `Tools` | listed tool | `{"method": "tools/call", "params": {"name": <tool>, "arguments": {}}}` | `name` |
+| `Resources` | listed resource, then resource template | `{"method": "resources/read", "params": {"uri": <uri>}}`; a template's `uriTemplate` as written, with `URI template: <uriTemplate>` leading its description | `name`, else the URI |
+| `Prompts` | listed prompt | `{"method": "prompts/get", "params": {"name": <prompt>, "arguments": {}}}` | `name` |
+
+Every request is a `POST` to `url` described by the entry's `description`,
+with the `Content-Type: application/json` row an `mcp` body carries and
+`inherit` auth. The body is a bare call (no `jsonrpc` or `id`), so the engine
+stamps the envelope and `_meta` at send. The tool's schema (`mcpTool`),
+arguments drawn from it and assertions are not filled in (issue
+[#3839](https://github.com/athrvk/vayu/issues/3839)). An entry with no usable
+identity (a tool or prompt with no non-empty `name`, a resource with no `uri`,
+a template with no `uriTemplate`) is skipped and counted in `meta.skipped` as
+`malformed_item`.
+
+**No credential reaches the tree.** With `auth`, the root collection's auth is
+`{"mode": "bearer", "token": "{{mcpToken}}"}` over a secret collection variable
+`mcpToken` left empty, for the user to fill. A `headers` line whose name is a
+credential's (`Authorization`, `Cookie`, `X-API-Key` and the rest of the set the
+logger redacts) is carried onto each request with its value blank and the row
+disabled, so the request says which header the server wanted without holding or
+sending it; every other line is carried as sent.
+
+**Bounds.** The server is one a user typed, so each call is held on every side
+(`constants::import_mcp`): a reply of at most 4 MiB, a total of 20 seconds per
+call (an event stream a server keeps open ends there), no redirect followed, at
+most 100 pages per list and 10,000 entries across the import. An engine
+shutdown cancels a call in flight. Vayu's own engine and MCP ports are refused
+as on every send path ([Reserved local ports](#reserved-local-ports)); every
+other loopback server is reachable. The transfer leaves through the
+[transport policy](#proxy-settings). Header and token values are never logged.
+
+**Errors:**
+- `400` `Invalid 'url': ...`, `Invalid 'headers': ...`, `Invalid 'auth': ...`,
+  `Invalid 'include': ...`, or `Body must be a JSON object`; nothing is sent.
+- `413` `<method> failed: <reason>` for a reply over 4 MiB, or
+  `The server lists more than 10000 tools, resources and prompts, the most one import reads`.
+- `502` `<method> failed: <reason>`, where the reason is the reply reader's own
+  message: `server supports 2025-11-25, 2025-06-18; this request is 2026-07-28`
+  for a version refusal, `insufficient_scope: needs "<scopes>"` for a `403`
+  naming them, `HTTP 400 with no JSON-RPC error: the server looks legacy-era
+  ...` for a legacy server's list call, a transfer's own error (a refused
+  connection, a timeout, a reserved port).
+- `502` `<method> answered with no '<key>' list`, or
+  `<method> still had a nextCursor after 100 pages, the most one import follows`.
 
 ### POST /import
 
@@ -6453,8 +6549,8 @@ needs it is as often an OAuth token fetch, a redirect or a script's
 `pm.sendRequest` as it is the request you are looking at. So the engine keeps a
 registry of host to certificate and applies the matching entry itself, on every
 outbound path: design sends, load runs, SSE streams, `pm.sendRequest`, the
-OAuth token endpoint, `POST /import/fetch` and the monitor scrape. Nothing on a
-request names a certificate.
+OAuth token endpoint, `POST /import/fetch`, `POST /import/mcp` and the monitor
+scrape. Nothing on a request names a certificate.
 
 Rows are read into the [transport policy](#proxy-settings) at the point of use,
 so a change reaches the next transfer without a restart - and, exactly like the
@@ -8478,8 +8574,8 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
 
 Only `http` and `https` URLs are sent, on every send path: Send, a load or
 collection run, a streaming request, History replay, MCP, `pm.sendRequest`, an
-OAuth 2.0 token request, `POST /import/fetch` and the server-vitals monitor.
-The scheme is read case-insensitively from the URL as it stands just before
+OAuth 2.0 token request, `POST /import/fetch`, `POST /import/mcp` and the
+server-vitals monitor. The scheme is read case-insensitively from the URL as it stands just before
 the transfer - after composition, a data row's bind, the pre-request script
 and the residual pass, and as the transfer is handed it
 ([Query encoding](#query-encoding)) - so a `{{baseUrl}}` that resolves to
@@ -8558,7 +8654,8 @@ No request the engine sends reaches Vayu itself: the engine's own port (the
 `--mcp-port`, 9877 when it is started without one) are refused on this
 machine, on every send path - Send, a load or collection run, a streaming
 request, History replay, MCP, `pm.sendRequest`, an OAuth 2.0 token
-request, `POST /import/fetch` and the server-vitals monitor. The API's
+request, `POST /import/fetch`, `POST /import/mcp` and the server-vitals monitor.
+The API's
 [gate](#who-may-call-the-api) admits a loopback request with no `Origin`, which
 is exactly what the engine's own client sends, so without this a request in an
 imported collection could read and write everything the API holds (issue
@@ -15676,7 +15773,7 @@ VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes
 | 412 | A whole-record `PUT` or a `POST /globals` whose `If-Match` no longer names the stored row (`precondition_failed`, [Conditional updates](#conditional-updates-with-if-match)) |
 | 429 | A start refused at its cap: `oauth2_authorize_limit_reached` (16 unsettled sign-in attempts), `mock_issuer_limit_reached` (8 mock issuers) |
 | 500 | Internal server error, including a storage failure that is neither a full disk nor a lock ([resource writes](#a-storage-failure-is-not-a-400)) |
-| 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
+| 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy, an MCP server `/import/mcp` read) |
 | 503 | Engine is shutting down (`POST /runs`, see below), or the database stayed locked past its busy timeout (a resource write; carries `Retry-After: 1`) |
 | 504 | OAuth 2.0 token endpoint did not answer within the `defaultTimeout` setting (`/oauth2/token`, `oauth2_timeout`) |
 | 507 | The disk holding the data is full (a resource write, `insufficient_storage`) |

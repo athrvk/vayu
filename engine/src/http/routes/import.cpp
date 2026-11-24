@@ -22,6 +22,7 @@
 #include "vayu/http/routes.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/id.hpp"
+#include "vayu/utils/log_text.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include "vayu/core/run_manager.hpp"
@@ -47,7 +48,8 @@ httplib::Response& res) {
     if (req.method != "POST" || !req.has_header ("Content-Length")) {
         return httplib::Server::HandlerResponse::Unhandled;
     }
-    if (req.path != "/import" && req.path != "/import/parse" && req.path != "/import/document") {
+    if (req.path != "/import" && req.path != "/import/parse" &&
+    req.path != "/import/document" && req.path != "/import/mcp") {
         return httplib::Server::HandlerResponse::Unhandled;
     }
     const size_t limit =
@@ -71,6 +73,12 @@ httplib::Response& res) {
 // same pair the HTTP handler writes out.
 std::pair<int, nlohmann::json>
 create_client_certificate_response (vayu::db::Database& db, const nlohmann::json& json);
+
+// Defined in import_mcp.cpp, the testable core of POST /import/mcp (#3838);
+// returns {http_status, json_body}.
+std::pair<int, nlohmann::json> import_mcp_response (const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel);
 
 /**
  * @brief One event of a streamed `/import/fetch` (issue #882).
@@ -1707,6 +1715,36 @@ void handle_import_parse (RouteContext& ctx, const httplib::Request& req, httpli
     }
 }
 
+void handle_import_mcp (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    const auto body = parse_request_json (req.body);
+    if (!body) {
+        refuse_request_body (res, "POST /import/mcp", body.error ());
+        return;
+    }
+    try {
+        auto [status, response] = import_mcp_response (*body,
+        vayu::http::resolve_transport_policy (ctx.db), &ctx.server_stopping);
+        if (status != 200) {
+            // A field, not the message: the reason can quote the server.
+            vayu::utils::log_warning ("http",
+            "POST /import/mcp - " + std::to_string (status),
+            { { "reason", vayu::utils::bounded_log_text (error_message_of (response)) } });
+        } else {
+            vayu::utils::log_info ("http",
+            "MCP server, " +
+            std::to_string (response["meta"]["requestCount"].get<int> ()) + " request(s)");
+        }
+        res.status = status;
+        res.set_content (
+        response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "http", "POST /import/mcp - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
 void handle_import_document (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
@@ -1837,6 +1875,25 @@ void register_import_routes (RouteContext& ctx) {
     ctx.server.Post ("/import/parse",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_import_parse (ctx, req, res);
+    });
+
+    /**
+     * POST /import/mcp
+     * Imports from a live MCP server (#3838): asks it what it offers and
+     * answers the tree `POST /import/parse` would, so `POST /import/apply`
+     * persists it unchanged. Reads only; nothing is stored.
+     * Body params: url (required, http/https - the server's endpoint), headers
+     * (optional - `[{name, value}]` lines or an object, as `POST /execute`
+     * reads them), auth (optional - `{mode: "bearer", token}`), include
+     * (optional - `{tools, resources, prompts}` booleans, default true, false,
+     * false).
+     * Returns: 200 `{collections, environments, globals, meta}`, 400 for a bad
+     * url, headers, auth or include, 413 for a reply or a listing over its
+     * bound, 502 when a call failed or a list never ended.
+     */
+    ctx.server.Post (
+    "/import/mcp", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_import_mcp (ctx, req, res);
     });
 
     /**

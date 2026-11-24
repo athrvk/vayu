@@ -148,6 +148,19 @@ const nlohmann::ordered_json& headers);
  */
 [[nodiscard]] std::string without_stale_postman_source (std::string stored);
 
+/**
+ * @brief An imported request's @p headers plus the Content-Type row its
+ *        @p body cannot go without (`graphql`, `jsonrpc` and `mcp` bodies:
+ *        `application/json`; `xml`; a typed raw language), marked
+ *        `source: "body-mode"`. A request that already declares an enabled
+ *        `Content-Type` keeps it, and one that refuses the header (@p refused,
+ *        Postman's `disabledSystemHeaders`, #1765) gets none. Shared by every
+ *        importer that builds header rows, so the row cannot differ by format.
+ */
+[[nodiscard]] nlohmann::ordered_json with_required_content_type (nlohmann::ordered_json headers,
+const nlohmann::ordered_json& body,
+bool refused = false);
+
 /// The two toggles the import dialog offers, applied at parse time so the
 /// preview counts what will actually be created.
 struct ImportOptions {
