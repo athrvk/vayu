@@ -6,7 +6,6 @@
  */
 
 /**
- * @file tools.ts
  * @brief The MCP tool registry. Each tool maps to engine capabilities, applies
  *        the safety guards (allowlist / caps / confirmation), and returns a
  *        result. Schemas are Zod (the SDK validates arguments and generates the

@@ -5,10 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * History Component Types
- */
-
 import type { Run, RunReport, LoadTestMetrics, MonitorSample } from "@/types";
 import type { DashboardDerived } from "@/modules/dashboard/types";
 import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";

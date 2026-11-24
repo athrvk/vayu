@@ -6,7 +6,6 @@
  */
 
 /**
- * @file engine-client.ts
  * @brief Thin main-process HTTP client for the Vayu engine REST API
  *        (http://127.0.0.1:9876). The Electron main process cannot import the
  *        renderer's `@/services` client, so this is a minimal standalone
@@ -268,7 +267,7 @@ export class EngineClient {
 	 * A `POST /execute` also runs its OAuth 2.0 token fetch and its scripts in
 	 * sequence with the transfer, so the budget is a worst case for the payload
 	 * ({@link executeBudgetMs}), not a bare transfer. A payload with neither is
-	 * the timeout plus the grace, as it always was.
+	 * the timeout plus the grace.
 	 *
 	 * A payload composed from a stored request carries a `timeout` only when the
 	 * request states one (`payload_from_stored`, issue #2937), so for most sends
@@ -484,9 +483,6 @@ export class EngineClient {
 	 * Parse an import document and persist it, in one call (`POST /import`,
 	 * issue #877).
 	 *
-	 * The verb that was missing: an agent could bind, describe, diff, sync,
-	 * export and unbind a spec, and could not *import* a document at all,
-	 * because `POST /import/apply` took a tree only the renderer could build.
 	 * Every format the app accepts comes through here - OpenAPI 2.0/3.x, Postman
 	 * v2.0/v2.1, a Postman environment or globals export, Insomnia v4 or v5 - read by
 	 * the engine's one reader, so nothing on this side has an opinion about what
@@ -1088,7 +1084,7 @@ export class EngineClient {
 	 * execute-ready payload that {@link executeRequest} / {@link startRun}
 	 * accept unchanged. Pure - it sends nothing and creates no run row, which
 	 * is what lets the allowlist gate read the *resolved* URL before any
-	 * traffic flows. This replaced the MCP-side composition copy (issue #226).
+	 * traffic flows (issue #226).
 	 */
 	composeRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/compose", payload, signal);

@@ -6,7 +6,7 @@
  * whenever the request body omitted a "timeout" field, ignoring the
  * user-configurable engine `defaultTimeout` setting. The setting's key is
  * pinned by `config_route_test.cpp`, and a load run's use of it by
- * `run_manager_test.cpp` (#2798).
+ * `run_manager_summary_test.cpp` (#2798).
  */
 
 #include <gtest/gtest.h>

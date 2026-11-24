@@ -6,7 +6,6 @@
  */
 
 /**
- * @file app-log.ts
  * @brief The two Electron-coupled loggers every main-process module shares
  *        (#1558): `appLogger()` for the app's own lifecycle (`main`,
  *        `sidecar`, `window`, `updater`, `power`, `notify`, `ipc`

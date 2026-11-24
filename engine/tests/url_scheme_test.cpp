@@ -432,7 +432,7 @@ TEST (UrlSchemeHandle, TheApplierAloneRefusesEveryOtherProtocolLibcurlSpeaks) {
 // ============================================================================
 
 /**
- * `POST /execute` on an in-process listener, the shape `sse_stream_test.cpp`'s
+ * `POST /execute` on an in-process listener, the shape `sse_stream_fixture.hpp`'s
  * `StreamExecuteTest` uses: the real handler, the real exchange, the real
  * scripts.
  */

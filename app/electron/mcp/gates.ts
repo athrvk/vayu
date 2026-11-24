@@ -6,7 +6,6 @@
  */
 
 /**
- * @file gates.ts
  * @brief The answers the MCP endpoint gives without the SDK: the wrong path,
  *        the wrong method, and a handler that threw past its own error paths;
  *        and the server that holds the port, with how it closes.

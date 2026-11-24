@@ -6,8 +6,6 @@
  */
 
 /**
- * CollectionDetail
- *
  * Tab shell for the Collection Detail screen. Reached via
  * navigation-store.navigateToCollection(collectionId).
  */
@@ -310,9 +308,8 @@ export default function CollectionDetail() {
 					}}
 					className="flex-1 flex flex-col overflow-hidden"
 				>
-					{/* The active trigger's weight change used to shift its neighbours
-				    on every switch; TabLabel reserves the bold width, so it no
-				    longer can. */}
+					{/* TabLabel reserves the bold width, so the active trigger's weight
+				    change cannot shift its neighbours. */}
 					<TabsList
 						variant="pane"
 						className="shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"

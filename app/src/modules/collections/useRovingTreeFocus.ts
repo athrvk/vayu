@@ -9,8 +9,8 @@
  * Roving tabindex for the collection tree (WAI-ARIA treeview pattern).
  *
  * The tree is a single tab stop. Arrow keys move between rows, so tabbing past
- * the tree costs one press instead of one per row - previously a workspace with
- * 2 collections and 4 requests cost 17.
+ * the tree costs one press instead of one per row (17 for a workspace with 2
+ * collections and 4 requests).
  *
  * Visible order comes from the DOM (`[role="treeitem"]` in document order),
  * collapsed subtrees unrendered - except in a windowed tree, which mounts only

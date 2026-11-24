@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http-versions.ts
  * @brief HTTP protocol values a request asks the engine to negotiate.
  *
  * Mirrors `HTTP_VERSIONS` in `app/src/constants/request.ts` - restated here

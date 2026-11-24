@@ -6,7 +6,6 @@
  */
 
 /**
- * @file in-flight-calls.ts
  * @brief An abort handle per 2025-era request the HTTP host is still serving,
  *        so that client's `notifications/cancelled` reaches it (#3574).
  *

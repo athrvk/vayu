@@ -6,7 +6,6 @@
  */
 
 /**
- * @file held-exchange.ts
  * @brief One exchange the MCP HTTP host is serving, and the answer it is owed
  *        when the host cuts it (#3598).
  *

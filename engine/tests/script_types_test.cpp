@@ -1261,7 +1261,7 @@ TEST (ScriptTypesTest, AListFieldDeclaresAnArrayOfItsElementType) {
  * can read them without a running engine.
  *
  * `app/src/hooks/script-typedefs.docs-compile.test.ts` compiles the 54 `pm.*`
- * blocks in `docs/engine/scripting.md` and `docs/app/pm-api-compatibility.md`
+ * blocks in the pages of `docs/engine/scripting/` and `docs/app/pm-api-compatibility.md`
  * against this file and requires zero errors - the guard that found all four
  * defects above, and the only one that could have: a declaration can contain
  * every right name and still not type-check, which is what

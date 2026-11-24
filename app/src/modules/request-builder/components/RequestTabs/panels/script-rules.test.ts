@@ -24,7 +24,7 @@
  *     missing here;
  *   - a rule about a *hook* rather than a member - a pre-request script does not
  *     run under load; a test script under load sees sampled responses; the
- *     sandbox has no `URL` - is in the two published pages the panel's own
+ *     sandbox has no `URL` - is in the published pages the panel's own
  *     "Scripting docs" link opens.
  *
  * Mutation check: delete any of these sentences from `scripting.cpp` (and
@@ -36,6 +36,7 @@ import { readFileSync } from "node:fs";
 import {
 	DOC_READING_GUARDS,
 	ENGINE_READING_GUARDS,
+	entryCovers,
 	fromRepoRoot,
 } from "@/lib/routed-inputs.testkit";
 
@@ -45,7 +46,19 @@ function read(path: string) {
 
 const [typedefsPath] = ENGINE_READING_GUARDS.scriptRules.paths;
 const typedefs = read(typedefsPath);
-const pages = DOC_READING_GUARDS.scriptRules.paths.map(read).join("\n");
+
+/**
+ * The pages that carry the hook rules: the sandbox's missing host globals are in
+ * the limitations page, the sampled responses of a load test in the execution
+ * context page, and the pre-request rule in the compatibility page. The registry
+ * names the scripting directory and CI routes an edit to any page of it here.
+ */
+const HOOK_RULE_PAGES = [
+	"docs/engine/scripting/limitations.md",
+	"docs/engine/scripting/execution-context.md",
+	"docs/app/pm-api-compatibility.md",
+];
+const pages = HOOK_RULE_PAGES.map(read).join("\n");
 
 /**
  * A rule, and the phrase that carries it. The phrases are the engine's own
@@ -100,6 +113,15 @@ describe("the rules the script panels used to carry", () => {
 
 	it.each(HOOK_RULES)("states in the scripting pages: %s", (_rule, phrase) => {
 		expect(pages).toMatch(phrase);
+	});
+
+	it("reads only pages the guard registry routes", () => {
+		for (const page of HOOK_RULE_PAGES) {
+			const routed = DOC_READING_GUARDS.scriptRules.paths.some((entry) =>
+				entryCovers(entry, page)
+			);
+			expect(routed, `${page} is not routed by the registry`).toBe(true);
+		}
 	});
 
 	/*

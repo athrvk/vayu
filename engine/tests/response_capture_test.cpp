@@ -206,7 +206,7 @@ TEST_F (ResponseCaptureTest, ExemplarStoreKeepsOnePerStatusUpToTheLimit) {
 // would tie "which store pays" to "does this deserve a body", and a record can
 // sit in the sampled budget and still deserve one (a completion that is both
 // sampled and a claimed exemplar). The *policy* - which completions get a
-// source at all - is `handle_result`'s, and load_strategy_test.cpp pins it.
+// source at all - is `handle_result`'s, and load_strategy_pacing_test.cpp pins it.
 TEST_F (ResponseCaptureTest, CaptureFollowsTheCallerNotTheStore) {
     MetricsCollectorConfig config = capture_config ();
     config.store_success_traces   = true;

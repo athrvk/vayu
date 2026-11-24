@@ -6,7 +6,6 @@
  */
 
 /**
- * @file runs.tools.ts
  * @brief Acting on runs: stop, baseline, delete, live metrics and comparison. The
  *        stored-run reads sit with the other reads in `reads.tools.ts`.
  */

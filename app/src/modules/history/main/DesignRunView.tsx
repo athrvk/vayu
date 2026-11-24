@@ -6,8 +6,6 @@
  */
 
 /**
- * DesignRunView
- *
  * A past design run, opened as an editable copy of the request that was sent.
  * Read it, change it, send it again. Nothing typed here reaches the saved
  * request unless the Save button below is used, and that asks first.

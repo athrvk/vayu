@@ -6,8 +6,6 @@
  */
 
 /**
- * SaveAgentRunButton
- *
  * "Save to request" for a run an agent started that no saved request stands
  * behind (issue #1817). It is the header's primary action there: the run is the
  * only record of what was sent, and Save is how it stops being disposable.

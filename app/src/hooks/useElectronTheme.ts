@@ -6,8 +6,6 @@
  */
 
 /**
- * useElectronTheme Hook
- *
  * React face of {@link useThemeStore} - light/dark mode and the accent colour
  * scheme, synced with the OS/Electron theme settings. The store owns the
  * values, the persistence, the OS subscriptions and the one write to `<html>`;

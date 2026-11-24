@@ -5,11 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * @file sidecar.ts
- * @brief Manages the C++ engine sidecar process lifecycle
- */
-
 import { spawn, ChildProcess, execSync } from "child_process";
 import { randomBytes } from "crypto";
 import { app } from "electron";
@@ -48,8 +43,7 @@ import { readMcpPort } from "./mcp/store.js";
  *
  * Module-level rather than a method because callers outside the sidecar need it
  * when there is no sidecar instance to ask: `app:getPaths` answers Settings
- * whether or not the engine came up. It used to re-derive this inline, so a
- * change here silently showed the user the old directory.
+ * whether or not the engine came up.
  */
 export function engineDataDirectory(): string {
 	if (isDevelopmentBuild()) {
@@ -202,8 +196,7 @@ function isPlausiblePid(pid: number): boolean {
  * `EPERM`, since it comes back through the generic Win32 error translation.
  * Reading "could not tell" as "gone" would let a *running* engine be declared
  * stale, its lock deleted underneath it; so an unclear answer costs a
- * subprocess and lets the name check decide, which is what the old
- * tasklist-only Windows path did in every case.
+ * subprocess and lets the name check decide.
  */
 function isPidCertainlyDead(pid: number): boolean {
 	try {
@@ -334,7 +327,7 @@ function checkLockFile(
  * is exactly what a test cannot have: adoption, shutdown and the restart/quit
  * race are all *ownership* logic, and driving them through real engines would
  * mean 45-second health waits and a spawned binary per assertion. Production
- * passes `defaultSidecarSystem`, which is the code that used to be inline.
+ * passes `defaultSidecarSystem`.
  */
 export interface SidecarSystem {
 	/**
@@ -450,11 +443,7 @@ const CHILD_EXPECTED_STATES: ReadonlySet<EngineLifecycle["kind"]> = new Set([
  * Why a spawned engine is never going to answer.
  *
  * Recorded by the child's `exit` and `error` handlers so `waitForEngine` can
- * stop polling a port nothing is listening on. The loop used to consult only
- * the health probe, so an engine that died at spawn - a missing shared library,
- * a corrupt binary, a lock it could not take - still cost the full 45-second
- * ceiling, and with no window on screen yet the user watched nothing happen for
- * all of it.
+ * stop polling a port nothing is listening on.
  */
 type SpawnFailure =
 	| { kind: "exit"; code: number | null; signal: NodeJS.Signals | null; stderr: string[] }
@@ -576,7 +565,7 @@ export class EngineSidecar {
 	/**
 	 * The tail of the operation queue. `start`, `stop`, `restart` and `shutdown`
 	 * each run after the one before has settled, so two of them never drive the
-	 * child at once: overlapping restarts used to each spawn an engine.
+	 * child at once.
 	 */
 	private queueTail: Promise<void> = Promise.resolve();
 	/** The queued or running restart, which a second request joins. */
@@ -1000,9 +989,8 @@ export class EngineSidecar {
 		}
 
 		// Check if binary exists. The remediation names `build.py` because that is
-		// the repo's single build entry point - the per-platform shell scripts this
-		// message used to name have never existed, and the raw cmake line it
-		// offered skips the vcpkg toolchain wiring build.py does for you.
+		// the repo's single build entry point, and a raw cmake line skips the vcpkg
+		// toolchain wiring build.py does for you.
 		if (!fs.existsSync(this.binaryPath)) {
 			throw new Error(
 				`Engine binary not found at: ${this.binaryPath}\n\n` +
@@ -1396,10 +1384,6 @@ export class EngineSidecar {
 
 	/**
 	 * Whether the engine this app is using is alive - however we came by it.
-	 *
-	 * This used to read `this.process !== null`, which is false for every
-	 * adopted engine, so a perfectly healthy backend reported "not running" and
-	 * the quit path skipped shutting it down.
 	 */
 	isRunning(): boolean {
 		return this.ownership.kind !== "none";
@@ -1425,7 +1409,7 @@ export class EngineSidecar {
 	 * Queued behind whatever is running, so a restart requested during the first
 	 * start's health poll waits for that start rather than killing the child it
 	 * is polling. A restart requested while another is queued or running joins
-	 * it, and gets the same promise: two restarts used to both spawn.
+	 * it, and gets the same promise.
 	 */
 	restart(maxRetries: number = ENGINE_RESTART_MAX_RETRIES): Promise<void> {
 		if (this.pendingRestart) return this.pendingRestart;
