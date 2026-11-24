@@ -6,7 +6,6 @@
  */
 
 /**
- * @file request-body.ts
  * @brief The body a write tool stores, from the `body` / `bodyType` / `file`
  *        arguments.
  */

@@ -6,8 +6,6 @@
  */
 
 /**
- * useActiveCollectionId Hook
- *
  * The collection whose variables are in scope for whatever the user is looking
  * at - a request tab's own collection, or a collection tab itself.
  *

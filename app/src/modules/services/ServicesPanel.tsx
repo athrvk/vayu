@@ -17,7 +17,7 @@
  * It is a drawer view rather than a tab because that is what the shell already
  * says navigation is - the Dock's left group switches drawer views, and a
  * service is a thing you consult while working in a request, not a document you
- * open. The inbox and, since #481 phase 3, the mock server each keep a tab as
+ * open. The inbox and the mock server (#481 phase 3) each keep a tab as
  * their detail surface (a capture list or a growing activity log needs the
  * width); an issuer has no detail surface, so its whole management fits a row
  * that expands plus one dialog, and no new TabType.

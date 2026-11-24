@@ -12,8 +12,8 @@
  * cannot commit per event, and both answered it the same way: buffer, commit
  * the first item at once - the first tick or step of a run is the one a reader
  * is waiting on, and holding it back makes a fast run look slow to start - and
- * let a trailing timer carry whatever arrives inside the window. Since #1153
- * that was two field-for-field copies of one mechanism, which is the shape a
+ * let a trailing timer carry whatever arrives inside the window (#1153). That
+ * was two field-for-field copies of one mechanism, which is the shape a
  * timing fix or a teardown leak lands in one of and not the other.
  *
  * It owns the buffer, the timer and the cadence, and nothing else. What a batch

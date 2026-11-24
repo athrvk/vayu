@@ -6,7 +6,6 @@
  */
 
 /**
- * @file safety.tools.ts
  * @brief `get_safety_config`: the session's own limits, readable before an
  *        agent acts rather than discovered one refusal at a time (#2444).
  */

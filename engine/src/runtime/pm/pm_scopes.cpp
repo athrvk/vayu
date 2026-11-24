@@ -994,6 +994,10 @@ JSValue js_from_json (JSContext* ctx, const nlohmann::json& value, const char* l
 // made every script of a load run given rows another, so a message naming only
 // collection runs steers a user who stashed the object during one of those to
 // look for a mistake that is not there.
+//
+// It ends at the scripting directory, not at the page: with the longest member
+// name the text already fills QuickJS's 256-byte formatting buffer
+// (`JS_MakeError`), and a page's own path would cut off the end of it.
 ContextData* iteration_data_context (JSContext* ctx, const char* member) {
     auto* data = get_context_data (ctx);
     if (!data || !data->iteration_data) {
@@ -1002,7 +1006,7 @@ ContextData* iteration_data_context (JSContext* ctx, const char* member) {
         "row "
         "bound. A row is bound by an iteration of a collection run with a data "
         "set, by a send-with-row, and by a load run's scripts when the run has "
-        "a data set. See docs/engine/scripting.md.",
+        "a data set. See docs/engine/scripting/.",
         member);
         return nullptr;
     }

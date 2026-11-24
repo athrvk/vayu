@@ -8,21 +8,6 @@
 /**
  * A segmented control: one choice out of a few, all of them visible.
  *
- * The response body's Pretty / Raw / Preview switch was a hand-rolled version -
- * three `<Button variant="ghost">` inside a `bg-muted` div, each repeating the
- * same eight-class active/inactive string. It carried four defects that a
- * primitive would never have had:
- *
- *   - **No radius class on the track**, so it stayed square at every Roundedness
- *     setting while its neighbours followed it.
- *   - **`gap-1` between segments**, which reads as loose chips on a strip rather
- *     than one control.
- *   - **The active state written out per segment**, three copies of one rule.
- *   - **A `bg-muted` track on a `bg-muted/20` row** - same hue, 20% apart, so
- *     the track barely existed. There is no track fill at all now: the raised
- *     active segment is the affordance, which sidesteps the problem rather than
- *     restating it.
- *
  * Built on Radix's ToggleGroup, so arrow-key movement and roving focus arrive
  * with it. Like `Tabs`, every state change is a `data-[state=]` variant rather
  * than a swapped class: the class list is identical either way and only the
@@ -41,11 +26,8 @@
  * **Sizes are the app's own floor steps** (issue #1679), not new numbers. `xs`
  * is `--spacing-control-sm` (24px) and `sm` is `--spacing-control` (28px) - the
  * response toolbar sits an `xs` control on a 32px `band`, one step above the
- * `band` tab strip above it. They used to be written as `h-5`/`h-6`, which
- * this doc comment already described as 24/28px; under the 3px spacing
- * rhythm `--spacing` moved to for #1670, those resolved to 15px/18px instead
- * - a comment describing an intent the class list had stopped delivering.
- * Named steps that do not ride `--spacing` are what closes that gap for good.
+ * `band` tab strip above it. Named steps that do not ride `--spacing` (moved to a
+ * 3px rhythm in #1670, where `h-5`/`h-6` resolve to 15px/18px) keep 24px and 28px.
  */
 
 import * as React from "react";

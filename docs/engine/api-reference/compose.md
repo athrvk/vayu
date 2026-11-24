@@ -137,8 +137,8 @@ Where the engine itself writes a query pair into a URL, it uses Postman's rule (
   A layered value is resolved whole and encoded once.
   The scheme and the authority are never percent-encoded (the host is lowercased and written by its ASCII name, as above), so a `{{base}}` holding `https://x/p?k=a b` has its query part encoded and nothing else changed.
   `disableUrlEncoding` writes every value as typed.
-- A pair a script adds with `pm.request.url.query.add`, `upsert` or `pm.request.url.addQueryParams` is a row and is written by the row rule above ([scripting](../scripting.md#writing)).
-- A `pm.sendRequest` URL is encoded whole after its variables resolve, by the same `encode_url_as_postman`, and `disableUrlEncoding` does not apply to it ([scripting](../scripting.md#sending-a-request-from-a-script-pmsendrequest)).
+- A pair a script adds with `pm.request.url.query.add`, `upsert` or `pm.request.url.addQueryParams` is a row and is written by the row rule above ([scripting](../scripting/request-mutation.md#writing)).
+- A `pm.sendRequest` URL is encoded whole after its variables resolve, by the same `encode_url_as_postman`, and `disableUrlEncoding` does not apply to it ([scripting](../scripting/send-request.md#sending-a-request-from-a-script-pmsendrequest)).
   A script and Send write the same request line for every URL; `tests/url_encoding_test.cpp` (`PostmanUrlEncodingAgreement`) pins it.
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead: the OpenAPI sync diff compares stored URLs against that form, and neither other source uses Postman's set.
 

@@ -41,8 +41,7 @@
  *    value
  *
  * The `{{name}}` matcher itself is `VARIABLE_PATTERN` from
- * `constants/variables.ts` - this module used to declare its own identical
- * copy, which is how the app came to hold four (issue #227).
+ * `constants/variables.ts`, the app's one copy of it (issue #227).
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";

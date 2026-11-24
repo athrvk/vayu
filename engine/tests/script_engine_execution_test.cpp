@@ -130,7 +130,9 @@ TEST_F (ScriptEngineTest, SetNextRequestsRefusalIsNeverTruncatedMidWord) {
     "pm.execution.setNextRequest('checkout');", request, env);
 
     EXPECT_FALSE (result.success);
-    EXPECT_NE (result.error_message.find ("docs/engine/scripting.md."), std::string::npos)
+    EXPECT_NE (result.error_message.find (
+               "docs/engine/scripting/execution-metrics-data.md."),
+    std::string::npos)
     << "the message's own last sentence must survive whole: " << result.error_message;
 }
 

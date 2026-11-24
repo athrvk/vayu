@@ -6,8 +6,6 @@
  */
 
 /**
- * CodeEditor
- *
  * Single wrapper around the Monaco editor. All shared editor configuration
  * (default options, theme, font size) lives here so it only has to change in
  * one place. Consumers pass only what varies (language, value, height, etc.).

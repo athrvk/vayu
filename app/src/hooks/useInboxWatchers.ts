@@ -19,7 +19,7 @@
  *
  * The inbox list is observed here only while at least one inbox may notify. It
  * polls every `SERVICES_POLL_INTERVAL_MS` and a root observer that nobody reads
- * is what #1150 removed, so the app pays for this list when the feature is on
+ * is waste (#1150), so the app pays for this list when the feature is on
  * and not otherwise. The pruning of dead ids is bound to the same read: an id
  * belongs to the engine process that minted it, and this is where the answer the
  * engine gave arrives.

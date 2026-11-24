@@ -6,8 +6,6 @@
  */
 
 /**
- * AppearancePanel
- *
  * Cosmetic app preferences: theme mode, accent color scheme, and interface
  * (font / scale / roundedness / density). Client-side only (localStorage-backed), so
  * there's no Save button - changes apply live. Rendered inside

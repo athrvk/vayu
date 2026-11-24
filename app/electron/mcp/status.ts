@@ -6,7 +6,6 @@
  */
 
 /**
- * @file status.ts
  * @brief What `mcp:status` and `mcp:connectClient` answer, kept out of `main.ts`
  *        so the answers can be tested without Electron.
  *

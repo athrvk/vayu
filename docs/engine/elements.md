@@ -358,7 +358,7 @@ for the rest. The pointer is relative to the value judged, so under `source: "js
 inside that value, not at the reply.
 
 The validator is the one `pm.response.to.have.jsonSchema` and the OpenAPI response contracts use
-(valijson, **draft-07**; [scripting](scripting.md) has its limits). A keyword it does not evaluate
+(valijson, **draft-07**; [scripting](scripting/index.md) has its limits). A keyword it does not evaluate
 (`unevaluatedProperties`, `prefixItems`, `dependentSchemas`, a nested `propertyNames`: what a JSON
 Schema 2020-12 schema, MCP's default dialect, can hold) fails the assertion whatever the value is,
 naming each keyword with how many times the schema uses it: `the schema uses keywords the draft-07
@@ -431,7 +431,7 @@ there.
 `metric.record` writes through `ElementContext::record_metric`, a callback bound only when a run's `MetricsCollector` is
 reachable (the sequential run, a scenario load run, design mode's `script.pre`/`script.post`); a
 bare design send has none, and the element reports `skipped` there rather than recording nowhere
-silently. `pm.metrics.trend`/`.counter`/`.rate` (`docs/engine/scripting.md`) write through the same
+silently. `pm.metrics.trend`/`.counter`/`.rate` (`docs/engine/scripting/execution-metrics-data.md`) write through the same
 callback from a script, so both surfaces share one collector-side implementation
 (`MetricsCollector::record_custom_metric`). Every run is capped at
 `constants::metrics_collector::MAX_CUSTOM_METRIC_NAMES` (32) distinct names, refused at

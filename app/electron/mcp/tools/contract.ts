@@ -6,7 +6,6 @@
  */
 
 /**
- * @file contract.ts
  * @brief What a tool is, what it is handed and what it answers: the registry's
  *        types, the elicitation seam and the data families a call can change.
  */
@@ -149,8 +148,7 @@ export interface McpDataChangedEvent {
 	 * *live*, which is what lets the renderer attach its stream to a run no
 	 * surface of its own started - and with it the OS progress indicator (#1362),
 	 * the keep-awake hold (#1357) and the finished notification (#1358), all of
-	 * which live inside the run services and used to begin only once a dashboard
-	 * was opened.
+	 * which live inside the run services.
 	 *
 	 * Present on the `run` event of the two tools that create a run
 	 * (`start_load_run`, `run_collection`) and on no other: `run_collection_smoke`

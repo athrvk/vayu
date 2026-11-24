@@ -30,9 +30,8 @@
  * - 0.56 reorganised the entry points under an `exports` map and this type is
  * what pinned the composed object to the barrel through it (#1342).
  *
- * `createWebWorker` used to be omitted here too, as a barrel-only export
- * nothing calls. 0.56's barrel no longer exports it at all, so naming it would
- * be omitting a key that is not there.
+ * `createWebWorker` is not omitted here: 0.56's barrel does not export it at all,
+ * so naming it would be omitting a key that is not there.
  */
 import type * as Monaco from "monaco-editor";
 

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file withhold.ts
  * @brief What an MCP read hands an agent in place of a secret (#1805): a
  *        variable flagged `secret`, an auth credential, a cookie value, the
  *        credentials in a proxy URL, the credentials a saved request carries in

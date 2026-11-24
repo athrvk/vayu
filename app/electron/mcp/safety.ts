@@ -6,7 +6,6 @@
  */
 
 /**
- * @file safety.ts
  * @brief Pure guard functions for the MCP layer: allowlist enforcement, load
  *        cap checks, and duration parsing. No I/O and no Electron imports, so
  *        this module is unit-testable in isolation.

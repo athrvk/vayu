@@ -6,8 +6,6 @@
  */
 
 /**
- * RunConfigSummary Component
- *
  * The "Test config" box of a stored load run: one line with the settings that
  * define the experiment (mode, virtual users, passes or requests, duration, protocol) and a
  * "Details" disclosure for the rest (target rate, data set, timeout). The

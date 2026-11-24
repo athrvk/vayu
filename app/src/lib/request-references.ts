@@ -146,7 +146,7 @@ export function bindableStrings(
 		if (body.file?.fileName) strings.push(body.file.fileName);
 		if (body.file?.contentType) strings.push(body.file.contentType);
 	}
-	// Bound per iteration since #591, and applied (base64, percent-encoding) only
+	// Bound per iteration (#591), and applied (base64, percent-encoding) only
 	// after the bind - so what a token sits in is the credential itself.
 	strings.push(...authCredentials(request.resolvedAuth));
 	return strings;

@@ -15,10 +15,8 @@
  * import this module directly.
  *
  * **The content here is not all hand-typed.** Descriptions arrive from imported
- * Postman, Insomnia and OpenAPI files - third-party documents off the internet -
- * and until now Vayu stored that markdown and displayed none of it, which is the
- * only reason it never mattered. Rendering it changes that, so four decisions
- * are load-bearing rather than stylistic:
+ * Postman, Insomnia and OpenAPI files - third-party documents off the internet.
+ * Four decisions are load-bearing rather than stylistic:
  *
  * **1. No navigating anchors, ever.** A clicked `<a href>` navigates the whole
  * renderer, and the preload re-runs on the new origin, handing
@@ -26,9 +24,8 @@
  * `href` reaches the DOM, and the click goes to the scheme-validated
  * `openExternalUrl` path, which refuses anything that is not http(s).
  *
- * This is no longer the only layer. #822 put the refusal underneath it that this
- * note used to say was missing: beside `contextIsolation: true` and
- * `nodeIntegration: false`, `electron/main.ts` now installs
+ * This is not the only layer (#822): beside `contextIsolation: true` and
+ * `nodeIntegration: false`, `electron/main.ts` installs
  * `electron/window-navigation.ts` on the main window, which refuses a navigation
  * that is not the app's own document and denies `window.open`; the app document
  * also carries a Content-Security-Policy (`electron/renderer-csp.ts`). Keep this

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file connection.tools.ts
  * @brief Connection setup: the client certificates (mutual TLS) Vayu presents, and
  *        `diagnose_connection`.
  */

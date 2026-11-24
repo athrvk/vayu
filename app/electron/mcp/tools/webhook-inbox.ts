@@ -6,7 +6,6 @@
  */
 
 /**
- * @file webhook-inbox.ts
  * @brief The webhook inbox payloads and the capture-page bound.
  */
 

@@ -75,11 +75,9 @@ export function useSettingsItems(query: string): PaletteItem[] {
 					? `${entry.categoryLabel} · ${entry.id}`
 					: entry.categoryLabel,
 			// The terms someone types to reach this row: the engine key every
-			// doc and log line names it by, and its aliases. The description
-			// used to be here too - a whole sentence of prose, carried only so
-			// cmdk's second filter could not hide a row this source had already
-			// matched. Nothing filters these rows twice now (`ranking.ts`), so
-			// the defensive half is gone and what remains is search terms.
+			// doc and log line names it by, and its aliases. Not the description:
+			// nothing filters these rows twice (`ranking.ts`), so what belongs here is
+			// search terms.
 			keywords: [entry.id, ...entry.keywords],
 			perform: () => reveal(entry),
 		}));

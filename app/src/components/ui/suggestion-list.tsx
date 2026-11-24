@@ -53,10 +53,7 @@ export interface SuggestionListProps {
 	/**
 	 * Cap on what is shown, if any. Omitted, every item renders and
 	 * `CommandList`'s own `max-h-[300px] overflow-y-auto` scrolls to the rest -
-	 * the same way the command palette's uncapped list already does. A header
-	 * list of 31 names used to be sliced to 10 here on top of an identical
-	 * slice the caller already applied, so the other 21 were never reachable
-	 * by scrolling - there was nothing past the tenth row to scroll *to*.
+	 * the same way the command palette's uncapped list already does.
 	 */
 	limit?: number;
 	className?: string;

@@ -6,8 +6,6 @@
  */
 
 /**
- * RecentRuns
- *
  * Flat rows rather than cards - the card grid is what made the old screen read
  * as a landing page. Carries the app's existing run vocabulary (method badge,
  * type badge, status tokens, mono timestamps) so it matches the dashboard and

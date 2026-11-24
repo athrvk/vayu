@@ -6,8 +6,6 @@
  */
 
 /**
- * LauncherSkeleton
- *
  * What the welcome screen shows while its two queries are in flight.
  *
  * It used to render `null`. That was a deliberate fix for a worse bug - both

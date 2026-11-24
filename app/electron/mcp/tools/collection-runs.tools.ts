@@ -6,7 +6,6 @@
  */
 
 /**
- * @file collection-runs.tools.ts
  * @brief Running a collection: the smoke matrix and the design-mode scenario run.
  */
 

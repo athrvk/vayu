@@ -6,7 +6,6 @@
  */
 
 /**
- * @file diff-bodies.ts
  * @brief `diff_bodies` (#3705): the bounded difference between two stored
  *        bodies - RFC 6901 pointers for two JSON bodies, a line diff for other
  *        text, and equal / not equal for a binary one.

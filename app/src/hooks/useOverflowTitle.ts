@@ -8,8 +8,6 @@
 import { useCallback, useEffect, useRef } from "react";
 
 /**
- * useOverflowTitle
- *
  * Attaches a native `title` tooltip to a truncating element - but only while
  * the text is actually cut off.
  *

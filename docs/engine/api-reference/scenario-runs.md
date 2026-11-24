@@ -67,13 +67,13 @@ Each step is the `POST /execute` exchange - pre-request script, send through the
 > environment variable instead of the row.
 
 **Scripts** additionally read `pm.info.iteration` (0-based), `pm.info.vu` (1-based) and `pm.info.iterationCount`.
-See [scripting.md](../scripting.md#script-identity-pminfo) for which run shapes report which.
+See [scripting/info-and-setup.md](../scripting/info-and-setup.md#script-identity-pminfo) for which run shapes report which.
 
 **A run with `data` binds one row per iteration.**
 Row `i % rows` binds to iteration `i`, and the run's scripts read it as `pm.iterationData` - `get(name)` and `toObject()`, read-only, and `undefined` for a run sent without `data`.
 With `iterations` absent the row count *is* the iteration count; with both given the explicit count wins and the index wraps.
 The rows reach the run's worker and nowhere else: they are not persisted, and the snapshot records the row count (`dataRowCount`) plus the file's `dataFileName` and `dataFileHash` when they were sent, and `dataFileCastNumbers: true` when its numbers were read as numbers, never its path or rows.
-The full contract is in [scripting.md](../scripting.md#data-rows-pmiterationdata).
+The full contract is in [scripting/execution-metrics-data.md](../scripting/execution-metrics-data.md#data-rows-pmiterationdata).
 
 **`{{data.column}}` puts the row into the request itself.**
 `pm.iterationData` is read *after* a step's request was built, so it cannot change where the request goes; the `data.*` namespace can.
@@ -95,7 +95,7 @@ There is no second, looser substitution path for the bare one.
 Exhaustively, and identically for both spellings:
 the **URL** (path and query string alike, so a token in a stored request's params reaches it once they are joined into the URL), every **header name** and **header value**, the **raw body**, **both halves of every form field** (`x-www-form-urlencoded` and `form-data`), and the **credential fields** of the request's auth -
 the bearer **token**, basic auth's **username** and **password**, and an api key's **name** and **value**.
-Script text is never interpolated at all (a script reads its row through `pm.iterationData`, or through `pm.variables` for a bare name - see [scripting.md](../scripting.md#variables-pmvariables)).
+Script text is never interpolated at all (a script reads its row through `pm.iterationData`, or through `pm.variables` for a bare name - see [scripting/variables.md](../scripting/variables.md#variables-pmvariables)).
 
 The pass runs over the **composed** text, not the text as it was authored, so a token that arrived as a *variable's value* binds like any other:
 a variable `endpoint` whose value is `/u/{{data.id}}` leaves `{{data.id}}` in the URL after composition - it is rescanned (issue #1009), but the `data.` namespace is deferred to bind time (issue #1007), so this token survives it - and the data pass then binds it.
@@ -199,7 +199,7 @@ A name a bind merely *shortens* is not this rule - `X-{{data.h}}` with a blank c
 
 A cell that is present but **`null`** errors the same way, naming the token and the row.
 It is the same failure one type down - the token says the value comes from the file and the file says there is none - and writing `""` for it would send `{"n": }` for a typed placement or a quietly blank field for a quoted one.
-A column that is legitimately optional belongs in a script, through `pm.iterationData` (see [scripting.md](../scripting.md#data-rows-pmiterationdata)), where `null` is a value a branch can read.
+A column that is legitimately optional belongs in a script, through `pm.iterationData` (see [scripting/execution-metrics-data.md](../scripting/execution-metrics-data.md#data-rows-pmiterationdata)), where `null` is a value a branch can read.
 
 A run sent **without a `data` set at all** whose plan still carries a `data.*` token is refused outright, before any run row exists: nothing would bind the token, so every iteration would send the literal text `{{data.id}}`.
 The `400` names the step and the token, and - when the collection [declares a data contract](collections.md#collections) - the columns it declares, so the message says which file to run with rather than only that one is missing:
@@ -252,7 +252,7 @@ A [scenario load run](scenario-load.md#scenario-load-runs) reports the other fou
 A load run stores no step rows, so that error's text, the same sentence, is the `stepError` of a `run` warning in the [engine log](../logging.md).
 What differs there is a step that got no response: on a load run it ends its iteration, so a load run's `errored` is not the sum of its steps' `noResponse`, and `iterationsAbandoned` is its iteration-abort count.
 On a collection run a transport failure continues the iteration like a script error does, as Postman's and Newman's runners do by default; a later step that reads a response that never arrived errors on its own row.
-A step that errored while the iteration continues has its own flow control ignored - a `setNextRequest`, `skipRequest` or `setNextRequest(null)` from a script that then threw is an instruction from code that did not finish, so the iteration walks to the next plan position (see [scripting.md](../scripting.md#flow-control-pmexecution)).
+A step that errored while the iteration continues has its own flow control ignored - a `setNextRequest`, `skipRequest` or `setNextRequest(null)` from a script that then threw is an instruction from code that did not finish, so the iteration walks to the next plan position (see [scripting/execution-metrics-data.md](../scripting/execution-metrics-data.md#flow-control-pmexecution)).
 
 **The run's summary also carries the HTTP/2 fallback count** (#3262).
 Every sent step's trace has `httpVersionDowngraded` (see [`POST /execute`](execute.md#post-execute)), and the runner adds those up into the stored summary's `http_version_downgraded`, the key a load run writes, so the report's `summary.httpVersionDowngraded` is the same figure in both run kinds.
@@ -277,7 +277,7 @@ An engine shutdown stops an active run the same way.
 `pm.execution.setNextRequest(name)` runs a named request next instead of the one that follows, `setNextRequest(null)` ends the iteration, and `pm.execution.skipRequest()` (pre-request scripts only) sends nothing and marks the step `skipped`.
 A target that names no step in the run, or one that two steps share, fails the step by name rather than guessing, and [`maxStepsPerIteration`](load-runs.md#the-scenario-block-collection-runs) is what stops a cycle.
 Both refusals end the iteration whatever `stopOnError` says, and a step whose script errored has its redirect ignored.
-The full contract, including everywhere the two methods throw, is in [scripting.md](../scripting.md#flow-control-pmexecution).
+The full contract, including everywhere the two methods throw, is in [scripting/execution-metrics-data.md](../scripting/execution-metrics-data.md#flow-control-pmexecution).
 
 **The stored snapshot carries a step manifest, never the composed plan.**
 `runs.config_snapshot` holds the block as validated - with `data` replaced by its row count - plus `{index, requestId, name, method, url}` per step, where `url` is the **stored, uncomposed** one.

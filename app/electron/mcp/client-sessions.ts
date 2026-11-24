@@ -6,7 +6,6 @@
  */
 
 /**
- * @file client-sessions.ts
  * @brief Which MCP client sent a request, for the stateless HTTP host (#1817).
  *
  * The host builds a fresh server per POST, so the server that answers

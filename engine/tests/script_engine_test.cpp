@@ -764,11 +764,11 @@ TEST_F (ScriptEngineTest, ZeroTimeoutDisablesLimit) {
 // The sandbox's global surface
 // ============================================================================
 //
-// `scripting.md` now teaches request rewriting, so what a script can *compute*
+// The scripting guide now teaches request rewriting, so what a script can *compute*
 // is part of the contract. Installed on top of QuickJS's built-ins: `console`,
 // `pm`, `btoa` / `atob` (#187), and `require` / `CryptoJS` (#2578). Still
 // absent: a URL parser and `fetch`. This pins both halves so a doc example
-// cannot come to rely on something that was never there (`scripting.md` used
+// cannot come to rely on something that was never there (the scripting guide used
 // to show a `computeHash` that does not exist).
 
 TEST_F (ScriptEngineTest, StandardBuiltinsAreAvailableToScripts) {
@@ -803,13 +803,13 @@ TEST_F (ScriptEngineTest, NoUrlParserOrFetchIsExposed) {
 
     ASSERT_TRUE (result.success) << result.error_message;
     // If one of these ever lands, the "what a script can compute" section in
-    // scripting.md stops being true and should be rewritten, not left standing.
+    // the scripting guide stops being true and should be rewritten, not left standing.
     // `crypto` in particular: a global of that name is a promise of Web Crypto's
     // whole surface, which this sandbox does not implement - which is why the
     // hashing surface is pm.crypto and synchronous.
     EXPECT_EQ (env["present"].value, "")
     << "a new global is available - update the 'What a script can compute' "
-       "section in scripting.md";
+       "section in the scripting guide";
 }
 
 TEST_F (ScriptEngineTest, Base64AndHashingGlobalsAreInstalled) {
@@ -826,7 +826,7 @@ TEST_F (ScriptEngineTest, Base64AndHashingGlobalsAreInstalled) {
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["missing"].value, "")
-    << "the signing surface #187 added is incomplete - scripting.md and "
+    << "the signing surface #187 added is incomplete - the scripting guide and "
        "pm-api-compatibility.md teach these names";
 }
 

@@ -211,10 +211,8 @@ function CollectionItemRow({
 				// `transition-colors` includes in Tailwind v4): a focus ring must
 				// appear instantly, otherwise it visibly fades between rows as
 				// Tab moves. Hover may ease; focus may not.
-				// h-8: the shared drawer row height. Row height used to be an
-				// accident of content - the 28px chevron set it here, padding set
-				// it elsewhere - so sibling drawer views ran 34/36/38/40px and the
-				// rhythm shifted every time you switched view.
+				// h-8: the shared drawer row height, so the rhythm holds when you switch
+				// drawer view.
 				"focus-row flex h-8 items-center gap-1 pr-2 group transition-[color,background-color,border-color] cursor-pointer",
 				// The rows inside a folder being deleted are dimmed by the
 				// list (`CollectionTreeRows`), which knows which they are.

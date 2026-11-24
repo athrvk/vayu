@@ -6,8 +6,6 @@
  */
 
 /**
- * CookiesCard
- *
  * What the engine's cookie jar is holding, and the button that empties it
  * (issue #301). The jar is what makes "log in once, reuse the session" work
  * for design-mode requests, and it is kept per environment - so this is also

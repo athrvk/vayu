@@ -510,9 +510,7 @@ function useSaveStatusDisplay(status: SaveStatus): SaveStatus {
  * reads as one normal gap between the connection light and the version -
  * cancelling both sides removes that surviving gap too and jams the two
  * together with none at all.
- * `pending` -> `saving` -> `saved` -> `idle` is now a smooth grow-then-shrink
- * instead of a jump, and `idle` at rest looks exactly like the row did before
- * any of this existed - one `gap-4` between neighbours, never two, never zero.
+ * At `idle` the row holds one `gap-4` between neighbours, never two, never zero.
  */
 function SaveStatusLine() {
 	const rawStatus = useSaveStore((s) => s.status);
@@ -616,16 +614,8 @@ export function Dock() {
 			 * `ui/toast.tsx`. Same value (2rem); the token is what keeps the two
 			 * from drifting apart.
 			 *
-			 * Status in the centre, controls on the right. #1615 moved the
-			 * sidebar-view switchers to `ActivityRail` and the context-bar
-			 * toggle to `ContextRail`, both on a window edge the OS never
-			 * covers, and left this strip status-only; #1711 amends that to
-			 * admit a right-aligned cluster of controls that act on the *active
-			 * tab's* view, rendered only while that tab is a request tab; #3635
-			 * amends it again for the one control that is not per-tab, the
-			 * bottom panel's button, which leads the cluster on every tab and
-			 * with none. The rule that survives all three is the one that
-			 * matters: every item here has a non-footer path (pending restart
+			 * Status in the centre, controls on the right (#1615, #1711, #3635). The rule:
+			 * every item here has a non-footer path (pending restart
 			 * is the banner in Settings, save status opens the tab it names,
 			 * the response position has its chord, its palette row and its
 			 * Settings row, the bottom panel its chord and its palette row), so

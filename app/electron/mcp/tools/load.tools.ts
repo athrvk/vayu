@@ -6,7 +6,6 @@
  */
 
 /**
- * @file load.tools.ts
  * @brief `start_load_run`: a load test over one request or a collection scenario.
  */
 

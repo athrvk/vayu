@@ -92,7 +92,7 @@ Two things the generated file still cannot get from the table, both handled in `
 That cannot catch the class of defect where a declaration contains every right name and still does not type-check, and four of those shipped (#463):
 `pm.cookies.jar()` emitted twice with the `object` overload winning, every jar method's signature emptied by the `()` inside its own label, `pm.info.eventName` read as prose and typed `void`, and two `pm.expect` chains shorter than the documentation beside them.
 
-So the durable guard compiles **every ` ```javascript ` block mentioning `pm.`** in [`scripting.md`](../scripting.md) and [`pm-api-compatibility.md`](../../app/pm-api-compatibility.md) against the real declarations and requires zero errors,
+So the durable guard compiles **every ` ```javascript ` block mentioning `pm.`** in [`scripting/index.md`](../scripting/index.md) and [`pm-api-compatibility.md`](../../app/pm-api-compatibility.md) against the real declarations and requires zero errors,
 with the app's own compiler options and suppressed codes. The same suite compiles scripts that use the absent names and requires the error each should draw, and scripts that declare one themselves and requires none. The documentation and the declarations then hold each other up:
 an example the editor would squiggle fails the suite, and so does a declaration that stops describing what the docs recommend.
 

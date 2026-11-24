@@ -11,7 +11,7 @@
  * same request on the wire. Send (buffered and streaming), the load run and the
  * History replay all build through it; a field added here reaches all of them.
  *
- * Raw: since #226 the engine resolves `{{variables}}` and inherit auth at
+ * Raw (#226): the engine resolves `{{variables}}` and inherit auth at
  * compose time, so the editor state goes over as-is - resolving here too would
  * interpolate the payload twice. The inline shape (not compose-by-id) is
  * deliberate: the editor state may be ahead of the saved row.

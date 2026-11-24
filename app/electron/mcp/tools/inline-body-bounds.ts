@@ -6,7 +6,6 @@
  */
 
 /**
- * @file inline-body-bounds.ts
  * @brief How much of a body, a trace and a run report one tool result carries
  *        inline (#767, #769).
  */

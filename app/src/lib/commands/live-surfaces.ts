@@ -15,8 +15,8 @@
  * has run - and that draft exists only inside `RequestBuilderProvider`, which the
  * palette is a sibling of. A command reaching for the saved request instead
  * would run the *old* URL after an edit and report it as the run the user asked
- * for: a near-miss that reads as a bug, which is why #526 shipped the registry
- * without these commands rather than approximating them.
+ * for: a near-miss that reads as a bug, which is why the registry ships
+ * without these commands rather than approximating them (#526).
  *
  * So the mounted feature hands its own handler out, and the palette merges what
  * is registered into the surfaces it offers. The alternative - reading the draft

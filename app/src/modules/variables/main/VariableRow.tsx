@@ -176,9 +176,7 @@ function VariableRow({
 				 * implementation, and the copy left behind
 				 * here missed the fixes it since received.
 				 * Reveal state belongs to the primitive -
-				 * unmounting on un-secret is what clears it,
-				 * which is what the editor's own revealed-set
-				 * used to do by hand.
+				 * unmounting on un-secret is what clears it.
 				 */}
 				{isSecretField ? (
 					<SecretInput

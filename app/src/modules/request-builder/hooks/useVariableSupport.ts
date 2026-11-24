@@ -9,12 +9,11 @@
  * The request builder's own variable scope, in the shape the variable-aware
  * inputs take as a prop.
  *
- * `VariableInput` and `KeyValueEditor` used to reach for
- * `useRequestBuilderContext()` themselves, which is what made them unusable
- * outside this module - the hook throws with no provider above it (#564). They
- * take a `VariableSupport` now, and this is the one adapter from the context to
- * that shape, rather than a `useMemo` copied into each of the five call sites
- * inside the builder.
+ * `VariableInput` and `KeyValueEditor` take a `VariableSupport` rather than
+ * reaching for `useRequestBuilderContext()` themselves, which throws with no
+ * provider above it (#564); this is the one adapter from the context to that
+ * shape, rather than a `useMemo` copied into each of the five call sites inside
+ * the builder.
  *
  * Memoised on its members: the object is a prop on a `memo`-wrapped row, so a
  * fresh identity each render would re-render every row of the densest table in

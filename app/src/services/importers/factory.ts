@@ -8,17 +8,9 @@
 /**
  * Parsing an import document - one call to the engine (issue #877).
  *
- * **This file used to be the dispatcher of a parser stack.** Six detectors ran
- * in order over a document parsed here with `js-yaml`, and whichever claimed it
- * built the whole tree: `openapi-v3.ts`, `openapi-v2.ts` and their shared half,
- * `postman.ts`, `postman-environment.ts`, `insomnia-v4.ts`, the schema sampler,
- * the OAuth mapper. All of it is gone, engine-side, and the reason is not tidiness:
- * it was the *second* reader of a document. #853 moved what a stored OpenAPI
- * document declares, #860 its response schemas, #865 the requests an import
- * would build and #854 what a re-fetch would change - and every one of those
- * had to be pinned to this stack by a cross-language conformance fixture,
- * because two readers of one document disagree exactly where it matters. There
- * is one reader now, so there is nothing left to pin.
+ * **Parsing is the engine's, not this file's.** A renderer-side parser stack would
+ * be the *second* reader of a document, and two readers of one document disagree
+ * exactly where it matters (#853, #860, #865, #854).
  *
  * It also made a hole an agent could see: `POST /import/apply` took a
  * pre-parsed tree, so over MCP a spec could be bound, diffed, synced and

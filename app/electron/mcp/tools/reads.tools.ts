@@ -6,7 +6,6 @@
  */
 
 /**
- * @file reads.tools.ts
  * @brief The registry's opening reads: engine health, the collection, request,
  *        environment and run lists, the stored-run reads and the engine config.
  */

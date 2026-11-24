@@ -6,16 +6,12 @@
  */
 
 /**
- * TooltipIconButton
- *
  * An icon-only button that is named and described from a single `label`: the
  * label becomes the accessible name (`aria-label`) and the visible tooltip.
  *
- * Icon buttons need both, and the two used to be supplied separately - or, more
- * often, only `title` was set, which is a weak substitute: a `title` tooltip
+ * Icon buttons need both; `title` alone is a weak substitute: a `title` tooltip
  * does not appear on keyboard focus, does not work on touch, cannot be styled,
- * and its screen-reader handling is inconsistent. Several buttons relied on it
- * and so had no proper name at all.
+ * and its screen-reader handling is inconsistent.
  *
  * This is the same Button-inside-Tooltip pattern the Dock, the collection-tree
  * header, and the response viewer already use; collapsing it into one component

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file lifecycle.ts
  * @brief The one owner of the MCP server's running state: whether the port is
  *        bound, the service behind it, and why the last start failed.
  *

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file header-rows.ts
  * @brief A `headers` argument written over a stored header list: the rows or
  *        the map a write tool takes, and the stored value a withheld row keeps.
  */

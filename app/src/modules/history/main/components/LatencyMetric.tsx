@@ -6,8 +6,6 @@
  */
 
 /**
- * LatencyMetric Component
- *
  * A latency tile. Neutral unless the value exceeds the user's SLO, and then it
  * takes the tier its `severity` names: which percentile a tile is says nothing
  * about whether the run was slow, so the tier is never unconditional (#2245).

@@ -28,7 +28,7 @@
  * surfaces are resolved by `useColumnAudit` rather than read off the row,
  * because the run resolves them the same way: a request's `inherit` auth becomes the chain's
  * credentials (`resolveEffectiveAuth`), which a data row binds per iteration
- * since #591, and the collection chain's own scripts run for every step ahead
+ * (#591), and the collection chain's own scripts run for every step ahead
  * of the request's. Auditing the rows as stored called a column bound into a
  * basic-auth pair "declared but not referenced".
  *
