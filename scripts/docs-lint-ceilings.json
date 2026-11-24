@@ -309,27 +309,6 @@
       "long_lines": 11,
       "max_cell": 1307
     },
-    "docs/engine/scripting/limitations.md": {
-      "max_cell": 291
-    },
-    "docs/engine/scripting/response.md": {
-      "max_line": 524,
-      "long_lines": 1,
-      "max_cell": 512
-    },
-    "docs/engine/scripting/sandbox.md": {
-      "max_cell": 286
-    },
-    "docs/engine/scripting/send-request.md": {
-      "max_line": 712,
-      "long_lines": 2,
-      "max_cell": 696
-    },
-    "docs/engine/scripting/variables.md": {
-      "max_line": 511,
-      "long_lines": 1,
-      "max_cell": 462
-    },
     "docs/ux-writing.md": {
       "max_line": 1352,
       "long_lines": 8,

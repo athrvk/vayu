@@ -103,8 +103,8 @@ Each entry is `{ event, id, data, receivedAt }`:
 | `id` | The origin's `id:`, **absent** when it sent none. Not the relay's own frame id, which is a different number and would make a comparison silently wrong. |
 | `data` | The `data:` payload as a string, multi-line frames joined with `\n`. `JSON.parse` it yourself - the wire says nothing about what it holds. |
 | `dataTruncated` | `true` only when that one event hit `sseMaxEventBytes` and `data` is a prefix. Absent otherwise. |
-| `text` | What the request's `streamTextPath` read off this event (issue #3773). **Absent** when no path was declared, when the path matched nothing, `null`, an array or an object, when `data` is not JSON, and when the event was cut (`dataTruncated`). |
-| `receivedAt` | When the engine received the event, in milliseconds since the Unix epoch (the clock `Date.now()` reads), so `events[0].receivedAt` against the send time is the time to first event. A **number on a design Send**, **absent** wherever the list is parsed back out of a buffered body - a load run's inline or deferred script, where it is not measured. |
+| `text` | What the request's `streamTextPath` read off this event (issue #3773). [Details](#the-text-of-an-event-in-full) |
+| `receivedAt` | When the engine received the event, in milliseconds since the Unix epoch (the clock `Date.now()` reads)... [Details](#the-receivedat-of-an-event-in-full) |
 
 **`pm.response.streamText` is the reply, assembled.**
 A stream whose request declares a `streamTextPath` (a JSONPath such as `$.choices[0].delta.content` for an OpenAI-compatible chat completion or `$.delta.text` for an Anthropic-style one, see [`POST /execute`](../api-reference/execute.md#post-execute)) gets every event's `text` joined in order, the events the path missed skipped (a role-only chunk, a ping, the `[DONE]` sentinel).
@@ -164,6 +164,15 @@ Two differences follow from where those responses come from, and both are visibl
 
 A response that did not stream still reads `undefined`, so the `typeof` check above is the one guard on every path.
 
+### The `text` of an event in full
+
+**Absent** when no path was declared, when the path matched nothing, `null`, an array or an object, when `data` is not JSON, and when the event was cut (`dataTruncated`).
+
+### The `receivedAt` of an event in full
+
+...so `events[0].receivedAt` against the send time is the time to first event.
+A **number on a design Send**, **absent** wherever the list is parsed back out of a buffered body - a load run's inline or deferred script, where it is not measured.
+
 ## `pm.response.mcp` - an mcp reply's failure class
 
 A request whose body mode is `mcp` is answered with one JSON object or with an event stream ending in the final JSON-RPC response ([the `mcp` reply](../api-reference/request-body.md#the-mcp-reply)).
@@ -214,9 +223,9 @@ Each entry is `{ code, status, url, schemeDowngrade, headers }`:
 |-------|--|
 | `code` | The hop's status, a number (`301`, `302`, ...). Named as `pm.response.code` is. |
 | `status` | The hop's reason phrase, as `pm.response.status` is - the wire phrase, or the registered text for the code on HTTP/2 and later. |
-| `url` | The URL of the request **this hop answered**, so `redirects[0].url` is the URL that was requested and the next entry's is where the first one's `Location` pointed (resolved, when it was relative). The value of the request's auth query parameter, and of any credential-named one, is **blank** (`?client_secret=&page=2`). The stored trace's `response.redirects[].url` and the `/execute` answer's carry `<redacted>` there instead, as their request `url` does; a script's copy stays blank, the form an export writes. |
-| `schemeDowngrade` | `true` when this hop's request went over `https` and the next one over `http`. The engine withholds `Authorization` and a typed `Cookie` when the scheme, host or port changes, but an API-key *header* is sent on, so this is the one hop a credential can cross in clear text. |
-| `headers` | The hop's own received headers, shaped as `pm.response.headers` is: lower-cased keys, case-insensitive `get()` / `has()` and the other read methods, a repeated name folded with `", "`. A hop's `Set-Cookie` lines therefore join into one string, as they do on `pm.response.headers`. |
+| `url` | The URL of the request **this hop answered**, so `redirects[0].url` is the URL that was requested... [Details](#the-url-of-a-redirect-hop-in-full) |
+| `schemeDowngrade` | `true` when this hop's request went over `https` and the next one over `http`. [Details](#the-schemedowngrade-of-a-redirect-hop-in-full) |
+| `headers` | The hop's own received headers, shaped as `pm.response.headers` is... [Details](#the-headers-of-a-redirect-hop-in-full) |
 
 **Empty means none, absent means not recorded.**
 A send that was not redirected, or that ran with *Follow redirects* off, reads `[]` - the engine looked and saw no hop.
@@ -225,3 +234,18 @@ The property is **missing** where the engine follows redirects without keeping t
 A chain that ends in `too_many_redirects` still lists the hops it made, at most the request's `maxRedirects`.
 
 The same facts are on the run's stored trace as `response.redirects[]`, with `status`/`statusText` and `headerLines` in place of the script's `code`/`status`/`headers`, and with `<redacted>` where the script's `url` reads blank.
+
+### The `url` of a redirect hop in full
+
+...and the next entry's is where the first one's `Location` pointed (resolved, when it was relative).
+The value of the request's auth query parameter, and of any credential-named one, is **blank** (`?client_secret=&page=2`).
+The stored trace's `response.redirects[].url` and the `/execute` answer's carry `<redacted>` there instead, as their request `url` does; a script's copy stays blank, the form an export writes.
+
+### The `schemeDowngrade` of a redirect hop in full
+
+The engine withholds `Authorization` and a typed `Cookie` when the scheme, host or port changes, but an API-key *header* is sent on, so this is the one hop a credential can cross in clear text.
+
+### The `headers` of a redirect hop in full
+
+...lower-cased keys, case-insensitive `get()` / `has()` and the other read methods, a repeated name folded with `", "`.
+A hop's `Set-Cookie` lines therefore join into one string, as they do on `pm.response.headers`.
