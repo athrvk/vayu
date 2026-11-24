@@ -224,7 +224,7 @@ The store holds the same id so the switcher, the resolver and every composed pay
 - `useActiveEnvironmentRestore` (`hooks/`, mounted in `App.tsx`) reconciles on launch: adopt the engine's active environment if it has one, otherwise push a persisted id that names an environment that still exists - once per session, so a write the engine keeps rejecting is a failed write and not a request loop.
   Both directions wait on `isSuccess`; an unreachable engine returns an empty list that is indistinguishable from "no environments exist", and adopting from that would clear a good selection on every cold start.
   A third direction was added with the MCP state tools (#758): once this session has *seen* the engine hold a selection, an engine that reports none is adopted as a clear rather than pushed back at.
-  Otherwise an `activate_environment` with `"none"` - or any other client's deactivate - would be undone on the very next refetch by this window's memory of the id it used to hold.
+  Otherwise an `activate_environment` with `"none"` - or any other client's deactivate - would be undone on the very next refetch by this window's memory of the id it last held.
   The upgrade push stays for the case it was written for: an engine that has never held a selection at all.
 
 It composes with `useActiveEnvironmentGuard` above rather than replacing it, and is mounted after it: the guard answers "does this id still exist", this hook answers "which id does the engine hold".

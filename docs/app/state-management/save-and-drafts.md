@@ -27,7 +27,7 @@ type UnsavedEdit =
 ```
 
 **Each surface reports under its own id, and nothing writes `status` (#3350).**
-The store used to hold one `status` that every surface wrote through public setters (`setStatus`, `markPendingSave`, `startSaving`, `failSave`, `reset`), so one surface's write erased another's:
+The store holds no single `status` that every surface writes through public setters (`setStatus`, `markPendingSave`, `startSaving`, `failSave`, `reset`): that shape let one surface's write erase another's:
 switching request tabs ran a `reset()` that wiped the variables editor's "Not saved", Settings' clean branch published `idle` over another context's error, and the autosave retry read another surface's failure as its own.
 Those setters are gone.
 A surface reports:
@@ -95,8 +95,7 @@ The "Saved" window is the store's own: `reportSaved` opens it and any later repo
 Its lifetime is `TIMING.SAVED_STATUS_DURATION_MS`, in one place, for every surface that saves.
 
 **`lastErrorMessage` is the reason behind an `"error"` status**, for the Dock's persistent line - see below.
-It went through the same fate as `errorMessage` once: the field existed for the Dock's error line, that line was removed in favour of the toast, and the field went with it as one nothing read any more.
-It is back because the toast turned out not to be the whole answer (next paragraph), and this time it has a second reader.
+A field with one reader, the Dock's error line, goes when that line does, as `errorMessage` did; this one has a second reader because the toast is not the whole answer (next paragraph).
 Whether that failure was a 507 is kept on its entry (`diskFull`), not beside it: `flushAll` reads it per context, and no screen reads a store-wide copy.
 
 There is no `lastSavedAt` or `pendingSaveId`, for the same reason that field almost went a second time - every match on either name was a write inside `save-store.ts`.
@@ -226,7 +225,7 @@ A stored value that moved away from the draft's `baseline` is a conflict (#1437)
 
 **It replaced `collection-auth-draft-store.ts` (#1483).**
 The Inheritance Chain card and the context bar's `CollectionAuthSection` read the stored collection, which says nothing about a mode picked and not yet saved.
-`AuthTab` used to mirror its draft into a store of its own and clear it on unmount, so with the draft now outliving the tab the context bar would have described the saved auth while the tab stayed dirty.
+`AuthTab` does not mirror its draft into a store of its own that clears on unmount: the draft outlives the tab, so the context bar would describe the saved auth while the tab stayed dirty.
 Both read the entity draft store through `useCollectionAuthDraft` instead; `withDraftAuth` (`modules/request-builder/utils/auth-resolution.ts`) substitutes the pick into an ancestor chain before either reader calls `resolveAuthSource`, so a dirty pick and its own inheritance chain agree.
 A reader tells "unsaved" from a just-saved entry with `isUnsavedAuthDraft` (same module), which compares the way the tab's `isDirty` does; both readers append "(unsaved)" only while that holds, because the engine composes from the stored row and a request below sends that until Save.
 

@@ -132,8 +132,8 @@ Leaving the list alone there keeps a phantom row on screen that fails the same w
     Refetching an infinite query re-fetches *every* loaded page in sequence, so a user ten pages deep drove ~10 engine requests per tick.
     Only page 1 can gain rows (`start_time DESC`) anyway; a paged list refreshes on the next mutation or invalidation instead of on a timer.
   - **Only a surface that renders runs mounts it.**
-    The interval belongs to the hook, so it runs for as long as *any* observer is mounted - and the App root used to be one, which kept the poll alive with History closed, nothing running and nothing at the root reading the result (#1150).
-    The root now calls **`usePrefetchRuns()`** instead: one `prefetchInfiniteQuery` over `runsListInfiniteOptions()`, which warms the same cache entry without observing it.
+    The interval belongs to the hook, so it runs for as long as *any* observer is mounted - so the App root must not be one: it would keep the poll alive with History closed, nothing running and nothing at the root reading the result (#1150).
+    The root calls **`usePrefetchRuns()`** instead: one `prefetchInfiniteQuery` over `runsListInfiniteOptions()`, which warms the same cache entry without observing it.
     `HistoryList`, `WelcomeScreen` and the palette's `useEntityItems` observe the key while they are visible and drive the cadence themselves.
   - **`runsListInfiniteOptions(q?, pinnedOnly?, origin?)`** - the key, fetcher and page params (the cursor, `string | undefined`), shared by the hook and the warm-up so the entry one writes is the entry the other reads.
     `origin` joins the key only when set, so the unfiltered list stays the entry the warm-up and the other observers share.
@@ -160,7 +160,7 @@ Leaving the list alone there keeps a phantom row on screen that fails the same w
   Own key family (`queryKeys.runs.lastCollectionRun(collectionId)`) under the `lastCollectionRuns()` prefix, outside `runs.lists()`, for the third time and the same shape reason.
   Invalidated by `useStartScenarioRunMutation` (the new run *is* the last run), `useDeleteRunMutation` and `useInvalidateRuns`.
 - **`useRunQuery(runId)`** / **`runDetailOptions(runId)`** - Fetch a single run (full `configSnapshot`).
-  Same 404 contract as `requestDetailOptions`: only an `ApiError` with `statusCode === 404` becomes **`RunNotFoundError`** (test it with `isRunNotFound`, never by message), and that error is **never retried** - a run tab is persisted and outlives its run, so a deleted run used to retry forever behind a "Try again" that could not work.
+  Same 404 contract as `requestDetailOptions`: only an `ApiError` with `statusCode === 404` becomes **`RunNotFoundError`** (test it with `isRunNotFound`, never by message), and that error is **never retried** - a run tab is persisted and outlives its run, so a deleted run would retry forever behind a "Try again" that could not work.
   Everything else - a 5xx, an unreachable engine - is rethrown untouched and keeps the default retry budget.
   `HistoryDetail` renders the two cases differently: "this run no longer exists" (deleted, or removed by History's retention, which keeps only the newest Send runs; the 404 cannot tell them apart) with **Close tab**, versus "couldn't load this run" with **Try again**.
   The options carry a function-form `refetchInterval` that polls (3s) only while the cached run's status is `running` or `pending`: this object is spread into every open tab's query by `tab-descriptors`, and a run opened mid-run (from another window, an agent or a relaunch) has nothing else that tells it the run ended (#1934).
@@ -173,7 +173,7 @@ Leaving the list alone there keeps a phantom row on screen that fails the same w
 
 - **`useRunTimeSeriesQuery(runId, status?)`** (`@/queries/runs`) - The stored series behind the History charts, in **one request**: `GET /runs/:id/metrics?maxPoints=HISTORY_SERIES_MAX_POINTS` (2,000, `config/network.ts`).
   A run with at most that many ticks comes back raw; a longer one comes back folded into buckets, with `bucketed: true` and `ticksPerBucket` on the envelope (#2547), which the Performance tab's charts state in a note.
-  It is a plain query, never paged: a 24 h soak used to be 18 pages of raw ticks.
+  It is a plain query, never paged: paging the raw ticks of a 24 h soak would take 18 pages.
   Keyed `runs.timeSeriesDownsampled(id, maxPoints)`, under the `runs.timeSeries(id)` prefix the run-scoped invalidation and removal use.
   A finished run's ticks cannot change, so `staleTime: Infinity`; with an in-progress `status` the ticks written so far are stale at once.
   `gcTime` is the short `RUN_SERIES_GC_TIME_MS` (1m): the entry is small and one request to read again.

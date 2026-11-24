@@ -45,7 +45,7 @@ The fourth is the Services drawer's inbox row (`modules/services/ServicesPanel.t
 It reads rather than writes, and an inbox whose toggle is off gets no note, because there is nothing to say about a promise that was never made.
 
 **Persisted**, and pruned: an inbox id belongs to the engine process that minted it, so `retainInboxes` drops every id a successful `GET /inbox` no longer names, called from `useInboxWatchers` on a list read the engine actually answered - a failed read leaves the map alone, because "no inboxes" and "could not ask" are not the same list.
-It was called from `InboxView` until #1400, which pruned the map only while that tab happened to be open.
+It is called from `useInboxWatchers` and not from `InboxView`, which would prune the map only while that tab happened to be open (#1400).
 `migrate` and `merge` both normalize, as `host-sleep-store` does.
 
 ## `import-modal-store.ts` - Import Modal UI
@@ -82,7 +82,7 @@ The menu is a Radix `DropdownMenu`, which owns its open state unless handed one;
 ## `import-report-store.ts` - What An Import Left Undone
 
 The loss report of a successful import, kept after the dialog that showed it closes (issue #2109).
-The preview lists everything an import dropped or altered, one line each (`importNotices`); on success the dialog resets and that list used to go with it.
+The preview lists everything an import dropped or altered, one line each (`importNotices`); on success the dialog resets and would take that list with it, which is why the report is kept here.
 `announceImport` (`modules/collections/import-report.ts`) records one `ImportReport` per applied file here, keyed by the **real** id of each root collection the file created, so a file that created several roots stores the same report under each.
 `announceImport` also folds the outcome of the import's environment activation (`import-environment.ts`) into the toast it raises.
 

@@ -17,7 +17,7 @@ It is stored as the engine's `liveReplayWindowMs` entry (milliseconds; `0` = ful
 The engine needs the same number: it sizes the in-memory SSE tick ring that `GET /runs/:runId/live` replays - from offset 0 for a first attach, which is what rebuilds these charts when the dashboard attaches mid-run, and from the last frame held for a Reconnect (#3571).
 Two settings would let the retained span and the displayed span disagree, with the engine replaying less than the chart is configured to show.
 `constants/live-window.ts` owns the option list and the `liveWindowToMs` / `liveWindowFromMs` mapping.
-The Dashboard picker is its **only** editor: the engine settings list rendered a second one until #586, under a different label and a different save model, and `ENGINE_SETTINGS_EDITED_IN_APP` (`modules/settings/engine-settings-edited-in-app.ts`) is what keeps that row out of it now.
+The Dashboard picker is its **only** editor: a second one in the engine settings list would sit under a different label and a different save model (#586), and `ENGINE_SETTINGS_EDITED_IN_APP` (`modules/settings/engine-settings-edited-in-app.ts`) is what keeps that row out of it.
 
 The **tick ceiling** is shared the same way, as `liveMaxRetainedTicks` (default 50,000).
 It is a memory bound, not a rendering one - `bucketColumns` collapses ticks into `chartBucketSeconds` buckets (0.5s by default) before uPlot sees them, and uPlot draws to canvas, so a full window reaches the screen as a few thousand points however many ticks back it.
@@ -193,7 +193,7 @@ It does not say it over a run whose `endedAs` is already set, and a later `runEn
 
 **A batch per flush, not a commit per event** (issue #1153).
 `ScenarioRunService` buffers arriving `step` events and commits what it collected on the user's `liveRefreshMs` cadence, the same throttle `LoadTestService` puts on its ticks.
-The premise for having none - that a scenario's step rate is bounded by request latency - does not hold: the engine's scenario loop is sequential with no pacing, so a local target returns hundreds of steps per second, and each one used to cost a full copy of the step list, a store notify and a re-render of the run tab.
+The premise for having none - that a scenario's step rate is bounded by request latency - does not hold: the engine's scenario loop is sequential with no pacing, so a local target returns hundreds of steps per second, and each one would cost a full copy of the step list, a store notify and a re-render of the run tab.
 The buffer is committed on the leading edge of a window and again on a trailing timer, and drained when the stream closes or fails; a run replaced mid-flight discards whatever it left buffered, since those rows belong to a list the store has already cleared.
 That mechanism - buffer, leading edge, trailing timer, and the `liveRefreshMs` read behind it - is one implementation, `services/throttled-batcher.ts` (issue #1206), and now has a third caller: `useExecutionEvents` buffers a design-mode request's streamed events through it the same way (issue #1158).
 When to flush and when to discard stay each caller's own, because the lifecycles genuinely differ - the design-mode hook flushes on teardown rather than discarding, because a teardown there is as often the builder unmounting mid-stream as it is a replacement, and the store's run guard is what drops the leftovers in the second case.

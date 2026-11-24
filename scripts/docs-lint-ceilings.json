@@ -160,43 +160,14 @@
       "max_cell": 814,
       "history": 7
     },
-    "docs/app/state-management/draft-hooks.md": {
-      "history": 3
-    },
-    "docs/app/state-management/engine-and-variable-hooks.md": {
-      "history": 1
-    },
-    "docs/app/state-management/flows-and-practices.md": {
-      "history": 2
-    },
-    "docs/app/state-management/module-local-stores.md": {
-      "history": 2
-    },
-    "docs/app/state-management/notices-and-menus.md": {
-      "history": 2
-    },
-    "docs/app/state-management/query-hooks.md": {
-      "history": 3
-    },
     "docs/app/state-management/query-keys.md": {
       "max_line": 1529,
       "long_lines": 9,
-      "max_cell": 1327,
-      "history": 1
-    },
-    "docs/app/state-management/request-builder-context.md": {
-      "history": 4
+      "max_cell": 1327
     },
     "docs/app/state-management/run-live-state.md": {
       "max_line": 490,
-      "long_lines": 1,
-      "history": 2
-    },
-    "docs/app/state-management/save-and-drafts.md": {
-      "history": 3
-    },
-    "docs/app/state-management/tabs-layout-session.md": {
-      "history": 1
+      "long_lines": 1
     },
     "docs/app/variable-resolution.md": {
       "lines": 1406,

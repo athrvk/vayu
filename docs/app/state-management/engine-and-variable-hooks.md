@@ -84,7 +84,7 @@ The request builder's context carries it beside `resolveString`, and `VariableSu
 4. Global variables
 
 Collection scope comes from the `collectionId` option and nowhere else - a caller that passes none resolves against globals + environment.
-See `docs/app/variable-resolution.md` for why the session-store fallback was removed.
+See `docs/app/variable-resolution.md` for why there is no session-store fallback.
 
 `boundRow` is optional and additive: without it `resolveString` / `resolveObject` resolve exactly as before (composition only, both a bound column and `{{data.column}}` deferred).
 With it, they resolve through `resolveTemplateWithRow` instead, so a bare bound column and `{{data.column}}` both read the row - the request builder's provider is the one caller that passes it, deriving it from the picked-row index.

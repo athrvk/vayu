@@ -102,7 +102,7 @@ That is what makes its `staleTime: Infinity` honest: an answer cannot go stale w
 - **A single-request update invalidates narrowly, for the same reason.**
   Which lists a request write can affect *is* client-side knowledge: the request's own collection, plus the one it left if the write was a move.
   So `useUpdateRequestMutation` invalidates `requests.listByCollection(id)` per affected collection rather than `requests.lists()`.
-  It used to refetch every collection's list on any rename, which a reorder (a run of sibling PUTs) turns into one full-tree refetch per row.
+  Invalidating `requests.lists()` would refetch every collection's list on any rename, which a reorder (a run of sibling PUTs) turns into one full-tree refetch per row.
   The source collection of a move is read from the `requests.detail` cache, which still holds the pre-update row at that point - the response carries only the new owner.
 - **The warm-cache prefetch is a query too.**
   `usePrefetchCollectionsAndRequests` is keyed as `queryKeys.prefetch.allRequests()` rather than an inline key, so a write that can change any collection's requests re-runs it as one call (`invalidateAllRequestLists`).

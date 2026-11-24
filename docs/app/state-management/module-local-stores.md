@@ -29,7 +29,7 @@ const {
 **Every action here has a caller, and expanding is idempotent.**
 `expandCollection` (one id) and `expandCollections` (an ancestor chain) both return the *same* Set when nothing changes, because it is passed down the whole tree and listed in effect dependencies - a fresh Set for a no-op re-renders every row and re-runs the reveal effect.
 That is why the tree calls them instead of hand-rolling `if (!expanded.has(id)) toggle(id)`, which reads the set it writes and so drags `expandedCollectionIds` into the dependencies of everything that expands.
-`collapseCollection` and `reset` used to live here with no callers at all; collapsing goes through `toggleCollectionExpanded`.
+The store has no `collapseCollection` and no `reset`; collapsing goes through `toggleCollectionExpanded`.
 
 ## `modules/history/history-store.ts` - History Filter & Sort
 
@@ -264,7 +264,7 @@ The outline lives in the context bar, outside `RequestBuilderProvider`; the Mona
 What crosses the boundary is a request to reveal, not an editor.
 
 **Consume-and-clear**, for the reason the insertion effect records: a command left in the slot is replayed on the next render and the next remount, and Radix remounts the Body tab on every glance at Headers.
-`GraphQLBody` clears it once served **and** when it cannot serve it (the operation was renamed away, which it says out loud); the provider clears one naming another request or a request whose body is no longer GraphQL, since nothing under it can ever serve those.
+`GraphQLBody` clears it once served **and** when it cannot serve it (the operation has been renamed away, which it says out loud); the provider clears one naming another request or a request whose body is no longer GraphQL, since nothing under it can ever serve those.
 The provider's other half is bringing the Body tab forward - the editor does not exist while another tab is on screen.
 
 **A command names its request** for the reason the [body drafts](request-builder-context.md#requestbuildercontext---body-drafts) do: only one request builder is mounted at a time, so a mismatch takes a click and a tab switch in the same tick, and the cost of not carrying the id is another request's editor jumping to a line number that means nothing there.

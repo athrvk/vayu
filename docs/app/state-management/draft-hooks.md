@@ -45,8 +45,8 @@ const {
   The saver and the token are bound together when `performSave` is called; if the token has moved by the time the write lands, an edit arrived that the payload does not hold, and the status goes back to `pending` rather than flashing "Saved" over it.
   The caller is what re-arms the save - this only refuses to mislabel it
 
-`app/src/config/timing.ts` used to carry an `AUTO_SAVE_DELAY_MS: 3000` that nothing read and that this section documented as the source of truth.
-It is deleted; `timing-keys-have-readers.test.ts` now fails on any TIMING key without a reader, and `useSaveManager.autosave-setting.test.tsx` pins the Settings value to the timer that actually runs.
+`app/src/config/timing.ts` carries no `AUTO_SAVE_DELAY_MS`: a constant nothing reads has no place as the source of truth.
+`timing-keys-have-readers.test.ts` now fails on any TIMING key without a reader, and `useSaveManager.autosave-setting.test.tsx` pins the Settings value to the timer that actually runs.
 
 **Usage:**
 ```typescript
@@ -69,7 +69,7 @@ Located in `app/src/hooks/useEntityDraft.ts`.
 `reset` therefore has fewer callers than `draft` has; `InfoTab` reaches the discard path through `adopt` instead.
 
 **Why auth - and now Elements - keep the button (#446, #1512).**
-Not because a credential or an element list outranks a plain field - the request builder autosaves its own auth through `useSaveManager`, and used to autosave its scripts the same way `InfoTab` still does.
+Not because a credential or an element list outranks a plain field - the request builder autosaves its own auth through `useSaveManager`, as `InfoTab` does.
 Because a blur is not a completion signal once a tab is more than one focus stop: an OAuth 2.0 config with Advanced open renders 20 focus stops, 9 of them non-value controls, and clicking reveal to check a half-typed password fires `focusout` while the draft is dirty - so a blur-commit would write half a credential to the record every descendant request inherits from.
 The old `ScriptTab` had exactly one focus stop (its Monaco editor), so leaving it meant what leaving a description means - but `ElementsTab`'s `ElementList` is adding a kind, naming a row, toggling it, reordering it and editing its form, each a separate stop, and a `script.*` element's own editor inside the list would fire the identical half-typed-value blur.
 The fields only make sense saved together, which is what the button means on both tabs now.
@@ -100,7 +100,7 @@ const {
   In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`.
   The request builder needs the same property for the same reason and gets it a different way, since its state is not a draft: see [the draft adopts an external write per field](#the-request-builders-draft-adopts-an-external-write-per-field).
 - **A dirty draft is never silently overwritten (#1437).**
-  While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote.
+  While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft`, which would let an MCP `update_collection` landing mid-edit replace the user's unsaved text with whatever the agent wrote.
   `ElementsTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it.
   `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose.
   Its per-key Take theirs calls `adopt`, not `setDraft` and not `reset` (which would take the other field too):

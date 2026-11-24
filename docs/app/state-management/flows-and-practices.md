@@ -157,12 +157,12 @@ A renderer that is replaced - a crash recovered, a hung one reloaded from the "n
     Route the failure through `reportFailed` (toast + "Not saved") when the edit stays on screen, a toast when the surface rolls it back, or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - the context bar's variables section did neither, so a rejected edit sat on screen looking committed.
 
 6. **Leaving an editor saves or asks; it does not drop.**
-   A settings category switch, an unmount, a tab switch - each used to discard dirty state silently in at least one place.
+   A settings category switch, an unmount and a tab switch are each a place dirty state could be discarded silently, so each saves or asks.
    Settings flushes its valid edits on the way out (engine config writes are cheap merge-patches); the collection tabs keep their panels mounted so there is nothing to discard.
 
 7. **Tab LRU and dirty state:** The tab store reads the save registry and refuses to evict a dirty tab (`isTabDirty`, matched by tab *type* - the registry is keyed by editor and the two do not line up).
    Nothing is flushed during eviction, because the predicate has already declined to take unsaved work; over the cap with every candidate dirty, no tab closes at all.
-   An *explicit* close (`closeTab`) is not eviction and used to have no such guard; it now applies the same `isTabDirty` check but only refuses when the engine is not `connected` (#1489) - a dirty tab closes and flushes as usual once the engine can actually take the write.
+   An *explicit* close (`closeTab`) is not eviction, but it applies the same `isTabDirty` check and only refuses when the engine is not `connected` (#1489) - a dirty tab closes and flushes as usual once the engine can actually take the write.
 
 8. **Response persistence:** Responses are stored in memory (not localStorage) so they survive tab switches but are cleared on page reload.
    This balances UX (quick switch back) with memory (responses can be large).

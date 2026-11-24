@@ -106,9 +106,9 @@ Not persisted.
 Two settings each own a header row: the body mode's `Content-Type` (written by `BodyPanel`) and the Event stream toggle's `Accept: text/event-stream` (written by `SettingsPanel`, issue #574).
 GraphQL is sent as a JSON envelope and genuinely needs `Content-Type: application/json`, so `BodyPanel` appends one - but nothing removed it, so a single visit to GraphQL left the header on the request for good, including after switching back to `none`, which sends no body at all.
 
-Ownership of the row used to be a context-level record, `{ requestId, rowId, value }`, held in a ref the provider owned.
-That could not survive a reload: a fresh mount started with an empty ref, so a stale auto-written row was then indistinguishable from one the user typed, and neither `withoutContentType` (nothing to remove) nor a later mode switch (an "existing" row, so nothing to add) could tell the difference (issue #1481).
-Ownership now lives on the row itself - `KeyValueEntry.source?: HeaderRowSource`, whose `"body-mode" | "stream"` half (`AutoHeaderSource`) is what an app setting writes;
+Ownership of the row is not a context-level record, `{ requestId, rowId, value }`, held in a ref the provider owns.
+Such a record cannot survive a reload: a fresh mount starts with an empty ref, so a stale auto-written row is then indistinguishable from one the user typed, and neither `withoutContentType` (nothing to remove) nor a later mode switch (an "existing" row, so nothing to add) can tell the difference (issue #1481).
+Ownership lives on the row itself - `KeyValueEntry.source?: HeaderRowSource`, whose `"body-mode" | "stream"` half (`AutoHeaderSource`) is what an app setting writes;
 the third value, `"legacy-default"`, is the engine's own header-strip repair pass marking a row it disabled rather than deleted (issue #1491, `docs/engine/db-schema.md`'s "header-strip pass" section) and is never written from this side.
 There is no context accessor for either app setting any more;
 `switchAutoHeader` in `modules/request-builder/utils/auto-header.ts` reads and writes the marker directly on the headers array it is handed, once per change:
@@ -125,8 +125,8 @@ Two things it is deliberate about:
   Silently replacing it would be a worse version of the bug this exists to fix.
   A disabled declaration does not count: it is not sent, so the header the mode needs is still missing.
 
-The setting that used to be the one slot left, `AutoMethod`, is not a header row at all (issue #1228).
-A new request is a GET, and GraphQL over GET is a different transport - the document travels as query parameters and a mutation cannot be sent that way - so picking the GraphQL body mode on a request still holding that default used to build one the server answered with a bare `400`.
+`AutoMethod` is not a header row at all (issue #1228).
+A new request is a GET, and GraphQL over GET is a different transport - the document travels as query parameters and a mutation cannot be sent that way - so picking the GraphQL body mode on a request still holding that default would build one the server answers with a bare `400`.
 The mode now sets `POST` the same reversible way it sets the `Content-Type` header above, and leaving the mode puts the method back.
 It has the same reload gap issue #1481 fixed for the two header rows, closed the same way by issue #1505: ownership lives on `RequestState.methodSource?: MethodSource` (`"graphql"`, the domain type mirroring `HeaderRowSource`), a value on the request itself rather than a ref-held record, so it is exactly as durable as `request.method` beside it.
 `switchGraphQLMethod` in `panels/body/graphql-method.ts` is the rule that reads and writes it, called from `BodyPanel.handleModeChange` alongside `switchAutoHeader`, and it keeps the same two guarantees stated as bullets above, read against a scalar field instead of a row:
@@ -135,7 +135,7 @@ A GET still reaches GraphQL through the door this side effect does not touch - t
 
 **Which identity a builder files under is one value, resolved once** (issue #1272): `memoryKey ?? request.id ?? UNSAVED_AUTO_KEY`, read by every per-builder map the provider still holds - now only the Send-with-row picker's row memory below, since the three reversible-setting records above all moved onto the request's own state.
 A request tab is its request and passes nothing.
-The editable copy History renders for a stored run passes the run id, because `design-run-seed.ts` gives that copy `id: null` on purpose - a null id is one of the two gates that stop an edited copy from rewriting the saved request - so every open run copy used to share the id-less bucket before issue #1272.
+The editable copy History renders for a stored run passes the run id, because `design-run-seed.ts` gives that copy `id: null` on purpose - a null id is one of the two gates that stop an edited copy from rewriting the saved request - so every open run copy would otherwise share the id-less bucket (issue #1272).
 That was not a near miss: the rules read a `requestId` of `null` against another `null` as a match, so the second run tab's picked row was handed the first one's record and read as its own.
 A prop rather than a field on `RequestState` that only History would set: `request.id` stays honestly null, and no request grows a "which run am I" field for one caller.
 A run id names a tab, so that memory is bounded by the same sweep rather than exempt from it.
