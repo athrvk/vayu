@@ -6,23 +6,14 @@
  */
 
 /**
- * One Monaco model per request per editor (#3136).
- *
- * One `RequestBuilder` serves every request tab and `BodyPanel` stays mounted
- * once visited (#1718), so the same Monaco editor outlives a request switch.
- * `@monaco-editor/react` applies a changed `value` to whatever model the editor
- * holds as an undoable edit, so without a model of its own per request, Ctrl+Z
- * in request B restored request A's text and reported it through `onChange`,
- * marking B dirty and autosaving A's body into it.
- *
- * Giving each request its own model (the `path` prop) turns the switch into
- * `setModel`: every request keeps its own undo stack, cursor and scroll, and a
- * value that already matches the model is no edit at all.
- *
- * **The pane is part of the path** because a pane is a different document, not
- * a different view of one: the raw body and the GraphQL query share
- * `request.body` but must never share an undo stack, or leaving GraphQL for
- * JSON would offer the query as an undo step of the payload.
+ * One Monaco model per request per editor (#3136). One `RequestBuilder` serves every request tab
+ * and `BodyPanel` stays mounted once visited (#1718), so an editor outlives a request switch, and
+ * `@monaco-editor/react` applies a changed `value` to the held model as an undoable edit: Ctrl+Z in
+ * request B restored A's text through `onChange`, dirtying B and autosaving A's body into it. A
+ * model per request (the `path` prop) makes the switch a `setModel`: each request keeps its undo
+ * stack, cursor and scroll, and a matching value is no edit. **The pane is part of the path**: the
+ * raw body and the GraphQL query share `request.body` but are different documents, and a shared
+ * undo stack would offer the query as an undo step of the JSON payload.
  */
 
 import type { MonacoApi } from "@/lib/monaco-api";
@@ -46,12 +37,10 @@ function requestIdOf(uri: { scheme: string; authority: string; path: string }): 
 }
 
 /**
- * Dispose the request models whose request is not in `keep`.
- *
- * Idempotent, and safe on a model an editor still shows: Monaco detaches it,
- * and the editor takes the next request's model on the render that follows.
- * Models that are not ours (the response viewer's, a script's) are untouched.
- * `keep` null disposes every request model - the builder is going away.
+ * Dispose the request models whose request is not in `keep`. Idempotent, and safe on a model an
+ * editor still shows: Monaco detaches it, and the editor takes the next request's model next
+ * render. Other models (the response viewer's, a script's) are untouched. `keep` null disposes
+ * every request model: the builder is going away.
  */
 export function disposeRequestModels(monaco: MonacoApi, keep: ReadonlySet<string> | null): void {
 	for (const model of monaco.editor.getModels()) {

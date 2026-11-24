@@ -6,14 +6,12 @@
  */
 
 /**
- * Where the request knows better than a kind's blank config (#3806): an
- * `assert.jsonschema` added to an `mcp` request whose stored tool states an
- * `outputSchema` starts as "the tool result's `structuredContent` matches it".
- *
- * `ElementList` writes the answer into the element when it is added; the
- * element is stored data, so a later edit of the tool does not reach back into
- * it. The path is the JSON-RPC envelope's: the engine hands the assertion the
- * whole response body, and an MCP tool result sits under `result`.
+ * Where the request knows better than a kind's blank config (#3806): an `assert.jsonschema` added
+ * to an `mcp` request whose stored tool states an `outputSchema` starts as "the tool result's
+ * `structuredContent` matches it". `ElementList` writes this into the element when added; the
+ * element is stored data, so a later tool edit does not reach it. The path is the JSON-RPC
+ * envelope's: the engine hands the assertion the whole body, and an MCP tool result sits under
+ * `result`.
  */
 
 import { isPlainObject } from "@/lib/elements";
@@ -24,9 +22,8 @@ export const MCP_STRUCTURED_CONTENT_PATH = "$.result.structuredContent";
 type StartingElementConfigs = Record<string, Record<string, unknown>>;
 
 /**
- * The starting configs for @p request's elements, by kind, or `undefined` when
- * it has none to offer: any body other than `mcp`, or a tool with no
- * `outputSchema`.
+ * The starting configs for @p request's elements by kind, or `undefined`: any body but `mcp`, or a
+ * tool with no `outputSchema`.
  */
 export function startingElementConfigs(
 	request: Pick<RequestState, "bodyMode" | "mcpTool">

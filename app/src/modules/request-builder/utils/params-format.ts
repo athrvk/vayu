@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Params Format Utilities
- *
- * Utilities for converting between params array and text format for bulk edit
- */
+/** Converting between params rows and Bulk Edit text. */
 
 import type { KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
@@ -25,20 +21,16 @@ import { queryRowsOf } from "./path-variables";
 import { writesBareKey } from "./url";
 
 /**
- * Format params array to text format for bulk edit
- * Format: "key=value" (one per line); a disabled row is prefixed `// `
- * (issue #1480), the same marker the Headers tab uses.
- *
- * Query rows only: the bulk editor edits the query table, and a path row
- * (issue #1764) belongs to the URL's `:name` segments, not to a `key=value` line.
+ * Params as Bulk Edit text: `key=value` per line, a disabled row prefixed `// ` (#1480), as Headers
+ * does. Query rows only: a path row (#1764) belongs to the URL's `:name` segments, not a line.
  */
 export const formatParamsToText = (params: KeyValueItem[]): string => {
 	return (
 		queryRowsOf(params)
 			// Empty rows are not offered for editing.
 			.filter((p) => p.key.trim() || p.value.trim())
-			// Each line is spelled the way `buildUrlWithParams` sends it: a
-			// valueless row as a bare `page`, an empty value as `page=`.
+			// Spelled as `buildUrlWithParams` sends it: a valueless row as bare `page`, an empty
+			// value as `page=`.
 			.map(
 				(p) =>
 					`${p.enabled ? "" : "// "}${writesBareKey(p) ? p.key : `${p.key}=${p.value}`}`
@@ -52,25 +44,18 @@ const scanParamLines = (text: string): ScannedLine[] =>
 	scanKeyValueLines(text, PARAM_SEPARATORS, { allowBareKey: true });
 
 /**
- * The lines `parseParamsFromText` drops, with their 1-based line numbers (blank
- * lines count but are not reported), so a commit can say what it did not read
- * (#3694). `=novalue` names no key; a bare word is a valueless param, not unread.
+ * The lines `parseParamsFromText` drops, with 1-based line numbers (blank lines counted, not
+ * reported), so a commit can say so (#3694). `=novalue` names no key; a bare word is a valueless
+ * param, not unread.
  */
 export const unreadParamLines = (text: string): UnreadLine[] => unreadLinesOf(scanParamLines(text));
 
 /**
- * Parse text format to params array
- * Format: "key=value" (one per line); "key: value" is accepted when the line
- * carries no `=`, so a header block pasted here parses instead of vanishing.
- * A leading `// ` disables the row (issue #1480).
- *
- * `page`, a legal valueless parameter, is a `valueless` row (`?page`), where
- * `page=` is an empty value (`?page=`).
- *
- * A line that restates a row of `previous` (same key, value and `=`) keeps that
- * row's id, each row once. `buildUrlWithParams` reads the id to tell a row
- * carried over from one the user edited (issue #1771), and a bulk commit edits
- * only the lines that changed.
+ * Bulk Edit text as params: `key=value` per line, `key: value` accepted when the line has no `=`,
+ * so a pasted header block parses; a leading `// ` disables the row (#1480). `page` is a
+ * `valueless` row (`?page`), `page=` an empty value (`?page=`). A line restating a row of
+ * `previous` (same key, value and `=`) keeps its id, each row once: `buildUrlWithParams` reads the
+ * id to tell a carried row from an edited one (#1771), so a bulk commit edits only changed lines.
  *
  * @param text - Params in text format
  * @param previous - The rows the text was formatted from, if any
@@ -93,8 +78,7 @@ export const parseParamsFromText = (
 		});
 	}
 
-	// The `//` marker is not part of what a line restates: toggling a row off
-	// in the text keeps its id.
+	// The `//` marker is no part of what a line restates: toggling a row off in text keeps its id.
 	return carryIds(
 		queryRowsOf(previous),
 		params,
@@ -106,9 +90,8 @@ export const parseParamsFromText = (
 };
 
 /**
- * Whether committing `text` would change nothing about the enabled
- * query `params` (issue #1480) - see `isNoOpHeadersEdit`, same rule. Path rows
- * are not what the text describes, so they never make an edit look like one.
+ * Whether committing `text` changes nothing about the enabled query `params` (#1480),
+ * `isNoOpHeadersEdit`'s rule; path rows never count.
  */
 export const isNoOpParamsEdit = (text: string, params: KeyValueItem[]): boolean => {
 	const normalize = (list: KeyValueItem[]) =>

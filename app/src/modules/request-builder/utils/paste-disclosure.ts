@@ -30,9 +30,9 @@ const UNREADABLE_COMMAND_REASON: Record<CommandFailure, string> = {
 };
 
 /**
- * The notice for a pasted command that could not be imported (#3685). The paste
- * is taken over before the import runs, so without it an unreadable command
- * vanishes; the reason is named because each is fixed in a different place.
+ * The notice for a pasted command that could not be imported (#3685). The paste is taken over
+ * before the import, so without it the command vanishes; the reason is named, as each reason is
+ * fixed in a different place.
  */
 export function unreadableCommandNotice(reason: CommandFailure): ToastOptions {
 	return {
@@ -49,22 +49,16 @@ function describe(dropped: DroppedFlag): string {
 }
 
 /**
- * The notice for what a paste dropped, or null when it dropped nothing.
- *
- * Null rather than an empty toast: the common paste carries everything, and a
- * "nothing was lost" notice on every one of them is how a disclosure surface
- * gets learned as noise and stops being read.
- *
- * `warning` rather than `info`, because a request that will now go direct when
- * the command said "through this proxy" fails later for a reason the paste is
- * responsible for - and the severity floor a user can raise must not hide that.
+ * The notice for what a paste dropped, or null. Null, not an empty toast: most pastes carry
+ * everything, and a "nothing lost" toast on each teaches users to ignore the surface. `warning`,
+ * not `info`: a request now going direct where the command said "through this proxy" fails later
+ * because of the paste, and the user-raisable severity floor must not hide that.
  */
 export function droppedFlagsNotice(dropped: DroppedFlag[]): ToastOptions | null {
 	if (dropped.length === 0) return null;
 
-	// The first pointer, not one per flag: a toast has room for one action, and
-	// the flags that carry a pointer nearly always share a destination (three of
-	// the four homes are the same settings category).
+	// The first pointer, not one per flag: a toast has room for one action, and pointing flags
+	// nearly always share a destination (three of the four homes are one settings category).
 	const destination = dropped.find((entry) => entry.pointer)?.pointer;
 
 	return {
@@ -84,9 +78,8 @@ export function droppedFlagsNotice(dropped: DroppedFlag[]): ToastOptions | null 
 }
 
 /**
- * The notice for the shell variables a paste turned into `{{NAME}}` (#3777), or
- * null when it named none. `info`: the request is correct and sends the literal
- * text only until each name has a value.
+ * The notice for the shell variables a paste turned into `{{NAME}}` (#3777), or null. `info`: the
+ * request is correct and sends the literal text only until each name has a value.
  */
 function variablesNotice(variables: string[]): ToastOptions | null {
 	if (variables.length === 0) return null;
@@ -100,9 +93,8 @@ function variablesNotice(variables: string[]): ToastOptions | null {
 }
 
 /**
- * What a pasted command earns the user: a toast for the variables it named and
- * one for the flags it dropped, in that order, each a single sentence. Empty
- * when the paste changed nothing the user needs to hear about.
+ * A paste's toasts: the variables it named, then the flags it dropped, one sentence each; empty
+ * when nothing needs hearing.
  */
 export function pasteNotices(
 	imported: Pick<CommandImport, "dropped" | "variables">

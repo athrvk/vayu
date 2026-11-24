@@ -5,10 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * URL utilities for the request builder.
- */
-
 import type { KeyValueEntry, KeyValueItem } from "@/types";
 import { generateId } from "@/lib/id";
 import { isBlankRow } from "@/components/shared/KeyValueEditor/key-value";
@@ -47,11 +43,10 @@ interface UrlQuerySplit {
 }
 
 /**
- * The URL cut at its fragment (the first `#`) and then its query (the first
- * `?` before that), with a `{{variable}}` token opaque - so `{{a#b}}` is not a
- * fragment, the same cut `pathVariableSegments` and the engine's
- * `path_variable_segments` make. The fragment is never sent, so a pair left
- * glued to it would never reach the server.
+ * The URL cut at its fragment (first `#`), then its query (first `?` before that), a `{{variable}}`
+ * token opaque so `{{a#b}}` is no fragment: the cut `pathVariableSegments` and the engine's
+ * `path_variable_segments` make. The fragment is never sent, so a pair left glued to it would never
+ * reach the server.
  */
 function splitQuery(url: string): UrlQuerySplit {
 	const { base: beforeFragment, fragment } = splitFragment(url);
@@ -65,8 +60,8 @@ function splitQuery(url: string): UrlQuerySplit {
 }
 
 /**
- * The URL's query pairs, never decoded: split on `&`, then on the first `=`.
- * Empty pairs (`a=1&&b=2`) are dropped.
+ * The URL's query pairs, never decoded: split on `&`, then the first `=`; empty pairs (`a=1&&b=2`)
+ * dropped.
  */
 function rawQueryPairs(url: string): RawQueryPair[] {
 	const { query } = splitQuery(url);
@@ -88,9 +83,8 @@ function rawQueryPairs(url: string): RawQueryPair[] {
 }
 
 /**
- * The rows a query is written from: enabled and keyed. A path row
- * (`in: "path"`, issue #1764) is never part of the query: its value goes into
- * a `:name` segment, which the URL already carries.
+ * The rows a query is written from: enabled and keyed, never a path row (`in: "path"`, #1764),
+ * whose value fills a `:name` segment the URL already carries.
  */
 function queryRowsToWrite(params: readonly KeyValueEntry[]): KeyValueEntry[] {
 	return params.filter((p) => p.enabled && p.key.trim() && !isPathRow(p));
@@ -102,14 +96,10 @@ export function writesBareKey(row: KeyValueEntry): boolean {
 }
 
 /**
- * One row as `key=value`, encoded with Postman's query rule
- * (`encodeQueryComponent`, issue #1771), or as typed under `encode: false`.
- *
- * An empty value writes `key=` and a `valueless` row a bare `key`, as
- * Postman's `QueryParam.unparseSingle` writes `""` and `null` (issue #1772).
- *
- * `encode: false` is a request's `disableUrlEncoding` (issue #1765): the row
- * is written as typed, so `q=a|b` stays `a|b` in the URL the engine sends.
+ * One row as `key=value`, by Postman's query rule (`encodeQueryComponent`, #1771), or as typed
+ * under `encode: false`, a request's `disableUrlEncoding` (#1765), so `q=a|b` stays `a|b` on the
+ * wire. An empty value writes `key=` and a `valueless` row a bare `key`, as
+ * `QueryParam.unparseSingle` writes `""` and `null` (#1772).
  */
 function writeQueryRow(row: KeyValueEntry, encode: boolean): string {
 	const key = encode ? encodeQueryComponent(row.key, "key") : row.key;
@@ -118,28 +108,20 @@ function writeQueryRow(row: KeyValueEntry, encode: boolean): string {
 }
 
 /**
- * The URL that expresses exactly these params: the rows *replace* whatever
- * query the URL carried. The fragment, if any, stays after the new query.
+ * The URL expressing exactly these params: the rows *replace* the URL's query; a fragment stays
+ * after it. The Params table's rule only: there the rows are the whole query, so deleting the last
+ * clears it.
  *
- * This is the Params table's rule, and only the table's - there the rows are
- * the whole truth of the query, so deleting the last one has to clear it.
- *
- * A row the URL already carries keeps the URL's own bytes (issue #1771), so an
- * edit rewrites only the pairs it touches and a pair written by another rule
- * survives it: an Insomnia or OpenAPI import's `encodeURIComponent` join, or a
- * Postman `key=`. Each enabled row takes the first unused pair spelled exactly
- * as the row, and only then may a row take a pair that `safeDecode`s to it.
- * That second match is for a row an older version stored decoded (`+05:00`
- * held for `%2B05%3A00`; re-encoding it would send a `+` a server reads as a
- * space), so it is open only to a row carried over unchanged from `previous`
- * (same id, key and value). A row the user just edited or added means what it
- * says: `+` typed over `%2B` is a `+`. With no `previous`, every row counts as
- * carried over. A row with no pair is encoded.
- *
- * The exact match also asks the pair to agree on `=`, so a row made valueless
- * (or given its `=` back) is rewritten. The decoded match does not: a row
- * stored before rows could be valueless holds `""` for a URL's bare `?flag`,
- * and a carried-over one keeps it.
+ * A row the URL already carries keeps the URL's bytes (#1771), so an edit rewrites only the pairs
+ * it touches and a pair written by another rule survives (an Insomnia or OpenAPI import's
+ * `encodeURIComponent` join, a Postman `key=`). Each enabled row takes the first unused pair
+ * spelled exactly as it, and only then a pair that `safeDecode`s to it. That second match is for a
+ * row an older version stored decoded (`+05:00` for `%2B05%3A00`; re-encoding sends a `+` a server
+ * reads as a space), so only a row carried over unchanged from `previous` (same id, key and value)
+ * gets it: a row just edited or added means what it says, so `+` typed over `%2B` is a `+`. With no
+ * `previous`, every row counts as carried over. A row with no pair is encoded. The exact match also
+ * requires the same `=`, so a row made valueless (or given its `=` back) is rewritten; the decoded
+ * match does not, so a row from before valueless rows, holding `""` for a bare `?flag`, keeps it.
  */
 export function buildUrlWithParams(
 	baseUrl: string,
@@ -187,15 +169,12 @@ export function buildUrlWithParams(
 }
 
 /**
- * Parse the query string of a URL into key/value items, never decoded: a row
- * holds the query text as the URL spells it (`a%20b`), which is Postman's own
- * row model (`QueryParam.parse`) and the read side of `buildUrlWithParams`.
- *
- * Nothing is lost that way (issue #1771). Decoding is not reversible: `%2B`
- * decodes to a `+` a server then reads as a space, `%2541` to `%41`, and `%26`
- * inside a value to a new `&` pair. And since the query encoding never encodes
- * `%`, a raw row written back is the pair it came from. A pair with no `=`
- * (`?flag`) is a `valueless` row, so it is written back without one.
+ * The URL's query as items, never decoded: a row holds the query as the URL spells it (`a%20b`),
+ * Postman's row model (`QueryParam.parse`) and the read side of `buildUrlWithParams`. Nothing is
+ * lost (#1771): decoding is not reversible (`%2B` becomes a `+` a server reads as a space, `%2541`
+ * becomes `%41`, a `%26` in a value a new pair), and the query encoding never encodes `%`, so a raw
+ * row written back is its pair. A pair with no `=` (`?flag`) is a `valueless` row, written back
+ * without.
  */
 export function parseQueryParams(url: string): KeyValueItem[] {
 	return rawQueryPairs(url).map(({ key, value, valueless }) => ({
@@ -208,38 +187,29 @@ export function parseQueryParams(url: string): KeyValueItem[] {
 }
 
 /**
- * The params rows a URL states on its own, for a request that arrives with a
- * URL and no rows: its query, then a path row (empty value) per `:name`
- * segment (issue #1764).
+ * The params rows a URL states alone, for a request arriving with a URL and no rows: its query,
+ * then an empty path row per `:name` segment (#1764).
  */
 export function paramsFromUrl(url: string): KeyValueItem[] {
 	return [...parseQueryParams(url), ...pathRowsFromUrl(url)];
 }
 
 /**
- * Merge the URL's query into the existing params rows, in place of replacing
- * them outright.
+ * The URL's query merged into the existing rows, not replacing them. A disabled row is invisible in
+ * the URL (`buildUrlWithParams` skips it), so replacing with `parseQueryParams(url)` would delete
+ * every disabled row on the next keystroke, and typing the query away would leave the enabled rows
+ * it had (#1482). Enabled rows follow the URL's pair order and keep id, description and `source`; a
+ * key the URL drops is dropped, a new key gets a fresh row where it stands. Following the URL keeps
+ * the table's own rebuild (`buildUrlWithParams`, row order) from reordering the URL on the next
+ * table edit (#3426).
  *
- * A disabled row is invisible in the URL by design (`buildUrlWithParams` skips it),
- * so a wholesale replace with `parseQueryParams(url)` deletes every disabled
- * row on the next keystroke, and typing the query away leaves nothing to
- * remove the enabled rows it used to carry (issue #1482). Enabled rows follow
- * the URL's pair order and keep their id, description and `source`; a key the
- * URL no longer carries is dropped, and a key new to the URL gets a fresh row
- * where it stands. Following the URL is what keeps the Params table's own
- * rebuild (`buildUrlWithParams`, row order) from reordering the URL on the
- * next table edit (issue #3426).
- *
- * A row the URL cannot carry keeps its slot after the enabled row that
- * preceded it (see `unwrittenRowsByAnchor`): a disabled row, and a row with a
- * value and no key yet, which `buildUrlWithParams` never writes either. Read
- * as "dropped from the URL", a half-typed row was deleted by the next URL
- * keystroke, and by every save's echo (#3663). The blank spare row is the
- * table's, not the URL's, and is left out.
- *
- * Path rows (issue #1764) follow the URL's `:name` segments by their own rule,
- * `syncPathRows`, which reads `previousUrl` to tell an edit of those segments
- * from one that leaves them alone, and come after the query rows.
+ * A row the URL cannot carry keeps its slot after the enabled row before it
+ * (`unwrittenRowsByAnchor`): a disabled row, or one with a value and no key yet, which
+ * `buildUrlWithParams` never writes either. Read as "dropped from the URL", a half-typed row was
+ * deleted by the next URL keystroke and by every save's echo (#3663). The blank spare row is the
+ * table's, not the URL's, and is left out. Path rows (#1764) follow the `:name` segments by
+ * `syncPathRows`, which reads `previousUrl` to tell an edit of them from one that leaves them, and
+ * come after the query rows.
  */
 export function mergeParamsFromUrl(
 	existing: readonly KeyValueItem[],
@@ -270,9 +240,8 @@ export function mergeParamsFromUrl(
 }
 
 /**
- * For each pair of the URL, the enabled row that carries it (the first
- * unclaimed pair with the row's key, rows taken in order), or `undefined` for
- * a pair no row carries.
+ * For each URL pair, the enabled row carrying it (the first unclaimed pair with the row's key, rows
+ * in order), or `undefined` for a pair no row carries.
  */
 function claimUrlPairs(
 	rows: readonly KeyValueItem[],
@@ -288,11 +257,9 @@ function claimUrlPairs(
 }
 
 /**
- * Each row the URL cannot carry (`isUnwrittenRow`), grouped under the nearest
- * row before it that the URL still carries (`null` when none, so it leads the
- * list). An enabled row the URL dropped cannot anchor anything, so what
- * followed it falls back to the row before it. Order within a group is the
- * existing order.
+ * Each row the URL cannot carry (`isUnwrittenRow`), grouped under the nearest earlier row it still
+ * carries (`null` when none, so it leads). A row the URL dropped anchors nothing, so what followed
+ * it falls back to the row before. Order within a group is the existing order.
  */
 function unwrittenRowsByAnchor(
 	rows: readonly KeyValueItem[],
@@ -312,8 +279,8 @@ function unwrittenRowsByAnchor(
 }
 
 /**
- * A row `buildUrlWithParams` leaves out of the query (`queryRowsToWrite`), so
- * the URL says nothing about it: disabled, or holding something with no key.
+ * A row `buildUrlWithParams` leaves out of the query (`queryRowsToWrite`), so the URL says nothing
+ * of it: disabled, or holding something with no key.
  */
 function isUnwrittenRow(row: KeyValueItem): boolean {
 	return !row.enabled || (!row.key.trim() && !isBlankRow(row));
@@ -330,13 +297,10 @@ export function safeDecode(part: string): string {
 }
 
 /**
- * A pasted URL with each line break, and the whitespace around it, removed:
- * what an address bar does with a URL wrapped by a terminal, a mail or a PDF
- * (#3688). Whitespace elsewhere is the user's own and stays; the engine already
- * reports a URL with a space in it.
- *
- * Split rather than one `\s*[\r\n]\s*` regex: a long run of blanks with no break
- * after it would make that pattern quadratic.
+ * A pasted URL with each line break and the whitespace around it removed, as an address bar treats
+ * a URL wrapped by a terminal, a mail or a PDF (#3688). Other whitespace is the user's and stays;
+ * the engine reports a URL with a space. Split rather than one `\s*[\r\n]\s*` regex, which is
+ * quadratic on a long run of blanks with no break after it.
  */
 export function joinWrappedLines(text: string): string {
 	const lines = text.split(/[\r\n]+/);
