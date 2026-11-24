@@ -6,26 +6,21 @@
  */
 
 /**
- * What a tab's right-click menu offers (#1360).
+ * What a tab's right-click menu offers (#1360), beside `TabStrip` for `tab-descriptors.ts`'s
+ * reason: what a tab is called and what it can do are answers this strip gives that more than one
+ * surface eventually wants.
  *
- * Beside `TabStrip` rather than inside it, for the reason `tab-descriptors.ts`
- * is: what a tab is called and what a tab can do are both answers this strip
- * gives, and both are wanted by more than one surface eventually.
+ * **Every close here is a store action, never a loop in this file.** "Close others" and "Close to
+ * the right" each remove a set, which the store closes in one publication with one recorded visit
+ * (`tabs-store.ts`); a loop of `closeTab` calls would walk Back through tabs the user never opened.
  *
- * **Every close here is a store action, never a loop in this file.** "Close
- * others" and "Close to the right" each remove a set, and the store closes a set
- * in one publication with one recorded visit (`tabs-store.ts`); a loop of
- * `closeTab` calls would walk Back through tabs the user never opened.
- *
- * **There is no Duplicate here, and that is settled** (#1360 asked for one,
- * #1389 decided against it). The Duplicate it asked for was "a second tab on
- * the same request", which the store refuses by construction: `openTab` dedupes
- * by entity, `sameLocation` finds a tab by the place it shows, and
- * `closeTabsForEntities` closes by entity - two tabs on one request would make
- * all three ambiguous. Duplicating the *request* is a different action under
- * the same word, and it already exists one click away on that request's own row
- * (`useTreeCrud`'s `handleDuplicateRequest`); this menu is about tabs, so it
- * does not grow a second route to it. Nothing is pending behind this paragraph.
+ * **There is no Duplicate here, and that is settled** (#1360 asked for one, #1389 decided against
+ * it). "A second tab on the same request" is refused by the store by construction: `openTab`
+ * dedupes by entity, `sameLocation` finds a tab by the place it shows and `closeTabsForEntities`
+ * closes by entity, so two tabs on one request would make all three ambiguous. Duplicating the
+ * *request* is another action under the same word, already one click away on that request's row
+ * (`useTreeCrud`'s `handleDuplicateRequest`); this menu is about tabs, so it grows no second route.
+ * Nothing is pending behind this paragraph.
  */
 
 import { X, XCircle, ChevronsRight, CheckCheck, Copy } from "lucide-react";
@@ -51,8 +46,8 @@ export function useTabActions(tab: Tab, descriptor: TabDescriptor): RowAction[] 
 			label: "Close others",
 			icon: XCircle,
 			onSelect: () => closeOtherTabs(tab.id),
-			// Offered but inert with one tab open would be a menu item that does
-			// nothing; disabled says which it is.
+			// With one tab open it would do nothing; disabled says so rather than offering an inert
+			// item.
 			disabled: openTabs.length < 2,
 		},
 		{
@@ -66,8 +61,8 @@ export function useTabActions(tab: Tab, descriptor: TabDescriptor): RowAction[] 
 			icon: CheckCheck,
 			onSelect: closeSavedTabs,
 		},
-		// Request tabs only, and only once the request has loaded - the path is
-		// the collection chain the breadcrumb shows, which the descriptor holds.
+		// Request tabs only, once the request has loaded: the path is the collection chain the
+		// breadcrumb shows, held by the descriptor.
 		...(descriptor.path
 			? [
 					{
