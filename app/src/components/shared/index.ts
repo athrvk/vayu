@@ -132,7 +132,7 @@ export * from "./EmptyState";
 export * from "./ErrorState";
 
 // ...and the one way to say a single field will not take what you typed. The
-// three levels of error presentation are the rule in docs/design-system.md.
+// three levels of error presentation are the rule in docs/design-system/component-patterns.md.
 export * from "./FieldError";
 
 // "Allowed origins" - the CORS policy box on the mock and inbox start forms (#2367)

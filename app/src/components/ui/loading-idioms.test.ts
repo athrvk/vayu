@@ -8,7 +8,7 @@
 /**
  * A spinner is the `Loader2` glyph, never a hand-drawn ring (issue #2073).
  *
- * The "Loading" rule in docs/design-system.md names three shapes (skeleton,
+ * The "Loading" rule in docs/design-system/component-patterns.md names three shapes (skeleton,
  * inline `Loader2`, progress view). Four `div`s drawn as a ring - a bordered
  * circle with a transparent top edge - were a fourth idiom that carried none of
  * the rule's fixes: a skeleton that holds the layout, a glyph that follows the

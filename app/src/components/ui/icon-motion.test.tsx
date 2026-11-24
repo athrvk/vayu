@@ -353,7 +353,7 @@ const MOTION_GLYPH: Record<string, LucideIcon> = {
 
 /**
  * The motions whose ink leaves the 24-unit viewBox, from the "Leaves the
- * frame" column of the table in docs/design-system.md. An inline `svg` clips
+ * frame" column of the table in docs/design-system/motion.md. An inline `svg` clips
  * to its viewBox (`overflow: hidden` is the UA value for an svg root in HTML),
  * so each of these has to say `overflow: visible` or the travel is simply cut
  * off - and cut off silently, at every call site at once.

@@ -112,7 +112,7 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					//
 					// A dialog is a focus device before it is a container: widen the
 					// scale only for content that earns it, in
-					// `dialog-width-scale.test.tsx` and docs/design-system.md with the
+					// `dialog-width-scale.test.tsx` and docs/design-system/dialogs.md with the
 					// reason, never at a call site.
 					"dialog-panel fixed left-[50%] top-[50%] z-50 flex max-h-[85vh] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] flex-col gap-3 overflow-y-auto [scrollbar-gutter:auto] rounded-lg border bg-background p-5 shadow-lg",
 					className
@@ -160,7 +160,7 @@ const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
  * `min-h-0` is what allows the shrink at all: a flex item's automatic minimum
  * size on the main axis is its content, so without it this band refuses to be
  * shorter than its content and the overflow moves back out to the panel. It is
- * the vertical case of the `min-w-0` rule in docs/design-system.md.
+ * the vertical case of the `min-w-0` rule in docs/design-system/overflow-and-shrink.md.
  *
  * `flex-auto` and not `flex-1`: `flex-1` bases the item at `0%`, which asks a
  * short dialog to stretch its one band over the whole cap. Basis `auto` grows

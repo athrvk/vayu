@@ -452,7 +452,7 @@ a project page served from a subdirectory, and `/` redirects to it.
 
 Site-only styling lives in `docs/stylesheets/extra.css` (accent, header, headings,
 landing page). It styles the documentation site, **not** the product - the token
-rules in [Design System](docs/design-system.md) do not apply to it, and it must
+rules in [Design System](docs/design-system/index.md) do not apply to it, and it must
 never be used as a reference for app CSS.
 
 The site's favicon and header logo are **not** files under `docs/`.

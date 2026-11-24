@@ -21,7 +21,7 @@ interface DisclosureCardProps {
  * Header and contents are one card, not a bordered header with loose fields
  * under it: a disclosure whose contents sit on the dialog background reads as
  * loose fields rather than as the section that revealed them. The card is the
- * design system's `Card` (docs/design-system.md "Cards"), which the
+ * design system's `Card` (docs/design-system/component-patterns.md "Cards"), which the
  * `Collapsible` root renders as (`asChild`) so the open state still lands on the
  * card's own element. `panel-clip` is required by the `overflow-hidden` that keeps the trigger's hover fill inside the rounded
  * corners - it tucks focus rings inward so the clip cannot eat them.

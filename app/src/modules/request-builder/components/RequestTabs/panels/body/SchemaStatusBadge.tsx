@@ -53,7 +53,7 @@ export function BadgeText({
  *
  * The finite set is what makes the width reservation below correct, and there
  * being a finite set at all is why `LabelSwap` fits here and does not fit a
- * `TabCount` - see the `LabelSwap` paragraph in `docs/design-system.md`.
+ * `TabCount` - see the `LabelSwap` paragraph in `docs/design-system/motion.md`.
  */
 const SCHEMA_WORDS = ["Schema", "Schema stale", "No schema", "Load schema"] as const;
 

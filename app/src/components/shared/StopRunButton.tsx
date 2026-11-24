@@ -19,7 +19,7 @@
  * fixes.
  *
  * `destructive-text`, not `destructive`, for the label - the bare fill token as
- * a foreground is the colour bug this repo hits most (`docs/design-system.md`).
+ * a foreground is the colour bug this repo hits most (`docs/design-system/chart-colors.md`).
  *
  * The caller owns the request and the failure path. This is a button: it says
  * what the pending state looks like and nothing about what stopping means.

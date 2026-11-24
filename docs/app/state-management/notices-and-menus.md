@@ -175,4 +175,4 @@ Removal is driven by the primitive's `onOpenChange(false)`, which covers timeout
 Delays live in `config/timing.ts` (`TOAST_DURATION_MS`, `TOAST_EXIT_MS`) with every other UI-facing delay in the app, and the stack cap in `constants/toast.ts` (`MAX_TOASTS`).
 The store holds behaviour, not configuration.
 
-See `docs/design-system.md` -> Toasts for the visual tokens.
+See `docs/design-system/feedback-and-dashboard.md` -> Toasts for the visual tokens.

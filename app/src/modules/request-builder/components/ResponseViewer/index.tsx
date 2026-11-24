@@ -369,7 +369,7 @@ export default function ResponseViewer() {
 	 * the body you were reading vanished until the new ones landed. That is the
 	 * loading state destroying the context the user is working in - the defect
 	 * stale-while-revalidate exists to fix, and what this pane's own rule in
-	 * docs/design-system.md ("Loading") already said not to do: an in-place
+	 * docs/design-system/component-patterns.md ("Loading") already said not to do: an in-place
 	 * action on an existing control is an inline spinner on *that control*, and
 	 * nothing else on the pane should move. Send already carries it, relabelling
 	 * itself Sending. A re-send now keeps the previous exchange on screen and
@@ -426,7 +426,7 @@ export default function ResponseViewer() {
 	 * The layout is still: the whole exchange recedes to 60% and nothing about
 	 * its own content changes size or position, so everything stays readable
 	 * and clickable while the new response is on its way. That is what the
-	 * "Loading" rule in docs/design-system.md asks for (the control that was
+	 * "Loading" rule in docs/design-system/component-patterns.md asks for (the control that was
 	 * clicked shows the work; nothing else on the pane moves) and it is the
 	 * treatment React Query's own paginated-queries guide reaches for when it
 	 * hands back the previous page's data - dim what is stale, do not replace

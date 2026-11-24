@@ -33,7 +33,7 @@ through, so this component owns the shape and never has to know about the tree.
 ## Field Error (`components/shared/FieldError.tsx`)
 
 The message under a control that will not take what you typed, and the bottom of the app's three
-error levels: **field-level** is `FieldError`, **block-level** is [`Callout`](../../design-system.md),
+error levels: **field-level** is `FieldError`, **block-level** is [`Callout`](../../design-system/index.md),
 **pane-level** is `ErrorState`. Before issue #1688 the middle of that range was hand-written
 `text-destructive-text` paragraphs at three sizes - the import dialog alone carried `text-sm`,
 `text-xs` and `text-[11px]` - some with a leading glyph, some announced and most not.

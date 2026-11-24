@@ -24,7 +24,7 @@
  * `rounded-full` and `rounded-none` are deliberately fixed - circles, switch
  * tracks and squared-off tab strips are not meant to follow the setting - so
  * they are allowed as classes. A scan cannot tell a dot from a chip, so keeping
- * `rounded-full` off buttons and chips is a review rule (design-system.md,
+ * `rounded-full` off buttons and chips is a review rule (design-system/geometry.md,
  * "`rounded-full` is for circles"); the two sites that broke it are held by
  * rendered-class tests beside them.
  *

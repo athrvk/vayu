@@ -14,8 +14,8 @@ heading anchor, so:
 - **Add a new page to the `nav:` in `.github/mkdocs.yml`** in the same commit.
   Off-nav pages build and are reachable by URL, but never appear in the sidebar.
 - **Do not rename or move a doc file** without checking for readers. Tests read
-  doc paths (`app/src/design-system-doc.test.ts` reads `docs/design-system.md`;
-  `app/src/state-management-doc.test.ts` reads the pages of `docs/app/state-management/`,
+  doc paths (`app/src/design-system-doc.test.ts` reads every page of
+  `docs/design-system/`; `app/src/state-management-doc.test.ts` reads the pages of `docs/app/state-management/`,
   `architecture.md` and the pages of `api-integration/`, and fails on a `useXxx` or
   `SCREAMING_CASE` name they quote that no longer exists in the app source),
   and every relative cross-link is validated by the build.

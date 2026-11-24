@@ -17,7 +17,7 @@
  * green "Global" in the popover, while `VariablesCategoryTree` and
  * `VariableTableEditor` painted the same scope green in the sidebar.
  *
- * `--scope-global` is a real token in both themes and `docs/design-system.md`
+ * `--scope-global` is a real token in both themes and `docs/design-system/categorical-colors.md`
  * gives it the same convention as collection and environment. The neutral was
  * the odd one out, not the design.
  */
@@ -69,7 +69,7 @@ describe("labels", () => {
 describe("one size, one weight", () => {
 	/**
 	 * Both variants are the 10px micro/badge step in the UI face, whose weight is
-	 * `font-semibold` (`docs/design-system.md`). This primitive was the clearest
+	 * `font-semibold` (`docs/design-system/typography.md`). This primitive was the clearest
 	 * case of the drift #1222 collected: `compact` overrode `Badge`'s base to
 	 * `font-medium` and `full` inherited it, so one component rendered one size at
 	 * two weights.

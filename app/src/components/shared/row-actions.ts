@@ -27,7 +27,7 @@ export interface RowAction {
 	icon: LucideIcon;
 	/**
 	 * The named icon motion the glyph answers this item's hover with
-	 * (`ICON_MOTION`, `docs/design-system.md` → Motion → Icon motion). Optional:
+	 * (`ICON_MOTION`, `docs/design-system/motion.md` → Motion → Icon motion). Optional:
 	 * most actions are a label with a glyph beside it and nothing to animate.
 	 * Declared here rather than at the two menus because the item is drawn once
 	 * for both of them (`RowActionBody`).

@@ -172,7 +172,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 				{/* A server that is up is a run state, so the glyph takes the
 				    `--status-*` family's text pair - the bare indicator token
 				    misses even the 3:1 icon bar on a light surface (2.21:1,
-				    design-system.md). */}
+				    design-system/accent-and-status.md). */}
 				<ServerCog
 					className="size-icon-sm shrink-0 text-status-success-text"
 					aria-hidden="true"

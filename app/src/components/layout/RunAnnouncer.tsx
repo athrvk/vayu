@@ -14,7 +14,7 @@
  * surface is mounted at a time and the history view remounts per run, and a
  * live region has to be in the DOM, empty, before the change it announces. It
  * is therefore an `sr-only` region rather than the visible line, the deliberate
- * exception to `docs/design-system.md`'s rule. Polite, for the reason
+ * exception to `docs/design-system/accessibility.md`'s rule. Polite, for the reason
  * `ResponseAnnouncer` gives.
  */
 

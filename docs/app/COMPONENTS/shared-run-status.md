@@ -49,7 +49,7 @@ is not the window in front may also raise an opt-in OS notification
 (`services/notify.ts`, issue #1358), and every one of those events still raises
 its toast too. Four variants - `info`, `success`, `warning`, `error` - each
 carried by an icon and a left rail rather than colour alone; tokens and
-durations in `docs/design-system.md` -> Toasts.
+durations in `docs/design-system/feedback-and-dashboard.md` -> Toasts.
 
 ## Run Status Pill (`components/shared/RunStatusPill.tsx`)
 

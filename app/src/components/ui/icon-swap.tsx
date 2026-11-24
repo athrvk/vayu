@@ -46,7 +46,7 @@ interface IconSwapProps<S extends string> {
  * without the remount a state change would repaint the same node with no
  * transition. Entry only, by that same limitation: React removes the outgoing
  * node synchronously, so there is no fade-out half without JS-driven motion,
- * which this design system rules out (see Motion in `docs/design-system.md`).
+ * which this design system rules out (see Motion in `docs/design-system/motion.md`).
  *
  * This is a *different mechanism* from `data-icon-motion` (`icon-motion.ts`),
  * not a variant of it, and the two do not overlap: a motion animates one glyph

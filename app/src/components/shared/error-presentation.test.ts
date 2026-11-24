@@ -11,7 +11,7 @@
  * Error *text* had three presentations and nothing saying which to reach for:
  * `Callout` in twenty files, a full-pane `ErrorState`, and hand-written
  * `text-destructive-text` paragraphs in between at three different sizes. The
- * rule now (`docs/design-system.md`, Component Patterns):
+ * rule now (`docs/design-system/component-patterns.md`, Component Patterns):
  *
  * - field-level - one control refused one value: `FieldError`
  * - block-level - a condition about the form or the pane: `Callout`
