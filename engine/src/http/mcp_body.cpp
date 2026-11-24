@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/mcp_body.cpp
  * @brief An MCP request's `_meta` and mirrored headers. See
  *        `vayu/http/mcp_body.hpp` for why the engine writes both.
  */

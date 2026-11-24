@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/cookie_warnings.cpp
  * @brief The cookie warnings of a design send. See
  *        `vayu/http/cookie_warnings.hpp`.
  */

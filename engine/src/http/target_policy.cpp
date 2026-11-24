@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/target_policy.cpp
  * @brief The per-payload host rule a send or run is held to (issue #2521).
  */
 

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/oauth_registration.cpp
  * @brief Dynamic client registration (RFC 7591) for a discovered MCP server's
  *        authorization server (#3766).
  */
