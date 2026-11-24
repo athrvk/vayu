@@ -72,6 +72,19 @@ describe("the discovery switch", () => {
 		expect(screen.queryByRole("switch", { name: "Discover from the server URL" })).toBeNull();
 	});
 
+	it("is dropped with its found values when another grant is chosen, since no switch would show it", () => {
+		const onChange = open(DISCOVERED);
+
+		fireEvent.click(screen.getByRole("combobox", { name: "Grant type" }));
+		fireEvent.click(screen.getByRole("option", { name: "Client credentials" }));
+
+		const written = onChange.mock.lastCall?.[0] as OAuth2Config;
+		expect(written.grantType).toBe("client_credentials");
+		expect("discoverUrl" in written).toBe(false);
+		expect("discoveredFields" in written).toBe(false);
+		expect(written.clientId).toBe("registered");
+	});
+
 	it("turns discovery on with no URL typed yet, and shows the server URL field", () => {
 		const onChange = open(AUTH_CODE);
 
