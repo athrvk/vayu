@@ -6,8 +6,6 @@
  */
 
 /**
- * DialogCancelButton
- *
  * The one way to draw the button that backs out of something (issue #1693).
  *
  * Before this, the same button carried three different variants depending on
