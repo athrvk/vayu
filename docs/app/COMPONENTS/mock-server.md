@@ -7,17 +7,17 @@ description: >-
 
 The detail surface for one running mock (issue #481 phase 3). Rendered for the singleton
 `mock-server` tab, on the same terms as [Webhook Inbox](inbox.md#webhook-inbox-modulesinbox): the Services
-drawer's mock-servers row used to expand in place to a route table, which was enough while a route
-table was the only thing there was to see. Once a mock also keeps a live `GET /mock/:id/activity`
-log, it needs a surface that can grow while it is watched.
+drawer's mock-servers row does not expand in place to a route table: that was enough while a route
+table was the only thing there was to see, but a mock also keeps a live `GET /mock/:id/activity`
+log, which needs a surface that can grow while it is watched.
 
 - `index.tsx` (`MockServerView`, screen `"mock-server"`) - the mock's base URL with a copy control
   and a text **Copy for agent** button (`mockServerReference`, #2047), the collection it serves, a stop button, an **Open collection** link back to it, and (with more
   than one mock running) a `Select` switcher ordered by port, the same reasoning `InboxView`'s
   switcher follows: the engine lists mocks in map order, which is not stable across polls, and a
   switcher whose entries move under the pointer is worse than none. Below the header, two sections:
-  **Routes**, the same start-time snapshot the drawer row used to show inline (`GET
-  /mock/:id/routes`, now carrying `mode`, `exampleName` and `hits` per route from Task 8's
+  **Routes**, the same start-time snapshot (`GET
+  /mock/:id/routes`, carrying `mode`, `exampleName` and `hits` per route from Task 8's
   Examples-tab mode selection) - and **Activity**, the live feed of what the mock has actually
   served. Both poll at `TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS`: the route table's *shape* is a
   start-time snapshot, but each route's `hits` moves live as traffic arrives (drawn as a counted noun, "3 hits", "1 hit"), so it joined the fast

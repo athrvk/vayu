@@ -29,7 +29,7 @@ Shared, Monaco-independent modules that power the GraphQL body mode.
 ## `graphql-body.ts`
 
 The GraphQL-over-HTTP envelope, converted to and from the two editor panes.
-Keeps `operationName` and any key it does not model (`extensions`) across a round trip - the pair used to carry `{query, variables}` alone, so one keystroke deleted the rest.
+Keeps `operationName` and any key it does not model (`extensions`) across a round trip, so one keystroke cannot delete the rest.
 Variables that hold `{{tokens}}` outside a string are written into the envelope verbatim (the engine resolves them before sending); variables that are broken for any other reason are still dropped, and `classifyVariables` is what the pane's badge reads to tell the two apart.
 A string-typed `variables` (Postman's shape) shows verbatim rather than JSON-encoded.
 Also `operationNames` (which operations a document defines, for the picker), `documentOutline` (kind, name **and** starting line of every operation, anonymous ones included, for the context bar's outline - `operationNames` drops all three, since it answers the narrower "what may be sent as `operationName`") and `findOperationLine` (where an outline row's operation sits in *another copy* of the document - the bar reads the stored request and the editor holds the live buffer, so a row is resolved by name rather than by carrying its line across).
@@ -103,7 +103,7 @@ A route that returns the type outright outranks one that narrows to it, so a sch
 ## `insert-skeleton.ts`
 
 Turns an explorer row into an edit of the query document, under one contract: **the document still parses afterwards, and can be run**.
-Parsing is not enough on its own - a lone `fragment PostFields on Post { … }` is valid GraphQL holding no operation, which is what a type row used to write onto an empty document and what Send gets nothing back from.
+Parsing is not enough on its own - a lone `fragment PostFields on Post { … }` is valid GraphQL holding no operation, which is what a type row would write onto an empty document, and what Send gets nothing back from.
 So a **type row inserts the query that returns the type** (`rootPathsToType`, best route first, a deprecated root field never chosen).
 A step that narrows writes the inline fragment it needs (`node(id: $id) { ... on Post { … } }`) - not the "probably compatible" guessing this module refuses, but the narrowing without which the selection would not be legal.
 Where no root field returns the type at all, `insertFragment` writes the definition **and the spread that uses it** - one edit, because `Fragment "X" is never used` is a validation rule and a lone appended definition rejects the whole request, the operation the user already had included.
@@ -131,10 +131,10 @@ Cleared by whoever decides its fate: `GraphQLBody` after revealing (or after fai
 ## `variables-schema.ts`
 
 Derives a JSON Schema from the query's `$variable` definitions + the introspected schema via `getVariablesJSONSchema`, then applies it to the variables editor through `monaco.json.jsonDefaults` so variable values are validated and autocompleted.
-The query is masked before it is parsed - one `{{token}}` anywhere used to cost the pane the schema for every variable the query declares - and the schema is registered against the pane's masked twin as well as the pane itself.
+The query is masked before it is parsed - so that one `{{token}}` anywhere cannot cost the pane the schema for every variable the query declares - and the schema is registered against the pane's masked twin as well as the pane itself.
 
 ## `variables-diagnostics.ts`
 
 What a JSON editor's markers are computed from when its text may hold `{{token}}`s outside strings - the Variables pane and the request body's `json` / `jsonrpc` modes (#3137): a hidden twin model holding the editor's text with every out-of-string token masked to a same-length JSON string.
-Monaco's JSON worker validates the twin, and its markers are republished on the visible model minus the ones that land on a token - so a `{{token}}` no longer reads as a syntax error while a genuine mistake beside it, which the aborted parse used to swallow, now does.
+Monaco's JSON worker validates the twin, and its markers are republished on the visible model minus the ones that land on a token - so a `{{token}}` does not read as a syntax error while a genuine mistake beside it, which an aborted parse would swallow, does.
 Filtering the worker's markers on the model itself cannot do this: one token also earns an `End of file expected.` on the character *after* it.

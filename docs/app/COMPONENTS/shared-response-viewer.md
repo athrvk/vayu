@@ -78,13 +78,13 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 > **One list, four renderers.** The five network phases are drawn by the
 > request-builder's `ResponseTimingTab` (timeline + legend), the history
 > Performance tab's `PhaseAveragesCard`, the dashboard's
-> `charts/TimingWaterfall`, and the history `SampleRequestCard`. Each used to
-> declare its own copy of the list, so adding a phase meant finding every
-> renderer and nothing pointed you at the others. Two had already drifted: the waterfall
-> painted TTFB with `--primary` - an accent-tracking token the design system
+> `charts/TimingWaterfall`, and the history `SampleRequestCard`. They share
+> one list: a copy per renderer means adding a phase requires finding every
+> renderer, with nothing pointing you at the others, and copies drift. A waterfall
+> that paints TTFB with `--primary` - an accent-tracking token the design system
 > forbids for a chart series, and the very bug `ResponseTimingTab`'s header
-> comment describes fixing in its own copy - and carried private tooltip strings
-> that `phase-tips.ts` existed to replace.
+> comment describes fixing in its own copy - and carries private tooltip strings
+> is what `phase-tips.ts` exists to replace.
 >
 > Add a phase to `TIMING_PHASES` and every renderer picks it up.
 > `timing-phases.test.tsx` guards that by mocking in a sixth phase and asking
@@ -148,8 +148,8 @@ them and carries their config through untouched.
 
 Mode names and the editable list live in `constants/auth-modes.ts`
 (`AUTH_MODE_LABELS`, `EDITABLE_AUTH_MODES`), which every auth surface reads -
-including `AuthInheritBanner`. Four places used to name the modes independently
-and had drifted; `auth-modes.test.ts` and `AuthFields/auth-editor-parity.test.tsx`
+including `AuthInheritBanner`. Four places naming the modes independently
+would drift; `auth-modes.test.ts` and `AuthFields/auth-editor-parity.test.tsx`
 hold that line, the latter by rendering both hosts and comparing what they show.
 
 ## Shared OAuth 2.0 Form (`components/shared/OAuth2Form/`)

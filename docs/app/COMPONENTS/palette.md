@@ -114,8 +114,8 @@ Once something is typed, four rules apply:
   of stuffing the query into every row's keywords, which scored them all alike. Settings is its own
   group rather than more Commands: twelve sections would bury the handful of things the palette can
   actually *do*.
-- **A row must clear `MATCH_FLOOR` (0.1) to render.** cmdk keeps every score above zero, so a
-  0.0008 match used to render exactly like a 0.99 one. The floor sits just under `commandScore`'s
+- **A row must clear `MATCH_FLOOR` (0.1) to render.** cmdk keeps every score above zero, so without a floor a
+  0.0008 match renders exactly like a 0.99 one. The floor sits just under `commandScore`'s
   `SCORE_CHARACTER_JUMP` (0.17), which is what a match beginning mid-word scores - so "oken" still
   finds "Issue token", and a query reached only by two or more scattered jumps does not.
 - **`substringKeywords` are matched literally, not fuzzily.** A URL is the case this exists for:

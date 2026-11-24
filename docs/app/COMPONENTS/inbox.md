@@ -22,11 +22,10 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   inbox record carries no creation stamp and does not gain one - #555 answered that, and the
   Services drawer orders by port for the same reason. Every mutation this tab owns reports its
   failure as a toast (`reportFailure`), which is the one discipline the whole inbox lifecycle
-  follows; Stop and Clear used to pass no `onError` at all (#555, item 7 - taken there rather than in
-  #556's tab pass, which both issues named as the shared brush). The header's copy control answers
+  follows; Stop and Clear pass an `onError` too (#555). The header's copy control answers
   to the same discipline through the shared `useCopy` (see [Services](services.md#services-modulesservices)) -
-  it is not a mutation, but it is the other thing here that can fail, and it claimed success
-  regardless until #565. The URL button is an icon button, so a landed copy swaps its glyph to a check
+  it is not a mutation, but it is the other thing here that can fail, and it reports success
+  only once the write has landed (#565). The URL button is an icon button, so a landed copy swaps its glyph to a check
   and raises no toast (`useCopy({ feedback: "icon" })`, #2315); the "Copy for agent" text button beside
   it keeps its own plain `useCopy()` and toasts.
 - `InboxStartOptions.tsx` - the secondary start path (issue #2367): an **Inbox options** icon button
@@ -53,9 +52,9 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   sibling in the controls' own flex row, per `docs/design-system.md`'s hint-stacking rule. The reply
   headers are
   [`KeyValueEditor`](shared-key-value-editor.md#shared-keyvalue-editor-componentssharedkeyvalueeditor) rows, with no `variables` scope
-  passed - a canned reply is echoed verbatim, so there is nothing to resolve. They were local
-  `Input` pairs until #564 made the primitive mountable outside `RequestBuilderProvider`; the
-  table's trailing blank row replaced the panel's own "Add header" button. Header names complete
+  passed - a canned reply is echoed verbatim, so there is nothing to resolve. The primitive
+  is mountable outside `RequestBuilderProvider` (#564), and the table's trailing blank row stands
+  in for an "Add header" button. Header names complete
   from the same `STANDARD_HEADERS` list as the request builder's Headers tab (#1449) - the mount
   had reused the primitive without its header-specific suggestion prop.
 - `CaptureRaw.tsx` - the detail pane's Raw view (issue #3109). A capture whose `bodyEncoding` is
@@ -104,7 +103,7 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   fills, not a second list beside it - two lists would need reconciling on every clear, and whichever
   the detail pane read would decide which was true. The reconnect is the service's own, not the
   browser's: `EventSource` treats a non-200 as fatal, and a reconnect landing inside the engine's
-  dead-socket window meets a `409`, so a single drop used to end the stream for the life of the tab.
+  dead-socket window meets a `409`, so a single drop would end the stream for the life of the tab.
   It retries with a jittered backoff, resumes from the last capture id it saw (`?lastEventId=`, since
   no API sets a header on a fresh connection), and once the retries are spent reports `stopped` so
   the surface can say so and offer a Resume rather than leave the badge reading `Running`. A stream
@@ -201,9 +200,9 @@ the first the engine listed, so a row labelled "Open inbox on port B" opened a t
 falls back to the lowest-numbered port.
 
 **Entry points:** the **Services** drawer view, which lists every inbox and opens this tab (issue
-#502), and the palette's `Inbox` entry. The welcome Launcher's tile is now `Services` rather than
+#502), and the palette's `Inbox` entry. The welcome Launcher's tile is `Services`, not
 `Inbox` - it teaches where the whole family of local services lives instead of opening one tab -
-and the Dock's running-services indicator reveals the same view. Until #502 the Launcher tile was
-the *only* way in, and a running inbox was invisible once its tab was closed. The **OS** Dock or
+and the Dock's running-services indicator reveals the same view. Without the Services view the Launcher tile would be
+the *only* way in, and a running inbox would be invisible once its tab was closed. The **OS** Dock or
 taskbar icon - not the in-app Dock this paragraph otherwise means - is one more pointer back: its
 unread count is what says a capture arrived at all when no Vayu window is in front (issue #1364).
