@@ -3047,9 +3047,8 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   never tools, and `protocol.integration.test.ts` classifies every write tool
   into one, so a new write tool fails until its family is in the sentence.
   Withholding the schema rather than only the call is what makes
-  the toggle free: those tools are 66,077 of the 181,447 bytes (36%) of the
-  `tools/list` an agent is sent (app host, reveal off, measured at #2441), and
-  on a default install none of them could have succeeded.
+  the toggle free: those tools are over a third of the `tools/list` an agent
+  is sent (#2441), and on a default install none of them could have succeeded.
   Write access is a separate grant from reveal: a script stored by a write tool
   (`create_request` / `update_request` / `create_collection` /
   `update_collection`, or an import) is not refused while reveal is off, and
@@ -3827,11 +3826,14 @@ Every session pays for the whole `tools/list` answer before it does anything,
 so its size is held by `tool-list-budget.test.ts`, which builds the real
 registry through the real server for each host (the app and the stdio CLI,
 whose remedy wording differs) and each writes-off/on and reveal-off/on pair.
-Each cap is that measurement rounded up to the next 100 bytes. Measured at
-#3749, reveal off / on: on the app host 152,490 / 149,510 bytes with writes
-off and 219,528 / 214,877 with writes on; on the CLI host 152,756 / 149,776
-and 221,300 / 216,649. A change that grows the list re-measures and raises the
-caps in its own diff; one that shrinks it lowers them.
+There are two fixed ceilings, one for a session with writes off and one for
+writes on, each applied to every host and reveal setting: they are constants
+in the test, not measurements of the code, and a change that needs bytes
+removes bytes elsewhere; it never raises a ceiling (#3558). They are interim
+values that only move down, and #3751 is where they reach their final ones. A
+failing session prints its host, its measured size, the overshoot and the five
+largest tools. The server instructions have a ceiling of their own in the same
+file, so text moved from the descriptions into them still counts.
 
 A tool's result fields are explained on its output schema, one clause per
 member, rather than narrated in its description (`get_run_report` and
@@ -3844,11 +3846,10 @@ is left undeclared.
 The server strips the `$schema` key the SDK writes on every input and output
 schema when its value is the 2020-12 URI (#3748): the MCP specification
 ("JSON Schema Usage" > "Schema Dialect") makes 2020-12 the default for a schema
-with no `$schema`, so the key says nothing and costs about 57 bytes a schema
-(5,415 with writes off, 7,068 with writes on, on both hosts). A schema that
-names another dialect keeps it.
+with no `$schema`, so the key says nothing and costs about 57 bytes a schema. A
+schema that names another dialect keeps it (`server.schema-dialect.test.ts`).
 
-Two shapes keep the list small, and the same file checks both. A tool
+Two shapes keep the list small, and `tool-list-shape.test.ts` checks both. A tool
 description fails on a sentence of 150 or more characters that more than three
 descriptions repeat: a rule that long belongs in the server instructions, with
 a one-line pointer in the tool (the withholding rules and the error definition
@@ -3863,7 +3864,7 @@ pointer whose tool is not listed in that session or does not state that
 argument. A repetition kept on purpose is named in the test's
 `SHARED_ARGUMENT_DESCRIPTIONS` with its reason: today only `environmentId`,
 whose default is stated at the argument on every tool that takes it (#2480).
-The file also fails on any `Withheld` or `<redacted>` in a description of a
+That file also fails on any `Withheld` or `<redacted>` in a description of a
 session with reveal on.
 
 ## Deferred
