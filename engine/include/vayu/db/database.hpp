@@ -31,26 +31,23 @@
 namespace vayu::db {
 
 /**
- * The schema version this engine understands, stamped into `PRAGMA
- * user_version` by `migrate_before_sync` (#1492, #1514). Bumped by the commit
- * that changes `make_vayu_storage`'s mapping: `sync_schema ()` runs without
- * `preserve`, so an older engine opening a database with a column it does not
- * map would rebuild the table without it. Also bumped by a migration step that
- * must run once and that an older engine must not read past (4, 6, 7): the
- * version is its done-marker. A database stamped newer is refused at startup.
- * Every version's change is in `docs/engine/db-schema/schema-versions.md`.
+ * The schema version this engine understands, stamped into
+ * `PRAGMA user_version` by `migrate_before_sync` (#1492, #1514). Bumped by a
+ * commit that changes `make_vayu_storage`'s mapping (`sync_schema ()` runs
+ * without `preserve`, so an older engine would rebuild a table without a column
+ * it does not map) and by a one-shot migration an older engine must not read
+ * past (4, 6, 7; the version is its done-marker). A newer stamp is refused at
+ * startup. Each version's change: `docs/engine/db-schema/schema-versions.md`.
  */
 inline constexpr int SCHEMA_VERSION = 11;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.
  *
- * `sqlite3_column_text` answers `const unsigned char*`, and every consumer
- * reads characters, so the conversion lives once, here: a copy of a primitive
- * does not receive its fixes. [basic.lval] permits reading bytes through a
- * character type, which is why the cast is a NOLINT and not a defect. A SQL
- * NULL comes back as `nullptr`, as the C API reports it: absent versus empty
- * is the caller's distinction, and defaulting it here would erase it.
+ * One primitive, since a copy does not receive its fixes; the cast is a NOLINT,
+ * not a defect, because [basic.lval] permits reading bytes through a character
+ * type. SQL NULL stays `nullptr`: absent versus empty is the caller's
+ * distinction, and defaulting here would erase it.
  */
 inline const char* column_text (sqlite3_stmt* stmt, int column_index) {
     // [basic.lval] permits reading any object through a character type; see
@@ -62,12 +59,10 @@ inline const char* column_text (sqlite3_stmt* stmt, int column_index) {
 /**
  * @brief How a storage write failed, as far as a caller can act on it.
  *
- * `Full` is `SQLITE_FULL`: the disk holding the database has no room, and
- * freeing space is the cure. `Busy` is `SQLITE_BUSY` or `SQLITE_LOCKED` after
- * the busy timeout: another connection held the file, and the same call is
- * worth repeating. `Other` is every remaining SQLite failure (an I/O error, a
- * read-only file, a file that cannot be opened, corruption): nothing the
- * caller sent was wrong and nothing it can do will help.
+ * `Full` (`SQLITE_FULL`): free disk space. `Busy`
+ * (`SQLITE_BUSY`/`SQLITE_LOCKED` past the busy timeout): another connection
+ * held the file; retry. `Other` (I/O, read-only, unopenable, corrupt): neither
+ * the request's fault nor fixable by the caller.
  */
 enum class StorageFailure : std::uint8_t { Full, Busy, Other };
 
@@ -80,23 +75,20 @@ struct StorageError {
 /**
  * @brief Sort an exception a write caught into a storage failure, or nothing.
  *
- * A `std::system_error` in sqlite_orm's SQLite category is a storage failure
- * and any other exception (a `nlohmann::json` parse error, a validation
- * `std::runtime_error`, a `std::filesystem_error` whose errno 13 is not
- * `SQLITE_FULL`) answers `std::nullopt`: the request itself was at fault.
- * Same category guard as `classify_probe_failure`.
+ * Only a `std::system_error` in sqlite_orm's SQLite category is one, the guard
+ * `classify_probe_failure` uses; anything else (a JSON parse error, a
+ * validation error, a `std::filesystem_error` whose errno 13 is not
+ * `SQLITE_FULL`) answers `std::nullopt`: the request was at fault.
  */
 std::optional<StorageError> classify_storage_error (const std::exception& error);
 
 /**
- * Optional filters for the paginated GET /runs list; an unset field does not
- * constrain the query. `q` is a case-insensitive substring of the stored
- * `config_snapshot` text (SQL LIKE), which may over-match JSON keys and
- * structure, acceptable for a search box. `collection_id` is the opposite, on
- * purpose: it reads `scenario.collectionId` out of the snapshot as JSON, so it
- * matches the field, never the text around it. Only a snapshot with a
- * `scenario` manifest has that path (a collection run, and a load run over a
- * collection, #3544), so a single-request design or load run cannot match.
+ * Optional filters for the paginated GET /runs list; unset fields are
+ * wildcards. `q` is a case-insensitive SQL LIKE over the stored
+ * `config_snapshot` text, over-matching JSON keys, acceptable for a search box.
+ * `collection_id` deliberately reads `scenario.collectionId` as JSON, matching
+ * the field only; only collection runs and load runs over a collection have it
+ * (#3544).
  */
 struct RunFilter {
     std::optional<RunType> type;
@@ -104,48 +96,35 @@ struct RunFilter {
     std::optional<std::string> request_id;
     std::optional<std::string> q;
     std::optional<std::string> collection_id;
-    // `true` lists only pinned baselines, `false` only unpinned ones. Both are
-    // real questions - "which run is the baseline for this request" is the
-    // first, and it is what a client resolves before diffing against it.
+    // `true` lists only pinned baselines (what a client resolves before
+    // diffing), `false` only unpinned.
     std::optional<bool> baseline;
     // Exact match on `runs.origin` (#1817). The route sets it only for a kind
     // `is_run_origin_kind` accepts, so an unknown value is never a filter here.
     std::optional<std::string> origin;
-    // Exact match on `runs.outcome` (#3547). A row with no outcome (NULL)
-    // matches no value.
+    // Exact match on `runs.outcome` (#3547); a NULL outcome matches no value.
     std::optional<RunOutcome> outcome;
 };
 
-/**
- * A keyset position in the GET /runs order (`start_time DESC, id DESC`): the
- * last row of the page before. `id` breaks a `start_time` tie, which makes the
- * order total, so a page that starts after this row neither repeats nor skips
- * one (#2978).
- */
+/// A keyset position in GET /runs order (`start_time DESC, id DESC`), the
+/// previous page's last row; `id` breaks ties, making the order total, so pages
+/// neither repeat nor skip (#2978).
 struct RunCursor {
     int64_t start_time = 0;
     std::string id;
 };
 
-/**
- * What `Database::transition_run_status` did (#3340). `current` is the status
- * the row holds once the call returns: the target when `applied`, the status
- * that refused the move otherwise, and nothing when there is no such run.
- */
+/// What `transition_run_status` did (#3340): `current` is the row's status
+/// afterwards, the target if `applied`, the refusing status otherwise, nothing
+/// without such a run.
 struct RunStatusTransition {
     bool applied = false;
     std::optional<RunStatus> current;
 };
 
-/**
- * The narrow outcome of a design run's single exchange: what came back and how
- * long it took, and nothing else.
- *
- * Deliberately not `Result`. The paginated GET /runs list reads this for a
- * whole page of rows at once, and a `Result` carries `trace_data` - the entire
- * exchange, request and response bodies included - which would turn a list page
- * into megabytes for a readout of two numbers.
- */
+/// A design run's exchange as two numbers, not a `Result`: GET /runs reads a
+/// page of these, and `trace_data` (bodies included) would make a list page
+/// megabytes.
 struct DesignResultOutcome {
     int status_code;
     double latency_ms;
@@ -154,48 +133,41 @@ struct DesignResultOutcome {
 /**
  * @brief One thing the user deleted, as the trash lists it (issue #988).
  *
- * A *root* only: the row the user asked to delete, never the descendants that
- * went with it. What a cascade took is counted, because that is the question
- * a trash view asks ("restoring this brings back what?", and "purging it
- * destroys what?") and listing every stamped row would answer a different one.
+ * A root only, never what its cascade took; that is counted instead, answering
+ * "restoring brings back what?" and "purging destroys what?".
  */
 struct TrashEntry {
     std::string id;
-    /// "collection", "request", "environment", "example" or
-    /// "clientCertificate" (#2973) - the five tables the trash spans, so a
-    /// client knows which shape it is looking at without a second read. Every
-    /// dispatch on it names all five and throws on anything else.
+    /// One of the five trash tables (`"collection"`, `"request"`,
+    /// `"environment"`, `"example"`, `"clientCertificate"`, #2973), so a client
+    /// knows the shape without a second read; every dispatch names all five and
+    /// throws on anything else.
     std::string kind;
-    /// A certificate has no name of its own: its entry is named by its target,
-    /// `host` or `host:port`, the label a trace shows for it.
+    /// A certificate's is its target, `host` or `host:port`, as a trace labels
+    /// it.
     std::string name;
-    /// When the delete ran, in Unix ms. Also the cohort key - see
-    /// `Collection::deleted_at`.
+    /// Delete time, Unix ms; also the cohort key (`Collection::deleted_at`).
     int64_t deleted_at = 0;
-    /// The row this one hung under: a collection's parent (absent at the tree
-    /// root), a request's owning collection (always present), an example's
-    /// owning *request* (always present, #2971). Absent for an environment
-    /// and a client certificate, which hang under nothing.
+    /// The owner: a collection's parent (absent at the root), a request's
+    /// collection, an example's request (#2971); absent for environments and
+    /// certificates.
     std::optional<std::string> parent_id;
-    /// The name of the row `parent_id` names, set for a request and an example
-    /// only (#3449): two same-named entries are told apart by their owner.
-    /// Absent when the owner row is gone, which no write path leaves behind.
+    /// `parent_id`'s name, for requests and examples (#3449), telling
+    /// same-named entries apart; absent only if the owner is gone, which no
+    /// write leaves behind.
     std::optional<std::string> parent_name;
-    /// Descendants *this delete* took with it - the cohort, and therefore
-    /// exactly what a restore puts back. Both 0 for a request, an
-    /// environment, an example and a client certificate.
+    /// Descendants this delete took (the cohort, what a restore puts back); 0
+    /// but for a collection.
     int64_t collections = 0;
     int64_t requests    = 0;
     /// Descendants a purge destroys (#3449): every stamped row under the root,
-    /// whichever delete stamped it, walked as `purge_collection_locked` walks
-    /// (stopping at a live collection). A superset of the cohort counts: a row
-    /// an earlier delete left inside the subtree is here and not there. Both 0
-    /// for every kind but a collection.
+    /// whichever delete stamped it, walked like `purge_collection_locked`
+    /// (stopping at a live collection), so a superset of the cohort; 0 but for
+    /// a collection.
     int64_t purge_collections = 0;
     int64_t purge_requests    = 0;
-    /// How many variables an environment holds, as `parse_variables` reads its
-    /// blob. Set for an environment only: absent, not 0, for the other kinds,
-    /// and the wire omits the key the same way.
+    /// An environment's variable count (via `parse_variables`); absent, not 0,
+    /// for other kinds, as on the wire.
     std::optional<int64_t> variables;
 };
 
@@ -216,13 +188,11 @@ struct RunHistoryCleared {
     int64_t kept_pinned = 0;
 };
 
-/// Why a restore did not happen. `NotFound` is a 404 - nothing in the trash
-/// carries that id; `OwnerGone` is a 409 - a request whose collection, or an
-/// example whose request, is itself deleted or missing, which has no root to
-/// come back to; `OverLimit` is a 409 - an example whose request already holds
-/// `request_example::MAX_PER_REQUEST` live examples (#2971); `TargetTaken` is a
-/// 409 - a client certificate whose host and port a live entry now claims
-/// (#2973).
+/// Why a restore did not happen: `NotFound` (404, no such trash id),
+/// `OwnerGone` (409, the request's collection or the example's request is
+/// deleted or missing), `OverLimit` (409, the request has
+/// `request_example::MAX_PER_REQUEST` live examples, #2971), `TargetTaken`
+/// (409, a live entry claims the certificate's host and port, #2973).
 enum class RestoreRefusal : std::uint8_t {
     NotFound,
     OwnerGone,
@@ -237,13 +207,11 @@ struct RestoreFailure {
 };
 
 /**
- * Thrown by `apply_reorder` when a row it was told to write is not stored at
- * commit time. The batch is rolled back whole, and the row stays deleted.
- *
- * A reorder only repositions rows that exist, so a missing one is never to be
- * created: an upsert would silently resurrect a row a concurrent cascade just
- * deleted, inside an endpoint whose contract is "all or nothing". The message
- * names the row so the 409 the `/reorder` route turns this into is actionable.
+ * Thrown by `apply_reorder` when a row to write is not stored at commit; the
+ * batch rolls back whole and the row stays deleted. A reorder only moves
+ * existing rows, so an upsert could only silently resurrect what a concurrent
+ * cascade deleted. The message names the row so the `/reorder` 409 is
+ * actionable.
  */
 class MissingRowError : public std::runtime_error {
     public:
@@ -255,22 +223,18 @@ class MissingRowError : public std::runtime_error {
 /**
  * @brief One OpenAPI sync, as the rows it writes (issue #655).
  *
- * The one write that creates, updates *and* deletes, and it must be
- * all-or-nothing: half of it leaves a collection bound to a document its
- * requests do not reflect, the state binding exists to prevent. So the new
- * document, the moved binding and the rows are one transaction. Ids are
- * assigned by the caller, as for `import_apply`: nothing here can look up a
- * row this transaction has not committed. `POST /specs/bind` writes through
- * this too (#862), filling only @ref spec, @ref binding and @ref updated: a
- * half-applied bind leaves the same state, so it shares this transaction
- * rather than a second that could disagree about what "all of it" means.
+ * The one write that creates, updates and deletes; all-or-nothing, since half
+ * of it leaves a collection bound to a document its requests do not reflect.
+ * Ids are the caller's, as for `import_apply`: nothing can look up a row this
+ * transaction has not committed. `POST /specs/bind` uses it too (#862), filling
+ * only @ref spec, @ref binding and @ref updated, and shares the transaction
+ * because a half-applied bind leaves the same state.
  */
 struct SpecSyncBatch {
     /// The re-fetched document. A new row, never a rewrite - see `SpecDocument`.
     SpecDocument spec;
-    /// The bound collection with `openapi` already moved to @ref spec. Updated,
-    /// never inserted: a sync of a collection that no longer exists is a
-    /// `MissingRowError`, not a resurrection.
+    /// The bound collection, `openapi` moved to @ref spec; updated, never
+    /// inserted (a vanished collection is a `MissingRowError`).
     Collection binding;
     /// Tag folders an added operation needs and the collection does not have.
     std::vector<Collection> new_collections;
@@ -279,25 +243,23 @@ struct SpecSyncBatch {
     std::vector<Request> updated;
     /// Request ids to delete. Their examples cascade, as `delete_request` does.
     std::vector<std::string> deleted;
-    /// Example rows to insert - a created request's, and the imported ones a
-    /// refreshed request's replace.
+    /// Example rows to insert: a created request's, and the imports replacing a
+    /// refreshed request's.
     std::vector<RequestExample> examples;
-    /// The imported example rows @ref examples replaces. Ids, because the row
-    /// they name is stored and only its identity matters here.
+    /// Ids of the imported example rows @ref examples replaces.
     std::vector<std::string> deleted_examples;
     /// `spec_declined_operations` rows this write forgets (#3031): those a
-    /// created request takes back, or all of the collection's when a bind
-    /// moves it to a different document.
+    /// created request takes back, or all the collection's when a bind changes
+    /// its document.
     std::vector<int64_t> cleared_declines;
 };
 
 /**
- * @brief One workspace snapshot, as `POST /workspace/backup` reports it
- *        (issue #987).
+ * @brief One workspace snapshot, as `POST /workspace/backup` reports it (issue
+ *        #987).
  *
- * The path is absolute wherever the engine's own database path is, which is
- * every real start - the daemon is given a data directory - and it is what the
- * user needs, because restoring is a file copy they perform themselves.
+ * `path` is absolute on every real start (the daemon gets a data directory), as
+ * the user needs: restoring is a file copy they make themselves.
  */
 struct BackupRecord {
     /// The snapshot written, as a path the user can act on.
@@ -313,10 +275,9 @@ struct BackupRecord {
 /**
  * @brief Why a workspace backup did not happen (issue #987).
  *
- * The two cases answer with different statuses and read differently to a user,
- * so they are one type with a flag rather than a message a route has to parse:
- * a refused *concurrent* backup is a 409 and nothing is wrong, while anything
- * else is a 500 naming what SQLite or the filesystem refused.
+ * A flag, not a message to parse: a refused concurrent backup is a 409 with
+ * nothing wrong; any other failure is a 500 naming what SQLite or the
+ * filesystem refused.
  */
 struct BackupFailure {
     /// Another backup holds the slot; nothing was written.
@@ -329,23 +290,21 @@ class Database {
     public:
     explicit Database (const std::string& db_path);
     /**
-     * @param startup_busy_timeout how long every connection the constructor
-     *        opens waits for another connection's lock before the database is
-     *        refused as unavailable (issue #2420). The one-argument form uses
-     *        `BUSY_TIMEOUT_MS`; a test lowers it to reach the refusal quickly.
-     *        `init` replaces it with `dbBusyTimeout` on the open connection.
+     * @param startup_busy_timeout how long each connection the constructor
+     *        opens waits for another's lock before the database is refused as
+     *        unavailable (#2420); the one-argument form uses `BUSY_TIMEOUT_MS`
+     *        (a test lowers it), and `init` replaces it with `dbBusyTimeout`.
      * @throws std::runtime_error when the database cannot be examined (locked,
-     *         disk full, read-only, an I/O error) - nothing is renamed,
-     *         restored or deleted - or when it was written by a newer schema.
+     *        disk full, read-only, an I/O error; nothing is renamed, restored
+     *        or deleted) or a newer schema wrote it.
      */
     Database (const std::string& db_path, std::chrono::milliseconds startup_busy_timeout);
     ~Database ();
 
-    // Neither copyable nor movable: the handle behind the pImpl owns the open
-    // SQLite connection and the mutex every write is serialized on, and every
-    // holder in the engine keeps it in place (a stack local in `daemon.cpp`, a
-    // `unique_ptr` in the fixtures). A move would leave a hollow instance whose
-    // methods still compile.
+    // Neither copyable nor movable: the pImpl owns the SQLite connection and
+    // the write mutex, every holder keeps it in place (`daemon.cpp`'s local,
+    // the fixtures' `unique_ptr`), and a move would leave a hollow instance
+    // whose methods still compile.
     Database (const Database&)            = delete;
     Database& operator= (const Database&) = delete;
     Database (Database&&)                 = delete;
@@ -357,79 +316,73 @@ class Database {
     /**
      * @brief The database file this instance was opened on.
      *
-     * The engine's data directory, effectively: files derived from settings
-     * are written beside it (the CA bundle `resolve_transport_policy`
-     * materializes, issue #706) so that a caller holding a `Database` needs no
-     * second path parameter threaded through it to find them.
+     * Effectively the data directory: settings-derived files (the CA bundle
+     * `resolve_transport_policy` writes, #706) sit beside it, so no second path
+     * parameter is needed.
      */
     const std::string& path () const;
 
     /**
-     * @brief What this startup did about a database it could not open, if it
-     *        had to do anything (issue #922).
+     * @brief What this startup did about a database it could not open, if
+     *        anything (issue #922).
      *
-     * `nullopt` is a clean start, the ordinary case and what a genuine first run
-     * gives. A value means the user's data was restored from a backup or deleted,
-     * and `GET /health` reports it so the app can say so; `db/recovery.hpp` says
-     * why the fact is on disk and never cleared here. Read once at construction,
-     * so the polled health endpoint costs no file access.
+     * `nullopt` is a clean start (a first run too); a value means the data was
+     * restored from a backup or deleted, which `GET /health` reports. Why it
+     * lives on disk and is never cleared here: `db/recovery.hpp`. Read once at
+     * construction, so polling health costs no file access.
      */
     [[nodiscard]] const std::optional<RecoveryRecord>& recovery () const; // db_maintenance.cpp
 
     // Project Management - collections and their trash/reorder are defined
     // in db_collections.cpp; requests and their examples in db_requests.cpp.
     void create_collection (const Collection& c);
-    /// Live collections only - a deleted one is gone to every reader but the
-    /// trash (issue #988).
+    /// Live collections only; a deleted one is gone to every reader but the
+    /// trash (#988).
     std::vector<Collection> get_collections ();
-    /// Live only, like `get_collections` - a deleted row reads as absent, which
-    /// is what turns every by-id route into its own 404 (issue #988).
+    /// Live only: a deleted row reads as absent, so every by-id route 404s
+    /// (#988).
     std::optional<Collection> get_collection (const std::string& id);
-    /// Whether @p id names a collection that is stored *and* stamped - the
-    /// state `get_collection` cannot tell apart from an id never written
-    /// (#1883). An unknown id is `false`, so a forward reference stays legal.
+    /// Whether @p id is stored *and* stamped, which `get_collection` cannot
+    /// tell from never written (#1883); an unknown id is `false`, so forward
+    /// references stay legal.
     bool collection_is_trashed (const std::string& id);
-    /// Stamps the collection and its whole subtree as deleted rather than
-    /// removing them (issue #988). `GET /trash` lists it, restore puts it back
-    /// and purge is what finally destroys it.
+    /// Stamps the collection and its subtree deleted (#988): `GET /trash` lists
+    /// it, restore puts it back, purge destroys it.
     ///
-    /// @param declined_under the bound collection above @p id, when there is
-    ///        one: each request this delete stamps that records an operation
-    ///        is recorded as declined under it, in the same transaction
-    ///        (#3031). The route resolves it, and leaves it empty when the
-    ///        deleted collection is itself the bound one - deleting a whole
-    ///        bound tree is not a decision about any one operation.
+    /// @param declined_under the bound collection above @p id, if any: each
+    ///        stamped request that records an operation is declined under it in
+    ///        the same transaction (#3031). Empty when the deleted collection
+    ///        is the bound one: deleting a bound tree decides no operation.
     void delete_collection (const std::string& id,
     const std::optional<std::string>& declined_under = std::nullopt);
-    /// Writes @p collection as `create_collection` does and, in one transaction,
-    /// forgets every operation declined under it (#3031): a binding moved off
-    /// the document those deletes were decided against.
+    /// Writes @p collection as `create_collection` does and, in one
+    /// transaction, forgets every operation declined under it (#3031): a
+    /// binding moving off the document they were decided on.
     ///
-    /// @param departed the requests the same write takes out of a spec contract,
-    ///        stamps cleared, @p declined_under naming where each is declined
-    ///        (`apply_reorder`'s two parameters): a `PUT /collections/:id` that
-    ///        unbinds and reparents at once (#3470). The forget runs after them,
-    ///        so a decline recorded under @p collection itself goes too.
+    /// @param departed the requests this write takes out of a spec contract
+    ///        (stamps cleared), with
+    /// @p declined_under naming where each is declined: `apply_reorder`'s two
+    ///        parameters, for a `PUT /collections/:id` that unbinds and
+    ///        reparents at once (#3470). The forget runs after them, so
+    ///        declines under @p collection go too.
     // db_collections.cpp
     void rebind_collection (const Collection& collection,
     const std::vector<Request>& departed                               = {},
     const std::unordered_map<std::string, std::string>& declined_under = {});
 
     /// @param declined_under the bound collection a move takes @p r out of
-    ///        (`declined_by_move` in `routes.hpp`, resolved by the route, #3446): the
-    ///        operation the *stored* row records is declined under it in the
-    ///        same transaction, as `delete_request` records it. The caller
-    ///        has already cleared @p r's stamp. Empty records nothing.
+    ///        (`declined_by_move`, `routes.hpp`, #3446): the stored row's
+    ///        operation is declined under it in the same transaction, as
+    ///        `delete_request` does; @p r's stamp is already cleared. Empty
+    ///        records nothing.
     void save_request (const Request& r,
     const std::optional<std::string>& declined_under = std::nullopt);
     /// Live only - see `get_collection` (issue #988).
     std::optional<Request> get_request (const std::string& id);
     /// Live only, and empty for a deleted collection (issue #988).
     std::vector<Request> get_requests_in_collection (const std::string& collection_id);
-    /// Every live request of every live collection, grouped by collection and
-    /// in each group the order `get_requests_in_collection` answers with: what
-    /// a client building the whole tree needs, in one query rather than one
-    /// per collection.
+    /// Every live request of every live collection, grouped by collection in
+    /// `get_requests_in_collection`'s order: the whole tree in one query.
     std::vector<Request> get_requests_in_live_collections ();
     /// `get_requests_in_collection`'s rows, filter and order, as summaries:
     /// the large columns are never read (#2546).
@@ -438,37 +391,30 @@ class Database {
     /// `get_requests_in_live_collections`' rows, filter and order, as summaries.
     std::vector<RequestSummary> get_request_summaries_in_live_collections ();
     /**
-     * Every live request at or beneath @p root_id, depth-first in sibling
-     * order (`sibling_order.hpp`, #2535): at each collection its sub-folders
-     * and its requests are one list, a request runs where it sits and a
-     * sub-folder's whole subtree where the sub-folder sits. What a recursive
-     * run, a mock server's route table and an OpenAPI export walk, so the
-     * three list a tree in the order the sidebar shows it. A `parent_id` cycle
-     * visits each collection once.
+     * Every live request at or beneath @p root_id, depth-first in sibling order
+     * (`sibling_order.hpp`, #2535): sub-folders and requests share one list, so
+     * a sub-folder's subtree runs where it sits. Recursive runs, mock route
+     * tables and OpenAPI exports walk it, matching the sidebar. A `parent_id`
+     * cycle visits each collection once.
      */
     std::vector<Request> get_requests_in_subtree (const std::string& root_id);
     /**
-     * The `order` a row appended under @p parent_id takes: one past the highest
-     * held by a live sibling of either kind, sub-folders by `parent_id` and
-     * requests by `collection_id` (`sibling_order.hpp`, #2535). `std::nullopt` is
-     * the roots, which hold collections only. @p excluded_id is left out of the
-     * scan, so a row resetting its own position lands after its *other* siblings.
-     * `0` for a parent with no live child; nothing when a sibling already holds
-     * `MAX_SIBLING_ORDER` (#3451): there is no slot after it, and the caller
-     * refuses the append.
+     * The `order` an append under @p parent_id takes: one past the highest live
+     * sibling of either kind (`sibling_order.hpp`, #2535); `std::nullopt` is
+     * the roots (collections only). @p excluded_id is skipped so a row
+     * resetting its own position lands after its *other* siblings. `0` with no
+     * live child; nothing when a sibling holds `MAX_SIBLING_ORDER` (#3451), and
+     * the caller refuses.
      */
     [[nodiscard]] std::optional<int> next_sibling_order (
     const std::optional<std::string>& parent_id,
     const std::string& excluded_id = {}); // db_collections.cpp
-    /// Stamps the request as deleted (issue #988). Its examples stay on the
-    /// row - nothing can read them while the request is stamped, and a purge
-    /// takes them with it.
+    /// Stamps the request deleted (#988); its examples stay on the row,
+    /// unreadable while it is stamped, and go with a purge.
     ///
     /// @param declined_under the bound collection the request answers to
-    ///        (`core::nearest_spec_binding`, resolved by the route): when the
-    ///        request records an operation, the operation is recorded as
-    ///        declined under it in the same transaction (#3031). Empty records
-    ///        nothing.
+    ///        (`core::nearest_spec_binding`): a recorded operation is declined
+    ///        under it in the same transaction (#3031). Empty records nothing.
     void delete_request (const std::string& id,
     const std::optional<std::string>& declined_under = std::nullopt);
     /// The operations deletes declined under the bound collection
@@ -477,51 +423,45 @@ class Database {
 
     // Trash - what soft delete left behind (issue #988)
 
-    /// Every deleted root, newest first. A root is a stamped row whose owner is
-    /// *not* stamped: the thing the user deleted, never what its cascade took.
-    /// A deleted environment has no owner, so it is always a root (#2970). A
-    /// deleted example is a root only while its request is live (#2971): under
-    /// a trashed request it is part of that request's entry, and with no
-    /// request row at all it is listed nowhere, having nothing to come back to.
-    /// A deleted client certificate has no owner either and is always a root
-    /// (#2973).
+    /// Every deleted root, newest first: a stamped row whose owner is not
+    /// stamped. Environments and certificates have no owner, so are always
+    /// roots (#2970, #2973); an example is one only while its request is live
+    /// (#2971), part of a trashed request's entry, listed nowhere without one.
     std::vector<TrashEntry> get_trash ();
 
     /**
      * @brief Put a deleted row, and everything its delete took with it, back.
      *
-     * Restores the *cohort*: the stamped subtree rows carrying this row's own
-     * `deleted_at`; a row deleted separately and earlier keeps its stamp and
-     * becomes a trash root of its own. A collection whose parent is gone or
-     * deleted comes back at the tree root (`parent_id` cleared), the only rewrite
-     * beyond the stamp. An environment comes back unconditionally and inactive
-     * (#2970): activating it is the client's choice. An example comes back only
-     * under a live request with room under `MAX_PER_REQUEST` (#2971). A client
-     * certificate comes back only while no live entry claims its host and port
-     * (#2973), or the certificate presented would fall to row order; that refusal
-     * names the live entry and is decided under the write's lock. The example and
-     * certificate refusals are 409s and leave the row in the trash.
+     * Restores the *cohort* (stamped rows carrying this row's `deleted_at`); an
+     * earlier separate delete keeps its stamp and stays a root. A collection
+     * whose parent is gone or deleted returns at the root (`parent_id`
+     * cleared), the only rewrite beyond the stamp. An environment returns
+     * unconditionally and inactive (#2970; activating is the client's call). An
+     * example needs a live request with room under `MAX_PER_REQUEST` (#2971). A
+     * certificate needs no live entry on its host and port (#2973), else row
+     * order would pick the one presented; that refusal names the entry and is
+     * decided under the write's lock. Example and certificate refusals are
+     * 409s; the row stays.
      */
     std::expected<TrashOutcome, RestoreFailure> restore_deleted (const std::string& id);
 
     /**
-     * @brief Destroy a deleted row for good - the hard cascade soft delete
+     * @brief Destroy a deleted row for good: the hard cascade soft delete
      *        replaced.
      *
-     * Takes the whole subtree, stamp or no stamp, because a row left under a
-     * removed collection is reachable by no read and restorable by nothing.
-     * `nullopt` when no *deleted* row carries that id: purging a live row is
-     * not something this endpoint can be asked for by accident.
+     * Takes the whole subtree, stamped or not: a row left under a removed
+     * collection is unreachable and unrestorable. `nullopt` when no *deleted*
+     * row has the id, so a live row is never purged by accident.
      */
     std::optional<TrashOutcome> purge_deleted (const std::string& id);
 
     /**
      * @brief Purge everything deleted longer ago than @p retention_days.
      *
-     * @param retention_days 0 keeps the trash forever - the same reading
-     *        `maxRunsRetained` and `runRetentionDays` give 0.
-     * @param now the caller's clock in Unix ms, so a test can state the age it
-     *        is asking about rather than sleep for it.
+     * @param retention_days 0 keeps the trash forever, as 0 reads for
+     *        `maxRunsRetained` and `runRetentionDays`.
+     * @param now the caller's clock, Unix ms, so a test states an age instead
+     *        of sleeping.
      * @return how many roots were purged.
      */
     int64_t purge_expired_trash (int retention_days, int64_t now);
@@ -530,52 +470,46 @@ class Database {
     /// system clock - what startup runs (issue #988).
     int64_t purge_expired_trash_configured ();
 
-    // Saved example responses, owned by a request (issue #481). Every read is
-    // by request id or by example id; there is no all-examples query, because
-    // an example only means anything next to the request it answers.
+    // Saved example responses, owned by a request (#481): read only by request
+    // or example id, since an example means nothing apart from its request.
 
     void save_request_example (const RequestExample& e);
     /// A suppressed or trashed row reads as absent - see the definition
     /// (issues #722, #2971).
     std::optional<RequestExample> get_request_example (const std::string& id);
-    /// Oldest first (created_at, then id) - the order a mock server resolves
-    /// "the first example" in, so it is a contract rather than a detail.
-    /// Excludes tombstones and trashed rows, so a deleted example of either
-    /// origin is gone to every reader (issues #722, #2971).
+    /// Oldest first (`created_at`, then id), the order a mock server's "first
+    /// example" uses, so a contract. Tombstones and trashed rows are excluded:
+    /// a deleted example of either origin is gone (#722, #2971).
     std::vector<RequestExample> get_request_examples (const std::string& request_id);
     /// The tombstones only - deleted imported examples, which exist so a spec
     /// sync does not write back what the user removed (issue #722).
     std::vector<RequestExample> get_suppressed_request_examples (const std::string& request_id);
     /// Live examples only - what counts against `MAX_PER_REQUEST`.
     int64_t count_request_examples (const std::string& request_id);
-    /// Whether any row carries @p id, tombstoned or trashed included - the
-    /// collision check a create runs before its `replace`, which would
-    /// otherwise overwrite a row every read hides (#2971).
+    /// Whether any row has @p id, tombstoned or trashed included: a create
+    /// checks before its `replace`, which would overwrite a hidden row (#2971).
     bool request_example_id_taken (const std::string& id);
-    /// Stamps a live example as deleted (#2971); the row stays for `GET /trash`
-    /// until a restore or a purge. The route sends only a user's own example
-    /// here - an imported one is tombstoned by `suppress_request_example`.
+    /// Stamps a live example deleted (#2971), kept for `GET /trash` until
+    /// restore or purge. Only a user's own example comes here; an imported one
+    /// is tombstoned (`suppress_request_example`).
     void delete_request_example (const std::string& id);
     /// Keeps an imported example's row as a tombstone instead of removing it
     /// (issue #722). `now` is the caller's clock, as every other write here.
     void suppress_request_example (const std::string& id, int64_t now);
 
-    // OpenAPI documents - defined in db_specs.cpp. Bound by collections
-    // rather than owned by one, so nothing here cascades:
-    // `delete_spec_document` is only ever reached once the route has proven
-    // no collection still names the id.
+    // OpenAPI documents (db_specs.cpp): bound by collections, not owned, so
+    // nothing cascades; the route proves no collection names the id before
+    // `delete_spec_document`.
 
     void save_spec_document (const SpecDocument& s);
     std::optional<SpecDocument> get_spec_document (const std::string& id);
     /**
      * @brief The collections whose `openapi` binding names @p spec_id.
      *
-     * A scan, not an index: the binding lives inside a JSON blob, the collections
-     * table is the small, sidebar-sized one, and the callers are the delete
-     * refusal and nothing on a request's hot path. Collections in the Trash are
-     * included, `deleted_at` set (#3446), since a restore brings their binding
-     * back. Empty means nobody binds the spec, the only state
-     * `delete_spec_document` may be called in.
+     * A scan, not an index: the binding is inside a JSON blob, the table is
+     * sidebar-sized, and only the delete refusal calls it. Trashed collections
+     * count (#3446), since a restore brings their binding back; empty is the
+     * only state `delete_spec_document` may be called in.
      */
     std::vector<Collection> get_collections_bound_to_spec (const std::string& spec_id);
     void delete_spec_document (const std::string& id);
@@ -584,30 +518,25 @@ class Database {
      * @brief Reclaim documents nothing can reach any more, returning how many
      *        went (issue #718).
      *
-     * Nothing owns a `spec_documents` row, so no cascade removes it: every sync
-     * mints a new document and moves the binding off the old one, and unbinding,
-     * re-binding or deleting the bound collection leaves documents behind. A year
-     * of weekly syncs of a 12 MB document strands ~600 MB that no route can even
-     * list (`DELETE /specs/:id` needs an id, and there is no list route).
+     * Nothing owns a `spec_documents` row, so no cascade removes one: each sync
+     * mints a new document, and unbinding, re-binding or deleting the binder
+     * leaves the old. A year of weekly 12 MB syncs strands ~600 MB no route can
+     * even list (`DELETE /specs/:id` needs an id; there is no list).
      *
-     * **The lifetime rule**, and the only one: a document lives while a collection
-     * binds it or a *retained run* names it in `runs.config_snapshot`. The run half
-     * is what lets the sweep run beside retention rather than instead of it: a
-     * scenario run stamps the `specId` it planned against, and its coverage may
-     * still send a reader to the source, so a document outlives its binding
-     * exactly as long as the runs that used it. Hence the first caller,
-     * `prune_runs_configured`, the pass that releases run references (on startup
-     * and after every run, with no schedule of its own); the others are
-     * `spec_sync_apply` (the accretion source) and `delete_collection` (a binder
-     * going away). A document written within `SPEC_DOCUMENT_SWEEP_GRACE_MS` is
-     * spared regardless (that constant documents the bind-in-flight window).
+     * **The lifetime rule**: a document lives while a collection binds it or a
+     * *retained run* names it in `runs.config_snapshot` (a scenario run's
+     * coverage may still need its source), so it outlives its binding exactly
+     * as long as its runs; that is what makes the sweep safe beside retention.
+     * Callers: `prune_runs_configured` (the pass that releases run references,
+     * at startup and after every run), `spec_sync_apply` (the accretion
+     * source), `delete_collection` (a binder going). Anything written within
+     * `SPEC_DOCUMENT_SWEEP_GRACE_MS` is spared (the bind-in-flight window).
      *
-     * **Never throws**: each caller reaches it as the tail of an operation whose
-     * success does not depend on it, so a failure is logged and swallowed. Cheap
-     * when there is nothing to do, as riding every run completion requires: it
-     * asks its three questions cheapest-first and stops at the first that leaves
-     * nothing at stake, so the ordinary case never reads the runs table, and no
-     * path reads `content`.
+     * **Never throws**: each caller's success does not depend on it, so
+     * failures are logged and swallowed. Cheap when idle, as every run
+     * completion requires: three questions cheapest-first, stopping when
+     * nothing is at stake, so the ordinary case never reads the runs table and
+     * no path reads `content`.
      */
     size_t sweep_orphaned_spec_documents ();
 
@@ -615,15 +544,13 @@ class Database {
      * @brief Repair bindings stored without the document version they name
      *        (issue #709), returning how many were stamped.
      *
-     * Contract coverage and response-schema validation need the binding's
-     * `specHash` to agree with the stored document, and a binding the import path
-     * wrote before #709 has `{specId}` alone, so every run of it reports no
-     * contract. Safe by construction: a hashless binding came from an import that
-     * stored exactly the document it names, so that document's current hash *is*
-     * the bound version. A binding naming a document no longer held is left as
-     * is; a run already says so. Idempotent and run at startup with the other
-     * repair passes, not behind a one-shot flag: a stamped binding is skipped
-     * next start, so the pass costs one scan of the sidebar-sized table.
+     * Coverage and schema validation need `specHash` to match the stored
+     * document; bindings imports wrote before #709 lack it, so their runs
+     * report no contract. Safe: a hashless binding came from an import that
+     * stored exactly its document, so that document's hash *is* the bound
+     * version; one naming a vanished document is left alone. Idempotent at
+     * startup, not a one-shot flag: stamped bindings are skipped, so a start
+     * costs one scan of the sidebar-sized table.
      */
     int64_t stamp_hashless_spec_bindings ();
 
@@ -631,18 +558,16 @@ class Database {
      * @brief Disable the header rows a pre-#1229 client saved into stored
      *        requests, and answer how many requests were rewritten.
      *
-     * Such a client wrote `X-Vayu-Version` and a fresh `X-Request-ID` into the
-     * request at save time, so every consumer of the stored request (a load run,
-     * a collection run, an MCP send, an export, a snippet) replays one day's
-     * version and one frozen correlation id. The engine adds both at send time,
-     * which fixes only what is sent; this pass fixes what was already written.
-     * Which rows match, and why each rule is narrow enough to disable rather than
-     * delete, is `strip_legacy_managed_headers` (`http/default_headers.hpp`),
-     * testable without a database. Idempotent, at startup, for the reason
-     * `stamp_hashless_spec_bindings` is. Trashed rows are left alone (#1491):
-     * `restore_request_locked` / `restore_collection_locked` run the same disable
-     * on a row leaving the trash, so a trashed request stays byte-identical until
-     * restored.
+     * Such rows (`X-Vayu-Version`, a fixed `X-Request-ID`) make every consumer
+     * (load and collection runs, MCP sends, exports, snippets) replay one day's
+     * version and one frozen correlation id; the engine's send-time headers fix
+     * only new sends, this pass the stored rows. The match rules, and why each
+     * is narrow enough to disable rather than delete, are
+     * `strip_legacy_managed_headers` (`http/default_headers.hpp`), testable
+     * without a database. Idempotent at startup, as
+     * `stamp_hashless_spec_bindings`. Trashed rows are left alone (#1491):
+     * `restore_request_locked` / `restore_collection_locked` apply it on the
+     * way out, so a trashed request stays byte-identical.
      */
     int64_t strip_stored_managed_headers (); // db_maintenance.cpp
 
@@ -650,24 +575,22 @@ class Database {
      * @brief Rewrite every collection stored with `parent_id = ''` to NULL,
      *        trashed rows included, and answer how many were rewritten.
      *
-     * `""` was a second spelling of the tree root before #3451; writes store NULL
-     * (`read_parent_id_field`). Idempotent and unmarked, unlike
-     * `strip_stored_managed_headers`: `idx_collections_parent_id` serves both
-     * statements, so a clean workspace pays one index probe per start. Saves a
-     * `pre-repair` snapshot before the first rewrite, and throws, rewriting
-     * nothing, when it cannot.
+     * `""` was a second spelling of the root before #3451; writes store NULL
+     * (`read_parent_id_field`). Unmarked, unlike
+     * `strip_stored_managed_headers`: both statements use
+     * `idx_collections_parent_id`, so a clean start pays one index probe. Saves
+     * a `pre-repair` snapshot first, and throws, rewriting nothing, when it
+     * cannot.
      */
     int64_t clear_empty_parent_ids (); // db_maintenance.cpp
 
     /**
      * @brief Persist a whole import in one transaction (issue #96).
      *
-     * Every row lands or none does, so a failed import leaves no half-created tree
-     * for a client to roll back. Rows are written collections -> requests ->
-     * examples -> environments, so a parent exists before the rows that reference
-     * it. Ids are assigned by the caller (`POST /import/apply` resolves its temp
-     * ids first): nothing here can look up a row this transaction has not
-     * committed.
+     * All rows or none, written collections -> requests -> examples ->
+     * environments so parents exist first. Ids are the caller's
+     * (`POST /import/apply` resolves its temp ids): nothing here can look up a
+     * row this transaction has not committed.
      */
     // db_requests.cpp
     void import_apply (const std::vector<Collection>& collections,
@@ -679,21 +602,18 @@ class Database {
     /**
      * @brief Persist a whole batch reorder in one transaction (issue #365).
      *
-     * The rows carry positions (and, for a move, owners) the caller has already
-     * validated against each other; every one lands or none does. N sibling `PUT`s
-     * could stop halfway and leave two rows at one `order` and a gap, a shape no
-     * read repairs because the tie rule then decides the display order. Every row
-     * is **updated, never inserted**: one not stored at commit time throws
-     * `MissingRowError` and rolls the batch back (#386), since an insert here
-     * could only be a resurrection. Separate from `import_apply` despite the shape:
-     * this writes existing rows, must not touch environments, and its caller
-     * validates different things.
+     * The rows' positions (and, for a move, owners) are pre-validated against
+     * each other; all land or none. N sibling `PUT`s could stop halfway and
+     * leave two rows at one `order` and a gap, which no read repairs since the
+     * tie rule then picks the display order. **Updated, never inserted**: a row
+     * missing at commit throws `MissingRowError` and rolls back (#386), as an
+     * insert could only be a resurrection. Not `import_apply`: this rewrites
+     * existing rows, never environments, after other validation.
      *
      * @param declined_under request id to the bound collection the batch moves
-     *        that request out of (#3446), each resolved by the route: the
-     *        operation the stored row records is declined under it before the
-     *        row is written, in the same transaction. The caller has already
-     *        cleared the stamp on the row it passes.
+     *        that request out of (#3446), resolved by the route: the stored
+     *        row's operation is declined under it before the row is written, in
+     *        the same transaction. The caller has cleared the row's stamp.
      */
     // db_collections.cpp
     void apply_reorder (const std::vector<Collection>& collections,
@@ -703,84 +623,80 @@ class Database {
     /**
      * @brief Persist a whole OpenAPI sync in one transaction (issue #655).
      *
-     * Separate from `import_apply` for `apply_reorder`'s reason: it writes rows
-     * that exist and deletes rows the caller named, and an upsert on either would
-     * resurrect what a concurrent delete removed. `SpecSyncBatch::binding` and
-     * every `updated` row must be stored at commit time, or it throws
-     * `MissingRowError` and rolls back whole; the route answers 409, the diff's
-     * ground having moved. A `deleted` request already gone is *not* an error (the
-     * sync wanted it gone); its examples go either way, as `delete_request` does.
+     * Not `import_apply`, for `apply_reorder`'s reason: it rewrites and deletes
+     * named rows, where an upsert would resurrect what a concurrent delete
+     * removed. `SpecSyncBatch::binding` and every `updated` row must exist at
+     * commit, or `MissingRowError` rolls it all back (the route's 409: the
+     * diff's ground moved). A `deleted` request already gone is fine; its
+     * examples go either way.
      */
     void spec_sync_apply (const SpecSyncBatch& batch); // db_specs.cpp
 
     /**
      * @brief Run @p fn with the DB mutex held for the whole of it (issue #386).
      *
-     * Every other method locks per call, enough for a write that depends only on
-     * its arguments but not for a composite that reads, decides, then writes:
-     * `POST /reorder` validates a batch against the stored graph before committing
-     * it, and between the two another write can move the ground (two reparents,
-     * each legal alone, commit a cycle; a create computes `max_order + 1` inside
-     * the range being renumbered). The mutex is recursive, so @p fn may call any
-     * method here. Hold it only for a bounded composite: `/health`, the runs poll
-     * and SSE all wait for the whole of @p fn.
+     * Per-call locking does not cover a read-decide-write composite: between
+     * `POST /reorder`'s validation and commit another write can move the ground
+     * (two legal reparents commit a cycle; a create computes `max_order + 1`
+     * inside the range being renumbered). The mutex is recursive, so
+     * @p fn may call any method here. Keep @p fn bounded: `/health`, the runs
+     *        poll and SSE all wait.
      */
     void with_lock (const std::function<void ()>& fn); // database.cpp
 
     /**
      * @brief What `GET /changes` relays (issue #3420): one event per committed
      *        write of a collection, request, example, environment, the globals
-     *        or a trash entry. See `db/change_feed.hpp` for when one is
-     *        published and what a cascade publishes.
+     *        or a trash entry (when, and what a cascade publishes:
+     *        `db/change_feed.hpp`).
      *
-     * Every public write of those kinds publishes here and nothing else does;
-     * the startup repair passes rewrite rows before the engine listens, when
-     * no stream can be open and a resume from an earlier process resets.
+     * Only public writes of those kinds publish; startup repairs run before the
+     * engine listens, when no stream is open and a resume from an earlier
+     * process resets.
      */
     ChangeFeed& change_feed () {
         return changes_;
     }
 
-    // db_environments.cpp. The reads see live rows only (#2970): every
-    // composition, script scope and export reaches an environment through
-    // `get_environment`, so a trashed one is missing to all of them at once.
+    // db_environments.cpp. Reads see live rows only (#2970): compositions,
+    // script scopes and exports all go through `get_environment`, so a trashed
+    // one is missing to all of them.
     void save_environment (const Environment& e);
     std::vector<Environment> get_environments ();
     std::optional<Environment> get_environment (const std::string& id);
-    /// Stamps the environment as deleted and clears `is_active` (#2970); the
-    /// row stays for `GET /trash` until a restore or a purge.
+    /// Stamps it deleted and clears `is_active` (#2970); kept for `GET /trash`
+    /// until restore or purge.
     void delete_environment (const std::string& id);
 
     /**
-     * Client-certificate registry (issue #707). Plain CRUD: the routes own
-     * validation and the uniqueness answer, both decisions that need a status
-     * code. `get_client_certificates` is read once per resolved transport policy
-     * (per design send, *once per run* on the load and collection paths), never
-     * per transfer (`vayu::http::resolve_transport_policy`). Both reads see live
-     * rows only (#2973): a trashed entry is presented to no host, and a PUT or
-     * second DELETE of one is a 404.
+     * Client-certificate registry (issue #707), plain CRUD: the routes own
+     * validation and the uniqueness answer, needing a status code.
+     * `get_client_certificates` runs once per resolved transport policy (per
+     * design send, once per load or collection run), never per transfer
+     * (`vayu::http::resolve_transport_policy`). Reads see live rows only
+     * (#2973): a trashed entry is presented to no host, and a PUT or second
+     * DELETE of one 404s.
      */
     // db_credentials.cpp
     void save_client_certificate (const ClientCertificate& c);
     std::vector<ClientCertificate> get_client_certificates ();
     std::optional<ClientCertificate> get_client_certificate (const std::string& id);
-    /// The live entry other than @p except_id that claims @p host and @p port,
-    /// or nothing - the one definition of "one entry per target" (#707), asked
-    /// by the create and update routes and by a restore (#2973). A decision
-    /// built on the answer holds the DB mutex across it and the write.
+    /// The live entry other than @p except_id claiming @p host and @p port: the
+    /// one definition of "one entry per target" (#707), used by create, update
+    /// and restore (#2973). Hold the DB mutex across the answer and the write
+    /// that relies on it.
     std::optional<ClientCertificate> client_certificate_for_target (const std::string& host,
     const std::optional<int>& port,
     const std::string& except_id = {});
-    /// Stamps a live entry as deleted (#2973); the row, passphrase included,
-    /// stays for `GET /trash` until a restore or a purge.
+    /// Stamps a live entry deleted (#2973); the row, passphrase included, stays
+    /// until restore or purge.
     void delete_client_certificate (const std::string& id);
 
     /**
-     * Allowed folders for request-body files (`file_roots`, schema version 3).
-     * Plain CRUD like the registry above: `routes/file_roots.cpp` owns the
-     * path rules and the uniqueness answer. Read once per design send and once
-     * per run (`vayu::http::FileAccessPolicy::from_database`), never per
-     * transfer. `get_file_roots` answers ordered by path.
+     * Allowed folders for request-body files (`file_roots`, schema version 3),
+     * plain CRUD: `routes/file_roots.cpp` owns path rules and uniqueness. Read
+     * once per design send and per run (`FileAccessPolicy::from_database`),
+     * never per transfer; ordered by path.
      */
     // db_credentials.cpp
     void save_file_root (const FileRoot& root);
@@ -789,11 +705,9 @@ class Database {
     void delete_file_root (const std::string& id);
 
     /**
-     * Files a person picked (`file_grants`, schema version 6, #2356). Plain
-     * CRUD like the allowed folders above: the caller canonicalises `path` and
-     * owns the uniqueness answer (the column is UNIQUE, and `save_file_grant`
-     * replaces). Read with the folders, once per design send and once per run
-     * (`FileAccessPolicy::from_database`). `get_file_grants` answers ordered by
+     * Files a person picked (`file_grants`, schema version 6, #2356), plain
+     * CRUD: the caller canonicalises `path` and owns uniqueness (the column is
+     * UNIQUE; `save_file_grant` replaces). Read with the folders; ordered by
      * path.
      */
     // db_credentials.cpp
@@ -811,63 +725,60 @@ class Database {
     std::optional<OAuthToken> get_oauth_token (const std::string& cache_key);
     void delete_oauth_token (const std::string& cache_key);
     /**
-     * Removes @p cache_key's row only while it still holds @p refresh_token,
-     * reading and removing under one acquisition of the mutex (#3344). A
-     * refresh the provider refused clears the token it spent, never the row
-     * another acquisition wrote while it was in flight.
+     * Removes @p cache_key's row only while it holds @p refresh_token, reading
+     * and removing under one mutex acquisition (#3344): a refused refresh
+     * clears the token it spent, never a row another acquisition wrote
+     * meanwhile.
      *
      * @return whether a row was removed.
      */
     bool delete_oauth_token_if_refresh_matches (const std::string& cache_key,
     const std::string& refresh_token);
 
-    // Execution - runs and every run-scoped artifact below (metric ticks,
-    // monitor samples, results, the webhook inbox) are defined in
-    // db_runs.cpp.
+    // Execution: runs and every run-scoped artifact below (ticks, monitor
+    // samples, results, the webhook inbox) live in db_runs.cpp.
     void create_run (const Run& run);
     std::optional<Run> get_run (const std::string& id);
     /**
      * @brief The run row as last committed, read without waiting on the DB
-     * mutex (#2679).
+     *        mutex (#2679).
      *
-     * Through a second, read-only connection, so a write in flight on the
-     * main one (a results chunk, the WAL checkpoint inside its commit) is
-     * neither waited for nor seen. For a read that must stay prompt while a
-     * run writes; `get_run` stays the read a read-then-write composes with.
+     * Via a second, read-only connection, so an in-flight write (a results
+     * chunk, its WAL checkpoint) is neither waited for nor seen. For reads that
+     * must stay prompt during a run; `get_run` is the one a read-then-write
+     * composes with.
      */
     std::optional<Run> get_run_snapshot (const std::string& id);
     /**
      * @brief Move run @p id to @p to if its status is one of @p allowed_from
-     * (#3340). The only run status write after the insert.
+     *        (#3340). The only run status write after the insert.
      *
-     * The read, the decision and the write share one DB mutex acquisition. No
-     * wildcard: an empty @p allowed_from refuses every row, so a terminal status
-     * is left only by an edge the caller names. `end_time` moves with the edge: a
-     * terminal @p to keeps a stored value later than `start_time` (from
-     * `update_run_end_time`) and stamps now over anything else, the
-     * `seed_run_times` seed included; @p to Running clears it to 0 so a live
-     * report measures to now; other edges leave it. A busy database is retried, a
-     * terminal write until it lands: a lost final status leaves the run `running`,
-     * which retention never prunes, until the next start reconciles it (a graceful
-     * shutdown waits for that worker; a killed daemon leaves it to
-     * `reconcile_orphaned_runs`). Any other error throws; a refusal is logged and
-     * answered, never thrown.
+     * Read, decision and write share one DB mutex acquisition. No wildcard: an
+     * empty @p allowed_from refuses every row, so a terminal status is left
+     * only by a named edge. `end_time` moves with the edge: a terminal @p to
+     * keeps a stored value later than `start_time` (`update_run_end_time`'s)
+     * and stamps now over anything else, the `seed_run_times` seed included; @p
+     * to Running clears it to 0 so a live report measures to now; other edges
+     * leave it. Busy is retried, a terminal write until it lands (a lost final
+     * status leaves the run `running`, unpruned, until the next start
+     * reconciles it; a graceful shutdown waits for that worker, a kill leaves
+     * it to `reconcile_orphaned_runs`). Other errors throw; a refusal is logged
+     * and answered, never thrown.
      */
     RunStatusTransition transition_run_status (const std::string& id,
     std::initializer_list<RunStatus> allowed_from,
     RunStatus to);
-    // Stamp end_time now without changing status. A later terminal
-    // `transition_run_status` keeps this value.
+    // Stamps end_time now, status unchanged; a later terminal
+    // `transition_run_status` keeps it.
     void update_run_end_time (const std::string& id);
     std::vector<Run> get_all_runs ();
-    // Paginated, filtered run list ordered start_time DESC, id DESC (newest
-    // first, ties by id) - the only order the UI uses. count_runs returns the
-    // total matching @p filter (ignoring limit/offset/cursor) for the
-    // pagination envelope.
+    // Newest first (start_time DESC, id DESC), the only order the UI uses;
+    // count_runs is the total matching @p filter, ignoring limit, offset and
+    // cursor, for the pagination envelope.
     std::vector<Run>
     get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t offset);
-    // The same order, starting after @p before: the index seeks to the cursor
-    // instead of stepping over every row an OFFSET would skip (#2978).
+    // The same order after @p before: the index seeks to the cursor instead of
+    // stepping over an OFFSET's rows (#2978).
     std::vector<Run>
     get_runs_before (const RunFilter& filter, const RunCursor& before, int64_t limit);
     int64_t count_runs (const RunFilter& filter);
@@ -876,44 +787,41 @@ class Database {
     /**
      * @brief Store the whole-run results summary (JSON) on the run row.
      *
-     * Written once when a run reaches a terminal status; `GET /runs/:id/report`
-     * reads it instead of re-reducing the time-series. A missing run is logged
-     * and ignored (the run may have been deleted mid-flight), never an error.
-     *
-     * Retries on a busy database like the other write paths - losing this write
-     * loses the run's aggregates outright, since nothing else records them.
+     * Written once at a terminal status and read by `GET /runs/:id/report`
+     * instead of re-reducing the time series. A missing run (deleted
+     * mid-flight) is logged and ignored. Busy is retried: losing this write
+     * loses the run's aggregates, which nothing else records.
      */
     void update_run_summary (const std::string& id, const std::string& summary);
 
     /**
      * @brief Pin (or unpin) a run as a baseline, returning the stored row.
      *
-     * `std::nullopt` means no run has that id - the route's 404. Several runs
-     * may be pinned at once: the engine records the pin and nothing more, and
-     * which baseline applies to a given run is the client's choice (per
-     * request, per endpoint), so no write here unpins anything else.
+     * `std::nullopt` is no such run (the 404). Many runs may be pinned: which
+     * baseline applies is the client's choice (per request, per endpoint), so
+     * this never unpins another.
      */
     std::optional<Run> set_run_baseline (const std::string& id, bool baseline);
 
     /**
-     * @brief Prune old runs (and their cascaded metrics/results) by three limits.
+     * @brief Prune old runs (and their cascaded metrics/results) by three
+     *        limits.
      *
-     * The count caps are per kind (#2429): @p max_runs counts load and scenario
-     * runs, @p max_design_runs design Sends, and neither evicts the other. A run
-     * is a victim beyond its kind's most recent N (by start_time) OR when older
-     * than @p max_age_days, which applies to every kind; 0 disables a limit. A
-     * run still `running`/`pending` or pinned as a baseline (`Run::baseline`) is
-     * never pruned and counts toward no cap. Deletion is batched, releasing the
-     * DB mutex between batches so a large backlog cannot stall other endpoints;
-     * each victim is re-read in its batch's lock and spared if since pinned, back
-     * in flight or deleted (#1906). `delete_run` is the explicit verb and deletes
-     * whatever it names.
+     * Count caps are per kind (#2429): @p max_runs for load and scenario runs,
+     * @p max_design_runs for design Sends, neither evicting the other. A run
+     * beyond its kind's newest N (by start_time) or older than @p max_age_days
+     * (every kind) is a victim; 0 disables a limit. Runs `running`, `pending`
+     * or pinned (`Run::baseline`) are never pruned and count toward no cap.
+     * Deletion is batched, releasing the mutex between batches so a backlog
+     * cannot stall other endpoints; each victim is re-read in its batch's lock
+     * and spared if since pinned, in flight or deleted (#1906). `delete_run` is
+     * the explicit verb and deletes whatever it names.
      *
      * @param after_selection Test seam, invoked once victims are chosen, with
-     *        the mutex released and before the first batch - the window a
+     *        the mutex released and before the first batch: the window a
      *        competing pin lands in.
-     * @param max_design_runs The design Send cap; after the seam so the
-     *        existing three-argument callers keep their meaning.
+     * @param max_design_runs The design Send cap; after the seam so
+     *        three-argument callers keep their meaning.
      */
     void prune_runs (int max_runs,
     int max_age_days,
@@ -921,45 +829,43 @@ class Database {
     int max_design_runs                           = 0);
 
     /**
-     * @brief Prune runs using the configured `maxRunsRetained`,
-     * `maxDesignRunsRetained` and `runRetentionDays` knobs. Called at startup
-     * and after a run reaches a terminal status.
+     * @brief Prune runs by the configured `maxRunsRetained`,
+     *        `maxDesignRunsRetained` and `runRetentionDays`, at startup and
+     *        after each run ends.
      */
     void prune_runs_configured ();
 
     /**
      * @brief Delete every run retention would ever delete, now (#2429).
      *
-     * What "Clear run history" asks for: every run except a pinned baseline
-     * and one still `running`/`pending`. Every stored id is a candidate and
-     * the exemption is decided per row inside `remove_unexempt_runs`' batch
-     * lock, so a run pinned or started while the clear is under way is
-     * spared. A run deleted here is gone for good; there is no runs trash.
+     * "Clear run history": every run but pinned baselines and those
+     * `running`/`pending`, decided per row in `remove_unexempt_runs`' batch
+     * lock, so one pinned or started meanwhile is spared. There is no runs
+     * trash.
      */
     RunHistoryCleared clear_runs ();
 
     /**
-     * @brief Mark runs left `running`/`pending` by a previous process as failed.
+     * @brief Mark runs left `running`/`pending` by a previous process as
+     *        failed.
      *
-     * A crash or kill leaves in-flight runs with no terminal status, so `GET /runs`
-     * would report them running forever; a graceful shutdown is not one of those
-     * (`RunManager::shutdown` joins every worker, which writes it). Called from
-     * `init()`, before the sweeper and the HTTP server start, so no run of this
-     * process can be caught; `daemon.cpp` holds the instance lock before the
-     * database opens, so no other engine has a live run here. That lock is the
-     * whole ownership check; rows carry no owner (#2422). A load run with no
-     * stored summary and at least one metric tick gets one from its last tick,
-     * marked `"partial": true` (#2895): only the tick's cumulative figures, never
-     * its one-second windows; a run with a summary keeps it, any other gets none.
-     * `end_time` keeps what the run recorded (the moment of death is unknowable,
-     * and the restart time would span the downtime); a row with none (0, as a
-     * move to Running leaves) gets its `start_time`.
+     * A crash or kill leaves in-flight runs without a terminal status, which
+     * `GET /runs` would report as running forever (a graceful shutdown joins
+     * every worker, which writes it). Called from `init()` before the sweeper
+     * and HTTP server start, so no run of this process is caught, and
+     * `daemon.cpp` takes the instance lock before opening the database, so no
+     * other engine has one here: that lock is the whole ownership check
+     * (#2422). A load run with no summary but a metric tick gets one from its
+     * last tick, marked `"partial": true` (#2895), cumulative figures only. An
+     * `end_time` is kept (death time is unknowable; the restart would span the
+     * downtime); a row with none (0, as a move to Running leaves) gets its
+     * `start_time`.
      *
      * @return Number of rows reconciled.
      */
     size_t reconcile_orphaned_runs ();
 
-    // Metric ticks - one wide row per tick; the current time-series storage.
+    // Metric ticks: one wide row per tick.
     void add_metric_tick (const MetricTick& tick);
     // The run's most recently written tick, or nothing when it wrote none.
     std::optional<MetricTick> get_last_metric_tick (const std::string& run_id);
@@ -969,9 +875,8 @@ class Database {
     std::vector<MetricTick> get_metric_ticks_since (const std::string& run_id, int64_t last_id);
     int64_t count_metric_ticks (const std::string& run_id);
 
-    // Monitor samples - one wide row per scrape of a run's configured
-    // server-vitals endpoint. Deliberately not part of `metric_ticks`: that
-    // payload's key set is the GET /runs/:id/metrics contract.
+    // Monitor samples: one wide row per server-vitals scrape, not in
+    // `metric_ticks`, whose key set is the GET /runs/:id/metrics contract.
     void add_monitor_sample (const MonitorSample& sample);
     // Ordered (timestamp, id) so a page boundary never splits a sample.
     std::vector<MonitorSample>
@@ -981,26 +886,22 @@ class Database {
     // Results
     /// Inserts one result row and answers the id SQLite assigned it.
     int add_result (const Result& result);
-    /**
-     * @brief One result row of @p run_id, or nothing.
-     *
-     * Matched on both ids, so a result id reached through another run's path
-     * is not found: `GET /runs/:runId/results/:resultId` answers it a 404.
-     */
+    /// One result row of @p run_id, matched on both ids, so another run's
+    /// result id 404s on `GET /runs/:runId/results/:resultId`.
     std::optional<Result> get_result (const std::string& run_id, int result_id);
     /**
      * @brief Batch insert of a run's sampled results, optionally with the
      *        response bodies captured alongside them.
      *
-     * `bodies` refer to results by index (`PendingResultBody::result_index`),
-     * since row ids exist only after the insert. Written in chunks of
-     * `RESULTS_WRITE_CHUNK_ROWS`, one transaction and one DB mutex acquisition
-     * each with a pause off the mutex between, so another caller waits one chunk,
-     * not the flush (#2548). A chunk's results, body rows and new blobs commit
-     * together, so no body row points at a rolled-back result; the call as a
-     * whole is not atomic (a failure keeps committed chunks). Bodies dedupe by
-     * `body_hash` across the whole call: identical responses, the load-test norm,
-     * share one `body_blobs` row.
+     * `bodies` refer to results by index (`PendingResultBody::result_index`):
+     * row ids exist only after the insert. Chunks of
+     * `RESULTS_WRITE_CHUNK_ROWS`, each one transaction and mutex acquisition
+     * with a pause off the mutex between, so others wait one chunk, not the
+     * flush (#2548); a chunk's results, body rows and new blobs commit
+     * together, so no body row outlives its result. The call is not atomic: a
+     * failure keeps committed chunks. Bodies dedupe by `body_hash` across the
+     * call, so identical responses (the load-test norm) share one `body_blobs`
+     * row.
      */
     void add_results_batch (const std::vector<Result>& results,
     const std::vector<PendingResultBody>& bodies = {});
@@ -1008,50 +909,46 @@ class Database {
     /**
      * @brief A run's results with every column but `trace_data`, in id order.
      *
-     * For a reader that needs each row's status, latency and error and not
-     * the stored trace (#2548); the report of a load run that is not terminal
-     * reads no row at all (#2659). Each row's `trace_data` comes back empty,
-     * which every reader of a `Result` already takes to mean "no trace".
+     * For readers needing status, latency and error, not the trace (#2548; a
+     * non-terminal load run's report reads no row at all, #2659). `trace_data`
+     * comes back empty, which every reader takes as "no trace".
      */
     std::vector<Result> get_results_without_traces (const std::string& run_id);
     /**
-     * @brief Status code and latency for a page of **design** runs, in one query.
+     * @brief Status code and latency for a page of **design** runs, in one
+     *        query.
      *
-     * The paginated GET /runs list attaches each design run's outcome to its row
-     * (`resultSummary`), as GET /runs/:id attaches the whole exchange; a load or
-     * collection row's comes from the stored `summary`, never its results (#2130,
-     * #2954). Not `get_results` in a loop, for three reasons: two columns, so
-     * `trace_data` is never read; one statement for a page of 50; and the
-     * statement matches only design-run results, so a load run's unbounded error
-     * rows cannot be pulled, by the query rather than by caller discipline
-     * (GET /runs/:id's guard is a caller-side one, and has to be). A run with no
-     * result row yet is absent from the map, not zeroed: "no outcome recorded" and
-     * "HTTP 0 in 0ms" differ.
+     * GET /runs attaches each design row's outcome (`resultSummary`); load and
+     * collection rows take theirs from the stored `summary`, never results
+     * (#2130, #2954). Not `get_results` in a loop: two columns (no
+     * `trace_data`), one statement per page, and a statement matching only
+     * design-run results, so a load run's unbounded error rows cannot be pulled
+     * by the query itself (GET /runs/:id's guard is caller-side, and has to
+     * be). A run with no result row yet is absent, not zeroed: "no outcome" is
+     * not "HTTP 0 in 0ms".
      */
     std::unordered_map<std::string, DesignResultOutcome>
     get_design_result_outcomes (const std::vector<std::string>& run_ids);
 
-    // Captured response bodies for a run's sampled results. Deliberately not
-    // reachable from get_results: a finished run's report loads and parses
-    // every result row's trace, and this is exactly the data it must not pay for.
+    // Captured bodies of a run's sampled results, unreachable from get_results
+    // on purpose: a finished run's report parses every result row's trace and
+    // must not pay for these.
     std::vector<ResultBody>
     get_result_bodies_paginated (const std::string& run_id, int64_t limit, int64_t offset);
     int64_t count_result_bodies (const std::string& run_id);
     /// The stored bytes of a blob, or `""` when the id is 0 or unknown.
     std::string get_body_blob_content (int blob_id);
 
-    // Webhook inbox captures (issue #480). The inbox itself is process-lifetime
-    // state on InboxManager; only what it captured is stored, and only so a
-    // long-running listener's capture list is paged off disk rather than held
-    // on the heap.
+    // Webhook inbox captures (#480): the inbox is process-lifetime
+    // `InboxManager` state; only its captures are stored, so a long listener's
+    // list pages off disk instead of the heap.
 
     /**
      * @brief Append one capture and trim the inbox back to @p max_captures.
      *
-     * Insert and trim are one transaction: a list briefly holding 501 rows would
-     * be harmless, but a trim without its insert (or the reverse) would drop a
-     * capture the caller was told had landed. The oldest go first by `id`, the
-     * insertion and so arrival order, which unlike `received_at` cannot tie.
+     * One transaction: a list briefly at 501 rows is harmless, a trim without
+     * its insert (or the reverse) drops a capture reported as landed. Oldest go
+     * first by `id`, the arrival order, which unlike `received_at` cannot tie.
      *
      * @return the id assigned to the stored capture.
      */
@@ -1061,8 +958,8 @@ class Database {
     std::vector<InboxRequest>
     get_inbox_requests_paginated (const std::string& inbox_id, int64_t limit, int64_t offset);
     int64_t count_inbox_requests (const std::string& inbox_id);
-    /// One capture by id, matched on the inbox as well: an id belonging to
-    /// another inbox is absent, the way `get_result` treats another run's.
+    /// One capture, matched on the inbox too: another inbox's id is absent, as
+    /// in `get_result`.
     std::optional<InboxRequest> get_inbox_request (const std::string& inbox_id, int capture_id);
     /// Captures with `id` greater than @p last_id, oldest first (the live poll).
     std::vector<InboxRequest>
@@ -1072,22 +969,19 @@ class Database {
     /**
      * @brief Drop every capture, for every inbox. Called from `init()`.
      *
-     * An inbox is process-lifetime, so after a restart no row here has an inbox
-     * that could list it - they would be unreachable bytes growing with every
-     * session. Same reasoning as `reconcile_orphaned_runs`: the previous
-     * process's leftovers are reconciled before anything can read them.
+     * Inboxes are process-lifetime, so after a restart no inbox can list these
+     * rows; like `reconcile_orphaned_runs`, leftovers are cleared before
+     * anything reads them.
      */
     int64_t clear_inbox_requests_all ();
 
     // Workspace backup (issue #987)
 
     /**
-     * @brief Where snapshots are written - `backups/` beside the database file.
+     * @brief Where snapshots are written: `backups/` beside the database file.
      *
-     * Derived from @ref path rather than threaded through as a second
-     * parameter, on the rule that directory already carries (the CA bundle
-     * `resolve_transport_policy` materializes is a sibling for the same
-     * reason): a caller holding a `Database` knows where the workspace lives.
+     * Derived from @ref path, as the CA bundle is, so a `Database` holder needs
+     * no second path.
      */
     // db_maintenance.cpp
     [[nodiscard]] std::string backups_directory () const;
@@ -1097,46 +991,43 @@ class Database {
      *        prune older ones to `maxBackupsRetained`.
      *
      * `VACUUM INTO`, not a file copy: under WAL the `-wal` holds committed
-     * transactions the main file lacks, so copying the file under a running
-     * engine is unsafe, while `VACUUM INTO` reads one snapshot and writes a
-     * complete, defragmented database. It is read-only towards the workspace, so
-     * it cannot cost the user the data it copies.
+     * transactions the main file lacks, while `VACUUM INTO` writes one
+     * complete, defragmented snapshot, read-only towards the workspace.
      *
      * @param now The caller's clock, in Unix ms. It names the file, so a test
      *        can state which snapshot it is asking for; a stamp already taken
-     *        is stepped over rather than written through, exactly as the
-     *        corruption quarantine does.
-     *
+     *        is stepped over, not written through, as the corruption quarantine
+     *        does.
      * @return the snapshot, or why there is none. Never throws: every failure
-     *         is a @ref BackupFailure the route turns into a status.
+     *        is a @ref BackupFailure the route turns into a status.
      */
     std::expected<BackupRecord, BackupFailure> backup_workspace (int64_t now);
 
     /**
-     * @brief The single-backup slot, held while one snapshot is written
-     *        (issue #987).
+     * @brief The single-backup slot, held while one snapshot is written (issue
+     *        #987).
      *
-     * Two concurrent `VACUUM INTO`s would each write a whole copy (unbounded disk
-     * for a double-click), and the later would race the earlier's retention pass
-     * for the files it prunes. So a second caller is refused, not queued: a backup
-     * is asked for *now*, and "one is already running" beats an unasked-for copy
-     * later. `backup_workspace` takes the slot for its own duration; the type is
-     * public so a test can hold it and assert the refusal without racing.
+     * Two concurrent `VACUUM INTO`s would each write a whole copy (unbounded
+     * disk for a double-click), and the later would race the earlier's
+     * retention pass. So a second caller is refused, not queued: "one is
+     * already running" beats an unasked-for copy later. `backup_workspace`
+     * holds it for its own duration; the type is public so a test can hold it
+     * and assert the refusal without racing.
      */
     class BackupSlot {
         public:
         explicit BackupSlot (Database& db); // db_maintenance.cpp
         ~BackupSlot ();                     // db_maintenance.cpp
 
-        // Neither copyable nor movable: this is a lock, and every one of the
-        // four would produce a second object claiming to hold the one slot.
+        // Neither copyable nor movable: it is a lock, and a copy or move would
+        // be a second holder.
         BackupSlot (const BackupSlot&)            = delete;
         BackupSlot& operator= (const BackupSlot&) = delete;
         BackupSlot (BackupSlot&&)                 = delete;
         BackupSlot& operator= (BackupSlot&&)      = delete;
 
-        /// False when another backup already had the slot - nothing was taken,
-        /// and the destructor releases nothing.
+        /// False when another backup had the slot: nothing was taken, and the
+        /// destructor releases nothing.
         [[nodiscard]] bool held () const {
             return held_;
         }
@@ -1152,57 +1043,55 @@ class Database {
      * @brief Replace `<db>.bak` with a snapshot of this database, if this start
      *        validated it.
      *
-     * Taken after the engine listens, not before (a copy there costs O(database
-     * size) on every clean start): `VACUUM INTO` a `.bak.tmp` on a connection of
-     * its own (consistent under WAL, unlike a file copy of a live database),
-     * validated by the constructor's own probe, then renamed over the backup. A
-     * snapshot failing any step is removed and the previous backup left as it
-     * was, so the copy recovery reaches for is never partial. A no-op on a start
-     * that took the recovery branch: the backup that branch judged, restored or
-     * kept as evidence is not this call's to overwrite.
+     * Taken after the engine listens, since a copy before costs O(database
+     * size) on every clean start: `VACUUM INTO` a `.bak.tmp` on its own
+     * connection (consistent under WAL, unlike a file copy of a live database),
+     * validated by the constructor's probe, then renamed over the backup. A
+     * snapshot failing any step is removed and the old backup kept, so recovery
+     * never reaches a partial copy. A no-op on a start that took the recovery
+     * branch: the backup it judged, restored or kept as evidence is not this
+     * call's to overwrite.
      *
      * @return why nothing was written, or nothing. Never throws.
      */
     std::expected<void, std::string> refresh_recovery_backup (); // db_maintenance.cpp
 
     /**
-     * @brief Run @ref refresh_recovery_backup on a thread of its own.
-     *
-     * The daemon calls this once its listener is up, so the snapshot overlaps
-     * the app's first requests instead of delaying `/health`. At most one per
-     * `Database`; a second call is ignored.
+     * @brief Run @ref refresh_recovery_backup on a thread of its own, once the
+     *        listener is up, so it overlaps the app's first requests rather
+     *        than delaying `/health`. One per `Database`; a second call is
+     *        ignored.
      */
     void start_recovery_backup_refresh (); // db_maintenance.cpp
 
     /**
-     * @brief Interrupt a running refresh and wait for its thread.
-     *
-     * A shutdown must not wait out a whole snapshot of a large workspace, and
-     * must not release the engine's lock while one is still reading the file.
-     * An interrupted snapshot is discarded; the previous backup stands.
-     * Idempotent, and called by the destructor as well.
+     * @brief Interrupt a running refresh and wait for its thread: a shutdown
+     *        must neither wait out a large snapshot nor release the engine's
+     *        lock while one still reads the file. The partial snapshot is
+     *        discarded. Idempotent; the destructor calls it too.
      */
     void finish_recovery_backup_refresh (); // db_maintenance.cpp
 
     /**
      * @brief Refresh `<db>.bak` once more as the engine stops, so it holds this
-     *        session's work rather than only what the session started from.
+     *        session's work.
      *
-     * Called after every writer has stopped and @ref finish_recovery_backup_refresh
-     * has returned, before the `Database` closes, so the engine's lock is still
-     * held. Skipped when the session wrote nothing after `init`, counted by
-     * `sqlite3_total_changes64` on the shared connection (a write through another
-     * connection is not seen); otherwise the WAL is checkpointed and the backup
-     * replaced as @ref refresh_recovery_backup replaces it. Bounded by the smaller
-     * of @p budget and `database::SHUTDOWN_BACKUP_DEADLINE_MS`: the copy is
-     * interrupted at the deadline and one finishing past it is discarded
-     * unvalidated; the validation, flush and rename after a copy run to
-     * completion. Every failure leaves the previous backup; the caller logs why.
+     * Called after every writer stopped and @ref finish_recovery_backup_refresh
+     * returned, before the `Database` closes, so the engine's lock is still
+     * held. Skipped when the session wrote nothing after `init` (by
+     * `sqlite3_total_changes64` on the shared connection; other connections'
+     * writes are not seen); otherwise the WAL is checkpointed and the backup
+     * replaced as
+     * @ref refresh_recovery_backup does. Bounded by the smaller of @p budget
+     *        and `database::SHUTDOWN_BACKUP_DEADLINE_MS`: the copy is
+     *        interrupted at the deadline and one finishing past it is discarded
+     *        unvalidated; validation, flush and rename run to completion.
+     *        Failures keep the previous backup; the caller logs why.
      *
-     * @param budget what is left of the window the caller has for its
-     *        shutdown; zero or less refreshes nothing.
-     * @return why nothing was written, or nothing (also when the session
-     *         wrote nothing). Never throws.
+     * @param budget what is left of the caller's shutdown window; zero or less
+     *        refreshes nothing.
+     * @return why nothing was written, or nothing (also when the session wrote
+     *        nothing). Never throws.
      */
     std::expected<void, std::string> refresh_recovery_backup_on_shutdown (
     std::chrono::milliseconds budget); // db_maintenance.cpp
@@ -1210,11 +1099,9 @@ class Database {
     // Config Entries - Structured configuration with metadata; db_config.cpp
     void save_config_entry (const ConfigEntry& entry);
     /**
-     * @brief Write a batch of config entries in one sqlite transaction (#1453).
-     *
-     * The write half of `POST /config`'s all-or-nothing batch (validation is the
-     * other): every row lands or none does, the shape `apply_reorder` and
-     * `spec_sync_apply` use. A loop of `save_config_entry` commits row by row.
+     * @brief Write a batch of config entries in one sqlite transaction (#1453):
+     *        the write half of `POST /config`'s all-or-nothing batch, where a
+     *        loop of `save_config_entry` would commit row by row.
      */
     void save_config_entries (const std::vector<ConfigEntry>& entries);
     std::optional<ConfigEntry> get_config_entry (const std::string& key);
@@ -1222,63 +1109,48 @@ class Database {
     void seed_default_config (); // Initialize default config values if empty
 
     /**
-     * @brief Whether @p key is one this build declares, i.e. one
-     *        `seed_default_config` upserts, not merely one with a row (#1492).
+     * @brief Whether @p key is one this build declares (`seed_default_config`
+     *        upserts it), not merely one with a row (issue #1492).
      *
-     * A row can outlive the catalogue that wrote it: a workspace a newer engine
-     * opened keeps that engine's config rows, and `seed_default_config` deletes
-     * only its own fixed retired-key list, never a key it does not recognise
-     * (deleting would guess that an unexplained row is safe to destroy). Without
-     * this check `GET /config` would list a setting this build cannot describe or
-     * validate, and `POST /config` would accept a write to it because the row
-     * exists. Populated once by `seed_default_config` from exactly the keys it
-     * upserts (never the retired list) and never read before the first seed.
+     * A newer engine's rows outlive its catalogue in a workspace this build
+     * reopens, and `seed_default_config` deletes only its own retired keys,
+     * never an unknown one (that would guess an unexplained row is safe to
+     * destroy). Without this check `GET /config` would list settings this build
+     * cannot describe and `POST /config` accept writes to them. Populated once
+     * by `seed_default_config` from exactly the keys it upserts, never read
+     * before the first seed.
      */
     bool is_known_config_key (const std::string& key) const;
 
     /**
      * @brief SQLite page-cache size in force on the last connection opened, in
-     * bytes (0 before the first one).
-     *
-     * `cache_size` is per-connection state, so the value from `dbCacheSize` is
-     * re-applied every time sqlite_orm opens a connection and then read back
-     * from SQLite - this reports the answer, not the request. It is the only
-     * way to observe that the setting reached the database, which is what makes
-     * the wiring testable and the startup line honest about what it applied.
+     *        bytes (0 before the first): `cache_size` is per connection, so
+     *        `dbCacheSize` is re-applied on every open and read back, the only
+     *        way to prove the setting arrived (tests, the startup line).
      */
     int applied_cache_size_bytes () const; // db_maintenance.cpp
 
     /**
-     * @brief SQLite's `synchronous` level on this database's connection, read
-     * back from SQLite rather than echoed (0 = OFF, 1 = NORMAL, 2 = FULL).
-     *
-     * Like `applied_cache_size_bytes`: the level is applied twice in a
-     * `Database`'s life (the compile-time default before the constructor's schema
-     * sync, then `dbSynchronous` once `init` can read it), so only SQLite can say
-     * which is in force (#838: the startup line reported the requested level
-     * while the schema sync and config seed had run at SQLite's default).
+     * @brief SQLite's `synchronous` level on this connection, read back rather
+     *        than echoed (0 = OFF, 1 = NORMAL, 2 = FULL): it is applied twice
+     *        (the compile-time default before the schema sync, `dbSynchronous`
+     *        once `init` reads it), and the startup line once reported the
+     *        request while sync and seed ran at SQLite's default (#838).
      */
     int applied_synchronous () const; // db_maintenance.cpp
 
-    /**
-     * @brief SQLite's `journal_size_limit` on this database's connection in
-     * bytes (-1 is no limit), read back from SQLite; nothing if it would not
-     * answer. Per-connection state like the settings above (#2433).
-     */
+    /// SQLite's `journal_size_limit` on this connection, bytes (-1 no limit),
+    /// read back; nothing if SQLite would not answer. Per connection, like the
+    /// above (#2433).
     std::optional<int64_t> applied_journal_size_limit () const; // db_maintenance.cpp
 
-    /**
-     * @brief SQLite's `mmap_size` on this database's connection in bytes (0 is
-     * unmapped), read back from SQLite; nothing if it would not answer. SQLite
-     * clamps the request, so this is what is in force (#2433).
-     */
+    /// SQLite's `mmap_size` on this connection, bytes (0 unmapped), read back
+    /// since SQLite clamps the request; nothing if it would not answer (#2433).
     std::optional<int64_t> applied_mmap_size () const; // db_maintenance.cpp
 
-    /**
-     * @brief SQLite's busy timeout on this database's connection, in
-     * milliseconds, read back from SQLite: the constructor's
-     * `startup_busy_timeout` until `init` applies `dbBusyTimeout`.
-     */
+    /// SQLite's busy timeout on this connection, ms, read back: the
+    /// constructor's `startup_busy_timeout` until `init` applies
+    /// `dbBusyTimeout`.
     int applied_busy_timeout_ms () const; // db_maintenance.cpp
 
     // Type-safe config getters
@@ -1292,88 +1164,83 @@ class Database {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 
-    /// `change_feed`. Published to with the DB mutex held, after the write's
-    /// own transaction has committed (`db/change_feed.hpp`).
+    /// `change_feed`, published to under the DB mutex after the write's
+    /// transaction commits (`db/change_feed.hpp`).
     ChangeFeed changes_{ change_feed_id_base_now () };
 
     /**
-     * @brief Whether the database at @p path opens and carries this build's
-     *        schema - or is corrupt, or could not be examined at all: the
-     *        constructor's validation of the file and of its `.bak`, and
-     *        @ref refresh_recovery_backup's of its own snapshot.
+     * @brief Whether the database at @p path opens with this build's schema, is
+     *        corrupt, or cannot be examined: validates the file and its `.bak`
+     *        at construction, and
+     * @ref refresh_recovery_backup's snapshot.
      */
     static ProbeResult probe_database (const std::string& path,
     std::chrono::milliseconds busy_timeout); // db_maintenance.cpp
 
     /**
      * @brief The snapshot, validation and rename both recovery-backup refreshes
-     *        share; the guards that decide whether to take one are theirs.
+     *        share; deciding whether to take one is theirs.
      *
-     * @param on_connection handed the snapshot's own connection before the
-     *        copy starts and `nullptr` before it closes (`vacuum_into`);
-     *        answering false refuses the copy.
-     * @param validate_by a copy that finishes after this is discarded rather
-     *        than validated.
+     * @param on_connection given the snapshot's connection before the copy and
+     *        `nullptr` before it closes (`vacuum_into`); answering false
+     *        refuses the copy.
+     * @param validate_by a copy finishing after this is discarded, not
+     *        validated.
      */
     std::expected<void, std::string> replace_recovery_backup (
     const std::function<bool (sqlite3*)>& on_connection,
     std::chrono::steady_clock::time_point validate_by); // db_maintenance.cpp
 
-    /// The startup recovery record, read from the marker file in the
-    /// constructor. See `recovery()`.
+    /// The startup recovery record, read from the marker file at construction
+    /// (`recovery()`).
     std::optional<RecoveryRecord> recovery_;
 
-    /// The keys `seed_default_config` upserted on this engine's last seed
-    /// pass - this build's config catalogue. See `is_known_config_key`.
+    /// The keys `seed_default_config` upserted last, this build's catalogue
+    /// (`is_known_config_key`).
     std::unordered_set<std::string> known_config_keys_;
 
     /**
-     * @brief Delete a run and every child row it owns (ticks, metrics, results).
-     *
-     * The single definition of the run cascade - `delete_run` and
-     * `remove_unexempt_runs` both call it, so a new child table is wired into
-     * every delete by editing one function. The caller must already hold the
-     * DB mutex.
+     * @brief Delete a run and every child row it owns (ticks, metrics,
+     *        results): the one run cascade, used by `delete_run` and
+     *        `remove_unexempt_runs`, so a new child table is wired in once.
+     *        Caller holds the DB mutex.
      */
     void remove_run_cascade_locked (const std::string& id); // db_runs.cpp
 
     /**
-     * @brief Cascade-delete @p ids in batches, sparing what retention exempts.
-     *
-     * The deleting half of `prune_runs` and `clear_runs`: the mutex is taken
-     * per batch of 100 and released between them, and each row is re-read
-     * under its batch's lock, so a run pinned, back in flight or already gone
-     * since the caller chose it is skipped (#1906). Answers the ids deleted.
+     * @brief Cascade-delete @p ids in batches, sparing what retention exempts:
+     *        `prune_runs`' and `clear_runs`' deleting half. The mutex is taken
+     *        per batch of 100 and released between, and each row is re-read
+     *        under it, skipping one pinned, back in flight or gone since chosen
+     *        (#1906). Answers the ids deleted.
      */
     std::vector<std::string> remove_unexempt_runs (const std::vector<std::string>& ids); // db_runs.cpp
 
     /**
      * @brief Every collection id in @p root_id's subtree, @p root_id first.
      *
-     * The one definition of "the subtree", shared by the delete cascade, the
-     * restore and the purge; the trash's counts run the same walk (`walk_subtree`
-     * in db_collections.cpp) over rows the listing already read (#2972), so all
-     * four agree on what a collection owns. `All` walks stamped and live rows
-     * alike (a restore must find what to put back); `StampedOnly` stops at a live
-     * row, which is what a purge destroys (#1883). The visited set is
-     * load-bearing: a `parent_id` cycle written before write-time validation
-     * would otherwise loop forever under the global DB mutex (#79). The caller
-     * must already hold that mutex.
+     * The one definition of "the subtree" for the delete cascade, restore and
+     * purge; the trash counts run the same walk (`walk_subtree`,
+     * db_collections.cpp) over rows the listing already read (#2972), so all
+     * four agree. `All` walks stamped and live rows (a restore must find what
+     * to put back); `StampedOnly` stops at a live row, what a purge destroys
+     * (#1883). The visited set is load-bearing: a `parent_id` cycle from before
+     * write-time validation would otherwise loop forever under the global DB
+     * mutex (#79), which the caller must hold.
      */
     enum class SubtreeRows : std::uint8_t { All, StampedOnly };
     std::vector<std::string> collection_subtree_locked (const std::string& root_id,
     SubtreeRows rows = SubtreeRows::All); // db_collections.cpp
 
     /**
-     * @brief Destroy a collection subtree, a single request, a single
-     *        environment, a single example or a single client certificate
-     *        outright - examples, requests, then collections, deepest first.
+     * @brief Destroy a collection subtree or a single request, environment,
+     *        example or client certificate outright: examples, requests, then
+     *        collections, deepest first.
      *
-     * The hard cascade soft delete replaced (#988), the one definition purge and
-     * retention reach for. A collection purge takes stamped collections only
-     * (#1883): a live one under the purged subtree is re-parented to the tree
-     * root, as a restore treats a collection whose parent is gone. The caller
-     * must already hold the DB mutex.
+     * The hard cascade soft delete replaced (#988), the one definition purge
+     * and retention use. A collection purge takes stamped collections only
+     * (#1883), re-parenting a live one under it to the root, as a restore
+     * treats an orphan. Caller holds the DB mutex.
      */
     void purge_collection_locked (const std::string& id);  // db_collections.cpp
     void purge_request_locked (const std::string& id);     // db_requests.cpp
@@ -1382,11 +1249,10 @@ class Database {
     void purge_client_certificate_locked (const std::string& id); // db_credentials.cpp
 
     /**
-     * @brief Destroy the trash entry @p entry names, by its kind - the one
-     *        dispatch an explicit purge and the retention sweep share, so a
-     *        kind the trash gains cannot be purged by one and missed by the
-     *        other. Throws `std::logic_error` on a kind it does not know. The
-     *        caller must already hold the DB mutex.
+     * @brief Destroy the trash entry @p entry names by kind: the one dispatch
+     *        explicit purge and the retention sweep share, so no new kind is
+     *        purged by one and missed by the other. Throws `std::logic_error`
+     *        on an unknown kind. Caller holds the DB mutex.
      */
     void purge_trash_entry_locked (const TrashEntry& entry); // db_collections.cpp
 
@@ -1394,32 +1260,25 @@ class Database {
      * @brief The trash entry for one deleted row, or nothing when @p id names
      *        no *deleted* row.
      *
-     * By id, not by root: restore and purge take an id, and a row a cascade took
-     * is not a root, so a roots-only answer would make the re-parent rule
-     * unreachable and "restore this one request" a 404. The listing filters roots
-     * from *its* answer and builds entries from the same helpers
-     * (db_collections.cpp), counting a cohort from rows already read (#2972), so
-     * both agree on what an entry says. The caller must hold the DB mutex.
+     * By id, not root: restore and purge take ids, and a cascade-taken row is
+     * no root, so roots-only would make re-parenting unreachable and "restore
+     * this request" a 404. The listing builds its entries from the same helpers
+     * (db_collections.cpp), counting cohorts from rows already read (#2972), so
+     * both agree. Caller holds the DB mutex.
      */
     std::optional<TrashEntry> trash_entry_locked (const std::string& id); // db_collections.cpp
 
     /**
-     * @brief Whether the collection @p owner_id names is missing or itself
-     *        deleted - the question both halves of a restore ask about the row
-     *        they are putting back.
-     *
-     * An empty optional is the *tree root*, which is not an absent owner: a
-     * collection that sits at the top has nothing above it by design. The
-     * caller must already hold the DB mutex.
+     * @brief Whether the collection @p owner_id names is missing or deleted, as
+     *        both halves of a restore ask. An empty optional is the tree root,
+     *        not an absent owner. Caller holds the DB mutex.
      */
     bool owner_is_absent_locked (const std::optional<std::string>& owner_id); // database.cpp
 
     /**
-     * @brief Whether the request @p request_id names is missing or itself
-     *        deleted - `owner_is_absent_locked` for an example, whose owner is
-     *        a request and never the tree root (#2971). Both the listing and
-     *        the restore ask it, so they agree on what an example can come
-     *        back under. The caller must already hold the DB mutex.
+     * @brief `owner_is_absent_locked` for an example, whose owner is a request,
+     *        never the root (#2971); listing and restore both ask, so they
+     *        agree. Caller holds the DB mutex.
      */
     bool request_is_absent_locked (const std::string& request_id); // db_requests.cpp
 
@@ -1430,34 +1289,29 @@ class Database {
     };
 
     /**
-     * @brief The listed trash root holding the stamped collection
-     *        @p collection_id: the walk up `parent_id` to the stamped
-     *        collection whose parent is not stamped. Nothing when
-     *        @p collection_id names no stamped row.
-     *
-     * Restoring that root is the first step that can bring the collection
-     * back, and the one a person can see in the trash; a row inside it is not
-     * listed. Bounded by a visited set, as `collection_subtree_locked` is. The
-     * caller must already hold the DB mutex.
+     * @brief The listed trash root holding the stamped collection @p
+     *        collection_id: up `parent_id` to the stamped collection whose
+     *        parent is not stamped; nothing if @p collection_id is not stamped.
+     *        Restoring it is the first step that can bring the collection back,
+     *        and the one a person sees. Bounded by a visited set, as
+     *        `collection_subtree_locked`. Caller holds the DB mutex.
      */
     std::optional<TrashRootRef> collection_trash_root_locked (
     const std::string& collection_id); // db_collections.cpp
 
-    /// `collection_trash_root_locked` for a request that is not live: its
-    /// collection's root when that collection is stamped, otherwise the
-    /// request itself; nothing when no row has @p request_id. The caller must
-    /// already hold the DB mutex.
+    /// `collection_trash_root_locked` for a non-live request: its collection's
+    /// root if that is stamped, else the request; nothing without such a row.
+    /// Caller holds the DB mutex.
     std::optional<TrashRootRef> request_trash_root_locked (
     const std::string& request_id); // db_collections.cpp
 
     /**
-     * @brief The `OwnerGone` refusal for a request or an example whose owner is
-     *        not live (#3449), naming the entry and its owner by name and
-     *        @p root, the trash root to restore first, by name and id; "is
-     *        gone" when @p root is empty, because no row is left to restore.
-     *        @p what is the entry's kind as the message starts ("Request"),
-     *        @p owner_noun its owner's ("collection"). Reads `parent_name`,
-     *        which `trash_entry_locked` sets whenever the owner row exists.
+     * @brief The `OwnerGone` refusal for a request or example whose owner is
+     *        not live (#3449): names the entry, its owner and @p root (the
+     *        trash root to restore first, by name and id), or "is gone" without
+     *        one. @p what starts the message ("Request"), @p owner_noun names
+     *        the owner ("collection"). Reads `parent_name`, set whenever the
+     *        owner row exists.
      */
     static RestoreFailure owner_not_live_refusal (std::string_view what,
     std::string_view owner_noun,
@@ -1465,61 +1319,55 @@ class Database {
     const std::optional<TrashRootRef>& root); // db_collections.cpp
 
     /**
-     * @brief Record that deleting @p request declined the operation it
-     *        records, under the bound collection @p collection_id (#3031).
-     *
-     * Nothing for a request whose `spec_operation` names no whole identity.
-     * One row per operation under one binding: a second delete for it takes
-     * the row over. Shared by `delete_request` and `delete_collection`; the
-     * caller holds the DB mutex and is inside the delete's own transaction.
+     * @brief Record that deleting @p request declined its operation under the
+     *        bound collection
+     * @p collection_id (#3031); nothing if `spec_operation` names no whole
+     *        identity. One row per operation per binding, a later delete taking
+     *        it over. For `delete_request` and `delete_collection`, under the
+     *        DB mutex inside the delete's transaction.
      */
     void record_declined_operation_locked (const std::string& collection_id,
     const Request& request); // db_requests.cpp
 
-    /// Forgets the record @p request's delete wrote, the half of a restore
-    /// that puts the operation back in the sync's hands (#3031). Nothing for a
-    /// request that records no operation: it claims none back, and the record
-    /// a move out of its binding wrote stands (#3446). Same scope rule as
+    /// Forgets the record @p request's delete wrote, so a restore hands the
+    /// operation back to the sync (#3031). Nothing for a request recording no
+    /// operation: a move's record stands (#3446). Scope as
     /// `record_declined_operation_locked`.
     void forget_declined_by_locked (const Request& request); // db_requests.cpp
 
     /**
-     * @brief Update each of @p requests, first recording the decline
-     *        @p declined_under names for it off the stored row, before the
-     *        write clears its stamp (#3446).
+     * @brief Update each of @p requests, first recording the decline @p
+     *        declined_under names for it off the stored row, before the write
+     *        clears its stamp (#3446).
      *
-     * Updated, never inserted: a row that is not stored and live throws
-     * `MissingRowError`, `apply_reorder`'s rule and its reason. Shared by
-     * `apply_reorder` and `rebind_collection`; the caller holds the DB mutex
-     * and is inside its own transaction, and publishes @p changes, to which
-     * each write's change is appended, once that commits.
+     * Updated, never inserted: a row not stored and live throws
+     * `MissingRowError`, as in `apply_reorder`. For `apply_reorder` and
+     * `rebind_collection`, under the DB mutex inside their transaction; each
+     * write's change goes onto @p changes, published once that commits.
      */
     void update_moved_requests_locked (const std::vector<Request>& requests,
     const std::unordered_map<std::string, std::string>& declined_under,
     std::vector<Change>& changes); // db_collections.cpp
 
     /**
-     * @brief The five shapes of `restore_deleted`, split by what a row can
-     *        come back to: a request needs a live collection and refuses
-     *        without one, a collection re-parents to the tree root instead, an
-     *        environment needs nothing, an example needs a live request with
-     *        room for it, and a client certificate needs its target free.
+     * @brief `restore_deleted`'s five shapes, by what a row comes back to: a
+     *        request needs a live collection (or refuses), a collection
+     *        re-parents to the root instead, an environment needs nothing, an
+     *        example a live request with room, a certificate a free target.
      *
-     * Named steps rather than one function with every shape inside it (#1033's
-     * rule, and what `readability-function-cognitive-complexity` reports).
-     * Each takes an entry `trash_entry_locked` already proved deleted, and each
-     * requires the DB mutex.
+     * Named steps, not one function (#1033's rule,
+     * `readability-function-cognitive-complexity`). Each takes an entry
+     * `trash_entry_locked` proved deleted and needs the DB mutex.
      */
     // The first two are defined in db_collections.cpp, beside restore_deleted.
     std::expected<TrashOutcome, RestoreFailure> restore_request_locked (
     const TrashEntry& entry);
     TrashOutcome restore_collection_locked (const TrashEntry& entry);
-    /// Clears the stamp and nothing else: no owner, no cohort, no re-parent,
-    /// and `is_active` stays false (#2970).
+    /// Clears the stamp only: no owner, cohort or re-parent; `is_active` stays
+    /// false (#2970).
     TrashOutcome restore_environment_locked (const TrashEntry& entry); // db_environments.cpp
-    /// Refuses under a request that is not live (`OwnerGone`) or already holds
-    /// `MAX_PER_REQUEST` live examples (`OverLimit`); otherwise clears the
-    /// stamp and nothing else (#2971).
+    /// Refuses under a non-live request (`OwnerGone`) or at `MAX_PER_REQUEST`
+    /// live examples (`OverLimit`); otherwise clears the stamp only (#2971).
     std::expected<TrashOutcome, RestoreFailure> restore_example_locked (
     const TrashEntry& entry); // db_requests.cpp
     /// Refuses while a live entry claims the same host and port
@@ -1528,48 +1376,40 @@ class Database {
     const TrashEntry& entry); // db_credentials.cpp
 
     /**
-     * @brief Clear `is_active` on every environment except @p keep_id.
-     *
-     * The single definition of "at most one environment is active" - every
-     * write path that can store an active environment calls it, so the
-     * invariant cannot be enforced on one path and forgotten on another. The
-     * caller must already hold the DB mutex and be inside a transaction:
-     * deactivating the previous environment and activating the new one is one
-     * atomic switch, never a window in which two or zero are active.
+     * @brief Clear `is_active` on every environment except @p keep_id: the one
+     *        definition of "at most one active", called by every write that can
+     *        store an active environment. Caller holds the DB mutex inside a
+     *        transaction, so the switch is atomic, never two or zero active.
      */
     void deactivate_other_environments_locked (const std::string& keep_id); // db_environments.cpp
 
     /**
-     * @brief Refuse a spec write whose target rows have moved under it.
-     *
-     * Throws `MissingRowError` for the bound collection or any updated request
-     * that no longer exists - a spec write updates rows, never resurrects them,
-     * which is `apply_reorder`'s rule and its reason. The caller must already
-     * hold the DB mutex and be inside the write's own transaction, so what this
-     * proves is still true when the write lands.
+     * @brief Refuse a spec write whose target rows moved: `MissingRowError` for
+     *        a vanished bound collection or updated request (update, never
+     *        resurrect, as `apply_reorder`). Caller holds the DB mutex inside
+     *        the write's transaction, so the proof holds when the write lands.
      */
     void verify_spec_sync_rows_locked (const SpecSyncBatch& batch); // db_specs.cpp
 
     /**
-     * @brief Write one spec batch: deletes first, then the document, the
-     *        folders, the binding and the rows.
-     *
-     * Same scope rule as @ref verify_spec_sync_rows_locked - mutex held, inside
-     * the transaction, after the verification.
+     * @brief Write one spec batch: deletes first, then the document, folders,
+     *        binding and rows. Scope as @ref verify_spec_sync_rows_locked:
+     *        mutex held, in the transaction, after verifying.
      *
      * @return the changes the batch publishes once its transaction commits.
      */
     std::vector<Change> write_spec_sync_batch_locked (const SpecSyncBatch& batch); // db_specs.cpp
 
     /**
-     * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked error.
+     * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked
+     *        error.
      *
-     * On a busy error the mutex is released *before* the backoff sleep (@p base
-     * times the attempt number), so a retry never stalls other endpoints that need
-     * it. Non-busy exceptions rethrow immediately; busy exhaustion after
-     * @p attempts logs and rethrows. @p attempts of @ref RETRY_UNTIL_LANDED never
-     * exhausts: the backoff stops growing at ten steps and each retry past that is
-     * a warning. @p what names the operation for log messages.
+     * The mutex is released *before* the backoff sleep (@p base times the
+     * attempt number, growing for ten steps), so a retry stalls no other
+     * endpoint. Non-busy exceptions rethrow at once; busy past
+     * @p attempts logs and rethrows; @ref RETRY_UNTIL_LANDED never exhausts,
+     *        warning on each retry past ten. @p what names the operation in
+     *        logs.
      */
     static constexpr int RETRY_UNTIL_LANDED = 0;
     void retry_on_busy (const char* what, // database.cpp
