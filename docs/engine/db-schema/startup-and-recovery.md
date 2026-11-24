@@ -20,9 +20,9 @@ What happens next:
 | Outcome | What happens to the files | What is recorded |
 |---------|---------------------------|------------------|
 | A newer `user_version` than this engine understands | Nothing - the constructor throws before the file is touched, and the daemon does not start | (the exception, naming both versions) |
-| An older `user_version` | Before anything raises the version, a copy is saved to `backups/vayu-<stamp>-pre-v<N>.db` ([the copy before a migration](#the-copy-before-a-migration)). If it cannot be written, nothing is touched and the daemon does not start | (the exception, naming the path and why the copy failed) |
+| An older `user_version` | Before anything raises the version, a copy is saved to `backups/vayu-<stamp>-pre-v<N>.db` ([the copy before a migration](#the-copy-before-a-migration)). [Details](#an-older-user_version-in-full) | (the exception, naming the path and why the copy failed) |
 | Cannot be examined (locked, disk full, read-only, I/O error) | Nothing is touched, the daemon does not start, the reason is named | (the exception, naming the path, the SQLite code and message, and what to do) |
-| Opens cleanly | Once the engine is listening, `<db>.bak` is replaced by a `VACUUM INTO` snapshot of it, validated by the same probe, flushed to disk and renamed into place - so the backup is only ever taken from a database that validated, and is never a partial copy. A clean shutdown after a session that wrote anything takes the same snapshot again (#2421), so the backup holds that session's work | Nothing |
+| Opens cleanly | Once the engine is listening, `<db>.bak` is replaced by a `VACUUM INTO` snapshot of it... [Details](#a-database-that-opens-cleanly-in-full) | Nothing |
 | Corrupt, `<db>.bak` passes the same validation | The corrupt file set is quarantined and the backup copied back over it | `restored_from_backup` |
 | Corrupt, `<db>.bak` is corrupt too | The backup is left untouched as evidence, the corrupt file set is quarantined, and a fresh empty database is created | `backup_also_corrupt` |
 | Corrupt, `<db>.bak` cannot be examined | Nothing is touched and the daemon does not start, naming the backup: whether it would restore is unknown | (the exception, naming the backup) |
@@ -53,6 +53,15 @@ Starting fresh is deliberate - the alternative is a daemon that fails to start o
 > database.** `<db>.bak` is refreshed, once the engine listens, from a file the
 > migration or repair has already rewritten, so it cannot be the way back.
 > [The copy before a migration](#the-copy-before-a-migration) is.
+
+## An older `user_version` in full
+
+If it cannot be written, nothing is touched and the daemon does not start
+
+## A database that opens cleanly in full
+
+...validated by the same probe, flushed to disk and renamed into place - so the backup is only ever taken from a database that validated, and is never a partial copy.
+A clean shutdown after a session that wrote anything takes the same snapshot again (#2421), so the backup holds that session's work
 
 ## The copy before a migration
 

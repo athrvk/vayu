@@ -210,39 +210,6 @@
     "docs/engine/cli.md": {
       "max_cell": 284
     },
-    "docs/engine/db-schema/collections-and-requests.md": {
-      "max_cell": 219
-    },
-    "docs/engine/db-schema/credentials-and-files.md": {
-      "max_line": 505,
-      "long_lines": 1,
-      "max_cell": 473
-    },
-    "docs/engine/db-schema/index.md": {
-      "max_line": 999,
-      "long_lines": 2,
-      "max_cell": 969
-    },
-    "docs/engine/db-schema/indexes.md": {
-      "max_line": 437,
-      "long_lines": 1,
-      "max_cell": 376
-    },
-    "docs/engine/db-schema/run-artifacts.md": {
-      "max_line": 2591,
-      "long_lines": 5,
-      "max_cell": 2529
-    },
-    "docs/engine/db-schema/schema-versions.md": {
-      "max_line": 692,
-      "long_lines": 2,
-      "max_cell": 582
-    },
-    "docs/engine/db-schema/startup-and-recovery.md": {
-      "max_line": 413,
-      "long_lines": 1,
-      "max_cell": 383
-    },
     "docs/engine/elements.md": {
       "lines": 894
     },

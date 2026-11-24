@@ -131,8 +131,8 @@ Stores individual HTTP request definitions.
 | `http_version`        | TEXT    | `'auto'` \| `'http1.1'` \| `'http2'`; default `'auto'` |
 | `verify_ssl`          | INTEGER | Boolean; verify the TLS certificate; default 1       |
 | `stream`              | INTEGER | Boolean; consume the response as SSE; default 0      |
-| `stream_text_path`    | TEXT    | The JSONPath each event's `data` is read through for the reply's text, in the elements' subset; NULL when none. Read only while `stream` is set, and kept while it is off (issue #3773, schema version 11) |
-| `stream_first_content_marker` | TEXT | The literal byte string (1-256 bytes, no NUL) a run's stream is watched for, timed as `stream.timeToFirstMatch`; NULL when none. Read only while `stream` is set, and kept while it is off (issue #3774, schema version 11) |
+| `stream_text_path`    | TEXT    | The JSONPath each event's `data` is read through for the reply's text, in the elements' subset; NULL when none. [Details](#stream_text_path-in-full) |
+| `stream_first_content_marker` | TEXT | The literal byte string (1-256 bytes, no NUL) a run's stream is watched for, timed as `stream.timeToFirstMatch`; NULL when none. [Details](#stream_first_content_marker-in-full) |
 | `disable_cookies`     | INTEGER | Boolean; keep the cookie jar out of this request's transfer; default 0 (issue #1765) |
 | `disabled_system_headers` | TEXT | JSON array of lowercased header names the engine does not add on its own; default `"[]"` (issue #1765) |
 | `disable_url_encoding` | INTEGER | Boolean; write path values and an api-key query parameter as typed; default 0 (issue #1765) |
@@ -261,6 +261,14 @@ Nullable on the `spec_operation` precedent directly above, for the same reason: 
 Conflating the two would show a user a protocol they asked for but were not actually granted.
 On create or on an explicit `null` reset, this column seeds from the `defaultHttpVersion` [`config_entries`](config.md#config_entries) row (`'auto'` unless changed) - a write-time default only, never consulted at execution.
 Changing the global afterward does not alter a request already saved.
+
+### `stream_text_path` in full
+
+Read only while `stream` is set, and kept while it is off (issue #3773, schema version 11)
+
+### `stream_first_content_marker` in full
+
+Read only while `stream` is set, and kept while it is off (issue #3774, schema version 11)
 
 ---
 
