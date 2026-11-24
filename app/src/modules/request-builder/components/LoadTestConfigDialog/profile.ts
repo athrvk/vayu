@@ -6,7 +6,9 @@
  */
 
 import type { LoadTestConfig } from "@/types";
+import type { LoadTestLimits } from "@/constants/load-test";
 import { CONCURRENCY_LABEL, CONCURRENCY_UNIT } from "@/constants/load-test-modes";
+import { rangeError } from "../../utils/loadTestValidation";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 
 /**
@@ -30,6 +32,20 @@ export function usesDuration(mode: LoadTestConfig["mode"]): boolean {
  */
 export function appliesRetryAfter(mode: LoadTestConfig["mode"]): boolean {
 	return mode !== "constant_rps";
+}
+
+/** The cap is on screen only with the option on, in a mode that applies it. */
+export function retryAfterCapError(
+	mode: LoadTestConfig["mode"],
+	limits: LoadTestLimits,
+	backoff: boolean,
+	capMs: number
+): string | null {
+	if (!backoff || !appliesRetryAfter(mode)) return null;
+	return rangeError("Longest Retry-After wait", capMs, limits.RETRY_AFTER_MAX_MS, {
+		whole: true,
+		engineBound: true,
+	});
 }
 
 /**
