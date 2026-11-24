@@ -65,8 +65,8 @@ namespace {
  * went, or `nullopt` when it could not be moved (issue #984).
  *
  * SQLite's own `.recover` can usually pull most rows out of a damaged
- * file - but only while the file exists, and the previous behaviour deleted
- * it at the exact moment it was the last copy of anything. The sidecars go
+ * file - but only while the file exists, and deleting it loses the last copy of
+ * anything. The sidecars go
  * with it because a `-wal` holds committed transactions the main file does
  * not.
  */
@@ -945,7 +945,6 @@ bool copy_db_files (const fs::path& src, const fs::path& dst) {
     if (!fs::exists (src, ec))
         return false;
 
-    // Copy main file
     fs::copy_file (src, dst, fs::copy_options::overwrite_existing, ec);
     if (ec) {
         vayu::utils::log_warning ("db", "Backup copy failed: " + ec.message ());
@@ -1583,8 +1582,7 @@ void Database::init () {
 
     // WAL mode and the default `synchronous` are set by `Impl`'s constructor,
     // before the first `sync_schema` - see the note there. They are deliberately
-    // not repeated here: two statements of one fact drift, and this one used to
-    // read as though the connection had been on a rollback journal until now.
+    // not repeated here: two statements of one fact drift.
 
     // Seed default configuration values if empty (must be before reading config)
     seed_default_config ();
@@ -1608,7 +1606,6 @@ void Database::init () {
     get_config_int ("dbSynchronous", vayu::core::constants::database::SYNCHRONOUS);
     impl_->storage.pragma.synchronous (synchronous);
 
-    // Get busy timeout in milliseconds
     const int busy_timeout_ms =
     get_config_int ("dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS);
     impl_->storage.pragma.busy_timeout (busy_timeout_ms);
@@ -1908,9 +1905,8 @@ Database::BackupSlot::~BackupSlot () {
 // Whether the database at `path` opens and carries this build's schema.
 //
 // The same probe answers for the main file and for the `.bak` beside it
-// (issue #984): the backup used to be restored on the strength of its
-// existence alone - "we assume the backup itself is valid" - so a torn copy
-// was written over the only other copy of the user's data. An
+// (issue #984): a backup restored on the strength of its existence alone would
+// overwrite the only other copy of the user's data with a torn one. An
 // `integrity_check` pragma would answer a narrower question (pages, not
 // schema) and would not answer the one that matters here, which is whether
 // *this engine* can open the file it is about to commit to. The refresh of

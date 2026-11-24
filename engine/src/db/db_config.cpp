@@ -135,9 +135,9 @@ double Database::get_config_double (const std::string& key, double default_value
 void Database::seed_default_config () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
 
-    // One transaction for the whole seed (issue #838): a throw partway used to
-    // leave the table half-seeded, and batching what were ~66 separate commits
-    // into one is what keeps a scratch database's test-suite wall time down.
+    // One transaction for the whole seed (issue #838): a throw partway would leave the
+    // table half-seeded, and one commit in place of ~66 keeps a scratch database's
+    // test-suite wall time down.
     auto seed_transaction = impl_->storage.transaction_guard ();
 
     auto existing               = impl_->storage.get_all<ConfigEntry> ();
