@@ -6,65 +6,33 @@
  */
 
 /**
- * The raw HTTP exchange, in `curl -v` notation - `>` for what was sent, `<` for
- * what came back.
+ * The raw HTTP exchange in `curl -v` notation: `>` for what was sent, `<` for what came back. In
+ * Postman and Bruno "Raw" is the unformatted body and the exchange lives elsewhere (Bruno's
+ * Timeline, Postman's Console); none joins both halves into one blob.
  *
- * **Nothing else does it the way this used to.** In Postman and Bruno, "Raw" in
- * a response pane means the *unformatted response body* - one of Pretty / Raw /
- * Preview - and the whole exchange lives somewhere else entirely: Bruno calls it
- * the Timeline, Postman puts it in the Console. JMeter splits it across Sampler
- * result / Request / Response data. None of them concatenates the two halves
- * into one blob with a divider through the middle, which is what this did.
- *
- * **The tab stays called "Raw", deliberately.** That does collide with the body
- * toolbar's Raw segment, which means the other thing - the unformatted body -
- * and the collision was weighed rather than missed. The alternatives were worse:
- * "Timeline" implies a sequence of calls over time and would sit beside a tab
- * already called Timing, and "Wire time" is taken inside Vayu, where the Timing
- * summary uses it for the libcurl transfer phase. Renaming to dodge one
- * collision by creating another is not a trade. The prefixes below also carry
- * most of the weight the name would have: the content is self-evidently an
- * exchange the moment you look at it.
- *
- * The prefixes are the closest thing to a convention a reader already knows,
- * and they beat a separator line in three ways: every line says which half it
- * belongs to instead of only the boundary saying it, an excerpt pasted into an
- * issue stays unambiguous even without the boundary, and there is no marker
- * string for this component and the grammar to disagree about - which they had
- * already managed to do once.
- *
- * **There is no response half when nothing came back.** A `status: 0` exchange
- * (a timeout, a refused connection, a failed handshake) has no response, and
- * `buildRawResponse` would still print `HTTP/1.1 0` under the real request - a
- * status line no server sent. That case shows the sent request alone, and an
- * empty state when the engine recorded none (a failure before the send, such as
- * an invalid URL). Every other response still renders both halves with or
- * without a recorded request: restored traces omit `rawRequest`.
- *
- * **The body is printed as received** (`bodyRaw`, issue #2459), not the indented
- * copy the Pretty view reads: this tab is the exchange, and indentation the
- * server never sent does not belong in it.
- *
- * **The headers are the lines as received** (issue #2460): `Set-Cookie` twice
- * is two lines, and a name keeps the case the server wrote it in. A response
- * restored from before the lines were stored prints the folded map instead.
- *
- * **A body with no text view is one line saying so** (issue #2458): its
- * bytes are `rawBytes`, and neither their base64 nor a lossy decoding is what
- * the server sent.
- *
- * **The body is capped at `LARGE_BODY_BYTES`, the Body tab's limit** (issue
- * #3138). Past it only the first that many characters are built into the
- * exchange and handed to the editor, with the same "Large response" notice
- * above it: `buildRawResponse`, `markLines` and a Monaco model over the whole
- * body are the passes that limit exists to avoid, and this tab paid them for
- * any size. The test is the length of the received string alone - Raw prints
- * that one string - and the result is memoised on the fields it reads, so a
- * re-render with the same response does not rebuild a 2MB string.
- *
- * **`language="http"` finally means something.** Monaco ships no `http`
- * language, so this editor had been falling back to plain text since it was
- * written - see `lib/http-language.ts`.
+ * - **The tab stays "Raw", deliberately**, despite the body toolbar's Raw segment meaning the
+ *   unformatted body: "Timeline" implies calls over time beside a tab called Timing, and "Wire
+ *   time" already names libcurl's transfer phase in the Timing summary. The prefixes make the
+ *   content self-evidently an exchange.
+ * - **Prefixes, not a separator line**: every line says its half, a pasted excerpt stays
+ *   unambiguous, and there is no marker string for this component and the grammar to disagree on.
+ * - **No response half when nothing came back.** A `status: 0` exchange (timeout, refused
+ *   connection, failed handshake) has none, and `buildRawResponse` would print `HTTP/1.1 0`, a
+ *   status no server sent; it shows the sent request alone, or an empty state when none was
+ *   recorded (a failure before sending, such as an invalid URL). Any other response renders both
+ *   halves, with or without a request: restored traces omit `rawRequest`.
+ * - **The body is as received** (`bodyRaw`, #2459), not Pretty's indented copy: indentation the
+ *   server never sent is not part of the exchange.
+ * - **Headers are the lines as received** (#2460): `Set-Cookie` twice is two lines, names keep the
+ *   server's case. A response restored from before lines were stored prints the folded map.
+ * - **A body with no text view is one line saying so** (#2458): its bytes are `rawBytes`, and
+ *   neither base64 nor a lossy decode is what the server sent.
+ * - **The body is capped at `LARGE_BODY_BYTES`, the Body tab's limit** (#3138): past it only that
+ *   many characters are built and handed to the editor, under the same "Large response" notice, as
+ *   `buildRawResponse`, `markLines` and a Monaco model over the whole body are the passes that
+ *   limit avoids. The test is the received string's length alone (Raw prints that string), memoised
+ *   on the fields read, so an unchanged re-render does not rebuild a 2MB string.
+ * - **`language="http"` is real**: Monaco ships none; see `lib/http-language.ts`.
  */
 
 import { useMemo } from "react";
@@ -87,17 +55,16 @@ export interface RawRequestResponseProps {
 		statusText: string;
 		headers: Record<string, string>;
 		/**
-		 * `ResponseState.headerLines`: printed as received, one line each. The
-		 * folded `headers` is the fallback for a response that has none.
+		 * `ResponseState.headerLines`, printed as received, one line each; the folded `headers` is
+		 * the fallback without them.
 		 */
 		headerLines?: HeaderLine[];
 		body: string;
 		/** `ResponseState.bodyRaw`: the body as received, which the received half prints. */
 		bodyRaw?: string;
 		/**
-		 * The negotiated protocol - `ResponseState.httpVersion`. See
-		 * `buildRawResponse`'s doc comment for the display-string contract and
-		 * what an omitted or empty value falls back to.
+		 * The negotiated protocol (`ResponseState.httpVersion`); `buildRawResponse` documents the
+		 * display contract and fallback.
 		 */
 		httpVersion?: string;
 		/** `ResponseState.rawBytes`: set for a body the engine sent as base64. */
@@ -122,8 +89,8 @@ function ReceivedExchange({ rawRequest, response }: RawRequestResponseProps) {
 	const { status, statusText, headers, headerLines, body, bodyRaw, httpVersion, rawBytes } =
 		response;
 
-	// The fields it reads, not `response`: the parent hands over a new object whenever
-	// anything on the response changes, and a 2MB rebuild is not free.
+	// The fields read, not `response`: the parent hands a new object on any response change, and a
+	// 2MB rebuild is not free.
 	const { value, bodyLength } = useMemo(
 		() =>
 			buildExchange(rawRequest, {
@@ -155,8 +122,8 @@ function ReceivedExchange({ rawRequest, response }: RawRequestResponseProps) {
 }
 
 /**
- * The exchange as one string, and the received body's full length when it was
- * cut to `LARGE_BODY_BYTES` (`null` when nothing was).
+ * The exchange as one string, plus the received body's full length when cut to `LARGE_BODY_BYTES`
+ * (else `null`).
  */
 function buildExchange(
 	rawRequest: string,
@@ -173,10 +140,9 @@ function buildExchange(
 	const received = markLines(rawResponse, RECEIVED_MARKER);
 
 	/*
-	 * No blank line between the halves: `markLines` ends the request with a bare
-	 * `>`, which is the blank line that closes a head, and the response opens on
-	 * `< HTTP/1.1 ...`. That is exactly what `curl -v` prints, and it is what the
-	 * grammar reads to know the response head has started.
+	 * No blank line between the halves: `markLines` ends the request with a bare `>` (the blank
+	 * line closing a head) and the response opens on `< HTTP/1.1 ...`, exactly `curl -v`'s output
+	 * and what the grammar reads as the response head starting.
 	 */
 	return {
 		value: rawRequest ? `${markLines(rawRequest, SENT_MARKER)}\n${received}` : received,
@@ -185,8 +151,8 @@ function buildExchange(
 }
 
 /**
- * What the received half prints for the body. A body with no text view is one
- * line, however big its bytes are, so only a printed body is ever cut.
+ * What the received half prints for the body; a body with no text view is one line, so only a
+ * printed body is cut.
  */
 function bodyToPrint(response: RawRequestResponseProps["response"]): {
 	text: string;
@@ -213,18 +179,11 @@ function RawEditor({ value }: { value: string }) {
 			value={value}
 			readOnly
 			/*
-			 * No line numbers, and no gutter left where they were.
-			 *
-			 * Every line already opens with `>` or `<`, so a number column is a
-			 * second left-hand rail competing with the one that carries meaning.
-			 * Nothing here refers to a line by number either - unlike the Body
-			 * tab, where a JSON path and a line number are how you talk about a
-			 * payload.
-			 *
-			 * `lineNumbersMinChars: 0` and `lineDecorationsWidth: 0` matter as
-			 * much as `lineNumbers: "off"`: without them Monaco keeps reserving
-			 * the gutter, and the markers start a couple of characters in from
-			 * the edge for no reason.
+			 * No line numbers and no gutter: every line opens with `>` or `<`, so numbers would be
+			 * a second left rail competing with the one that means something, and nothing here
+			 * refers to a line by number (unlike Body, where paths and line numbers name payload
+			 * parts). `lineNumbersMinChars: 0` and `lineDecorationsWidth: 0` matter as much as
+			 * `lineNumbers: "off"`: without them Monaco still reserves the gutter.
 			 */
 			options={{
 				folding: false,

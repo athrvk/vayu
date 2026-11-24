@@ -6,18 +6,12 @@
  */
 
 /**
- * Name-and-confirm for "save this response as an example" (issue #588), at the
- * `StartMockServerDialog` scale: one field, the facts the save carries, and the
- * engine's refusal shown where the form is.
- *
- * It names rather than saves silently because the name is the only thing the
- * Examples panel lists, and "200 OK" three times over is a list you cannot read.
- *
- * The mutation lives here rather than in the caller, which is the other way
- * round from `StartMockServerDialog`: there the parent owns a success toast and
- * a running/stopped switch either way, and here success means only "close".
- * Keeping it in also keeps `ResponseViewer` - a pane that redraws on every send
- * - from needing a query client for a feature that exists inside a modal.
+ * Name-and-confirm for "save this response as an example" (#588), at `StartMockServerDialog`'s
+ * scale: one field, the facts the save carries, the engine's refusal shown in the form. It asks for
+ * a name since the name is all the Examples panel lists, and "200 OK" three times is unreadable.
+ * The mutation lives here, unlike `StartMockServerDialog` (whose parent owns a toast and a switch):
+ * success here only closes, and `ResponseViewer`, which redraws every send, needs no query client
+ * for a modal's feature.
  */
 
 import { useState } from "react";
@@ -49,9 +43,8 @@ export interface SaveAsExampleDialogProps {
 	/** The response being kept - status, headers, body, and its truncation. */
 	response: ResponseState;
 	/**
-	 * Mounted only while open, like `StartMockServerDialog`: the mount is the
-	 * reset, so the name field starts from this response's status line every
-	 * time rather than carrying the last attempt - or its error - over.
+	 * Mounted only while open, like `StartMockServerDialog`: the mount is the reset, so the name
+	 * starts from this response's status line, never the last attempt or its error.
 	 */
 	onClose: () => void;
 }
@@ -107,10 +100,9 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 
 					{/*
 					 * A restored run's body may be only the slice the engine kept
-					 * (`maxTraceBodyBytes`), and a mock serves an example as though it
-					 * were a whole response. Said before the save, not after - the row
-					 * carries it afterwards as the "Partial body" chip, which is the
-					 * only part the panel shows once this dialog is gone.
+					 * (`maxTraceBodyBytes`), and a mock serves an example as a whole response. Said
+					 * before the save; afterwards the row's "Partial body" chip is all the panel
+					 * shows.
 					 */}
 					{response.bodyTruncated && (
 						<Callout severity="warning" title="This body is not the whole response">
@@ -122,10 +114,9 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 					)}
 
 					{/*
-					 * The other way a body ends up partial, and not exclusive with the
-					 * one above (issue #3422): the engine stopped reading at
-					 * `maxDesignResponseBodyBytes`, so a re-send reads the same amount
-					 * and the remedy is the setting, as in the viewer's own notice.
+					 * The other partial body, not exclusive with the above (#3422): the engine
+					 * stopped reading at `maxDesignResponseBodyBytes`, so a re-send reads the same
+					 * and the remedy is the setting, as in the viewer's notice.
 					 */}
 					{response.bodyCapped && (
 						<Callout severity="warning" title="This body was capped while reading">
@@ -137,10 +128,9 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 					)}
 
 					{/*
-					 * The ordering contract, stated where the save happens: the mock
-					 * answers with the first example of a matched route, an append never
-					 * takes that position, and a running mock reloads nothing until it
-					 * is restarted.
+					 * The ordering contract, where the save happens: a mock answers with a matched
+					 * route's first example, an append never takes that position, and a running
+					 * mock reloads nothing until restarted.
 					 */}
 					<p className="text-xs text-muted-foreground">
 						Added after the request&apos;s existing examples, so a mock server keeps

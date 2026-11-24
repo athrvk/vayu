@@ -6,17 +6,13 @@
  */
 
 /**
- * The response asks for more scope (#3766): a 403 whose `WWW-Authenticate` the
- * engine classifies as `insufficient_scope` (`POST /oauth2/step-up`), for a
- * request whose own auth is OAuth 2.0. It names the scopes and, for the
- * authorization code grant, offers to sign in again asking for them beside the
- * held ones, then stores that scope in the request's config. Nothing retries
- * on its own: a load run cannot take a browser step, so only a person's click
- * re-authorizes.
- *
- * Here rather than in the Auth tab because this is where the 403 is read, and
- * the builder's context holds both the response and the config. An inherited
- * config belongs to a collection this pane cannot write, so it gets nothing.
+ * The response asks for more scope (#3766): a 403 whose `WWW-Authenticate` the engine classifies as
+ * `insufficient_scope` (`POST /oauth2/step-up`), on a request whose own auth is OAuth 2.0. It names
+ * the scopes and, for the authorization code grant, offers a sign-in asking for them beside the
+ * held ones, then stores that scope in the config. Nothing retries itself: a load run cannot take a
+ * browser step, so only a click re-authorizes. Here, not in the Auth tab, since this is where the
+ * 403 is read and the context holds response and config; an inherited config is a collection's,
+ * which this pane cannot write, so it gets nothing.
  */
 
 import { useMemo } from "react";
@@ -51,8 +47,8 @@ export default function StepUpNotice({
 function OwnConfigStepUp({ challenges, className }: { challenges: string[]; className?: string }) {
 	const { request, resolveString } = useRequestBuilderContext();
 	const config = request.auth.mode === "oauth2" ? request.auth.config : null;
-	// The same resolution and cache entries as the Auth tab's form
-	// (`AuthPanel`'s `resolveKey`), so a sign-in here posts what Get token would.
+	// The Auth tab's resolution and cache entries (`AuthPanel`'s `resolveKey`), so a sign-in here
+	// posts what Get token would.
 	const resolved = useMemo(
 		() => (config ? resolveOAuth2Config(config, resolveString, request.id ?? "new") : null),
 		[config, resolveString, request.id]
@@ -87,8 +83,8 @@ function nextStep(interactive: boolean, named: boolean): string {
 }
 
 /**
- * Its own component so the sign-in, which holds the config's sign-in key while
- * mounted, exists only while there is a step-up to act on.
+ * Its own component, so the sign-in (holding the config's sign-in key while mounted) exists only
+ * with a step-up to act on.
  */
 function StepUpCallout({
 	config,
@@ -101,8 +97,8 @@ function StepUpCallout({
 }) {
 	const { updateField } = useRequestBuilderContext();
 
-	// The scope written is the one signed in with, and a discovered start's
-	// filled members are written as the Auth tab's sign-in writes them.
+	// The scope written is the one signed in with; a discovered start's filled members are written
+	// as the Auth tab's sign-in writes them.
 	const store: OAuth2SignedIn = (result, sent) => {
 		const scoped = { ...config, scope: sent.scope };
 		const next = result.resolved

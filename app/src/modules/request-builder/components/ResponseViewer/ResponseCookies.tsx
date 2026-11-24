@@ -6,28 +6,15 @@
  */
 
 /**
- * ResponseCookies Component
- *
- * Displays cookies extracted from Set-Cookie headers: one per received line,
- * or, for a response with no lines, from the folded header.
- *
- * A redirect chain is two groups (issue #2461). The final response's headers
- * are all `headers` holds, so a cookie a followed 3xx set - the `302` that
- * answers a login - is read from `redirects` instead and listed under
- * "Set during redirects", one sub-heading per hop. Those rows say what the
- * server sent, never that the jar stored it: a cross-origin hop's cookie is
- * dropped by curl, so "stored" would be a claim this tab cannot back.
- *
- * A hop that went from `https` to `http` (`schemeDowngrade`, issue #2949) is
- * announced above both groups whether or not it set a cookie: the common
- * downgrade is a bare `301` with nothing to list, and this tab is the only
- * reader of the hops.
- *
- * Parsing lives in `parse-set-cookie.ts`; the three defects it fixes are
- * documented there. The visible consequence was that `attrs` had always been
- * parsed and never rendered, so Path, HttpOnly, Secure and SameSite - the
- * reason a developer opens this tab - were computed on every row and thrown
- * away. They have a column now.
+ * Cookies from Set-Cookie headers: one per received line, or from the folded header when there are
+ * no lines. A redirect chain is two groups (#2461): `headers` holds only the final response's, so a
+ * cookie a followed 3xx set (the `302` answering a login) is read from `redirects` and listed under
+ * "Set during redirects", one sub-heading per hop. Those rows say what the server sent, never that
+ * the jar stored it: curl drops a cross-origin hop's cookie. An `https` to `http` hop
+ * (`schemeDowngrade`, #2949) is announced above both groups whether or not it set a cookie: the
+ * common downgrade is a bare `301`, and this tab is the hops' only reader. Parsing is
+ * `parse-set-cookie.ts`; the attributes (Path, HttpOnly, Secure, SameSite), the reason a developer
+ * opens this tab, have their own column.
  */
 
 import { Callout, EmptyState, HeaderValue } from "@/components/shared";
@@ -52,8 +39,8 @@ export interface ResponseCookiesProps {
 }
 
 /**
- * One cookie per received `Set-Cookie` line. Names are case-insensitive and the
- * engine keeps the server's spelling in the lines.
+ * One cookie per received `Set-Cookie` line; names are case-insensitive, and the lines keep the
+ * server's spelling.
  */
 function cookiesFromLines(lines: HeaderLine[]): ParsedCookie[] {
 	return lines
@@ -64,7 +51,7 @@ function cookiesFromLines(lines: HeaderLine[]): ParsedCookie[] {
 
 /** The folded map entry, for a response that carries no lines. */
 function cookiesFromFolded(headers: Record<string, string>): ParsedCookie[] {
-	// Header names are case-insensitive; the engine has sent both spellings.
+	// Header names are case-insensitive, and the engine has sent both spellings.
 	const setCookie = headers["set-cookie"] || headers["Set-Cookie"];
 	return setCookie ? parseSetCookie(setCookie) : [];
 }
@@ -76,9 +63,9 @@ interface HopCookies {
 }
 
 /**
- * "302 Found, to /home": what answered and where it sent the client. `url` is
- * the request the hop answered, resolved by the engine; the `Location` beside it
- * may be relative. A hop from an engine before #2949 has no `url`.
+ * "302 Found, to /home": what answered and where it sent the client. `url` is the request the hop
+ * answered, engine-resolved; the `Location` beside it may be relative. Engines before #2949 send no
+ * `url`.
  */
 function hopLabel(hop: RedirectHop): string {
 	const location = hop.headerLines.find((line) => line.name.toLowerCase() === "location");
@@ -160,22 +147,16 @@ export default function ResponseCookies({ headers, headerLines, redirects }: Res
 		return <EmptyState variant="inline" title="No cookies in response" />;
 	}
 
-	// A response with no redirect cookies is the one table it always was; the
-	// group labels appear only when there is a second group to tell it from.
+	// Without redirect cookies it is one table; group labels appear only when a second group
+	// exists.
 	const grouped = hops.length > 0;
 
 	return (
 		/*
-		 * Both rules are `border-rule`, resolved by the `surface-card` the
-		 * response pane declares. They were `border-border` and
-		 * `border-border/50`, which on a card measure 1.003 and 1.002 - the
-		 * cookie list had no visible structure whatsoever in dark mode: header
-		 * and rows ran together as one block of text.
-		 *
-		 * The rows are not held one step lighter than the header, because at this
-		 * surface "one step lighter" lands back at invisible. The header is
-		 * distinguished by its label styling instead, and rows still light up on
-		 * hover.
+		 * Both rules are `border-rule`, resolved by the pane's `surface-card`; `border-border`
+		 * measured 1.003 and 1.002 on a card, so in dark the list had no visible structure. The
+		 * rows are not a step lighter than the header (here that lands back at invisible): the
+		 * header is told apart by its label styling, and rows light up on hover.
 		 */
 		<div className="p-4 overflow-auto h-full space-y-6">
 			{downgrades.length > 0 && <DowngradeNotice hops={downgrades} />}

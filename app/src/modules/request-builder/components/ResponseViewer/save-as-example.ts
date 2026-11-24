@@ -6,22 +6,15 @@
  */
 
 /**
- * Turning the response on screen into a stored example (issue #588).
- *
- * Kept out of the dialog because this is the part with a contract: what an
- * app-saved example holds has to match what an importer would have written for
- * the same response, or the mock server would answer differently depending on
- * where its route table came from. The two rules that could drift are both
- * here - the Content-Type lookup is the Postman importer's, header for header
- * (`importers/postman.ts`), and `order` is never sent so the engine appends.
- *
- * A response from a live send also carries the request as it was at Send
- * (`sentRequest`), and the save forwards it as `savedFrom` with the server's
- * own reason phrase and the response time (issue #1763): the engine turns that
- * into the Postman saved response once, so an export describes the request
- * that produced this response rather than whatever the request has become. A
- * response fetched with no Send to match it to (the last run after a restart,
- * one opened from History) has no snapshot and sends no `savedFrom`.
+ * Turning the response on screen into a stored example (#588), apart from the dialog because this
+ * part has a contract: an app-saved example must match what an importer writes for the same
+ * response, or a mock answers differently by where its routes came from. Both drift-prone rules are
+ * here: the Content-Type lookup is the Postman importer's (`importers/postman.ts`), and `order` is
+ * never sent, so the engine appends. A live send's response carries the request as sent
+ * (`sentRequest`), forwarded as `savedFrom` with the reason phrase and response time (#1763): the
+ * engine builds the Postman saved response once, so an export describes the request that produced
+ * this response. A response with no matching Send (the last run after a restart, one from History)
+ * has no snapshot and sends no `savedFrom`.
  */
 
 import type { CreateRequestExampleRequest, KeyValueEntry } from "@/types";
@@ -30,15 +23,9 @@ import type { ResponseState } from "../../types";
 import { receivedBody } from "../../utils/response-bytes";
 
 /**
- * The name a save starts with: the status line, which is what a saved response
- * is usually called and is unique enough to tell two of them apart at a glance.
- *
- * Editable at save time - this is a starting point, not a scheme.
- *
- * The engine records `bodyTruncated` now
- * (issue #659) and the panel chips it, so the name is back to being just a
- * name - a user may call an example whatever they like without erasing what it
- * is.
+ * The starting name: the status line, what a saved response is usually called and unique enough to
+ * tell two apart. Editable at save; truncation is recorded (`bodyTruncated`, #659) and chipped, so
+ * the name is free to be anything.
  */
 export function defaultExampleName(response: ResponseState): string {
 	return response.statusText
@@ -47,23 +34,19 @@ export function defaultExampleName(response: ResponseState): string {
 }
 
 /**
- * Why @p response cannot become an example, or nothing when it can.
- *
- * An example's body is text, and a body the engine sent as base64 (issue
- * #2458) is not: its text, when it has one, is a decoding the engine would
- * store and serve as UTF-8 under a Content-Type that still names the original
- * charset. Refused rather than saved as something the server never sent.
+ * Why @p response cannot become an example, or nothing. An example body is text, and a body the
+ * engine sent as base64 (#2458) is not: its text would be a decoding stored and served as UTF-8
+ * under a Content-Type naming the original charset. Refused, not saved as something never sent.
  */
 export function exampleRefusal(response: Pick<ResponseState, "rawBytes">): string | undefined {
 	return response.rawBytes ? "Examples hold UTF-8 text, and this body isn't" : undefined;
 }
 
 /**
- * The response's headers as stored entries, one per line the server sent, in
- * its case and order (issue #3422). The folded `headers` map joins a repeated
- * name into one value and lowercases it, so saving from it would store a
- * `Set-Cookie` pair as one row and a mock would answer with a header the server
- * never sent; a response with no recorded lines falls back to that map.
+ * The response's headers as stored entries, one per line sent, in its case and order (#3422). The
+ * folded map joins a repeated name into one lowercased value, so a `Set-Cookie` pair would become
+ * one row and a mock would answer with a header never sent; with no recorded lines, the map is the
+ * fallback.
  */
 function headerEntries(response: ResponseState): KeyValueEntry[] {
 	return resolveHeaderLines(response.headers, response.headerLines).map(({ name, value }) => ({
@@ -74,19 +57,12 @@ function headerEntries(response: ResponseState): KeyValueEntry[] {
 }
 
 /**
- * The create payload for @p response under @p name.
- *
- * `contentType` is the response's own Content-Type header verbatim, looked up
- * case-insensitively - the same rule and the same "" fallback the Postman
- * importer uses, rather than a media type parsed out of it. The engine
- * denormalizes this column for the mock server, and a value that disagrees with
- * the header beside it is the kind of difference that only shows up when
- * something is served.
- *
- * `savedFrom` rides only when the response has a Send snapshot: without one
- * there is no request to report, and the engine regenerates on export. Its
- * `receivedAt` is when the response came in, the time a cookie's `Max-Age`
- * counts from - not the Save, which may be minutes later.
+ * The create payload for @p response under @p name. `contentType` is the response's Content-Type
+ * header verbatim, found case-insensitively, with the Postman importer's "" fallback, not a parsed
+ * media type: the engine denormalizes it for the mock server, and a value disagreeing with the
+ * header shows up only when served. `savedFrom` rides only with a Send snapshot (else the engine
+ * regenerates on export); its `receivedAt` is when the response arrived, which a cookie's `Max-Age`
+ * counts from, not the later Save.
  */
 export function exampleFromResponse(
 	response: ResponseState,
@@ -97,17 +73,15 @@ export function exampleFromResponse(
 		name,
 		status: response.status,
 		headers,
-		// The text as received, not the indented pane copy: a mock server serves
-		// this verbatim, so it must keep the server's key order and number digits.
+		// The text as received, not the indented pane copy: a mock serves it verbatim, keeping the
+		// server's key order and digits.
 		body: receivedBody(response),
 		contentType: headers.find((h) => h.key.toLowerCase() === "content-type")?.value ?? "",
-		// Always `user`: this is the field a spec sync reads to know it must
-		// leave the row alone (#627). An app-saved example is never a spec's.
+		// Always `user`: a spec sync reads this to leave the row alone (#627).
 		origin: "user",
-		// Partial either way: stored-run truncation or a read stopped at the Send
-		// cap (`bodyCapped`, #3422). Both leave a body that is not what the server
-		// sent, and a mock serves it as whole. An absent flag means "not partial",
-		// not "unknown", for a response that never went through a trace.
+		// Partial either way: stored-run truncation or a read stopped at the Send cap
+		// (`bodyCapped`, #3422), neither what the server sent, and a mock serves it as whole.
+		// Absent means "not partial", not "unknown", for a response never through a trace.
 		bodyTruncated: Boolean(response.bodyTruncated || response.bodyCapped),
 		...(response.sentRequest && {
 			savedFrom: {
@@ -121,10 +95,9 @@ export function exampleFromResponse(
 }
 
 /**
- * When @p response came in, as `savedFrom.receivedAt` (epoch ms): the live
- * funnel's `receivedAt`, else the stored run's time a stream's reloaded copy
- * carries in `restoredFrom.at`. Nothing when neither parses, and the engine
- * uses its own clock.
+ * When @p response came in, as `savedFrom.receivedAt` (epoch ms): the live funnel's `receivedAt`,
+ * else `restoredFrom.at` on a stream's reloaded copy. Nothing when neither parses; the engine then
+ * uses its clock.
  */
 function receivedAtOf(response: ResponseState): { receivedAt?: number } {
 	const at = Date.parse(response.receivedAt ?? response.restoredFrom?.at ?? "");
