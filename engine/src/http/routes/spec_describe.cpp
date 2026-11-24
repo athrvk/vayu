@@ -6,30 +6,21 @@
  */
 
 /**
- * @brief `POST /specs/describe` - what a picked document is, before anything is
- *        stored (issue #869).
+ * `POST /specs/describe`: what a picked document is, before anything is stored
+ * (#869). Picking a file in the Spec tab paints the format, `info.title` and
+ * the declared operations, whose identities go to `POST /specs/match`, while
+ * the bind derives them from the same bytes engine-side
+ * (`core::derive_spec_indexes`, #862). Two readers of one document is what #853
+ * ends, and here it has its own failure: a document the two read differently
+ * previews one pairing and commits another. So this answers the card's question
+ * from the reader the write uses.
  *
- * The last read of a document the renderer still made. Picking a file in the
- * Spec tab painted three things from a parse there - the format, `info.title`
- * and the operations the document declares - and handed those identities to
- * `POST /specs/match`; the bind then derived the same identities from the same
- * bytes engine-side (`core::derive_spec_indexes`, #862). Two readers of one
- * document is the thing #853 set out to end, and here it had a failure of its
- * own: a document the two read differently previewed one pairing and committed
- * another.
- *
- * So this answers the question the card was asking, from the reader the write
- * uses. It is the shape `GET /specs/:id/meta` has - describe rather than send -
- * pointed at bytes nobody has stored yet, which is why the document comes in the
- * body: a bind preview is about a document the user has not committed to, and a
- * route that stored it to describe it would store one for every file merely
- * looked at.
- *
- * It stays a *description*, deliberately: the identities go back to the caller
- * and the caller hands them to `POST /specs/match`, rather than this route
- * matching too. The pairing needs a collection and this does not - and the
- * alternative, teaching the matcher to take a document, would upload the same
- * bytes twice for one preview.
+ * It has `GET /specs/:id/meta`'s shape (describe rather than send) pointed at
+ * unstored bytes, so the document comes in the body: storing it to describe it
+ * would store one for every file merely looked at. It stays a description: the
+ * identities go back to the caller for `POST /specs/match`, since the pairing
+ * needs a collection and this does not, and a matcher taking a document would
+ * upload the same bytes twice per preview.
  */
 
 #include "vayu/core/constants.hpp"
