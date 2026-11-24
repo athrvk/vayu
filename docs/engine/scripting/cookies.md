@@ -148,7 +148,7 @@ A read outside the allowed set does not throw.
 `get` answers `undefined` and `getAll` answers `[]`, through the callback as well, and the script's console gets one warning naming the host (never the full URL, which may carry a secret):
 
 ```
-pm.cookies.jar().get read nothing for b.example: a jar read is limited to the request's own site (a.example) and to hosts this script has called through pm.sendRequest. See docs/engine/scripting.md.
+pm.cookies.jar().get read nothing for b.example: a jar read is limited to the request's own site (a.example) and to hosts this script has called through pm.sendRequest. See docs/engine/scripting/cookies.md.
 ```
 
 **A redirect target is not seen.**
@@ -175,7 +175,7 @@ A refused write does not throw and stages nothing.
 The call completes as an accepted write would - `set` returns (and passes the callback) the cookie it would have stored, `unset` the name - and the script's console gets one warning naming the host or domain, never the full URL:
 
 ```
-pm.cookies.jar().set wrote nothing for the domain victim.example: a jar write is limited to the request's own site (a.example) and to hosts this script has called through pm.sendRequest. See docs/engine/scripting.md.
+pm.cookies.jar().set wrote nothing for the domain victim.example: a jar write is limited to the request's own site (a.example) and to hosts this script has called through pm.sendRequest. See docs/engine/scripting/cookies.md.
 ```
 
 A bad argument is still the error it was; the site check runs after the arguments are validated.
