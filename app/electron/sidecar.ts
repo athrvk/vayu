@@ -5,11 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * @file sidecar.ts
- * @brief Manages the C++ engine sidecar process lifecycle
- */
-
 import { spawn, ChildProcess, execSync } from "child_process";
 import { randomBytes } from "crypto";
 import { app } from "electron";

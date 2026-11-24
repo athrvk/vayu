@@ -6,7 +6,6 @@
  */
 
 /**
- * @file log-reader-ipc.ts
  * @brief The Logs tab's IPC (#3635) over `log-reader.ts`: `logs:list` and
  *        `logs:read` (invoke), `logs:tail-start` / `logs:tail-stop` (invoke),
  *        and `logs:records`, the one-way push main sends the tailing renderer.

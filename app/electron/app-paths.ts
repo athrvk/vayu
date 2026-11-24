@@ -6,7 +6,6 @@
  */
 
 /**
- * @file app-paths.ts
  * @brief The directories Settings - General shows the user.
  *
  * Extracted from the `app:getPaths` handler, which had grown its own copy of

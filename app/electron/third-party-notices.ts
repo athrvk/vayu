@@ -6,7 +6,6 @@
  */
 
 /**
- * @file third-party-notices.ts
  * @brief Open the installer's THIRD_PARTY_NOTICES.txt (#2693).
  *
  * The file is generated at package time into `app/build/` and shipped loose by
