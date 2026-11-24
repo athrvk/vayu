@@ -25,7 +25,7 @@
  *    `pm.globals` and `pm.collectionVariables` read their own scope alone
  *    (#3133, #3147). `pm.iterationData` has no `replaceIn`.
  *  - a bare `{{name}}` anywhere else - never interpolated (D16,
- *    `docs/engine/scripting.md`), so it is muted and informational only.
+ *    `docs/engine/scripting/variables.md`), so it is muted and informational only.
  *
  * **Not an AST parse.** These are three fixed call shapes, so a regex per
  * accessor is intentionally sufficient and cheap on every keystroke - the

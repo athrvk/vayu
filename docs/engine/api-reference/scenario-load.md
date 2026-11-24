@@ -430,7 +430,7 @@ It sends one request at a time, so the concurrency argument above does not apply
 Neither setting reads the other: raising the load cap does not change what a Send reads.
 
 A **script's own fetch** (`pm.sendRequest`) is a third read, and it takes the bound of the path it runs on: the design bound in a Send's or a collection step's scripts, the load bound in a load run's deferred `tests` script, which runs once per sampled response.
-It refuses at that bound rather than keeping a prefix, on either path, because nothing on the object it hands the script could say the body was cut - see [scripting](../scripting.md#sending-a-request-from-a-script-pmsendrequest).
+It refuses at that bound rather than keeping a prefix, on either path, because nothing on the object it hands the script could say the body was cut - see [scripting](../scripting/send-request.md#sending-a-request-from-a-script-pmsendrequest).
 
 **Wire method and body.**
 A body is sent with whatever method the request names: a `GET` carrying one stays a `GET` on the wire (Elasticsearch-style search bodies work), not a `POST`.

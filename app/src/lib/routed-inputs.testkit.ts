@@ -124,17 +124,18 @@ interface ReadingGuard {
 export const DOC_READING_GUARDS = {
 	scriptTypedefs: {
 		reader: "app/src/hooks/script-typedefs.docs-compile.test.ts",
-		paths: ["docs/engine/scripting.md", "docs/app/pm-api-compatibility.md"],
+		paths: ["docs/engine/scripting/", "docs/app/pm-api-compatibility.md"],
 	},
 	/*
-	 * The same two pages, read for a different question (#1223): the script
+	 * The same pages, read for a different question (#1223): the script
 	 * panels stopped stating the `pm.*` rules in prose, so this guard is what
 	 * holds each rule to the surface it moved to - the completion table for a
-	 * member's rule, these pages for a hook's.
+	 * member's rule, these pages for a hook's. It names the two scripting pages
+	 * that hold a hook's rule, and the directory entry routes them.
 	 */
 	scriptRules: {
 		reader: "app/src/modules/request-builder/components/RequestTabs/panels/script-rules.test.ts",
-		paths: ["docs/engine/scripting.md", "docs/app/pm-api-compatibility.md"],
+		paths: ["docs/engine/scripting/", "docs/app/pm-api-compatibility.md"],
 	},
 	/*
 	 * The anchor an app link carries (#2576): `pmApiCompatibility` opens the

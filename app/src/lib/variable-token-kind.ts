@@ -135,7 +135,7 @@ export interface VariableTokenContext {
  *   has run.
  * - `"bare"` - not a read at all: a `{{name}}` written into a script outside
  *   any `pm.<accessor>.replaceIn(...)` call, which the engine sends verbatim
- *   (D16, `docs/engine/scripting.md`). Muted and informational regardless of
+ *   (D16, `docs/engine/scripting/variables.md`). Muted and informational regardless of
  *   what the name would otherwise resolve to.
  *
  * Every span a script editor finds carries one, so a caller with no hint is

@@ -384,7 +384,7 @@ persists.
 |---|---|
 | [Overview](engine/architecture.md) | Core structure, engine-side auth resolution |
 | [HTTP API](engine/api-reference/index.md) | Every endpoint, payload shape, and status code |
-| [Test Scripting](engine/scripting.md) | The QuickJS sandbox, script globals, hooks, limits |
+| [Test Scripting](engine/scripting/index.md) | The QuickJS sandbox, script globals, hooks, limits |
 | [Local Database](engine/db-schema.md) | SQLite tables and the JSON shapes stored in them |
 | [Command Line](engine/cli.md) | Flags and subcommands for running the engine standalone |
 | [MCP Server](engine/mcp/index.md) | The tool surface exposed to coding agents |

@@ -102,7 +102,7 @@ Connecting (TCP and the TLS handshake) is additionally capped at 30 seconds (iss
 A streaming send does not apply it to the transfer (see `stream` below) but refuses a malformed one all the same.
 In a load run the latency histograms hold one hour at most (issue #2790): a completion longer than that, a timeout above `3600000` that ran out, is counted at one hour, so a percentile or `max` it reaches reads about `3600000` ms (within 0.1%) rather than the true duration, and the sample is never left out.
 The same deadline bounds the OAuth 2.0 token request an `auth` block makes (issue #2833), a refresh, the wait for another call's refresh of the same token, and the fresh grant a rejected refresh falls back to counted together: a token endpoint that does not answer within it fails the send as `AUTH_FAILED` with `authErrorCode` `oauth2_timeout`, and the request itself is never sent.
-It is also the default timeout of every `pm.sendRequest` the send's scripts make, buffered or streamed; a call's own `timeout` option replaces it, and the script's remaining budget can only lower either ([Scripting](../scripting.md#sending-a-request-from-a-script-pmsendrequest)).
+It is also the default timeout of every `pm.sendRequest` the send's scripts make, buffered or streamed; a call's own `timeout` option replaces it, and the script's remaining budget can only lower either ([Scripting](../scripting/send-request.md#sending-a-request-from-a-script-pmsendrequest)).
 
 **`requestId`, `environmentId` and `collectionId` must be strings** (issue #1917, `collectionId` since #3461): an id of any other JSON type (`"requestId": 7`) is a `400` naming the field - `'requestId' must be a string (got number)` - before any run row exists.
 Absent and `null` mean no link.
@@ -214,7 +214,7 @@ The post-request script runs **once, after the stream has terminated**, and read
 a script runs to completion, its timers included, before anything is reported, so a live per-event callback is not a feature that was skipped but one the runtime cannot have.
 The same three properties reach every run that streams: a collection run's streaming step and a load run's post-request script, inline or deferred (issue #3769).
 A stream whose request declared a `streamTextPath` also binds `pm.response.streamText`, the stored trace's `streamText`, and each entry's `text` (issue #3773), on a Send and on every run that streams alike.
-See [Scripting](../scripting.md#pmresponseevents---a-streamed-runs-events).
+See [Scripting](../scripting/response.md#pmresponseevents---a-streamed-runs-events).
 
 Because the route has already answered `202`, a streaming run's script output has nowhere to be *returned*: the trace's `scripts` node is the only route it takes.
 That node is not a streaming feature - every design send stores it (issue #725), with the same keys the buffered response body carries (`testResults`, `consoleLogs`, `preScriptError`, `postScriptError` and, since #3633, `scriptRequests`).
@@ -306,7 +306,7 @@ Use a static credential there, or move the data token into the request itself.
 The scripts read it as `pm.info.requestName` (with `requestId` as `pm.info.requestId`); a client sends it because Send executes editor state, which may be unsaved and therefore have a name no stored row carries.
 Absent, the engine falls back to the name of the row named by `requestId`, so linking an id is enough.
 An empty string is treated as absent - a script reads `undefined` rather than `""` - and a non-string is a **400** (`'requestName' must be a string`).
-See [scripting.md](../scripting.md#script-identity-pminfo).
+See [scripting/info-and-setup.md](../scripting/info-and-setup.md#script-identity-pminfo).
 
 **`allowScriptRequests` lets this payload's scripts use `pm.sendRequest`.**
 Absent, `null` or non-boolean all mean `false`, and that default is a security control rather than a convenience (issue #302): Vayu's MCP target allowlist is checked in the MCP server, before it calls this endpoint, and held by the engine to the URL a send is about to dial ([`targetPolicy`](#post-execute)), so a request issued from inside a script with `pm.sendRequest` never passes either.
@@ -314,7 +314,7 @@ Denying unless a caller asks means a client that forgets gets a script that cann
 The app's Send and load runs send `true`; the MCP server never does.
 `POST /runs` reads the same field for a `script.post` element's deferred validation (its [`requestElements`](load-runs.md#the-requestelements-array-a-single-request-runs-own-step-level-elements)), so one script behaves the same on both.
 Read **before** the `stream` branch, so a streaming send's scripts are governed by it exactly as a buffered send's are - the app sends it on both halves of Send (issue #653).
-See [scripting.md](../scripting.md#sending-a-request-from-a-script-pmsendrequest).
+See [scripting/send-request.md](../scripting/send-request.md#sending-a-request-from-a-script-pmsendrequest).
 
 **`elements` is the only script source, and it runs** (issue #1514's cut-over, replacing #1513's `preRequestScript(s)` / `postRequestScript(s)`).
 A caller still sending any of `preRequestScript`, `preRequestScripts`, `postRequestScript`, `postRequestScripts` or `tests` - even naming one with `null` is accepted as a no-op, but a real value is not - is refused with a `400` naming `elements` as the replacement, before any run row exists.
@@ -345,7 +345,7 @@ Its `pm.request` edits - method, url, headers, body - are applied to the request
 A credential that waits on the script (#2473) is applied after it instead, and a script-set `Authorization` still wins: auth never replaces a header the request already carries.
 `requestHeaders` and `rawRequest` in the response below, and the stored trace behind `GET /runs/:id`, all report the post-script request.
 A value the engine cannot send (a non-string url, an unknown method) rejects the whole write-back, leaves the request unchanged, and is reported as `preScriptError`.
-See [scripting.md](../scripting.md#mutating-the-request-pre-request-scripts).
+See [scripting/request-mutation.md](../scripting/request-mutation.md#mutating-the-request-pre-request-scripts).
 
 **Redirect policy.**
 `followRedirects` defaults to **true**, so omitting it follows every 3xx and the final response is returned as the answer, with the earlier hops' status and header lines on its `redirects` member (field notes below the response example) - send `followRedirects: false` to make the 3xx itself the answer.
@@ -548,7 +548,7 @@ Each `testResults` and `consoleLogs` entry names its level in **`scope`**: `coll
 It is not `level`, which a console line already uses for the console method.
 An entry stored before the field carries no `scope` and is the request's own; so is one from a payload whose `elements` carry no `origin`.
 `success` folds the same way: a failing `pm.test` at any level is a failed assertion, and the first level that throws is the error.
-`preScriptError` / `postScriptError` hold the thrown message as they always have when the request's own script threw (never empty or a bare `null`: a script that runs out of memory reads `Script ran out of memory at the 1 MiB limit`, see [Error Handling](../scripting.md#error-handling));
+`preScriptError` / `postScriptError` hold the thrown message as they always have when the request's own script threw (never empty or a bare `null`: a script that runs out of memory reads `Script ran out of memory at the 1 MiB limit`, see [Error Handling](../scripting/errors-and-practices.md#error-handling));
 when an inherited level threw, they name it - "Collection pre-request script failed - <message>", "Folder test script failed - <message>".
 An `assert.*` or `extract.*` element's entry carries the `scope` of the level that declared it.
 
@@ -646,7 +646,7 @@ Only 3xx responses are hops: a `1xx` interim response such as `100 Continue` is 
 It is always present on a design answer, an empty array when nothing was followed (`followRedirects: false` always gives an empty one, the 3xx being the answer), and holds at most `maxRedirects` entries (every hop when `maxRedirects` is negative, which sets no limit), so a loop that ends in `TOO_MANY_REDIRECTS` reports the hops it made.
 The stored `trace_data.response` carries it too, written only when non-empty; a load-run sample records none.
 It reports what the server sent: see the cross-origin paragraph above for why a hop's cookie is not necessarily one a later hop carried.
-A post-request script reads the same hops as [`pm.response.redirects`](../scripting.md#pmresponseredirects---the-hops-a-send-followed) (`code`/`status`/`headers` for `status`/`statusText`/`headerLines`), absent where the chain is not recorded.
+A post-request script reads the same hops as [`pm.response.redirects`](../scripting/response.md#pmresponseredirects---the-hops-a-send-followed) (`code`/`status`/`headers` for `status`/`statusText`/`headerLines`), absent where the chain is not recorded.
 
 **`warnings` lists what the engine did to the exchange that the response does not show** (issue #3307), each as `{code, message}` in the order it was found: `code` is a stable snake_case identifier a client branches on, `message` the sentence a person reads.
 A warning never fails the send.
@@ -688,7 +688,7 @@ A blank `Accept` or `Expect` row is therefore sent empty in place of libcurl's o
 Two blank rows keep a meaning of their own and are neither sent nor recorded: a blank `Content-Type` means no Content-Type (on a `binary` body, absent, so the file's type applies; see [the `body` union](request-body.md#the-request-body-union)), and a blank `Cookie` row joins nothing into the cookie line.
 A disabled row is never sent.
 The record does not carry libcurl's own additions or the jar's `Cookie` line; those are `rawRequest`'s alone.
-A test script's `pm.request.headers` reads this same set (see [scripting.md](../scripting.md#request-object-pmrequest)), so an assertion about what was composed to go out reads the same set the engine recorded; the Headers tab lists `rawRequest`'s header block instead, which is that set plus the transport's own lines.
+A test script's `pm.request.headers` reads this same set (see [scripting/request.md](../scripting/request.md#request-object-pmrequest)), so an assertion about what was composed to go out reads the same set the engine recorded; the Headers tab lists `rawRequest`'s header block instead, which is that set plus the transport's own lines.
 
 **`requestHeaderLines` is the same record unfolded** (issue #2466): one `{name, value}` entry per line the transfer appended, in wire order, a repeated name repeated and each in its own spelling - the request's own lines first, in the order the request gave them, then what the engine derived.
 Always present, an empty array when nothing was recorded.
@@ -698,7 +698,7 @@ Always present, an empty array when nothing was recorded.
 so a restored response pane's sent-headers disclosure shows the set the live one showed, derived `User-Agent` and body-implied `Content-Type` included, rather than the composed map's different answer.
 Both maps are stored because they answer different questions: the composed one is what a *pre-request* script saw and what reseeds a request tab from a run.
 The key is **absent** on a step that sent nothing and on every row written before the field, so a reader falls back to `request.headers` - `restore-response.ts`'s `sentSide` is that reader.
-A load run's sampled capture records no sent headers at all: its deferred replay and the Samples viewer both keep reading the composed map, as [scripting.md](../scripting.md#request-object-pmrequest) documents.
+A load run's sampled capture records no sent headers at all: its deferred replay and the Samples viewer both keep reading the composed map, as [scripting/request.md](../scripting/request.md#request-object-pmrequest) documents.
 That map can differ from the wire in the way this record exists to state - the derived `User-Agent` and body-implied `Content-Type` are absent, and a blank `Content-Type` or `Cookie` row, which is not sent, is listed - and for load samples that divergence is **recorded as permanent** rather than treated as a gap to close (issue #677 item 7).
 Which completions become samples is decided when they finish, so a sent record for the few that are kept would have to be built for every transfer, and a load run exists not to charge the hot path for what it throws away.
 
@@ -750,7 +750,7 @@ Releases before this one sent a flat `string[]` with the source encoded as a `"[
 The field is omitted entirely when neither script logged anything.
 Each script execution keeps at most 1000 lines and 1 MiB (64 KiB a line); a script that passes either ends its entries with one `warn` line saying output was dropped.
 A `pm.sendRequest` summary line also carries `scriptRequest`, the index of the call's record in `scriptRequests` (above, issue #3633).
-See [scripting.md](../scripting.md#console-output).
+See [scripting/console-and-examples.md](../scripting/console-and-examples.md#console-output).
 
 **`httpVersion` on the response** is the protocol actually **negotiated** (`CURLINFO_HTTP_VERSION` after the transfer), e.g. `"HTTP/1.1"` or `"HTTP/2"` - an *outcome*, not an echo of the request's own `httpVersion` field, and deliberately a different value space (see [requests.http_version](../db-schema.md#requests) for the full distinction).
 It is `""`, not omitted, when nothing was negotiated (e.g. the connection never reached a server) - empty rather than guessing `"HTTP/1.1"` and presenting a guess as fact.

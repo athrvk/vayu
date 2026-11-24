@@ -32,7 +32,7 @@
  * (`lib/script-variable-tokens.ts`): a script reaches a variable through
  * `pm.<accessor>.get(...)`, `pm.<accessor>.replaceIn(...)` (every accessor but
  * `pm.iterationData`), or - not interpolated at all, so painted muted and
- * read-only - a bare `{{name}}` (D16, `docs/engine/scripting.md`). This is a different gate from
+ * read-only - a bare `{{name}}` (D16, `docs/engine/scripting/variables.md`). This is a different gate from
  * `BODY_LANGUAGES` in `useVariableCompletionProvider.ts`, which is the `{{`
  * **completion** list's own list and stays as it is: offering brace
  * completion in a script would still teach the wrong syntax, even though the

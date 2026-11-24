@@ -392,7 +392,7 @@ composed, and it is pure (sends nothing, no run row): that split is load-bearing
 | `docs/engine/architecture.md` | Core engine structure, auth resolution |
 | `docs/engine/elements.md` | The element registry, a kind's config or phase, an element kind, the pipeline that runs one |
 | `docs/engine/db-schema.md` | Schema, migrations, stored JSON |
-| `docs/engine/scripting.md` | Script globals, hooks, sandbox limits |
+| `docs/engine/scripting/` | Script globals, hooks, sandbox limits: one page per `pm.*` area, `index.md` names them |
 | `docs/engine/mcp/` | MCP tools or their schemas (the server itself lives in `app/electron/mcp/`); `tools.md` is generated from the registry, so a new tool changes it by `pnpm docs:mcp-tools` from `app/` and no hand-written page |
 | `docs/engine/cli.md` | Flags or subcommands |
 | `docs/engine/logging.md` | The log record, categories, redaction, file names |

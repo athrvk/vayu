@@ -129,7 +129,7 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   A hop's `Set-Cookie` is what the server sent, not what the cookie jar kept.
   A hop's `url` is the request it answered, masked as the result's own `url` is (issue #2949, [Secret values](secrets.md#secret-values)), and `schemeDowngrade` is true when that request went over `https` and the next over `http`: libcurl drops `Authorization` and `Cookie` there, an API key sent as a header travels.
   `requestHeaderLines` (and a stored trace's `sentHeaderLines`) is masked the same way, every repeated credential line on its own.
-  A `postRequestScript` reads the same set as `pm.request.headers` (see [scripting.md](../scripting.md#request-object-pmrequest)).
+  A `postRequestScript` reads the same set as `pm.request.headers` (see [scripting/request.md](../scripting/request.md#request-object-pmrequest)).
 - **Transport fields** - `httpVersion` rides the inline overlay for both tools, and `start_load_run` adds `followRedirects` / `maxRedirects` (issue #760).
   They belong here rather than beside the load shape because they describe the *request*: `POST /compose` emits all three on a stored request under the never-elided rule, so an agent's value has to be laid over the composed payload the same way a URL override is.
   A URL-only run has no stored row behind it, which makes this the only way its redirect policy gets stated at all.
@@ -233,7 +233,7 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     `run_collection` takes the same two arguments for a design-mode run.
     Neither tool ever sends `stream` for a collection - the engine answers it with a `400` there.
 - **Request mutation** - a pre-request script's `pm.request` edits (url, method, headers, body, auth) are applied to the request that is sent, so an agent can sign a request or override the engine-applied auth from `run_request` (with reveal on; the script itself is refused while it is off), and a saved request's stored pre-request script does the same under `run_collection_smoke`.
-  The write-back is engine-side ([scripting.md](../scripting.md#mutating-the-request-pre-request-scripts)), so both tools get it without composing anything extra.
+  The write-back is engine-side ([scripting/request-mutation.md](../scripting/request-mutation.md#mutating-the-request-pre-request-scripts)), so both tools get it without composing anything extra.
   A rejected edit comes back as `preScriptError` in the response.
   `start_load_run` did not offer the field at all before issue #1594 - `POST /runs` ran no pre-request hook on its single-target path.
   It still does not accept an ad-hoc `preRequestScript` argument (a saved request's own `script.pre` element is the only source), and a composed one only mutates the request when it is marked to run inline or this run's own `elements.scripts` override forces it - see *Load-testing a saved request* above.

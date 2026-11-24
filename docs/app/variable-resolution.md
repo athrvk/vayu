@@ -188,7 +188,7 @@ executor substitutes them immediately before each send, because the value
 belongs to the iteration rather than to the request. A *script* resolves them
 (issue #1057): `pm.variables.replaceIn("{{$vu}}")` renders the number the
 request beside it was bound with, since by then the send has one - see
-[the scripting docs](../engine/scripting.md).
+[the scripting docs](../engine/scripting/index.md).
 
 Being reserved is what makes them bindable at all. A variable someone happens
 to name `$vu` does **not** answer for the identity - unlike `$guid`, where a
@@ -1243,7 +1243,7 @@ while a row is bound, come that row's bare column names - the same D18 tier the
 ladder above adds, reached from a script - and then **environment → collection
 → global**, stopping at the first scope that has the name enabled: this page's
 priority order, read from the top down. See
-[scripting.md](../engine/scripting.md#variables-pmvariables) and
+[scripting/variables.md](../engine/scripting/variables.md#variables-pmvariables) and
 [pm API compatibility](./pm-api-compatibility.md) for the details.
 
 The collection scope a script reads is the **whole chain**, the same one
@@ -1286,7 +1286,7 @@ impossible while still answering the read. A disabled row is looked past
 wherever it sits, so unticking an inherited name in a descendant falls through
 to the ancestor's value rather than hiding it. See
 [pm API compatibility](./pm-api-compatibility.md) and
-[scripting.md](../engine/scripting.md#variables-pmvariables).
+[scripting/variables.md](../engine/scripting/variables.md#variables-pmvariables).
 
 #### Autocomplete inside the accessors
 
@@ -1382,7 +1382,7 @@ These rules make the offered set match what the call can actually read:
   scope, so a variable called `$vu` shadows nothing.
 
 The dotted `pm.*` completions (served by the engine, see
-[the scripting docs](../engine/scripting.md)) yield inside a string literal so
+[the scripting docs](../engine/scripting/index.md)) yield inside a string literal so
 the two lists never appear together.
 
 ---

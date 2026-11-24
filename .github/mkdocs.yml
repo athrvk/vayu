@@ -129,7 +129,25 @@ nav:
           - Runs: engine/api-reference/runs.md
           - Collection Run Verdicts: engine/api-reference/collection-runs.md
           - Scripting Completions: engine/api-reference/scripting.md
-      - Test Scripting: engine/scripting.md
+      - Test Scripting:
+          - Overview: engine/scripting/index.md
+          - pm.test() and pm.expect(): engine/scripting/test-and-expect.md
+          - Response: engine/scripting/response.md
+          - Response Headers, Cookies and Assertions: engine/scripting/response-headers-and-assertions.md
+          - Request: engine/scripting/request.md
+          - Mutating the Request: engine/scripting/request-mutation.md
+          - Script Identity, Setup and Teardown: engine/scripting/info-and-setup.md
+          - Variables and Environments: engine/scripting/variables.md
+          - pm.sendRequest: engine/scripting/send-request.md
+          - Cookies: engine/scripting/cookies.md
+          - Flow Control, Metrics and Data Rows: engine/scripting/execution-metrics-data.md
+          - Console Output and Examples: engine/scripting/console-and-examples.md
+          - The Sandbox: engine/scripting/sandbox.md
+          - The require Shelf: engine/scripting/require-shelf.md
+          - Legacy Objects and the Visualizer: engine/scripting/legacy-and-visualizer.md
+          - Editor Support and Limitations: engine/scripting/limitations.md
+          - Where Each Kind of Script Runs: engine/scripting/execution-context.md
+          - Errors, Best Practices and API Reference: engine/scripting/errors-and-practices.md
       - Local Database: engine/db-schema.md
       - Elements: engine/elements.md
       - Command Line: engine/cli.md

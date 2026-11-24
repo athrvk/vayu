@@ -313,7 +313,7 @@ The phase is never stored; while the run is active it is published as `phase` on
   The run keeps its own end - `completed`, or `failed` when `thresholds.failRun` judges it so - and its sending window is what it would have been without the Stop, since the Stop ended no sending.
   When the Stop cancelled anything, the summary records it as `drainCut: {cancelled}` (issue #3538), and the run reads **not judged** ("15 requests were still unanswered when the drain was stopped") unless a budget it already missed fails it: the requests the Stop cut are the slowest the run sent, and judging what is left would pass a run on its fastest answers.
   A Stop in either phase also ends the deferred test replay and any script still running (#3460): the running script stops at its next interrupt poll and no further sample is replayed, so `testValidation.samplesTested` counts the samples the replay reached and the worker settles within the 5s below instead of after each remaining sample's `scriptTimeout`.
-  `script.teardown` still runs after a Stop latched before it (see [scripting.md](../scripting.md#sending-a-request-from-a-script-pmsendrequest), "A Stop ends the script itself").
+  `script.teardown` still runs after a Stop latched before it (see [scripting/send-request.md](../scripting/send-request.md#sending-a-request-from-a-script-pmsendrequest), "A Stop ends the script itself").
 - **A drain that hits its deadline with no Stop** cancels what is still outstanding the same way, and because nobody asked for that one to stop, it is an error with no response, not a cancellation.
   Without that bound an upstream that never answers would hold the run in `running` indefinitely.
 
