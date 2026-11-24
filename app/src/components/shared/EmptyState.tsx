@@ -9,8 +9,8 @@
  * The one way to say "there is nothing here yet" (about twenty hand-rolled copies had drifted in
  * icon size, heading size and case). Two variants, as there are two shapes:
  *
- * - `pane` - owns a region (a detail view with nothing selected, an empty list), centred and
- *   icon-led.
+ * - `pane` - owns a region (a detail view with nothing selected, an empty list), centred on both
+ *   axes and icon-led.
  * - `inline` - a small panel inside something (a response tab, a card, a drawer group): one muted
  *   line, no icon, which would outweigh the panel. It takes an `action` (#1693): the drawer's group
  *   notes ("No inbox yet", "No environments") are dead ends whose create handler sits one row up in
@@ -71,7 +71,8 @@ interface InlineEmptyStateProps extends EmptyStateBaseProps {
 	iconClassName?: never;
 	/**
 	 * For a line in a dense surface (a drawer tree, a dialog's list box, a settings card), where
-	 * `p-8 text-sm` outsizes its host: `p-3 text-xs`, as the bare lines it replaced used.
+	 * the default `p-8 text-sm` outsizes its host: `p-3 text-xs`, as the bare lines it replaced
+	 * used.
 	 */
 	compact?: boolean;
 }

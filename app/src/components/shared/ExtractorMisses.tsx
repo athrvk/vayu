@@ -8,7 +8,7 @@
 /**
  * A step's extractor misses (#3053), "2 extractor misses", shown by a collection run's step card
  * and a scenario load run's Steps tab in one wording. A miss unsets the extractor's variable, so a
- * later step sends `{{name}}` unresolved while the missing step can pass. The engine omits the
+ * later step sends `{{name}}` unresolved while the step that missed can pass. The engine omits the
  * count at 0 and older reports have none, so neither renders. Text, not a `Badge`: it paints no
  * background, the rule `badge-hover.test.tsx` keeps for those that do.
  */

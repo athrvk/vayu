@@ -56,7 +56,7 @@ export function FieldError({ id, icon: Icon, children, as = "p", className }: Fi
 			role="alert"
 			className={cn(
 				"flex items-center gap-1.5 text-xs text-destructive-text",
-				// A `<span>` is inline, so the flex row would not take its own line.
+				// A `<span>` is inline by default, so the flex row would not take its own line.
 				as === "span" && "flex",
 				className
 			)}

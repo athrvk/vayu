@@ -7,10 +7,11 @@
 
 /**
  * A visible `<Label>` and the one control it names. A sibling `<Label>` names nothing: a screen
- * reader announces the control by its placeholder, or as a bare "edit text" (#3498). The control
- * renders through a function so it takes the `id` the label points at, minted per instance. `label`
- * goes to the control too: an input with its own `aria-label` (`VariableInput` falls back to its
- * placeholder) is named by that, which outranks `<label for>`.
+ * reader announces the control by its placeholder, or as a bare "edit text" or "combo box" (#3498).
+ * The control renders through a function so it takes the `id` the label points at, minted here and
+ * unique per instance. `label` goes to the control too: an input with its own `aria-label`
+ * (`VariableInput` falls back to its placeholder) is named by that, which outranks `<label for>`,
+ * so it must carry the label's text.
  */
 
 import { useId, type ReactNode } from "react";

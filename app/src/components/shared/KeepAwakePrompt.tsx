@@ -12,7 +12,8 @@
  * declaring ten minutes or more, with the standing preference off. Mounted once at the root, not at
  * the three start sites: the question is about the live run, which the dashboard store knows, and
  * one mount cannot stack dialogs. A collection run is never asked about: it declares no duration,
- * and a prompt on every run would train dismissal.
+ * so a two-second sequence looks like a two-hour one, and a prompt on every run would train the
+ * user to dismiss it.
  */
 
 import { useState } from "react";

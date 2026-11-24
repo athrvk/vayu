@@ -18,10 +18,10 @@
  * or flex child stays one and the drawer's indent maths holds. **The actions are the pointed-at
  * row's, without selecting it**: selecting in the collection tree opens the request in a tab
  * (`selectedRequestId` derives from the active tab, `CollectionTree.tsx`), and no file manager
- * opens a document on right-click. Delete deleting the row under the pointer comes from the
- * actions, each row building its list over its entity. The right-click does move focus to the row,
- * the tree's "you are here". **The native menu is kept away by the marker, not `preventDefault`**:
- * the main process draws its edit menu from Chromium's `context-menu` event
+ * opens a document on right-click. Delete deleting the row under the pointer, not the open one,
+ * comes from the actions, each row building its list over its entity. The right-click does move
+ * focus to the row, the tree's "you are here". **The native menu is kept away by the marker, not
+ * `preventDefault`**: the main process draws its edit menu from Chromium's `context-menu` event
  * (`electron/context-menu.ts`), which a renderer's `preventDefault` does not reach.
  * `contextProps("own-menu")` says a surface draws its own, spread here so every row is covered, as
  * for Monaco.

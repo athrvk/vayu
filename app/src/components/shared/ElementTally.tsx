@@ -12,15 +12,15 @@
  * **A `deferred` element is not a skipped one.** A post-request script does not run inline on the
  * load path; the engine replays it against sampled responses and reports it in the Test validation
  * card (Sampled replay beside an exact Assertions card, #2820), so its `passed`/`failed` are zero
- * by construction and "0 passed" would read as a script doing nothing. Absent before #2144, which
- * keeps the older rendering.
+ * by construction and "0 passed" would read as a script doing nothing. `deferred` is absent from a
+ * report stored before #2144, which keeps the older rendering.
  *
  * **`missing` and `error` are buckets of their own (#3051)**: an extractor finding nothing is
- * `missing`, not `skipped`, and an element unable to run its check is `error`, not `failed`, which
- * includes neither. A `required` extractor's miss fails the step, so its bucket takes the error
- * colour and says so. A row stored before #3051 has neither, and its `skipped` and `failed` keep
- * what they counted then. The row names its element (`name`, the kind beside it) and the level it
- * was composed from (`origin`); without a `name` it prints the kind.
+ * `missing`, not `skipped`, and an element unable to run its check is `error`, not `failed`; the
+ * engine's `failed` includes neither. A `required` extractor's miss fails the step, so its bucket
+ * takes the error colour and says so. A row stored before #3051 has neither, and its `skipped` and
+ * `failed` keep what they counted then. The row names its element (`name`, the kind beside it) and
+ * the level it was composed from (`origin`); without a `name` it prints the kind.
  *
  * **An inline script row carries what the script said (#3127)**, drawn under the line by
  * {@link ElementMessages}. The deferred line names the replay's sample size when known, as

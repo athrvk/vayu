@@ -11,8 +11,8 @@
  * missing `getMethodColor` fallback).
  *
  * The `badge` variant is a fixed-width column, not a chip growing with its letters: rows put the
- * badge first, so an intrinsic chip started names at a different x per method, a ragged edge down
- * every list. Three decisions hold the column:
+ * badge first, so an intrinsic-width chip started names at a different x per method, a ragged edge
+ * down every list. Three decisions hold the column:
  *
  * 1. **Width** is `BADGE_METHOD_CHARS` characters plus the chip's padding and border, in `ch` so it
  *    tracks the mono font and one class covers both sizes. Five keeps `PATCH` whole; the three

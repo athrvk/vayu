@@ -158,10 +158,10 @@ function CoverageRow({ operation }: { operation: RunCoverageOperation }) {
 							key={status}
 							/*
 							 * The warning *tint* behind the status's own text colour, never a fill
-							 * under it: an undeclared 200 is still a 200. Tint plus
-							 * `--status-*-text` is the pairing the status rules allow
-							 * (app/CLAUDE.md); a background makes it a box, so it takes a radius
-							 * token.
+							 * under it: an undeclared 200 is still a 200, and repainting the code
+							 * would trade one fact for the other. Tint plus `--status-*-text` is
+							 * the pairing the status rules allow (app/CLAUDE.md); a background
+							 * makes it a box, so it takes a radius token.
 							 */
 							className={cn(
 								"font-mono text-xs",

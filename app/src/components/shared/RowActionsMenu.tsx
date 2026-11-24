@@ -45,7 +45,7 @@ interface RowActionsMenuProps {
 	className?: string;
 	/**
 	 * The trigger's tab stop: `0` by default, reachable by Tab; a roving-tabindex tree passes `-1`,
-	 * being one stop whose row keys are the way in.
+	 * as the whole tree is one stop and the row's keys are the way in.
 	 */
 	tabIndex?: number;
 	/**

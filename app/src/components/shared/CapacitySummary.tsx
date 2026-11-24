@@ -8,13 +8,14 @@
 /**
  * What a capacity-discovery run found: the most virtual users the target held inside its latency
  * budget and error limit, the level it gave out at, and the per-level trail. The headline is a
- * sentence, as the mode answers one question in words ("what can my service take"); the levels
- * table is the evidence behind it. The sentence follows why the search stopped, as the
- * `maxHealthy*` figures mean different things per reason: a measured capacity when the target gave
- * out (latency or errors), a floor when the search ran out of ceiling, time or patience, an
- * overshoot on a plateau (the last level tried; `saturation*` names where the curve flattened).
- * "Sustained N" for all of them claims a limit never found. Silent for every other mode: a
- * fixed-target run measured a point, and an empty shell would imply it looked for a limit.
+ * sentence, not a stat grid: the mode answers one question in words ("what can my service take"),
+ * and four numbers side by side leave the reader to assemble it; the levels table is the evidence
+ * behind it. The sentence follows why the search stopped, as the `maxHealthy*` figures mean
+ * different things per reason: a measured capacity when the target gave out (latency or errors), a
+ * floor when the search ran out of ceiling, time or patience, an overshoot when throughput
+ * plateaued (the last level tried; `saturation*` names where the curve flattened). "Sustained N"
+ * for all of them claims a limit never found. Silent for every other mode: a fixed-target run
+ * measured a point, and an empty shell would imply it looked for a limit and found none.
  */
 
 import type { ReactNode } from "react";
@@ -221,8 +222,8 @@ export function CapacitySummary({ capacity, stepDuration, className }: CapacityS
 
 	const stop = STOP_REASONS[capacity.stopReason];
 	const detail = stopDetail(capacity, stepDuration);
-	// A run stored before errors were judged has no `errorPct` on any level, so the table keeps
-	// three columns for it.
+	// A run stored before errors were judged has no `errorPct` on any level, and its error column
+	// would be empty cells, so the table keeps its three columns for it.
 	const showErrors = capacity.levels.some((level) => level.errorPct !== undefined);
 	// Likewise `samples`, absent on a run stored before the engine reported it.
 	const showSamples = capacity.levels.some((level) => level.samples !== undefined);

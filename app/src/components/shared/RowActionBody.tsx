@@ -16,9 +16,9 @@ import type { RowAction } from "./row-actions";
  * An item's contents: glyph, label, then a trailing column with the reason the item is off or the
  * value it carries (#1690). `data-icon-motion` arrives in a variable no source scan sees; the
  * rendered-class half of `icon-motion.call-sites.test.tsx` holds it. `ml-auto`, not a gap: a menu
- * sizes to its widest row, so a reason sitting where its label ends would read as part of "Move up"
- * on one row and not the next. `text-muted-foreground` keeps it behind the label on enabled items
- * too, a disabled one being at the menu's disabled opacity already.
+ * sizes to its widest row, so "Already first" sitting where its label ends would read as part of
+ * "Move up" on one row and not the next. `text-muted-foreground` keeps it behind the label on
+ * enabled items too, a disabled one being at the menu's disabled opacity already.
  */
 export function RowActionBody({ action }: { action: RowAction }) {
 	const Icon = action.icon;
