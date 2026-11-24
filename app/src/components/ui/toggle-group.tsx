@@ -6,28 +6,15 @@
  */
 
 /**
- * A segmented control: one choice out of a few, all of them visible.
- *
- * Built on Radix's ToggleGroup, so arrow-key movement and roving focus arrive
- * with it. Like `Tabs`, every state change is a `data-[state=]` variant rather
- * than a swapped class: the class list is identical either way and only the
- * attribute moves.
- *
- * **The class list being static is not enough on its own.** `data-[state=on]:
- * font-semibold` still changes the rendered *weight* of an active segment's
- * text, and a heavier weight is wider - so without help, activating a segment
- * shoves every segment (and anything sitting beside the group) sideways.
- * `tabs.tsx` hit this exact bug (`TabLabel`'s doc comment names it) and fixed
- * it by reserving the bold width up front, in the primitive, rather than at
- * each call site; `ToggleGroupItem` does the same thing here: its children
- * render twice, stacked in one grid cell, with a `font-semibold` hidden copy
- * sizing the column so the visible copy's own weight never changes the box.
- *
- * **Sizes are the app's own floor steps** (issue #1679), not new numbers. `xs`
- * is `--spacing-control-sm` (24px) and `sm` is `--spacing-control` (28px) - the
- * response toolbar sits an `xs` control on a 32px `band`, one step above the
- * `band` tab strip above it. Named steps that do not ride `--spacing` (moved to a
- * 3px rhythm in #1670, where `h-5`/`h-6` resolve to 15px/18px) keep 24px and 28px.
+ * A segmented control: one choice of a few, all visible, on Radix's ToggleGroup for arrow keys and
+ * roving focus. As in `Tabs`, every state change is a `data-[state=]` variant, so only the
+ * attribute moves. **A static class list is not enough**: `data-[state=on]:font-semibold` makes an
+ * active segment's text wider and shoves the others; `ToggleGroupItem` reserves the bold width as
+ * `tabs.tsx` does (`TabLabel`), rendering its children twice in one grid cell with a hidden
+ * `font-semibold` copy sizing the column. **Sizes are the app's floor steps** (#1679): `xs` is
+ * `--spacing-control-sm` (24px), `sm` `--spacing-control` (28px); the response toolbar sits an `xs`
+ * control on a 32px `band`, a step above the tab strip. Named steps off `--spacing` (a 3px rhythm,
+ * #1670, where `h-5`/`h-6` are 15px/18px) keep 24px and 28px.
  */
 
 import * as React from "react";
@@ -48,8 +35,7 @@ const ITEM: Record<SegmentSize, string> = {
 	sm: "h-control px-2.5 text-xs",
 };
 
-// The gap sits on the inner content spans, not the item itself - see
-// `ToggleGroupItem`'s width-reservation comment below.
+// The gap is on the inner content spans, not the item (see `ToggleGroupItem`'s width reservation).
 const ITEM_GAP: Record<SegmentSize, string> = {
 	xs: "gap-1",
 	sm: "gap-1.5",
@@ -58,9 +44,9 @@ const ITEM_GAP: Record<SegmentSize, string> = {
 const SegmentSizeContext = React.createContext<SegmentSize>("xs");
 
 /*
- * Radix's Root props are a union discriminated on `type`, so simply omitting
- * `type` leaves `value` as `string | string[]` and every caller has to cast.
- * Extracting the single-select arm first is what makes `value: string`.
+ * Radix's Root props are a union on `type`, so omitting `type` leaves `value` as
+ * `string | string[]` and every caller casts; extracting the single-select arm makes
+ * `value: string`.
  */
 type SingleRootProps = Extract<
 	React.ComponentProps<typeof ToggleGroupPrimitive.Root>,
@@ -72,9 +58,8 @@ export interface ToggleGroupProps extends Omit<SingleRootProps, "type"> {
 }
 
 /**
- * Single-select only. A multi-select toggle group is a different control with
- * different semantics, and nothing here wants one - offering `type` would invite
- * a caller to build a checkbox row that looks like a segmented control.
+ * Single-select only: multi-select is another control, nothing wants one, and offering `type`
+ * invites a checkbox row looking like a segmented control.
  */
 function ToggleGroup({ className, size = "xs", ...props }: ToggleGroupProps) {
 	return (
@@ -84,19 +69,10 @@ function ToggleGroup({ className, size = "xs", ...props }: ToggleGroupProps) {
 				data-slot="toggle-group"
 				className={cn(
 					/*
-					 * No track fill and no outline. The raised active segment is the
-					 * whole affordance.
-					 *
-					 * A filled track was tried and is wrong here twice over. It draws a
-					 * box around the segments that reads as a bordered widget dropped
-					 * onto the toolbar rather than part of it - and the fill would have
-					 * to be `--muted`, which is exactly what the toolbar it sits on
-					 * already is. That is the same-colour-on-same-colour defect the old
-					 * hand-rolled version had (`bg-muted` on `bg-muted/20`), arrived at
-					 * from the other direction.
-					 *
-					 * `rounded-md` stays, so the padding box still follows the
-					 * Roundedness setting for the segment corners inside it.
+					 * No track fill and no outline: the raised active segment is the affordance. A
+					 * filled track reads as a bordered widget dropped onto the toolbar, and its
+					 * fill would be `--muted`, the toolbar's own colour. `rounded-md` stays, so the
+					 * padding box follows Roundedness for the segment corners inside.
 					 */
 					"inline-flex items-center rounded-md",
 					TRACK[size],
@@ -121,41 +97,28 @@ function ToggleGroupItem({
 			data-slot="toggle-group-item"
 			className={cn(
 				"inline-flex shrink-0 items-center justify-center whitespace-nowrap",
-				// One step tighter than the track, so the inner corner follows the
-				// outer one instead of sitting proud of it at high Roundedness.
+				// A step tighter than the track, so the inner corner follows the outer at high
+				// Roundedness.
 				"rounded-[calc(var(--radius)-2px)]",
 				"font-medium text-muted-foreground transition-colors",
 				"hover:text-foreground",
 				"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 				"disabled:pointer-events-none disabled:opacity-50",
 				/*
-				 * The active chip is the *tinted* one, and the row around it stays
-				 * the surface it belongs to.
-				 *
-				 * This was `bg-card` first, which assumed a `--muted` toolbar to lift
-				 * off. That toolbar turned out to be the wrong idea - a full muted
-				 * fill made the row a grey band between a card-coloured tab strip and
-				 * a card-coloured editor - so the row is card now and the chip is
-				 * muted. The measured separation is the same either way, because it
-				 * is the same pair of colours:
+				 * The active chip is the *tinted* one; the row stays its surface's colour.
+				 * Measured:
 				 *
 				 *                          light    dark
 				 *     card vs muted        1.18     1.15
 				 *     primary/10 on muted  1.25     1.05
 				 *     primary/15 on muted  1.41     1.07
 				 *
-				 * An accent tint looks like the obvious "active" fill and is the
-				 * *worse* option in dark - at 10-15% alpha it barely moves luminance.
-				 *
-				 * No fill carries this alone at ~1.16, and none needs to. The text
-				 * does the work: `--foreground` against `--muted-foreground` measures
-				 * 13.69 dark. That difference is *non-chromatic*, which matters
-				 * because the graphite scheme's accent is a neutral - a hue-based
-				 * active state vanishes there, the trap `tabs.tsx` documents.
-				 *
-				 * Deliberately not accent-coloured. The tab strip directly above uses
-				 * accent text plus an underline; repeating that here would make the
-				 * toolbar read as a second tab row.
+				 * An accent tint, the obvious "active" fill, is *worse* in dark: at 10-15% alpha it
+				 * barely moves luminance. No fill carries this alone at ~1.16, and none needs to:
+				 * the text does, `--foreground` against `--muted-foreground` at 13.69 dark, a
+				 * *non-chromatic* difference that survives graphite's neutral accent (the trap
+				 * `tabs.tsx` documents). Not accent-coloured: the tab strip above uses accent text
+				 * and an underline, and repeating it would read as a second tab row.
 				 */
 				"data-[state=on]:bg-accent data-[state=on]:text-foreground",
 				"data-[state=on]:font-semibold data-[state=on]:shadow-sm",
@@ -165,12 +128,9 @@ function ToggleGroupItem({
 			{...props}
 		>
 			{/*
-			 * Width reservation (see the file-level comment): the children render
-			 * twice, stacked in one grid cell, so the column is always as wide as
-			 * the bold form - the visible copy's own weight (medium at rest, the
-			 * `data-[state=on]` semibold above once active) never changes the box.
-			 * `font-weight` is inherited, so the visible copy needs no weight class
-			 * of its own; it just takes whatever this item currently has.
+			 * Width reservation (see the file header): the children render twice in one grid cell,
+			 * so the column is always the bold form's width. `font-weight` inherits, so the visible
+			 * copy takes the item's current weight with no class of its own.
 			 */}
 			<span className="grid">
 				<span

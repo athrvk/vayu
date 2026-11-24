@@ -6,16 +6,11 @@
  */
 
 /**
- * The resolved branch of `VariablePopover`: the value field, the secret's eye,
- * and how the edit is committed.
- *
- * The editable field *is* the current value, so there is no separate read-out
- * above it. A second display renders only where it does work the field cannot:
- * a secret, masked until deliberately revealed, and the not-editable case.
- *
- * The edit buffer, the reveal flag and the key handler belong to the popover:
- * its content unmounts on close, and its close path is what saves, discards
- * and re-masks them.
+ * `VariablePopover`'s resolved branch: the value field, the secret's eye, and how the edit commits.
+ * The editable field *is* the current value, so there is no read-out above it; a second display
+ * appears only where the field cannot serve (a masked secret, the not-editable case). The edit
+ * buffer, reveal flag and key handler belong to the popover: its content unmounts on close, and its
+ * close path saves, discards and re-masks them.
  */
 
 import { Eye, EyeOff } from "lucide-react";
@@ -27,12 +22,9 @@ import { Input } from "./input";
 import { TooltipIconButton } from "./tooltip-icon-button";
 
 /**
- * A **fixed-width** stand-in for a hidden secret.
- *
- * Deliberately not `"•".repeat(value.length)` and deliberately not a
- * `type="password"` input holding the real string (which is why `SecretInput`
- * is not used here): both draw one dot per character, which tells anyone
- * looking how long the secret is.
+ * A **fixed-width** stand-in for a hidden secret, not `"•".repeat(value.length)` nor a
+ * `type="password"` input holding it (so not `SecretInput`): both draw a dot per character, telling
+ * anyone looking the secret's length.
  */
 export const SECRET_MASK = "••••••••";
 
@@ -50,9 +42,8 @@ export interface ResolvedValueEditorProps {
 	revealed: boolean;
 	onRevealChange: (revealed: boolean) => void;
 	/**
-	 * A real DOM attribute, so it fires on mount whatever Radix's own
-	 * `onOpenAutoFocus` decided: a hover that opens the popover unfocused must
-	 * pass false (issue #1220 hover redesign).
+	 * A real DOM attribute, so it fires on mount whatever Radix's `onOpenAutoFocus` decided; a
+	 * hover opening the popover unfocused passes false (#1220).
 	 */
 	autoFocus: boolean;
 	onSave: () => void;
@@ -66,10 +57,9 @@ export function ResolvedValueEditor(props: ResolvedValueEditorProps) {
 			<ValueField {...props} />
 
 			{/*
-			 * What the two keys do, as a sentence rather than as keycaps: Enter
-			 * is not what saves an auto-mode edit - clicking away does, and Enter
-			 * is one way of doing that - so a `↵ save` chip advertised a commit
-			 * key beside a mode that commits on blur.
+			 * The keys as a sentence, not keycaps: clicking away saves an auto-mode edit and Enter
+			 * is one way of doing that, so a `↵ save` chip advertised a commit key in a mode that
+			 * commits on blur.
 			 */}
 			{canEdit && saveMode === "auto" && (
 				<p className="text-micro text-muted-foreground">
@@ -90,12 +80,9 @@ export function ResolvedValueEditor(props: ResolvedValueEditorProps) {
 }
 
 /**
- * One field for a secret too.
- *
- * Hidden, the field is read-only and shows a fixed-width mask, so nothing about
- * the value is inferable and it cannot be edited blind. Revealing turns it into
- * an ordinary editable field - one control, two states, and the eye is the only
- * thing that moves between them.
+ * One field for a secret too. Hidden, it is read-only with a fixed-width mask, so nothing is
+ * inferable and nothing edited blind; revealed, an ordinary editable field. One control, two
+ * states, the eye the only switch.
  */
 function ValueField({
 	name,
@@ -128,11 +115,9 @@ function ValueField({
 				<Input
 					size="sm"
 					/*
-					 * Keyed against the revealed field below, which is otherwise the
-					 * same `<Input>` in the same slot: React would reconcile the two
-					 * rather than remount, and `autoFocus` fires on mount - so
-					 * revealing left focus behind on the eye and the field the reveal
-					 * exists to open had to be tabbed back to.
+					 * Keyed apart from the revealed field, the same `<Input>` in the same slot:
+					 * React would reconcile rather than remount, and `autoFocus` fires on mount, so
+					 * revealing left focus on the eye.
 					 */
 					key="secret-masked"
 					readOnly
@@ -145,13 +130,11 @@ function ValueField({
 					revealed={false}
 					onToggle={() => onRevealChange(true)}
 					/*
-					 * The popover suppresses its own open-autofocus, and every other
-					 * branch compensates with `autoFocus` on the field it opens onto.
-					 * The masked field is `readOnly`, and the popover is non-modal and
-					 * portalled, so without this a secret was the one variable a
-					 * keyboard user could not read (issue #1215). The eye is the right
-					 * landing: revealing is the only action here, and it hands focus
-					 * on to the editable field.
+					 * The popover suppresses its open-autofocus, and every other branch puts
+					 * `autoFocus` on its field. The masked field is `readOnly` in a non-modal
+					 * portalled popover, so without this a secret was the one variable a keyboard
+					 * user could not read (#1215). The eye is the landing: revealing is the only
+					 * action, and it hands focus to the editable field.
 					 */
 					autoFocus={autoFocus}
 				/>
@@ -184,7 +167,7 @@ function RevealButton({
 }: {
 	revealed: boolean;
 	onToggle: () => void;
-	/** The masked branch's only entry point - see its call site. */
+	/** The masked branch's only entry point; see its call site. */
 	autoFocus?: boolean;
 }) {
 	return (

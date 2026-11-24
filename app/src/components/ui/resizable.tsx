@@ -11,11 +11,9 @@ import { Group, Panel, Separator } from "react-resizable-panels";
 import { cn } from "@/lib/utils";
 
 /**
- * `data-orientation` is stamped here because v4 of the library renders none:
- * it lays the group out with an inline `flex-direction` and exposes the
- * orientation on the separator alone, as `aria-orientation` (the separator's
- * own, which is the opposite word). One attribute on the group is what a
- * stylesheet or a test can read the arrangement from.
+ * `data-orientation` is stamped here because the library's v4 renders none: it lays the group out
+ * with an inline `flex-direction` and exposes orientation only on the separator, as its own
+ * (opposite) `aria-orientation`. One group attribute gives a stylesheet or test the arrangement.
  */
 const ResizablePanelGroup = ({
 	className,
@@ -33,18 +31,12 @@ const ResizablePanelGroup = ({
 const ResizablePanel = Panel;
 
 /**
- * The divider. Its own `aria-orientation` is the separator's, not the group's:
- * a group laying its panels side by side has a separator that runs top to
- * bottom (`vertical`), and a stacked group has one that runs across
- * (`horizontal`), which is what the `aria-[orientation=horizontal]:` variants
- * below style.
- *
- * `onReset` runs on double-click in place of the library's own reset, which
- * puts the panels back at their `defaultSize` - the *persisted* ratio here,
- * so on its own a double-click would reset to wherever the user last left the
- * divider. The caller resets to its own idea of neutral (the builder's is an
- * even split) and writes that through, the same behaviour
- * `PanelResizeHandle` gives the drawer's handle.
+ * The divider. Its `aria-orientation` is the separator's, not the group's: side-by-side panels have
+ * a `vertical` separator, stacked ones `horizontal`, which the `aria-[orientation=horizontal]:`
+ * variants style. `onReset` replaces the library's double-click reset, which restores
+ * `defaultSize`, here the *persisted* ratio, so it would reset to where the user last left it. The
+ * caller resets to its own neutral (the builder's even split) and writes it through, as
+ * `PanelResizeHandle` does for the drawer.
  */
 const ResizableHandle = ({
 	withHandle,

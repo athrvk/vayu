@@ -6,27 +6,14 @@
  */
 
 /**
- * A markdown field that reads as prose and edits as text.
- *
- * Click the rendered block to edit it; click away and it renders again. Vayu
- * has stored markdown in descriptions since descriptions existed and rendered
- * none of it - the field even advertised "Markdown supported" beside a plain
- * textarea.
- *
- * **Focus is the trigger, not dirtiness.** The two disagree in both directions -
- * a clean focused field, a dirty blurred one - and focus is the one the user is
- * actually expressing: you are editing because you clicked in. Dirtiness is kept
- * only as a safety catch, via `keepSourceOpen`: a caller whose save failed
- * passes it so unsaved text is never hidden behind a render of what is stored.
- *
- * **The caret goes to the end, not to where you clicked.** Mapping a rendered
- * offset back to a source offset needs a real WYSIWYG editor with position
- * mapping; every implementation of this pattern without one puts the caret at
- * the end, and pretending otherwise would mean a caret that lands somewhere
- * plausible and wrong.
- *
- * **Both modes share a min and max height**, so clicking to edit does not shove
- * the rest of the panel down the screen and blurring does not yank it back up.
+ * A markdown field that reads as prose and edits as text: click the rendered block to edit, click
+ * away and it renders. **Focus is the trigger, not dirtiness**: the two disagree both ways (a clean
+ * focused field, a dirty blurred one), and focus is what the user expresses. Dirtiness is only a
+ * safety catch, `keepSourceOpen`, which a caller whose save failed passes so unsaved text is never
+ * hidden behind the stored render. **The caret goes to the end**, not where you clicked: mapping a
+ * rendered offset to source needs a WYSIWYG editor with position mapping, and a guess would land
+ * plausibly and wrong. **Both modes share a min and max height**, so entering and leaving edit does
+ * not shove the panel.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -45,9 +32,8 @@ export interface MarkdownEditorProps {
 	/** Shown in place of the render when `value` is empty and unfocused. */
 	emptyHint?: string;
 	/**
-	 * Hold the source open regardless of focus. For a caller whose save failed:
-	 * rendering stored text over unsaved edits would hide the thing that needs
-	 * attention.
+	 * Hold the source open regardless of focus, for a caller whose save failed: rendering stored
+	 * text over unsaved edits would hide what needs attention.
 	 */
 	keepSourceOpen?: boolean;
 	minHeight?: string;
@@ -78,16 +64,10 @@ export function MarkdownEditor({
 	const startEditing = () => setIsEditing(true);
 
 	/*
-	 * Focus the textarea once it exists, with the caret at the end.
-	 *
-	 * An effect rather than a callback: `setIsEditing(true)` does not render
-	 * synchronously, so anything that runs in the same tick - including a
-	 * `requestAnimationFrame` - finds `textareaRef.current` still null and
-	 * silently does nothing. Effects run after commit, which is the first moment
-	 * the element is there.
-	 *
-	 * Keyed on `isEditing` and not on `showSource`, so pinning the source open
-	 * does not also steal focus from wherever the user was.
+	 * Focus the textarea once it exists, caret at the end. An effect, as `setIsEditing(true)` does
+	 * not render synchronously: anything in the same tick, `requestAnimationFrame` included, finds
+	 * the ref null and does nothing; effects run after commit. Keyed on `isEditing`, not
+	 * `showSource`, so pinning the source open steals no focus.
 	 */
 	useEffect(() => {
 		if (!isEditing) return;
@@ -118,17 +98,15 @@ export function MarkdownEditor({
 					/>
 				) : (
 					/*
-					 * A button, so the whole block is one keyboard-reachable control
-					 * that enters edit mode - the same thing clicking it does. Links
-					 * inside the render are their own buttons and stop the click from
-					 * bubbling to this one, so following a link does not also drop
-					 * you into the source.
+					 * A button, so the block is one keyboard-reachable control entering edit mode,
+					 * as a click does. Links in the render are their own buttons and stop the click
+					 * bubbling, so following one does not open the source.
 					 */
 					<div
 						role="button"
 						tabIndex={0}
-						// The label, not the content: a button is named from its
-						// content otherwise, which here is the whole rendered description.
+						// The label, not the content, which would otherwise name the button: the
+						// whole rendered description.
 						aria-label={ariaLabel}
 						onClick={startEditing}
 						onKeyDown={(e) => {
@@ -152,10 +130,8 @@ export function MarkdownEditor({
 				)}
 
 				{/*
-				 * The escape hatch, and the reason it exists: without it there is no
-				 * way to look at your own markdown while reading, and people who
-				 * write markdown want that. Obsidian calls the same thing source
-				 * mode.
+				 * The escape hatch: without it there is no way to see your markdown while reading,
+				 * which markdown writers want. Obsidian calls it source mode.
 				 */}
 				<TooltipIconButton
 					label={pinned ? "Show rendered" : "Show markdown source"}
