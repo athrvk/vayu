@@ -10284,7 +10284,7 @@ transfer that never completes leaks its slot for the rest of the run.
 **Reaching a cap is a *successful* completion**, not a timeout and not an error:
 it is the stream's intended end under load, so it lands in the run's success
 counts, its latency histogram and its status-code distribution like any other
-200. Every ending, the cap's included:
+200. The endings, side by side:
 
 | Ending | Reported as |
 |--------|-------------|
