@@ -227,7 +227,6 @@
     "app/src/stores/save-store.ts": 1,
     "app/src/stores/toast-store.ts": 1,
     "app/src/types/domain.ts": 11,
-    "app/src/types/ui.ts": 2,
     "engine/include/vayu/core/capacity_controller.hpp": 1,
     "engine/include/vayu/core/cli_args.hpp": 1,
     "engine/include/vayu/core/constants.hpp": 1,

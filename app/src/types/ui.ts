@@ -34,13 +34,6 @@ export type { ColorScheme } from "@/constants/color-schemes";
  * The variable scope a variable-aware input is editing inside, handed in rather
  * than reached for.
  *
- * `VariableInput` and the key/value table used to call
- * `useRequestBuilderContext()` in their bodies, and that hook *throws* with no
- * `RequestBuilderProvider` above it - so the app's densest table could not
- * render anywhere but the request builder, and every other surface that wanted
- * key/value rows hand-rolled its own (issue #564). A hand-rolled copy never
- * receives the primitive's fixes.
- *
  * Optional at every consumer, and its absence is a real state rather than a
  * degraded one: a surface with no variable scope - an inbox's canned reply
  * headers, say - has nothing to resolve, nothing to autocomplete and no
@@ -190,7 +183,7 @@ export interface KeyValueEditorProps {
 	 * the table then resolves nothing, shows no `ResolvedPeek` and offers no
 	 * `{{` autocomplete. That is the correct reading of a surface with no
 	 * variables, not a degraded one. It is a prop rather than a context read
-	 * because the hook that used to supply it *throws* outside
+	 * because `useRequestBuilderContext()` *throws* outside
 	 * `RequestBuilderProvider`, which made this table structurally unusable
 	 * anywhere else (#564).
 	 */
