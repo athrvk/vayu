@@ -117,9 +117,10 @@ namespace detail {
         return std::nullopt;
 
     const double milliseconds = amount * multiplier;
-    // Parenthesized: a test target includes `windows.h` without `NOMINMAX`
-    // (`core/constants.hpp` says why), whose `max` macro would break MSVC.
-    if (milliseconds > static_cast<double> ((std::numeric_limits<int64_t>::max) ()))
+    // `INT64_MAX`, not `numeric_limits::max ()`: a test target includes
+    // `windows.h` without `NOMINMAX` (`core/constants.hpp` says why), whose
+    // `max` macro breaks the call under MSVC.
+    if (milliseconds > static_cast<double> (INT64_MAX))
         return std::nullopt;
     return static_cast<int64_t> (milliseconds);
 }
