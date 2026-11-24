@@ -6,7 +6,6 @@
  */
 
 /**
- * @file mock-server.ts
  * @brief The payload `start_mock_server` sends, and the caveat on its answer.
  */
 

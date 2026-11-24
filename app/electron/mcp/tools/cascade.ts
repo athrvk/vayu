@@ -6,7 +6,6 @@
  */
 
 /**
- * @file cascade.ts
  * @brief What `delete_collection` takes with it, counted before anyone is asked.
  */
 

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file input-schemas.ts
  * @brief Zod input fragments more than one tool declares, so an argument
  *        means the same on every tool that takes it. A long description is
  *        stated on one of them and the others point there ({@link asOn}).
