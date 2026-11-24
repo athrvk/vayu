@@ -347,7 +347,7 @@ when the task comes up, or on request by name.
 | Load | Covers |
 |------|--------|
 | `app/CLAUDE.md` | TypeScript/React conventions, the UI rules enforced by tests, design-system and border/surface rules, renderer doc map |
-| `engine/CLAUDE.md` | C++ conventions, the engine HTTP API contract, request composition (`POST /compose`), engine doc map |
+| `engine/CLAUDE.md` | C++ conventions, the rules to design the HTTP API and `POST /compose` around (each links its page under `docs/engine/api-reference/`), engine doc map |
 | `releasing` skill | Version bump, release notes, tagging, `install.sh`, winget publishing |
 | `docs-site` skill | MkDocs publishing rules, nav, anchors, analytics, local preview |
 | `pr-description` skill | Writing this repo's PR titles/descriptions - lead with why, scale to diff size, flag risk vs. safe-to-skip, the screenshot-commit-then-drop workflow for visual changes |

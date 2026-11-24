@@ -2187,7 +2187,7 @@ record shape, the category list, the redaction rule and the file layout
   read from it per transfer (#2416, #2678), so a link re-pointed after the
   check, or between a run's iterations, is not followed (a path a data row
   binds is opened per submission, through the check again);
-  `engine/CLAUDE.md` states what remains. A record
+  what the open does not cover is stated on that page. A record
   of a send keeps `bodyFile {fileName, size, sha256}`, never the bytes or the
   path. See [api-reference/request-body.md](api-reference/request-body.md#file-references-binary-bodies-and-file-parts).
 - **Single instance**: one engine per data directory, held from before the
