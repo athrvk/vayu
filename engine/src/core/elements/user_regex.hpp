@@ -8,7 +8,6 @@
  */
 
 /**
- * @file user_regex.hpp
  * @brief The one way a pattern a user wrote is compiled and run (#1874):
  *        `extract.regex`, `assert.jsonpath`'s `regex`, `assert.contains`'s
  *        `matches` and `control.if`'s `matches` all go through it.

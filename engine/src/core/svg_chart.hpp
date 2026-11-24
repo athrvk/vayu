@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/svg_chart.hpp
  * @brief Line charts of a run's time series as inline `<svg>` (#2135).
  *
  * The markup carries no script, no external reference and no `url(...)`, so a
