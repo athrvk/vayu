@@ -1867,7 +1867,8 @@ the report's own shape (`McpErrorCounts::to_json`): `{ "transport"?, "protocol"?
 `error.code` (`"-32602"`, ..., and `"other"` for any code outside the reserved and server
 ranges). It counts every failed reply whatever its status, so it is a superset of `error_types`'
 `mcp_*` names, which count only a failure under a 2xx or 3xx. Written by the completed and the
-failed run alike, `{}` included. A summary stored before the issue has
+failed run alike, `{}` included, and by a collection run, whose `status_codes` bucket a failed
+reply under a 2xx or 3xx under `0` as the load path does. A summary stored before the issue has
 no key, and the report then leaves `summary.errorClasses` out. A reconciled crash summary
 (above) does not write it.
 
@@ -1996,7 +1997,7 @@ four keys `apply_run_summary` reads plus everything sequence-shaped under
 ```json
 {
   "total_requests": 5, "status_codes": { "0": 1, "200": 4 },
-  "http_version_downgraded": 0, "test_duration": 1.8, "rps": 2.8,
+  "http_version_downgraded": 0, "error_classes": {}, "test_duration": 1.8, "rps": 2.8,
   "latency": {
     "count": 5, "min": 12.0, "max": 240.0, "avg": 71.6,
     "p50": 40.0, "p75": 60.0, "p90": 240.0, "p95": 240.0, "p99": 240.0, "p999": 240.0
@@ -2013,7 +2014,9 @@ four keys `apply_run_summary` reads plus everything sequence-shaped under
 `total_requests` is the number of **requests sent** and `status_codes` their
 distribution, in the load summary's shape (issue #2822): a step the plan skipped
 is in `scenario.steps_executed` and in neither, while a request that got no
-response is in both, under `"0"`. Both are here precisely because the report
+response is in both, under `"0"`, as is a failed `mcp` reply under a 2xx or 3xx
+(issue #3828, counted by class in `error_classes`, the load summary's key and
+shape, always written). Both are here precisely because the report
 would otherwise read the rows that survived `maxScenarioStoredSteps`, call their
 count the run's size, and count a skipped step's status-`0` row as a failure.
 `status_codes` is written even when empty: `{}` is a run in which no step sent,

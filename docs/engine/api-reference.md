@@ -976,7 +976,11 @@ status, a failed transfer's `transport` included: the stored summary's
 `protocolCodes` a `protocol` failure's `error.code` by code. It is therefore a
 superset of the three `mcp_*` error types: a 4xx or 5xx failure has a class and
 no error type, and a failed transfer keeps its own error type (`timeout`,
-`connection_failed`, ...) beside its `transport` class.
+`connection_failed`, ...) beside its `transport` class. A collection run
+counts the same, and buckets a failed reply under a 2xx or 3xx under status `0`
+as a load run does, so it is in the run's `errorRate` and its `maxErrorRatePct`
+budget on every run shape; the step's own row keeps the status the server
+sent.
 
 #### File references: `binary` bodies and file parts
 
@@ -14857,7 +14861,7 @@ failed reply is counted whatever its status, so each is an error inside
 ([The `mcp` reply](#the-mcp-reply)). **Absent and `{}` are different answers**:
 absent is a run stored before the count existed, or one reported from its
 sampled results. A partial report of a running load run reads it from the live
-counter.
+counter, and a collection run carries it too.
 
 `summary.partial` (`true`) marks a run the engine died under, whose figures are
 its last persisted tick's; `summary.summaryMissing` (`true`) marks a failed load

@@ -27,6 +27,7 @@
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/core/transaction_histograms.hpp"
 #include "vayu/core/vayu_extensions.hpp"
+#include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/sse_stream.hpp"
@@ -551,6 +552,8 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     // Written at 0 too, as the load path does: the report reads a missing key
     // as 0 either way, but a stored 0 says the run counted and found none.
     summary["http_version_downgraded"] = inputs.http_version_downgraded;
+    // Always written, `{}` included, the load path's rule (#3828).
+    summary["error_classes"] = inputs.error_classes.to_json ();
 
     // The steps that sent, the same sample a latency budget judges. A run in
     // which none did stores only `count: 0`: a block of zeros would read as
@@ -992,6 +995,37 @@ bool kept_before_successes (StepOutcome outcome) {
 }
 
 /**
+ * A sent step in the run's tallies, as the load path's `handle_result` counts
+ * a completion: its status, its failed `mcp` reply's class (#3828), its stream
+ * and protocol, and its latency when its transfer ran.
+ */
+void tally_sent_step (const StepContext& ctx,
+const vayu::Response& response,
+const StepRecord& record,
+ScenarioSummaryInputs& summary) {
+    // A failed reply under a 2xx or 3xx goes under `0`, where the load path's
+    // `record_error` puts it, so the error rate and its budget count it; the
+    // step's row and its coverage keep the status the server sent.
+    const bool failed_behind_success =
+    vayu::http::mcp_failure_behind_success_status (response) != nullptr;
+    ++summary.status_codes[failed_behind_success ? 0 : record.status_code];
+    if (const auto& reply = response.mcp_reply) {
+        if (const auto& error_class = reply->error_class) {
+            summary.error_classes.record (*error_class, reply->code);
+        }
+    }
+    if (const auto completion = stream_completion_of (response)) {
+        ctx.context->metrics_collector->record_stream_completion (*completion);
+    }
+    if (response.http_version_downgraded) {
+        ++summary.http_version_downgraded;
+    }
+    if (response.transfer_attempted) {
+        summary.latencies.push_back (record.latency_ms);
+    }
+}
+
+/**
  * What the step leaves behind: its trace, the run's tallies, the stored row and
  * the live frame.
  */
@@ -1081,18 +1115,7 @@ ScenarioStepStore& store) {
     // run's stop-cancelled request is not (#2136, #3397).
     if (exchange.sent && record.outcome != StepOutcome::Stopped) {
         coverage.record (step.index, record.status_code);
-        ++summary.status_codes[record.status_code];
-        // Every stream that ended, success or failure, as the load path counts
-        // them (`handle_result`).
-        if (const auto completion = stream_completion_of (exchange.response)) {
-            ctx.context->metrics_collector->record_stream_completion (*completion);
-        }
-        if (exchange.response.http_version_downgraded) {
-            ++summary.http_version_downgraded;
-        }
-        if (exchange.response.transfer_attempted) {
-            summary.latencies.push_back (record.latency_ms);
-        }
+        tally_sent_step (ctx, exchange.response, record, summary);
     }
     if (record.tests) {
         summary.assertions.passed += record.tests->passed;

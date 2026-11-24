@@ -1070,5 +1070,29 @@ TEST_F (McpReplyRunTest, AScenarioLoadRunCountsItsFailedRepliesByClass) {
     EXPECT_EQ (load.error_classes.to_json (), mixed_classes (CALLS));
 }
 
+// A collection run counts the classes its own way, and a failure under a 200
+// goes under status 0 as on the load path, so its error rate counts it.
+// Mutation check: drop the `0` bucket in `tally_sent_step` and the error rate
+// reads 1 of 40; drop its `error_classes.record` and the classes read `{}`.
+TEST_F (McpReplyRunTest, ACollectionRunCountsItsFailedRepliesByClassAsErrors) {
+    constexpr size_t CALLS = 40;
+    server_->reply_in_turn (McpReplyShape::Json, mixed_turns ());
+    const auto rows = run_sequentially ({}, CALLS);
+    ASSERT_EQ (rows.size (), CALLS);
+
+    const auto stored = db_->get_run (last_run_id_);
+    ASSERT_HAS_VALUE (stored);
+    auto summary = json::parse (stored->summary);
+    EXPECT_EQ (summary["error_classes"], mixed_classes (CALLS)) << summary.dump ();
+    EXPECT_EQ (summary["status_codes"], json ({ { "0", 6 }, { "200", 33 }, { "400", 1 } }))
+    << summary.dump ();
+
+    auto report = last_report ();
+    EXPECT_EQ (report["summary"]["errorClasses"], mixed_classes (CALLS))
+    << report.dump ();
+    EXPECT_EQ (report["summary"]["failedRequests"], 7);
+    EXPECT_DOUBLE_EQ (report["summary"]["errorRate"].get<double> (), 17.5);
+}
+
 } // namespace
 } // namespace vayu::http

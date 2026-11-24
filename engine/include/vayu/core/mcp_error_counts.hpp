@@ -16,8 +16,9 @@
  * slots and never used as a key: the codes JSON-RPC 2.0 reserves (-32700,
  * -32600 to -32603), the implementation-defined server band (-32000 to -32099,
  * where MCP's own -32020 and -32022 sit), and one slot for every other code.
- * `MetricsCollector` keeps the same table in atomics for the load paths, and
- * serialises through @ref McpErrorCounts::to_json.
+ * `MetricsCollector` keeps the same table in atomics for the load paths; the
+ * sequential collection runner, which does not feed the collector, keeps this
+ * plain copy. Both serialise through @ref McpErrorCounts::to_json.
  */
 
 #include <array>
