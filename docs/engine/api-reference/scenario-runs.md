@@ -86,7 +86,7 @@ Composition (`POST /compose`, and the plan resolution that shares it) leaves a `
 
 **A bare column name is a second, different rule and it *is* a tier** (issue #1007).
 Postman binds a dataset's columns to bare names, so an imported data-driven collection is written `{{username}}` rather than `{{data.username}}`, and while a row is bound that row's own bare column names answer **above the active environment** -
-see [D18 in variable resolution](../../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007) for the full ladder and the tradeoff it makes against #402's guarantee.
+see [D18 in variable resolution](../../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment) for the full ladder and the tradeoff it makes against #402's guarantee.
 Which bare names a bind owns is not global - it is stated per composition, as the [`dataColumns`](compose.md#post-compose) field, or filled by the engine itself where it already knows the dataset (a scenario plan's steps, a single-request load run, a send carrying one row).
 A bare name **not** in that set resolves as an ordinary variable, exactly as it did before this rule existed; only a name the set names is deferred by composition the way `data.*` always was, for the run's per-row bind (`core::apply_data_template`) to join through the identical walk - the same escaping, the same missing-column and null-cell refusals, the same header rules, for either spelling.
 There is no second, looser substitution path for the bare one.

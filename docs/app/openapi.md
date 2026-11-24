@@ -81,8 +81,8 @@ records no operation identity: those files describe requests, not a contract.
 
 ### Importing a document you are already bound to
 
-Importing a spec that a collection already binds used to make a second
-collection from scratch, and say nothing about the first. The two then diverged
+Importing a spec that a collection already binds would make a second
+collection from scratch and say nothing about the first. The two would diverge
 with nothing marking which was real: the bound one keeps its operation
 identities, its saved examples and its coverage history, and the fresh one has
 none of that while looking newer.
@@ -174,9 +174,9 @@ spec is untouched.
 If the whole bundle would exceed `maxSpecDocumentBytes`, the import stops and
 says so rather than storing a truncated contract. **So does a single document
 over the same limit**, before it is parsed and before the preview is built
-(issue #719) - the check used to run only while following references, so a
-generated single-file spec too large to store was fetched, parsed and previewed
-in full, and refused by the engine only once you pressed Import, which failed
+(issue #719) - a check that ran only while following references would let a
+generated single-file spec too large to store be fetched, parsed and previewed
+in full, and refused by the engine only once you pressed Import, which fails
 the whole transaction. The message names the size, the limit and the setting.
 The limit is the *spec document* one: a Postman or Insomnia export is stored as
 collections and requests, so it is not measured against it.
@@ -373,7 +373,7 @@ see [What applying does to examples](#what-applying-does-to-examples).
 ## Applying what the check found
 
 Every item is a checkbox, and applying is deliberately partial: take the four
-new operations and keep the one request whose operation was removed, if that is
+new operations and keep the one request whose operation the spec no longer has, if that is
 what you want. What arrives ticked is what applying can only restore, never
 destroy:
 

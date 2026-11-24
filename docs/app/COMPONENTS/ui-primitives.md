@@ -43,10 +43,9 @@ attribute, which `Input` omits.
 ## `dialog-cancel-button`
 
 `DialogCancelButton` is the only thing that draws a **Cancel** (issue #1693).
-The word used to come in three variants - `outline` in five dialogs,
-`secondary` in three, `ghost` in three, plus one hand-rolled `<button>` with a
-copied class list - so which one a user saw depended on which dialog they
-opened. It settles on `secondary`, matching `DeleteConfirmDialog`, and takes
+Left to each call site the word comes in several variants (`outline`,
+`secondary`, `ghost`, a hand-rolled `<button>` with a copied class list), so
+which one a user sees depends on which dialog they opened. It settles on `secondary`, matching `DeleteConfirmDialog`, and takes
 no `variant` prop: a call site that can choose is a call site that can drift.
 `label` renames the word, `size` and `className` pass through for the inline
 forms outside a `DialogFooter` (the new-collection row, the client-certificate
@@ -148,8 +147,7 @@ to keep from each answering that separately (#938, #1213).
   keybinding service stops what it resolves, so the chord died at the editor
   instead of reaching `Shell`'s bubble-phase listener. S, W, B, `,`, the digits
   and the ⇧ view chords really are unbound in the standalone editor and arrive
-  on their own - which is what the bridge's comment used to claim about **all**
-  of them.
+  on their own.
 - **⇧⌘M, the way out.** Monaco's Tab indents, which is right for a code editor
   and a keyboard trap for anyone who reached one by tabbing (WCAG 2.1.2).
   Monaco's own exit, `editor.action.toggleTabFocusMode`, cannot simply be
@@ -256,10 +254,10 @@ beside a plain textarea.
    sanitising (there is a published advisory for exactly that), so it stays on
    the default.
 3. **Raw HTML renders, and `rehype-sanitize` runs immediately after
-   `rehype-raw`.** `rehype-raw` used to be deliberately absent, which made raw
-   HTML inert - fine until Stripe's official OpenAPI document turned out to
-   write every operation description as HTML (`<p>Retrieves…</p>`), which is
-   spec-legal and was on screen as literal text. The order is the rule: sanitise
+   `rehype-raw`.** `rehype-raw` is not left out: that makes raw
+   HTML inert, which fails for Stripe's official OpenAPI document, which
+   writes every operation description as HTML (`<p>Retrieves…</p>`), which is
+   spec-legal and would be on screen as literal text. The order is the rule: sanitise
    before the raw HTML is parsed and it sanitises a tree the payload is not in
    yet. The schema is derived from the component's own element allow-list, keeps
    `href` on an anchor and **no other attribute** (`class` least of all - the

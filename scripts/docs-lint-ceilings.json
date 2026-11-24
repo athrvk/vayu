@@ -6,8 +6,7 @@
   "pages": {
     "docs/app/COMPONENTS/app-shell.md": {
       "max_line": 7483,
-      "long_lines": 65,
-      "history": 9
+      "long_lines": 65
     },
     "docs/app/COMPONENTS/collections.md": {
       "max_line": 1031,
@@ -19,34 +18,19 @@
     },
     "docs/app/COMPONENTS/graphql-library.md": {
       "max_line": 1180,
-      "long_lines": 8,
-      "history": 4
+      "long_lines": 8
     },
     "docs/app/COMPONENTS/history.md": {
       "max_line": 5745,
-      "long_lines": 56,
-      "history": 6
-    },
-    "docs/app/COMPONENTS/inbox.md": {
-      "history": 5
+      "long_lines": 56
     },
     "docs/app/COMPONENTS/logs-and-console.md": {
       "max_line": 3378,
       "long_lines": 15
     },
-    "docs/app/COMPONENTS/mock-server.md": {
-      "history": 2
-    },
-    "docs/app/COMPONENTS/palette.md": {
-      "history": 1
-    },
     "docs/app/COMPONENTS/request-builder.md": {
       "max_line": 9113,
-      "long_lines": 48,
-      "history": 10
-    },
-    "docs/app/COMPONENTS/shared-element-list.md": {
-      "history": 4
+      "long_lines": 48
     },
     "docs/app/COMPONENTS/shared-key-value-editor.md": {
       "max_line": 1474,
@@ -54,28 +38,19 @@
     },
     "docs/app/COMPONENTS/shared-response-viewer.md": {
       "max_line": 3503,
-      "long_lines": 18,
-      "history": 2
-    },
-    "docs/app/COMPONENTS/shared-run-results.md": {
-      "history": 1
+      "long_lines": 18
     },
     "docs/app/COMPONENTS/shared-run-status.md": {
       "max_line": 504,
       "long_lines": 1
     },
-    "docs/app/COMPONENTS/shared-variable-input.md": {
-      "history": 4
-    },
     "docs/app/COMPONENTS/ui-primitives.md": {
       "max_line": 878,
-      "long_lines": 2,
-      "history": 3
+      "long_lines": 2
     },
     "docs/app/COMPONENTS/variables-and-settings.md": {
       "max_line": 6509,
-      "long_lines": 29,
-      "history": 3
+      "long_lines": 29
     },
     "docs/app/COMPONENTS/welcome.md": {
       "max_line": 631,
@@ -90,30 +65,22 @@
     },
     "docs/app/architecture.md": {
       "max_line": 2047,
-      "long_lines": 25,
-      "history": 2
+      "long_lines": 25
     },
     "docs/app/building.md": {
-      "lines": 656,
-      "history": 2
+      "lines": 654
     },
     "docs/app/data-driven-runs.md": {
-      "lines": 693,
-      "history": 1
-    },
-    "docs/app/graphql.md": {
-      "history": 2
+      "lines": 693
     },
     "docs/app/import-collections/README.md": {
-      "lines": 751,
-      "max_cell": 234,
-      "history": 5
+      "lines": 748,
+      "max_cell": 234
     },
     "docs/app/import-collections/insomnia-v4.md": {
       "max_line": 1085,
       "long_lines": 17,
-      "max_cell": 838,
-      "history": 1
+      "max_cell": 838
     },
     "docs/app/import-collections/insomnia-v5.md": {
       "max_line": 600,
@@ -127,14 +94,12 @@
     "docs/app/import-collections/openapi-v2.md": {
       "max_line": 1815,
       "long_lines": 23,
-      "max_cell": 564,
-      "history": 1
+      "max_cell": 564
     },
     "docs/app/import-collections/openapi-v3.md": {
-      "max_line": 1415,
+      "max_line": 1411,
       "long_lines": 40,
-      "max_cell": 672,
-      "history": 8
+      "max_cell": 672
     },
     "docs/app/import-collections/postman-environment.md": {
       "max_line": 835,
@@ -145,20 +110,17 @@
       "lines": 664,
       "max_line": 2911,
       "long_lines": 31,
-      "max_cell": 1130,
-      "history": 5
+      "max_cell": 1130
     },
     "docs/app/openapi.md": {
       "lines": 1106,
-      "max_cell": 233,
-      "history": 3
+      "max_cell": 233
     },
     "docs/app/pm-api-compatibility.md": {
-      "lines": 2388,
+      "lines": 2385,
       "max_line": 840,
       "long_lines": 3,
-      "max_cell": 814,
-      "history": 7
+      "max_cell": 814
     },
     "docs/app/state-management.md": {
       "lines": 4217,
@@ -168,8 +130,7 @@
       "history": 22
     },
     "docs/app/variable-resolution.md": {
-      "lines": 1406,
-      "history": 13
+      "lines": 1405
     },
     "docs/architecture.md": {
       "lines": 982,

@@ -226,7 +226,7 @@ for these fields' `FieldError`s.
 
 **An `object` that declares no `properties` takes a key/value editor, not a
 text box** (#3047). `control.switch`'s `cases` maps a variable's value to a
-folder member's name, and the text box it used to fall through to saved a
+folder member's name, and a text box would save a
 string, which the engine refuses with a 400. `StringMapField` is a row per
 entry (a key input, a value input, a remove button) plus an "Add entry"
 button; the stored value is a plain object of string to string, and an
@@ -291,12 +291,12 @@ list by `InheritedElementsNotice` instead of once per script row.
 **The editor box has a definite pixel height, resizable by a handle below it**
 (issue #1605). `ElementRow` is an auto-height card, not a bounded ancestor a
 percentage or a `ResizablePanelGroup` could divide, so `CodeEditor`'s default
-`height="100%"` used to resolve against nothing and Monaco laid out at zero
+`height="100%"` would resolve against nothing and Monaco would lay out at zero
 height with the typed text hidden. `ScriptElementForm` instead sets the box's
 height directly from `layout-store`'s `scriptEditorHeights`, keyed by the
 owning element's own `id` (`ElementRow` passes it) - a request or collection
 can show a `script.pre` and a `script.post` card at once, and a single shared
-value used to mean dragging either one's handle resized both (issue #1643
+value would mean dragging either one's handle resizes both (issue #1643
 part 2). A row with no entry of its own starts from the last height set on
 *any* row, `scriptEditorHeightDefault`, read once at mount rather than
 subscribed to - so a still-mounted row with no entry is never retroactively
@@ -420,17 +420,17 @@ toggle. The last five kinds added surface under a "Recently used" group,
 persisted in `layout-store`'s `recentElementKinds`.
 
 **A new request or collection sends no `elements` at all** (issue #1609):
-creation used to seed an empty, enabled `script.pre`/`script.post` pair
-(`lib/elements.ts`'s retired `defaultScriptElements`) so the two script tabs
-this feature replaced still had a visible slot on a fresh entity. That made
+seeding an empty, enabled `script.pre`/`script.post` pair
+(`lib/elements.ts`'s retired `defaultScriptElements`) would give a fresh
+entity a visible slot in the two script tabs, but it would make
 `InheritedElementsNotice` claim "2 elements will run before your own" about a
-collection whose two elements did nothing, and gave the engine an empty
+collection whose two elements did nothing, and give the engine an empty
 script to compose, run and report as a real outcome. A blank `script.*`
-element (`isBlankScriptElement`, `lib/elements.ts`) is now inert everywhere it
+element (`isBlankScriptElement`, `lib/elements.ts`) is inert everywhere it
 is read - `scriptTextFor`, the Elements tab's badge count, and
 `InheritedElementsNotice`'s count and list - the app-side half of a rule the
-engine pipeline enforces the same way (`docs/engine/elements.md`), so the
-seeding lost its reason to exist. The notice also skips the collection-only
+engine pipeline enforces the same way (`docs/engine/elements.md`), so
+seeding has no reason to exist. The notice also skips the collection-only
 kinds (`script.setup`, `script.teardown`, #3457): a disabled or blank element
 never runs, and these never run *before a request* at all. **A fresh entity's Elements tab shows a
 sentence plus quick-add chips instead of a bare `emptyLabel` string**
