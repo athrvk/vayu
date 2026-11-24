@@ -2628,7 +2628,9 @@ request it runs streams, for a design run and a load run alike, and never
 
 Under load a stream is bounded by construction, and **reaching a cap is a
 successful completion, not a timeout** - so a streaming run's clean error rate
-is not evidence the caps went unused. The report answers that with a `stream`
+is not evidence the caps went unused (an `mcp` request's stream that a cap
+ends before its final response is the exception: an `mcp_transport` error,
+#3831). The report answers that with a `stream`
 section (`RunReport.stream`): the per-completion event distribution, the totals,
 a derived `eventsPerSecond`, `capped` - how many streams a cap ended rather
 than the server - and `timeToFirstEvent` (issue #3234), the wait from submitting
