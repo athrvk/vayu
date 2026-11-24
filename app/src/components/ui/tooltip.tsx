@@ -39,31 +39,21 @@ function TooltipContent({
 }
 
 /**
- * Secondary text inside a tooltip - a shortcut, a URL, the source of a value.
- *
- * **`--muted-foreground` is not a de-emphasis here, it is a disappearance.** A
- * tooltip is `bg-primary-fill`, and that token is tuned against the canvas: on
- * the accent fills it measures 1.04-2.27:1, worst on Blue, where the hint is
- * often a URL the reader is meant to read off the tooltip. De-emphasis on a
- * *filled* surface has to be an alpha of the foreground that already reads on
- * it - the same argument `surface-sunken` makes for its `--rule` - which is
- * what this is, so the one value lives here rather than at each call site.
- * → `tooltip-hint-contrast.test.ts`
+ * Secondary text in a tooltip (a shortcut, a URL, a value's source). **`--muted-foreground` here is
+ * a disappearance**: the tooltip is `bg-primary-fill`, tuned against the canvas, and on the accent
+ * fills it measures 1.04-2.27:1, worst on Blue, where the hint is often a URL to read. De-emphasis
+ * on a *filled* surface is an alpha of the foreground that reads on it (as `surface-sunken` argues
+ * for its `--rule`), so the one value lives here. → `tooltip-hint-contrast.test.ts`
  */
 function TooltipHint({ className, ...props }: React.ComponentProps<"span">) {
 	return <span className={cn("text-primary-foreground/80", className)} {...props} />;
 }
 
 /**
- * A tooltip's first line when the control has a keyboard shortcut: the label,
- * then the chord in a `TooltipHint`.
- *
- * Every shortcut tooltip in the app renders through this, so the chord sits in
- * the one tinted primitive at the one gap whichever control it belongs to. The
- * chord is not parenthesised: a "(Ctrl+K)" written into the label string would
- * live outside `TooltipHint`, in the plain foreground, and the spacing would be
- * a string template away from drifting per call site.
- * → `tooltip-shortcut-format.test.tsx`
+ * A shortcut tooltip's first line: the label, then the chord in a `TooltipHint`. Every shortcut
+ * tooltip uses it, so the chord sits in the one tinted primitive at the one gap. Not parenthesised:
+ * a "(Ctrl+K)" in the label string would sit outside `TooltipHint`, in plain foreground, its
+ * spacing a template away from drifting. → `tooltip-shortcut-format.test.tsx`
  */
 function TooltipShortcutLabel({ label, shortcut }: { label: string; shortcut: React.ReactNode }) {
 	return (
@@ -75,21 +65,13 @@ function TooltipShortcutLabel({ label, shortcut }: { label: string; shortcut: Re
 }
 
 /**
- * A tooltip's value line, with the hint that says where the value came from.
- *
- * **The two never share a flex row** (issue #1195). `TooltipContent` is capped
- * at `max-w-xs`, a value wraps on `break-all` - a min-content width of about
- * one character - and a hint has to keep its intrinsic width to stay readable,
- * so a row of the two hands its whole width to the hint and leaves the value a
- * vertical strip of letter fragments. That is not a rare shape: it needs only a
- * long environment name beside an unbroken value, and it hid the URL-ish values
- * these tooltips exist to show. Stacking them gives the value the full width
- * whichever of the two is long, and costs a hint that is short today nothing
- * but a line.
- *
- * The single-line alternative - `min-w-0 flex-1` on the value plus a truncated
- * hint - was rejected: a clipped source name loses the answer to "which
- * environment", which is half of what the reader hovered for.
+ * A tooltip's value line with the hint saying where it came from, **never in one flex row**
+ * (#1195): `TooltipContent` caps at `max-w-xs`, a value wraps on `break-all` (min-content about a
+ * character), and a hint keeps its intrinsic width, so a row hands its width to the hint and leaves
+ * the value a strip of letter fragments, as a long environment name beside an unbroken value did.
+ * Stacked, the value gets the full width whichever is long, costing a short hint a line. A
+ * truncated hint beside a `min-w-0 flex-1` value was rejected: a clipped source name loses "which
+ * environment", half of what the reader hovered for.
  */
 function TooltipValue({
 	hint,

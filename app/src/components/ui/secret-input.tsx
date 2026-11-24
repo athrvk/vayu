@@ -6,11 +6,9 @@
  */
 
 /**
- * SecretInput - a masked text field with an eye toggle to reveal the value.
- * Modeled on the reveal pattern used by the variables table editor, extracted
- * so any secret field (OAuth 2.0 client secret / password, etc.) shares one
- * implementation. Masking and {{variable}} highlighting are mutually exclusive
- * by nature, so this deliberately uses a plain Input rather than VariableInput.
+ * A masked text field with an eye to reveal it, the variables table's reveal pattern shared by
+ * every secret field (an OAuth 2.0 client secret, a password). A plain `Input`, not
+ * `VariableInput`: masking and `{{variable}}` highlighting exclude each other.
  */
 
 import { useState } from "react";
@@ -31,19 +29,16 @@ interface SecretInputProps {
 	size?: InputProps["size"];
 	disabled?: boolean;
 	/**
-	 * Read-only display: the value can be revealed but not edited. The eye toggle
-	 * stays live (revealing is not editing), unlike `disabled`, which greys it out.
-	 * Its host is a surface that shows a secret it does not own the edit path for -
-	 * the context bar's request-tab variables row, whose edits land on the
-	 * Variables page.
+	 * Read-only display: revealable, not editable. The eye stays live (revealing is not editing),
+	 * unlike `disabled`, which greys it. For a surface showing a secret it cannot edit: the context
+	 * bar's request-tab variables row, whose edits land on the Variables page.
 	 */
 	readOnly?: boolean;
 	/** Names the field for a screen reader, e.g. `Value of apiKey`. */
 	"aria-label"?: string;
 	/**
-	 * Blur passthrough, for a host that commits on focus-out rather than on
-	 * every keystroke - the variables table saves there, so without this the
-	 * only field it cannot mount this primitive in would be the secret one.
+	 * Blur passthrough, for a host committing on focus-out: the variables table saves there, so
+	 * without it the secret field is the one it could not mount this in.
 	 */
 	onBlur?: React.FocusEventHandler<HTMLInputElement>;
 	/** For a host that commits on Enter, such as a create form. */
@@ -86,12 +81,9 @@ export function SecretInput({
 			/>
 			<TooltipIconButton
 				type="button"
-				// Was `tabIndex={-1}`, on the reasoning that this is an affordance on
-				// the field rather than a form control. True, but the consequence was
-				// that a keyboard-only user had no way at all to reveal a Basic-auth
-				// password or an OAuth client secret to check what they had typed -
-				// the one thing the control exists for. One extra stop per secret
-				// field is a fair price.
+				// In the tab order: it is an affordance on the field, but without a stop a keyboard
+				// user could not reveal a Basic-auth password or OAuth client secret to check it,
+				// the one thing the control is for. One stop per secret field is a fair price.
 				disabled={disabled}
 				onClick={() => setRevealed((v) => !v)}
 				className="absolute right-0 top-0 h-full w-9 text-muted-foreground hover:text-foreground"
