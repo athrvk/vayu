@@ -254,10 +254,16 @@ a change touches (#946), so nothing else holds an untouched file at zero.
 - **A suite that outgrows one file keeps its name** and moves its fixture to a
   header, with the cases spread by area: `ScriptEngineTest` is defined once in
   `tests/script_engine_fixture.hpp` and its cases live in
-  `tests/script_engine_*_test.cpp` by `pm.*` area (#3852). The suite name is
-  what `vayu_scratch_database_suites`, ctest regexes and `--gtest_filter` key
-  on, so a rename makes them silently stop matching; a helper two of the files
-  read goes in that header too, in `vayu::tests`.
+  `tests/script_engine_*_test.cpp` by `pm.*` area (#3852); `RunsRouteTest` is
+  in `tests/runs_route_fixture.hpp` (`runs_route_*_test.cpp`) and
+  `DatabaseTest` in `tests/database_fixture.hpp` (`db_*_test.cpp`). The suite
+  name is what `vayu_scratch_database_suites`, ctest regexes and
+  `--gtest_filter` key on, so a rename makes them silently stop matching; a
+  helper two of the files read goes in that header too, in `vayu::tests` (or
+  the namespace the cases already live in, as `database_fixture.hpp` does with
+  `vayu::db`). The fixture class stays out of an anonymous namespace: gtest
+  refuses a suite whose `TEST_F`s name different classes, and an anonymous
+  namespace gives each file its own.
 - **A test waits on a condition with `vayu::tests::wait_until`**
   (`engine/tests/wait_until.hpp`), never on a `sleep_for` followed by an
   assertion. Its deadline (`WAIT_DEADLINE`, 20s) only bounds how long a broken

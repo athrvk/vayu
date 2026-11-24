@@ -10,9 +10,9 @@
  * @brief Who started a run (#1817): `read_run_origin`'s rules, and the two
  *        routes that create a run row storing what it read.
  *
- * The list filter and both serializers are held in runs_route_test.cpp beside
- * the rest of `GET /runs`; a row stored before the columns existed is held in
- * db_test.cpp with the other schema-version cases.
+ * The list filter and both serializers are held in runs_route_rows_test.cpp
+ * beside the other `GET /runs` row fields; a row stored before the columns existed is
+ * held in db_migration_versions_test.cpp with the other schema-version cases.
  */
 
 // Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /

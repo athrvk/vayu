@@ -15,7 +15,7 @@
  * operation's own `200` already answered, is a transport error a response - are
  * decisions this file makes and no executor can change. The wiring that carries
  * them into a run's summary is pinned in scenario_runner_test.cpp and
- * runs_route_test.cpp.
+ * runs_route_report_sections_test.cpp.
  */
 
 #include "optional_assert.hpp"

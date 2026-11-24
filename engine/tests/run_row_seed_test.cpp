@@ -19,7 +19,7 @@
  * `seed_run_times` is the one place that stamps both, so testing it covers
  * both inserts (the suite has no in-process HTTP route harness); the field
  * default is the backstop for a future insert site that forgets to call it,
- * and is asserted in db_test.cpp against the real reconcile path.
+ * and is asserted in db_run_retention_test.cpp against the real reconcile path.
  *
  * `scenario_snapshot` sits here for the same reason: it is the other thing
  * `POST /runs` does to a row before writing it, and what it keeps out of the

@@ -53,6 +53,11 @@ add_executable(vayu_tests
     script_completions_test.cpp
     script_types_test.cpp
     event_loop_test.cpp
+    db_migration_repair_test.cpp
+    db_migration_test.cpp
+    db_migration_versions_test.cpp
+    db_run_retention_test.cpp
+    db_run_summary_test.cpp
     db_test.cpp
     db_layout_test.cpp
     config_seed_test.cpp
@@ -101,7 +106,12 @@ add_executable(vayu_tests
     requests_route_test.cpp
     examples_route_test.cpp
     specs_route_test.cpp
+    runs_route_report_sections_test.cpp
+    runs_route_report_summary_test.cpp
+    runs_route_report_test.cpp
+    runs_route_rows_test.cpp
     runs_route_test.cpp
+    runs_route_write_test.cpp
     collections_route_test.cpp
     resource_write_route_test.cpp
     error_shape_route_test.cpp
