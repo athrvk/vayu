@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_cookies.cpp
  * @brief `pm.cookies` (the jar) and `pm.response.cookies`.
  */
 

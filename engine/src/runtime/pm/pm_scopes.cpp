@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_scopes.cpp
  * @brief `pm.environment`, `pm.globals`, `pm.collectionVariables`, `pm.variables`
  *        and `pm.iterationData`.
  */

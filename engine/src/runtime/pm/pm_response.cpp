@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_response.cpp
  * @brief `pm.response`, its header accessors and its `to` assertion chain.
  */
 

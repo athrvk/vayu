@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_expect.cpp
  * @brief `pm.test` and the `pm.expect` chainable assertions.
  */
 

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_request_url.cpp
  * @brief `pm.request`, its `Url` object, `pm.info` and the pre-request write-back.
  */
 

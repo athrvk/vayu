@@ -6,7 +6,6 @@
  */
 
 /**
- * @file pm_send_request.cpp
  * @brief `pm.sendRequest`, and the auth block reader it shares with
  *        `pm.request.auth` (`pm_auth.hpp`).
  */

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file script_engine.cpp
  * @brief QuickJS-based JavaScript scripting engine implementation
  *
  * This file interfaces with QuickJS C library and uses different coding conventions.
