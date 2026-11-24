@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Splits docs/engine/api-reference.md into the pages of docs/engine/api-reference/
+Splits the engine's single API reference page into the pages of docs/engine/api-reference/
 (#3849), re-aims every link to it, and proves the move lost nothing.
 
 The source is the page as it stands at --rev (default origin/master), read from
@@ -51,8 +51,10 @@ import sys
 from html.parser import HTMLParser
 from pathlib import Path
 
-SOURCE_PATH = "docs/engine/api-reference.md"
-OUT_DIR = "docs/engine/api-reference"
+# The page was docs/engine/<NAME>.md; its pages are docs/engine/<NAME>/.
+NAME = "api-reference"
+SOURCE_PATH = f"docs/engine/{NAME}.md"
+OUT_DIR = f"docs/engine/{NAME}"
 NAV_FILE = ".github/mkdocs.yml"
 
 # Each marker starts a section, which runs to the next marker. `line` is matched
