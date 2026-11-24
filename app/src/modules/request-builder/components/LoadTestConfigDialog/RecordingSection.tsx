@@ -32,10 +32,8 @@ interface RecordingSectionProps {
 }
 
 /**
- * Sampling, slow threshold, in-flight cap, timing breakdown and Retry-After
- * back-off: controls most
- * runs never touch, folded away so they do not sit between the profile and the
- * Start button.
+ * Sampling, slow threshold, in-flight cap, timing breakdown and Retry-After back-off: controls most
+ * runs never touch, folded away so they do not sit between the profile and Start.
  */
 export function RecordingSection({
 	mode,
@@ -74,11 +72,9 @@ export function RecordingSection({
 					className="w-full accent-primary"
 				/>
 				{/*
-				    The left stop is 1%, not 0%. The value is converted to the
-				    engine's sampling period, and no period expresses "none" - that
-				    is the Save timing breakdown toggle below, which gates storage
-				    outright. Errors are never sampled either way; they are always
-				    kept.
+				 * The left stop is 1%, not 0%: the value becomes the engine's sampling period, and
+				 * no period means "none" (Save timing breakdown below gates storage outright).
+				 * Errors are never sampled; they are always kept.
 				 */}
 				<div className="flex justify-between text-label text-muted-foreground">
 					<span>1% - a trickle</span>
@@ -98,11 +94,9 @@ export function RecordingSection({
 				onChange={(raw) => onSlowThresholdChange(Number(raw))}
 				min={limits.SLOW_THRESHOLD_MS.MIN}
 				max={limits.SLOW_THRESHOLD_MS.MAX}
-				// Outlier capture has its own budget, so it neither spends
-				// nor is spent by the sample rate above - but it is still
-				// bounded (max_slow_results, 1000), because under
-				// saturation nearly every request crosses the threshold.
-				// 0 disables the capture rather than flagging everything.
+				// Outlier capture has its own budget, apart from the sample rate, but is still
+				// bounded (max_slow_results, 1000), since under saturation nearly every request
+				// crosses the threshold. 0 disables the capture rather than flagging everything.
 				hint="Requests slower than this are flagged and saved whatever the sample rate, up to a retention limit. 0 turns the capture off."
 			/>
 

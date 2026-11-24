@@ -6,38 +6,29 @@
  */
 
 /**
- * The dialog's pass/fail budgets: what the fields are, when a draft is
- * unusable, and what payload it builds.
+ * The dialog's pass/fail budgets: the fields, when a draft is unusable, and the payload it builds.
+ * Component-free so the rules test without rendering, and one table because the same metrics drive
+ * the fields, the validation and the payload: three lists would drift, into a budget the user typed
+ * and the engine never judged.
  *
- * Kept component-free so the rules can be tested without rendering, and kept in
- * one table because the same metrics drive the fields, the validation and
- * the payload - three hand-written lists would drift, and the way that failure
- * shows up is a budget the user typed and the engine never judged.
+ * The ranges mirror `engine/src/core/threshold_eval.cpp` as a courtesy, not the gate: the engine
+ * 400s an out-of-range budget regardless, and these tell the user before the run, not after it
+ * fails to start.
  *
- * The ranges mirror `engine/src/core/threshold_eval.cpp`. They are a courtesy,
- * not the gate: the engine rejects an out-of-range budget with a 400 whatever
- * this file thinks, and these exist so the user is told before the run rather
- * than after it fails to start.
- *
- * Beside that table is the one budget family no table can hold: a
- * `custom.<name>.<stat>` ceiling on a metric the plan records under a name only
- * the user knows (issue #1500). It is a free-text row rather than a picker of
- * recorded names because the engine itself checks only the key's *shape* - it
- * does not cross-check `<name>` against the run's `metric.record` elements, and
- * an unmatched name is simply `evaluated: false` in the report. MCP's
- * `thresholdsInput` made the same call for the same key family
- * (`electron/mcp/tools/input-schemas.ts`, `catchall`).
+ * Beside the table is the family no table holds: a `custom.<name>.<stat>` ceiling on a metric the
+ * plan records under a name only the user knows (#1500). A free-text row, not a picker, because the
+ * engine checks only the key's *shape*, never `<name>` against the run's `metric.record` elements,
+ * and an unmatched name is just `evaluated: false` in the report. MCP's `thresholdsInput` decided
+ * the same (`electron/mcp/tools/input-schemas.ts`, `catchall`).
  */
 
 import type { RunThresholdBudgets, RunThresholds } from "@/types";
 import { generateId } from "@/lib/id";
 
 /**
- * The fixed budgets, and only those: `RunThresholdBudgets` is the half of
- * `RunThresholds` that holds them, so this table cannot pick up `failRun` (a
- * flag over the budgets, rendered as its own switch) or a `custom.<name>.<stat>`
- * key (a free-text row, below), and a fixed budget added to the type without a
- * field here fails to compile.
+ * The fixed budgets only: `RunThresholdBudgets` is the half of `RunThresholds` that holds them, so
+ * the table cannot pick up `failRun` (its own switch) or a `custom.<name>.<stat>` key (a free-text
+ * row), and a fixed budget added to the type without a field here fails to compile.
  */
 export type BudgetKey = keyof RunThresholdBudgets;
 
@@ -53,16 +44,14 @@ export interface BudgetField {
 	max: number;
 	hint?: string;
 	/**
-	 * Replaces `hint` in the dialog that seeds this field from a setting. The
-	 * collection runner seeds nothing, so a hint saying the value was seeded
-	 * would be false there.
+	 * Replaces `hint` where a setting seeds the field; the collection runner seeds nothing, so not
+	 * there.
 	 */
 	seededHint?: string;
 	/**
-	 * Judged on a stream section, which only a run that streams has (a
-	 * streaming request's load run, or a collection run with a streaming step):
-	 * the engine reports it not evaluated, and so failed, on any other run. Both
-	 * dialogs show these only then - use {@link budgetFieldsFor}, not the whole
+	 * Judged on a stream section, which only a streaming run has (a streaming request's load run,
+	 * or a collection run with a streaming step); on any other run the engine reports it not
+	 * evaluated, so failed. Both dialogs show these only then: use {@link budgetFieldsFor}, not the
 	 * table.
 	 */
 	streamOnly?: boolean;
@@ -106,8 +95,8 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		id: "lt-budget-error-rate",
 		label: "Error rate at most",
 		unit: "%",
-		// 0 is the one meaningful floor here: "no request may fail" is a real
-		// budget, where a latency ceiling or a throughput floor of 0 is a typo.
+		// 0 is the one meaningful floor: "no request may fail" is a budget, where a latency ceiling
+		// or a throughput floor of 0 is a typo.
 		min: 0,
 		minInclusive: true,
 		max: 100,
@@ -127,8 +116,7 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		id: "lt-budget-assertion-failure-rate",
 		label: "Assertion failure rate at most",
 		unit: "%",
-		// Same reasoning as the error rate above: "no assertion may fail" is a
-		// real budget.
+		// As the error rate: "no assertion may fail" is a budget.
 		min: 0,
 		minInclusive: true,
 		max: 100,
@@ -170,10 +158,9 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 ];
 
 /**
- * The fields a run of this kind can declare: every fixed budget, less the
- * stream ones unless the run streams. A stream budget on any other run is
- * "not evaluated" in the report and so counts as missed, which is why a
- * non-streaming run must neither offer one nor send one.
+ * The fields a run can declare: every fixed budget, less the stream ones unless it streams. A
+ * stream budget elsewhere is "not evaluated" and counts as missed, so it is neither offered nor
+ * sent.
  */
 export function budgetFieldsFor(streaming: boolean): readonly BudgetField[] {
 	return streaming ? BUDGET_FIELDS : BUDGET_FIELDS.filter((field) => !field.streamOnly);
@@ -208,9 +195,8 @@ export const BUDGETS_EXPLAINER =
 	"The run is judged against the budgets set here. Blank fields are skipped; with every field blank the run is measured but not judged.";
 
 /**
- * Capacity discovery climbs past the limit on purpose, and the engine judges a
- * latency budget over the run's pooled histogram, every level included
- * (issue #2816).
+ * Capacity discovery climbs past the limit on purpose, and latency is judged over every level
+ * (#2816).
  */
 export const CAPACITY_BUDGETS_NOTE =
 	"In Capacity discovery a latency budget is judged over the whole run, every level the search climbed through included, so it measures how far the search went, not the capacity it found.";
@@ -224,14 +210,11 @@ export const STREAM_SEED_HINT =
 	"Starts from Settings › Dashboard › p99 threshold, but a streaming request does not send it. Type a value to set a p99 budget for this run.";
 
 /**
- * The first budget the engine would reject, phrased for the dialog.
- *
- * Blank is always fine - budgets are opt-in, and clearing a field is how a user
- * declines one. Anything else must be a number in range: a value that is not
- * gets said out loud rather than dropped from the payload, because silently
- * sending most of the budgets someone typed is the worse failure. A field
- * the run cannot declare (`streaming` false, a stream budget) is not checked: it
- * is not shown and not sent, so a remembered value in it is no one's mistake.
+ * The first budget the engine would reject, phrased for the dialog. Blank is always fine: budgets
+ * are opt-in, and clearing a field declines one. Anything else must be a number in range, and a bad
+ * value is said, not dropped, because silently sending most of what someone typed is worse. A field
+ * the run cannot declare (a stream budget with `streaming` false) is not checked: it is neither
+ * shown nor sent, so a remembered value there is no one's mistake.
  */
 export function budgetError(draft: BudgetDraft, streaming = false): string | null {
 	for (const field of budgetFieldsFor(streaming)) {
@@ -252,31 +235,25 @@ export function budgetError(draft: BudgetDraft, streaming = false): string | nul
 }
 
 /**
- * The stats a `custom.<name>.<stat>` budget can read, exactly as
- * `threshold_eval.cpp`'s `custom_metric_stats()` lists them: a trend's
- * percentiles and `max`, plus `value` (a counter's running total, or a rate's
- * percentage) and `rate` (the same field, spelled for a rate metric).
+ * The stats a `custom.<name>.<stat>` budget reads, as `threshold_eval.cpp`'s
+ * `custom_metric_stats()` lists them: a trend's percentiles and `max`, `value` (a counter's total
+ * or a rate's percentage) and `rate` (the same field, spelled for a rate metric).
  */
 export const CUSTOM_BUDGET_STATS = ["p50", "p95", "p99", "max", "value", "rate"] as const;
 
 export type CustomBudgetStat = (typeof CUSTOM_BUDGET_STATS)[number];
 
 /**
- * `metric.record`'s own bound on a name (`metric_kinds.cpp`'s config schema:
- * `minLength` 1, `maxLength` 100). Mirrored so a name too long to have been
- * recorded is refused where it is typed. There is no character rule to mirror -
- * the engine imposes none, and inventing one here would refuse a name a run can
- * legitimately record.
+ * `metric.record`'s bound on a name (`metric_kinds.cpp`: `minLength` 1, `maxLength` 100), so a name
+ * too long to be recorded is refused as typed. No character rule: the engine has none, and one here
+ * would refuse a name a run can record.
  */
 export const MAX_CUSTOM_METRIC_NAME_LENGTH = 100;
 
 /**
- * One `custom.<name>.<stat>` row as the user is editing it.
- *
- * `id` is the row's identity for React and for the remove button, minted with
- * `generateId` like every other repeatable row in the app (`KeyValueEditor`'s
- * `createEmptyKeyValue`) - never the name, which is blank on a fresh row and
- * changes under the user's cursor.
+ * One `custom.<name>.<stat>` row being edited. `id` is its React and remove-button identity, from
+ * `generateId` like every repeatable row (`KeyValueEditor`'s `createEmptyKeyValue`), never the
+ * name, which starts blank and changes under the cursor.
  */
 export interface CustomBudgetDraft {
 	id: string;
@@ -296,13 +273,9 @@ export function customBudgetKey(name: string, stat: CustomBudgetStat): `custom.$
 }
 
 /**
- * What the engine would reject about one custom row, phrased for the dialog, or
- * `undefined` when there is nothing to say.
- *
- * A row with neither a name nor a value is an unused slot rather than a
- * mistake - the same rule a blank fixed field follows. A row with only one of
- * the two is *not*: half a budget is the "typed but never judged" failure this
- * file exists to prevent, so it is said out loud rather than dropped.
+ * What the engine would reject about one custom row, or `undefined`. A row with neither name nor
+ * value is an unused slot, as a blank fixed field is; one with only half is *not*: half a budget is
+ * the "typed but never judged" failure, so it is reported, not dropped.
  */
 export function customBudgetRowError(row: CustomBudgetDraft): string | undefined {
 	const name = row.name.trim();
@@ -320,9 +293,8 @@ export function customBudgetRowError(row: CustomBudgetDraft): string | undefined
 	if (raw === "" || !Number.isFinite(Number(raw))) {
 		return `${label} must be a number, or clear the name to drop the budget.`;
 	}
-	// The engine's own bound on this family, and its own words for it: every
-	// custom stat is a ceiling, so a negative one is unmeetable rather than
-	// strict.
+	// The engine's own bound and words: every custom stat is a ceiling, so a negative one is
+	// unmeetable.
 	if (Number(raw) < 0) {
 		return `${label} must be zero or greater - it is a ceiling on a recorded metric.`;
 	}
@@ -330,13 +302,9 @@ export function customBudgetRowError(row: CustomBudgetDraft): string | undefined
 }
 
 /**
- * The first thing wrong with the custom rows as a set, or `null`.
- *
- * Aggregated here rather than in each dialog so both gate their button on one
- * call, the way they already do on {@link budgetError}. The duplicate check is
- * the part no per-row function can make: two rows naming the same metric and
- * stat are one key in the payload, so the second would silently overwrite the
- * first - a budget typed and never judged, again.
+ * The first thing wrong with the custom rows as a set, or `null`, so both dialogs gate on one call,
+ * as on {@link budgetError}. The duplicate check is what no per-row check can make: two rows with
+ * the same metric and stat are one payload key, so the second would silently overwrite the first.
  */
 export function customBudgetsError(rows: readonly CustomBudgetDraft[]): string | null {
 	const seen = new Set<string>();
@@ -356,18 +324,12 @@ export function customBudgetsError(rows: readonly CustomBudgetDraft[]): string |
 }
 
 /**
- * The `thresholds` payload for `POST /runs`, or `undefined` when nothing was
- * declared - never an empty object, which the engine rejects rather than
- * starting a run no verdict will be computed for.
- *
- * Assumes {@link budgetError} and {@link customBudgetsError} passed; an
- * unparseable field is skipped rather than sent as `NaN`, and so is a custom
- * row with a blank half. `failRun` is folded in only when at least one budget
- * was declared - the engine rejects `{ failRun: true }` alone, and a lone
- * flag with no budget to judge means the same thing here. A custom budget
- * counts as one: it is judged exactly as a fixed one is. A stream budget is
- * sent only when `streaming`: a remembered one on a request that does not
- * stream would be reported not evaluated, and so missed.
+ * The `thresholds` payload for `POST /runs`, or `undefined` when nothing was declared, never `{}`,
+ * which the engine refuses rather than start an unjudged run. Assumes {@link budgetError} and
+ * {@link customBudgetsError} passed; an unparseable field is skipped, not sent as `NaN`, as is a
+ * half-blank custom row. `failRun` is folded in only with a budget: the engine refuses
+ * `{ failRun: true }` alone, and a custom budget counts as one. A stream budget is sent only when
+ * `streaming`: elsewhere it would be not evaluated, so missed.
  */
 export function buildThresholds(
 	draft: BudgetDraft,
@@ -413,10 +375,9 @@ export function isDeclaredCustomBudget(row: CustomBudgetDraft): boolean {
 }
 
 /**
- * What the collapsed card says about its contents, so a closed card is not
- * silent about the budgets that will judge the run: a count, and the budget
- * itself when there is only one. Counts what the payload would carry - a fixed
- * field with a value plus the custom rows with both halves filled.
+ * What the collapsed card says, so a closed card is not silent about what will judge the run: a
+ * count, and the budget itself when there is one. Counts what the payload carries: filled fixed
+ * fields plus fully filled custom rows.
  */
 export function summariseBudgets(
 	draft: BudgetDraft,
