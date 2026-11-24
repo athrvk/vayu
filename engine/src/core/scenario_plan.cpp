@@ -231,8 +231,8 @@ std::vector<nlohmann::json>& rows_out) {
 
     // Refused rather than ignored (issue #1503): a key this block does not
     // read - a typo, or a knob from a version of the client ahead of this
-    // engine - used to change nothing and answer 202 anyway, which is a
-    // silence every future scenario field would inherit. The refusal lists
+    // engine - would change nothing and answer 202 anyway, a silence every future
+    // scenario field would inherit. The refusal lists
     // this set by hand, so the two change together.
     static const std::unordered_set<std::string> known_scenario_keys = {
         "source", "collectionId", "recursive", "data", "dataFileName",
@@ -470,9 +470,9 @@ nlohmann::json& raw_elements_out) {
     // (below). `apply_auth` collapses basic auth into one base64
     // `Authorization` value, so a `{{data.user}}` resolved into the plan is
     // unreadable by the time
-    // anything scans the built request: it used to go out as base64 of the
-    // literal token text, silently, and the refusal below could not see it
-    // either (issue #591). Such a step keeps its credentials typed and
+    // anything scans the built request: it would go out as base64 of the literal
+    // token text, silently, and the refusal below could not see it either (issue
+    // #591). Such a step keeps its credentials typed and
     // unbound and applies its auth per iteration instead - one base64 per
     // iteration, and only for the steps that need it.
     const vayu::http::Auth parsed_auth =
@@ -549,8 +549,7 @@ nlohmann::json& raw_elements_out) {
         if (!token) {
             // The credentials are scanned too, and for the same reason: a
             // data token in a basic-auth field is exactly as unbindable as
-            // one in the URL, and until it was kept out of the base64 above
-            // this refusal could not see it at all.
+            // one in the URL, which the base64 above would otherwise hide from this refusal.
             token = auth_template.first_data_token ();
         }
         if (token) {

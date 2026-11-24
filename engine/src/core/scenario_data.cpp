@@ -103,7 +103,7 @@ enum class FieldContext : std::uint8_t {
  * here, because `graphql_wire_body` escapes it wholesale when it wraps it and
  * escaping first would double every quote.
  *
- * `Xml` (the mode #580 added) is a document too, with quoting rules of its own
+ * `Xml` (#580) is a document too, with quoting rules of its own
  * rather than JSON's - see `advance_xml_state` for what a bound value is
  * written as, and why it depends on the token's position.
  *

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/run_export.cpp
  * @brief The run-report document (#2127): an allowlisted copy of a finished
  *        load run's report, configuration and time series.
  */

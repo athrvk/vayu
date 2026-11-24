@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/run_export_html.cpp
  * @brief The run-report document as one self-contained HTML page (#2135).
  *
  * What each section says is `run_export_view.cpp`; this file is the page: its
