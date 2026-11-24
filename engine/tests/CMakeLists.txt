@@ -32,6 +32,17 @@ add_executable(vayu_tests
     ordered_json_parse_test.cpp
     invariant_test.cpp
     optional_assert_test.cpp
+    script_engine_async_test.cpp
+    script_engine_encoding_test.cpp
+    script_engine_execution_test.cpp
+    script_engine_expect_chai_test.cpp
+    script_engine_expect_test.cpp
+    script_engine_legacy_test.cpp
+    script_engine_request_test.cpp
+    script_engine_require_assertions_test.cpp
+    script_engine_require_test.cpp
+    script_engine_response_test.cpp
+    script_engine_variables_test.cpp
     script_engine_test.cpp
     script_expect_message_test.cpp
     script_response_assertions_test.cpp
