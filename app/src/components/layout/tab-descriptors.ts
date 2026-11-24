@@ -101,9 +101,7 @@ export interface TabDescriptor {
  * Icons carry the tab's *kind*; the rail carries its method.
  *
  * Freeing the icon from repeating the method is what lets a run say which kind
- * of run it is. Both kinds used to be `Clock`, and the old comment conceded the
- * point - "the tooltip says which kind" - which a glance cannot read. A
- * finished load test now takes the same `Zap` as the live dashboard, because it
+ * of run it is. A finished load test takes the same `Zap` as the live dashboard, because it
  * is the same thing at a later time.
  */
 export function iconForTab(
@@ -150,11 +148,10 @@ export function iconForTab(
  * dynamic list, fed the same options objects `useRequestQuery` and
  * `useRunQuery` use, so the retry and 404 rules are not restated here.
  *
- * **The resolver is called once, without a collection id.** It previously ran
- * per tab with that tab's own `collectionId`, which cannot survive the move to
- * a single hook. It only affects the label of a request that has *no name of
- * its own* and whose URL uses a collection-scoped variable from a collection
- * other than the session's active one; that tab shows the unresolved
+ * **The resolver is called once, without a collection id.** It only affects the
+ * label of a request that has *no name of its own* and whose URL uses a
+ * collection-scoped variable from a collection other than the session's active
+ * one; that tab shows the unresolved
  * `{{var}}/path` instead of the concrete path. Globals, the environment and the
  * active collection all still resolve.
  *
@@ -378,7 +375,7 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 			}
 			case "run": {
 				// A run tab is a past design run, load test, or collection run.
-				// "Run" told none of them apart. A collection run has no url or
+				// A collection run has no url or
 				// method to show, so it is named for the collection it ran
 				// instead - the id if that collection has since been deleted,
 				// never a blank tab, the same fallback the history row uses.
