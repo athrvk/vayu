@@ -8,12 +8,13 @@
 /**
  * The MCP tool result above the raw reply in the request builder's Body tab (#3841): `content[]`
  * blocks as what they are, `structuredContent` as a JSON body, `isError` as a banner.
- * `readMcpResult` reads; this draws. It renders nothing for a reply the pane cannot read whole
- * (capped, truncated, or without a text view), as a half-read envelope would show a result the
- * server did not send; the raw body is always below. Every string is the server's: text is never
- * markup, an image is an `<img>` over its bytes and only for `image/*`, a link a button handing an
- * http(s) URL to the browser. Audio is named and sized, not played: the policy has no `media-src`,
- * so `default-src 'self'` refuses a `data:` or `blob:` source (`electron/renderer-csp.ts`).
+ * `readMcpResult` reads; this draws. It renders nothing for a reply the pane cannot read whole (one
+ * the engine capped or storage truncated, or one without a text view), as a half-read envelope
+ * would show a result the server did not send; the raw body is always below. Every string is the
+ * server's: text is never markup, an image is an `<img>` over its bytes and only for `image/*`, a
+ * link a button handing an http(s) URL to the system browser. Audio is named and sized, not played:
+ * the renderer's policy has no `media-src`, so `default-src 'self'` refuses a `data:` or `blob:`
+ * source (`electron/renderer-csp.ts`).
  */
 
 import { useMemo } from "react";

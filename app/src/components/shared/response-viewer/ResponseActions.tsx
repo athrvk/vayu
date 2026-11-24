@@ -11,11 +11,11 @@
  * never Pretty's indented copy: both hand back what the server sent (#2459). The file is named from
  * the response's Content-Type (`extensionForContentType`), text and bytes alike, so
  * `text/javascript` saves as `.js` and a text body with no usable subtype (absent,
- * `application/vnd...`) as `.txt`, never `.undefined` or `.bin` (#3140). The copy feedback is
- * `useCopy`'s (`TIMING.COPY_RESET_MS`). A base64 body (`rawBytes`, #2458) downloads as its exact
- * bytes under its Content-Type; its text, when it has one, is a decoding, which Copy takes, and
- * with none Copy says so rather than copying base64. A failed save is a toast; a cancelled dialog
- * is not (#3246).
+ * `application/vnd...`) as `.txt`, never `.undefined`, and never `.bin` for something readable
+ * (#3140). The copy feedback is `useCopy`'s (`TIMING.COPY_RESET_MS`). A base64 body (`rawBytes`,
+ * #2458) downloads as its exact bytes under its Content-Type; its text, when it has one, is a
+ * decoding, which Copy takes, and with none Copy says so rather than copying base64. A failed save
+ * is a toast; a cancelled dialog is not (#3246).
  */
 
 import { Copy, Check, Download } from "lucide-react";

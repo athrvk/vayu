@@ -11,11 +11,11 @@ export type HeaderLine = readonly [name: string, value: string];
 /**
  * The request's header lines as they went out, in wire order, read off the engine's recorded frame
  * (`rawRequest`): `Host`, `Accept`, `Content-Length`, the jar's `Cookie` and the author's rows
- * alike. From the frame, as only it states all of them (#2464): `requestHeaders` is what Vayu
- * composed, and the transport writes its own lines after. Lines, not a map: a repeated name is a
- * repeated wire line a map would collapse; names keep the frame's spelling. Pass only a recorded
- * frame: `buildRawRequest` fabricates `Host` and `Content-Length` for a frameless stored row, lines
- * that never went on a wire (the funnels guard this, `wireRequestHeadersField`).
+ * alike. From the frame, as only it states all of them (#2464): `requestHeaders` is the sent record
+ * of what Vayu composed, and the transport writes its own lines after. Lines, not a map: a repeated
+ * name is a repeated wire line a map would collapse; names keep the frame's spelling. Pass only a
+ * recorded frame: `buildRawRequest` fabricates `Host` and `Content-Length` for a frameless stored
+ * row, lines that never went on a wire (the funnels guard this, `wireRequestHeadersField`).
  */
 export function parseWireHeaders(rawRequest: string | undefined): HeaderLine[] {
 	if (!rawRequest) return [];

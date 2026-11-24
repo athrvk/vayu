@@ -139,10 +139,11 @@ export function formatBody(body: string | undefined, bodyType?: BodyType): strin
 
 /**
  * Response time at a readable precision: four decimals of a millisecond (`340.1235 ms`) sit far
- * below the measurement's resolution, the last digits noise that lengthens the number people scan.
- * The digits are the load surfaces' (`formatLatencyParts`, #2793): two decimals below 10 ms, whole
- * milliseconds above, so a 2.27 ms send reads `2.27 ms` here and as a load p50. Here, shared,
- * because a fix to one viewer's copy missed the other.
+ * below the measurement's resolution, the last digits noise that makes the number people scan
+ * longer and harder to compare between runs. The digits are the load surfaces'
+ * (`formatLatencyParts`, #2793): two decimals below 10 ms, whole milliseconds above, so a 2.27 ms
+ * send reads `2.27 ms` here and as a load p50. Here, shared, because a fix to one viewer's copy
+ * missed the other.
  */
 export function formatResponseTime(ms: number): string {
 	const { value, unit } = formatDuration(ms);
@@ -176,9 +177,9 @@ const isReportedEpoch = (ms: number | undefined): ms is number =>
 
 /**
  * Milliseconds from @p from to @p to, both epoch ms, or undefined when either is unknown (#3775): a
- * load run's sampled event has no `receivedAt`, and a stream restored later has no send time.
- * Floored at 0: a stream's send time is stamped when the engine's `202` lands, so a local
- * upstream's first event can be a few ms earlier.
+ * load run's sampled event has no `receivedAt`, and a stream restored in a later session has no
+ * send time. Floored at 0: a stream's send time is stamped by the renderer when the engine's `202`
+ * lands, so a local upstream's first event can be a few ms earlier.
  */
 export function elapsedBetween(
 	from: number | undefined,

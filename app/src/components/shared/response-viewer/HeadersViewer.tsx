@@ -233,9 +233,9 @@ export interface ResponseHeadersPanelProps {
  * is one list: the request as it went out (`wireRequestHeaders`, #2464) when recorded, else its own
  * lines (`requestHeaderLines`, #2466), and only for an answer predating both, the folded sent
  * record, so a failed send or a row stored before the frame was kept still lists every header the
- * request carried. A display, never an input. The empty-state fallback is this panel's own:
- * `HeadersViewer` renders `null` with no entries, which would leave a header-less response as an
- * unexplained blank pane.
+ * request carried. A display, never an input: nothing here reaches a send. The empty-state fallback
+ * is this panel's own: `HeadersViewer` renders `null` with no entries, which would leave a
+ * header-less response as an unexplained blank pane.
  */
 export function ResponseHeadersPanel({
 	requestHeaders,

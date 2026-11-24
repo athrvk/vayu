@@ -12,9 +12,9 @@
  * and how big, those bytes being `rawBytes`, the decoded base64 the engine sent for a non-UTF-8
  * body (#2458). Past `LARGE_BODY_BYTES` it keeps one mode: no `formatBody`, no highlighting, a raw
  * prefix in the editor with a notice, as everything here runs synchronously in render and a
- * multi-megabyte response would freeze the window (the constant in `utils.ts` has the passes and
- * why 2MB). The request builder's Raw tab (`RawRequestResponse`) caps its copy alike, with the same
- * notice.
+ * multi-megabyte response would freeze the window between Send and the pane painting (the constant
+ * in `utils.ts` has the passes and why 2MB). The request builder's Raw tab (`RawRequestResponse`)
+ * caps its copy alike, with the same notice.
  */
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -72,14 +72,14 @@ export default function ResponseBody({
 	/*
 	 * The body type from content and headers. Above the gate the *content* half is skipped, being a
 	 * whole-string pass itself: without a content-type (or with `text/plain`) `detectBodyType`
-	 * trims, `JSON.parse`s and lower-cases the body, the freeze the gate prevents, paid before the
-	 * gate. The header still decides where present; an unlabelled large body reads as text, as
-	 * rendered anyway.
+	 * trims, `JSON.parse`s and lower-cases the body, for a 32MB body the freeze the gate prevents,
+	 * paid before the gate. The header still decides where present; an unlabelled large body reads
+	 * as text, as rendered anyway.
 	 */
 	const detectedType = useMemo(() => {
 		const declared = detectBodyType(headers, isLargeBody ? "" : bodyRaw || body);
 		// Bytes without a text view never reach the editor, whatever the header: the funnel decided
-		// (`isText`).
+		// there is no text (`isText`).
 		if (rawBytes && !rawBytes.isText) return isNonTextType(declared) ? declared : "binary";
 		// A binary header over a body sent as UTF-8 (no `rawBytes`, or `isText`) is text
 		// mislabelled (#3427): readable, so the editor shows it. Image and PDF keep their pane.
@@ -199,8 +199,8 @@ export default function ResponseBody({
 				) : (
 					<CodeEditor
 						height={height}
-						// Plaintext above the gate: tokenising a 2MB model for colour is the third
-						// pass the threshold avoids.
+						// Plaintext above the gate: tokenising a 2MB model for syntax colours is
+						// the third pass the threshold avoids.
 						language={isLargeBody || viewMode === "raw" ? "plaintext" : language}
 						ariaLabel="Response body"
 						value={formattedBody}
@@ -269,7 +269,8 @@ function DecodeNoticeCallout({
 
 /**
  * An image, a PDF or other bytes: what it is, how big, and the image itself. The bytes are
- * `rawBytes` for base64, else the UTF-8 text, then exactly those bytes.
+ * `rawBytes` when the engine sent base64, else the UTF-8 text it sent, which is then exactly those
+ * bytes.
  */
 function NonTextBody({
 	type,

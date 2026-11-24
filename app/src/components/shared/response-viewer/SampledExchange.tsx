@@ -6,17 +6,18 @@
  */
 
 /**
- * One sampled HTTP exchange: a summary row expanding into the detail, one shell for the history
- * detail and every sample list, as the dashboard's and History's had drifted in everything but data
- * (#76, #2220) despite sharing per-concern primitives (#60). **Presentational, over already-shaped
- * data**: a status code, a latency and a pre-resolved phase list, whether from SSE or SQLite.
- * Expansion is the parent's state (the history detail holds one open index), the split
- * `LoadTestDetail` uses to reuse the dashboard's derived components. **What a caller adds stays a
- * slot, not a flag**: the history card's sections (trace details: error type, data row, per-test
- * failures, the slow-request warning; then request and response) arrive as `details` (before the
- * timing tiles) and `children` (after), not booleans, which the response viewers were deliberately
- * not merged into. The `timestamp` is a caller-formatted `ReactNode`: a stored row dates a run and
- * wants the day; a sample within a seconds-old run would want milliseconds.
+ * One sampled HTTP exchange: a summary row expanding into the detail. One shell, as the dashboard's
+ * and History's two copies (#76) drifted in almost every detail but data despite sharing
+ * per-concern primitives (#60); the dashboard now renders History's report (#2220).
+ * **Presentational, over already-shaped data**: a status code, a latency and a pre-resolved phase
+ * list, whether from SSE or SQLite. Expansion is the parent's state (the history detail holds one
+ * open index), the split `LoadTestDetail` uses to reuse the dashboard's derived components. **What
+ * a caller adds stays a slot, not a flag**: the history card's sections (trace details: error type,
+ * data row, per-test failures, the slow-request warning; then request and response) arrive as
+ * `details` (before the timing tiles) and `children` (after), not booleans, which the response
+ * viewers were deliberately not merged into. The `timestamp` is a caller-formatted `ReactNode`: a
+ * stored row dates a run and wants the day; a sample within a seconds-old run would want
+ * milliseconds.
  */
 
 import { type ReactNode } from "react";

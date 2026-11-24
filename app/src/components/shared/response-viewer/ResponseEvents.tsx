@@ -21,7 +21,7 @@
  * chip, a monospace preview and an expandable payload, so rows arrive in slices that grow as the
  * end is scrolled to, and an unchanged row does not re-render when later ones arrive.
  *
- * **A Text view beside the rows** (#3773) when the request declared a text path: the events'
+ * **A Text view beside the rows** (#3773) when the request declared a stream text path: the events'
  * `text`, joined, as the reply reads. It renders what the engine put on each event and never reads
  * `data`: with no provider shape known there is no finish-reason callout, only what the stream says
  * (an event named `error`, the end reason). **Every disclosure is in band**: a capped stream and a
@@ -60,10 +60,10 @@ export interface ResponseEventsProps {
 	/** The list is a prefix of what arrived. */
 	eventsTruncated?: boolean;
 	/**
-	 * The reply the text path read, joined over every event: the engine's string for a stored run,
-	 * the store's running one live. It beats joining `events`, which the stored-items cap can cut
-	 * short. Absent without a path (or, live, before a match), when the Text view shows only if an
-	 * event carries `text`.
+	 * The reply the stream text path read, joined over every event: the engine's string for a
+	 * stored run, the store's running one live. It beats joining `events`, which the stored-items
+	 * cap can cut short. Absent without a path (or, live, before a match), when the Text view shows
+	 * only if an event carries `text`.
 	 */
 	streamText?: string;
 	/** Why the stream ended, or undefined while it is still open. */
@@ -84,8 +84,8 @@ export interface ResponseEventsProps {
 	contentType?: string;
 	/**
 	 * When the stream started, epoch ms (#3775): a row's offset is its `receivedAt` less this.
-	 * Absent without a send time (a stream restored from History, a load run's capture), when rows
-	 * show no offset rather than one measured from a guess.
+	 * Absent without a send time (a stream restored from History, a load run's sampled capture),
+	 * when rows show no offset rather than one measured from a guess.
 	 */
 	sentAt?: number;
 	/** A transport failure on the relay, if the live stream hit one. */
@@ -308,7 +308,7 @@ const EventRow = memo(function EventRow({
 					{/*
 					 * `variant="chip"`, as this Badge paints its own background: other variants
 					 * pair `bg-x` with `hover:bg-x/80`, and tailwind-merge keeps `hover:bg-*`, so
-					 * the variant's fill would show on hover.
+					 * the caller's fill would win at rest and the variant's on hover.
 					 */}
 					<Badge variant="chip" className="shrink-0 bg-muted text-muted-foreground">
 						{event.event}
