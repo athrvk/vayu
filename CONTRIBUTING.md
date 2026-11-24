@@ -431,6 +431,32 @@ Conventions for writing app tests - the default `node` environment, when to ask
 for `jsdom`, and the timeout rule for render-heavy cases - are in
 `app/CLAUDE.md`.
 
+### Test file size
+
+A test file is capped at **1,500 lines**, engine and app alike (`*.test.ts(x)`,
+`*.testkit.ts(x)`, `*_test.cpp`). A file that grew past it is split by suite or
+by source module, with its shared setup moved to a testkit or a header, not
+listed. One script holds the line and needs no install:
+
+```bash
+python3 scripts/test-size-lint.py            # test files over the cap
+python3 scripts/test-size-lint.py --measure  # the exceptions file this tree needs
+```
+
+The files that were over the cap when it was set are listed in
+`scripts/test-size-exceptions.json` with the size each had. The list may only
+shrink: a file over its recorded size fails, a file now within the cap fails
+as stale (delete the entry), and CI compares the list with the base branch's
+copy, so an entry cannot be added or raised to make room. Splitting a file
+and lowering its entry is `--measure`. It runs on a pull request as `Test file
+size` and prints nothing when it passes.
+
+A test that holds a number to a **ceiling** (`CEILING`, a `*_CEILING`, a
+`maxBytes:` row) keeps the number in the constant and the measured value in the
+failure message. The docblock above it states the rule and carries no value and
+no history of raises; `app/src/test/ceiling-docblock.guard.test.ts` fails one
+that does.
+
 ## Documentation
 
 Everything in `docs/` is published to **[athrvk.github.io/vayu](https://athrvk.github.io/vayu/)**

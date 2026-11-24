@@ -37,19 +37,12 @@ import { DOC_READING_GUARDS, entryCovers, fromRepoRoot } from "@/lib/routed-inpu
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * The most directives this repository may carry.
- *
- * A ceiling, not a count to hold: 16 was what #1216 left behind, one of which
- * went with the body editor's drag handle (#1323); 17 added the Dock's
- * worker-count tooltip (#1508); 18 adds the script element form's editor
- * height handle (#1605); 19 adds ActivityRail's roving-tabindex nav (#1615);
- * 20 adds the history list's roving-tabindex group (`useHistoryListFocus`);
- * 21 adds `DisabledHint`'s wrapper span, the only keyboard path to the reason a
- * control is off (#1690); 22 adds ContextRail's roving-tabindex nav, the right-edge
- * twin of ActivityRail's (#1872).
- * The number moves down with the list in the doc when a site is fixed rather
- * than suppressed. Raising it means adding a site to the doc too, which is
- * where the reason has to convince the next reader.
+ * The most directives this repository may carry: a fixed ceiling the owner
+ * sets, not a count to hold. Remove a suppression rather than raise it. A site
+ * that has to stay is listed in `docs/design-system/accessibility.md` in the
+ * same change, where its reason has to convince the next reader, and the owner
+ * decides the ceiling. The measured count is printed by the failure below and
+ * written nowhere else.
  */
 const CEILING = 22;
 
@@ -133,7 +126,7 @@ describe("the jsx-a11y suppressions", () => {
 	it("stays under the ceiling", () => {
 		expect(
 			directives.length,
-			`Fix the site, or - if the suppression is the right answer - add it to the Accessibility page, docs/design-system/accessibility.md, and raise this ceiling on purpose:\n${directives
+			`${directives.length} jsx-a11y suppressions, over the fixed ceiling of ${CEILING}. Remove one rather than raise the ceiling. A site that has to stay is listed in docs/design-system/accessibility.md, and the owner sets the ceiling:\n${directives
 				.map(({ file, line, rules }) => `${file}:${line} ${rules.join(", ")}`)
 				.join("\n")}`
 		).toBeLessThanOrEqual(CEILING);
