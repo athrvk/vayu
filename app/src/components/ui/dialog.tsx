@@ -28,8 +28,8 @@ function DialogOverlay({
 		<DialogPrimitive.Overlay
 			data-slot="dialog-overlay"
 			className={cn(
-				// dialog-overlay: see index.css. Shares its duration and curve
-				// with the panel so the two land as one event.
+				// dialog-overlay (index.css): shares the panel's duration and curve, so both land
+				// as one.
 				"dialog-overlay fixed inset-0 z-50 bg-black/80",
 				className
 			)}
@@ -40,11 +40,9 @@ function DialogOverlay({
 
 interface DialogContentProps extends React.ComponentProps<typeof DialogPrimitive.Content> {
 	/**
-	 * Draw the corner close button. On by default, and off for exactly one
-	 * shape: a command palette, whose top-right corner is occupied by its own
-	 * search field and which closes on Escape or a click outside like the
-	 * overlay it is. A dialog with a form or a decision keeps it - the button is
-	 * the discoverable way out.
+	 * The corner close button, on by default and off for one shape: a command palette, whose corner
+	 * is its search field and which closes on Escape or a click outside. A form or decision dialog
+	 * keeps it: it is the discoverable way out.
 	 */
 	showClose?: boolean;
 }
@@ -56,79 +54,55 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 			<DialogPrimitive.Content
 				data-slot="dialog-content"
 				className={cn(
-					// dialog-panel: see index.css. Keep the translate utilities -
-					// they centre the panel via the standalone `translate`
-					// property, which the scale-only keyframes compose with
-					// rather than fight.
+					// dialog-panel (index.css). Keep the translate utilities: they centre the panel
+					// via the standalone `translate` property, which the scale-only keyframes
+					// compose with.
 					//
-					// `flex flex-col` carries two jobs, and both are
-					// load-bearing.
+					// `flex flex-col` does two load-bearing jobs.
 					//
-					// **Width** (issue #701). This was `grid grid-cols-1` -
-					// `repeat(1, minmax(0, 1fr))` - because an implicit grid
-					// track is `auto`, whose minimum is its items' min-content,
-					// so one wide descendant - a data-file preview table, a long
-					// unbroken URL - grew the track past this panel's own
-					// `max-w`, which cannot follow it. The panel stayed the
-					// painted width while every row inside laid out at the
-					// track's, so right-aligned controls and the footer ended up
-					// over the backdrop. A column flex container refuses the same
-					// thing for a different reason: `min-width: auto` does not
-					// apply on the cross axis, so an item stretches to the line -
-					// this panel's own content width - and a wide descendant
-					// overflows *inside* it rather than widening it. Measured in
-					// Chromium against the seven-column shape from #701: an
-					// `auto` track put the footer 580px past the painted edge,
-					// and `grid-cols-1` and this flex column both put it 25px
-					// inside it, to the pixel.
+					// **Width** (#701). An implicit grid track is `auto`, its minimum the items'
+					// min-content, so one wide descendant (a data-file preview, a long URL) grew it
+					// past the panel's `max-w` and right-aligned controls and the footer laid out
+					// over the backdrop. A column flex container applies no `min-width: auto` on
+					// the cross axis, so an item stretches to the panel's content width and a wide
+					// descendant overflows *inside* it. Measured in Chromium on #701's seven-column
+					// shape: an `auto` track put the footer 580px past the painted edge;
+					// `grid-cols-1` and this both put it 25px inside.
 					//
-					// **Height** (issue #773). `max-h-[85vh]` plus a
-					// `DialogBody`, which is the band that scrolls. Without the
-					// cap a panel taller than the viewport is centred on a box it
-					// does not fit and clipped at *both* ends, with nothing to
-					// scroll because it is `fixed` - an eighteen-row dialog at a
-					// 613px viewport left its Run button 198px below the screen,
-					// reachable by Tab and not by pointer.
+					// **Height** (#773). `max-h-[85vh]` plus a `DialogBody`, the band that scrolls.
+					// Without the cap a panel taller than the viewport is centred and clipped at
+					// *both* ends with nothing to scroll (it is `fixed`): an eighteen-row dialog at
+					// 613px left its Run button 198px off screen, reachable by Tab, not pointer.
+					// `overflow-y-auto` is the fallback for a dialog with no `DialogBody`: the
+					// panel scrolls itself and the footer stays reachable, taking the close button
+					// along, which is why a dialog that can grow takes the band; with one present
+					// the panel never scrolls and the button stays.
 					//
-					// `overflow-y-auto` here is the fallback for a dialog with no
-					// `DialogBody`: nothing claims the leftover height, so the
-					// panel scrolls itself and the footer stays reachable. It
-					// takes the corner close button with it, which is exactly why
-					// a dialog that can grow should take the band instead - with
-					// one present the panel never scrolls at all and the button
-					// stays pinned.
+					// Four widths: a form or decision is `sm:max-w-lg` (512px); content with a
+					// shape of its own (a table, a diff, a preview, a dense config) `max-w-xl`
+					// (576px, the default); a *browser*, where reading a grid is the task,
+					// `sm:max-w-2xl` (672px, the data-row picker, #892: seven CSV columns at 576px
+					// leave ~60px each); a dense config of two independent groups
+					// `max-w-xl lg:max-w-4xl` (896px from `lg`, one column below), in two panes
+					// (#2231).
 					//
-					// Four widths, not eleven. A dialog is either a form or a
-					// decision, which is `sm:max-w-lg` (512px); or it holds
-					// something with a shape of its own - a table, a diff, a
-					// preview, a dense config - which is `max-w-xl` (576px) and
-					// the default here; or it is a *browser*, where reading a grid
-					// is the task, which is `sm:max-w-2xl` (672px, opened for the
-					// data-row picker, issue #892: seven CSV columns at 576px leave
-					// ~60px each); or it is a dense config that is two independent
-					// groups, which is `max-w-xl lg:max-w-4xl` (896px from the `lg`
-					// breakpoint, one column below it) and lays them in two panes
-					// (issue #2231).
-					//
-					// A dialog is a focus device before it is a container: widen the
-					// scale only for content that earns it, in
-					// `dialog-width-scale.test.tsx` and docs/design-system/dialogs.md with the
-					// reason, never at a call site.
+					// A dialog is a focus device before a container: widen the scale only for
+					// content that earns it, in `dialog-width-scale.test.tsx` and
+					// docs/design-system/dialogs.md with the reason, never at a call site.
 					"dialog-panel fixed left-[50%] top-[50%] z-50 flex max-h-[85vh] w-full max-w-xl translate-x-[-50%] translate-y-[-50%] flex-col gap-3 overflow-y-auto [scrollbar-gutter:auto] rounded-lg border bg-background p-5 shadow-lg",
 					className
 				)}
 				{...props}
 			>
-				{/* Its own outline under its `h2` title. React context crosses the
-				    portal, so without this a dialog opened from a tab inherits the
-				    tab's level and a card or empty state inside it could be a second
-				    `h1` (#3498). */}
+				{/*
+				 * Its own outline under its `h2` title: context crosses the portal, so a dialog
+				 * opened from a tab would inherit its level and a card or empty state inside could
+				 * be a second `h1` (#3498).
+				 */}
 				<HeadingSection level={3}>{children}</HeadingSection>
 				{showClose && (
-					// `size-target` (issue #1679, 24px): the close button carried no
-					// explicit hit box at all - just the bare 16px icon - which read
-					// under the WCAG 2.2 SC 2.5.8 floor with only its own SVG bounds
-					// to click.
+					// `size-target` (#1679, 24px): the bare 16px icon alone was under WCAG 2.2 SC
+					// 2.5.8's floor.
 					<DialogPrimitive.Close className="absolute right-4 top-4 flex size-target items-center justify-center rounded-md opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
 						<X className="size-icon" />
 						<span className="sr-only">Close</span>
@@ -148,33 +122,18 @@ const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
 );
 
 /**
- * The band that scrolls (issue #773).
- *
- * A dialog that can grow past the viewport puts everything between its header
- * and its footer in here: `flex-auto` claims the height the two fixed bands
- * leave, and once that is less than the content asks for, this box scrolls -
- * so the title stays readable, the primary action stays on screen, and the
- * corner close button, which is positioned against the panel rather than
- * against this box, does not scroll away with the content.
- *
- * `min-h-0` is what allows the shrink at all: a flex item's automatic minimum
- * size on the main axis is its content, so without it this band refuses to be
- * shorter than its content and the overflow moves back out to the panel. It is
- * the vertical case of the `min-w-0` rule in docs/design-system/overflow-and-shrink.md.
- *
- * `flex-auto` and not `flex-1`: `flex-1` bases the item at `0%`, which asks a
- * short dialog to stretch its one band over the whole cap. Basis `auto` grows
- * only into height that is actually free and shrinks only when there is none.
- *
- * A short dialog does not need one - a confirm, a rename, a three-field form.
- * The panel keeps its own `overflow-y-auto` for those.
- *
- * `overflow-y-auto` computes `overflow-x` to `auto` too, so the band clips on
- * all four sides - a focused field's outset ring loses its left and right
- * edges here, and the first and last rows lose theirs at either scroll end
- * (issue #1627). `-mx-1 px-1 -my-px py-px` folds 4px of horizontal and 1px of
- * vertical clearance back with negative margins, so no call site's layout
- * shifts and no call site needs its own copy.
+ * The band that scrolls (#773). A dialog that can grow past the viewport puts everything between
+ * header and footer here: `flex-auto` claims the height the fixed bands leave and scrolls past it,
+ * so the title stays readable, the primary action on screen, and the close button (positioned
+ * against the panel) does not scroll away. `min-h-0` allows the shrink: a flex item's automatic
+ * main-axis minimum is its content, so without it the overflow moves back to the panel (the
+ * vertical `min-w-0` rule, docs/design-system/overflow-and-shrink.md). `flex-auto`, not `flex-1`,
+ * whose `0%` basis stretches a short dialog's band over the whole cap; basis `auto` grows only into
+ * free height. A short dialog (a confirm, a rename, a three-field form) needs none; the panel's
+ * `overflow-y-auto` covers it. `overflow-y-auto` makes `overflow-x` `auto` too, clipping all sides:
+ * a focused field's outset ring loses its edges, and the first and last rows theirs at the scroll
+ * ends (#1627). `-mx-1 px-1 -my-px py-px` folds 4px and 1px of clearance back with negative
+ * margins, so no call site shifts or needs its own copy.
  */
 const DialogBody = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
 	<div
@@ -202,9 +161,8 @@ function DialogTitle({ className, ...props }: React.ComponentProps<typeof Dialog
 	return (
 		<DialogPrimitive.Title
 			data-slot="dialog-title"
-			// 15px, the scale's title step, not stock shadcn's 18px: a dialog
-			// title is the app's own chrome and read three steps above body in a
-			// dense tool (#1202).
+			// 15px, the scale's title step, not shadcn's 18px: a dialog title is chrome and read
+			// three steps above body in a dense tool (#1202).
 			className={cn("text-md font-semibold leading-none tracking-tight", className)}
 			{...props}
 		/>

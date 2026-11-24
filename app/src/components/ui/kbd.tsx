@@ -6,19 +6,14 @@
  */
 
 /**
- * Kbd - keyboard key-cap component.
- *
- * Use one <Kbd> per key for a Linear/Raycast-style multi-key indicator:
+ * A keyboard key cap. One `<Kbd>` per key, for a Linear/Raycast-style indicator:
  *
  *   <Kbd>⌘</Kbd> <Kbd>↵</Kbd>          // chord
  *   <Kbd size="sm">⌘K</Kbd>            // dense menu shortcut
  *
- * For shortcuts that read top-down ("Press X or click Y"), prefer the chord
- * form (one Kbd per key) so each cap has a visible separator.
- *
- * Two sizes:
- *   - default - main UI (empty states, modal hints). 24×24 cap, 12px glyph.
- *   - sm      - menus / inline dense rows. 18×18 cap, 10px glyph.
+ * Prefer the chord form (one per key) for shortcuts read top-down ("Press X or click Y"), so each
+ * cap has a visible separator. Sizes: `default` (main UI: empty states, modal hints), 24×24 cap,
+ * 12px glyph; `sm` (menus, dense rows), 18×18 cap, 10px glyph.
  */
 
 import * as React from "react";
@@ -34,11 +29,8 @@ function Kbd({ className, size = "default", ...props }: KbdProps) {
 			data-slot="kbd"
 			className={cn(
 				"inline-flex items-center justify-center font-mono font-semibold text-foreground bg-muted border border-border-strong border-b-[2px] rounded-md shadow-sm leading-none align-middle",
-				// `h-target min-w-target` (issue #1679), not `h-6 min-w-[24px]`: this
-				// doc comment already claimed a "24x24 cap" and `h-6` stopped
-				// delivering it the moment `--spacing` moved to the 3px rhythm for
-				// #1670 (18px, not 24) - the two sides of the cap now read from the
-				// same floor rather than one fixed and one drifting with density.
+				// `h-target min-w-target` (#1679), not `h-6 min-w-[24px]`: `h-6` is 18px under the
+				// 3px `--spacing` (#1670), so both sides of the 24px cap read one floor.
 				size === "default" && "h-target min-w-target px-1.5 text-xs",
 				size === "sm" && "h-[18px] min-w-[18px] px-1 text-micro",
 				className
