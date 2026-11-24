@@ -33,8 +33,8 @@ export const API_ENDPOINTS = {
 	REQUEST_DEFAULTS: `/request-defaults`,
 
 	// Collections. POST the collection path to create; PUT the by-id path to
-	// update. The engine split the verbs in #95 - POST no longer upserts, so an
-	// update sent as a POST is a 409, and a create sent as a PUT is a 404.
+	// update. POST is create-only (#95), so an update sent as a POST is a 409, and a
+	// create sent as a PUT is a 404.
 	COLLECTIONS: `/collections`,
 	COLLECTION_BY_ID: (id: string) => `/collections/${id}`,
 	COLLECTIONS_UPDATE: (id: string) => `/collections/${id}`,
@@ -248,8 +248,7 @@ export const API_ENDPOINTS = {
 			: `/runs/${runId}/monitor?maxPoints=${maxPoints}`,
 
 	// Import. FETCH proxies a remote collection past CORS; APPLY persists the
-	// whole parsed tree in one atomic call and returns the temp-id -> real-id map
-	// (the import path no longer creates items one POST at a time).
+	// whole parsed tree in one atomic call and returns the temp-id -> real-id map.
 	// PARSE turns a raw document into that tree - every format the app accepts,
 	// read by the engine's one reader (issue #877). DOCUMENT is the narrower
 	// half of it: a document's bytes as a JSON DOM, which is all the ref bundler
