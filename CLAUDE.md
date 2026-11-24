@@ -12,7 +12,8 @@ React UI, communicating over HTTP on port 9876.
   (clang-tidy on the C++ a push changes), `install-git-hooks.sh`, `test/`
   (load-test fixtures + mock server, installer and hook suites), `perf/` (the
   weekly measurement harness), `cxx-feature-probe`, `vendor-js/` (rebuilds a
-  vendored script library from its npm tarballs)
+  vendored script library from its npm tarballs), `docs-split/` (the committed
+  script of a doc split, with its no-loss proof)
 
 This file holds only what applies to *every* session. Deeper material loads on
 demand - see [Where the rest lives](#where-the-rest-lives) at the bottom. Every
@@ -276,8 +277,18 @@ narration (`used to`, `until #N`, `since #N landed`, an issue number in a
 heading; rationale is allowed). `scripts/docs-lint.py` holds this in the
 `Docs site` workflow. A page already over a budget has a ceiling in
 `scripts/docs-lint-ceilings.json` that may only be lowered, and a stale one
-fails; split or trim the page instead of raising a ceiling. `CONTRIBUTING.md`
-has the local command.
+fails; split or trim the page instead of raising a ceiling. A page split out
+of one that is gone may carry that page's ceilings and no higher.
+`CONTRIBUTING.md` has the local command.
+
+**A table or count derived from a registry is generated, never kept by hand.**
+The MCP tool table and the one line that states how many tools, resources and
+prompts exist are rendered from the registries into
+`docs/engine/mcp/tools.md`. `tools-doc.fresh.test.ts` fails when the committed
+page differs from the render and names the command that rewrites it
+(`pnpm docs:mcp-tools`, from `app/`); `tool-count-docs.test.ts` fails any other
+page that states a count. A new tool changes its `*.tools.ts` file and the
+generated page, and no prose page.
 
 **Deferred work is filed as a GitHub issue in the same commit that defers it.**
 There is no backlog file; the tracker is the only backlog. A comment saying
