@@ -6,7 +6,6 @@
  */
 
 /**
- * @file variables.tools.ts
  * @brief Globals and variable resolution: `get_globals`, `resolve_variables` and
  *        `update_globals`.
  */

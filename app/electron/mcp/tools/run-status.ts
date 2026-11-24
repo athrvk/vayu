@@ -6,7 +6,6 @@
  */
 
 /**
- * @file run-status.ts
  * @brief Whether a run is still going: the `get_run` projection, the partial
  *        marker on a report read mid-run and the `nextStep` the start tools hand
  *        back (#2436).

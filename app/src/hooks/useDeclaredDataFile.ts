@@ -7,7 +7,7 @@
 
 /**
  * The file a collection's data contract was last run with, re-read from disk
- * (issue #599, through the chain since #729, shared since #1039).
+ * (issue #599; through the chain, #729; shared, #1039).
  *
  * Two dialogs start a run that can bind `{{data.*}}`: the Run collection dialog
  * and the load dialog. Both want the same opening state - "the file you

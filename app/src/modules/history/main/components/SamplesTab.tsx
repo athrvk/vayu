@@ -6,8 +6,6 @@
  */
 
 /**
- * SamplesTab Component
- *
  * Displays sampled request details for load tests.
  */
 

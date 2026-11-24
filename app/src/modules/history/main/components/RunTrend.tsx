@@ -6,8 +6,6 @@
  */
 
 /**
- * RunTrend
- *
  * p95 latency, throughput and error rate across the runs of one request or one
  * collection (#2165), under the open run's own Performance charts: a run's
  * report answers "how did this one go", this answers "is it getting better or

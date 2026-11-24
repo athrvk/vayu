@@ -15,9 +15,7 @@
  * (`panels/body/graphql-method.ts`, issue #1505). A ref-based record could not
  * survive a reload, so a stale auto-written value was then indistinguishable
  * from one the user chose; a value on the request itself is exactly as
- * durable as the rest of the request. The generic per-request slot that held
- * these records (`useAutoRecordSlot`) went with the last of them - see the
- * VCS history for its shape if a future setting needs the pattern again.
+ * durable as the rest of the request.
  *
  * {@link UNSAVED_AUTO_KEY} outlives that slot: the Send-with-row picker's row
  * memory (issue #1271) still is a provider-held per-request map, and needs

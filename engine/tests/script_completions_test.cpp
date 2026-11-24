@@ -334,7 +334,7 @@ TEST (ScriptCompletions, TheCookieJarsWriteHalfIsOffered) {
 }
 
 // The same drift, on the variable scopes: `pm.variables` was offered by
-// `scripting.md` for months while the runtime had no such object, and every
+// The scripting guide for months while the runtime had no such object, and every
 // scope method added in #184 is invisible in the editor until it is listed
 // here. Both directions are defects, so both are checked - an offered method
 // the runtime lacks throws "is not a function" the moment it is accepted, and a
@@ -1115,7 +1115,7 @@ TEST (ScriptCompletions, TheContentTypeSnippetPassesAgainstAJsonResponse) {
 // reverse for one named surface (the cookie jar's write half, the variable
 // scopes, the expect matchers). So a whole new `pm.*` surface could be bound
 // and listed nowhere and nothing failed - which is exactly what happened to
-// `pm.iterationData`: shipped by #356, documented in scripting.md, and absent
+// `pm.iterationData`: shipped by #356, documented in the scripting guide, and absent
 // from all 126 completion entries. The #337 closure verification predicted it
 // in those words, and the very next surface fell through.
 //

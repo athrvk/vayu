@@ -6,7 +6,6 @@
  */
 
 /**
- * @file variable-blobs.ts
  * @brief Read-merge-write for the variable blobs environments and globals keep.
  *
  * Environments and globals store their variables as one JSON blob that every

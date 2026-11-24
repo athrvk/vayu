@@ -216,7 +216,7 @@ A failed transfer is not given that test, since it already fails its step as an 
 **Where it is reported.**
 An `mcp` request's response carries `mcp`, on the live `POST /execute` answer and on the stored trace's `response` node alike: `{}` for a reply that succeeded, `{ "errorClass", "code"?, "message" }` for one that failed, `code` being the JSON-RPC `error.code` when there was one.
 Absent for every other body mode.
-Scripts read the same object as `pm.response.mcp` ([scripting](../scripting.md#pmresponsemcp---an-mcp-replys-failure-class)).
+Scripts read the same object as `pm.response.mcp` ([scripting](../scripting/response.md#pmresponsemcp---an-mcp-replys-failure-class)).
 
 **Under load** a failed reply whose status reads as a success (2xx, 3xx) is recorded as an error of the run under the error type `mcp_transport`, `mcp_protocol` or `mcp_tool` (`error_types` in the summary, `error_type` on the stored error record, which also carries the `mcp` node), and in a scenario run as its step's `httpErrors` too.
 Like every completion recorded with an error type, it is bucketed under status `0` in the status distribution.

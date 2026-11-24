@@ -6,7 +6,6 @@
  */
 
 /**
- * @file oauth2.ts
  * @brief The OAuth 2.0 token-cache tools' inputs, and the projections that
  *        keep a token's bytes out of their answers.
  */

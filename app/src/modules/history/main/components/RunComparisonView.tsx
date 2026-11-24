@@ -6,8 +6,6 @@
  */
 
 /**
- * RunComparisonView
- *
  * The open load run against any other finished load run of the same request or
  * collection:
  * every latency percentile, both throughput measures, the reliability rows and

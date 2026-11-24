@@ -609,15 +609,6 @@ export default function RequestBuilderProvider({
 	 * `memoryKey`, because two id-less builders are not one builder (issue
 	 * #1272). Spelled once rather than per map - the maps share a sweep, and two
 	 * spellings of one rule are how they drift apart.
-	 *
-	 * The Content-Type row a body mode adds, the `Accept: text/event-stream`
-	 * row the Event stream toggle adds, and the method the GraphQL mode sets
-	 * (issue #1228) used to all be tracked this way - an in-memory record that
-	 * could not survive a reload, leaving a stale auto-written value
-	 * indistinguishable from one the user chose (issue #1481). All three now
-	 * carry their own ownership on the request's own state (`KeyValueEntry.source`
-	 * for the two rows, `RequestState.methodSource` for the method, issue
-	 * #1505) and need no slot here.
 	 */
 	const memoryKey = declaredMemoryKey ?? request.id ?? UNSAVED_AUTO_KEY;
 	/*
@@ -925,8 +916,7 @@ export default function RequestBuilderProvider({
 			setRestoredFor(null);
 			/*
 			 * No id, so there is no stored response to restore - fall back to
-			 * the one handed in. Clearing it unconditionally (as it used to)
-			 * threw away `initialResponse`, and a detached copy opened showing
+			 * the one handed in. Clearing it unconditionally threw away `initialResponse`, and a detached copy opened showing
 			 * "No response yet".
 			 */
 			setLocalResponse(initialResponse ?? null);
@@ -940,9 +930,8 @@ export default function RequestBuilderProvider({
 	} else if (initialRequest && lastReset.collectionId !== collectionId) {
 		/*
 		 * The same request, moved to a different collection underneath us
-		 * (issue #1436, the `move_item` case). The reset above used to treat
-		 * this exactly like a different request and discard the whole draft;
-		 * now only `collectionId` moves; a dirty body or headers survive.
+		 * (issue #1436, the `move_item` case). Only `collectionId` moves; a
+		 * dirty body or headers survive.
 		 */
 		setLastReset((prev) => ({ ...prev, collectionId }));
 		const nextCollectionId = collectionId || null;
@@ -965,9 +954,7 @@ export default function RequestBuilderProvider({
 	}
 
 	/*
-	 * The per-field three-way merge (issue #1436), generalizing what used to be
-	 * a name-only special case (`useEntityDraft` and #1437's `InfoTab` proved
-	 * the shape first, for the collection tabs).
+	 * The per-field three-way merge (issue #1436).
 	 *
 	 * A field the user has not touched since the last known-good value adopts
 	 * an external change silently - `setRequestState`, never `setRequest`,

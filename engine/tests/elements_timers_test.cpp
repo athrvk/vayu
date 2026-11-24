@@ -455,8 +455,8 @@ TEST (SharedThroughputBudgetsTest, ConcurrentClaimsNeverCollideOnTheSameSlot) {
 // ============================================================================
 // C, D. Sequential-run behaviour - a real design-mode collection run driven
 // through RunManager, following scenario_runner_test.cpp's own shape
-// (ScenarioRunnerTest's fixture is file-local there, so this is a smaller
-// sibling of it rather than a reuse of its class).
+// (ScenarioRunnerTest's fixture is in scenario_runner_fixture.hpp; this is a
+// smaller sibling of it rather than a reuse of its class).
 // ============================================================================
 
 /// Two endpoints, both instant 200s - the point of every test below is
@@ -548,7 +548,7 @@ class ElementsTimersRunnerTest : public ::testing::Test {
     }
 
     /// Resolve, create the run row and start the worker - `start_scenario` in
-    /// `scenario_runner_test.cpp`'s own shape, with one addition: an
+    /// `scenario_runner_fixture.hpp`'s own shape, with one addition: an
     /// `elements` run override (issue #1498's `elements.seed` /
     /// `elements.timers`), absent by default. A fresh run id per call, so a
     /// test that starts more than one run (the reproducibility pair) never
@@ -715,7 +715,7 @@ TEST_F (ElementsTimersRunnerTest, ElementsTimersOffSilencesAConfiguredThinkTime)
 // the same "stop is honoured without finishing what is already in flight"
 // contract `timer.think` gets from its own should_stop poll (mirrored here
 // from AStopIsHonouredBetweenStepsNotAfterTheIteration in
-// scenario_runner_test.cpp, adapted to pacing).
+// scenario_runner_events_test.cpp, adapted to pacing).
 //
 // NOTE: `timer.pacing` runs at `step.before`, dispatched through
 // `execute_exchange` (request_exchange.cpp), whose `ElementContext` binds

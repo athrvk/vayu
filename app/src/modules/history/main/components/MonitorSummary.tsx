@@ -6,11 +6,8 @@
  */
 
 /**
- * MonitorSummary Component
- *
  * The per-series min/max/avg the engine recorded for a run's server-vitals
- * scrape. The chart above it answers "when"; this answers "how high did it get",
- * which previously could only be read by hovering the line.
+ * scrape. The chart above it answers "when"; this answers "how high did it get".
  *
  * It also states the two kinds of missed scrape a chart cannot draw, because
  * both look like an empty panel and need different fixes (#3120): a failure (no

@@ -249,7 +249,7 @@ TEST_F (ScriptEngineTest, UnknownDigestEncodingNamesTheValidOnes) {
 TEST_F (ScriptEngineTest, PreRequestScriptSignsTheOutgoingRequest) {
     // #109's write-back and #187's crypto meeting: the headline use case the
     // issue named. The signature is over the canonical string built from
-    // pm.request *after* the other edits, which is what scripting.md teaches.
+    // pm.request *after* the other edits, which is what the scripting guide teaches.
     auto result = engine.execute_prerequest (R"JS(
         var timestamp = '1700000000';
         var canonical = [pm.request.method, pm.request.url, timestamp].join('\n');

@@ -8,13 +8,9 @@
 /**
  * Resolving a request's auth down to the record the engine is sent.
  *
- * This file used to be `auth-mapping.ts` and was mostly a translator: the
- * builder held a flat editor-local auth shape (`AuthType` + `AuthConfigState`),
- * so every load, save and execute had to convert to and from the domain
- * `RequestAuth`. The builder now holds `RequestAuth` itself, so the translation -
- * and the `apikey`/`api-key`, `in`/`addTo` rename traps that came with it - is
- * gone. What remains is the part that was never mapping: walking the collection
- * chain for `inherit`, and flattening a concrete auth for the wire.
+ * The builder holds `RequestAuth` itself, so there is no translation to the
+ * domain shape here: this walks the collection chain for `inherit`, and
+ * flattens a concrete auth for the wire.
  */
 
 import { containsVariableToken } from "@/constants/variables";

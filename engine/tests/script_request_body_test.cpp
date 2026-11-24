@@ -510,7 +510,7 @@ TEST_F (ScriptRequestBodyTest, AFormBodyStillReadsAsItsFieldsInAStringContext) {
  * `String.prototype` is a String exotic object holding "", so an object that
  * only inherits from it answers `0` here. Deleting the own definition makes this
  * test read 0 for a 24-character body, which is the silent wrong answer the
- * object is built to avoid - and `docs/engine/scripting.md`'s worked example
+ * object is built to avoid - and `docs/engine/scripting/console-and-examples.md`'s worked example
  * sets Content-Length from exactly this.
  */
 TEST_F (ScriptRequestBodyTest, LengthIsTheBodysOwnLengthAndNotTheInheritedZero) {

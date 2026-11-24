@@ -667,7 +667,7 @@ JavaScript execution engine for pre-request and test scripts:
 
 - **Postman-compatible API**: `pm.test()`, `pm.expect()`, `pm.response`, etc.
 - **Mutable request**: a pre-request script's `pm.request` writes are applied to the
-  request before it is sent (see `docs/engine/scripting.md`)
+  request before it is sent (see `docs/engine/scripting/request-mutation.md`)
 - **Signing**: `pm.crypto.sha256` / `.hmacSha256` plus the `btoa` / `atob` globals, so
   a pre-request script can sign the request it just rewrote. Backed by **libsodium**
   through `utils/sha256.hpp` (shared with PKCE) and `utils/encoding.hpp` - the engine
@@ -1075,7 +1075,7 @@ never a fresh read of the stored rows, and teardown reads the original. Each
 sample's `pm.request` is re-derived from the request the run built and the
 row and identity the sample recorded (`request_as_submitted`,
 `step_request_as_submitted`), so nothing is retained per sample - see
-[scripting.md](scripting.md#load-test-scripts).
+[scripting/execution-context.md](scripting/execution-context.md#load-test-scripts).
 
 ### Database (`SQLite`)
 

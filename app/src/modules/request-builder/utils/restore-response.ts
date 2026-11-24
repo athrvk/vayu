@@ -125,11 +125,9 @@ export function eventsFromTrace(
  * Both transports write it. A streaming send has no choice - it was answered
  * `202` before its post-request script had run, so the trace is the only route
  * its results ever take - and a buffered send stores the same object it also
- * returns in the `/execute` body. Until #725 it stored nothing, so a restored
- * ordinary send showed the Tests pane's empty state whether its assertions had
- * passed or never run.
+ * returns in the `/execute` body.
  *
- * A trace written before that fix carries no node, which is why an absent one
+ * A trace written before #725 carries no node, which is why an absent one
  * is read as "no results" rather than as a failure.
  *
  * The keys are the engine's own (`build_script_result_node`), identical to the
