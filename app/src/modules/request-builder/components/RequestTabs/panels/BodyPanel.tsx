@@ -16,7 +16,7 @@
  * plus an XML document the user writes whole, so the mode buys highlighting
  * (Monaco's `xml` basic language ships in the bundle already, for the response
  * viewer), the `{{` completion every other body language gets
- * (`BODY_LANGUAGES`, which this mode was missing from until #1214) and an
+ * (`BODY_LANGUAGES`, #1214) and an
  * auto-`Content-Type: application/xml` - not an editor of its own. The engine
  * sends its content byte for byte, with no envelope of any kind.
  *
@@ -33,24 +33,13 @@
  * is the tool its `Mcp-Param-*` headers are read from, and a note on where the
  * derived headers appear.
  *
- * **GraphQL used to live here**, and was roughly 40% of the file - the only
- * mode with an editor pair, an introspection lifecycle and a header side effect
- * of its own. It is its own component now.
- *
  * **Choosing GraphQL still adds a Content-Type header, but says so - and
- * leaving GraphQL removes it again.** It used to write `Content-Type:
- * application/json` into `request.headers` in silence, on a tab you are not
- * looking at, and never take it back - so picking GraphQL once and returning to
- * None left the header behind for good, on a request that sends no body at all.
- * The header is genuinely required, so it is still added; what changed is that
+ * leaving GraphQL removes it again.** The header is genuinely required, so it is still added; what changed is that
  * the panel announces it, and that the next mode change takes back the row it
  * wrote (`body/content-type.ts`, by row id - a Content-Type the user typed is
  * indistinguishable by value and must survive).
  *
- * **The resolved preview swaps rather than splits.** It used to put the editor
- * and a read-only echo side by side at `grid-cols-2`, so the code you are
- * editing gave up half its width - about 250px each on a narrow response split.
- * A resolved body is something you glance at to confirm, not something you read
+ * **The resolved preview swaps rather than splits.** A resolved body is something you glance at to confirm, not something you read
  * alongside, so the two share one full-width surface.
  *
  * **The editor fills the pane rather than a fixed box.** It was 320px of
@@ -197,8 +186,8 @@ export default function BodyPanel() {
 	}
 
 	/*
-	 * What GraphQL introspection needs, unresolved: since #228 it composes
-	 * engine-side, so the URL, the header rows and the auth block go over as
+	 * What GraphQL introspection needs, unresolved: it composes
+	 * engine-side (#228), so the URL, the header rows and the auth block go over as
 	 * typed and `POST /compose` resolves them - including an `inherit` that only
 	 * the collection chain can settle, which is what an Auth-panel-authed
 	 * endpoint needs to answer introspection at all.
@@ -301,8 +290,7 @@ export default function BodyPanel() {
 		/*
 		 * GraphQL means something different on a GET - the document travels as
 		 * query parameters and a mutation cannot be sent at all - and a new
-		 * request is a GET, so picking the mode used to build a request the
-		 * server answered with a bare 400 (issue #1228). The method moves the
+		 * request is a GET (issue #1228). The method moves the
 		 * same reversible way the header above does, and back again on the way
 		 * out; `graphql-method.ts` is the rule, including why a method the user
 		 * chose is left alone in both directions. Both fields write in one call,
@@ -403,10 +391,7 @@ export default function BodyPanel() {
 					</Select>
 
 					{/*
-					 * What actually goes on the wire, beside the picker. It used to
-					 * appear only *inside* the dropdown, so once a mode was chosen the
-					 * content type it implies was one click away and invisible the rest
-					 * of the time.
+					 * What actually goes on the wire, beside the picker.
 					 */}
 					{wireContentType ? (
 						<code className="truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-label text-muted-foreground">

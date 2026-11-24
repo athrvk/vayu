@@ -295,7 +295,7 @@ still survives a tab switch and a return (issue #659), because neither of those
 is a send. Closing the request's tab does drop it, which is not the same act: it
 ends the memory rather than unbinding the row, and it is what bounds a map the
 provider would otherwise hold for the life of the session (issue #1271, see
-[`state-management.md`](state-management.md#requestbuildercontext---the-headers-a-setting-added)).
+[`state-management/request-builder-context.md`](state-management/request-builder-context.md#requestbuildercontext---the-headers-a-setting-added)).
 
 **Why the renderer can show this and composition cannot.** A plan is composed
 once, before any row exists to bind, so composition still defers both

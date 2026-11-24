@@ -26,11 +26,9 @@
  * they have chosen *since* is never reverted, which is the same rule
  * `switchAutoHeader` states as "a row edited by hand is no longer ours".
  *
- * Ownership used to live in a ref the provider held, keyed by request id -
- * which meant nothing survived a reload, and a stale `POST` was then
- * indistinguishable from one the user picked (issue #1505, the same gap
- * #1481 closed for the Content-Type and Accept rows). `Request.methodSource`
- * is the fix, on the row itself rather than beside it: `MethodSelector`
+ * Ownership is `Request.methodSource` (issue #1505, the same gap #1481 closed
+ * for the Content-Type and Accept rows), on the row itself rather than beside
+ * it, so it survives a reload: `MethodSelector`
  * clears it the moment the user picks a method by hand, the same way retyping
  * a marked header row clears `KeyValueEntry.source`.
  *
