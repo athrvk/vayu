@@ -9,11 +9,11 @@
  * The sync comparison (#654, #854); the header gives the four rules this must
  * not lose.
  *
- * A port of the renderer's `spec-diff.ts` held to the same answers, not the
- * same code, for the reason `openapi_drafts.cpp` gives about the drafts it
- * compares: both halves must agree on what a document produces, or a field
- * reads as changed on a document nobody edited. The renderer's copy is gone, so
- * this is the one answer.
+ * A port of the renderer's `app/src/services/openapi/spec-diff.ts` held to the
+ * same answers, not the same code, for the reason `openapi_drafts.cpp` gives
+ * about the drafts it compares: both halves must agree on what a document
+ * produces, or a field reads as changed on a document nobody edited. The
+ * renderer's copy is gone, so this is the one answer.
  */
 
 #include "vayu/core/spec_diff.hpp"
