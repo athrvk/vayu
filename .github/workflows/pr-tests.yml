@@ -408,6 +408,8 @@ jobs:
               # job), and its test pins how.
               - 'scripts/suite-fingerprint.py'
               - 'scripts/test/suite_fingerprint_test.py'
+              - 'scripts/docs-lint.py'
+              - 'scripts/test/docs_lint_test.py'
               - 'scripts/test/vcpkg_baseline_test.py'
               # The benchmark script's mode names are read out of types.hpp.
               - 'scripts/test/bench-compare.sh'
@@ -1509,6 +1511,11 @@ jobs:
 
       - name: Test the suite fingerprint
         run: python3 scripts/test/suite_fingerprint_test.py
+
+      # The docs gate itself (#3846): the lint runs in `Docs site`, and this is
+      # what proves each of its rules still fires.
+      - name: Test the docs lint
+        run: python3 scripts/test/docs_lint_test.py
 
   # Shell and Python (#887) - the two languages nothing else in this workflow
   # reads. Both checks are seconds of work on a runner that needs neither a C++
