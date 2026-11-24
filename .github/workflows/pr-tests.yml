@@ -277,7 +277,7 @@ jobs:
               - 'docs/app/data-driven-runs.md'
               - 'docs/app/COMPONENTS.md'
               - 'docs/index.md'
-              - 'docs/engine/mcp.md'
+              - 'docs/engine/mcp/**'
               - 'docs/compare/vayu-vs-bruno.md'
               - 'docs/compare/vayu-vs-postman.md'
               - 'docs/compare/vayu-vs-jmeter.md'

@@ -58,6 +58,15 @@ export function filterGlob(entry: string): string {
 	return entry.endsWith("/") ? `${entry}**` : entry;
 }
 
+/**
+ * Whether a registry entry routes @p path: the file itself, or the directory it
+ * sits under. A guard that reads one page of a split directory asserts this, so
+ * moving the page out of the directory is red here and not silently unrouted.
+ */
+export function entryCovers(entry: string, path: string): boolean {
+	return entry.endsWith("/") ? path.startsWith(entry) : entry === path;
+}
+
 function hasMarkdown(directory: string): boolean {
 	return readdirSync(directory).some((name) => {
 		const path = join(directory, name);
@@ -192,20 +201,31 @@ export const DOC_READING_GUARDS = {
 	},
 	/*
 	 * The one guard whose input is a *number* in prose (#1431): the MCP tool
-	 * registry grows by a tool, and every page that says how many there are
-	 * stays on the figure that was true when it was written - 24 on two pages,
-	 * 49 on two more, against 68 in `TOOLS`. The pages that name no count are
-	 * listed too, so the guard covers them from the day one is added. The
-	 * resource and prompt totals ride the same pages (#2108).
+	 * registry grows by a tool, and a page that states how many there are stays
+	 * on the figure that was true when it was written - 24 on two pages, 49 on
+	 * two more, against 68 in `TOOLS`. So no page states one except the
+	 * generated `docs/engine/mcp/tools.md`, and this guard fails a page that
+	 * does. The pages that name no count are listed too, so the guard covers
+	 * them from the day one is added. The resource and prompt totals ride the
+	 * same pages (#2108).
 	 */
 	mcpToolCount: {
 		reader: "app/electron/mcp/tool-count-docs.test.ts",
 		paths: [
 			"docs/index.md",
-			"docs/engine/mcp.md",
+			"docs/engine/mcp/",
 			"docs/compare/vayu-vs-bruno.md",
 			"docs/compare/vayu-vs-postman.md",
 		],
+	},
+	/*
+	 * `docs/engine/mcp/tools.md` is the tool table and the count, rendered from
+	 * the registry (#3848); the guard holds the committed page equal to the
+	 * render. The write roster in `safety.md` is read by `mcpToolCount` above.
+	 */
+	mcpToolsDoc: {
+		reader: "app/electron/mcp/tools-doc.fresh.test.ts",
+		paths: ["docs/engine/mcp/"],
 	},
 	/*
 	 * The JMeter comparison page's claim about which logic controllers the
@@ -224,7 +244,7 @@ export const DOC_READING_GUARDS = {
 	 */
 	agentReference: {
 		reader: "app/src/lib/agent-reference.docs.test.ts",
-		paths: ["docs/engine/mcp.md"],
+		paths: ["docs/engine/mcp/"],
 	},
 	/*
 	 * The app-side logger (#1558) is a from-scratch port of the engine's
@@ -592,9 +612,8 @@ export const ROOT_READING_GUARDS = {
 		paths: ["scripts/perf/measure-app.mjs"],
 	},
 	/*
-	 * The README states the MCP tool count twice, so the doc guard above reads
-	 * it as well - the same number, drifting for the same reason (#1431), and
-	 * the resource and prompt totals with it (#2108).
+	 * The README is read by the doc guard of the same name above: it is the
+	 * page a count drifted on first (#1431), and it states none now.
 	 */
 	mcpToolCount: {
 		reader: "app/electron/mcp/tool-count-docs.test.ts",
