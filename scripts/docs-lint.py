@@ -12,6 +12,12 @@ Per page it measures:
   history     phrases that narrate what was          0
   description a front-matter `description:`          required
 
+The three CLAUDE.md guides are held to one budget of their own, the lines they
+may carry, and to nothing else: a guide holds rules, and reference belongs on a
+page under docs/ that the guide links.
+
+  lines       lines in a guide                       400
+
 A page over a budget has an entry in scripts/docs-lint-ceilings.json holding the
 value it had when the entry was written, and is held to that instead. The file
 may only shrink: an entry whose page is now within budget (or gone) fails as
@@ -57,12 +63,18 @@ from pathlib import Path
 
 LINES_BUDGET = 600
 LINES_BUDGET_REFERENCE = 1000
+LINES_BUDGET_GUIDE = 400
 LINE_LENGTH_BUDGET = 400
 CELL_LENGTH_BUDGET = 200
 
 # The measured values a ceiling may hold, in the order they are reported. A
 # missing description is not here: it is a plain failure, never an entry.
 METRICS = ("lines", "max_line", "long_lines", "max_cell", "history")
+
+# The guides a session reads first, relative to the repository root. They are
+# held to a line budget and to no other, and have no front matter.
+GUIDES = ("CLAUDE.md", "app/CLAUDE.md", "engine/CLAUDE.md")
+GUIDE_METRICS = ("lines",)
 
 _WHAT = {
     "lines": "lines",
@@ -162,9 +174,10 @@ def measure_page(text: str) -> dict:
     }
 
 
-def budget(metric: str, reference: bool) -> int:
+def budget(metric: str, reference: bool, guide: bool = False) -> int:
+    lines = LINES_BUDGET_GUIDE if guide else LINES_BUDGET_REFERENCE if reference else LINES_BUDGET
     return {
-        "lines": LINES_BUDGET_REFERENCE if reference else LINES_BUDGET,
+        "lines": lines,
         "max_line": LINE_LENGTH_BUDGET,
         "long_lines": 0,
         "max_cell": CELL_LENGTH_BUDGET,
@@ -194,6 +207,8 @@ def parse_ceilings(raw: str, source: str) -> dict:
         for metric, value in entry.items():
             if metric not in METRICS:
                 raise CeilingsError(f"{source}: {page}: unknown ceiling '{metric}'")
+            if page in GUIDES and metric not in GUIDE_METRICS:
+                raise CeilingsError(f"{source}: {page}: a guide holds a ceiling for its lines only")
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise CeilingsError(f"{source}: {page}: '{metric}' must be a whole number")
     return data
@@ -204,11 +219,12 @@ def is_reference(page: str, ceilings: dict) -> bool:
 
 
 def page_findings(page: str, measured: dict, entry: dict, reference: bool) -> list[str]:
+    guide = page in GUIDES
     found = []
-    if not measured["description"]:
+    if not guide and not measured["description"]:
         found.append("no front-matter `description:` (it is the page's meta and social-card text)")
-    for metric in METRICS:
-        value, limit = measured[metric], budget(metric, reference)
+    for metric in GUIDE_METRICS if guide else METRICS:
+        value, limit = measured[metric], budget(metric, reference, guide)
         ceiling = entry.get(metric)
         if ceiling is None and value > limit:
             found.append(f"{value} {_WHAT[metric]}, over the budget of {limit}")
@@ -306,20 +322,25 @@ def raised_entries(ceilings: dict, baseline: dict) -> list[tuple[str, str]]:
 
 def read_pages(root: Path) -> dict[str, dict]:
     docs = root / "docs"
-    return {
+    pages = {
         path.relative_to(root).as_posix(): measure_page(path.read_text(encoding="utf-8"))
         for path in sorted(docs.rglob("*.md"))
     }
+    for guide in GUIDES:
+        if (root / guide).is_file():
+            pages[guide] = measure_page((root / guide).read_text(encoding="utf-8"))
+    return pages
 
 
 def seed(pages: dict[str, dict], ceilings: dict) -> dict:
     entries = {}
     for page, measured in sorted(pages.items()):
         reference = is_reference(page, ceilings)
+        guide = page in GUIDES
         over = {
             metric: measured[metric]
-            for metric in METRICS
-            if measured[metric] > budget(metric, reference)
+            for metric in (GUIDE_METRICS if guide else METRICS)
+            if measured[metric] > budget(metric, reference, guide)
         }
         if over:
             entries[page] = over
@@ -334,7 +355,7 @@ def lint(root: Path, baseline: dict | None) -> tuple[list[str], dict]:
     ceilings_path = root / "scripts" / "docs-lint-ceilings.json"
     ceilings = parse_ceilings(ceilings_path.read_text(encoding="utf-8"), ceilings_path.name)
     pages = read_pages(root)
-    if not pages:
+    if not any(page.startswith("docs/") for page in pages):
         raise CeilingsError(f"no pages found under {root / 'docs'}: the root is wrong")
 
     problems: list[tuple[str, str]] = []
@@ -350,7 +371,8 @@ def lint(root: Path, baseline: dict | None) -> tuple[list[str], dict]:
     for page in dict.fromkeys(page for page, _ in problems):
         measured = pages.get(page)
         if measured:
-            values = ", ".join(f"{metric} {measured[metric]}" for metric in METRICS)
+            shown = GUIDE_METRICS if page in GUIDES else METRICS
+            values = ", ".join(f"{metric} {measured[metric]}" for metric in shown)
             report.append(f"  measured {page}: {values}")
     return report, pages
 
