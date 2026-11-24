@@ -11,9 +11,7 @@
  *
  * Its own module because it once had two renderers - the schema explorer's
  * header and the Query pane's chip - and a second copy in one of them would be a
- * copy that does not receive the other's fixes; the two used to say the same
- * thing in different words from different panes, which is the split #455 was
- * filed about. The badge now renders once, in the Query header's schema control,
+ * copy that does not receive the other's fixes (#455). The badge now renders once, in the Query header's schema control,
  * in the same place whether the explorer is open or shut (#1224). `BadgeText`,
  * the tier under it, still has other callers in the body.
  *
@@ -145,8 +143,7 @@ function schemaBadgeFace(entry: SchemaEntry | null, awaitingLoad: boolean): Sche
  *
  * **Rendered unconditionally**, the contract `TabCount` states for the same
  * reason: it no longer returns `null` for `idle`, so no call site has to
- * remember a fallback, and the fallback the Query header used to hand-roll for
- * that case (a plain `Schema` label) is now this component's `idle` face.
+ * remember a fallback.
  */
 export function SchemaStatusBadge({
 	entry,

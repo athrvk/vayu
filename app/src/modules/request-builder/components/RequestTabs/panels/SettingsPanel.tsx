@@ -51,12 +51,7 @@
  * says which of the two the reader probably wants: trusting the authority in
  * Settings › Network & connectivity keeps verification on everywhere.
  *
- * **The rows are the app-settings rows** (issue #702). This tab used to
- * hand-roll a toggle arrangement, a number field and a labelled dropdown that
- * `SettingControls` already defines, and paid for it twice over: the rows drifted
- * from the settings screen's, and its `h3` section headings were `text-sm
- * font-medium` - the same type as the control labels below them - so six
- * sibling headings read where three groups were meant. Sections are `Eyebrow`
+ * **The rows are the app-settings rows** (issue #702). Sections are `Eyebrow`
  * now (11px, uppercase, muted), and a section holding one row *is* that row,
  * which is why Protocol and Streaming carry no heading of their own.
  *

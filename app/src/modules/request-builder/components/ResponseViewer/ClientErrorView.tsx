@@ -230,12 +230,10 @@ export default function ClientErrorView({
 				</div>
 
 				{/*
-				 * A lucide glyph, not the emoji this tip used to open with. That was
-				 * the only emoji in `modules/`, and it rendered in the OS emoji font:
+				 * A lucide glyph, not an emoji: an emoji renders in the OS emoji font,
 				 * full colour beside 12px muted text, at whatever size and baseline
-				 * that font chose, on a row where every other icon in the app is a
-				 * stroked lucide mark in a token colour. It also sat inside the <p>,
-				 * so it inherited nothing and aligned to nothing.
+				 * that font chooses, on a row where every other icon in the app is a
+				 * stroked lucide mark in a token colour.
 				 */}
 				{hint && (
 					<div className="surface-sunken rounded-md border border-rule p-3 text-left flex items-start gap-2">

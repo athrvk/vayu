@@ -97,10 +97,7 @@ export function requiredContentType(mode: BodyMode): string | null {
  * so the request would go out without the header.
  *
  * Typed on `KeyValueEntry` rather than the UI's `KeyValueItem` because the
- * importers ask the same question of rows that have no `id` yet. An imported
- * GraphQL request used to reach the wire as `x-www-form-urlencoded` - libcurl's
- * default - because this fired only on an interactive mode switch, and most
- * GraphQL servers answer that with a 400.
+ * importers ask the same question of rows that have no `id` yet.
  */
 export function contentTypeToAdd(mode: BodyMode, headers: KeyValueEntry[]): string | null {
 	return autoHeaderToAdd(CONTENT_TYPE, requiredContentType(mode), headers);
