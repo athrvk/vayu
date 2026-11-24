@@ -8,13 +8,12 @@
  */
 
 /**
- * @brief Postman's `{ type, <type>: params }` auth block, read for both
- *        surfaces that take one: `pm.sendRequest`'s `options.auth` and
- *        `pm.request.auth` (#3131).
+ * Postman's `{ type, <type>: params }` auth block, read for both surfaces that
+ * take one: `pm.sendRequest`'s `options.auth` and `pm.request.auth` (#3131).
  *
- * Its own header rather than part of `pm_internal.hpp`: `vayu::http::Auth`
- * lives beside the OAuth 2.0 token cache, whose sqlite_orm include every other
- * `pm/` file would otherwise compile.
+ * A header of its own, not part of `pm_internal.hpp`: `vayu::http::Auth` lives
+ * beside the OAuth 2.0 token cache, whose sqlite_orm include every other `pm/`
+ * file would otherwise compile.
  */
 
 #ifdef VAYU_HAS_QUICKJS
