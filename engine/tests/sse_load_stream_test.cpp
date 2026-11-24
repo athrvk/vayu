@@ -32,10 +32,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -46,6 +48,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/stream_content_marker.hpp"
 #include "vayu/http/stream_tally.hpp"
 #include "vayu/types.hpp"
 #include "wait_until.hpp"
@@ -58,6 +61,14 @@ constexpr std::chrono::milliseconds FIRST_EVENT_DELAY{ 300 };
 /// How long `/paused` waits between its two events, once the client has
 /// counted the first.
 constexpr std::chrono::milliseconds EVENT_PAUSE{ 300 };
+
+/// How long `/preamble` holds its content event, once the client has counted
+/// its preamble event.
+constexpr std::chrono::milliseconds CONTENT_DELAY{ 300 };
+
+/// What `/preamble`'s content event carries and its preamble does not: the
+/// first content marker of an Anthropic-style stream (#3774).
+constexpr std::string_view CONTENT_MARKER = "content_block_delta";
 
 /// The body of every reply that is not a stream: one event's worth of bytes
 /// under another content type.
@@ -151,6 +162,29 @@ class LoadStreamServer {
                 std::this_thread::sleep_for (EVENT_PAUSE);
                 const std::string second = "data: b\n\n";
                 sink.write (second.data (), second.size ());
+                sink.done ();
+                return true;
+            });
+        });
+
+        // An LLM-shaped stream (#3774): a preamble event at once, and the
+        // first content CONTENT_DELAY after the client's tally has counted the
+        // preamble (`preamble_live`, which the test puts on the request), so
+        // the two can never share a write however slowly this runner reads.
+        svr_.Get ("/preamble", [this] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider (
+            "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
+                const std::string preamble =
+                "event: message_start\ndata: {\"type\":\"message_start\"}\n\n";
+                sink.write (preamble.data (), preamble.size ());
+                while (preamble_live_->events.load () == 0 && !stopping_.load ()) {
+                    std::this_thread::sleep_for (std::chrono::milliseconds (1));
+                }
+                std::this_thread::sleep_for (CONTENT_DELAY);
+                const std::string content =
+                "event: content_block_delta\ndata: "
+                "{\"type\":\"content_block_delta\"}\n\n";
+                sink.write (content.data (), content.size ());
                 sink.done ();
                 return true;
             });
@@ -269,6 +303,11 @@ class LoadStreamServer {
         return paused_live_;
     }
 
+    /// The live counters `/preamble` reads; one `/preamble` request per server.
+    [[nodiscard]] std::shared_ptr<vayu::LiveStreamCounts> preamble_live () const {
+        return preamble_live_;
+    }
+
     private:
     httplib::Server svr_;
     std::thread thread_;
@@ -276,6 +315,8 @@ class LoadStreamServer {
     std::atomic<bool> stopping_{ false };
     // Built before the listener thread starts, so the handler reads it safely.
     std::shared_ptr<vayu::LiveStreamCounts> paused_live_ =
+    std::make_shared<vayu::LiveStreamCounts> ();
+    std::shared_ptr<vayu::LiveStreamCounts> preamble_live_ =
     std::make_shared<vayu::LiveStreamCounts> ();
     std::atomic<int> sse_or_429_hits_{ 0 };
 };
@@ -1150,4 +1191,196 @@ TEST (SseClientStreamTest, AStreamCutAfterItAnnouncedKeepsItsEvents) {
     ASSERT_HAS_VALUE (response.stream_events);
     EXPECT_EQ (*response.stream_events, 2u);
     EXPECT_FALSE (response.stream_capped);
+}
+
+// ---------------------------------------------------------------------------
+// The first content marker (issue #3774)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Bounds that watch for @p marker, with caps no test here reaches.
+vayu::StreamBounds marker_bounds (std::string marker) {
+    vayu::StreamBounds bounds{ 60000, 1000 };
+    bounds.first_content_marker =
+    std::make_shared<const vayu::http::StreamContentMarker> (std::move (marker));
+    return bounds;
+}
+
+/// @p chunks fed in order, the i-th at `started + i ms`, then reported onto a
+/// response whose final hop carries @p headers.
+vayu::Response fed_one_ms_apart (const vayu::StreamBounds& bounds,
+const std::vector<std::string_view>& chunks,
+const vayu::Headers& headers = event_stream_headers ()) {
+    const auto started = vayu::http::StreamTally::Clock::now ();
+    vayu::http::StreamTally tally;
+    tally.start (bounds, started);
+    for (std::size_t i = 0; i < chunks.size (); ++i) {
+        tally.feed (chunks[i], headers, started + std::chrono::milliseconds (i));
+    }
+    vayu::Response response;
+    response.headers = headers;
+    tally.report (response);
+    return response;
+}
+
+} // namespace
+
+// A preamble event at 0 ms, the marker split across the writes at 1 and 2 ms.
+// Healthy: first event 0 ms, first match 2 ms, stamped at the write that
+// delivered the marker's last byte. Mutation check: report the first arrival
+// as the match (`since_start_ms (first_arrival_)`) and the match reads 0.
+TEST (StreamTallyMarkerTest, AMarkerSplitAcrossWritesIsTimedAtItsLastByte) {
+    const auto response =
+    fed_one_ms_apart (marker_bounds ("content_block_delta"),
+    { "data: {\"type\":\"message_start\"}\n\n", "data: {\"type\":\"content_bl",
+    "ock_delta\"}\n\n" });
+
+    ASSERT_HAS_VALUE (response.stream_first_event_ms);
+    EXPECT_DOUBLE_EQ (*response.stream_first_event_ms, 0.0);
+    ASSERT_HAS_VALUE (response.stream_first_match_ms);
+    EXPECT_DOUBLE_EQ (*response.stream_first_match_ms, 2.0);
+}
+
+// The same stream one byte per write, the n-th byte at n ms: the marker's last
+// byte is the one timed, whatever the chunking, so the match reads its offset.
+TEST (StreamTallyMarkerTest, AMarkerDeliveredOneByteAtATimeIsTimedAtItsLastByte) {
+    constexpr std::string_view STREAM =
+    "data: {\"delta\":{\"text\":\"Hi\"}}\n\n";
+    constexpr std::string_view MARKER = "\"text\":\"";
+    std::vector<std::string_view> bytes;
+    bytes.reserve (STREAM.size ());
+    for (std::size_t i = 0; i < STREAM.size (); ++i) {
+        bytes.push_back (STREAM.substr (i, 1));
+    }
+
+    const auto response = fed_one_ms_apart (marker_bounds (std::string (MARKER)), bytes);
+
+    const auto last_byte = STREAM.find (MARKER) + MARKER.size () - 1;
+    ASSERT_HAS_VALUE (response.stream_first_match_ms);
+    EXPECT_DOUBLE_EQ (*response.stream_first_match_ms, static_cast<double> (last_byte));
+}
+
+// "aab" in "aaab": the third `a` breaks the partial match "aa", and the match
+// that starts at the second `a` is the real one. Fed whole and split at each
+// near miss. Mutation check: reset `matched` to 0 on a mismatch in
+// `StreamContentMarker::advance` instead of falling back and neither finds it.
+TEST (StreamTallyMarkerTest, AFailedPartialMatchDoesNotHideTheRealOne) {
+    const auto whole = fed_one_ms_apart (marker_bounds ("aab"), { "data: aaab\n\n" });
+    ASSERT_HAS_VALUE (whole.stream_first_match_ms);
+    EXPECT_DOUBLE_EQ (*whole.stream_first_match_ms, 0.0);
+
+    const auto split =
+    fed_one_ms_apart (marker_bounds ("aab"), { "data: a", "a", "a", "b\n\n" });
+    ASSERT_HAS_VALUE (split.stream_first_match_ms);
+    EXPECT_DOUBLE_EQ (*split.stream_first_match_ms, 3.0);
+}
+
+// A marker that never arrives is no measurement, not a 0, beside a first
+// event that is still timed; so is a stream that declared no marker.
+TEST (StreamTallyMarkerTest, AStreamWithoutTheMarkerHasNoMatchTime) {
+    const std::vector<std::string_view> chunks{ "data: {\"type\":\"ping\"}\n\n",
+        "data: {\"type\":\"message_stop\"}\n\n" };
+
+    const auto absent = fed_one_ms_apart (marker_bounds ("content_block_delta"), chunks);
+    EXPECT_TRUE (absent.stream_first_event_ms.has_value ());
+    EXPECT_FALSE (absent.stream_first_match_ms.has_value ());
+
+    const auto undeclared = fed_one_ms_apart (vayu::StreamBounds{ 60000, 1000 },
+    { "data: {\"type\":\"content_block_delta\"}\n\n" });
+    EXPECT_TRUE (undeclared.stream_first_event_ms.has_value ());
+    EXPECT_FALSE (undeclared.stream_first_match_ms.has_value ());
+}
+
+// The first match is the one timed: the marker again at 1 ms changes nothing.
+// Mutation check: drop the `first_match_` test from `scan_for_marker` and the
+// match reads 1.
+TEST (StreamTallyMarkerTest, OnlyTheFirstMatchIsTimed) {
+    const auto response = fed_one_ms_apart (
+    marker_bounds ("delta"), { "data: delta\n\n", "data: delta\n\n" });
+
+    ASSERT_HAS_VALUE (response.stream_first_match_ms);
+    EXPECT_DOUBLE_EQ (*response.stream_first_match_ms, 0.0);
+}
+
+// A reply that did not announce `text/event-stream` is no stream (#3771), so
+// its bytes are never scanned and its marker is no match.
+TEST (StreamTallyMarkerTest, AReplyThatIsNotAStreamIsNotScanned) {
+    vayu::Headers json_headers;
+    json_headers["Content-Type"] = "application/json";
+
+    const auto response =
+    fed_one_ms_apart (marker_bounds ("content_block_delta"),
+    { "{\"type\":\"content_block_delta\"}" }, json_headers);
+
+    EXPECT_FALSE (response.stream_events.has_value ());
+    EXPECT_FALSE (response.stream_first_match_ms.has_value ());
+}
+
+// The write that completes the marker still answers the event cap: the scan
+// adds a measurement, never a reason to keep a capped stream open.
+TEST (StreamTallyMarkerTest, TheWriteThatMatchesStillReachesTheEventCap) {
+    const auto started = vayu::http::StreamTally::Clock::now ();
+    vayu::http::StreamTally tally;
+    auto bounds       = marker_bounds ("delta");
+    bounds.max_events = 1;
+    tally.start (bounds, started);
+
+    EXPECT_TRUE (tally.feed ("data: delta\n\n", event_stream_headers (), started));
+}
+
+TEST (StreamTallyMarkerTest, AnEmptyMarkerIsRefused) {
+    EXPECT_THROW (vayu::http::StreamContentMarker (""), std::invalid_argument);
+}
+
+// `/preamble` sends its preamble event at once and its content CONTENT_DELAY
+// after the client has counted the preamble. Healthy: the match reads at
+// least CONTENT_DELAY (300 ms) and after the first event; stamped at the
+// first event it reads the few milliseconds the preamble took, under both.
+// A lower bound and an ordering only, which a slow runner cannot fail: the
+// server holds the content until the first event is already stamped.
+// Mutation check: report the first arrival as the match and both fail.
+TEST (SseLoadStreamTest, TheFirstContentMarkerIsTimedPastAPreambleEvent) {
+    LoadStreamServer server;
+    vayu::http::EventLoop loop (one_worker ());
+    loop.start ();
+    auto request = stream_request (server.url ("/preamble"), 1000, 30000);
+    ASSERT_HAS_VALUE (request.stream_bounds);
+    request.stream_bounds->live = server.preamble_live ();
+    request.stream_bounds->first_content_marker =
+    std::make_shared<const vayu::http::StreamContentMarker> (std::string (CONTENT_MARKER));
+
+    auto result = run_one (loop, request);
+    loop.stop ();
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_FALSE (response.has_error ()) << response.error_message;
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 2u);
+    ASSERT_HAS_VALUE (response.stream_first_event_ms);
+    ASSERT_HAS_VALUE (response.stream_first_match_ms);
+    EXPECT_GE (*response.stream_first_match_ms,
+    static_cast<double> (CONTENT_DELAY.count ()));
+    EXPECT_LT (*response.stream_first_event_ms, *response.stream_first_match_ms);
+}
+
+// The single-request client keeps the same tally, so a sequential run's step
+// times its marker by the same rule. Bounds and mutation check as above.
+TEST (SseClientStreamTest, TheFirstContentMarkerIsTimedPastAPreambleEvent) {
+    LoadStreamServer server;
+    auto request = stream_request (server.url ("/preamble"), 1000, 30000);
+    ASSERT_HAS_VALUE (request.stream_bounds);
+    request.stream_bounds->live = server.preamble_live ();
+    request.stream_bounds->first_content_marker =
+    std::make_shared<const vayu::http::StreamContentMarker> (std::string (CONTENT_MARKER));
+
+    const auto response = send_one (request);
+
+    EXPECT_FALSE (response.has_error ()) << response.error_message;
+    ASSERT_HAS_VALUE (response.stream_first_event_ms);
+    ASSERT_HAS_VALUE (response.stream_first_match_ms);
+    EXPECT_GE (*response.stream_first_match_ms,
+    static_cast<double> (CONTENT_DELAY.count ()));
+    EXPECT_LT (*response.stream_first_event_ms, *response.stream_first_match_ms);
 }

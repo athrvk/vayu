@@ -141,6 +141,39 @@ describe("ThresholdVerdict", () => {
 			expect(screen.getByText("950ms")).toBeInTheDocument();
 		});
 
+		// Mutation check: delete the metric's THRESHOLD_METRICS entry and the row
+		// reads the raw `streamTimeToFirstMatchP95Ms` key.
+		it("labels the first-match ceiling in milliseconds, and an unmatched run as unmeasured (#3774)", () => {
+			render(
+				<ThresholdVerdict
+					verdict={verdict({
+						checks: [
+							{
+								metric: "streamTimeToFirstMatchP95Ms",
+								limit: 900,
+								actual: 1388,
+								passed: false,
+							},
+							{
+								metric: "streamTimeToFirstMatchP95Ms",
+								limit: 900,
+								actual: 0,
+								passed: false,
+								evaluated: false,
+							},
+						],
+						passed: 0,
+						failed: 2,
+						verdict: "failed",
+					})}
+				/>
+			);
+			expect(screen.getAllByText(/Time to first match p95/)).toHaveLength(2);
+			expect(screen.queryByText(/streamTimeToFirstMatchP95Ms/)).not.toBeInTheDocument();
+			expect(screen.getAllByText(/≤ 900ms/)).toHaveLength(2);
+			expect(screen.getByText("1388ms")).toBeInTheDocument();
+		});
+
 		it("prints the event rate as a floor, and a stream budget on a run with no stream as unmeasured", () => {
 			render(
 				<ThresholdVerdict

@@ -1821,8 +1821,12 @@ struct StreamFlag {
 
 /**
  * Read `stream`, `maxStreamDurationMs`, `maxStreamEvents` and
- * `streamTextPath` off a `POST /execute` or `POST /runs` payload, and refuse
- * the combinations that cannot mean anything.
+ * `streamTextPath` off a `POST /execute` or `POST /runs` payload, check its
+ * `streamFirstContentMarker` (#3774), and refuse the combinations that cannot
+ * mean anything. The marker is checked and not kept: a single-request run
+ * compiles it off the payload (`single_request_stream_bounds`), and a design
+ * send, which reports no stream timings (each relayed event carries its own
+ * `receivedAt`), accepts it so a by-id compose's payload sends as it is.
  *
  * **Both endpoints read through this one function** (issue #576), so the two
  * cannot drift on what a cap is called, what type it takes or what range it
@@ -1855,9 +1859,9 @@ StreamFlag read_stream_flag (const nlohmann::json& json);
  * only those steps. A top-level `stream` is refused, either value: `true`
  * cannot make a stored non-streaming request stream and `false` cannot stop a
  * streaming one, so accepting it would let a caller believe it did either.
- * A top-level `streamTextPath` is refused for the same reason: each step reads
- * its stream through its stored request's own path. The answer's `value` is
- * always false.
+ * A top-level `streamTextPath` or `streamFirstContentMarker` is refused for
+ * the same reason: each step reads its stream through its stored request's
+ * own. The answer's `value` is always false.
  */
 StreamFlag read_collection_run_stream_caps (const nlohmann::json& json);
 

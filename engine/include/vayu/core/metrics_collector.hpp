@@ -1103,8 +1103,8 @@ class MetricsCollector {
      * milliseconds over the streams *completed* so far (issue #3236), read
      * through its own snapshot the same way; absent until one completed with
      * a timed event, and on every run without the live event tally. The
-     * report's `maxEventGap` and `eventRate` (#3776) are not mirrored here:
-     * they are read once, after the drain.
+     * report's `timeToFirstMatch` (#3774), `maxEventGap` and `eventRate`
+     * (#3776) are not mirrored here: they are read once, after the drain.
      */
     void put_gate_distributions (nlohmann::json& frame);
 
@@ -1139,6 +1139,11 @@ class MetricsCollector {
         /// delivered a timed event, so it is 0 for a run whose streams all
         /// stayed silent.
         Percentiles time_to_first_event;
+        /// Per-completion wait from submission to the request's first content
+        /// marker, in milliseconds (issue #3774). Its `count` is the
+        /// completions whose marker arrived, so it is 0 for a run that
+        /// declared none.
+        Percentiles time_to_first_match;
         /// Per-completion largest gap between two event arrivals, in
         /// milliseconds (#3776); `count` is the completions with two arrivals.
         Percentiles max_event_gap;
@@ -1166,6 +1171,7 @@ class MetricsCollector {
         size_t events                          = 0;
         bool capped                            = false;
         std::optional<double> first_event_ms   = std::nullopt;
+        std::optional<double> first_match_ms   = std::nullopt;
         std::optional<double> max_event_gap_ms = std::nullopt;
         std::optional<double> event_rate       = std::nullopt;
     };
@@ -1550,6 +1556,8 @@ class MetricsCollector {
     // Time to first event (issue #3234): a duration, so microseconds on the
     // latency histograms' scale. Null on the same rule as the one above.
     struct hdr_histogram* stream_first_event_histogram_ = nullptr;
+    // Time to the first content marker (#3774), on the same scale and rule.
+    struct hdr_histogram* stream_first_match_histogram_ = nullptr;
     // Each stream's largest event gap (#3776), on the same scale and rule.
     struct hdr_histogram* stream_max_gap_histogram_ = nullptr;
     // Each stream's event rate (#3776), as `stream_rate_recorded` scales it.
@@ -1788,7 +1796,8 @@ const MetricsCollector::Percentiles& interval);
  * `eventsPerSecond` is derived over @p duration_s, the run's `test_duration`
  * that the report's `rps` is read off: two rates a reader compares must come
  * off one clock. `timeToFirstEvent` (#3234) is omitted when no stream
- * delivered a timed event, and `maxEventGap` and `eventRate` (#3776) when no
+ * delivered a timed event, `timeToFirstMatch` (#3774) when no stream's first
+ * content marker arrived, and `maxEventGap` and `eventRate` (#3776) when no
  * stream measured one, on the section's own absent-not-zeros rule.
  */
 [[nodiscard]] nlohmann::json

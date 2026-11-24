@@ -155,6 +155,14 @@ const CASES: Array<[name: string, input: RunOutcomeInput, expected: unknown]> = 
 		{ outcome: "failed", reason: "2 of 2 budgets missed: time to first event p95, event rate" },
 	],
 	[
+		"a missed first match budget is named by its short name (#3774)",
+		{
+			status: "completed",
+			thresholdValidation: budgets(["streamTimeToFirstMatchP95Ms", false, false]),
+		},
+		{ outcome: "failed", reason: "1 of 1 budget missed: time to first match p95" },
+	],
+	[
 		"every budget met and no errors",
 		{ status: "completed", thresholdValidation: THREE_MET, errorRate: 0 },
 		{ outcome: "passed", reason: "All 3 budgets met" },

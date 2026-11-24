@@ -23,6 +23,7 @@ import {
 	protocolSettings,
 	responseCodeOfFailure,
 	responseFromExecuteResult,
+	streamFirstContentMarkerOf,
 	streamTextPathOf,
 	toBodyPayload,
 } from "./execute-mapping";
@@ -697,6 +698,35 @@ describe("streamTextPathOf", () => {
 		expect(streamTextPathOf({ stream: true, streamTextPath: ` ${OPENAI} ` })).toEqual({
 			streamTextPath: OPENAI,
 		});
+	});
+});
+
+// The first content marker a load run states (#3774): withheld from a request
+// that does not stream, and never trimmed, since the engine matches its bytes.
+// Mutation check: drop the `request.stream` gate and the buffered case sends a
+// marker the engine refuses with a 400; add a trim and the padded case changes.
+describe("streamFirstContentMarkerOf", () => {
+	const MARKER = '"delta":{"content":"';
+
+	it("states the marker of a streaming request", () => {
+		expect(
+			streamFirstContentMarkerOf({ stream: true, streamFirstContentMarker: MARKER })
+		).toEqual({ streamFirstContentMarker: MARKER });
+	});
+
+	it("states nothing for a request that does not stream, whatever the draft holds", () => {
+		expect(
+			streamFirstContentMarkerOf({ stream: false, streamFirstContentMarker: MARKER })
+		).toEqual({});
+	});
+
+	it("states nothing for an empty field, and keeps a padded one as written", () => {
+		expect(streamFirstContentMarkerOf({ stream: true, streamFirstContentMarker: "" })).toEqual(
+			{}
+		);
+		expect(
+			streamFirstContentMarkerOf({ stream: true, streamFirstContentMarker: ` ${MARKER} ` })
+		).toEqual({ streamFirstContentMarker: ` ${MARKER} ` });
 	});
 });
 

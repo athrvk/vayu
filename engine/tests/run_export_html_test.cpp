@@ -590,11 +590,16 @@ TEST (RunExportHtmlTest, AStreamingRunIsASectionOfItsTotalsAndItsDistributions) 
     for (const std::string_view cell :
     { "<th scope=\"row\">Streams</th><td>120</td>", "<td>14,400</td>",
     "<td>480 events/s</td>", "<th scope=\"row\">Streams ended at a cap</th><td>4</td>",
-    "<th scope=\"col\">Time to first event (ms)</th>", "<th scope=\"col\">Largest event gap (ms)</th>",
-    "<th scope=\"col\">Event rate (events/s)</th>", "<tr><th scope=\"row\">max</th><td>310</td><td>1,250</td><td>313</td><td>337</td></tr>" }) {
+    "<th scope=\"col\">Time to first event (ms)</th>",
+    "<th scope=\"col\">Time to first match (ms)</th>", "<th scope=\"col\">Largest event gap (ms)</th>",
+    "<th scope=\"col\">Event rate (events/s)</th>" }) {
         EXPECT_NE (stream.find (cell), std::string::npos) << cell << " in:\n"
                                                           << stream;
     }
+    const std::string_view max_row =
+    "<tr><th scope=\"row\">max</th><td>310</td><td>1,250</td>"
+    "<td>2,481</td><td>313</td><td>337</td></tr>";
+    EXPECT_NE (stream.find (max_row), std::string::npos) << stream;
     EXPECT_NE (section_html (html, "latency").find ("<caption>Each stream&#39;s full duration.</caption>"),
     std::string::npos);
 }

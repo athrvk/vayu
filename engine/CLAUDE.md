@@ -818,6 +818,17 @@ logged as a warning: it means a client skipped composition.
   longer reads it, #3770): the tally counts nothing for any other reply, leaves its
   `stream_events` absent, and a duration cap that ends one is a `Timeout`
   (`StreamTally::unannounced_cap_error`), never a capped success.
+  A first content marker (#3774) is `StreamBounds::first_content_marker`, a
+  `StreamContentMarker` (`http/stream_content_marker.hpp`) compiled once and
+  shared: the tally scans an announced reply's raw bytes with it until the
+  first match, keeping one integer of state, and stamps
+  `Response::stream_first_match_ms`, the report's `stream.timeToFirstMatch`
+  and the `streamTimeToFirstMatchP95Ms` budget. It is stored and read exactly
+  as `streamTextPath` is (`requests.stream_first_content_marker`, held to
+  `stream_first_content_marker_problem`; a by-id compose carries it beside
+  `stream: true`; `compile_stream_content_marker` builds it per step in
+  `step_stream_bounds` and per run in `single_request_stream_bounds`; a
+  collection run refuses a top-level one). A design send only checks it.
   The report gains a `stream` section, absent for runs that did not stream. A
   load stream's events are parsed back, never stored twice (#657): the sample
   body already *is* the `text/event-stream` bytes, and `GET /runs/:id/samples`

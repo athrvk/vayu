@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
 #include <string>
 #include <unordered_map>
 
@@ -86,6 +87,7 @@ const std::unordered_map<std::string, std::string>& metric_labels () {
         { "minThroughputRps", "Throughput" },
         { "maxAssertionFailureRatePct", "Assertion failure rate" },
         { "streamTimeToFirstEventP95Ms", "Time to first event p95" },
+        { "streamTimeToFirstMatchP95Ms", "Time to first match p95" },
         { "streamEventsPerSecondMin", "Events per second" },
     };
     return labels;
@@ -185,13 +187,13 @@ TEST (ThresholdEval, AThroughputFloorOfZeroIsRejected) {
 
 TEST (ThresholdEval, EveryKnownBudgetIsAcceptedTogether) {
     nlohmann::json thresholds{ { "latencyP50Ms", 20 }, { "latencyP95Ms", 40 },
-        { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 },
-        { "minThroughputRps", 10000 }, { "maxAssertionFailureRatePct", 5 },
-        { "streamTimeToFirstEventP95Ms", 800 }, { "streamEventsPerSecondMin", 200 } };
+        { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 }, { "minThroughputRps", 10000 },
+        { "maxAssertionFailureRatePct", 5 }, { "streamTimeToFirstEventP95Ms", 800 },
+        { "streamTimeToFirstMatchP95Ms", 900 }, { "streamEventsPerSecondMin", 200 } };
     EXPECT_FALSE (validate_thresholds (config_with (thresholds)).has_value ());
     auto outcome = evaluate_thresholds (config_with (thresholds), measured_run ());
     ASSERT_HAS_VALUE (outcome);
-    EXPECT_EQ (outcome->checks.size (), 8u);
+    EXPECT_EQ (outcome->checks.size (), 9u);
 }
 
 // --- The verdict: each budget passes and fails off the run's own numbers ---
@@ -572,6 +574,9 @@ TEST (ThresholdEval, AStreamBudgetOutsideItsRangeIsRejected) {
     expect_rejected ({ { "streamTimeToFirstEventP95Ms", 86400001 } },
     "streamTimeToFirstEventP95Ms");
     expect_rejected ({ { "streamTimeToFirstEventP95Ms", "fast" } }, "streamTimeToFirstEventP95Ms");
+    expect_rejected ({ { "streamTimeToFirstMatchP95Ms", 0 } }, "streamTimeToFirstMatchP95Ms");
+    expect_rejected ({ { "streamTimeToFirstMatchP95Ms", 86400001 } },
+    "streamTimeToFirstMatchP95Ms");
     expect_rejected ({ { "streamEventsPerSecondMin", 0 } }, "streamEventsPerSecondMin");
     expect_rejected ({ { "streamEventsPerSecondMin", 1e9 + 1 } }, "streamEventsPerSecondMin");
     expect_rejected ({ { "streamEventsPerSecondMin", true } }, "streamEventsPerSecondMin");
@@ -590,6 +595,52 @@ TEST (ThresholdEval, AFirstEventBudgetJudgesTheStreamsP95) {
     evaluate_thresholds (
     config_with ({ { "streamTimeToFirstEventP95Ms", 649 } }), streaming_run ()))
     .passed);
+}
+
+// #3774: a ceiling on the first content marker's p95, judged off the report's
+// own figure: an API that opens with a preamble event reads 650 ms to its
+// first event and 1,200 ms to its first content, and a 900 ms budget on the
+// content fails where the same budget on the first event would pass. Mutation
+// check: measure `time_to_first_event.p95` in `measured_first_match_p95` and
+// the 900 ms budget passes.
+TEST (ThresholdEval, AFirstMatchBudgetJudgesTheStreamsMatchP95) {
+    RunSummaryInputs inputs = streaming_run ();
+    ASSERT_HAS_VALUE (inputs.stream);
+    inputs.stream->time_to_first_match.count = 380;
+    inputs.stream->time_to_first_match.p95   = 1200.0;
+
+    auto fail = only_check (evaluate_thresholds (
+    config_with ({ { "streamTimeToFirstMatchP95Ms", 900 } }), inputs));
+    EXPECT_TRUE (fail.evaluated);
+    EXPECT_DOUBLE_EQ (fail.actual, 1200.0);
+    EXPECT_FALSE (fail.passed);
+    EXPECT_TRUE (only_check (
+    evaluate_thresholds (config_with ({ { "streamTimeToFirstMatchP95Ms", 1200 } }), inputs))
+    .passed);
+}
+
+// A run whose streams never matched (no marker declared, or the content never
+// came) has no time to first match, so its budget is unevaluated and failed,
+// never a pass read off a 0, while the first-event budget beside it is
+// judged. Mutation check: make the match row's `has_data` `stream_data_present`
+// and the first check reads evaluated and passed.
+TEST (ThresholdEval, AFirstMatchBudgetIsUnevaluatedWhenNoStreamMatched) {
+    auto outcome =
+    evaluate_thresholds (config_with ({ { "streamTimeToFirstMatchP95Ms", 900 },
+                         { "streamTimeToFirstEventP95Ms", 800 } }),
+    streaming_run ());
+    ASSERT_HAS_VALUE (outcome);
+    ASSERT_EQ (outcome->checks.size (), 2u);
+    const auto payload = build_threshold_outcome_payload (*outcome);
+    for (std::size_t i = 0; i < outcome->checks.size (); ++i) {
+        const auto& check   = outcome->checks[i];
+        const bool is_match = check.metric == "streamTimeToFirstMatchP95Ms";
+        EXPECT_EQ (check.evaluated, !is_match) << check.metric;
+        EXPECT_EQ (check.passed, !is_match) << check.metric;
+        EXPECT_EQ (payload["checks"][i].contains ("actual"), !is_match)
+        << payload.dump ();
+    }
+    EXPECT_EQ (outcome->failed, 1u);
 }
 
 // A floor on the rate the report prints, judged the other way round from a
