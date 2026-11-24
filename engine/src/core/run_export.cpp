@@ -6,8 +6,8 @@
  */
 
 /**
- * @brief The run-report document (#2127): an allowlisted copy of a finished
- *        load run's report, configuration and time series.
+ * The run-report document (#2127): an allowlisted copy of a finished load run's
+ * report, configuration and time series.
  */
 
 #include "vayu/core/run_export.hpp"
