@@ -104,8 +104,7 @@ template <typename Entry> class ListenerRegistry {
     public:
     using Entries = std::map<std::string, std::unique_ptr<Entry>>;
 
-    // Parenthesized against windows.h min/max macros (`core/constants.hpp`).
-    static constexpr std::size_t UNBOUNDED = (std::numeric_limits<std::size_t>::max) ();
+    static constexpr std::size_t UNBOUNDED = std::numeric_limits<std::size_t>::max ();
 
     /**
      * One start's slot, held from `reserve` to `commit`. Destroyed without a

@@ -32,8 +32,7 @@ namespace vayu::utils {
 
 /// `max_depth` for a caller that bounds nothing here: the parse itself recurses
 /// nowhere, so depth only matters to what walks the tree afterwards.
-// Parenthesized against windows.h min/max macros (`core/constants.hpp`).
-inline constexpr size_t ORDERED_JSON_UNBOUNDED = (std::numeric_limits<size_t>::max) ();
+inline constexpr size_t ORDERED_JSON_UNBOUNDED = std::numeric_limits<size_t>::max ();
 
 /**
  * @p text as an `ordered_json`, in time linear in its length, or `nullopt`
