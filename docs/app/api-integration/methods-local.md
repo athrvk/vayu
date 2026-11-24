@@ -62,7 +62,7 @@ Both writes need the engine's grant secret ([who may call the API](../../engine/
 
 | `electronAPI` method | Channel | What main does |
 |---|---|---|
-| `allowFolder(key)` | `file:allowFolder` | Opens the system folder picker, then `POST /file-roots` with the folder the user chose and the secret. The renderer names the dialog by key (`"allow-folder"`, `FOLDER_DIALOG_TITLES` in `electron/file-ipc.ts`) and nothing else: the title is main's, the picker opens where the last one ended in this process (the first call, none), and an unknown or non-string key rejects (#2378). |
+| `allowFolder(key)` | `file:allowFolder` | Opens the system folder picker, then `POST /file-roots` with the folder the user chose and the secret. [Details](#allowfolderkey-in-full) |
 | `removeAllowedFolder(id)` | `file:removeAllowedFolder` | `DELETE /file-roots/:id` with the secret, for an id shaped like one the engine mints. |
 
 Both answer only the app window's main frame (`electron/ipc-sender.ts`) and resolve with the engine's answer rather than throwing it away at the process boundary: `{outcome: "done", value}`, `{outcome: "refused", status, code, message}` or `{outcome: "unreachable", message}`, and for `allowFolder` also `{outcome: "cancelled"}`, with the chosen folder as `path` on every other outcome.
@@ -74,6 +74,10 @@ Outside Electron neither write exists, and the surfaces offer no way to add one.
 When the preload's `getFilePath(file)` gets a path from `webUtils.getPathForFile`, it also reports it on an internal channel, `file:picked`, that no `electronAPI` method exposes; main checks the sender is the app window's main frame and the value an absolute path, then records it with `POST /file-grants` and the secret (`electron/file-grants.ts`).
 A document the OS hands the app (`open-intent.ts`) is recorded the same way.
 The report is one-way, so the renderer cannot wait for it: a pick followed by a send within the same few milliseconds can reach the engine first.
+
+#### `allowFolder(key)` in full
+
+The renderer names the dialog by key (`"allow-folder"`, `FOLDER_DIALOG_TITLES` in `electron/file-ipc.ts`) and nothing else: the title is main's, the picker opens where the last one ended in this process (the first call, none), and an unknown or non-string key rejects (#2378).
 
 ### Webhook inbox
 

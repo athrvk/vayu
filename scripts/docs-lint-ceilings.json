@@ -56,11 +56,6 @@
       "max_line": 631,
       "long_lines": 2
     },
-    "docs/app/api-integration/methods-local.md": {
-      "max_line": 425,
-      "long_lines": 1,
-      "max_cell": 379
-    },
     "docs/app/architecture.md": {
       "max_line": 2047,
       "long_lines": 25
