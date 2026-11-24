@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief `pm.execution` (flow control) and `pm.metrics` (custom metrics).
- */
+/** `pm.execution` (flow control) and `pm.metrics` (custom metrics). */
 
 #include "pm_internal.hpp"
 
@@ -24,10 +22,9 @@ namespace {
 // ============================================================================
 
 // The context a flow-control call may record on, or nullptr having thrown.
-// Outside a scenario run there is no sequence to redirect, and the call is
-// refused rather than accepted and dropped: `setNextRequest("checkout")`
-// silently ignored in a single send is the false success issue #188's rule
-// exists to prevent.
+// Outside a scenario run there is no sequence to redirect, so the call is
+// refused, not accepted and dropped: `setNextRequest("checkout")` silently
+// ignored in a single send is the false success issue #188's rule prevents.
 ContextData* execution_context (JSContext* ctx, const char* member) {
     auto* data = get_context_data (ctx);
     if (!data) {
@@ -35,11 +32,11 @@ ContextData* execution_context (JSContext* ctx, const char* member) {
         return nullptr;
     }
     if (!data->in_scenario) {
-        // Kept under 256 bytes with the longest member name substituted
-        // (issue #1503): QuickJS formats this into a fixed-size buffer
+        // Kept under 256 bytes with the longest member name substituted (issue
+        // #1503): QuickJS formats this into a fixed-size buffer
         // (`JS_MakeError`, `vendor/quickjs-ng/quickjs.c`) and silently cuts
-        // whatever does not fit, mid-word - a vendored bound this file
-        // cannot raise, so the fix is a message that stays under it.
+        // what does not fit, mid-word, and the vendored bound cannot be raised
+        // from here.
         JS_ThrowPlainError (ctx,
         "pm.execution.%s is not available here: a single send has no next "
         "request, and a load run's scripts run after it finishes, against "
@@ -51,13 +48,11 @@ ContextData* execution_context (JSContext* ctx, const char* member) {
     return data;
 }
 
-// pm.execution.setNextRequest(name) - jump to the named step after this one
-// completes; setNextRequest(null) ends the iteration (Postman's convention).
-//
-// The argument is required and must be a string or null. Omitting it is a
-// TypeError rather than a synonym for null: "end the iteration" and "I forgot
-// the name" are different intents, and guessing between them would silently
-// end runs.
+// pm.execution.setNextRequest(name): jump to the named step after this one;
+// setNextRequest(null) ends the iteration (Postman's convention). The argument
+// is required, a string or null: omitting it is a TypeError, not a synonym for
+// null, because "end the iteration" and "I forgot the name" are different
+// intents and guessing would silently end runs.
 JSValue js_execution_set_next_request (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     auto* data = execution_context (ctx, "setNextRequest");
@@ -92,11 +87,9 @@ JSValue js_execution_set_next_request (JSContext* ctx, JSValueConst this_val, in
     return JS_UNDEFINED;
 }
 
-// pm.execution.skipRequest() - do not send this step.
-//
-// Pre-request only. In a test script the request has already gone out and
-// there is nothing left to skip, so the call throws instead of recording an
-// intent the runner would have to refuse afterwards.
+// pm.execution.skipRequest(): do not send this step. Pre-request only: in a
+// test script the request has already gone out, so the call throws rather than
+// record an intent the runner would have to refuse afterwards.
 JSValue js_execution_skip_request (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     (void)argc;
@@ -134,11 +127,10 @@ namespace {
 // pm.metrics - custom trends, counters and rates (issue #1500)
 // ============================================================================
 
-// The context a metrics call may record on, or nullptr having thrown. A
-// context with no bound collector - a context built by hand, or the deferred
-// `tests` replay running against a recorded sample rather than the run - has
-// nowhere for the value to go, and the call is refused rather than accepted
-// and dropped, the same false-success reasoning `execution_context` documents.
+// The context a metrics call may record on, or nullptr having thrown. With no
+// bound collector (a hand-built context, or the deferred `tests` replay against
+// a recorded sample) the value has nowhere to go, so the call is refused, for
+// `execution_context`'s false-success reason.
 ContextData* metrics_context (JSContext* ctx, const char* member) {
     auto* data = get_context_data (ctx);
     if (!data) {

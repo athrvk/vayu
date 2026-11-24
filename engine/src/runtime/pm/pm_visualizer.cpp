@@ -6,14 +6,13 @@
  */
 
 /**
- * @brief `pm.visualizer` (#2577): Postman's calls, accepted and not rendered.
+ * `pm.visualizer` (#2577): Postman's calls, accepted and not rendered.
  *
  * Postman draws a Handlebars template over the response in its Visualize tab.
- * Vayu has no such tab, and a script that only wants one drawn is otherwise a
- * working script: left unbound, `pm.visualizer.set(...)` threw and ended the
- * script before its remaining `pm.test` calls. So the calls are accepted and
- * each leaves one `console.warn`, the only trace there is - the template and
- * its data are not kept anywhere.
+ * Vayu has none, and a script that only wants one drawn is otherwise a working
+ * script: left unbound, `pm.visualizer.set(...)` would throw and end it before
+ * its remaining `pm.test` calls. So each call is accepted and leaves one
+ * `console.warn`, the only trace; the template and its data are kept nowhere.
  */
 
 #include "pm_internal.hpp"

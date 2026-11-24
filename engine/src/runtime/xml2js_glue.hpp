@@ -8,8 +8,8 @@
  */
 
 /**
- * @brief The factory around the vendored `xml2js` (engine/vendor/xml2js,
- *        #2654), and the `xml2Json` global built over it.
+ * The factory around the vendored `xml2js` (engine/vendor/xml2js,
+ * #2654), and the `xml2Json` global built over it.
  *
  * `XML2JS_GLUE_OPEN + XML2JS_JS + XML2JS_GLUE_CLOSE` is the source the shelf
  * evaluates. The library is xml2js 0.6.2 with sax and xmlbuilder bundled into

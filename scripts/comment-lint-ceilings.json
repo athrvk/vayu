@@ -150,7 +150,6 @@
     "engine/include/vayu/utils/id.hpp": 1,
     "engine/include/vayu/utils/reentrant.hpp": 1,
     "engine/include/vayu/utils/stop_signal.hpp": 1,
-    "engine/src/http/routes/script_types.cpp": 1,
-    "engine/src/runtime/script_engine.cpp": 1
+    "engine/src/http/routes/script_types.cpp": 1
   }
 }

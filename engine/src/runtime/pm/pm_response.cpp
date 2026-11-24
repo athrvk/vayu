@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief `pm.response`, its header accessors and its `to` assertion chain.
- */
+/** `pm.response`, its header accessors and its `to` assertion chain. */
 
 #include "pm_internal.hpp"
 
@@ -28,10 +26,9 @@
 namespace vayu::runtime::pm_detail {
 namespace {
 
-// json() and text() read the body bound to the function at build time rather
-// than the response hanging off the context, so `pm.response` and the response
-// a pm.sendRequest callback receives are served by one implementation instead
-// of two that can drift. Both are installed by `install_response_body_readers`.
+// json() and text() read the body bound at build time, not the context's
+// response, so `pm.response` and a pm.sendRequest callback's response share one
+// implementation that cannot drift (`install_response_body_readers`).
 JSValue js_response_json (JSContext* ctx,
 JSValueConst this_val,
 int argc,
@@ -76,7 +73,7 @@ JSValue* func_data) {
 
 } // namespace
 
-// Install json()/text() on @p response, bound to @p body.
+// json() / text() on @p response, bound to @p body.
 void install_response_body_readers (JSContext* ctx, JSValue response, const std::string& body) {
     JSValue bound = JS_NewStringLen (ctx, body.data (), body.size ());
 
@@ -92,18 +89,16 @@ void install_response_body_readers (JSContext* ctx, JSValue response, const std:
 // pm.response.to.have Assertions (Postman-compatible)
 // ============================================================================
 
-// These are chai assertions in Postman exactly as `pm.expect` is, so their
-// failures throw through `throw_assertion_failure` too - a report that named
-// one form `AssertionError` and the other `TypeError` would be a distinction
-// with nothing behind it. They carry no chai message argument (`status(200)`
-// takes a status code, not a message), so they call the helper directly rather
-// than through `throw_expect_failure`, which exists to apply that prefix.
+// Chai assertions in Postman as `pm.expect` is, so failures throw through
+// `throw_assertion_failure` too: naming one form `AssertionError` and the other
+// `TypeError` would be a distinction with nothing behind it. They take no chai
+// message (`status(200)` takes a code), so they call the helper directly, not
+// `throw_expect_failure`, which exists for that prefix.
 
-// The reason phrase as `pm.response.reason()` answers it: what the status line
-// carried when it carried one, and the registered phrase for the code when it
-// did not - HTTP/2 has no reason phrase on the wire at all. One definition,
-// because `to.have.status("OK")` and `reason()` are two readings of the same
-// response and a script that compares them must not get two answers.
+// The reason phrase as `pm.response.reason()` answers it: the status line's,
+// else the code's registered phrase (HTTP/2 sends none). One definition:
+// `to.have.status("OK")` and `reason()` read the same response and must not
+// give a comparing script two answers.
 std::string response_reason_phrase (const Response& response) {
     if (!response.status_text.empty ()) {
         return response.status_text;
@@ -113,9 +108,8 @@ std::string response_reason_phrase (const Response& response) {
 
 namespace {
 
-// A body can be megabytes, so a failure message quotes a bounded prefix rather
-// than the whole of it - and cuts on a UTF-8 boundary, because a message split
-// mid-sequence reaches the report as replacement characters.
+// A body can be megabytes, so a failure quotes a bounded prefix, cut on a UTF-8
+// boundary: a mid-sequence cut reaches the report as replacement characters.
 constexpr std::string::size_type kBodyExcerptBytes = 120;
 
 std::string describe_body (const std::string& body) {
@@ -129,10 +123,10 @@ std::string describe_body (const std::string& body) {
     return "'" + body.substr (0, cut) + "...' (" + std::to_string (body.size ()) + " bytes)";
 }
 
-// A number as a message quotes it back. `std::format` gives the shortest
-// spelling that round-trips (`200`, not `200.000000`; `200.5`, not
-// `200.500000`), and the three values it spells in C are given JavaScript's
-// names, because the script author is reading their own source back.
+// A number as a message quotes it: `std::format` gives the shortest
+// round-tripping spelling (`200`, `200.5`, not `200.000000`), and the three
+// non-finite values get JavaScript's names, as the author reads their own
+// source back.
 std::string describe_number (double value) {
     if (std::isnan (value)) {
         return "NaN";
@@ -143,9 +137,9 @@ std::string describe_number (double value) {
     return std::format ("{}", value);
 }
 
-// `size()`'s two halves. `header` is the serialised block - "Name: Value\r\n"
-// each - reconstructed from the parsed headers rather than measured off the
-// wire, so it will not match a Content-Length-derived figure to the byte.
+// `size()`'s two halves. `header` is the "Name: Value\r\n" block rebuilt from
+// the parsed headers, not measured off the wire, so it will not match a
+// Content-Length-derived figure to the byte.
 struct ResponseSizeBytes {
     size_t body   = 0;
     size_t header = 0;
@@ -162,10 +156,10 @@ ResponseSizeBytes response_size_bytes (const Response& response) {
 }
 
 // ----------------------------------------------------------------------------
-// Polarity. `pm.response.to.not` is a second chain whose matchers are functions
-// of their own, so the `not` is bound into each function rather than read off
-// `this`: a matcher detached from `to.not.have` keeps the polarity of the
-// chain it was read from instead of silently asserting the opposite.
+// Polarity. `pm.response.to.not` is a second chain with its own matcher
+// functions, so the `not` is bound into each, not read off `this`: a matcher
+// detached from `to.not.have` keeps its chain's polarity rather than silently
+// asserting the opposite.
 // ----------------------------------------------------------------------------
 
 // A response matcher's magic: a table row above the low bit, the chain's
@@ -182,16 +176,13 @@ constexpr size_t magic_row (int magic) {
 
 /**
  * chai's `this.assert (condition, message, negatedMessage)`, the shape of every
- * check chai-postman makes: under `not` the condition must be false.
- *
- * A matcher that checks two things checks them in chai-postman's order, each
- * negated on its own, so `to.not.have.header("X", "v")` fails whenever X is
- * present - Postman's verdict, which inverting the whole assertion would turn
- * into a pass for any other value.
- *
- * A message is a string, or a callable that builds one. A message quoting a
- * script value is the callable: `js_describe` runs the value's `toJSON`, which
- * a passing check has no reason to call.
+ * chai-postman check: under `not` the condition must be false. A matcher
+ * checking two things checks them in chai-postman's order, each negated alone,
+ * so `to.not.have.header("X", "v")` fails whenever X is present, Postman's
+ * verdict, which inverting the whole assertion would turn into a pass for any
+ * other value. A message is a string or a callable building one; one quoting a
+ * script value is the callable, as `js_describe` runs the value's `toJSON`,
+ * which a passing check has no reason to call.
  *
  * @return whether the check held; when it did not, the AssertionError is
  *         pending.
@@ -222,10 +213,9 @@ JSValue check_result (bool held) {
     return held ? JS_UNDEFINED : JS_EXCEPTION;
 }
 
-// The body as `pm.response.json()` reads it, or `undefined` when it is not
-// JSON - a value JSON.parse never produces, so it cannot be mistaken for a
-// body. The parse error is cleared: each caller reports an unparsable body in
-// its own words, and under `not` it is no failure at all.
+// The body as `pm.response.json()` reads it, or `undefined` when not JSON (a
+// value JSON.parse never produces). The parse error is cleared: each caller
+// words an unparsable body itself, and under `not` it is no failure.
 JSValue parse_body_json (JSContext* ctx, const std::string& body) {
     JSValue json = JS_ParseJSON (ctx, body.c_str (), body.size (), "<response>");
     if (JS_IsException (json)) {
@@ -235,13 +225,11 @@ JSValue parse_body_json (JSContext* ctx, const std::string& body) {
     return json;
 }
 
-// A status code as the script wrote it. `JS_ToInt32` truncated toward zero, so
-// `status(200.5)` compared as 200 and passed against a 200. No response can
-// carry a fractional or non-finite code, so an assertion written that way is
-// not a statement about the response at all; it is refused the way `body(5)`
-// is rather than reported as a verdict, which would name the status the author
-// got and leave the mistake in their own text unmentioned. nullopt with the
-// exception pending.
+// A status code as the script wrote it. No response carries a fractional or
+// non-finite code, so `status(200.5)` states nothing about the response: it is
+// refused, as `body(5)` is, rather than truncated by `JS_ToInt32` to 200 and
+// passing against a 200, which would leave the mistake in the author's text
+// unmentioned. nullopt with the exception pending.
 std::optional<double>
 read_status_code_arg (JSContext* ctx, JSValueConst value, const char* matcher) {
     double code = 0;
@@ -297,10 +285,10 @@ int magic) {
         return JS_EXCEPTION;
     }
 
-    // Postman takes either form and decides by type, never by coercion:
-    // chai-postman compares a string against `reason()` and a number against
-    // the code. Coercing both through `JS_ToInt32` read "OK" as 0 - failing an
-    // assertion Postman passes - and "200" as 200 - passing one Postman fails.
+    // Postman decides by type, never coercion: chai-postman compares a string
+    // against `reason()` and a number against the code. Coercing both with
+    // `JS_ToInt32` would read "OK" as 0, failing what Postman passes, and "200"
+    // as 200, passing what Postman fails.
     if (JS_IsString (argv[0])) {
         return check_status_reason (
         ctx, magic_negated (magic), *response, js_to_string (ctx, argv[0]));
@@ -357,9 +345,9 @@ int magic) {
     return check_status_reason (ctx, magic_negated (magic), *response, reason);
 }
 
-// `statusCodeClass(2)` - the code's hundreds digit. chai-postman compares with
-// `===`, so a class written as a string matches nothing there; it is refused
-// here instead, as a mistake in the script rather than a verdict.
+// `statusCodeClass(2)`: the code's hundreds digit. chai-postman compares with
+// `===`, so a string class matches nothing there; here it is refused as a
+// script mistake rather than given a verdict.
 JSValue js_response_have_status_code_class (JSContext* ctx,
 JSValueConst this_val,
 int argc,
@@ -402,10 +390,9 @@ int magic) {
 
     std::string header_name = js_to_string (ctx, argv[0]);
 
-    // `Headers` orders by `CaseInsensitiveLess`, so this lookup answers the
-    // case-insensitive match HTTP header names take - a script may ask for
-    // `content-type` against a `Content-Type` the wire sent. The map holds one
-    // value per name, so there is no earlier duplicate this could shadow.
+    // `Headers` orders by `CaseInsensitiveLess`, so this answers HTTP's
+    // case-insensitive match (`content-type` finds `Content-Type`); one value
+    // per name, so no earlier duplicate is shadowed.
     const auto found   = response->headers.find (header_name);
     const bool present = found != response->headers.end ();
     if (!check_holds (ctx, negated, present,
@@ -417,13 +404,12 @@ int magic) {
         return JS_UNDEFINED;
     }
 
-    // A header value is a string on the wire, and chai-postman compares the
-    // expected value against it strictly. Coercing the expectation instead let
-    // `header("X-Count", 5)` pass against the string "5" - a verdict Postman
-    // does not give - so a non-string expectation fails the assertion here
-    // rather than being stringified into agreement with the wire. Reached
-    // without the header only under `not`, where chai-postman reads the value
-    // of a header that is not there and throws; no value is what that means.
+    // A header value is a wire string, compared strictly by chai-postman, so a
+    // non-string expectation fails here rather than being stringified into
+    // agreement: `header("X-Count", 5)` passing against "5" is a verdict
+    // Postman does not give. Without the header this is reached only under
+    // `not`, where chai-postman reads a missing header's value and throws; no
+    // value is what that means.
     const std::string actual = present ? found->second : std::string{};
     const bool matches =
     present && JS_IsString (argv[1]) && js_to_string (ctx, argv[1]) == actual;
@@ -440,18 +426,15 @@ int magic) {
     }));
 }
 
-// A pattern is whatever carries a callable `test`, which is how
-// `expect(...).to.match` reads one: a regular expression literal is a real
-// RegExp here and satisfies it, and a matcher object a script built itself is
-// run rather than silently deep-equalled against the body. 1 when it is one
-// and matched, 0 when it is one and did not match, 2 when it is not a pattern,
-// -1 with an exception pending.
+// A pattern is anything with a callable `test`, as `expect(...).to.match` reads
+// one: a regex literal is a real RegExp here, and a script's own matcher object
+// is run, not deep-equalled against the body. 1 matched, 0 not, 2 not a
+// pattern, -1 with an exception pending.
 int body_pattern_match (JSContext* ctx, JSValueConst pattern, const std::string& body) {
     ScopedValue test_fn (ctx, JS_GetPropertyStr (ctx, pattern, "test"));
-    // Reading `test` runs a getter if the script defined one, and a getter that
-    // throws leaves the exception pending. Falling through to the deep-equal
-    // branch there would report a mismatch and drop the script's own error -
-    // the shape of silent wrongness this assertion was fixed for.
+    // Reading `test` runs a script's getter, and a throwing one leaves the
+    // exception pending; falling through to the deep-equal branch would report
+    // a mismatch and drop the script's error.
     if (JS_IsException (test_fn.get ())) {
         return -1;
     }
@@ -508,13 +491,11 @@ js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
         "Expected response to have a body", "Expected response to not have a body"));
     }
 
-    // chai-postman decides by the argument's type, and each form is a
-    // different comparison: a string is exact, a regular expression is
-    // executed against the body, an object is deep-equalled against the parsed
-    // JSON. Vayu stringified all three and substring-searched the result, so a
-    // partial string passed where Postman fails, and a regex or an object was
-    // searched for as the literal text "/re/" or "[object Object]" - failing
-    // where Postman passes.
+    // chai-postman decides by type, each form its own comparison: a string is
+    // exact, a regex is run against the body, an object is deep-equalled
+    // against the parsed JSON. A substring search over each stringified would
+    // pass a partial string Postman fails and search for "/re/" or "[object
+    // Object]", failing what Postman passes.
     if (JS_IsString (argv[0])) {
         const std::string expected = js_to_string (ctx, argv[0]);
         return check_result (check_holds (ctx, negated, body == expected,
@@ -541,10 +522,10 @@ js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
 }
 
 // ----------------------------------------------------------------------------
-// jsonBody's path, read the way chai-postman reads it: lodash `_.has` and
-// `_.get`, so `[0].id` on an array root, `a.b[2].c` and `a['b'].c` all name
-// what they name there (#2528). Vayu split on `.` and nothing else, so a
-// bracket was part of a property name and an array root held no path at all.
+// jsonBody's path, read as chai-postman reads it (lodash `_.has` / `_.get`), so
+// `[0].id` on an array root, `a.b[2].c` and `a['b'].c` name what they name
+// there (#2528); splitting on `.` alone would make a bracket part of a name and
+// give an array root no path.
 // ----------------------------------------------------------------------------
 
 // What lodash's `reIsDeepProp` asks: a `.`, or a `[` closed later. A path with
@@ -690,12 +671,11 @@ std::vector<std::string> lodash_path_segments (const std::string& path) {
 
 /**
  * `_.has (root, path)` and `_.get (root, path)` at once: 1 with the value in
- * @p out when every segment is an own property of the value before it, 0 when
- * one is not, -1 with an exception pending.
- *
- * Own, as `_.has` asks: a JSON array's `length` is one, its `map` is not. The
- * path is one key when lodash would read it as one - no `.` or `[...]` in it,
- * or a key the root itself holds, so `{"a.b": 1}` answers `a.b` whole.
+ * @p out when each segment is an own property of the value before it, 0 when
+ * one is not, -1 with an exception pending. Own, as `_.has` asks: a JSON
+ * array's `length` is one, its `map` is not. The path is one key when lodash
+ * reads it so (no `.` or `[...]`, or a key the root holds: `{"a.b": 1}` answers
+ * `a.b` whole).
  */
 int read_json_path (JSContext* ctx, JSValueConst root, const std::string& path, JSValue& out) {
     bool one_key = !reads_as_deep_path (path);
@@ -748,7 +728,7 @@ int magic) {
     ScopedValue json (ctx, parse_body_json (ctx, response->body));
     const bool valid = !JS_IsUndefined (json.get ());
 
-    // No-arg form asserts only that the body is valid JSON (Postman semantics).
+    // No argument: asserts only that the body is valid JSON, as Postman does.
     if (argc < 1) {
         return check_result (check_holds (ctx, negated, valid, "Response body is not valid JSON",
         "Expected response body to not be valid JSON"));
@@ -777,11 +757,10 @@ int magic) {
         return JS_EXCEPTION;
     }
 
-    // chai-postman's two-argument form is `_.has(json, path)` and then
-    // `_.isEqual(_.get(json, path), value)`. Vayu walked the path and stopped,
-    // never reading the expected value at all, so every value-checking
-    // assertion in an imported suite passed on any value the path held - the
-    // silent false pass #998 was filed for.
+    // chai-postman's two-argument form is `_.has(json, path)` then
+    // `_.isEqual(_.get(json, path), value)`; stopping at the walk would pass
+    // every value-checking assertion on any value the path held, the false pass
+    // of #998.
     if (argc < 2) {
         return JS_UNDEFINED;
     }
@@ -805,8 +784,8 @@ int magic) {
 }
 
 // chai-postman's `jsonSchema(schema, options)`, against the body as
-// `pm.response.json()` reads it. `options` is ajv's and is not read: the
-// validator is the engine's draft-07 one (`json_schema_failure`).
+// `pm.response.json()` reads it; `options` is ajv's and unread, the validator
+// being the engine's draft-07 one (`json_schema_failure`).
 JSValue js_response_have_json_schema (JSContext* ctx,
 JSValueConst this_val,
 int argc,
@@ -837,12 +816,11 @@ int magic) {
     return JS_UNDEFINED;
 }
 
-// `to.have.responseTime` / `to.have.responseSize` - chai-postman's chainable
-// methods, which retarget the assertion at a number: `.responseTime.below(200)`
-// is pm.expect's `below` on the time, and `responseTime(n)` asserts it equals
-// n. The time is `pm.response.responseTime`; the size is `size()`'s body and
-// header together, which is what chai-postman adds up. The row is the
-// `ResponseMeasure`.
+// `to.have.responseTime` / `to.have.responseSize`: chai-postman's chainable
+// methods retargeting the assertion at a number: `.responseTime.below(200)` is
+// pm.expect's `below` on the time, and `responseTime(n)` asserts it equals n.
+// The time is `pm.response.responseTime`; the size is `size()`'s body plus
+// header, what chai-postman adds up. The row is the `ResponseMeasure`.
 JSValue js_response_have_measure (JSContext* ctx,
 JSValueConst this_val,
 int argc,
@@ -876,20 +854,17 @@ struct StatusClassMatcher {
     const char* expectation;
 };
 
-// Status ranges only. The body-shape assertions (`json`, `withBody`) are not
-// ranges, so they get their own getters below.
-//
-// The named codes compare the code alone, where chai-postman compares the
-// reason phrase as well. The phrase is the server's to choose, and two of
-// chai-postman's rows want one no standard server sends ("Unauthorised" for
-// `unauthorised`, "Acceptable" for `notAcceptable`), so comparing it fails a
-// correct code; the difference is in docs/app/pm-api-compatibility.md.
+// Status ranges only; the body-shape assertions (`json`, `withBody`) get their
+// own getters below. The named codes compare the code alone, where chai-postman
+// compares the reason phrase too: the phrase is the server's, and two of its
+// rows want one no standard server sends ("Unauthorised", "Acceptable"),
+// failing a correct code; docs/app/pm-api-compatibility.md records the
+// difference.
 constexpr auto status_class_matchers = std::to_array<StatusClassMatcher> ({
 { "info", 100, 199, "a 1xx status code" },
-// `ok` is a named code in chai-postman, not a class: it asserts 200, so a
-// 204 passes here and fails in Postman while the two ranges agree. Vayu
-// scripts that meant the class have `success`, which is the 2xx one in
-// both - the migration note is in docs/app/pm-api-compatibility.md.
+// `ok` is a named code in chai-postman, not a class: it asserts 200, as here. A
+// script meaning the 2xx class has `success`, the 2xx row in both (the
+// migration note is in docs/app/pm-api-compatibility.md).
 { "ok", 200, 200, "status 200" },
 { "success", 200, 299, "a 2xx status code" },
 { "accepted", 202, 202, "status 202" },
@@ -907,10 +882,10 @@ constexpr auto status_class_matchers = std::to_array<StatusClassMatcher> ({
 { "error", 400, 599, "a 4xx or 5xx status code" },
 });
 
-// `magic` carries the status_class_matchers row. Registered as a getter, never
-// a plain property: `pm.response.to.be.ok` is written without parentheses, so a
-// function-valued property would be a discarded reference that asserts nothing
-// (the defect ExpectTrueFalseAssertsOnAccess pins for pm.expect).
+// `magic` is the row. A getter, never a plain property: `pm.response.to.be.ok`
+// has no parentheses, so a function-valued property would be a discarded
+// reference asserting nothing (the defect ExpectTrueFalseAssertsOnAccess pins
+// for pm.expect).
 JSValue js_response_be_status_class (JSContext* ctx,
 JSValueConst this_val,
 int argc,
@@ -971,12 +946,11 @@ int magic) {
 // pm.response.to chain objects
 // ============================================================================
 
-// Every link in the chain carries this class. Its exotic hook turns an
-// unrecognised member into a throw: `pm.response.to.be.ok` is an expression
-// statement, so a member that does not exist evaluates to undefined and
-// asserts nothing - a green test against a broken API, which is strictly worse
-// than a missing matcher that fails loudly. Own properties are resolved before
-// the hook runs, so it only ever sees names nothing implements.
+// Every chain link has this class, whose exotic hook turns an unrecognised
+// member into a throw: `pm.response.to.be.ok` is an expression statement, so a
+// missing member is `undefined` and asserts nothing, a green test against a
+// broken API, worse than a matcher failing loudly. Own properties resolve
+// before the hook, so it sees only names nothing implements.
 JSClassID response_chain_class_id = 0;
 
 namespace {
@@ -987,10 +961,10 @@ JSValueConst obj,
 JSAtom prop) {
     (void)desc;
 
-    // The opaque path doubles as the armed flag. Defining a property looks up
-    // the existing own property first, so a hook that threw from the moment the
-    // object existed would reject the chain's own members as they are installed
-    // - arm_response_chain_object runs last, once every member is in place.
+    // The opaque path doubles as the armed flag: defining a property looks up
+    // the existing own property first, so a hook throwing from the start would
+    // reject the chain's own members as installed; `arm_response_chain_object`
+    // runs last.
     const auto* path =
     static_cast<const char*> (JS_GetOpaque (obj, response_chain_class_id));
     if (!path) {
@@ -1000,10 +974,9 @@ JSAtom prop) {
     return report_unknown_chain_member (ctx, obj, prop, path);
 }
 
-// Value-initialized and then assigned rather than written as a designated
-// initializer: this is a QuickJS C struct, so it cannot carry default member
-// initializers, and naming one of its seven hooks leaves the other six as
-// -Wmissing-field-initializers warnings.
+// Value-initialized, then assigned, not a designated initializer: a QuickJS C
+// struct carries no default member initializers, and naming one of its seven
+// hooks leaves six -Wmissing-field-initializers warnings.
 JSClassExoticMethods response_chain_exotic = [] {
     JSClassExoticMethods exotic{};
     exotic.get_own_property = response_chain_unknown_member;
@@ -1024,10 +997,9 @@ JSValue create_response_chain_object (JSContext* ctx) {
     return JS_NewObjectClass (ctx, response_chain_class_id);
 }
 
-// Arms the unknown-member hook. Call once the object holds every member it is
-// meant to have; `path` names the chain in the error and must outlive the
-// object, so every caller passes a string literal and the class needs no
-// finalizer.
+// Arms the unknown-member hook once the object holds every member. `path` names
+// the chain in the error and must outlive the object, so callers pass string
+// literals and the class needs no finalizer.
 void arm_response_chain_object (JSValue obj, const char* path) {
     (void)JS_SetOpaque (obj, const_cast<char*> (path));
 }
@@ -1112,7 +1084,7 @@ JSValue js_response_chain_self (JSContext* ctx, JSValueConst this_val, int argc,
     return JS_DupValue (ctx, this_val);
 }
 
-// Create the pm.response.to chain object, and through `not` its negated twin.
+// The pm.response.to chain object, and through `not` its negated twin.
 JSValue create_response_to_object (JSContext* ctx, const ResponseChainLinks& links) {
     JSValue to = create_response_chain_object (ctx);
     if (JS_IsException (to)) {
@@ -1121,8 +1093,8 @@ JSValue create_response_to_object (JSContext* ctx, const ResponseChainLinks& lin
     JS_SetPropertyStr (ctx, to, "have", create_response_have_object (ctx, links));
     JS_SetPropertyStr (ctx, to, "be", create_response_be_object (ctx, links));
     if (links.negated) {
-        // `not` sets, it never toggles - pm.expect's rule (#883) - so
-        // `to.not.not` is still the negated chain.
+        // `not` sets, never toggles (pm.expect's rule, #883), so `to.not.not`
+        // is still the negated chain.
         JSAtom atom = JS_NewAtom (ctx, "not");
         JS_DefinePropertyGetSet (ctx, to, atom,
         JS_NewCFunction (ctx, js_response_chain_self, "not", 0), JS_UNDEFINED, 0);
@@ -1140,9 +1112,9 @@ JSValue create_response_to_object (JSContext* ctx, const ResponseChainLinks& lin
 // Header accessors (pm.request.headers / pm.response.headers)
 // ============================================================================
 
-// Name a rejected value the way the script author wrote it, so the error says
-// "got number" rather than showing them a coerced "[object Object]". Shared by
-// every pm surface, through pm_internal.hpp.
+// A rejected value named as the author wrote it, so the error says "got
+// number", not a coerced "[object Object]"; shared by every pm surface
+// (pm_internal.hpp).
 const char* js_type_name (JSContext* ctx, JSValueConst value) {
     if (JS_IsUndefined (value))
         return "undefined";
@@ -1165,19 +1137,16 @@ const char* js_type_name (JSContext* ctx, JSValueConst value) {
 
 namespace {
 
-// The methods live on the very object that holds the header entries, because
-// `apply_pm_request_writeback` reads *that* object - so a header added by
-// `add()` and one added by assignment have to be the same property or the two
-// views disagree about what is sent.
-//
-// They must therefore be invisible to the write-back, which enumerates own
-// **enumerable** string properties: an enumerable `get` would be read as a
-// header whose value is a function and would fail the whole write-back. Hence
-// the two flag sets below - methods without JS_PROP_ENUMERABLE, entries with
-// JS_PROP_C_W_E. Entries are *defined* rather than set so a header literally
-// named `get` overwrites the method attributes as well as its value and still
-// reaches the wire; a silently dropped header is the defect this whole surface
-// exists to avoid, and a shadowed method throws loudly instead.
+// The methods live on the object holding the header entries, because
+// `apply_pm_request_writeback` reads that object: a header added by `add()` and
+// one added by assignment must be the same property, or the views disagree
+// about what is sent. So they are invisible to the write-back, which enumerates
+// own enumerable string properties (an enumerable `get` would read as a
+// function-valued header and fail it): methods without JS_PROP_ENUMERABLE,
+// entries with JS_PROP_C_W_E. Entries are defined, not set, so a header
+// literally named `get` replaces the method's attributes and still reaches the
+// wire: a dropped header is the defect this surface avoids, and a shadowed
+// method throws loudly instead.
 constexpr int HEADER_METHOD_FLAGS = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
 
 } // namespace
@@ -1192,16 +1161,10 @@ const std::string& value) {
 
 namespace {
 
-// The own enumerable key naming `name`, spelled the way the object spells it.
-// HTTP header names are case-insensitive and JS object keys are not, so an
-// exact lookup would miss `Content-Type` on a response (whose keys the HTTP
-// client has lower-cased) and `content-type` on a request (whose keys keep
-// whatever the user typed).
-/// The header names the object holds, in the order it holds them - which is the
-/// order the source `Headers` map was walked in when the entries were defined,
-/// and so the order every read below reports. The methods are non-enumerable
-/// (HEADER_METHOD_FLAGS), so they are never among the names. `std::nullopt`
-/// means QuickJS left an exception pending.
+/// The header names the object holds, in the order the source `Headers` map was
+/// walked when the entries were defined, the order every read reports. The
+/// methods are non-enumerable (HEADER_METHOD_FLAGS), so never among them.
+/// `std::nullopt` means QuickJS left an exception pending.
 std::optional<std::vector<std::string>> header_key_order (JSContext* ctx, JSValueConst headers) {
     std::vector<std::string> keys;
     if (!js_own_enumerable_keys (ctx, headers, keys)) {
@@ -1210,6 +1173,10 @@ std::optional<std::vector<std::string>> header_key_order (JSContext* ctx, JSValu
     return keys;
 }
 
+// The own enumerable key naming `name`, as the object spells it: header names
+// are case-insensitive and JS keys are not, so an exact lookup would miss
+// `Content-Type` on a response (keys lower-cased by the HTTP client) and
+// `content-type` on a request (keys as the user typed them).
 std::optional<std::string>
 find_header_key (JSContext* ctx, JSValueConst headers, const std::string& name) {
     auto keys = header_key_order (ctx, headers);
@@ -1224,10 +1191,9 @@ find_header_key (JSContext* ctx, JSValueConst headers, const std::string& name) 
     return std::nullopt;
 }
 
-// `this` is the header object the method was reached through. Detaching a
-// method from it (`const get = pm.response.headers.get; get('x')`) leaves
-// `this` undefined, which would otherwise read as "no such header" - a wrong
-// answer dressed as a real one.
+// `this` is the header object the method was reached through; a detached method
+// (`const get = pm.response.headers.get; get('x')`) has `this` undefined, which
+// would read as "no such header", a wrong answer dressed as a real one.
 bool header_this_is_usable (JSContext* ctx, JSValueConst this_val, const char* member) {
     if (JS_IsObject (this_val) && !JS_IsFunction (ctx, this_val)) {
         return true;
@@ -1239,9 +1205,8 @@ bool header_this_is_usable (JSContext* ctx, JSValueConst this_val, const char* m
     return false;
 }
 
-// A header name is a non-empty string or nothing. Coercing a number here would
-// invent a field name; the write-back refuses non-primitive values for the same
-// reason.
+// A header name is a non-empty string or nothing: coercing a number would
+// invent a field name, why the write-back refuses non-primitive values.
 std::optional<std::string>
 read_header_name_arg (JSContext* ctx, const char* member, int argc, JSValueConst* argv) {
     if (argc < 1 || !JS_IsString (argv[0])) {
@@ -1288,11 +1253,10 @@ JSValue js_headers_get (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     return JS_GetPropertyStr (ctx, this_val, key->c_str ());
 }
 
-// Postman's PropertyList spells this `has(key, value?)` and checks the value
-// when one is given. Vayu read only the name, so `has(name, value)` answered
-// true for any value the header held - a check that looked like one and was
-// not. The comparison is strict against the wire string, as `to.have.header`'s
-// is: a non-string expectation matches nothing rather than being coerced.
+// Postman's PropertyList spells this `has(key, value?)` and checks a given
+// value; reading only the name would answer true for any value, a check that
+// looks like one and is not. The comparison is strict against the wire string,
+// as `to.have.header`'s: a non-string expectation matches nothing.
 JSValue js_headers_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (!header_this_is_usable (ctx, this_val, "has")) {
         return JS_EXCEPTION;
@@ -1317,15 +1281,12 @@ JSValue js_headers_has (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     return JS_NewBool (ctx, actual == js_to_string (ctx, argv[1]) ? 1 : 0);
 }
 
-// Postman's header object is a PropertyList, and the six reads below are the
-// half of it that only looks. `each` in particular is an everyday idiom, so all
-// six install on the response and sendRequest objects too, ahead of
-// the `mutators` gate.
-//
-// What they cannot report is what this object no longer holds: `Headers` is a
-// single-valued case-insensitive map, so a name the server sent twice arrived
-// folded with ", " and the wire order is gone with it. The order below is the
-// map's; the fold is documented beside these methods in both script docs.
+// Postman's header object is a PropertyList, and the reads below are the half
+// of it that only looks; `each` is an everyday idiom, so all install on the
+// response and sendRequest objects too, ahead of the `mutators` gate. They
+// cannot report what this object no longer holds: `Headers` is single-valued
+// and case-insensitive, so a name sent twice arrived folded with ", ", its wire
+// order gone. The order is the map's; both script docs describe the fold.
 
 /// One `{ key, value }` member - the shape Postman's PropertyList hands its
 /// iterator, and the shape `add`/`upsert` already read back.
@@ -1396,13 +1357,11 @@ JSValue js_headers_count (JSContext* ctx, JSValueConst this_val, int argc, JSVal
 }
 
 /**
- * `headers.each(fn, thisArg)` - the iteration idiom, with Postman's arguments.
- *
+ * `headers.each(fn, thisArg)`, the iteration idiom with Postman's arguments:
  * postman-collection's `each` is `_.forEach(members, iterator.bind(context))`,
- * so the callback is handed `(member, index, list)` and the optional second
- * argument becomes its `this`. Passing only the member would have been the
- * smaller change and would silently hand `undefined` to a script that reads the
- * index - the class of quiet wrong answer this surface exists to close.
+ * so the callback gets `(member, index, list)` and the optional second argument
+ * as `this`. Passing only the member would hand `undefined` to a script reading
+ * the index, a quiet wrong answer.
  */
 JSValue js_headers_each (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (!header_this_is_usable (ctx, this_val, "each")) {
@@ -1440,19 +1399,14 @@ JSValue js_headers_each (JSContext* ctx, JSValueConst this_val, int argc, JSValu
 }
 
 /**
- * `headers.toObject(excludeDisabled, caseSensitive)` - Postman's signature.
- *
- * Its header list is indexed case-insensitively, so `toObject()` there
- * **lower-cases every key**, and only `caseSensitive` keeps the spelling the
- * header was stored with. Copying the object's own keys instead - which is what
- * a plain enumeration would do - reads as the harmless choice and is not:
- * `pm.request.headers` keeps whatever the user typed, so
- * `toObject()['content-type']` would answer `undefined` here against a request
- * carrying `Content-Type`, and answer correctly in Postman.
- *
- * The other two switches Postman takes decide nothing here: `multiValue` has no
- * duplicate to unfold (they arrived folded), and `sanitizeKeys` no falsy key to
- * drop, since a header name is a non-empty string on both surfaces.
+ * `headers.toObject(excludeDisabled, caseSensitive)`, Postman's signature. Its
+ * list is indexed case-insensitively, so `toObject()` there lower-cases every
+ * key and only `caseSensitive` keeps the stored spelling. Copying the object's
+ * own keys looks harmless and is not: `pm.request.headers` keeps what the user
+ * typed, so `toObject()['content-type']` would be `undefined` here against
+ * `Content-Type`, and correct in Postman. Postman's other two switches decide
+ * nothing here: `multiValue` has no duplicate to unfold (they arrived folded),
+ * and `sanitizeKeys` no falsy key to drop.
  */
 JSValue js_headers_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (!header_this_is_usable (ctx, this_val, "toObject")) {
@@ -1493,13 +1447,11 @@ JSValue js_headers_one (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 }
 
 /**
- * `headers.indexOf(name)` - the header's position in `all()`, `-1` when absent.
- *
- * Postman takes a member object here as well as a name, and finds it by
- * identity in its own member list. The members handed out here are built per
- * call, so identity would answer `-1` for a member of this very list; matching
- * the object's `key` answers what Postman answers for that case, and `-1` for
- * an object naming a header this list does not hold, as Postman's does.
+ * `headers.indexOf(name)`: the position in `all()`, `-1` when absent. Postman
+ * also takes a member object, found by identity in its own list; members here
+ * are built per call, so identity would answer `-1` for this very list's
+ * member. Matching the object's `key` answers what Postman answers, and `-1`
+ * for an object naming a header this list lacks.
  */
 JSValue js_headers_index_of (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (!header_this_is_usable (ctx, this_val, "indexOf")) {
@@ -1521,9 +1473,8 @@ JSValue js_headers_index_of (JSContext* ctx, JSValueConst this_val, int argc, JS
     return JS_NewInt32 (ctx, -1);
 }
 
-// Postman spells this `add({ key, value })`; Bruno spells it `(name, value)`.
-// Both are accepted because both are idioms a user pastes in, and getting it
-// wrong in either direction would otherwise name a header "[object Object]".
+// Postman spells this `add({ key, value })`, Bruno `(name, value)`; both are
+// pasted idioms, and the wrong reading names a header "[object Object]".
 struct HeaderPair {
     std::string name;
     std::string value;
@@ -1583,19 +1534,19 @@ int magic) {
 
     auto existing = find_header_key (ctx, this_val, pair->name);
     if (existing && !is_upsert) {
-        // Postman's HeaderList holds duplicates and `add` appends one. This
-        // object cannot: it is a JS object read into a case-insensitive
-        // `Headers` map, so a second `X-Foo` has nowhere to live. Silently
-        // behaving as `upsert` would hide the difference; refusing names it.
+        // Postman's HeaderList holds duplicates and `add` appends one; this
+        // object is read into a case-insensitive `Headers` map, where a second
+        // `X-Foo` has nowhere to live. Behaving as `upsert` would hide the
+        // difference; refusing names it.
         return JS_ThrowTypeError (ctx,
         "headers.add: '%s' is already set (as '%s') and a request cannot carry "
         "it twice - use headers.upsert() to replace it",
         pair->name.c_str (), existing->c_str ());
     }
 
-    // Write through the spelling already present, so `upsert('content-type')`
-    // on a request holding `Content-Type` replaces it instead of creating a
-    // second casing the write-back would then refuse as a clash.
+    // Through the spelling already present, so `upsert('content-type')` on a
+    // request holding `Content-Type` replaces it rather than creating a second
+    // casing the write-back would refuse as a clash.
     define_header_entry (ctx, this_val, existing ? *existing : pair->name, pair->value);
     return JS_UNDEFINED;
 }
@@ -1608,9 +1559,9 @@ JSValue js_request_headers_remove (JSContext* ctx, JSValueConst this_val, int ar
     if (!name) {
         return JS_EXCEPTION;
     }
-    // Removing a header that is not there is idempotent, not a mistake -
-    // `remove('Authorization')` on a request that never had one is exactly what
-    // a defensive script writes.
+    // Removing an absent header is idempotent, not a mistake:
+    // `remove('Authorization')` on a request that never had one is what a
+    // defensive script writes.
     if (auto key = find_header_key (ctx, this_val, *name)) {
         JSAtom atom = JS_NewAtom (ctx, key->c_str ());
         JS_DeleteProperty (ctx, this_val, atom, 0);
@@ -1621,15 +1572,14 @@ JSValue js_request_headers_remove (JSContext* ctx, JSValueConst this_val, int ar
 
 } // namespace
 
-// `mutators` gates the three that only mean something before the request is
-// sent. They are still installed on a test script's pm.request.headers, where
-// they mutate an object nothing reads back - the same no-op that assignment
-// already is there, documented in both script docs.
+// `mutators` gates the three that mean something only before the send. They are
+// still installed on a test script's pm.request.headers, mutating an object
+// nothing reads back, the no-op assignment already is there (both script docs
+// say so).
 void install_header_methods (JSContext* ctx, JSValue headers, bool mutators) {
-    // The reads are eight of one shape, so they are a table and a loop - the
-    // idiom `build_query_object` (pm_request_url.cpp) uses for the same job. The three mutators are
-    // not: two of them share one implementation through a magic number, and
-    // spelling that in the table would cost more than it saves.
+    // The reads are eight of one shape, so a table and a loop, as
+    // `build_query_object` (pm_request_url.cpp) does; the three mutators are
+    // not, as two share one implementation through a magic number.
     struct HeaderRead {
         const char* name;
         JSCFunction* fn;
@@ -1667,9 +1617,9 @@ void install_header_methods (JSContext* ctx, JSValue headers, bool mutators) {
 
 namespace {
 
-// pm.response.reason() - the status line's reason phrase. Postman returns null
-// when there is none; vayu always has one, because status 0 (its synthetic
-// value for a client-side failure) is in the canonical table as "Error".
+// `pm.response.reason ()`: the status line's reason phrase. Postman answers
+// null for none; Vayu always has one, as status 0 (its synthetic client-side
+// failure) is "Error" in the canonical table.
 JSValue js_response_reason (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     (void)argc;
@@ -1681,11 +1631,9 @@ JSValue js_response_reason (JSContext* ctx, JSValueConst this_val, int argc, JSV
     return JS_NewString (ctx, response_reason_phrase (*data->response).c_str ());
 }
 
-// pm.response.size() -> { body, header, total }, in bytes.
-//
-// `body` is the body the script can actually read through text(), so
-// size().body and text().length agree for an ASCII body. `header` is
-// reconstructed, see `response_size_bytes`.
+// `pm.response.size ()` -> { body, header, total }, in bytes. `body` is what
+// text() reads, so size().body and text().length agree for an ASCII body;
+// `header` is rebuilt (`response_size_bytes`).
 JSValue js_response_size (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     (void)argc;
@@ -1707,27 +1655,21 @@ JSValue js_response_size (JSContext* ctx, JSValueConst this_val, int argc, JSVal
 }
 
 /**
- * Bind the streamed response's event list and its two markers onto
- * `pm.response`, or bind nothing at all (issue #575).
- *
- * Three properties, one arrival set: `events` is the bounded stored list,
- * `totalEvents` is how many the stream actually received, and
- * `eventsTruncated` says whether the two differ. A script that asserts over a
- * prefix believing it has the whole stream is the failure this exists to make
- * impossible, so the markers are never optional decoration - they are bound
- * with the list or the list is not bound.
- *
- * Absent, not empty, for a non-stream response: `typeof pm.response.events`
- * separates "not a stream" from "a stream with no events", which an empty
- * array could not. Same rule as `pm.request.body` and `pm.iterationData`.
+ * Binds the streamed response's event list and its two markers onto
+ * `pm.response`, or nothing (#575). One arrival set: `events` is the bounded
+ * stored list, `totalEvents` how many the stream received, `eventsTruncated`
+ * whether they differ. A script asserting over a prefix believing it has the
+ * whole stream is the failure this makes impossible, so the markers are bound
+ * with the list or the list is not bound. Absent, not empty, for a non-stream
+ * response: `typeof pm.response.events` separates "not a stream" from "no
+ * events" (the `pm.request.body` and `pm.iterationData` rule).
  *
  * Entries are `{ event, id?, data, receivedAt?, dataTruncated?, text? }`, and a
  * stream that declared a `streamTextPath` (#3773) also binds `streamText`,
- * every event's `text` joined; both are absent without one. The stored node
- * spells the upstream id `sourceId` because a relay frame id sits beside it
- * there; inside a script there is only one id to mean, so it is `id`. `id` is
- * absent when the origin sent none, rather than `""` - a script comparing ids
- * must be able to see that there was nothing to compare.
+ * every event's `text` joined; both absent without one. The stored node calls
+ * the upstream id `sourceId`, as a relay frame id sits beside it; a script has
+ * one id, so `id`, absent when the origin sent none rather than `""`, so a
+ * script comparing ids can see there was nothing to compare.
  */
 void install_response_events (JSContext* ctx, JSValue response, const nlohmann::json* node) {
     if (!node || !node->is_object ()) {
@@ -1756,17 +1698,15 @@ void install_response_events (JSContext* ctx, JSValue response, const nlohmann::
                 JS_SetPropertyStr (
                 ctx, entry, "id", JS_NewStringLen (ctx, id.data (), id.size ()));
             }
-            // The arrival time in epoch milliseconds, stamped by the SSE
-            // context. Only a Send measures it, so a load run's sampled node
-            // has none and the property stays absent there (#3775).
+            // Arrival in epoch ms, stamped by the SSE context; only a Send
+            // measures it, so a load run's sampled node has none (#3775).
             if (const auto received = item.find ("receivedAt");
             received != item.end () && received->is_number ()) {
                 JS_SetPropertyStr (ctx, entry, "receivedAt",
                 JS_NewInt64 (ctx, received->get<int64_t> ()));
             }
-            // Per-event truncation is disclosed in band exactly as the stored
-            // node discloses it: an event whose data is a prefix must never
-            // read as a whole one.
+            // Per-event truncation is disclosed in band, as the stored node
+            // does: a prefix must never read as a whole event.
             if (item.value ("dataTruncated", false)) {
                 JS_SetPropertyStr (ctx, entry, "dataTruncated", JS_NewBool (ctx, 1));
             }
@@ -1793,11 +1733,10 @@ void install_response_events (JSContext* ctx, JSValue response, const nlohmann::
     }
 }
 
-// One hop's received headers in the shape `pm.response.headers` has: lower-cased
-// names, a repeated name folded with ", ", get()/has() and no mutators. The fold
-// is what `ingest_header_line` does to the final response, so a hop and the
-// response read the same way; a hop's `Set-Cookie` lines therefore join like the
-// response's do.
+// One hop's received headers shaped like `pm.response.headers` (lower-cased
+// names, a repeat folded with ", ", get()/has(), no mutators): the fold
+// `ingest_header_line` applies to the final response, so a hop reads the same,
+// its `Set-Cookie` lines joined too.
 JSValue hop_headers_object (JSContext* ctx, const std::vector<HeaderLine>& lines) {
     Headers folded;
     for (const auto& line : lines) {
@@ -1879,7 +1818,7 @@ void install_response_mcp (JSContext* ctx, JSValue response, const std::optional
 void setup_pm_response (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
 
-    // Free old response object if it exists to prevent memory leak
+    // A pooled context still holds the previous execution's object; free it.
     JSValue old_response = JS_GetPropertyStr (ctx, pm, "response");
     if (!JS_IsUndefined (old_response)) {
         JS_FreeValue (ctx, old_response);
@@ -1888,20 +1827,19 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
     JSValue response = JS_NewObject (ctx);
 
     if (data && data->response) {
-        // pm.response.code
         JS_SetPropertyStr (
         ctx, response, "code", JS_NewInt32 (ctx, data->response->status_code));
 
-        // pm.response.status - Postman's reason phrase, not a second spelling
-        // of the code. Derived here rather than carried: the phrase is wanted
-        // only when a script reads it, and scripts run deferred on sampled
-        // responses, so nothing is added to the transfer path for it.
+        // `status` is Postman's reason phrase, not a second spelling of the
+        // code, derived here rather than carried: scripts read it rarely and
+        // run deferred on sampled responses, so the transfer path carries
+        // nothing for it.
         JS_SetPropertyStr (ctx, response, "status",
         JS_NewString (ctx, response_reason_phrase (*data->response).c_str ()));
 
-        // pm.response.responseTime - perceived latency (submit → completion),
-        // includes generator-side queue wait. For pure server time, use
-        // responseTimeWire. queue_wait_ms is exposed as responseTimeQueueWait.
+        // `responseTime` is perceived latency (submit to completion),
+        // generator-side queue wait included; `responseTimeWire` is server
+        // time, and `responseTimeQueueWait` the queue wait.
         JS_SetPropertyStr (ctx, response, "responseTime",
         JS_NewFloat64 (ctx, data->response->timing.total_ms));
         JS_SetPropertyStr (ctx, response, "responseTimeWire",
@@ -1909,7 +1847,7 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         JS_SetPropertyStr (ctx, response, "responseTimeQueueWait",
         JS_NewFloat64 (ctx, data->response->timing.queue_wait_ms));
 
-        // Error information (for client-side failures)
+        // Error information, for a client-side failure.
         if (data->response->error_code != vayu::ErrorCode::None) {
             JS_SetPropertyStr (ctx, response, "errorCode",
             JS_NewString (ctx, vayu::to_string (data->response->error_code)));
@@ -1917,7 +1855,6 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
             JS_NewString (ctx, data->response->error_message.c_str ()));
         }
 
-        // pm.response.json() and pm.response.text()
         install_response_body_readers (ctx, response, data->response->body);
 
         JS_SetPropertyStr (ctx, response, "reason",
@@ -1926,14 +1863,12 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         JS_SetPropertyStr (ctx, response, "size",
         JS_NewCFunction (ctx, js_response_size, "size", 0));
 
-        // pm.response.responseSize - `size().body`, under the name Postman
-        // scripts read it by.
+        // `responseSize` is `size().body`, under the name Postman scripts read.
         JS_SetPropertyStr (ctx, response, "responseSize",
         JS_NewInt64 (ctx, static_cast<int64_t> (data->response->body.size ())));
 
-        // pm.response.headers - a plain object with get()/has() over it. No
-        // mutators: the response has already arrived, so a header method that
-        // appeared to change it would be a lie.
+        // Headers with get()/has() and no mutators: the response has arrived,
+        // so a method appearing to change it would lie.
         JSValue headers = JS_NewObject (ctx);
         install_header_methods (ctx, headers, /*mutators=*/false);
         for (const auto& [key, value] : data->response->headers) {
@@ -1941,22 +1876,19 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         }
         JS_SetPropertyStr (ctx, response, "headers", headers);
 
-        // pm.response.cookies - a getter, so a script that never mentions
-        // cookies never pays for the parse. Configurable because the getter
-        // replaces itself with the list it built.
+        // `cookies` is a getter, so a script never mentioning cookies pays for
+        // no parse; configurable because the getter replaces itself with its
+        // list.
         JSAtom cookies_atom = JS_NewAtom (ctx, "cookies");
-        // Enumerable like every other member of pm.response, so
-        // console.log(pm.response) and JSON.stringify show it rather than
-        // hiding a documented property behind its own laziness.
+        // Enumerable like every pm.response member, so console.log and
+        // JSON.stringify show it rather than hiding it behind its laziness.
         JS_DefinePropertyGetSet (ctx, response, cookies_atom,
         JS_NewCFunction (ctx, js_response_cookies, "cookies", 0), JS_UNDEFINED,
         JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
         JS_FreeAtom (ctx, cookies_atom);
 
-        // pm.response.events / totalEvents / eventsTruncated - a streamed run
-        // only. Bound together or not at all: a script that reads the list
-        // without its markers cannot tell a whole stream from its prefix, and
-        // the three are one fact about one arrival set.
+        // A streamed run only, the three bound together or not at all
+        // (`install_response_events`).
         install_response_events (ctx, response, data->response_events);
 
         // pm.response.redirects - the followed 3xx hops, where recorded.
@@ -1965,7 +1897,7 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         // pm.response.mcp - an mcp request's reply class, where read.
         install_response_mcp (ctx, response, data->response->mcp_reply);
 
-        // pm.response.to.have chain for Postman-compatible assertions
+        // The `to` chain for Postman-compatible assertions.
         JS_SetPropertyStr (
         ctx, response, "to", create_response_to_object (ctx, POSITIVE_CHAIN));
     }

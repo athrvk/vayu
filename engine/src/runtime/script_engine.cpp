@@ -6,19 +6,18 @@
  */
 
 /**
- * @brief QuickJS-based JavaScript scripting engine implementation
+ * The QuickJS scripting engine. It calls the QuickJS C library and follows
+ * different coding conventions.
  *
- * This file interfaces with QuickJS C library and uses different coding conventions.
+ * The `pm` surfaces live in `pm/`, one file per family, sharing
+ * `pm/pm_internal.hpp` (issue #2092). What stays here is the console, base64,
+ * `Math.random`, the timers and `pm.crypto`, the `pm` composer and the engine
+ * itself.
  *
- * The `pm` object's surfaces live in `pm/`, one file per family, sharing
- * `pm/pm_internal.hpp`; what stays here is the console, base64, the timers
- * and `pm.crypto`, the `pm` composer and the engine itself (issue #2092).
- *
- * Nothing here is linted: `engine/src/runtime/.clang-tidy` turns every check off
- * for this directory, with the reason. There used to be a file-wide
- * NOLINTBEGIN/NOLINTEND pair saying the same thing a second way (#885) - two
- * mechanisms for one exemption, the weaker of which silently stops covering the
- * file the moment a function is moved out of it.
+ * Nothing here is linted: `engine/src/runtime/.clang-tidy` turns every check
+ * off for this directory, with the reason. A file-wide NOLINTBEGIN/NOLINTEND
+ * pair would say it a second way (#885): two mechanisms for one exemption, the
+ * weaker of which silently stops covering a function moved out of the file.
  */
 
 #include "vayu/runtime/script_engine.hpp"
@@ -174,12 +173,9 @@ std::optional<std::string> builtin_object_text (JSContext* ctx, JSValueConst val
 }
 
 /**
- * Every `console.*` method, distinguished by QuickJS's `magic` argument.
- *
- * One function rather than four near-copies: the formatting below is the whole
- * body and none of it varies by level. `magic` is how QuickJS passes a small
- * integer to a shared C function, which is exactly the shape of this problem -
- * the alternative is four wrappers that each forward to a fifth.
+ * Every `console.*` method, told apart by QuickJS's `magic` argument, its small
+ * integer for a shared C function. The formatting is the whole body and none of
+ * it varies by level, so one function, not four wrappers forwarding to a fifth.
  */
 JSValue
 js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
@@ -190,10 +186,9 @@ js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* a
         if (i > 0)
             ss << " ";
 
-        // JS_ToCString on an object invokes Object.prototype.toString() →
-        // "[object Object]". Pretty-print objects (and arrays) via
-        // JSON.stringify instead, matching standard console.log behavior.
-        // Functions are left to JS_ToCString (which yields their source).
+        // JS_ToCString would print an object as "[object Object]", so objects
+        // and arrays go through JSON.stringify, as console.log does. A function
+        // keeps JS_ToCString, which yields its source.
         if (JS_IsObject (argv[i]) && !JS_IsFunction (ctx, argv[i])) {
             if (auto text = builtin_object_text (ctx, argv[i])) {
                 ss << *text;
@@ -212,8 +207,8 @@ js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* a
                 JS_FreeValue (ctx, json);
                 continue;
             }
-            // Stringify threw (e.g. circular reference) or returned undefined.
-            // Clear any pending exception and emit a readable placeholder.
+            // Stringify threw (a circular reference) or returned undefined:
+            // clear the exception and print a placeholder.
             JS_FreeValue (ctx, json);
             JSValue exc = JS_GetException (ctx);
             if (!JS_IsNull (exc) && !JS_IsUndefined (exc)) {
@@ -234,11 +229,10 @@ js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* a
     return JS_UNDEFINED;
 }
 
-/// What `console.*` is bound to when `scriptEnableConsole` is off: the methods
-/// stay defined so a script that logs keeps running (#3461), but nothing is
-/// formatted or recorded. Binding a different function, rather than testing
-/// the flag inside `js_console_log`, keeps the per-call cost of a load test at
-/// one C call.
+/// `console.*` when `scriptEnableConsole` is off: still defined, so a script
+/// that logs keeps running (#3461), but nothing is formatted or recorded. A
+/// separate function, not a flag test in `js_console_log`, keeps a load test's
+/// per-call cost at one C call.
 JSValue js_console_discard (JSContext*, JSValueConst, int, JSValueConst*, int) {
     return JS_UNDEFINED;
 }
@@ -251,8 +245,8 @@ void setup_console (JSContext* ctx, bool record) {
     JSValue console = JS_NewObject (ctx);
 
     // The magic value is the ConsoleLevel, cast back in js_console_log. Keep
-    // this table and the enum in step - a wrong number here is a silently
-    // mislabelled line, not a compile error.
+    // each name on its own level: a wrong pairing is a silently mislabelled
+    // line, not a compile error.
     struct Method {
         const char* name;
         ConsoleLevel level;
@@ -279,19 +273,17 @@ void setup_console (JSContext* ctx, bool record) {
 // Base64 globals and pm.crypto
 // ============================================================================
 //
-// Why this is synchronous, and why it is not called `crypto.subtle`.
-//
-// Web Crypto's SubtleCrypto returns Promises and covers algorithms this sandbox
-// does not implement. Wearing the Web Crypto name while behaving differently is
-// the exact trap the sandbox-surface tests exist to catch, so the hashing
-// surface takes a name of its own, `pm.crypto`, and is honestly synchronous.
-// `btoa` / `atob` keep their standard names because they are synchronous on
-// the web too, and they keep their standard Latin-1 semantics with them.
+// Synchronous, and not called `crypto.subtle`: Web Crypto's SubtleCrypto
+// returns Promises and covers algorithms this sandbox does not implement, and
+// wearing that name while behaving differently is the trap the sandbox-surface
+// tests catch, so hashing takes a name of its own, `pm.crypto`. `btoa` / `atob`
+// keep their standard names, and their Latin-1 semantics, because they are
+// synchronous on the web too.
 
-// A JS string reaches C++ as UTF-8. `btoa` is defined over code units, not code
-// points, so anything above U+00FF is a range error there; every other caller
-// wants the UTF-8 bytes as they stand. Returning the byte string keeps one
-// conversion rule in one place.
+// A JS string reaches C++ as UTF-8. `btoa` is defined over code units, so a
+// code point above U+00FF is a range error there; every other caller wants the
+// UTF-8 bytes as they stand. Returning the byte string keeps the conversion
+// rule in one place.
 enum class ByteSource { Utf8, Latin1 };
 
 // Decodes UTF-8 to Latin-1 bytes, failing on any code point above U+00FF.
@@ -314,9 +306,8 @@ bool utf8_to_latin1 (std::string_view in, std::string& out) {
             out.push_back (static_cast<char> (cp));
             i += 2;
         } else {
-            // Three- and four-byte sequences are all above U+00FF by
-            // definition, and a malformed lead byte is not representable
-            // either.
+            // Three- and four-byte sequences are above U+00FF by definition,
+            // and a malformed lead byte is not representable either.
             return false;
         }
     }
@@ -380,10 +371,9 @@ JSValue js_atob (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
     return JS_NewStringLen (ctx, text.data (), text.size ());
 }
 
-// Turns a digest into whatever the caller asked for. 'bytes' exists so a digest
-// can be fed back in as a key: multi-round key derivation (AWS SigV4 signs with
-// the raw digest of the previous round) is impossible when the only outputs are
-// text.
+// 'bytes' lets a digest be fed back in as a key: multi-round key derivation
+// (AWS SigV4 signs with the previous round's raw digest) is impossible when
+// every output is text.
 JSValue encode_digest (JSContext* ctx,
 const std::array<uint8_t, 32>& digest,
 const std::string& encoding) {
@@ -422,9 +412,9 @@ const std::string& encoding) {
     return JS_NewStringLen (ctx, out.data (), out.size ());
 }
 
-// The encoding argument, which is optional and defaults to hex. An explicit
-// undefined is the same as omitting it; anything else non-string is a typo
-// worth failing on rather than coercing to a name that then fails anyway.
+// Optional, hex by default, and an explicit undefined counts as omitted. Any
+// other non-string is a typo worth failing on, not coercing to a name that then
+// fails anyway.
 bool read_digest_encoding (JSContext* ctx, int argc, JSValueConst* argv, int index, std::string& out) {
     out = "hex";
     if (argc <= index || JS_IsUndefined (argv[index])) {
@@ -494,11 +484,10 @@ void setup_base64_globals (JSContext* ctx) {
 //
 // QuickJS seeds each context's generator from the microsecond clock, and a
 // context is built per script, so two workers starting a script in the same
-// microsecond drew the same sequence. Its generator state is private and the
-// library offers no way to set it, so `Math.random` is replaced by this
-// function over one generator per thread, seeded once from libsodium. A
-// thread's contexts then continue one sequence instead of each restarting
-// from a clock reading, and two threads cannot share one.
+// microsecond would draw the same sequence. Its generator state is private
+// and cannot be set, so `Math.random` is replaced by this function over one
+// generator per thread, seeded once from libsodium: a thread's contexts
+// continue one sequence, and no two threads share one.
 
 /// A fresh 64-bit state from libsodium's CSPRNG; zero would be a fixed point of
 /// xorshift, so it is never returned. Throws if libsodium cannot initialise.
@@ -548,10 +537,9 @@ void setup_math_random (JSContext* ctx) {
 // ============================================================================
 //
 // Callbacks run on `TimerQueue`'s virtual clock, drained before the script
-// ends (`drain_async_work`), so a delay orders callbacks and never blocks the
-// thread: an inline load-run script runs where blocking is not allowed, and a
-// Postman script's `setTimeout` used as a sleep would otherwise spend the
-// script's own deadline doing nothing.
+// ends (`drain_async_work`): a delay orders callbacks and never blocks the
+// thread. An inline load-run script runs where blocking is not allowed, and a
+// Postman `setTimeout` used as a sleep would spend the script's deadline idle.
 
 enum class TimerKind : std::uint8_t { Once, Repeating };
 
@@ -633,13 +621,12 @@ void setup_pm_object (JSContext* ctx) {
     JSValue global = JS_GetGlobalObject (ctx);
     JSValue pm     = JS_NewObject (ctx);
 
-    // A class registered with JS_NewClass has no prototype until one is set, so
-    // without this the pm.response.to.* and pm.expect(...) objects would answer
-    // nothing but their own members - toString, hasOwnProperty and friends would
-    // reach the unknown-member hook and throw. Both chains and an expectation's
-    // matchers are armed, so all three need it; `JS_SetClassProto` takes
-    // ownership of the value it is given, so the first two calls get a
-    // reference of their own.
+    // A JS_NewClass class has no prototype until one is set. The
+    // pm.response.to.* and pm.expect(...) chains and an expectation's matchers
+    // all hook unknown members, so without Object's prototype toString,
+    // hasOwnProperty and friends would reach the hook and throw.
+    // `JS_SetClassProto` takes ownership of its value, so the first two calls
+    // get a reference of their own.
     JSValue plain        = JS_NewObject (ctx);
     JSValue object_proto = JS_GetPrototype (ctx, plain);
     JS_FreeValue (ctx, plain);
@@ -647,15 +634,13 @@ void setup_pm_object (JSContext* ctx) {
     JS_SetClassProto (ctx, expect_member_class_id, JS_DupValue (ctx, object_proto));
     JS_SetClassProto (ctx, response_chain_class_id, object_proto);
 
-    // `pm.request.url` inherits from **String.prototype**, which is the whole
-    // of how `url.startsWith(...)`, `.includes(...)`, `.slice(...)` and the
-    // rest keep working as they did on a string: every one of them coerces
-    // through `ToString(this)`, which the object's own `@@toPrimitive` answers
-    // with the URL. What it does not restore is `.length` - an own property of
-    // a real string, and one of the three breaks #991 documents.
-    // `pm.request.body` inherits from it for the same reason (issue #1003), so
-    // the first call gets a reference of its own - `JS_SetClassProto` takes
-    // ownership of the value it is given.
+    // `pm.request.url` inherits from String.prototype, which is the whole of
+    // how `.startsWith(...)`, `.includes(...)`, `.slice(...)` and the rest keep
+    // working as on a string: each coerces through `ToString(this)`, which the
+    // object's `@@toPrimitive` answers with the URL. It does not restore
+    // `.length`, an own property of a real string and one of the three breaks
+    // #991 documents. `pm.request.body` inherits from it for the same reason
+    // (issue #1003), so the first call gets a reference of its own.
     JSValue string_ctor  = JS_GetPropertyStr (ctx, global, "String");
     JSValue string_proto = JS_GetPropertyStr (ctx, string_ctor, "prototype");
     JS_FreeValue (ctx, string_ctor);
@@ -664,10 +649,8 @@ void setup_pm_object (JSContext* ctx) {
 
     JS_SetPropertyStr (ctx, pm, "test", JS_NewCFunction (ctx, js_pm_test, "test", 2));
 
-    // pm.expect(), with chai's `expect.fail` on the function object itself.
-    // The first member on a callable here: a JS function *is* an object, so
-    // the property write is ordinary - what is new is holding the function
-    // value long enough to write to it instead of handing it straight to `pm`.
+    // pm.expect(), with chai's `expect.fail` on the function itself, so the
+    // value is held long enough to write the member before it goes to `pm`.
     JSValue expect_fn = JS_NewCFunction (ctx, js_pm_expect, "expect", 1);
     JS_SetPropertyStr (
     ctx, expect_fn, "fail", JS_NewCFunction (ctx, js_pm_expect_fail, "fail", 1));
@@ -716,19 +699,17 @@ void setup_pm_object (JSContext* ctx) {
     JS_FreeValue (ctx, global);
 }
 
-// expect_class_id / expect_member_class_id / response_chain_class_id /
-// request_url_class_id / request_body_class_id are process-wide: every native callback looks one up
-// by name (JS_GetOpaque (ctx, ..., xxx_class_id)) rather than through the
-// JSRuntime that happens to own its JSContext, since each OS thread owns a
-// wholly separate JSRuntime (QuickJS's own is not thread-safe) but the five
-// ids must still agree across all of them. The zero-check-then-JS_NewClassID
-// sequence that assigns each one is neither atomic nor idempotent under a
-// race - two threads creating their first JSRuntime concurrently can
-// interleave the read and the write, corrupting the id one native callback
-// later dereferences (root cause of #1589's intermittent segfault). This
-// mutex makes that one-time assignment, plus the JS_NewClass registration
-// that depends on the id being final, happen under one lock; it is not on
-// any per-request hot path, only on first JSRuntime creation per thread.
+// `expect_class_id`, `expect_member_class_id`, `response_chain_class_id`,
+// `request_url_class_id` and `request_body_class_id` are process-wide: a native
+// callback reads one by name (`JS_GetOpaque (ctx, ..., xxx_class_id)`), not
+// through its context's runtime, because each OS thread owns a separate
+// JSRuntime (QuickJS's is not thread-safe) yet the five ids must agree across
+// all of them. The zero-check-then-JS_NewClassID that assigns each is neither
+// atomic nor idempotent: two threads creating their first JSRuntime at once can
+// interleave it and corrupt an id a native callback later dereferences (#1589's
+// intermittent segfault). This mutex puts that one-time assignment, and the
+// JS_NewClass registration that needs the final id, under one lock; only a
+// thread's first JSRuntime takes it, never a request.
 std::mutex& class_id_registration_mutex () {
     static std::mutex mutex;
     return mutex;
@@ -980,11 +961,10 @@ using namespace pm_detail;
 // ScriptEngine Implementation
 // ============================================================================
 
-// QuickJS calls this periodically during evaluation. Returning non-zero aborts
-// the current JS_Eval with an InternalError, which the execute() exception path
-// turns into result.error_message.
-// A raised `ScriptContext::stop` (#3460) aborts the call the same way, and is
-// read first: a script the run's Stop ended is cancelled, not timed out.
+// QuickJS polls this during evaluation; non-zero aborts the JS_Eval with an
+// InternalError, which execute() reports as `result.error_message`. A raised
+// `ScriptContext::stop` (#3460) aborts too, and is read first: a script the
+// run's Stop ended is cancelled, not timed out.
 extern "C" int script_interrupt_handler (JSContext* /*ctx*/, void* opaque) {
     auto* state = static_cast<RuntimeState*> (opaque);
     if (!state)
@@ -1170,8 +1150,7 @@ constexpr JSMallocFunctions SCRIPT_HEAP = {
 class ScriptEngine::Impl {
     public:
     ScriptConfig config;
-    // Pool of Runtime+Context pairs
-    // We need separate runtimes because QuickJS JSRuntime is not thread-safe
+    // Separate runtimes because a QuickJS JSRuntime is not thread-safe.
     using ContextPair = std::pair<JSRuntime*, JSContext*>;
     std::vector<ContextPair> context_pool;
     std::mutex pool_mutex;
@@ -1212,48 +1191,45 @@ class ScriptEngine::Impl {
 
         JS_SetMaxStackSize (rt, config.stack_size);
 
-        // Install a wall-clock deadline interrupt so infinite-loop scripts
-        // cannot hang the thread.
+        // The deadline interrupt: an infinite loop cannot hang the thread.
         JS_SetRuntimeOpaque (rt, rt_state);
         JS_SetInterruptHandler (rt, &script_interrupt_handler, rt_state);
         JS_SetHostPromiseRejectionTracker (rt, &script_rejection_tracker, rt_state);
 
-        // The five ids below are process-wide (see class_id_registration_mutex's
-        // comment); this lock is what makes their first assignment, and the
-        // JS_NewClass calls that depend on the final value, safe across the
-        // per-thread JSRuntimes that race to create their first context.
+        // The five ids are process-wide (class_id_registration_mutex); this
+        // lock makes their first assignment, and the JS_NewClass calls that
+        // need the final value, safe across the per-thread JSRuntimes racing to
+        // create their first context.
         {
             std::lock_guard<std::mutex> id_lock (class_id_registration_mutex ());
 
-            // Register Expectation class
             if (expect_class_id == 0) {
                 JS_NewClassID (rt, &expect_class_id);
             }
             JS_NewClass (rt, expect_class_id, &expect_class);
 
-            // Register the class of an expectation's matchers and chainable
-            // methods, callable objects whose hook refuses an unknown member.
+            // An expectation's matchers and chainable methods: callable objects
+            // whose hook refuses an unknown member.
             if (expect_member_class_id == 0) {
                 JS_NewClassID (rt, &expect_member_class_id);
             }
             JS_NewClass (rt, expect_member_class_id, &expect_member_class);
 
-            // Register the pm.response.to.* chain class, whose exotic hook makes
-            // an unknown assertion throw instead of silently evaluating to
-            // undefined.
+            // The pm.response.to.* chain, whose hook makes an unknown assertion
+            // throw instead of silently evaluating to undefined.
             if (response_chain_class_id == 0) {
                 JS_NewClassID (rt, &response_chain_class_id);
             }
             JS_NewClass (rt, response_chain_class_id, &response_chain_class);
 
-            // Register the pm.request.url class - see setup_pm_object for the
-            // prototype that keeps it usable as the string it replaced.
+            // pm.request.url; setup_pm_object gives it the prototype that keeps
+            // it usable as the string it replaced.
             if (request_url_class_id == 0) {
                 JS_NewClassID (rt, &request_url_class_id);
             }
             JS_NewClass (rt, request_url_class_id, &request_url_class);
 
-            // Register the pm.request.body class - same story, same prototype.
+            // pm.request.body: the same prototype, for the same reason.
             if (request_body_class_id == 0) {
                 JS_NewClassID (rt, &request_body_class_id);
             }
@@ -1291,24 +1267,23 @@ class ScriptEngine::Impl {
 
     /// The pool holds runtimes, not contexts: a script can reassign `pm` or
     /// `console`, patch `String.prototype` or `Array.prototype`, or leave a
-    /// global behind, and a context that survived it would hand all of that to
-    /// the next script on the thread - possibly another collection's (#1782).
-    /// Freezing and diffing cannot cover every intrinsic a script can reach, so
-    /// the context is rebuilt instead; the runtime (limits, interrupt handler,
-    /// class registrations) is what is worth keeping.
+    /// global behind, and a surviving context would hand all of it to the
+    /// thread's next script, possibly another collection's (#1782). Freezing
+    /// and diffing cannot cover every intrinsic a script can reach, so the
+    /// context is rebuilt; the runtime (limits, interrupt handler, class
+    /// registrations) is what is worth keeping.
     ///
     /// Unless a promise job is still queued (#1823): each job holds functions
-    /// that pin their context, so `JS_FreeContext` would free nothing and the
-    /// runtime would fill with dead contexts until its memory limit failed a
-    /// later script. `drain_async_work` empties the queue, so a job is left
-    /// only when the drain stopped at the deadline or the job cap, and that
-    /// job must never run: it is user code past its budget, against a context
-    /// whose `ContextData` is gone. `JS_FreeRuntime` drops it unrun, which
-    /// releases the context. Every value the execution itself held must be
-    /// freed before this call (`release_held_references`), for the same
-    /// pinning reason. A timer left queued is one of those values rather than
-    /// a reason to discard the runtime: the queue is the engine's, so freeing
-    /// it drops the timer unrun.
+    /// that pin their context, so `JS_FreeContext` would free nothing and dead
+    /// contexts would fill the runtime until its memory limit failed a later
+    /// script. `drain_async_work` empties the queue, so a job is left only when
+    /// the drain stopped at the deadline or the job cap, and it must never run:
+    /// it is user code past its budget, against a context whose `ContextData`
+    /// is gone. `JS_FreeRuntime` drops it unrun, releasing the context. Every
+    /// value the execution held must be freed first, by
+    /// `release_held_references`, for the same pinning reason. A queued timer
+    /// is one of those values, not a reason to discard the runtime: the queue
+    /// is the engine's, so freeing it drops the timer unrun.
     void release_context (ContextPair pair) {
         if (!pair.first || !pair.second)
             return;
@@ -1354,14 +1329,13 @@ class ScriptEngine::Impl {
     /// What the exception pending on @p ctx says, taken off the context.
     [[nodiscard]] std::string take_exception_message (JSContext* ctx) const {
         JSValue exc = JS_GetException (ctx);
-        // Whether the deadline stopped this script is the interrupt
-        // handler's to answer, not the clock's - the same question #1056
-        // settled one layer down. An error that merely *lands* past the
-        // deadline is still that error: a script's own throw at the buzzer,
-        // and `pm.sendRequest` refusing a spent budget from a blocking C
-        // function the handler never gets to interrupt. Comparing the clock
-        // here replaced the sentence naming the fault with a timeout line
-        // the user could not act on.
+        // Whether the deadline stopped this script is the interrupt handler's
+        // answer, not the clock's (the question #1056 settled one layer down).
+        // An error that merely *lands* past the deadline is still that error: a
+        // script's own throw at the buzzer, or `pm.sendRequest` refusing a
+        // spent budget from a blocking C function the handler cannot interrupt.
+        // Reading the clock here would replace the sentence naming the fault
+        // with a timeout line the user cannot act on.
         const auto& state = *static_cast<const RuntimeState*> (
         JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
         std::string message = state.stopped ? std::string (STOPPED_MESSAGE) :
@@ -1437,8 +1411,8 @@ class ScriptEngine::Impl {
     }
 
     /// Reports the script body's throw as the throw itself, the message a
-    /// synchronous script has always reported, rather than as an unhandled
-    /// rejection of the wrapper's promise.
+    /// synchronous script reports, rather than as an unhandled rejection of the
+    /// wrapper's promise.
     void record_body_rejection (JSContext* js_ctx,
     RuntimeState& state,
     ContextData& data,
@@ -1575,8 +1549,8 @@ class ScriptEngine::Impl {
             return result;
         }
 
-        // Refresh the per-execution deadline. A pooled context reused for the next
-        // script gets a fresh budget; timeout_ms == 0 disables the wall-clock limit.
+        // The pooled runtime's per-execution state: a fresh deadline
+        // (timeout_ms == 0 disables the wall-clock limit) and cleared flags.
         // acquire_context sets the opaque on every runtime it hands out.
         auto& rt_state = *static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt));
         rt_state.enabled            = config.timeout_ms != 0;
@@ -1608,8 +1582,7 @@ class ScriptEngine::Impl {
         ctx_data.response_events     = ctx.response_events;
         ctx_data.redirect_hops       = ctx.redirect_hops;
         // Both per-execution: the capability is this caller's, and the request
-        // budget starts full for every script rather than carrying over
-        // through a pooled context.
+        // budget starts full for every script.
         ctx_data.allow_send_request  = config.allow_send_request;
         ctx_data.send_request_count  = 0;
         ctx_data.console_enabled     = config.enable_console;
@@ -1681,10 +1654,10 @@ class ScriptEngine::Impl {
         // after a throw: what the script assigned before it threw was assigned.
         record_legacy_tests (js_ctx, ctx_data);
 
-        // Apply the script's pm.request edits to the request that is about to
-        // be sent. Deliberately runs even when the script threw: the edits it
-        // made before throwing already happened, the request is sent either
-        // way, and discarding them silently is the defect this replaced.
+        // Apply the script's pm.request edits to the request about to be sent,
+        // even when the script threw: the edits it made first already happened,
+        // and the request is sent either way, so discarding them would lose
+        // them silently.
         if (ctx.mutable_request) {
             if (auto reason = apply_pm_request_writeback (js_ctx, *ctx.mutable_request)) {
                 result.success       = false;
@@ -1694,7 +1667,6 @@ class ScriptEngine::Impl {
             }
         }
 
-        // Copy results
         result.tests          = std::move (ctx_data.tests);
         result.console_output = std::move (ctx_data.console_output);
         // One budget for the execution's records: a lifecycle row stores one
@@ -1714,7 +1686,6 @@ class ScriptEngine::Impl {
         // The flag is the caller's; the runtime goes back to the pool.
         rt_state.stop = nullptr;
 
-        // Check if any tests failed
         for (const auto& test : result.tests) {
             if (!test.passed) {
                 result.success = false;
@@ -1775,8 +1746,7 @@ size_t ScriptEngine::idle_runtime_count () const {
 
 std::string ScriptEngine::version () {
     // Derived from the vendored runtime, never written down here: a literal
-    // goes stale at the next vendor bump with nothing to catch it. This one
-    // reported "QuickJS 2024-01-13" while the tree carried quickjs-ng 0.16.0.
+    // goes stale at the next vendor bump with nothing to catch it.
     return std::string ("QuickJS-ng ") + JS_GetVersion ();
 }
 
