@@ -6,23 +6,12 @@
  */
 
 /**
- * StopRunButton
- *
- * "Stop the run that is happening right now" - the one treatment, wherever a
- * run can be cancelled. Two places call it: the load-test dashboard header and
- * the collection-run tab.
- *
- * It exists as a primitive rather than as markup each view repeats because the
- * treatment is not a `Button` variant: a destructive *outline* over `ghost`,
- * which no variant paints, plus the in-flight swap to a spinner and
- * "Stopping…". A second hand-rolled copy of that would not receive this one's
- * fixes.
- *
- * `destructive-text`, not `destructive`, for the label - the bare fill token as
- * a foreground is the colour bug this repo hits most (`docs/design-system/chart-colors.md`).
- *
- * The caller owns the request and the failure path. This is a button: it says
- * what the pending state looks like and nothing about what stopping means.
+ * "Stop the run happening now", one treatment wherever a run can be cancelled (the load-test
+ * dashboard header, the collection-run tab). A primitive, as the treatment is no `Button` variant:
+ * a destructive *outline* over `ghost`, plus the in-flight swap to a spinner and "Stopping…".
+ * `destructive-text`, not `destructive`, for the label: the bare fill as a foreground is the repo's
+ * most frequent colour bug (`docs/design-system/chart-colors.md`). The caller owns the request and
+ * the failure path; this says only what pending looks like.
  */
 
 import { StopCircle, Loader2 } from "lucide-react";
@@ -36,8 +25,8 @@ interface StopRunButtonProps {
 	/** True while the stop request is in flight; the button disables and says so. */
 	isStopping?: boolean;
 	/**
-	 * The word for the idle state. "Stop waiting" while a run only drains its
-	 * in-flight requests (#3568): there is no load left to stop.
+	 * The idle word: "Stop waiting" while a run only drains its in-flight requests (#3568), with no
+	 * load left to stop.
 	 */
 	label?: string;
 	className?: string;
@@ -61,9 +50,7 @@ export function StopRunButton({
 			)}
 		>
 			{/*
-			 * No `mr-*` here: the `Button` primitive's base string already sets
-			 * `gap-2` on its flex children, so a margin on top of it doubled the
-			 * icon-to-label gap to 8px + 6px.
+			 * No `mr-*`: the `Button` base sets `gap-2`, and a margin on top doubled the icon gap.
 			 */}
 			{isStopping ? (
 				<Loader2 className="size-icon-sm animate-spin" />

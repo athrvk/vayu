@@ -6,29 +6,19 @@
  */
 
 /**
- * A load run's aggregate test-validation outcome - how many sampled responses
- * were asserted against, and how many of those assertions passed (issue #726).
- * Two units share the card and the labels name them: responses tested is a
- * count of responses, passed and failed are counts of assertions (issue #2144).
+ * A load run's aggregate test-validation outcome: how many sampled responses were asserted against,
+ * and how many assertions passed (#726). Two units share the card, and the labels name them:
+ * responses tested counts responses, passed and failed count assertions (#2144). The engine writes
+ * `testValidation` (`run_manager.cpp` -> `runs.cpp`) into every load-run report whose plan carried
+ * a post-request script, and stores the named failures on a synthetic result row. The History
+ * Overview renders this, which the dashboard shows for a finished run (#2220), so a reopened run
+ * says whether its assertions ran.
  *
- * The engine writes `testValidation` (`run_manager.cpp` -> `runs.cpp`) into
- * every load-run report whose plan carried a post-request script, and stores
- * the named per-test failures on a synthetic result row. Before #726 the only
- * reader of either was the dashboard's own report view, mounted only while a
- * run was being watched - so a run reopened from History showed thresholds,
- * status codes and schema validation but never said whether its assertions ran
- * at all. The History Overview renders this block, and the dashboard shows that
- * Overview for a finished run (#2220).
- *
- * **`failures` lists the named failures.** The Overview passes them because
- * the synthetic failure row is filtered out of the Samples tab (see
- * `test-validation.ts`), so this is the one place they reach the screen. Each
- * distinct message is listed once with how often it failed (#3127): a script
- * failing the same way on every sampled response is one line, `x1,000`.
- *
- * **The replay's console lines close the card** (#3127), under a heading that
- * names the replay and its sample size. They ride inside `testValidation`, so a
- * report from an engine before the field simply has none to draw.
+ * **`failures` lists the named failures**: the synthetic row is filtered out of the Samples tab
+ * (`test-validation.ts`), so this is the one place they reach the screen. Each distinct message is
+ * listed once with its count (#3127): a script failing alike on every sample is one line, `x1,000`.
+ * **The replay's console lines close the card** (#3127), under a heading naming the replay and its
+ * sample size; they ride inside `testValidation`, so an older engine's report has none.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
@@ -46,56 +36,48 @@ export interface TestValidationSummaryProps {
 	testValidation: RunReport["testValidation"];
 	sampling: RunReport["sampling"];
 	/**
-	 * The named per-test failures the run recorded, from the synthetic
-	 * failure-detail result row (`run_manager.cpp` stores it with `status 0`).
-	 * The list is bounded engine-side, so {@link failuresTotal} is the true
-	 * count and a shorter list says so out loud rather than reading as the whole
-	 * set. Omitted by surfaces that already list failures per sample.
+	 * The named per-test failures, from the synthetic failure-detail row (`run_manager.cpp` stores
+	 * it with `status 0`). Bounded engine-side, so {@link failuresTotal} is the true count and a
+	 * shorter list says so aloud. Omitted by surfaces listing failures per sample.
 	 */
 	failures?: string[];
 	/**
-	 * How many times each of {@link failures} failed, parallel to it. A count
-	 * above 1 is shown beside the message; absent on a row stored before the
-	 * engine deduplicated, whose every entry stands for one.
+	 * How often each of {@link failures} failed, parallel to it; above 1 is shown beside the
+	 * message, and absent on a row stored before deduplication, whose every entry is one.
 	 */
 	failureCounts?: number[];
 	/** Failed assertions, each occurrence counted - not the length of {@link failures}. */
 	failuresTotal?: number;
 	/**
-	 * Every distinct message the replay saw, kept or not. When it exceeds
-	 * `failures.length` the card says how many of how many it shows; absent on an
-	 * old row, which is judged by {@link failuresTotal} as it always was.
+	 * Every distinct message the replay saw, kept or not; above `failures.length` the card says how
+	 * many of how many it shows. Absent on an old row, judged by {@link failuresTotal}.
 	 */
 	failuresDistinct?: number;
 	/**
-	 * The run's total request count, `summary.totalRequests`. With it the card
-	 * says how many of the run's requests were tested; without it the card says
-	 * nothing about the denominator rather than guess one (never "of 0").
+	 * The run's `summary.totalRequests`: with it the card says how many requests were tested;
+	 * without it, nothing about the denominator rather than a guess (never "of 0").
 	 */
 	totalRequests?: number;
 	/**
-	 * For a scenario load run, the responses that carried a deferred test script
-	 * (`replayScopeOf`, #2824). It is the denominator there, not
-	 * {@link totalRequests}: most requests of a sequence have no script to
-	 * replay, so "the rest were not kept" would be untrue of them. A caller
-	 * passes one or the other; this one wins if both arrive.
+	 * For a scenario load run, the responses carrying a deferred test script (`replayScopeOf`,
+	 * #2824), the denominator there rather than {@link totalRequests}: most of a sequence's
+	 * requests have no script, so "the rest were not kept" would be untrue. Pass one or the other;
+	 * this wins if both.
 	 */
 	replayScope?: ReplayScope;
 	/**
-	 * The card's title; `testValidationTitleOf` answers it (#2820), retitling the
-	 * card when `ExactAssertionsSummary` sits beside it.
+	 * The card's title, from `testValidationTitleOf` (#2820), which retitles it beside
+	 * `ExactAssertionsSummary`.
 	 */
 	title?: string;
 	className?: string;
 }
 
 /**
- * The tested-of-total line. `samplesTested` counts responses, `totalRequests`
- * counts requests, and the gap is not only the retention limit's doing: a
- * request that errored before a response arrived has nothing to test. The
- * sentence says the rest "had no response or were not kept" so it holds for
- * either cause; the uniformity of what was kept is `SampleRetentionNote`'s to
- * state, because only it knows whether the byte budget was spent.
+ * The tested-of-total line. `samplesTested` counts responses and `totalRequests` requests, and not
+ * only retention makes the gap (a request that errored before a response has nothing to test), so
+ * the rest "had no response or were not kept". Whether the kept set is uniform is
+ * `SampleRetentionNote`'s to say, as only it knows whether the byte budget was spent.
  */
 function testedLine(samplesTested: number, totalRequests: number): string {
 	if (samplesTested >= totalRequests) {
@@ -143,11 +125,9 @@ function FailureLine({ message, count }: { message: string; count: number | unde
 }
 
 /**
- * The "Showing X of Y" line, or `null` when the list is whole. A row that
- * carries `failuresDistinct` lists distinct messages, so its denominator is
- * distinct ones; `failuresTotal` counts occurrences there and cannot be set
- * against the list's length. An older row listed one entry per occurrence, so
- * its total still can.
+ * The "Showing X of Y" line, or `null` when the list is whole. A row with `failuresDistinct` lists
+ * distinct messages, so its denominator is distinct ones (`failuresTotal` counts occurrences
+ * there); an older row listed one entry per occurrence, so its total still serves.
  */
 function shownCueOf(
 	listed: number,
@@ -176,9 +156,8 @@ export function TestValidationSummary({
 }: TestValidationSummaryProps) {
 	const hasFailures = failures !== undefined && failures.length > 0;
 
-	// A run that asserted nothing has no `testValidation` at all - absent, never
-	// a row of zeros - and with no failures to name there is nothing to show. A
-	// report old enough to omit the block reads the same as a run without tests.
+	// A run that asserted nothing has no `testValidation` (absent, never zeros), and without
+	// failures there is nothing to show; a report old enough to omit the block reads the same.
 	if (!testValidation && !hasFailures) return null;
 
 	const shownCue = hasFailures
@@ -238,10 +217,9 @@ export function TestValidationSummary({
 				)}
 
 				{/*
-				 * The named failures, so a run that failed 13 of 100 assertions is
-				 * not indistinguishable from one that asserted nothing. Modelled on
-				 * the request-builder Tests tab and the sample row's failure list,
-				 * so the same failure reads the same wherever it is shown.
+				 * The named failures, so 13 of 100 failed is not indistinguishable from nothing
+				 * asserted; shaped like the request-builder Tests tab and a sample row's failure
+				 * list, so a failure reads the same everywhere.
 				 */}
 				{hasFailures && (
 					<div className={cn("space-y-1", testValidation && "mt-4")}>
@@ -259,10 +237,9 @@ export function TestValidationSummary({
 							))}
 						</div>
 						{/*
-						 * Said out loud when the stored list is shorter than what it
-						 * lists: a list of ten under a count of forty reads as the whole
-						 * set of problems unless it says otherwise (the
-						 * SampledSchemaValidation precedent beside it).
+						 * Said aloud when the stored list is shorter than its count: ten under
+						 * forty reads as the whole set otherwise (as `SampledSchemaValidation`
+						 * does).
 						 */}
 						{shownCue && (
 							<p className="mt-2 text-xs text-muted-foreground tabular-nums">
@@ -272,8 +249,10 @@ export function TestValidationSummary({
 					</div>
 				)}
 
-				{/* The replay's console lines (#3127). They are a member of
-				    `testValidation`, so they never outlive the block above them. */}
+				{/*
+				 * The replay's console lines (#3127), a member of `testValidation`, so never
+				 * outliving the block above.
+				 */}
 				<ReplayConsole
 					source={testValidation}
 					sampled={testValidation?.samplesTested}

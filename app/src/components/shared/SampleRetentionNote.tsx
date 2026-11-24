@@ -6,25 +6,15 @@
  */
 
 /**
- * Says what a run's bounded stores thinned away, wherever a sampled set is on
- * screen.
- *
- * Without it a list of 100 samples reads as "this run made 100 requests worth
- * showing", when it can be 100 kept out of 30,000 candidates. Two surfaces show
- * such a list - the dashboard's Sampled Requests and the history Samples tab -
- * and a third shows the tested responses, so the sentence lives here once
- * rather than being written out three times and drifting.
- *
- * Silent unless there is something to say: a run that dropped nothing, or one
- * whose summary predates the counts, gets no notice at all. "Nothing was
- * displaced" and "we cannot tell" are both worse as prose than as absence.
- *
- * What it says about the set on screen depends on which list it is. The traces
- * behind `results` are a failures-first selection (#2210), so it never calls
- * them uniform. The tested responses are a uniform sample of the run when the
- * count cap displaced an incumbent, and the part of it whose bodies fit when a
- * spent byte budget stopped admitting; `sampling.responseSampleBudgetSpent` is
- * the engine's answer to which one happened (issue #1192).
+ * What a run's bounded stores thinned away, wherever a sampled set shows: otherwise a list of 100
+ * samples reads as "100 requests worth showing" when it can be 100 of 30,000. The dashboard's
+ * Sampled Requests, the history Samples tab and the tested responses share it, so the sentence
+ * lives once. Silent with nothing to say (nothing dropped, or a summary predating the counts):
+ * "nothing was displaced" and "we cannot tell" are worse as prose than absence. What it says
+ * depends on the list: the traces behind `results` are a failures-first selection (#2210), never
+ * called uniform; the tested responses are a uniform sample when the count cap displaced an
+ * incumbent, and the part whose bodies fit when a spent byte budget stopped admitting,
+ * `sampling.responseSampleBudgetSpent` saying which (#1192).
  */
 
 import { formatNumber } from "@/lib/format-number";
@@ -36,9 +26,8 @@ export interface SampleRetentionNoteProps {
 	/** How many records this surface is showing. */
 	shown: number;
 	/**
-	 * Which budget the surface draws from. `traces` covers the sampled and
-	 * slow-request stores behind `results`; `responses` covers the buffer that
-	 * post-run test scripts are evaluated against.
+	 * The budget the surface draws from: `traces` is the sampled and slow-request stores behind
+	 * `results`, `responses` the buffer post-run test scripts are evaluated against.
 	 */
 	budget: "traces" | "responses";
 	className?: string;
@@ -52,9 +41,8 @@ export function SampleRetentionNote({
 }: SampleRetentionNoteProps) {
 	if (!sampling) return null;
 
-	// The two trace stores are one story to a reader looking at one list: both
-	// feed `results`, and which budget a given row was charged to is an engine
-	// detail, not something to make the reader reconcile.
+	// The two trace stores are one story to a reader of one list: both feed `results`, and which
+	// budget a row was charged to is an engine detail.
 	const displaced =
 		budget === "traces"
 			? sampling.successTracesDropped + sampling.slowTracesDropped
@@ -72,21 +60,19 @@ export function SampleRetentionNote({
 	);
 }
 
-// The response store's byte budget stops admitting rather than displacing, so a
-// run that spent it was graded on the part of it whose bodies fit. An
-// `undefined` marker is a run recorded before the engine reported which bound
-// applied - it keeps the uniformity sentence, because weakening the claim for
-// every older run costs the accurate message in the case that is nearly all of
-// them (only a target whose retained bodies average more than ~256 KiB can
-// reach the budget at the defaults).
+// The response store's byte budget stops admitting rather than displacing, so a run that spent it
+// was graded on the part whose bodies fit. An `undefined` marker (a run recorded before the engine
+// said which bound applied) keeps the uniformity sentence: weakening every older run's claim would
+// cost the accurate message where it is nearly always right (only a target whose kept bodies
+// average over ~256 KiB reaches the budget at the defaults).
 function describeShownSet(
 	budget: SampleRetentionNoteProps["budget"],
 	sampling: NonNullable<RunReport["sampling"]>,
 	shown: number
 ): string {
 	const count = formatNumber(shown);
-	// `results` is chosen by the report route, not drawn from the reservoir: rows
-	// with an error take the slots before any success does.
+	// `results` is chosen by the report route, not drawn from the reservoir: rows with an error
+	// take the slots first.
 	if (budget === "traces") {
 		return `Requests with an error are kept ahead of successful ones in the ${count} shown, so they are not a uniform sample of the run.`;
 	}

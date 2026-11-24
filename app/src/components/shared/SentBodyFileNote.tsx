@@ -6,13 +6,10 @@
  */
 
 /**
- * The file a stored run's `binary` body sent: name, size, and the start of its
- * sha256, with the whole hash a hover away. One line for every run surface
- * that shows a stored exchange - the design-run copy's header and a scenario
- * step's expansion - so a file is described in the same words wherever it is.
- *
- * Never the path: the engine does not record it here, and a path is the part
- * of a file reference that differs between machines anyway.
+ * The file a stored run's `binary` body sent: name, size and the start of its sha256, the whole
+ * hash a hover away. One line for every surface showing a stored exchange (the design-run copy's
+ * header, a scenario step's expansion), so a file reads the same everywhere. Never the path: the
+ * engine does not record it here, and paths differ between machines anyway.
  */
 
 import { FileUp } from "lucide-react";
