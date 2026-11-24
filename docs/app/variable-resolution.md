@@ -158,8 +158,8 @@ leaves it written as it stands, for a different reason.
 
 **The UI paints it as its own state, not as a broken variable.** Unresolved is
 the accurate word for what the resolvers do with the token, but it is the wrong
-thing to *show*: the builder used to render `{{data.email}}` red, hover it to
-"not defined", and offer to create a variable of that name - which, the
+thing to *show*: the builder does not render `{{data.email}}` red, hover it to
+"not defined", or offer to create a variable of that name - which, the
 namespace being disjoint, can never answer for the column. So a `data.*` token
 gets the muted run-time treatment (`RuntimeToken`) and a tooltip naming the run's
 data file, and no surface offers to create one. See
@@ -199,9 +199,9 @@ matched exactly, so `{{$vus}}` is an ordinary unknown `$name` and keeps its
 braces.
 
 **The UI paints them as their own state too** (issue #1101), for the reason the
-`data.*` paragraph above gives and one more. Until #1101 the builder rendered
-`{{$vu}}` red, hovered it to "not defined" and offered to create a variable of
-that name - the one offer that is guaranteed to change nothing, since the
+`data.*` paragraph above gives and one more. Painting
+`{{$vu}}` red, hovering it to "not defined" and offering to create a variable of
+that name would be the one offer that is guaranteed to change nothing, since the
 resolver answers the identity ahead of every scope. So they get the same muted
 `RuntimeToken` treatment, noted `not generated here` to tell them from the
 generator beside them, and no surface offers to create one. `{{$vus}}` keeps the
@@ -243,10 +243,10 @@ it does on a data-driven one. OAuth 2.0 is the exception for a row or the
 identity, and it is refused by name rather than sent wrong - its token is
 acquired against the token endpoint, never bound per iteration.
 
-### D18 - a bound row's bare column names outrank the environment (issue #1007)
+### D18 - a bound row's bare column names outrank the environment
 
 This repo labels the decisions #226 recorded D1, D2, D16, D17. This one is
-new, and it is not from #226: recorded here as **D18**.
+new, and it is not from #226: recorded here as **D18** (issue #1007).
 
 **What it costs.** #402 deliberately bought the property that attaching a data
 file to a collection cannot change what any existing token resolves to -
@@ -295,7 +295,7 @@ still survives a tab switch and a return (issue #659), because neither of those
 is a send. Closing the request's tab does drop it, which is not the same act: it
 ends the memory rather than unbinding the row, and it is what bounds a map the
 provider would otherwise hold for the life of the session (issue #1271, see
-[`state-management.md`](state-management.md#requestbuildercontext---the-headers-a-setting-added)).
+[`state-management/request-builder-context.md`](state-management/request-builder-context.md#requestbuildercontext---the-headers-a-setting-added)).
 
 **Why the renderer can show this and composition cannot.** A plan is composed
 once, before any row exists to bind, so composition still defers both
@@ -330,10 +330,9 @@ JSON string; only what the row supplies is written for its field.
 **The paint stays the accent; the popover now says why (issue #1064).** The
 token *state* `VariableInput` paints is unchanged: a bare name still paints as
 a bound column only where no scope defines it, and a shadowed bare name still
-paints as the variable, in the same accent it always has. That was the open
-question this section used to leave for later, and it has been decided rather
-than merely left open: the accent stays, and the explanation is what moves.
-Opening `VariablePopover` on a shadowed name while a row is picked now names
+paints as the variable, in the same accent it always has. The accent stays,
+and the explanation is what moves.
+Opening `VariablePopover` on a shadowed name while a row is picked names
 the row as the origin - unstruck, above the definitions it beat, which render
 struck beneath it exactly as any other shadowed definition does - so the
 popover states plainly that the row's cell, not the environment's value, is
@@ -451,8 +450,8 @@ the request fields; the script editors do not, for the same interpolation reason
 as everywhere else in this document (D16).
 
 The script panel's **"Names mentioned:" chips** read the same three states
-(issue #604). They used to paint a name red whenever no scope defined it, which
-for a `data.*` name is always - the reading that made a working column look
+(issue #604). They do not paint a name red whenever no scope defines it, which
+for a `data.*` name is always - a reading that would make a working column look
 broken in a row whose whole job is to say whether a name resolves. A column
 reached by its **bare** name gets that same paint (issue #1063): a script reads
 one through `pm.iterationData.get("email")`, or through `pm.variables.get("email")`
@@ -542,11 +541,11 @@ an unterminated one is a frozen window, not a wrong preview.
 
 **Collection scope is explicit only.** It comes from the `collectionId` option
 and nothing else; a caller that passes none resolves against globals +
-environment. There used to be a session-store fallback (`activeCollectionId`),
-but nothing ever wrote that field, so it could only ever hold a value
+environment. There is no session-store fallback (`activeCollectionId`):
+nothing writes that field, so it could only hold a value
 rehydrated from an old build - scoping a preview to a collection the user had
-left, or deleted, versions ago. It was removed in the `vayu.session` v2
-migration.
+left, or deleted, versions ago. The `vayu.session` v2
+migration drops it.
 
 The resolved `Record<string, ResolvedVariable>` is **derived** from that list
 (the origin carrying `winner: true`) rather than built beside it, so the two
@@ -617,8 +616,8 @@ the bar displayed. A token's popover does the same: its edit passes the
 `sourceId` of the definition it showed to `updateVariable`, and
 `useVariableWriter` writes to the collection or environment with that id, keeping
 the definition's `secret`, `type` and `createdAt` (a write still sets
-`enabled: true`). It used to write to the request's own collection whatever the winner was,
-so editing a value a chain's root defined put a copy in the leaf and left the root
+`enabled: true`). It does not write to the request's own collection whatever the winner is:
+that would put a copy of an edited root value in the leaf and leave the root
 untouched (#3683). A `sourceId` naming a collection or environment that no longer
 exists is a no-op, never a fall back to the request's collection; only a *create*,
 which has no definition and so no `sourceId`, lands in the request's own
@@ -662,8 +661,8 @@ The resolved map is then used by `resolveString(input)` (preview) and
 
 **A name nothing defines keeps its braces** (#1009), plain and `{{$name}}`
 alike. The token goes out on the wire, where it becomes a DNS or a `4xx`
-failure naming the thing that was never set; it used to resolve to the empty
-string, which sent `https://{{host}}/x` as `https:///x` - a different request,
+failure naming the thing that was never set; resolving it to the empty
+string would send `https://{{host}}/x` as `https:///x` - a different request,
 made silently. A definition that *exists* and holds an empty value still
 substitutes empty: the rule is about a name nothing answers, not about a blank
 answer. There is no way to escape a literal `{{`.
@@ -704,11 +703,11 @@ previews still resolve against the stored scopes. See
 [pm API compatibility](./pm-api-compatibility.md) for what that changes for a
 script.
 
-### One value composition refuses: a header a variable would forge (#738)
+### One value composition refuses: a header a variable would forge
 
 Substitution is textual everywhere, which is exactly right for a URL, a body and
 a form field - and wrong for one field, because a header line ends at CRLF and
-has no escape for it. A variable holding `ok\r\nX-Admin: true` written into
+has no escape for it (#738). A variable holding `ok\r\nX-Admin: true` written into
 `X-Note: {{note}}` would not put that text in `X-Note`: it would end the line
 and make `X-Admin: true` a header nobody wrote.
 
@@ -744,10 +743,10 @@ under the same code, before anything is rewritten. The same goes for the three
 header-name rules below. A buffered `POST /execute` answers `statusCode: 0`
 with the code as `refusalCode`; a streaming send answers a `400`.
 
-### The other one: a header a variable would repeat (#1051)
+### The other one: a header a variable would repeat
 
 A header *name* is substituted like anything else, so two names can come out of
-resolution as one: `{{tenant_header}}: acme` beside a literal
+resolution as one (#1051): `{{tenant_header}}: acme` beside a literal
 `X-Tenant: legacy` would send `X-Tenant` twice once the variable answers
 `X-Tenant`, where the request's rows show two different headers. Names are
 compared without case, so a `{{h}}` resolving to `authorization` would send a
@@ -778,10 +777,10 @@ in front of them. The pre-send gate is deliberately *not* the
 backstop here, and cannot be: by the time it sees a request the names are
 resolved, and a produced repeat looks exactly like a typed one.
 
-### And the name that resolves to nothing (#1084)
+### And the name that resolves to nothing
 
 The same file holds a second rule about a header *name*, one step further along:
-a name that resolves to the empty string. `{{blank}}: acme` with `blank` holding
+a name that resolves to the empty string (#1084). `{{blank}}: acme` with `blank` holding
 `""` - which is what an enabled row with a blank value is, an ordinary value
 rather than an exotic one - leaves a key with nothing in it, and the line that
 reaches the wire is `": acme"`, under no name at all. A strict server answers
@@ -819,10 +818,10 @@ refused there rather than sent. The collision rule keeps the narrower reach and
 loses nothing by it: a request that arrives already resolved cannot carry a
 collision to find, since two names that are already equal are already one key.
 
-### And the name that is not a name (#2467)
+### And the name that is not a name
 
 A header name pasted with a trailing blank - `Authorization ` - is a name no one
-meant, and sent as written it is the wire line `Authorization : Bearer x`, with a
+meant (#2467), and sent as written it is the wire line `Authorization : Bearer x`, with a
 space before the colon: a strict server answers `400` and a lenient one reads it
 as a header of another name. So every layer that reads a name does two things, in
 this order. It **trims** the spaces and tabs around it (SP and HTAB, nothing

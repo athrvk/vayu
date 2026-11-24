@@ -11,26 +11,7 @@
  *
  * Five components render these same five numbers: the request-builder's timing
  * tab, the dashboard's per-sample tiles, the dashboard's run-level averages
- * card, the dashboard's timing waterfall, and the history sample card. Each
- * one used to declare its own copy of the list - the label, the colour, the
- * field it reads, and (until `phase-tips.ts`) the tooltip. Adding a phase meant
- * finding all five; nothing pointed you at the other four.
- *
- * Two things had already drifted by the time this file was written, both in
- * ways a reader of any single file could not see:
- *
- *   - **`TimingWaterfall` still paints TTFB with `--primary` and Download with
- *     `--success`.** `ResponseTimingTab`'s header comment describes fixing
- *     exactly that ("they are `--chart-3` and `--chart-6` now") - the fix
- *     reached one of the two colour-encoding renderers. `--primary` tracks the
- *     user's accent, which the design system forbids for a chart series
- *     precisely because it collides with a neighbouring one; the guard that
- *     enforces it (`charts/uplot/status-code-series.test.ts`) reads only the
- *     `uplot/` directory, and the waterfall lives one level up.
- *   - **`TimingWaterfall` carries its own longer tip strings**, written before
- *     `phase-tips.ts` existed and never migrated - so the file whose docstring
- *     says these five sentences now live in one place was describing four
- *     renderers out of five.
+ * card, the dashboard's timing waterfall, and the history sample card.
  *
  * Colour is an *encoding* in the two chart-like renderers (waterfall bars,
  * timeline segments) and decoration in the tiles, so `cssVar` below is the

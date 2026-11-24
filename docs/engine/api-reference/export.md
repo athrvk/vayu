@@ -88,7 +88,7 @@ A **body** is never judged (a response example's body, a request body outside th
 | `rows_without_key` | A header, param or form row with a value but no name, left out |
 | `typed_auth_headers` | A request with an enabled header row named like the header its auth in force writes (`Authorization` for bearer, basic and an OAuth 2.0 token placed in the header; the key of an API key in a header), written with `noauth` - counted once per request |
 
-An auth a Postman import kept its original block for (`auth.postman`, see `docs/engine/db-schema.md`) is written as that block, while it still maps to the stored auth; everything below describes the rest.
+An auth a Postman import kept its original block for (`auth.postman`, see `docs/engine/db-schema/collections-and-requests.md`) is written as that block, while it still maps to the stored auth; everything below describes the rest.
 
 A header the user typed under the name the auth in force writes wins in Vayu (`apply_auth` skips a name the request already carries, case-insensitively and whatever its value), while postman-runtime lets the auth overwrite the header.
 The request is therefore written with `auth: {"type": "noauth"}` (also over an imported `auth.postman` block) and counted as `typed_auth_headers`, so the header Postman sends is the one Vayu sends.

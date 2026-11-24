@@ -36,9 +36,7 @@ interface AuthInheritBannerProps {
 
 /**
  * What to call this collection's auth, and the credential hint to preview under
- * it. The name comes from the shared registry: this used to hold a fourth
- * private list, which had drifted to rendering raw `OAUTH2` / `AWS` for modes
- * the two pickers called "OAuth 2.0" and "AWS Signature".
+ * it. The name comes from the shared registry.
  */
 function describeAuth(c: Collection): { label: string; secret: string | null } {
 	const auth = c.auth;

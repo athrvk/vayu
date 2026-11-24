@@ -83,11 +83,11 @@ Three shapes, and the difference between them is the point:
   request a caller forgot to check for is then unreachable rather than merely
   unlikely (issues #926, #954).
 
-These used to be `std::optional<std::pair<int, nlohmann::json>>`, where an
-*empty* optional meant success (issue #901). That reads backwards at every call
+These are not `std::optional<std::pair<int, nlohmann::json>>`, where an
+*empty* optional means success (issue #901). That reads backwards at every call
 site - `if (err)` is the failure path, `return std::nullopt` means "fine" - and
-a dropped return value silently means "no error", which is why the two most
-dangerous of them carried `[[nodiscard]]` by hand. `std::expected` puts the
+a dropped return value silently means "no error", which would need
+`[[nodiscard]]` by hand on every one. `std::expected` puts the
 direction in the type: `if (auto outcome = f (...); !outcome) return outcome;`
 propagates, and the response is reachable only through `.error ()`.
 
@@ -178,7 +178,7 @@ poll should wait (a results chunk whose commit runs the automatic WAL
 checkpoint); this read waits for none of it. What it gives up is composing
 with anything: it sees only what was committed before it, never a write in
 flight, and no lock scope can include it. A read that decides a write is
-`get_run` under the DB mutex. [`runs`](db-schema.md#runs) has the connection's
+`get_run` under the DB mutex. [`runs`](db-schema/runs.md#runs) has the connection's
 settings.
 
 ### Listeners
@@ -647,7 +647,7 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   run row, through `get_run_snapshot`, which takes no DB mutex (#2679, [One read that takes no
   lock](#one-read-that-takes-no-lock)). A result and its captured body share a chunk; a
   failure part-way keeps the chunks before it
-  ([`results`](db-schema.md#results))
+  ([`results`](db-schema/run-artifacts.md#results))
 - **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
   the first `maxStoredErrors` (default 10,000) individual records are kept; the rest are counted by
   `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
@@ -681,11 +681,10 @@ JavaScript execution engine for pre-request and test scripts:
 
 **Platform Support:** one engine everywhere - **QuickJS-NG** (the actively
 maintained fork), vendored in `engine/vendor/quickjs-ng` and built via its own
-CMake on all three platforms. Until #226's review, Linux/macOS ran Bellard's
-original QuickJS while Windows ran NG (the original does not compile under
-MSVC) - two interpreters behind one `pm.*` surface, so an engine-level
-behaviour difference was a Windows-vs-Unix script divergence. The original
-copy is deleted.
+CMake on all three platforms. Running Bellard's original QuickJS on
+Linux/macOS and NG on Windows (the original does not compile under MSVC) would
+put two interpreters behind one `pm.*` surface, so an engine-level behaviour
+difference would be a Windows-vs-Unix script divergence (#226).
 
 ### Cookie Jar
 
@@ -862,7 +861,7 @@ applied to the outgoing request rather than being left to the UI. This lives in
   `privateKey` that is one `{{variable}}` reference or a `privateKeyFile` read
   through file trust, #3632; the reference is resolved only into the config the
   token is acquired with and never stored, composed, logged or exported), the
-  [`oauth_tokens`](db-schema.md#oauth_tokens) cache (expiry skew min(45s, lifetime/2), refresh-token rotation, one refresh
+  [`oauth_tokens`](db-schema/credentials-and-files.md#oauth_tokens) cache (expiry skew min(45s, lifetime/2), refresh-token rotation, one refresh
   in flight per cache key and a compare-before-delete on a refused refresh,
   #3344; only an `invalid_grant` or `invalid_client` refusal clears the row,
   and an unavailable endpoint on a refresh is an `oauth2_network_error`,
@@ -1093,7 +1092,7 @@ Persistent storage using sqlite_orm:
 - `oauth_tokens`: Cached OAuth 2.0 access/refresh tokens (keyed by config identity)
 - `config_entries`: Engine configuration registry (read/written via `/config`)
 
-See [Database Schema](db-schema.md) for the full column list.
+See [Database Schema](db-schema/index.md) for the full column list.
 
 **Startup housekeeping** (`Database::init()`, before the sweeper and HTTP server start):
 
@@ -1107,7 +1106,7 @@ See [Database Schema](db-schema.md) for the full column list.
    restart and the restart time would span the downtime. A load run that stored no summary but wrote metric
    ticks is given one from its last tick in the same transaction, flagged
    `partial` (#2895), so its report shows the totals it reached rather than
-   zeros (see [Database Schema](db-schema.md#runs)).
+   zeros (see [Database Schema](db-schema/runs.md#runs)).
 2. **Pruning**: run history is trimmed per kind - load and collection runs to
    `maxRunsRetained`, design Sends to `maxDesignRunsRetained` (#2429) - and every
    kind to `runRetentionDays`.
@@ -1169,7 +1168,7 @@ immutable, fully composed plan **before the run row exists**, then answers
    here is a 400 and leaves no run row behind
    ↓
 3. Create Run record (type: Scenario). config_snapshot carries the step
-   manifest, never the composed plan (see db-schema.md)
+   manifest, never the composed plan (see db-schema/runs.md)
    ↓
 4. Start worker thread (execute_scenario_run). No event loop, no metrics thread
    ↓
@@ -1376,7 +1375,7 @@ the submit queue's hand-off, and a lock there would sit on the hot submission
 path.
 
 **Auth outlives its token.** A run resolves auth once, before the strategy
-starts, so a run longer than its OAuth 2.0 access token used to turn into a 401
+starts, so a run longer than its OAuth 2.0 access token would turn into a 401
 storm the report never explained. The watchdog closes that: it sleeps until
 `oauth2RefreshLeadMs` (default 60s) before the token expires, re-acquires it with
 a forced refresh, and publishes the new `Authorization` value on its
@@ -2026,7 +2025,7 @@ left alone. A second backup requested while one is running is refused with
 The engine writes into the same directory on its own, under the same count:
 `vayu-<stamp>-pre-v<N>.db` before an update migrates the workspace from schema
 version `N`, and `vayu-<stamp>-pre-repair.db` before a one-time repair pass
-rewrites stored rows ([db-schema.md](db-schema.md#the-copy-before-a-migration-issue-2426)).
+rewrites stored rows ([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#the-copy-before-a-migration)).
 A start that cannot write the first refuses to migrate rather than migrate
 without it.
 
@@ -2064,7 +2063,7 @@ snapshot with the steps above. Anything written since the update is not in it.
 
 **Putting a quarantined file back.** A start that judged `vayu.db` corrupt
 moved it to `vayu.db.corrupt-<ms>` before restoring `vayu.db.bak` or starting
-fresh ([db-schema.md](db-schema.md#the-quarantine-issue-984)). The `.bak` holds
+fresh ([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#the-quarantine)). The `.bak` holds
 the last clean shutdown at best, and less after a session that ended in a crash
 or one whose final refresh ran out of time, so when the quarantined file was
 healthy after all, it is the newer copy: with the engine stopped, copy `vayu.db.corrupt-<ms>` over

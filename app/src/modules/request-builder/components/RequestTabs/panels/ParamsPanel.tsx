@@ -18,8 +18,8 @@
  * goes with its segment (`syncPathRows`). They are outside bulk edit for the
  * same reason, and the table stays visible in both modes.
  *
- * The bulk-edit machinery that used to be duplicated here and in `HeadersPanel`
- * is now `BulkEditor`; only the format differs, and that is what this passes.
+ * Bulk edit is `BulkEditor`; only the format differs, and that is what this
+ * passes.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";

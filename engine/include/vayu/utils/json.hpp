@@ -188,7 +188,7 @@ const std::vector<vayu::db::Result>& results);
  * the same limit - body half only, header block kept whole, since the headers
  * are what the field is stored for. That cut lands on a character boundary
  * too. A header value can still carry a byte that is not UTF-8, so the caller
- * dumps with `error_handler_t::replace`. See docs/engine/db-schema.md
+ * dumps with `error_handler_t::replace`. See docs/engine/db-schema/run-artifacts.md
  * (results.trace_data).
  */
 void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);

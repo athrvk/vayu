@@ -35,11 +35,7 @@ import { receivedBody } from "../../utils/response-bytes";
  *
  * Editable at save time - this is a starting point, not a scheme.
  *
- * It used to append " (truncated body)" for a capped response, because the
- * engine had no column to carry the fact and the name was the only field the
- * panel lists. That made the disclosure droppable: the field is editable, so
- * renaming a partial example at save time left a row that reads as complete and
- * a mock server that serves it as one. The engine records `bodyTruncated` now
+ * The engine records `bodyTruncated` now
  * (issue #659) and the panel chips it, so the name is back to being just a
  * name - a user may call an example whatever they like without erasing what it
  * is.

@@ -2455,7 +2455,7 @@ struct Environment {
     // *applies* an active environment to a request, which must name its own
     // environmentId - but the choice is stored here rather than in client-local
     // state, so it survives a reinstall and is shared by every client on the
-    // same database. See docs/engine/db-schema.md.
+    // same database. See docs/engine/db-schema/environments-and-globals.md.
     bool is_active     = false;
     int64_t created_at = 0;
     int64_t updated_at = 0;
@@ -2806,7 +2806,7 @@ struct OAuthToken {
  *
  * `cert_path` / `key_path` are *paths*: the key never enters the database.
  * `passphrase` is the exception and is stored plaintext, on the precedent every
- * stored auth credential already sets - see docs/engine/db-schema.md, which
+ * stored auth credential already sets - see docs/engine/db-schema/credentials-and-files.md, which
  * discloses it.
  */
 struct ClientCertificate {

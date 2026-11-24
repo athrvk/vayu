@@ -234,7 +234,7 @@ The one caller today is the app's GraphQL schema introspection (`lib/graphql/int
 MCP's `run_request` deliberately does **not** set it: an agent's runs belong in History like anyone else's, and the tool builds its payload from named arguments, so an agent cannot supply the flag either.
 
 **`origin` says who started the run** (#1817):
-`{"kind": "app" | "mcp" | "other", "client": "<name>"}`, stored on the run row (`runs.origin` / `runs.origin_client`, see [the `runs` table](../db-schema.md#runs)) and returned on every run shape - [`GET /runs`](runs.md#get-runs) rows, [`GET /runs/:runId`](runs.md#get-runsrunid) and [`PUT /runs/:runId/baseline`](runs.md#put-runsrunidbaseline) - as `origin: {kind, client}`.
+`{"kind": "app" | "mcp" | "other", "client": "<name>"}`, stored on the run row (`runs.origin` / `runs.origin_client`, see [the `runs` table](../db-schema/runs.md#runs)) and returned on every run shape - [`GET /runs`](runs.md#get-runs) rows, [`GET /runs/:runId`](runs.md#get-runsrunid) and [`PUT /runs/:runId/baseline`](runs.md#put-runsrunidbaseline) - as `origin: {kind, client}`.
 It is **client-asserted metadata, not identity**: any caller can claim any kind and nothing authorises on it; History reads it to say which runs an agent started.
 The app sends `{"kind": "app"}`; the MCP server sends `{"kind": "mcp", "client": "<clientInfo.name>"}` with the name its client gave in the initialize handshake.
 
@@ -277,7 +277,7 @@ It is the caller's session rule, changing per request, and rides on the payload 
 It is the single-send half of a run's `scenario.data`: every `{{data.column}}` in the URL, the header names and values, the body and both halves of every form field is substituted against it, and both scripts read it as `pm.iterationData` with `pm.info.iteration` `0` and `pm.info.iterationCount` `1` - the send *is* row 0 of 1.
 Without the field nothing changes: `{{data.*}}` goes out written as it stands and `pm.iterationData` is `undefined`.
 
-**The row's own keys are also its bound bare names** (issue #1007): the send derives its `dataColumns` set from `data`'s keys itself, so a bare `{{username}}` binds from the row exactly as `{{data.username}}` does, at the same precedence [D18](../../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment-issue-1007) gives it.
+**The row's own keys are also its bound bare names** (issue #1007): the send derives its `dataColumns` set from `data`'s keys itself, so a bare `{{username}}` binds from the row exactly as `{{data.username}}` does, at the same precedence [D18](../../app/variable-resolution.md#d18---a-bound-rows-bare-column-names-outrank-the-environment) gives it.
 A bare name the row does not carry is not deferred in the first place - it is an ordinary `{{name}}`, resolved from the scopes at compose time or, if nothing there answers either, by the residual pass after the pre-request script (issue #1008).
 
 An **object** of name/value pairs, never the array a run sends - one row.
@@ -350,7 +350,7 @@ See [scripting.md](../scripting.md#mutating-the-request-pre-request-scripts).
 **Redirect policy.**
 `followRedirects` defaults to **true**, so omitting it follows every 3xx and the final response is returned as the answer, with the earlier hops' status and header lines on its `redirects` member (field notes below the response example) - send `followRedirects: false` to make the 3xx itself the answer.
 A chain longer than `maxRedirects` (default 10) fails the send with `TOO_MANY_REDIRECTS` rather than returning the last 3xx.
-Both clients send these explicitly for exactly that reason (see [api-integration](../../app/api-integration.md)).
+Both clients send these explicitly for exactly that reason (see [api-integration](../../app/api-integration/index.md)).
 `POST /runs` accepts the same three fields with the same defaults, so a load test can be run under the policy the request was configured with.
 
 **TLS verification.**
@@ -708,7 +708,7 @@ A transfer that failed before sending anything (DNS failure, connection refused)
 
 **The stored trace keeps the same string**, as `trace_data.request.rawRequest` on the design run this execute created (and on each step row of a scenario run)
 - so reopening a run shows the raw request the live view showed, cookies included, rather than one rebuilt from `headers` that never had them.
-Its body half is capped at `maxTraceBodyBytes` like `body` is, and the key is absent both on a step that sent nothing and on rows written before the field existed; see [db-schema](../db-schema.md#results).
+Its body half is capped at `maxTraceBodyBytes` like `body` is, and the key is absent both on a step that sent nothing and on rows written before the field existed; see [db-schema](../db-schema/run-artifacts.md#results).
 The redaction posture is the live field's, for the reason [Security](../architecture.md#security) records: a trace is the record of what was sent.
 
 **The answer names the request line the transfer was dialled with** (#3650): top-level `method` and `url`, the stored trace's `request.method` and `request.url`, written by the same function (`record_request_line`) so the two cannot disagree.
@@ -752,7 +752,7 @@ Each script execution keeps at most 1000 lines and 1 MiB (64 KiB a line); a scri
 A `pm.sendRequest` summary line also carries `scriptRequest`, the index of the call's record in `scriptRequests` (above, issue #3633).
 See [scripting.md](../scripting.md#console-output).
 
-**`httpVersion` on the response** is the protocol actually **negotiated** (`CURLINFO_HTTP_VERSION` after the transfer), e.g. `"HTTP/1.1"` or `"HTTP/2"` - an *outcome*, not an echo of the request's own `httpVersion` field, and deliberately a different value space (see [requests.http_version](../db-schema.md#requests) for the full distinction).
+**`httpVersion` on the response** is the protocol actually **negotiated** (`CURLINFO_HTTP_VERSION` after the transfer), e.g. `"HTTP/1.1"` or `"HTTP/2"` - an *outcome*, not an echo of the request's own `httpVersion` field, and deliberately a different value space (see [requests.http_version](../db-schema/collections-and-requests.md#requests) for the full distinction).
 It is `""`, not omitted, when nothing was negotiated (e.g. the connection never reached a server) - empty rather than guessing `"HTTP/1.1"` and presenting a guess as fact.
 The same field is stored in a design run's `trace_data.response` and reported back unchanged by `GET /runs/:runId` and `GET /runs/:runId/report`.
 
@@ -772,7 +772,7 @@ The same field is stored on a design run's `trace_data.response`, and load runs 
 
 **One timing convention.**
 The eight phase keys above (`totalMs` through `downloadMs`) are the same `*Ms` names the stored trace uses (`record_design_result` / `load_strategy` → `results[].trace` in `GET /runs/:runId/report`), and the design-mode writer stores all eight unconditionally - so a live response and one restored from the stored trace carry the same fields with the same names, Wire/Queue included.
-Traces written by earlier releases differ two ways, and readers must tolerate both: stored rows omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs` (see [db-schema.md](../db-schema.md)), and the live response named its keys without the suffix (`firstByte`, `dns`, …) - consumers of the raw `/execute` body written against that dialect must switch to the `*Ms` names.
+Traces written by earlier releases differ two ways, and readers must tolerate both: stored rows omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs` (see [db-schema/index.md](../db-schema/index.md)), and the live response named its keys without the suffix (`firstByte`, `dns`, …) - consumers of the raw `/execute` body written against that dialect must switch to the `*Ms` names.
 
 **`refusalCode` and `authErrorCode` say why a send never went out.**
 Both are **absent** from an answer that was sent.
@@ -804,7 +804,7 @@ A collection run's step row stores the same flat `scriptMs` (absent for a step w
 **Variables the scripts and extractors wrote are persisted, and only those.**
 After the post-request elements run, the engine writes back the three variable scopes (the run's environment, globals, and the executed request's collection) - but only for a scope whose variables a script or an `extract.*` element actually changed, a name removed included (an unset, or an extractor's miss with no `default`, #3053).
 A run that sets no variable writes nothing at all, so it does not move a collection's or environment's `updatedAt`.
-Each variable round-trips whole, `createdAt` included; see [VariableValue shape](../db-schema.md#variablevalue-shape) for why that field must survive and who may stamp it.
+Each variable round-trips whole, `createdAt` included; see [VariableValue shape](../db-schema/indexes.md#variablevalue-shape) for why that field must survive and who may stamp it.
 
 **`persistVariables: false` keeps them within the send** (#1904).
 Every script and extractor still runs, a value one sets is visible to the elements after it, and the response (or a stream's trace) reports their outcomes and `testResults` as usual; only the write-back above is skipped, on both the buffered and the streaming path, so no environment, collection or globals row changes.

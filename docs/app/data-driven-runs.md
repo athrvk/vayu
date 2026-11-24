@@ -580,7 +580,7 @@ outgrew the cap says so here rather than at the next run.
 
 Everything above is about a _run_. One thing is worth doing without one: a
 pre-request script that reads `pm.iterationData`, or a URL carrying
-`{{data.id}}`, used to be testable only by starting a collection run and digging
+`{{data.id}}`, is otherwise testable only by starting a collection run and digging
 the step out of the result - a run per line of script.
 
 With a contract declared and its file still in place, the request builder grows

@@ -70,7 +70,7 @@ Sending `variables: null` resets it to `{}`, never the literal string `null`.
 **Writing `isActive: true` is how a client switches the active environment**, and one request does the whole switch: the engine deactivates whichever environment held the flag in the same transaction, so at most one row is ever active and a client sends no companion write to clear the old one.
 Clearing entirely is `isActive: false` on the environment that holds it.
 The engine still never *applies* the active environment to a request - every execution names its own `environmentId` - but because the choice is stored rather than kept client-side, it survives a restart and is shared by every client on the same database.
-See [db-schema.md](../db-schema.md#environments).
+See [db-schema/environments-and-globals.md](../db-schema/environments-and-globals.md#environments).
 
 **Request:**
 ```json

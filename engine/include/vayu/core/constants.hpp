@@ -1471,7 +1471,7 @@ constexpr int TEMP_STORE = 2;
 /// disk or an externally truncated file would kill the engine with no log line
 /// and no 500. Mapping 256 MB cut SQLite's read time by 5-55%: 1-6 ms per
 /// 1,000 result rows, about 50 ms at the default 10,000 stored errors (Windows,
-/// OS cache warm; docs/engine/db-schema.md has the numbers) - not worth that.
+/// OS cache warm; docs/engine/db-schema/index.md has the numbers) - not worth that.
 /// Windows also refuses to truncate a mapped file, which `reclaim_freed_pages`
 /// needs.
 constexpr size_t MMAP_SIZE_BYTES = 0;

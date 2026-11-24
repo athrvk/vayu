@@ -74,7 +74,7 @@ And two run renderer → main for MCP's sake:
 | `app:focus`          | The open tab (type, entity id, label) and active environment (id, name), whole, on launch and on every change; `get_app_focus` reads the copy `electron/app-focus.ts` rebuilds field by field. |
 
 **The UI reflects MCP writes live.**
-An MCP call mutates the engine from the main process, which no renderer query can observe (`refetchOnWindowFocus` is off app-wide), so a request an agent created used to stay invisible in the collection tree until some unrelated mutation happened to refetch the lists.
+An MCP call mutates the engine from the main process, which no renderer query can observe (`refetchOnWindowFocus` is off app-wide), so a request an agent creates would stay invisible in the collection tree until some unrelated mutation happened to refetch the lists.
 Each tool declares the data families it changes (`invalidates` in `tools/*.tools.ts`) and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per family after a call that did **not** return an error.
 (The rows the engine's change feed covers reach the renderer that way too, from any writer: see [the stdio CLI](transports.md#stdio-cli-zed--headless--ci). This channel is what carries the rest, and a write it and the feed both report is invalidated twice, which costs a refetch and nothing else.)
 The event names a family (`collection`, `collectionRow`, `request`, `environment`, `run`, `cookie`, `config`, `service`, `oauth`, `clientCertificate`, `variables`) plus the `collectionId` / `requestId` / `runId` / `inboxId` / `mockId` the call itself named; it carries no engine data, so the renderer still reads every row through its query layer.
@@ -106,7 +106,7 @@ Its History row updates as usual.
 The tool's answer is the same either way.
 `run_collection_smoke` sends its requests one at a time through `POST /execute` and has no run to watch, so its `run` event carries nothing extra.
 
-The renderer side, including which query keys each family maps to, is in [`docs/app/state-management.md`](../../app/state-management.md).
+The renderer side, including which query keys each family maps to, is in [`docs/app/state-management/index.md`](../../app/state-management/index.md).
 
 Declaring the families per tool rather than deriving them from `category` is deliberate: an `execute` tool writes a run row and refills the cookie jar without being a "write", and the field is required, so a new tool cannot ship silently invisible to the UI.
 

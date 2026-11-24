@@ -280,7 +280,7 @@ inline std::function<ConfigEntry (ConfigEntry)> depends_on (const char* key) {
 
 // One category, one file, one function - called in this order from
 // `Database::seed_default_config` (`database.cpp`). Each seeds exactly the
-// entries `docs/engine/db-schema.md`'s `config_entries.category` table lists
+// entries `docs/engine/db-schema/config.md`'s `config_entries.category` table lists
 // for it.
 void seed_general (ConfigSeeder& seed, int64_t now);
 void seed_network (ConfigSeeder& seed, int64_t now);

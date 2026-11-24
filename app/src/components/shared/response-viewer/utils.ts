@@ -307,11 +307,8 @@ export function responseSizeTip(headers: Record<string, string> | undefined): st
  * Rebuild the raw HTTP request from the parts a stored trace keeps.
  *
  * A live send gets `rawRequest` from the engine, which assembles the real wire
- * message (`Client::send`, engine/src/http/client.cpp:277-331). A restored one has
- * no such string - the trace stores method, url, headers and body separately -
- * and the restore path used to collapse all four into `${method} ${url}`, so
- * the Raw tab of a reopened run showed a single line and the body that was sent
- * was not reachable anywhere in the app.
+ * message (`Client::send`, `engine/src/http/client.cpp`). A restored one has
+ * no such string - the trace stores method, url, headers and body separately.
  *
  * This follows the engine's order so the two read the same: request line with
  * the path, `Host` from the URL, the sent headers, `Content-Length` for a body,

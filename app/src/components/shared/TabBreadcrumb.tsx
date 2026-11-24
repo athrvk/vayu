@@ -8,12 +8,8 @@
 /**
  * TabBreadcrumb - the one "where am I" line a detail tab can draw.
  *
- * It began as `RequestBreadcrumb` in the request builder and was the only
- * surface in the app that answered the question (#1691): a collection tab, a
- * run report and the live dashboard all opened with a bare title and no chain,
- * even though each of them is reached from somewhere and each of those
- * somewheres is openable. Generalising the component rather than copying it is
- * what keeps the three from drifting into three different crumb shapes.
+ * One component for every detail tab (#1691), so the crumb shape cannot drift
+ * between them.
  *
  * **Every crumb can be cut, none to nothing (#3495).** A deep chain has to
  * shrink somewhere: each ancestor truncates down to a 3ch floor, so its chevron
@@ -27,9 +23,7 @@
  * belongs to the one rename surface each entity already has.
  *
  * **It costs nothing when there is nothing to say.** No crumbs, or only blank
- * labels, renders no element at all rather than a reserved empty band - the
- * ~30px the request builder's description band charged every request before it
- * became the Info tab.
+ * labels, renders no element at all rather than a reserved empty band.
  */
 
 import { Fragment } from "react";

@@ -385,7 +385,7 @@ persists.
 | [Overview](engine/architecture.md) | Core structure, engine-side auth resolution |
 | [HTTP API](engine/api-reference/index.md) | Every endpoint, payload shape, and status code |
 | [Test Scripting](engine/scripting.md) | The QuickJS sandbox, script globals, hooks, limits |
-| [Local Database](engine/db-schema.md) | SQLite tables and the JSON shapes stored in them |
+| [Local Database](engine/db-schema/index.md) | SQLite tables and the JSON shapes stored in them |
 | [Command Line](engine/cli.md) | Flags and subcommands for running the engine standalone |
 | [MCP Server](engine/mcp/index.md) | The tool surface exposed to coding agents |
 | [Benchmarks](engine/benchmarks.md) | RPS head-to-head against wrk and vegeta, with methodology |
@@ -397,8 +397,8 @@ persists.
 | [Overview](app/architecture.md) | Renderer-side structural decisions |
 | [UI Components](app/COMPONENTS/index.md) | The `modules/` + `components/` layout |
 | [Design System](design-system.md) | Tokens, elevation, typography, component patterns |
-| [State Management](app/state-management.md) | Zustand stores, TanStack Query keys, cache policy |
-| [Talking to the Engine](app/api-integration.md) | What the renderer sends the engine, and when |
+| [State Management](app/state-management/index.md) | Zustand stores, TanStack Query keys, cache policy |
+| [Talking to the Engine](app/api-integration/index.md) | What the renderer sends the engine, and when |
 | [Variables](app/variable-resolution.md) | How `{{variables}}` resolve, and scope precedence |
 | [Postman Script Support](app/pm-api-compatibility.md) | Which `pm.*` APIs the runtime supports |
 | [File Naming](app/file-name-conventions.md) | Naming rules across the renderer |

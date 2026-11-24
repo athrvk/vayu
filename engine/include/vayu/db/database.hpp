@@ -38,7 +38,7 @@ namespace vayu::db {
  * map would rebuild the table without it. Also bumped by a migration step that
  * must run once and that an older engine must not read past (4, 6, 7): the
  * version is its done-marker. A database stamped newer is refused at startup.
- * Every version's change is in `docs/engine/db-schema.md`, "Schema versions".
+ * Every version's change is in `docs/engine/db-schema/schema-versions.md`.
  */
 inline constexpr int SCHEMA_VERSION = 11;
 

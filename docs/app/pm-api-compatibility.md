@@ -514,8 +514,7 @@ reassignment or a name handed through a parameter is not followed.
 
 It costs nothing until used: the shim is evaluated the first time a script reads
 `require` or `CryptoJS`, not when a script starts. First use is about 0.55 to
-0.75 ms and about 22 KB of the script's memory, per execution; the engine binary
-grew by 0.2 % (debug build) for it.
+0.75 ms and about 22 KB of the script's memory, per execution.
 
 **`uuid`** is npm's `uuid` package (8.3.2), vendored unmodified, so it is the
 library rather than a Vayu-written shape. The module is callable and has npm's
@@ -790,8 +789,8 @@ form is untouched: it passes unless it throws.
 a `done()` that arrives later; Vayu judges a done-style test when its callback
 returns, and a `done()` left for a `.then` or an `await` runs only after the
 row is written. A callback that declares `done` and returns without calling it
-therefore **fails, naming the reason** - where the same script used to fail
-with `undefined is not a function`, which said nothing about why. Calling
+therefore **fails, naming the reason**, not with
+`undefined is not a function`, which says nothing about why. Calling
 `done()` twice throws rather than overwriting the first verdict, and the throw
 fails the test.
 
@@ -1070,10 +1069,10 @@ test `e.name`). **A mistake in the script text stays a
 `TypeError`** - a matcher called with no argument, a name nothing implements -
 because nothing was asserted, the call itself was wrong. That covers
 **property-style members too** (issue #999): `pm.expect(x).to.be.NaN` is an
-expression statement, so an unimplemented name used to evaluate to `undefined`
+expression statement, so an unimplemented name would evaluate to `undefined`
 and report PASS whatever the value was. Every name the chain does not carry -
 a typo, or one of the chai-postman members Vayu lacks (`.postmanRequest`,
-`.postmanResponse`, `.postmanRequestOrResponse`) - now raises a `TypeError`
+`.postmanResponse`, `.postmanRequestOrResponse`) - raises a `TypeError`
 naming itself. So does a name read off a matcher or a chainable method
 (#2528): a matcher is a call, so `.within.foo` and `.equal.name` are refused,
 and after `include`, `length` or `a` only the chain's own members resolve, so
@@ -1114,8 +1113,8 @@ none (HTTP/2 carries no phrase at all). `pm.response.reason()` answers the
 same string, and `pm.response.to.have.status(...)` compares a number against
 the code and a string against the phrase.
 
-Vayu spelled `status` as the number until #1000, so this is a break for a
-script written against the old spelling rather than against Postman.
+Vayu's `status` was the number before #1000, so this is a break for a
+script written against that spelling rather than against Postman.
 `docs/engine/scripting.md` carries [the migration
 note](../engine/scripting.md#status-is-the-reason-phrase-code-is-the-number),
 including the one legacy pattern - arithmetic on `status` - that goes on
@@ -1172,8 +1171,8 @@ order**, so a two-step form fails once the first step holds: `not.have.header(
 'id', 2)` fails when `id` exists, whatever its value. That is Postman's verdict;
 reading it as "the pair is not equal" would pass an assertion Postman fails.
 
-**`ok` narrowed to status 200 only (#998)** - it used to match any 2xx, the same
-class `success` still matches. A script that asserted `.ok` meaning "any 2xx"
+**`ok` is status 200 only (#998)**, not any 2xx - that is the
+class `success` matches. A script that asserted `.ok` meaning "any 2xx"
 should assert `.success` instead; a script that meant "200 exactly" needed no
 change. Postman's own named statuses (`accepted`, `withoutContent`, `badRequest`,
 `notFound`, ...) match by reason phrase as well as by code; Vayu's stay
@@ -1193,8 +1192,8 @@ plain object is deep-equalled against the **parsed** body - which reports
 `Response body is not valid JSON` when the body does not parse. A number or a
 boolean is a `TypeError` naming what was passed. With **no argument** `have.body()`
 asserts that the response has a body (the call form of `to.be.withBody`).
-`.have.jsonBody(path, value)` also started comparing `value`, which it used to
-accept and ignore - a script relying on the old no-op should not pass an
+`.have.jsonBody(path, value)` also compares `value`, which an earlier Vayu
+accepted and ignored - a script relying on that no-op should not pass an
 argument it does not want checked. The path is **lodash's**, as chai-postman
 reads it with `_.has` and `_.get` (#2528): `a.b[2].c`, `a['b'].c`, a key the
 root holds whole (`{"a.b": 1}` answers `a.b`), and `[0].id` on a body that is an
@@ -1202,7 +1201,7 @@ array. Each step is an own property, so an array's `length` is reachable and
 `map` is not.
 
 **`have.status` refuses a code that is not a whole finite number (#1048).**
-`status(200.5)` used to be truncated to `200` and pass against a 200; a
+`status(200.5)` is not truncated to `200` to pass against a 200: a
 fractional or `NaN` expectation is a mistake in the script text - no response
 can carry such a code - so it raises a `TypeError` naming what was written
 rather than a verdict naming the status that arrived. Postman would report a
@@ -2301,10 +2300,9 @@ A consequence worth knowing before editing either page: a `pm.*` example here is
 The corpus is whatever the two pages currently hold, and the guard beside the
 compile asserts a **floor** rather than a count, deliberately - an added or
 deleted example is an ordinary docs edit and must not fail an assertion in a
-`.test.ts`. Which is also why this page no longer states how large that corpus
+`.test.ts`. Which is also why this page does not state how large that corpus
 currently is: a count written into prose is a fact with nothing holding it
-true, and the one that used to sit here had drifted by a third. The figures in
-the `strictNullChecks` note below are dated for the same reason.
+true, and one drifted by a third.
 
 #### Optional members, and why the editor states them without enforcing them
 
@@ -2325,19 +2323,18 @@ type system enforces.
 That is a decision (#443), not an oversight, and `useScriptTypeDefinitions` now sets
 `strictNullChecks: false` explicitly rather than relying on the default, so a `strict:
 true` arriving through the spread of Monaco's existing options cannot turn it on as a side
-effect. It was taken on a count, and the count is a **measurement from when the
-decision was made** rather than a live property of the corpus: compiling the
-**57 scripts** the two pages then held - 54 `pm.*` examples plus three realistic
-ones - with the flag on added **13 diagnostics**:
+effect. It was taken on a measurement, not on a live property of the corpus: compiling
+the pages' `pm.*` examples plus a few realistic scripts with the flag on adds
+diagnostics of four kinds:
 
-| What | Count | Verdict |
-|------|------:|---------|
-| `pm.iterationData.get/has/toObject` unguarded | 7 | Correct inside the data-driven run those examples are about |
-| An optional string used straight - `pm.environment.get(...)` into `.trim()` and `pm.crypto.hmacSha256`, `pm.request.body` into `JSON.parse` | 4 | A real crash when the value is absent, and the idiom every script uses |
-| `pm.info.iteration > 0` | 1 | Works: the comparison is `false` outside a run |
-| `pm.response.errorMessage` after a truthy `pm.response.errorCode` | 1 | Correlated siblings, which no narrowing can see |
+| What | Verdict |
+|------|---------|
+| `pm.iterationData.get/has/toObject` unguarded | Correct inside the data-driven run those examples are about |
+| An optional string used straight - `pm.environment.get(...)` into `.trim()` and `pm.crypto.hmacSha256`, `pm.request.body` into `JSON.parse` | A real crash when the value is absent, and the idiom every script uses |
+| `pm.info.iteration > 0` | Works: the comparison is `false` outside a run |
+| `pm.response.errorMessage` after a truthy `pm.response.errorCode` | Correlated siblings, which no narrowing can see |
 
-Eight of the thirteen land on lines these docs publish as the way to use the API. Nor can
+Most of them land on lines these docs publish as the way to use the API. Nor can
 the noise be suppressed away while the catch is kept: `18048` is the code for
 `pm.iterationData.get(...)` - the case the flag was wanted for - *and* for `token.trim()`,
 and the remaining code is `2345`, which is the argument checking the whole feature exists
