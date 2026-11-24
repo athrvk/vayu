@@ -234,7 +234,7 @@ export function describeColumnReference(
 	 * be in is a column state - including "no contract declared". Falling
 	 * through would hand it the resolved/unresolved pair, and a column can never
 	 * be in `allVariables`, so the answer would always be the destructive red
-	 * issue #604 removed from exactly this row.
+	 * this row must not wear (issue #604).
 	 */
 	if (reads === "row") return describeColumnToken(name, contract);
 

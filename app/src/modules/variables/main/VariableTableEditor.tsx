@@ -974,7 +974,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	 * itself stable): `variables` in these deps would give both callbacks a new
 	 * identity on every keystroke, which is exactly what `React.memo` on
 	 * `VariableRow` cannot see through (issue #1716). Reading `variablesRef`
-	 * rather than the `index` the row used to be told keeps them stable across
+	 * rather than an `index` prop keeps them stable across
 	 * a row's whole lifetime, not just across one render's array.
 	 */
 	const updateVariable = useCallback(

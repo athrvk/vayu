@@ -555,9 +555,9 @@ class LoadTestService {
 		// only its stream, and reconnecting takes the lock again.
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
 		// A run the engine says failed paints the error state here, before the
-		// clear below and before the awaited fetch: until #1415 the only caller
-		// of `runProgress.fail` was `handleError`, which the engine's own
-		// failures never reach, so a real failure cleared the bar instead of
+		// clear below and before the awaited fetch (#1415): `handleError`, the other
+		// caller of `runProgress.fail`, is never reached by the engine's own failures,
+		// so a real failure would clear the bar instead of
 		// reddening it. Marking it also sets `progressFailedRunId`, which is
 		// what makes the clear below leave the flash standing.
 		if (status === "failed") this.failProgress(runId);

@@ -6,8 +6,6 @@
  */
 
 /**
- * DashboardPanel
- *
  * Behavioral preferences for live test dashboards and charts, in two topics:
  * the live charts (retention window, time granularity, refresh rate) and
  * capacity (the p99 threshold that drives breakpoint/saturation of a ramp-up

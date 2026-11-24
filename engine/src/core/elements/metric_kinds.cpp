@@ -6,7 +6,6 @@
  */
 
 /**
- * @file metric_kinds.cpp
  * @brief `metric.record` (issue #1500): a custom trend, counter or rate,
  *        recorded in `step.after` and reported beside the built-in phases -
  *        `customMetrics.<name>` in the run report, `custom.<name>.<stat>` in

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file redacted-input.ts
  * @brief The refusal of a credential slot written with the `<redacted>` marker
  *        (#3553), while the session cannot read secrets.
  *

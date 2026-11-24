@@ -6,7 +6,6 @@
  */
 
 /**
- * @file spec-bindings.ts
  * @brief OpenAPI spec bindings: reading a binding, bounding a document, and the
  *        import, diff, bind and sync answers in words.
  */

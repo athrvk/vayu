@@ -19,8 +19,7 @@
  * order is written down.
  *
  * **Order is by likelihood of visit** (#586), not by how the engine happens to
- * seed them. It used to put the least-visited category second and the one users
- * arrive with questions about last.
+ * seed them.
  *
  * **Labels are sentence case**, like the app panels above them in the sidebar.
  * The two registries meet at a section boundary, and Title Case on one side of
@@ -80,7 +79,7 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		label: "Network & connectivity",
 		// Widened by #703, which moved the request transport defaults in and
 		// the OAuth renewal watchdog out: the shelf is the wire itself, not
-		// only the throughput knobs it used to hold.
+		// only the throughput knobs.
 		description:
 			"The wire itself: what a new request starts with, how many transfers a worker keeps open, and how long a name resolution is reused",
 		icon: Network,

@@ -6,8 +6,6 @@
  */
 
 /**
- * InheritanceChain
- *
  * Renders the root→leaf ancestor chain for a collection and indicates which
  * ancestor's auth would be inherited if a descendant request used
  * `Inherit from collection`.

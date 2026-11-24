@@ -6,7 +6,6 @@
  */
 
 /**
- * @file control_transaction.cpp
  * @brief `control.transaction` (issue #1515): one latency histogram per
  *        named transaction, fed from every member of the folder it sits on.
  *

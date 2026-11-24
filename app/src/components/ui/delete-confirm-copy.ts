@@ -37,7 +37,7 @@ export function deleteConfirmCopy(name: string): { title: string; description: s
  * template (docs/ux-writing.md's calibration example for this exact flow):
  * how many variables go with it, that requests using them fall back to
  * sending the literal `{{token}}` text rather than failing to send at all, and
- * that the Trash can give it back - the delete is soft since #2970, so the
+ * that the Trash can give it back - the delete is soft (#2970), so the
  * generic "removed permanently" sentence would be false here. Both
  * environment-delete call sites (the header's own dialog and the sidebar row
  * menu's) build their description from this one function so their copy can
@@ -78,8 +78,8 @@ export function exampleDeleteDescription(origin: "import" | "user"): string {
 /**
  * The description a client certificate's remove dialog needs beyond the generic
  * template: what its host does without it, that the files are the user's and
- * stay where they are, and that the Trash can give it back (the delete is soft
- * since #2973). `target` is the `host` or `host:port` the registry names it by.
+ * stay where they are, and that the Trash can give it back (the delete is soft,
+ * #2973). `target` is the `host` or `host:port` the registry names it by.
  */
 export function clientCertificateDeleteDescription(target: string): string {
 	return (

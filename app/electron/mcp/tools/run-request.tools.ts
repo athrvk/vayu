@@ -6,7 +6,6 @@
  */
 
 /**
- * @file run-request.tools.ts
  * @brief `run_request`: one HTTP request sent through the engine in design mode.
  */
 

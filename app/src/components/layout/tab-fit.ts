@@ -8,11 +8,7 @@
 /**
  * How many document tabs fit, and how wide each one wants to be.
  *
- * The strip sizes each tab to its own name and sends the rest to an overflow
- * menu. It used to do the opposite - `min-w-20 max-w-50 shrink` let all of them
- * compress together, so opening a ninth tab made the other eight worse and the
- * platform decided readability: the same eight tabs degraded differently on
- * macOS, Windows and Linux because each leaves a different amount of strip.
+ * The strip sizes each tab to its own name and sends the rest to an overflow menu.
  *
  * Widths are measured with a canvas rather than from the DOM. Measuring rendered
  * tabs is circular here - deciding to hide one changes the widths you would
@@ -41,25 +37,20 @@ export const TAB_TRAILING = TAB_CLOSE_SPACE + 2;
 /**
  * Everything a tab draws that is not the name, in px.
  *
- * 12px leading padding (`px-3`, issue #1679 - was 8px), the trailing strip
+ * 12px leading padding (`px-3`, issue #1679), the trailing strip
  * above, a 2px method rail, a 1px separator, and 6px of gap when an icon is
  * present. These are Comfortable-density pixel values (`--spacing` at
  * 0.25rem/unit): `px-3` is 12px there and only 9px at Default, `right-0.5`
  * on the close button is 2px there and 1.5px at Default. This constant does
  * not vary by density at all, so using the larger, Comfortable-derived
  * numbers is the safe direction to be wrong in - a few spare px at Default
- * rather than text running under the close button, the defect line 52
- * below describes.
+ * rather than text running under the close button, the defect described below.
  *
  * The trailing strip is the close button's own footprint plus air. The button is
  * absolutely positioned, so it draws over that strip rather than sitting in the
- * flow, and it used to be budgeted at 0: absolute takes it out of layout, but
- * not out of the way. The name filling its tab ran under the button on the one
- * tab showing it, which was every active tab (#1202). It was invisible while
- * this measurement read the strip's inherited 16px font against a 13px label
- * and over-measured every tab by ~23%; correcting the font is what surfaced it.
- * Still far short of the old strip's 22px per tab, which reserved the button
- * *and* the method word on all of them.
+ * flow: absolute takes it out of layout, but not out of the way. The name
+ * filling its tab ran under the button on the one tab showing it, which was
+ * every active tab (#1202).
  */
 export const TAB_CHROME = 12 + TAB_TRAILING + 2 + 1;
 /** Extra when the tab carries a type icon (collection, run, settings…). */

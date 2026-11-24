@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http.ts
  * @brief Hosts the MCP server over Streamable HTTP on loopback, through the
  *        SDK's `createMcpHandler`: a fresh server per request, for both
  *        protocol eras. A 2026-07-28 client is served per request by design;

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file log.ts
  * @brief The app-side half of the structured logger (#1556, #1557, #1558).
  *
  * Mirrors the engine's `LogRecord` (`docs/engine/logging.md`,

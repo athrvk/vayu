@@ -142,7 +142,7 @@ interface EditedValue {
  * Its own component so the restart machinery - the action, and the cache
  * invalidation that follows it - is mounted only while the banner is on
  * screen, the same split the Dock's pending signal uses. It shares that one
- * action through `useEngineRestart`; the two used to be a copy each.
+ * action through `useEngineRestart`.
  */
 function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDismiss: () => void }) {
 	const { restart, isRestarting } = useEngineRestart();
@@ -405,10 +405,9 @@ export default function SettingsMain() {
 	/**
 	 * Leaving a category saves its edits instead of dropping them.
 	 *
-	 * This effect used to be a bare `setEditedValues({})`: picking another
-	 * category in the sidebar - or navigating away from Settings entirely, which
-	 * runs the same cleanup - discarded whatever had been typed, with no save, no
-	 * prompt, and nothing on screen to say it had happened. Engine settings are
+	 * Picking another category in the sidebar - or navigating away from Settings
+	 * entirely, which runs the same cleanup - would otherwise discard whatever had
+	 * been typed, with no save and no prompt.
 	 * cheap merge-patches, so they are saved rather than confirmed; the switch is
 	 * not itself a destructive act.
 	 *
@@ -622,9 +621,8 @@ export default function SettingsMain() {
 	/**
 	 * Drop a staged edit, putting the field back to the saved value.
 	 *
-	 * Called Revert on screen. It used to be called Reset, next to a "Default:"
-	 * line it had nothing to do with - so the one control that looked like the
-	 * way back to the default was the one control that was not.
+	 * Called Revert on screen, not Reset: Reset beside a "Default:" line would read
+	 * as the way back to the default, which this is not.
 	 */
 	const handleRevert = (entry: ConfigEntry) => {
 		setEditedValues((prev) => {
@@ -821,8 +819,7 @@ export default function SettingsMain() {
 							max={entry.max}
 							/*
 							 * The entry says what it measures, so every numeric
-							 * setting can reach the suffix - not only the three
-							 * keys a hardcoded list here used to name. A byte
+							 * setting can reach the suffix. A byte
 							 * count reads as the formatted value itself ("100.0
 							 * MB" beside the raw number in the field); every
 							 * other unit is its own symbol.

@@ -6,8 +6,6 @@
  */
 
 /**
- * McpSettingsPanel
- *
  * Client-side panel for the MCP server that exposes Vayu to AI agents (Claude
  * Code, Cursor, Codex). Shows the connection status + one-command onboarding,
  * and edits the safety guardrails (allowlist / caps / writes). Config is

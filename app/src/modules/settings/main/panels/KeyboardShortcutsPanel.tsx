@@ -6,8 +6,6 @@
  */
 
 /**
- * KeyboardShortcutsPanel
- *
  * The read-only list of every chord the app listens for (#951). Until it
  * existed, ⌘W, ⌘B, ⌘I and ⌘1-9 appeared nowhere on screen: the Dock advertised
  * the drawer switchers, the URL bar advertised Send and Load Test, and the rest
@@ -17,7 +15,7 @@
  * `constants/shortcuts.ts`, each row's name from that chord's own `label`, and
  * its key-caps from `chordKeys` - the same function the Dock's tooltips and the
  * response pane's empty state render through. A table of names and keys typed
- * out here is the exact defect #938 removed from the Shell, and it would be
+ * out here is the exact defect removed from the Shell (#938), and it would be
  * wrong the first time a chord changed. `KeyboardShortcutsPanel.test.tsx`
  * counts the rendered rows against the registry, so a chord cannot be added
  * without appearing here.

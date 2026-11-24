@@ -9,9 +9,7 @@
  * Which section tabs fit the space a strip has, and which go to the overflow
  * menu (#2200).
  *
- * The response and request strips used to be `overflow-x-auto` with a hidden
- * scrollbar, so at the default split the last tabs were simply cut off with no
- * cue that they existed. This is the measured-fit `TabStrip` uses for document
+ * This is the measured-fit `TabStrip` uses for document
  * tabs, applied to Radix `TabsTrigger`s: widths come from a canvas rather than
  * from the rendered triggers (hiding one would change what is measured next),
  * and the active tab is never the one overflowed.

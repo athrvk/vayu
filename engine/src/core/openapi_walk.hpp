@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/openapi_walk.hpp
  * @brief The one walk over a document's operations, shared by everything that
  *        reads one (issues #853, #865).
  *

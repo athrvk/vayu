@@ -6,15 +6,13 @@
  */
 
 /**
- * @file http/routes/mock_server.cpp
  * @brief The collection mock server: an engine-hosted listener that answers a
  *        collection's saved example responses (issue #481 phase 2), plus the
  *        routes that drive it. Lives with the routes for the same reason
  *        inbox.cpp does - the listener needs httplib, which is linked into the
  *        engine and the tests.
  *
- * Phase 1 gave examples somewhere to live; this is what they are *for*. The
- * route table is a start-time snapshot of the collection tree, so the listener
+ * The route table is a start-time snapshot of the collection tree, so the listener
  * thread reads immutable state and the manager's lock never has to be taken
  * from a handler.
  */
@@ -573,8 +571,7 @@ nlohmann::json mock_route_json (const MockRoute& route, std::uint64_t hits) {
         out["exampleName"] = named->name;
     } else {
         // "random": the first example's status stands in as a representative
-        // figure, the same value this field reported before a route could
-        // hold more than one example.
+        // figure.
         out["status"] = route.examples.front ().status;
     }
     return out;

@@ -9,18 +9,12 @@
  * Stopping the engine and the MCP server exactly once on the way out.
  *
  * `before-quit`'s second pass defers the quit, stops both children, and quits
- * again when they are down. Its guard used to be "is the engine still running",
- * which is state that only clears *after* those awaits - so a second
- * `before-quit` arriving mid-shutdown started a second `stopMcp()`/`stopEngine()`
- * on top of the first. No extra user gesture is needed to get there: an X click
- * flushes and closes the window, `window-all-closed` fires `app.quit()`, and
- * that quit can land inside a shutdown a prior quit already began.
- *
- * So the guard has to be "has a shutdown started", which is three states rather
- * than two - a quit arriving *during* the shutdown must be deferred (letting it
- * through exits the app with the engine half-stopped, and an adopted engine
- * would survive as an orphan), while the quit the shutdown itself resumes must
- * fall straight through, or the app never exits at all.
+ * again when they are down. The guard has to be "has a shutdown started", which
+ * is three states rather than two - a quit arriving *during* the shutdown must
+ * be deferred (letting it through exits the app with the engine half-stopped,
+ * and an adopted engine would survive as an orphan), while the quit the
+ * shutdown itself resumes must fall straight through, or the app never exits
+ * at all.
  *
  * Kept out of main.ts so it can be tested - main.ts creates windows and starts
  * the engine at import time, which no unit test can do.

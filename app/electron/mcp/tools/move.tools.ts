@@ -6,7 +6,6 @@
  */
 
 /**
- * @file move.tools.ts
  * @brief `move_item`: reordering and reparenting collections and requests.
  */
 

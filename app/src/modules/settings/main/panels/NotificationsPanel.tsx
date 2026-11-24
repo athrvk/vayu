@@ -6,8 +6,6 @@
  */
 
 /**
- * NotificationsPanel
- *
  * Two cards, because the panel now covers two ways of being told something.
  *
  * The first is the one interruption Vayu makes outside its own window: an OS
@@ -119,7 +117,7 @@ export default function NotificationsPanel() {
 					    the panel's name and description, so a card repeating them was
 					    two headings a few pixels apart (issue #1688). This card is one
 					    topic inside the panel, and that is what it is called - the
-					    description it used to carry now lives once, in
+					    the description lives once, in
 					    `app-panels.ts`. */}
 					<div className="flex items-center gap-2">
 						<Bell className="w-5 h-5 text-muted-foreground" />

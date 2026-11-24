@@ -8,7 +8,6 @@
  */
 
 /**
- * @file xml2js_glue.hpp
  * @brief The factory around the vendored `xml2js` (engine/vendor/xml2js,
  *        #2654), and the `xml2Json` global built over it.
  *

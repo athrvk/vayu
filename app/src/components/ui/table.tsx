@@ -8,11 +8,6 @@
 /**
  * The data table the response pane reads its headers and cookies out of.
  *
- * `HeadersViewer` and `ResponseCookies` had the chrome written out twice and
- * identically - `w-full text-sm`, a `border-b border-rule` head row,
- * `border-b border-rule hover:bg-muted/50` body rows, `py-2 px-3` cells. Two
- * columns in one and three in the other; everything around them the same.
- *
  * **Density is the reason this is `text-xs` and not `text-sm`.** Both tables
  * rendered at 14px with `py-2`, which is a ~36px row, while every other surface
  * in this pane - the tab strip, the toolbar, the console slabs, the timing

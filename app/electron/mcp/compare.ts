@@ -6,7 +6,6 @@
  */
 
 /**
- * @file compare.ts
  * @brief Pure server-side diff of two run reports (the `compare_runs` tool's
  *        core). Answers "did my change regress?" by comparing latency
  *        percentiles, error rate, throughput, and status-code mix, each

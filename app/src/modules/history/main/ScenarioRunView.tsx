@@ -6,8 +6,6 @@
  */
 
 /**
- * ScenarioRunView
- *
  * The run tab for a collection run: what the sequence did, step by step.
  *
  * **Not `LoadTestDetail`.** A scenario run's `results[]` are step executions of

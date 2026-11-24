@@ -96,8 +96,7 @@ export function Drawer({ mode = "push", siblingMode = "push" }: DrawerProps) {
 						className="enter-fade [--enter-fade-duration:var(--dur-panel-in)] panel-clip flex-1 overflow-hidden flex flex-col min-w-0"
 					>
 						{/* Each view supplies its own DrawerPanel, which owns the header
-						    and the scroll region - the Drawer no longer wraps some views
-						    in a ScrollArea and leaves others to manage their own.
+						    and the scroll region.
 
 						    Views fetch their own data too. The Drawer used to query
 						    collections and environments purely to hand them to the

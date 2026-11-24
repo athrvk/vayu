@@ -6,8 +6,6 @@
  */
 
 /**
- * ClientSettingsPanel
- *
  * Shared shell for client-side (app) settings panels - the header (title +
  * description) and the scrolling content column. App panels render only their
  * cards; this shell gives them the same chrome the engine settings view uses,

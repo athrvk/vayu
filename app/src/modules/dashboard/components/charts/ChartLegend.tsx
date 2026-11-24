@@ -10,8 +10,8 @@
  *
  * A swatch resolves through `ROLE_TOKEN`, the table the canvas resolves its
  * strokes through, so a legend cannot disagree with its chart. A hand-written
- * `hsl(var(--x))` here is what #2311 removed: thirteen of them had drifted
- * from the roles the series used.
+ * `hsl(var(--x))` here drifts from the roles the series use: thirteen of them
+ * had (#2311).
  */
 
 import { BAND_FILL_ALPHA } from "./uplot/UPlotChart";

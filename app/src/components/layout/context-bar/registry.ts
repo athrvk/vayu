@@ -14,19 +14,10 @@
  * another, and keeping them in step by hand is exactly the "config one branch
  * defines and another re-derives inline" defect the repo keeps finding.
  *
- * The collection and run sections arrived as entries in this array and nothing
- * else - no framework change, which is what the registry was for.
- *
- * `appliesTo` is still a pure, synchronous function of the tab and nothing else,
+ * `appliesTo` is a pure, synchronous function of the tab and nothing else,
  * because the Dock's toggle calls it on every render through
  * `contextBarHasContent`, and a predicate that read a query could not be called
- * from there at all. The entry for `graphql` used to record the consequence -
- * that narrowing it to the body mode "would mean the registry could read a
- * query, which is the framework change the registry exists to avoid" - and that
- * was the right call while the bar had three sections. At seven it was not: a
- * plain REST request opened a bar in which three sections existed only to say
- * they did not apply, so the reader scanned past all seven headers to find the
- * two that meant something (#1310).
+ * from there at all (#1310).
  *
  * So the data-level question got a second, orthogonal answer rather than a wider
  * `appliesTo`: `useRelevance`, a hook a section opts into, called by the bar and
@@ -81,9 +72,8 @@ import type { ContextBarSection } from "./types";
  * the section applies.
  *
  * The two now agree. `useGraphQLRelevance` hides the section outright off a
- * GraphQL body, so the chunk is not requested at all on a REST tab, where it
- * used to arrive the moment the expanded section mounted to say the request was
- * not GraphQL. That hook lives in `relevance.ts` rather than beside the section
+ * GraphQL body, so the chunk is not requested at all on a REST tab.
+ * That hook lives in `relevance.ts` rather than beside the section
  * precisely because this file has to name it eagerly: importing it from
  * `GraphQLSection.tsx` would pull the parser into the startup chunk through the
  * back door and undo the split. `startup-eager-graph.test.ts` guards both halves.
@@ -186,11 +176,7 @@ export const CONTEXT_BAR_SECTIONS: readonly ContextBarSection[] = [
 	 * what it contributes, what it hands down, how much is in it, and what
 	 * happened last time.
 	 *
-	 * `collection-last-run` closes the deferral this comment used to record.
-	 * It was held back twice because a collection's runs were not addressable -
-	 * `GET /runs` filtered by `requestId` and a collection run links none, so
-	 * the only route to the row was a substring search of every stored snapshot,
-	 * a scan per open bar. `GET /runs?collectionId=&limit=1` (#422) makes it one
+	 * `collection-last-run` reads `GET /runs?collectionId=&limit=1` (#422): one
 	 * server query for exactly the row shown.
 	 */
 	{

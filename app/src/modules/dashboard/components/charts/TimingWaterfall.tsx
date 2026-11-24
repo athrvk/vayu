@@ -21,8 +21,8 @@ import {
  * renders 5 rows so the card height stays constant; with no report values show
  * "-" and bars are empty.
  *
- * The rows come from the shared `TIMING_PHASES` descriptor. They used to be a
- * local list, and being local is what let two defects sit here unseen:
+ * The rows come from the shared `TIMING_PHASES` descriptor; a local list let
+ * two defects sit here unseen:
  *
  *   - TTFB was painted `hsl(var(--primary))` and Download `hsl(var(--success))`.
  *     The request-builder's timing tab had the identical bug and fixed it -

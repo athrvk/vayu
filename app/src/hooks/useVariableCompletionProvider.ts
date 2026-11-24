@@ -6,8 +6,6 @@
  */
 
 /**
- * useVariableCompletionProvider Hook
- *
  * `{{variable}}` autocomplete inside the Monaco editors.
  *
  * Every plain field in the request builder has had this for a long time -

@@ -6,8 +6,6 @@
  */
 
 /**
- * LoadTestingPanel
- *
  * The ceilings the load-test dialog offers. These are *this app's* policy, not
  * the engine's: the engine range-checks a run config too, but those bounds are
  * crash guards (a negative `concurrency` is an eager pre-allocation of ~1.8e19

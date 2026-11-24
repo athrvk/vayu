@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/import.cpp
  * @brief Import endpoints - the URL proxy (`/import/fetch`) that fetches a
  *        remote collection/spec past browser CORS, and the atomic bulk write
  *        (`/import/apply`) that persists a parsed import in one call.
@@ -291,11 +290,9 @@ const std::atomic<bool>* cancel) {
     config.max_response_bytes = fetch.max_bytes;
     config.local_peer_rule    = fetch.reference;
     config.cancel             = cancel;
-    // A stall bound in place of the total (issue #882). This route inherited
-    // `Request::timeout_ms` - 30 seconds for the whole transfer - which bounds a
-    // download's size rather than its health: 10 MB needed better than 340 KB/s
-    // just to arrive, and the failure read "Operation timed out ... with 4177920
-    // out of 6296254 bytes received" for a download that had never once stopped.
+    // A stall bound in place of the total (issue #882). A whole-transfer timeout
+    // (`Request::timeout_ms`, 30 seconds) bounds a download's size rather than its
+    // health: 10 MB needs better than 340 KB/s just to arrive.
     // What bounds a transfer that truly never ends is `max_response_bytes`, set
     // just above.
     config.stall_timeout_ms = vayu::core::constants::import_fetch::STALL_TIMEOUT_MS;
@@ -387,8 +384,7 @@ const std::atomic<bool>* cancel) {
 /**
  * The same fetch, reporting the download as it arrives (issue #882).
  *
- * Why this exists: an 8 MB spec behind a URL was a frozen import dialog. The
- * buffered route above cannot say anything until libcurl has the whole body, and
+ * The buffered route above cannot say anything until libcurl has the whole body, and
  * the wait is on the *upstream* download - so no amount of streaming between
  * engine and renderer would have helped. The report has to start where the bytes
  * do, which is the client's write callback.
@@ -1166,14 +1162,9 @@ const nlohmann::json& candidates) {
  * Testable core of POST /import/apply - persist a whole parsed import in one
  * atomic call, returning {http_status, json_body} (issue #96).
  *
- * The app used to POST every collection, request and environment individually,
- * which is why `POST /<resource>` had to accept a client-supplied id at all: the
- * orchestrator pre-assigned ids so it could wire `parentId` / `collectionId`
- * across a tree before any of it was persisted. Here the client sends opaque
- * temp ids instead, the engine assigns every real id via `generate_id`, and the
- * response's `idMap` translates one to the other. Nothing partial can survive: a
- * single bad item is a 400 with zero rows written, so the client-side
- * best-effort rollback is gone too.
+ * The client sends opaque temp ids, the engine assigns every real id via
+ * `generate_id`, and the response's `idMap` translates one to the other. Nothing
+ * partial can survive: a single bad item is a 400 with zero rows written.
  *
  * The passes below are separate because references may point forward - a child
  * collection is allowed to appear before its parent - and because every row must
@@ -1435,8 +1426,7 @@ import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
  * `ref-bundler.ts`, which inlines the files a multi-file OpenAPI document
  * references *before* the document is parsed or stored (issue #649). Finding
  * and rewriting those `$ref`s needs the document as a tree, and a YAML reader
- * in the renderer to get one is the last thing that kept `js-yaml` in
- * production `src/` after #877 moved every parse here.
+ * in the renderer to get one would keep `js-yaml` in production `src/` (#877).
  *
  * So the bundler reads through the engine's reader - the same
  * `core::read_document` behind `POST /specs`, `POST /specs/describe` and
@@ -1537,10 +1527,8 @@ const std::function<void ()>& before_write) {
 /**
  * Testable core of POST /import - parse a document and persist it.
  *
- * The verb an agent wants and the one thing MCP could not do about a spec
- * (issue #877): bind, describe, diff, sync, export and unbind were all
- * reachable, and *import a document* was not, because `POST /import/apply` took
- * a tree only a renderer could build. This is `import_parse_response` and
+ * The verb an agent wants (issue #877): `POST /import/apply` takes a tree only a
+ * renderer could build. This is `import_parse_response` and
  * `import_apply_response` with the flattening between them.
  *
  * Not a replacement for either half. The app still parses and applies

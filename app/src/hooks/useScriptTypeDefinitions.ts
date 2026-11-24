@@ -6,8 +6,6 @@
  */
 
 /**
- * useScriptTypeDefinitions Hook
- *
  * Hands Monaco's TypeScript worker the engine-generated declarations for the
  * `pm.*` surface, which is what the completion provider beside it cannot give:
  * hover documentation over an existing call, signature help while typing

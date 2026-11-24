@@ -50,8 +50,6 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 	// What this tab can do, beside what it is called. See tab-actions.ts.
 	const actions = useTabActions(tab, descriptor);
 	// Roving tabindex: the strip is one Tab stop, and Left/Right move within it.
-	// Previously every tab carried tabIndex={0}, so a developer with a dozen tabs
-	// open had to press Tab a dozen times to get past the strip.
 	const rovingTabIndex = isRovingStop ? 0 : -1;
 	const Icon = descriptor.icon;
 	// Drag-to-reorder state arrives by context, not props, so `tabItemPropsEqual`
@@ -115,7 +113,7 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 					// re-fires for one - only a real open does.
 					"enter-fade",
 					"group relative flex h-full shrink-0 cursor-pointer select-none items-center gap-1.5",
-					// px-3 (issue #1679), not the old pl-2 pr-2.5 - see tab-fit.ts's
+					// px-3 (issue #1679) - see tab-fit.ts's
 					// TAB_CHROME for the reserved-width side of this.
 					"border-r border-border/40 px-3 text-sm",
 					// The rule sits on the edge the content is on, and matches the

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file run-housekeeping.ts
  * @brief Reading runs back: the `list_runs` filters, the page bounds of the
  *        per-run reads, the delete prompts' wording, baseline resolution and
  *        the run-type refusal `compare_runs` shares with its prompt.

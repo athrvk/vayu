@@ -6,8 +6,6 @@
  */
 
 /**
- * RunExportMenu Component
- *
  * A finished load run as a file to share (#2139): the run tab's header and the
  * post-run dashboard's both mount it, and each mounts it only for a finished
  * load run - the engine refuses any other (`read_exportable_run`).

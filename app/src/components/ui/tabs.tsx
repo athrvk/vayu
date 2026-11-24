@@ -28,10 +28,6 @@
  * that mounts at full width widens its trigger and shoves its neighbours, so
  * the mark's own track animates open from zero instead of jumping.
  *
- * This file previously shipped shadcn's segmented-pill default, which four of
- * the five call sites immediately undid with `h-auto p-0 bg-transparent` before
- * re-declaring their own underline recipe. There is one *trigger* look now.
- *
  * **The strip's chrome is a `variant`, and it is required.** The triggers were
  * shared while the band around them was not: seven call sites carried seven
  * recipes - `mx-5 mt-3`, nothing at all, `w-full px-1`, `px-5` with a
@@ -287,9 +283,8 @@ function PresenceDot() {
 /**
  * The small superscript count on a tab.
  *
- * A superscript rather than the `h-5` `Badge` pill this replaces: the pill set
- * a 20px floor that no 24px band can accommodate, and it was the single reason
- * the old triggers had to stay 38px tall. This sets no height at all.
+ * A superscript, not a `Badge` pill: the pill's `h-5` set a 20px floor that no
+ * 24px band can accommodate. This sets no height at all.
  *
  * 10px is the documented micro step - see type-scale.test.ts, which rejects the
  * half-pixel sizes that come from nudging a number until it looks right.
@@ -297,14 +292,10 @@ function PresenceDot() {
  * **Zero renders nothing, and so does `undefined`.** A count is there to say
  * "there are this many"; a `0` says "there are none", which the tab's own empty
  * state already says at more length and without asking you to read a
- * superscript to find out there is nothing to read. The Console tab showed one
- * the moment its gating was removed and it always rendered - a `0` beside a tab
- * whose panel says "No console output".
+ * superscript to find out there is nothing to read.
  *
- * Handled here rather than at each call site because the call sites were
- * already working around it by hand: `RequestTabs` passed `badge: undefined`
- * and guarded with `tab.badge !== undefined`, which is the same remembering
- * problem one level up. A caller that genuinely wants to show a zero can pass
+ * Handled here rather than at each call site, each of which would have to remember it.
+ * A caller that genuinely wants to show a zero can pass
  * the string `"0"`.
  *
  * **"Renders nothing" means nothing *perceptible*, not nothing at all.** The
@@ -349,11 +340,8 @@ function TabCount({
 	const live = value === 0 || value === undefined || value === null ? null : value;
 	/*
 	 * The track reads `live`, the text reads `shown`: the collapse starts on
-	 * time while the digit it is collapsing around is still there to fade. The
-	 * contents used to empty in the same commit the track began shrinking, so
-	 * the track animated around an already-empty box and the count itself was
-	 * a hard cut - motion everywhere except on the part that carried the
-	 * meaning. See `useHeldValue`.
+	 * time while the digit it is collapsing around is still there to fade. See
+	 * `useHeldValue`.
 	 */
 	const { shown, fading } = useHeldValue(live, TIMING.MARK_FADE_MS);
 

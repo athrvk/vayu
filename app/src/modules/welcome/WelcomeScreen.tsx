@@ -6,8 +6,6 @@
  */
 
 /**
- * WelcomeScreen
- *
  * Vayu's new-tab surface: rendered for the "welcome" tab (opened by "+"), when
  * no tab is open at all, and for a request tab with no entity. It is not a
  * resume screen - tabs are persisted and restored, so returning users land back

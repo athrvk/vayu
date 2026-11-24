@@ -6,8 +6,6 @@
  */
 
 /**
- * VariableAutocomplete Component
- *
  * Use Case 1: Display a list of available variables for selection
  * - Shows the entries `buildVariableSuggestions` offers for the search query
  * - Displays variable name and scope badge

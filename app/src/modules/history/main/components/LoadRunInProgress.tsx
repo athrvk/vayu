@@ -6,8 +6,6 @@
  */
 
 /**
- * LoadRunInProgress
- *
  * What a load run's History tab shows while the engine is still executing it.
  *
  * The report endpoint answers for a live run, but it describes a run that has

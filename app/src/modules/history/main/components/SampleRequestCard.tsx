@@ -6,8 +6,6 @@
  */
 
 /**
- * SampleRequestCard Component
- *
  * A single stored sampled request, expandable. The row, the expansion chrome,
  * the error block and the timing tiles are the shared `SampledExchange` (#76),
  * laid out as a flat `divide-y` strip rather than a boxed card per row. What is
@@ -15,12 +13,8 @@
  * the response section.
  *
  * The response comes from `GET /runs/:id/samples` (issue #174), not from the
- * trace. This card used to read `sample.trace.request.headers` and
- * `sample.trace.response.body` - the design-mode nesting - on a surface that
- * only ever shows load-run rows, which no writer produces. Both branches were
- * dead, so the card rendered nothing but its timing tiles. There is also no
- * per-sample request to show any more: a load run's request is constant across
- * iterations and lives once in `runs.config_snapshot`.
+ * trace. There is no per-sample request to show: a load run's request is
+ * constant across iterations and lives once in `runs.config_snapshot`.
  */
 
 import {

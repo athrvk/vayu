@@ -6,8 +6,6 @@
  */
 
 /**
- * GeneralPanel
- *
  * System-level app settings: the installed version and a manual update check,
  * auto-save behavior, start at login, data management (clear stored run
  * history), on-disk storage locations, and a reset-to-defaults for every

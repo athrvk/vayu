@@ -6,7 +6,6 @@
  */
 
 /**
- * @file connect.ts
  * @brief One-click "connect this agent to Vayu" by shelling out to a client's
  *        own CLI - `claude mcp add` (Claude Code, after a `mcp get` so a second
  *        click is a no-op) and `code --add-mcp` (VS Code).
