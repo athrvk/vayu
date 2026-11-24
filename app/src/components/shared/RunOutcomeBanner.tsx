@@ -6,19 +6,13 @@
  */
 
 /**
- * The first thing a finished load run says: did it pass (#2130).
- *
- * `Completed` only says the run ended, and a run that blew every budget, or
- * answered half its requests with errors, ends just as cleanly as a good one. The
- * live dashboard and the history detail both open on this line so the answer is
- * not a scroll away in a card; the verdict itself is `run-outcome.ts`'s, shared
- * with the header glyph and the history row.
- *
- * Neutral for "Not judged", never green: a run nothing held to a standard has not
- * passed, and a tick there is the claim this banner exists to stop making.
- * Renders nothing for `null` - a run still streaming, or a report that has not
- * arrived, has no verdict to state, and "Not judged" over a missing report would
- * claim something about a run nobody has looked at.
+ * The first thing a finished load run says: did it pass (#2130). `Completed` only says it ended,
+ * and a run that blew every budget or half-errored ends as cleanly as a good one, so the live
+ * dashboard and the history detail open on this line, not a card a scroll away; the verdict is
+ * `run-outcome.ts`'s, shared with the header glyph and the history row. Neutral for "Not judged",
+ * never green: a run held to no standard has not passed. Renders nothing for `null` (a run still
+ * streaming, a report not yet arrived): "Not judged" over a missing report would claim something
+ * about a run nobody looked at.
  */
 
 import { Callout, type CalloutProps } from "./Callout";

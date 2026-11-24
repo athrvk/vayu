@@ -6,39 +6,21 @@
  */
 
 /**
- * Toaster
+ * Renders `stores/toast-store.ts`'s queue through `components/ui/toast.tsx`'s Radix primitive,
+ * mounted once in `App.tsx`.
  *
- * Renders the queue in `stores/toast-store.ts` through the Radix toast
- * primitive in `components/ui/toast.tsx`. Mounted once, in `App.tsx`.
+ * Accessibility: a live region first appearing with its content is commonly not announced. Radix
+ * gives *each* toast its own visually hidden `role="status" aria-live="polite"` region, mounted
+ * **empty** with the text injected a frame later (verified on the rendered DOM), so the region
+ * pre-exists its content; and as each holds one toast, not the stack, the implicit
+ * `aria-atomic="true"` is correct. Everything is polite, nothing assertive (`type="background"`,
+ * argued in `ui/toast.tsx`).
  *
- * Accessibility - what changed, and what deliberately did not:
- *
- * The version this replaces was hand-rolled, and hand-rolled a live region:
- * one `role="status"` container that outlived every toast, because a region
- * that first appears together with its content is commonly not announced at
- * all. It also had to set `aria-atomic="false"` explicitly, since `role=
- * "status"` implies `true` and one shared region would otherwise re-announce
- * the entire stack on every arrival.
- *
- * Radix solves the same problem the other way round, and this was verified
- * against the rendered DOM rather than assumed: it gives *each* toast its own
- * visually-hidden `role="status" aria-live="polite"` region, mounts it **empty**,
- * and injects the text a frame later. The region still pre-exists its own
- * content, which is the property that mattered. And because each region holds
- * one toast rather than the whole stack, the implicit `aria-atomic="true"` is
- * now the correct value - so the explicit `false` is gone on purpose, not by
- * omission.
- *
- * What carried over untouched is the decision that everything is polite and
- * nothing is assertive - `type="background"` on the primitive. That argument is
- * unchanged by the swap and is recorded at `ui/toast.tsx`.
- *
- * `ToastProvider` also gives the viewport a hotkey - F8 by default - that moves
- * focus into the stack, and advertises it in the viewport's accessible name
- * ("Notifications (F8)", Radix's default, confirmed in the browser). The app
- * does not bind it, only lists it: `FOCUS_NOTIFICATIONS_CHORD` (#3498). The `label`
- * passed here is a different string: it prefixes the announced text, not the
- * region name, which comes from `ToastViewport`'s own `label`.
+ * `ToastProvider` gives the viewport a hotkey, F8 by default, that moves focus into the stack, and
+ * advertises it in the viewport's accessible name ("Notifications (F8)", Radix's default, confirmed
+ * in the browser). The app does not bind it, only lists it (`FOCUS_NOTIFICATIONS_CHORD`, #3498).
+ * The `label` passed here prefixes the announced text; the region name comes from `ToastViewport`'s
+ * own `label`.
  */
 
 import {
@@ -58,13 +40,10 @@ export default function Toaster() {
 	const toasts = useToastStore((s) => s.toasts);
 	const dismissToast = useToastStore((s) => s.dismissToast);
 	/*
-	 * Position is the one preference this component sees; the duration scale,
-	 * the stack cap and the severity floor are all applied when the toast is
-	 * enqueued, so the queue arriving here is already the queue to draw.
-	 *
-	 * Swipe follows the position rather than being fixed: a stack anchored left
-	 * that could only be swiped right would have to be dragged across the whole
-	 * app to dismiss.
+	 * Position is the one preference seen here: the duration scale, stack cap and severity floor
+	 * apply at enqueue, so the queue arriving is the queue to draw. Swipe follows the position: a
+	 * stack anchored left that could only be swiped right would be dragged across the app to
+	 * dismiss.
 	 */
 	const position = useClientSettingsStore((s) => s.notifications.position);
 	const { swipe, className } = toastPositionOption(position);
@@ -76,13 +55,12 @@ export default function Toaster() {
 					key={id}
 					variant={variant}
 					duration={duration}
-					// Controlled, so the toast can sit in the closed state while its
-					// exit animation runs. `dismissToast` flips this to false and
-					// drops the entry TIMING.TOAST_EXIT_MS later; removing it here instead
-					// would unmount the node before Radix could animate it.
+					// Controlled, so the toast sits closed while its exit animation runs:
+					// `dismissToast` flips this and drops the entry TIMING.TOAST_EXIT_MS later;
+					// removing it here would unmount the node before Radix animates it.
 					open={open}
-					// Fires for a timeout, the close button and a completed swipe
-					// alike, so dismissal has one path rather than three.
+					// Fires for a timeout, the close button and a completed swipe, so dismissal has
+					// one path.
 					onOpenChange={(next) => {
 						if (!next) dismissToast(id);
 					}}
@@ -95,9 +73,8 @@ export default function Toaster() {
 						</ToastDescription>
 						{action ? (
 							<ToastAction
-								// Radix requires this: it is what a screen reader is
-								// offered in place of a button it cannot reach before
-								// the toast expires.
+								// Radix requires it: what a screen reader is offered instead of a
+								// button it cannot reach before the toast expires.
 								altText={action.altText ?? action.label}
 								onClick={action.onClick}
 							>

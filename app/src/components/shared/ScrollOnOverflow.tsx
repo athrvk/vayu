@@ -6,19 +6,12 @@
  */
 
 /**
- * ScrollOnOverflow
- *
- * Truncated text that scrolls itself into view on hover or keyboard focus, so a
- * long tab title can be read without opening it.
- *
- * It scrolls by the measured overflow - not a guessed distance - at a constant
- * speed, so a slightly-too-long label takes a moment and a very long one takes
- * proportionally longer. Text that fits is left completely alone: no animation
- * is attached, so a strip of short tabs stays still.
- *
- * The animation is CSS, which means the app's reduced-motion setting disables it
- * for free (that rule forces animation-duration to 0.01ms). Callers should still
- * pass a `title`, so the full text stays reachable when nothing animates.
+ * Truncated text that scrolls itself into view on hover or keyboard focus, so a long tab title
+ * reads without opening it. It scrolls by the measured overflow at a constant speed, so a slightly
+ * long label takes a moment and a very long one proportionally longer; text that fits gets no
+ * animation, so short tabs stay still. CSS animation, so the app's reduced-motion rule
+ * (animation-duration 0.01ms) disables it; callers still pass a `title`, keeping the text reachable
+ * when nothing animates.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -48,8 +41,8 @@ export function ScrollOnOverflow({ children, className }: ScrollOnOverflowProps)
 		setDistance(overflow > 1 ? overflow : 0);
 	}, []);
 
-	// Re-measure when the box or its text changes - a tab renaming or the drawer
-	// resizing both change whether the label still fits.
+	// Re-measure when the box or text changes: a tab renaming or the drawer resizing both change
+	// whether the label fits.
 	useEffect(() => {
 		measure();
 		const viewport = viewportRef.current;

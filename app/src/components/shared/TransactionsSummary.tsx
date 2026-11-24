@@ -6,17 +6,11 @@
  */
 
 /**
- * A run's `control.transaction` percentiles (issue #1515) - one row per
- * declared name that closed at least once, each a folder's members summed
- * into one latency distribution rather than reported per step.
- *
- * Silent when the run recorded none - an absent card, not an empty one, for
- * a collection with no `control.transaction` element and for a report from
- * an engine that predates this field.
- *
- * Two surfaces show it, the same two {@link CustomMetricsSummary} does - the
- * load run report's Overview tab and the scenario run view - so it lives
- * here once.
+ * A run's `control.transaction` percentiles (#1515): one row per declared name that closed at least
+ * once, a folder's members summed into one latency distribution rather than per step. Silent
+ * without any (no `control.transaction` element, or an engine predating the field): an absent card,
+ * not an empty one. Shown on the same two surfaces as {@link CustomMetricsSummary} (the load
+ * report's Overview, the scenario run view), so it lives once.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
