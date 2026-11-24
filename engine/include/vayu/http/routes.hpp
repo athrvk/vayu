@@ -400,7 +400,7 @@ int64_t stored_updated_at) {
  * millisecond, or two writes would share an entity tag.
  */
 inline int64_t next_updated_at (int64_t previous) {
-    return std::max (now_ms (), previous + 1);
+    return (std::max)(now_ms (), previous + 1);
 }
 
 /** The `ETag` of a 200 answer that carries the row's `updatedAt`. */
