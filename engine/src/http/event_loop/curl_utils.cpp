@@ -922,7 +922,7 @@ void apply_ca_options (CURL* curl, const TransportPolicy& policy) {
     // materialized file already carries the system anchors on the platforms
     // that keep them in a file.
     //
-    // Windows is the platform that does not, and since #851 it is an OpenSSL
+    // Windows is the platform that does not, and there (#851) it is an OpenSSL
     // build like the others - so the flag is unconditional there, not only
     // when a bundle is in force. An OpenSSL build on Windows has no CA file to
     // fall back to: `curl_version_info()->cainfo` names a path from the
@@ -1793,7 +1793,6 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
         }
     }
 
-    // Set callbacks
     set_opt<CURLOPT_WRITEFUNCTION> (curl, write_callback);
     set_opt<CURLOPT_WRITEDATA> (curl, data);
     set_opt<CURLOPT_HEADERFUNCTION> (curl, header_callback);
@@ -1856,9 +1855,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
         set_opt<CURLOPT_TCP_KEEPALIVE> (curl, 0L);
     }
 
-    // Protocol selection. Until nghttp2 was linked this was a hardcoded
-    // CURL_HTTP_VERSION_2TLS that libcurl silently ignored, so every request
-    // went out as HTTP/1.1 regardless. It now follows the request's field.
+    // Protocol selection follows the request's field.
     set_opt<CURLOPT_HTTP_VERSION> (
     curl, vayu::http::to_curl_http_version (request.http_version));
 
@@ -1878,7 +1875,6 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
         data->secret_header_names = request.secret_header_names;
     }
 
-    // Store private data pointer
     set_opt<CURLOPT_PRIVATE> (curl, data);
 
     return curl;
@@ -1899,10 +1895,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
 
     // Everything curl measured is read before the error branch: a failed
     // transfer still connected, still sent bytes, and still spent time doing
-    // it. Returning early here used to zero all of that, which dropped failed
-    // requests out of the throughput metrics and left load_strategy's
-    // "errors sometimes carry timing" branch permanently dead. The
-    // single-request client has always extracted first for this reason.
+    // it; zeroing it would drop failed requests out of the throughput metrics.
     CurlPhaseTimes phase_times = read_phase_times (curl);
     WireBytes wire_bytes       = read_wire_bytes (curl);
     int followed               = 0;

@@ -8,11 +8,9 @@
 /**
  * @brief The `POST /execute` handler's body, extracted (issue #353).
  *
- * Every function here was inlined in `http/routes/execution.cpp` until the
- * scenario runner needed the same sequence per step. It moved rather than being
- * copied, and it moved into `vayu_core` because the runner lives there - a
- * second copy in `core/scenario_runner.cpp` would be a copy that never receives
- * this one's fixes.
+ * It lives in `vayu_core` because the scenario runner does - a second copy in
+ * `core/scenario_runner.cpp` would be a copy that never receives this one's
+ * fixes.
  */
 
 #include "vayu/http/request_exchange.hpp"
@@ -242,7 +240,7 @@ nlohmann::json response_trace_node (const vayu::Response& response) {
     // before this field would otherwise be indistinguishable from one whose
     // body was cut, and absent is what those rows mean - not capped.
     //
-    // `bodyTruncated` on this same node is a different cut, added later by
+    // `bodyTruncated` on this same node is a different cut, made by
     // `cap_trace_bodies`: that one is this body being shortened for
     // storage, which re-sending recovers from.
     if (response.body_truncated) {
@@ -885,8 +883,8 @@ resolve_header_values (vayu::HeaderList& headers, const ResidualLookup& lookup) 
  * A name that resolves to *nothing* is refused here too (#1084), in that rule's
  * one wording: it is the same shape of quiet wrong request, a `": value"` line
  * no name owns, and this pass is the layer composition cannot stand in for -
- * the name a script has just defined is one composition never saw. Since #1095
- * that rule reaches a name which arrives *already* empty as well, holding no
+ * the name a script has just defined is one composition never saw. That rule
+ * also reaches a name which arrives *already* empty (#1095), holding no
  * token for the gate to find - see `a_header_name_needs_reading` for why this
  * rule widened there and the collision rule did not.
  *

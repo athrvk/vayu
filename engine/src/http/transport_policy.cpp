@@ -388,7 +388,7 @@ std::string without_unparseable_blocks (const std::string& pem) {
 /// this list. Linux and macOS run this resolver for real, which is why
 /// `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts there that *some*
 /// probe answers rather than assuming a particular one does. Windows is
-/// OpenSSL-backed too since #851 but has no bundle on any of these paths - the
+/// OpenSSL-backed too (#851) but has no bundle on any of these paths - the
 /// `cainfo` its port reports names the build machine - so it normally falls
 /// through to the empty path and takes its anchors from the certificate store
 /// via `CURLSSLOPT_NATIVE_CA` instead.
@@ -524,8 +524,8 @@ const std::filesystem::path& directory) {
 
     // The user's anchors *extend* the platform's rather than replacing them
     // (decision 4 of #704). On an OpenSSL-backed build `CURLOPT_CAINFO` is the
-    // whole trust store, so the merge has to happen here - and since #851
-    // every leg is one, macOS included (#818).
+    // whole trust store, so the merge has to happen here - and every leg is one
+    // (#851), macOS included (#818).
     //
     // Windows is the leg with nothing to merge: it keeps its anchors in a
     // certificate store and ships no PEM bundle, so `system_ca_bundle_path()`

@@ -250,8 +250,7 @@ std::string iso_timestamp () {
     // The conversion is read rather than assumed: a refused one leaves a
     // `std::tm` holding nothing usable, and formatting it anyway renders a
     // confident wrong date. Unreachable for `system_clock::now()` on a 64-bit
-    // `time_t`, which is why it went unchecked - what changes is that the
-    // answer is now either right or empty, never confidently wrong.
+    // `time_t`; the answer is either right or empty, never confidently wrong.
     const std::string seconds = vayu::utils::format_utc_time (t, "%Y-%m-%dT%H:%M:%S");
     if (seconds.empty ()) {
         return {};
@@ -677,7 +676,7 @@ DynamicResolution dynamic) {
         return resolve_dynamic_variable (name); // unknown $name keeps its braces (#186)
     }
     // An unknown ordinary name keeps its braces too (#1009), on the rule the
-    // line above has held since #186: a token that resolved to "" left the
+    // line above holds (#186): a token that resolved to "" left the
     // request *different* and said nothing - `https://{{host}}/x` went out as
     // `https:///x`, a URL nobody wrote, where the literal reaches DNS or the
     // server and comes back as an error naming the host that was never set.
@@ -1001,7 +1000,7 @@ nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& 
 namespace {
 
 // Builds through routes.hpp's error_body so /compose carries the same nested
-// shape as every other route (issue #173 landed while #226 was in flight).
+// shape as every other route (#173).
 std::pair<int, nlohmann::json>
 compose_error (int status, std::string_view code, const std::string& message) {
     return { status, routes::error_body (status, message, code) };
