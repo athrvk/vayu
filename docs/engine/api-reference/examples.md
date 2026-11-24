@@ -30,7 +30,7 @@ The app disclosed this in the example's *name* until the column landed, which a 
 
 ## GET /requests/:id/examples
 
-**Response:** an array of example objects, oldest first:
+**Response:** an array of example objects in list order (`order`, then `createdAt`, then `id`):
 ```json
 [
   {
