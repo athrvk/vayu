@@ -32,7 +32,7 @@ const CollapsibleTrigger = CollapsiblePrimitive.CollapsibleTrigger;
  * It deliberately does not carry `.panel-clip`: the same `Input`, `Switch` or
  * row-enable checkbox renders both inside a disclosure and outside one, and
  * tucking the ring inward here would give one control two looks depending on
- * where it sits - the clearance-over-tucking rule in `docs/design-system.md`,
+ * where it sits - the clearance-over-tucking rule in `docs/design-system/focus-states.md`,
  * guarded for the checkbox by `key-value-parity.test.tsx`. A consumer whose
  * control sits flush against this box's edge adds its own clearance, the way
  * the load-test dialog's disclosures do with `px-3 py-3`.

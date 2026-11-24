@@ -45,7 +45,7 @@
  * reproduced on one screen and not the other.
  *
  * **Fixed with clearance, deliberately not with `.panel-clip`.** The design
- * system offers both (docs/design-system.md, "Clipping panels" and the
+ * system offers both (docs/design-system/focus-states.md, "Clipping panels" and the
  * clearance rule), and for this control clearance is the only one that keeps it
  * consistent: the same shared `Checkbox` appears in the request builder's
  * key-value rows, where `KeyValueRow`'s `p-1` leaves the ring outset with a

@@ -561,7 +561,7 @@ export default function VariableInput({
 	 *
 	 * The strip is one Tab stop, not one per token: a URL with five variables
 	 * otherwise put five stops between the URL and Send. This is the roving
-	 * tabindex `docs/design-system.md` describes for the collection tree, in the
+	 * tabindex `docs/design-system/tree-navigation.md` describes for the collection tree, in the
 	 * one shape a tree hook cannot serve - `useRovingTreeFocus` navigates
 	 * `[role="treeitem"]` and dispatches at the tree's own data attributes, so
 	 * pointing it at tokens would silently do nothing.

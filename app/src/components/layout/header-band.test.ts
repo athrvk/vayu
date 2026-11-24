@@ -11,7 +11,7 @@
  *
  * `--spacing` scales rhythm and the `band` steps deliberately do not ride it
  * (see `chrome-floors.test.ts` and the "Chrome, Target and Icon Floors" table
- * in `docs/design-system.md`). An arbitrary `h-[52px]` is worse than a wrong
+ * in `docs/design-system/spacing-and-floors.md`). An arbitrary `h-[52px]` is worse than a wrong
  * token: it is a fixed length, so the row is the one piece of chrome in the app
  * that cannot follow anything, and a reader cannot tell a measured band from a
  * number somebody nudged until it looked right.

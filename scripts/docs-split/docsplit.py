@@ -16,8 +16,9 @@ What a move changes, and nothing else:
   - heading levels: a page promotes its first heading to the title where it has
     one section, and every heading on the page moves up by the same amount;
   - one sentence per line in prose (a paragraph's line breaks are replaced by a
-    break after each sentence; tables, fenced code, headings and quotes are
-    copied as they are);
+    break after each sentence, except a line break written as two trailing
+    spaces, which stays; tables, fenced code, headings and quotes are copied as
+    they are);
   - link targets: a relative target gains `../` because a page moved down a
     directory, a `#fragment` that now lives on another page gains that page's
     name, and a link in any other page to the old page is aimed at the new one;
@@ -228,8 +229,12 @@ def fit(text: str, budget: int = LINE_BUDGET) -> list[str]:
     return [text]
 
 
-def reflow_block(block: list[str]) -> list[str]:
-    """One paragraph or list item, one sentence per line."""
+def reflow_block(block: list[str], hard_break: bool = False) -> list[str]:
+    """One paragraph or list item, one sentence per line.
+
+    With `hard_break` the last line keeps the two trailing spaces that make a
+    Markdown line break, which joining the lines would otherwise drop.
+    """
     first = block[0]
     marker = _LIST.match(first)
     if marker:
@@ -243,7 +248,21 @@ def reflow_block(block: list[str]) -> list[str]:
     text = " ".join([first[lead:].strip()] + [line.strip() for line in block[1:]])
     budget = LINE_BUDGET - max(lead, indent)
     sentences = [piece for sentence in split_sentences(text) for piece in fit(sentence, budget)]
-    return [head + sentences[0]] + [" " * indent + sentence for sentence in sentences[1:]]
+    out = [head + sentences[0]] + [" " * indent + sentence for sentence in sentences[1:]]
+    if hard_break:
+        out[-1] += "  "
+    return out
+
+
+def is_prose(line: str) -> bool:
+    """Whether a line continues a paragraph rather than starting another block."""
+    return bool(line.strip()) and not (
+        _FENCE.match(line)
+        or _HEADING_LINE.match(line)
+        or _LIST.match(line)
+        or line.lstrip().startswith(("|", ">"))
+        or _HTML.match(line)
+    )
 
 
 def reflow(lines: list[str]) -> list[str]:
@@ -252,16 +271,17 @@ def reflow(lines: list[str]) -> list[str]:
     block: list[str] = []
     in_fence = False
 
-    def flush() -> None:
+    def flush(hard_break: bool = False) -> None:
         if block:
-            out.extend(reflow_block(block))
+            out.extend(reflow_block(block, hard_break))
             block.clear()
 
     start = 0
     if lines and lines[0] == "---":
         start = lines.index("---", 1) + 1
         out.extend(lines[:start])
-    for line in lines[start:]:
+    for number in range(start, len(lines)):
+        line = lines[number]
         if _FENCE.match(line):
             flush()
             in_fence = not in_fence
@@ -277,6 +297,10 @@ def reflow(lines: list[str]) -> list[str]:
             block.append(line)
         else:
             block.append(line)
+        # A line ending in two spaces is a line break inside the paragraph: the
+        # block ends there so the break survives the join.
+        if block and line.endswith("  ") and number + 1 < len(lines) and is_prose(lines[number + 1]):
+            flush(hard_break=True)
     flush()
     return out
 

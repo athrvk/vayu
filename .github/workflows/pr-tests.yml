@@ -271,7 +271,7 @@ jobs:
             app_doc_fixtures:
               - 'docs/engine/scripting/**'
               - 'docs/app/pm-api-compatibility.md'
-              - 'docs/design-system.md'
+              - 'docs/design-system/**'
               - 'docs/app/state-management/**'
               - 'docs/app/architecture.md'
               - 'docs/app/api-integration/**'

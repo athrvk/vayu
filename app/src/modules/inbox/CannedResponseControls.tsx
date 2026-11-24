@@ -295,7 +295,7 @@ export function CannedResponseControls({
 					</Button>
 				</div>
 
-				{/* Stacked under the row, not sharing it (docs/design-system.md's
+				{/* Stacked under the row, not sharing it (docs/design-system/feedback-and-dashboard.md's
 				    hint rule): a wrapping row would hand its width to this text and
 				    pin the shorter control wherever the wrap put it. The set exists
 				    to test a sender's retry and error handling; saying so is cheaper

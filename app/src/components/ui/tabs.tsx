@@ -49,7 +49,7 @@
  *
  * `border-rule` rather than a border token, and no surface class beside it:
  * `bg-panel` is the `:root` default surface, which is the one case where the
- * fallback value is the right answer (`docs/design-system.md`, "`border-rule`:
+ * fallback value is the right answer (`docs/design-system/surfaces.md`, "`border-rule`:
  * let the surface pick the token").
  */
 

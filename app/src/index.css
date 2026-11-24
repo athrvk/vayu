@@ -83,7 +83,7 @@
 	 * overridden at runtime (#3692). */
 
 	/*
-	 * Body text is 13px (docs/design-system.md), but Tailwind ships `text-sm`
+	 * Body text is 13px (docs/design-system/typography.md), but Tailwind ships `text-sm`
 	 * at 14px - and `text-sm` is by far the most-used size in the app. Rather
 	 * than migrate hundreds of call sites, or let two scales coexist a pixel
 	 * apart, redefine the token so `text-sm` *is* the documented body size.
@@ -581,7 +581,7 @@
 		 * their Comfortable values.
 		 * `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` stay put
 		 * at every density - no override for them exists in this block - per the
-		 * table in docs/design-system.md.
+		 * table in docs/design-system/spacing-and-floors.md.
 		 */
 		--spacing-control: 36px;
 		--spacing-control-sm: 32px;
@@ -1049,7 +1049,7 @@
  * The response pane's sending wave (see ResponseViewer/SendingWave.tsx).
  *
  * A re-send dims the whole pane to `opacity-60` and moves nothing else - the
- * "Loading" rule in docs/design-system.md - but a dim with no motion at all
+ * "Loading" rule in docs/design-system/component-patterns.md - but a dim with no motion at all
  * reads as inert rather than active, easy to mistake for a stalled request. The
  * stripe is deliberately faint (`via-foreground/[0.08]`, set at the call site)
  * so it never competes with the stale text still readable underneath it, and it
@@ -1148,7 +1148,7 @@
 	 * for those. Prefer clearance for a control that also appears outside a
 	 * clipping panel - tucking the ring in would give the same control two
 	 * different looks depending on the screen (see the checkbox note in
-	 * docs/design-system.md).
+	 * docs/design-system/focus-states.md).
 	 */
 	:where(.panel-clip)
 		:where(button, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
@@ -1319,7 +1319,7 @@
  *
  * `overflow-hidden` is permanent while open, same trade-off `collapsible.tsx`
  * documents: a control flush against this box's edge needs its own clearance,
- * not `.panel-clip` (`docs/design-system.md`).
+ * not `.panel-clip` (`docs/design-system/focus-states.md`).
  */
 @keyframes rail-collapse-in {
 	from {
@@ -1343,7 +1343,7 @@
  * ── Icon motion ──
  *
  * An icon that responds to the action it is the affordance for (#1685; the
- * policy is in #1683 and written down in docs/design-system.md under Motion).
+ * policy is in #1683 and written down in docs/design-system/motion.md under Motion).
  *
  * CSS only, deliberately. The lucide-animated shape is a `motion` component per
  * icon, each wrapping the glyph in a `div` that breaks `button-variants.ts`'s
@@ -1463,7 +1463,7 @@
 /*
  * `spin-once` - RefreshCw. One turn, not a loop: a loop means "work is
  * happening" and belongs to `Loader2` and the live indicators (the policy in
- * docs/design-system.md), while this is feedback for "this will run again".
+ * docs/design-system/motion.md), while this is feedback for "this will run again".
  *
  * A keyframe rather than `rotate: 360deg` on hover, because a transition would
  * unwind the full turn backwards on pointer-out. The animation is on the `svg`
@@ -1989,7 +1989,7 @@
  * The same glyph is drawn again as the `SettingsMain` page heading, where it
  * reports which panel you are on rather than offering an action. It carries no
  * attribute there, which is the placement rule in
- * docs/design-system.md working exactly as written.
+ * docs/design-system/motion.md working exactly as written.
  */
 
 /*
@@ -2549,7 +2549,7 @@
 	 * there is nothing to transition *from* and `opacity: 1` just paints
 	 * immediately. Entry only - React removes a conditionally-rendered node
 	 * synchronously, so there is no exit half without JS-driven motion, which
-	 * the Motion section of docs/design-system.md rules out.
+	 * the Motion section of docs/design-system/motion.md rules out.
 	 */
 	.enter-fade {
 		opacity: 1;

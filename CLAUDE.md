@@ -198,7 +198,7 @@ test that touches time, threads, sockets or a large render, check these rules:
   to the file and CI keeps it that way (`pnpm format:check`, from `app/` with
   an app-relative glob). Everything outside `app/` is unclean by policy: docs
   prose is hand-wrapped, workflows are written to be read as YAML, and
-  `docs/design-system.md` reflows hundreds of lines on a single pass. The
+  `docs/design-system/` reflows hundreds of lines on a single pass. The
   repo-root `.prettierignore` enforces the boundary mechanically. Never run
   prettier or `eslint --fix` repo-wide; format only files you touched that were
   clean before.

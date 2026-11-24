@@ -10,7 +10,7 @@
  * density must not carry them below it (issue #1679). `--spacing` scales
  * rhythm - row heights, paddings, gaps - and these three classes of thing are
  * exactly the ones that do not ride it: see the "Chrome, Target and Icon
- * Floors" table in docs/design-system.md and the ten steps `density.test.ts`
+ * Floors" table in docs/design-system/spacing-and-floors.md and the ten steps `density.test.ts`
  * checks against `index.css`.
  *
  * This is a source scan, not a render: vitest stubs CSS imports to `""`, and
@@ -326,7 +326,7 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	}
 
 	// A hand-rolled `<button>` that IS a single-line drawer row keeps `h-8`: the
-	// row height is the drawer's own (docs/design-system.md, "Drawer Row
+	// row height is the drawer's own (docs/design-system/rows-and-drawers.md, "Drawer Row
 	// Metric"), not a control's. The others of its kind are `<div>`s and never
 	// reach this scan. Keyed by path under `src/`, with the exact number of tags
 	// allowed: a further `h-8` in the same file is an offence, and the rot test

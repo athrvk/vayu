@@ -248,7 +248,7 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 				disableUrlEncoding: request.disableUrlEncoding,
 			});
 			// A text button, so the acknowledgement is the toast rather than a
-			// check swap (design-system.md, Component Patterns) - and `useCopy`
+			// check swap (design-system/feedback-and-dashboard.md, Component Patterns) - and `useCopy`
 			// owns the failure path.
 			await copy(snippet.code, "cURL command");
 		} catch (error) {

@@ -47,7 +47,7 @@ export interface AppSettingsPanel {
 	icon: LucideIcon;
 	/**
 	 * Which named motion this panel's glyph plays on hover or focus of the
-	 * sidebar row it sits in (`ICON_MOTION`, docs/design-system.md → Motion →
+	 * sidebar row it sits in (`ICON_MOTION`, docs/design-system/motion.md → Motion →
 	 * Icon motion). The same shape `DRAWER_VIEWS` carries, and for the same
 	 * reason: `SettingsCategoryTree` draws fifteen glyphs generically and must
 	 * not learn which one it has been handed.

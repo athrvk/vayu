@@ -87,7 +87,7 @@ describe("the root provider", () => {
 		// grace-area gap hoverable content exists for, and that gap is exactly
 		// what let a fast flick between adjacent triggers (the rail's icons)
 		// leave the first tooltip stuck open and the second never open at all -
-		// see the design-system.md paragraph this test is linked from.
+		// see the design-system/color-schemes.md paragraph this test is linked from.
 		expect(main).toMatch(/<TooltipProvider\b[^>]*\bdisableHoverableContent\b[^>]*>/);
 	});
 });

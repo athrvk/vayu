@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/postman_export.cpp
  * @brief The Postman v2.1.0 exporter. See the header for the contract.
  *
  * Shapes follow what current Postman (v11) writes, read off its own exports:

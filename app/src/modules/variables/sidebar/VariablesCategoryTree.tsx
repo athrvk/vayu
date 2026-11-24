@@ -23,7 +23,7 @@
  * `useRovingTreeFocus` is reused rather than re-implemented: a hand-rolled copy
  * would not receive the primitive's fixes, and the two lists of key guards would
  * drift the way this repo has watched them drift before. Rows declare what they
- * can do through the hook's `data-tree-*` protocol; see `docs/design-system.md`
+ * can do through the hook's `data-tree-*` protocol; see `docs/design-system/tree-navigation.md`
  * "Tree Navigation".
  *
  * Two shapes here differ from the collection tree, deliberately:

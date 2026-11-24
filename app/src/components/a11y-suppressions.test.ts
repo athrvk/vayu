@@ -17,7 +17,7 @@
  * line-level one is visible only to whoever opens that file, and nothing stopped
  * the count growing one justified line at a time.
  *
- * So the sites are enumerated in `docs/design-system.md` and this guard reads
+ * So the sites are enumerated in `docs/design-system/accessibility.md` and this guard reads
  * both halves. The count is a ceiling in the shape `type-scale.test.ts` uses for
  * font weights: it may come down when a suppression goes, and raising it is an
  * edit someone has to make on purpose. The doc list is compared site by site
@@ -32,7 +32,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { DOC_READING_GUARDS, entryCovers, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -133,7 +133,7 @@ describe("the jsx-a11y suppressions", () => {
 	it("stays under the ceiling", () => {
 		expect(
 			directives.length,
-			`Fix the site, or - if the suppression is the right answer - add it to the Accessibility section of docs/design-system.md and raise this ceiling on purpose:\n${directives
+			`Fix the site, or - if the suppression is the right answer - add it to the Accessibility page, docs/design-system/accessibility.md, and raise this ceiling on purpose:\n${directives
 				.map(({ file, line, rules }) => `${file}:${line} ${rules.join(", ")}`)
 				.join("\n")}`
 		).toBeLessThanOrEqual(CEILING);
@@ -152,12 +152,9 @@ describe("the jsx-a11y suppressions", () => {
 });
 
 describe("the doc's list of suppressions", () => {
-	const [DOC] = DOC_READING_GUARDS.a11ySuppressions.paths;
-	const doc = readFileSync(fromRepoRoot(DOC), "utf8");
-
-	/** The Accessibility section alone, so a bullet elsewhere cannot answer. */
-	const afterHeading = doc.slice(doc.indexOf("\n## Accessibility") + 1);
-	const section = afterHeading.slice(0, afterHeading.indexOf("\n## ", 1));
+	/** The Accessibility page alone, so a bullet elsewhere cannot answer. */
+	const DOC = "docs/design-system/accessibility.md";
+	const section = readFileSync(fromRepoRoot(DOC), "utf8");
 
 	/**
 	 * The bullets as `path (count) - rules`. A bullet wraps across lines, so each
@@ -182,6 +179,10 @@ describe("the doc's list of suppressions", () => {
 		// rewritten into another shape, fails here rather than passing by
 		// matching nothing.
 		expect(section.length).toBeGreaterThan(1000);
+		expect(
+			DOC_READING_GUARDS.a11ySuppressions.paths.some((entry) => entryCovers(entry, DOC)),
+			`${DOC} is not routed by the registry`
+		).toBe(true);
 		expect(section).toContain("a11y-suppressions.test.ts");
 		expect(listed.length).toBeGreaterThanOrEqual(10);
 	});

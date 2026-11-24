@@ -86,7 +86,7 @@ export default [
 	// fixed), and the rest are two patterns the rules cannot see, suppressed at
 	// the line with the reason - except where the rule takes an option that
 	// teaches it the pattern once, which is these three. The allowlist is
-	// documented under "Accessibility" in docs/design-system.md.
+	// documented under "Accessibility" in docs/design-system/accessibility.md.
 	{
 		files: ["**/*.tsx"],
 		plugins: jsxA11y.flatConfigs.recommended.plugins,

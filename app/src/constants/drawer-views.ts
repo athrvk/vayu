@@ -50,7 +50,7 @@ export interface DrawerViewDescriptor {
 	 *
 	 * History's `Clock` and Services' `Radio` animate here even though
 	 * `Clock` is one of the six status glyphs. That is the refined policy,
-	 * not an exception to it (docs/design-system.md, Icon motion): the
+	 * not an exception to it (docs/design-system/motion.md, Icon motion): the
 	 * prohibition is on a glyph *conveying* a state - a chip, a status
 	 * column, an inline warning - not on the glyph itself. Here it is the
 	 * affordance for an action.

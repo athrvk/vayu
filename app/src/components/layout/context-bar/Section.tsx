@@ -88,7 +88,7 @@ export function ContextBarSectionFrame({
  * chevron, the hover-to-foreground affordance and the body, not a fainter
  * colour: `EYEBROW_CLASS` is already `--muted-foreground`, and stacking an
  * opacity on it would take the title under the contrast floor
- * `docs/design-system.md` holds for small text.
+ * `docs/design-system/surfaces.md` holds for small text.
  *
  * The empty box where the chevron would be keeps these titles on the same left
  * edge as the sections above and below them; without it a quiet section reads

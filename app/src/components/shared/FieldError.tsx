@@ -14,7 +14,7 @@
  * `text-label`, some with a leading glyph and some without, some announced and
  * most not. The import dialog alone carried all three sizes.
  *
- * The rule, in one line each (`docs/design-system.md`, Component Patterns):
+ * The rule, in one line each (`docs/design-system/component-patterns.md`, Component Patterns):
  *
  * - **field-level** - one control rejected one value: `FieldError`.
  * - **block-level** - a condition about the whole form or pane, which may stack

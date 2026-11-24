@@ -7,7 +7,7 @@ description: >-
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dialog-cancel-button`, `disabled-hint`, `dropdown-menu`, `heading` (`Heading` and `HeadingSection`, the main pane's heading outline from `heading-level.ts`; see `docs/design-system.md`, Accessibility), `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover` (with its two branches, `resolved-value-editor` and `create-variable-form`), `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dialog-cancel-button`, `disabled-hint`, `dropdown-menu`, `heading` (`Heading` and `HeadingSection`, the main pane's heading outline from `heading-level.ts`; see `docs/design-system/accessibility.md`, Accessibility), `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover` (with its two branches, `resolved-value-editor` and `create-variable-form`), `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
 
 ## `input`
 
@@ -67,7 +67,7 @@ than two copies of the control. The gate stays the child's `disabled` prop.
 Crossing the gate swaps the child's DOM node, so a test must re-query it. A
 disabled menu item is the exception: `RowAction`'s `disabledReason` draws the
 reason on the item (see Row and tab actions menu above). The rule and the
-wording guidance are in [design-system.md](../../design-system.md).
+wording guidance are in [design-system/index.md](../../design-system/index.md).
 
 ## `dialog`
 
@@ -87,7 +87,7 @@ every other call site takes the band, which `dialog-height-band.test.tsx`
 enforces. `command` keeps the shape without the primitive: `CommandFooter` is a
 `shrink-0` sibling of `CommandList`, so the palette's hints sit outside the one
 thing that scrolls. The rules and the measurements are in
-[design-system.md](../../design-system.md).
+[design-system/index.md](../../design-system/index.md).
 
 The `cva` definitions for `badge`, `button` and `toast` live in sibling
 `*-variants.ts` modules and are re-exported from `components/ui/index.ts`. A

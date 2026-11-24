@@ -261,7 +261,7 @@ function PropertyRows({
 					// `grid-cols-2` is `repeat(2, minmax(0, 1fr))`, whose `0`
 					// minimum is what lets a long label or hint wrap inside its
 					// column instead of widening the track and the card with it
-					// (docs/design-system.md, "A grid track has the same default").
+					// (docs/design-system/overflow-and-shrink.md, "A grid track has the same default").
 					<div key={line[0]} className="grid grid-cols-2 gap-2">
 						{rows}
 					</div>

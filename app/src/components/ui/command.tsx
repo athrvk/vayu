@@ -272,7 +272,7 @@ function CommandInput({
 	 * The ring is on the wrapper, not on the input: the input sits flush in a
 	 * full-bleed row, so its own ring would trace a box the row does not have.
 	 * `ring-inset` because `CommandDialog` clips (`overflow-hidden`) - the same
-	 * reason `TabsTrigger` uses it, see docs/design-system.md. Without this the
+	 * reason `TabsTrigger` uses it, see docs/design-system/focus-states.md. Without this the
 	 * `outline-none` below left the one focusable element in the palette with no
 	 * indicator at all: it passes unnoticed only because nothing else in the
 	 * dialog can take focus (#1216).

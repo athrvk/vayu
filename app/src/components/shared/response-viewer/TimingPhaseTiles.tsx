@@ -14,7 +14,7 @@
  * waterfall bars, where the bar's hue is how you tell the phases apart - and
  * decoration here, where the label is right there in the tile. Carrying a
  * per-phase hue in a grid of labelled boxes bought nothing and cost the raw
- * palette that `docs/design-system.md` had to keep an exception open for.
+ * palette that `docs/design-system/categorical-colors.md` had to keep an exception open for.
  *
  * `surface-card`, not `bg-card` + `border-border`: these tiles sit on a
  * `bg-muted/30` panel rather than on the canvas, and `--border` is the same
