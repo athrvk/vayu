@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief Scripting API routes - provides script engine capabilities for UI autocomplete
- */
+/** Scripting API routes: script engine capabilities for UI autocomplete. */
 
 #include <algorithm>
 #include <array>
@@ -38,11 +36,8 @@ std::string shelf_names (std::string_view quote, std::string_view separator) {
 } // namespace
 
 /**
- * @brief Get script engine completions for UI autocomplete
- *
- * This endpoint returns all available pm.* API functions, properties,
- * and assertion chains that the script engine supports. The frontend
- * uses this data to provide autocomplete in the Monaco editor.
+ * Every `pm.*` function, property and assertion chain the script engine
+ * supports, for the Monaco editor's autocomplete.
  */
 nlohmann::json get_script_completions () {
     // CompletionItem kinds (monaco.languages.CompletionItemKind values)
@@ -1245,10 +1240,9 @@ nlohmann::json get_script_completions () {
 
     completions.push_back ({ { "label", "pm.request.body.urlencoded" },
     { "kind", KIND_FIELD }, { "insertText", "pm.request.body.urlencoded" },
-    // `object[]`, the spelling `pm.response.events` already uses, because the
-    // declaration generator names a fixed vocabulary of types and renders
-    // anything else as `void` - which would make every use of this list an
-    // editor error on correct code. The entry shape is the first line of the
+    // `object[]`, as `pm.response.events` is spelled: the declaration generator
+    // names a fixed vocabulary of types and renders anything else as `void`,
+    // which would make every use an editor error. The entry shape leads the
     // documentation instead, where the popup shows it.
     { "detail", "object[] | undefined" },
     { "documentation",
@@ -2970,11 +2964,11 @@ nlohmann::json get_script_completions () {
     ".oneOf.\n\nExample:\npm.expect(data).to.deep.equal({id: 1});" },
     { "sortText", "2_to_deep_equal" }, { "filterText", ".to.deep.equal" } });
 
-    // The rest of what the `deep` documentation above claims. `deep` is a
-    // flag-setting getter on the one chain object, so the runtime answers these; the
-    // generated declarations are derived from the table, so each is listed. Spelled as chai
-    // spells them, since the getters commute and a pasted Postman script uses
-    // chai's order.
+    // The rest of what the `deep` documentation above claims: `deep` is a
+    // flag-setting getter on the one chain object, so the runtime answers
+    // these, and the declarations derive from the table, so each is listed,
+    // spelled in chai's order (the getters commute, and pasted Postman scripts
+    // use chai's).
     completions.push_back ({ { "label", "to.deep.include" },
     { "kind", KIND_FUNCTION }, { "insertText", "to.deep.include(${1:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.deep.include(value: any)" },
@@ -3556,13 +3550,12 @@ nlohmann::json get_script_completions () {
     "over.\n\nExample:\npm.expect(n).to.be.above(0).and.to.be.below(10);" },
     { "sortText", "2_and" }, { "filterText", ".and" } });
 
-    // chai's language chains (issue #1053) - words that assert nothing and
-    // exist so a chain reads as English. Offered as fields, paren-less like
-    // `.and`, because each is a getter handing the same expectation back; a
-    // written pair of parentheses would call the chain's result. Every name the
-    // runtime binds has to be offered here or
+    // chai's language chains (#1053), words that assert nothing so a chain
+    // reads as English, offered paren-less like `.and`: each is a getter
+    // handing the expectation back, and written parentheses would call its
+    // result. Every name the runtime binds must be offered here or
     // `ScriptCompletions.EveryExpectMemberTheRuntimeBindsIsOffered` fails by
-    // name, and the generated declarations are derived from this table.
+    // name; the declarations derive from this table.
     struct LanguageChainCompletion {
         const char* name;
         const char* example;
@@ -3632,11 +3625,10 @@ nlohmann::json get_script_completions () {
 
     completions.push_back ({ { "label", "Test: Content-Type JSON" }, { "kind", KIND_SNIPPET },
     { "insertText",
-    // get() rather than an index: response header keys are lower-cased by the
-    // HTTP client, so headers["Content-Type"] reads back undefined and this
-    // fails as an assertion, which reads as a server fault rather than a bad
-    // example. get() is case-insensitive, so the name stays spelled the way the
-    // to.have.header line above spells it.
+    // get(), not an index: the HTTP client lower-cases response header keys, so
+    // headers["Content-Type"] is undefined and the assertion fails as if the
+    // server were at fault. get() is case-insensitive, so the name keeps the
+    // to.have.header line's spelling.
     "pm.test(\"Content-Type is JSON\", function() "
     "{\n\tpm.response.to.have.header(\"Content-Type\");\n\tpm.expect(pm."
     "response.headers.get("
@@ -3671,8 +3663,8 @@ nlohmann::json get_script_completions () {
 void register_scripting_routes (RouteContext& ctx) {
     /**
      * GET /scripting/completions
-     * Returns script engine API completions for UI autocomplete.
-     * This is a startup API - frontend fetches once and caches.
+     * Script engine API completions for UI autocomplete; the frontend
+     * fetches them once at startup and caches them.
      */
     ctx.server.Get ("/scripting/completions",
     [] (const httplib::Request&, httplib::Response& res) {
@@ -3691,13 +3683,11 @@ void register_scripting_routes (RouteContext& ctx) {
 
     /**
      * GET /scripting/types
-     * Returns the TypeScript declarations for the same surface, generated from
-     * the completion table above (see script_types.cpp). The app feeds these to
-     * Monaco's TypeScript worker, which is what turns a suggestion list into
-     * hover documentation, signature help and typo diagnostics.
-     *
-     * Served as text in a JSON envelope rather than as a `.d.ts` body so the
-     * app can cache on `version` without re-parsing the declarations.
+     * The TypeScript declarations for the same surface, generated from the
+     * completion table (script_types.cpp), which Monaco's TypeScript worker
+     * turns into hover documentation, signature help and typo diagnostics.
+     * Text in a JSON envelope, not a `.d.ts` body, so the app caches on
+     * `version` without re-parsing.
      */
     ctx.server.Get ("/scripting/types", [] (const httplib::Request&, httplib::Response& res) {
         vayu::utils::log_info (
