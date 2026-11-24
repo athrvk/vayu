@@ -22,7 +22,7 @@
  */
 
 #include <cstddef>
-#include <limits>
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -31,8 +31,10 @@
 namespace vayu::utils {
 
 /// `max_depth` for a caller that bounds nothing here: the parse itself recurses
-/// nowhere, so depth only matters to what walks the tree afterwards.
-inline constexpr size_t ORDERED_JSON_UNBOUNDED = std::numeric_limits<size_t>::max ();
+/// nowhere, so depth only matters to what walks the tree afterwards. `SIZE_MAX`,
+/// not `numeric_limits::max ()`: see `core/constants.hpp` on `windows.h`'s `max`
+/// macro.
+inline constexpr size_t ORDERED_JSON_UNBOUNDED = SIZE_MAX;
 
 /**
  * @p text as an `ordered_json`, in time linear in its length, or `nullopt`
