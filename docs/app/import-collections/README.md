@@ -104,9 +104,9 @@ command carried that Vayu cannot - each a single sentence.
 
 `detectBatch(documents, opts, intake)` returns one `BatchEntry` per picked file,
 in pick order, and **every picked file gets a row** - that is the property the
-whole module exists for. The dialog used to read `e.dataTransfer.files[0]` with
-no `multiple` on the input, so dropping a folder's worth of specs imported the
-first and discarded the rest without a word (issue #666). A row saying
+whole module exists for. A dialog that read only `e.dataTransfer.files[0]` with
+no `multiple` on the input would import the first spec of a dropped folder and
+discard the rest without a word (issue #666). A row saying
 "Unrecognised format" is the flow working; no row is the bug.
 
 An entry carries the bundled `raw` text, its `result` **or** its `error`, the
@@ -202,7 +202,7 @@ query: composition writes its value into the URL's `:name` segment instead.
 Every parser states the query some other way - Postman splits it out of the URL
 into `params[]`, Insomnia keeps a `parameters[]` beside a verbatim URL, the
 OpenAPI parsers synthesize params for a URL that never had a query - so an
-imported request used to go on the wire with its query missing, silently, until
+imported request would go on the wire with its query missing, silently, until
 the user happened to edit the Params table once (issue #590).
 
 `parse_import` closes that with one pass over every request draft,
@@ -242,11 +242,8 @@ in the payload can reference another (`parentTempId`, `collectionTempId`) while 
 exist yet, and they are never stored. The orchestrator throws if it sees an unstamped
 draft.
 
-This used to mint real `col_…` / `req_…` / `env_…` UUIDs, because the orchestrator created
-items one POST at a time and had to wire the tree itself - which is the only reason
-`POST /<resource>` ever accepted a client-supplied `id`. It no longer does: since #97 a
-create carrying an `id` is a `400`, on the single-resource routes and per item in
-`/import/apply` alike.
+They are not `col_…` / `req_…` / `env_…` UUIDs: a create carrying an `id` is a `400` (#97),
+on the single-resource routes and per item in `/import/apply` alike.
 
 ### 3. Persist - `orchestrator.ts`
 
@@ -538,10 +535,10 @@ from the jar, and folding one declaration at a time into a single joined `Cookie
 would mean inventing a merge the document never wrote, so mapping them is a recorded
 non-goal and naming the loss is the honest half. `unmapped_body` is a `requestBody`
 declaring only media types with no Vayu mode and no binary schema - an `image/png` whose
-schema is an object, say - which used to return `{ mode: "none" }` on the same path as
-*no body at all*, reporting nothing skipped; an operation that declared no body is still not
-counted, because it lost nothing. A whole-file body (`application/octet-stream`, or a
-`format: binary` schema) is no longer one of them: it imports as a `binary` body with no
+schema is an object, say - which would return `{ mode: "none" }` on the same path as
+*no body at all*, reporting nothing skipped, so it is counted; an operation that declares no
+body is not counted, because it lost nothing. A whole-file body (`application/octet-stream`, or a
+`format: binary` schema) is not one of them: it imports as a `binary` body with no
 file chosen.
 
 `file_body` is not a loss either. Every whole-file body - Postman's `file` mode, an Insomnia
@@ -698,8 +695,8 @@ outgoing request rather than emptied, so an imported collection using a faker
 value Vayu does not have shows it instead of hiding it.
 
 ### Sampler::sample
-`Sampler::sample(schema)` - generates a sample value for an OpenAPI/Swagger schema,
-used to build request-body stubs. It is **bounded and resilient**, not a naive one-level walk:
+`Sampler::sample(schema)` - generates a sample value for an OpenAPI/Swagger schema
+and builds request-body stubs. It is **bounded and resilient**, not a naive one-level walk:
 
 - Recurses up to `MAX_DEPTH = 6`.
 - Resolves `$ref` via the injected `resolveRef`, with a per-path `Set` **cycle guard**

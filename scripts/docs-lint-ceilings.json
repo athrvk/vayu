@@ -80,15 +80,13 @@
       "history": 2
     },
     "docs/app/import-collections/README.md": {
-      "lines": 751,
-      "max_cell": 234,
-      "history": 5
+      "lines": 748,
+      "max_cell": 234
     },
     "docs/app/import-collections/insomnia-v4.md": {
       "max_line": 1085,
       "long_lines": 17,
-      "max_cell": 838,
-      "history": 1
+      "max_cell": 838
     },
     "docs/app/import-collections/insomnia-v5.md": {
       "max_line": 600,
@@ -102,14 +100,12 @@
     "docs/app/import-collections/openapi-v2.md": {
       "max_line": 1815,
       "long_lines": 23,
-      "max_cell": 564,
-      "history": 1
+      "max_cell": 564
     },
     "docs/app/import-collections/openapi-v3.md": {
-      "max_line": 1415,
+      "max_line": 1411,
       "long_lines": 40,
-      "max_cell": 672,
-      "history": 8
+      "max_cell": 672
     },
     "docs/app/import-collections/postman-environment.md": {
       "max_line": 835,
@@ -120,8 +116,7 @@
       "lines": 664,
       "max_line": 2911,
       "long_lines": 31,
-      "max_cell": 1130,
-      "history": 5
+      "max_cell": 1130
     },
     "docs/app/openapi.md": {
       "lines": 1106,
