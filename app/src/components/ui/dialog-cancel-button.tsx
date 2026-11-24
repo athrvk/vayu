@@ -6,28 +6,13 @@
  */
 
 /**
- * The one way to draw the button that backs out of something (issue #1693).
- *
- * Before this, the same button carried three different variants depending on
- * which dialog you had opened: `outline` (`NewIssuerDialog`,
- * `SaveAsExampleDialog`, `LoadTestConfigDialog`, `StartMockServerDialog`,
- * `RunCollectionDialog`, `ImportModal`), `secondary` (`SaveRunToRequestDialog`,
- * `SpecReimportDialog`, `DeleteConfirmDialog`) and `ghost` (`ExportSpecDialog`,
- * `ClientCertificatesCard`, `VariablePopover`) - plus one hand-rolled `<button>`
- * with a copied class list in `SendWithRowDialog`. Nothing distinguished the
- * three: they are the same word doing the same thing next to the same confirm.
- *
- * `secondary` is the settled answer because it is what `DeleteConfirmDialog`
- * draws, and that is the dialog this app shows most often - it is the shape
- * users already read as "the one that does nothing". `ghost` was the weakest
- * of the three: a declining action that only appears on hover reads as
- * chrome, when it is one of exactly two things the dialog offers.
- *
- * The variant is deliberately not a prop. A caller that can choose is a
- * caller that can drift, which is the defect this replaces. `size` and
- * `className` do pass through: inline forms outside a `DialogFooter` (the new
- * collection row, the client-certificate form) draw the same button at `sm`
- * inside a denser row, and that is a density decision, not a variant one.
+ * The one way to draw the button that backs out of something (#1693): `outline`, `secondary` and
+ * `ghost` had each been used for the same word beside the same confirm. `secondary` because
+ * `DeleteConfirmDialog`, the dialog shown most, draws it, so users read it as "the one that does
+ * nothing"; `ghost` reads as chrome when it is one of the dialog's two choices. The variant is not
+ * a prop: a caller that can choose can drift. `size` and `className` pass through: inline forms
+ * outside a `DialogFooter` (the new collection row, the client-certificate form) draw it at `sm` in
+ * a denser row, a density decision, not a variant one.
  */
 
 import { Button, type ButtonProps } from "./button";
@@ -37,9 +22,8 @@ export interface DialogCancelButtonProps extends Omit<
 	"variant" | "children" | "asChild"
 > {
 	/**
-	 * The word on the button. Defaults to "Cancel"; "Not now" or "Keep it"
-	 * reads better when the dialog interrupted something the user did not
-	 * start, and `DeleteConfirmDialog` exposes it as `cancelLabel`.
+	 * The button's word, "Cancel" by default; "Not now" or "Keep it" reads better when the dialog
+	 * interrupted something the user did not start (`DeleteConfirmDialog`'s `cancelLabel`).
 	 */
 	label?: string;
 }
@@ -49,8 +33,8 @@ export function DialogCancelButton({
 	type = "button",
 	...props
 }: DialogCancelButtonProps) {
-	// `ref` rides in `props`: React 19 passes it as an ordinary prop, so there
-	// is no forwardRef wrapper to keep in step with `Button`'s own signature.
+	// `ref` rides in `props` (React 19 passes it as a prop), so no forwardRef wrapper must track
+	// `Button`'s signature.
 	return (
 		<Button type={type} variant="secondary" {...props}>
 			{label}

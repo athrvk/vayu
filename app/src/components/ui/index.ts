@@ -5,8 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-// Vayu UI Components
-// Re-exported from shadcn/ui with Vayu theming
+// Vayu's UI primitives: shadcn/ui components with Vayu theming.
 
 export { Button } from "./button";
 export { buttonVariants } from "./button-variants";

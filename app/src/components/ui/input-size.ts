@@ -6,11 +6,9 @@
  */
 
 /**
- * A text field's height, one floor token per `size` (#1830). `Input` and
- * `VariableInput` both read it, so the two fields cannot drift apart: a
- * key-value row's `VariableInput` and the variables table's `Input` are one
- * row pitch because both say `size="sm"`. A field states a size, never a
- * height class (`chrome-floors.test.ts`).
+ * A text field's height, one floor token per `size` (#1830). `Input` and `VariableInput` both read
+ * it, so a key-value row's `VariableInput` and the variables table's `Input` share a row pitch by
+ * both saying `size="sm"`. A field states a size, never a height class (`chrome-floors.test.ts`).
  */
 export const INPUT_HEIGHT = {
 	default: "h-control",
