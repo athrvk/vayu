@@ -777,7 +777,9 @@ logged as a warning: it means a client skipped composition.
   of the held length), which `cap_trace_bodies` keeps (#3423). The bytes are
   stored once: the trace's `events` node is a sidecar (`stream_trace_node`:
   `totalEvents`, `endReason`, `maxEventBytes`, one `receivedAt` per kept
-  event), and every reader of a stored trace (`report_result_node`,
+  event, and `startedAt` - the transfer's start, stamped before the first hop
+  by `note_transfer_start`, absent when unknown and never `0`, #3805), and
+  every reader of a stored trace (`report_result_node`,
   `attach_design_result`) serves the list parsed back from the stored body by
   `expand_stored_stream_events`, the `stream_events_node` the post-request
   script is bound to. A send's `streamTextPath` (#3773) is stored in that

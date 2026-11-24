@@ -8936,14 +8936,18 @@ post-request script read the same bytes, so `assert.contains`, `assert.size`,
 collection or load run's.
 
 The bytes are stored once (issue #657). The trace's `events` node is served as
-`{items, totalEvents, eventsTruncated, endReason, streamText?}` (each item
+`{items, totalEvents, eventsTruncated, endReason, streamText?, startedAt?}` (each item
 `{event, data, sourceId?, dataTruncated?, dataBytes?, text?, receivedAt}`), but
 the list is parsed from the stored body when the trace is read
 ([`GET /runs/:runId/results/:resultId`](#get-runsrunidresultsresultid), the
 report's `results[]` and `GET /runs/:runId`'s `result`): what the row stores is
 the sidecar `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...],
-streamTextPath?}`, one arrival time per event `sseMaxStoredEvents` kept. The
-served list stops at the shorter of that and `totalEvents`, and
+streamTextPath?, startedAt?}`, one arrival time per event `sseMaxStoredEvents`
+kept. `startedAt` (issue #3805) is when the transfer began, in epoch
+milliseconds on the clock `receivedAt` reads, so `receivedAt[0] - startedAt` is
+the wait for the first event; it is absent - never `0` - for a stream refused
+before its transfer began and for a row stored before the key, and is served as
+stored. The served list stops at the shorter of that and `totalEvents`, and
 `eventsTruncated` is `true` when either the list is shorter than `totalEvents`
 or the body is a prefix (`bodyCapped`, or `bodyTruncated` from
 `maxTraceBodyBytes`). A trace stored before #3770 carries its `items` and is

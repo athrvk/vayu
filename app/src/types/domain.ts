@@ -1611,6 +1611,13 @@ export interface RunResultStreamEvents {
 	eventsTruncated: boolean;
 	endReason: StreamEndReason;
 	/**
+	 * When the stream's transfer began, epoch ms on the engine's clock - the same
+	 * clock as `StreamEvent.receivedAt`, so an event's offset is `receivedAt -
+	 * startedAt` (#3805). Absent on a node written before the field existed and
+	 * on a stream that never began a transfer.
+	 */
+	startedAt?: number;
+	/**
 	 * Every event's `text` joined with nothing between, over **all** events the
 	 * stored body holds - the ones past the stored-items cap included, which
 	 * `items` has dropped (issue #3773). Present only when the request declared
@@ -4363,7 +4370,7 @@ export interface RunSample {
 		 * cap. No `endReason`: under load a stream ends by server close or by
 		 * one of two caps, and nothing per sample says which.
 		 */
-		events?: Omit<RunResultStreamEvents, "endReason">;
+		events?: Omit<RunResultStreamEvents, "endReason" | "startedAt">;
 	};
 }
 

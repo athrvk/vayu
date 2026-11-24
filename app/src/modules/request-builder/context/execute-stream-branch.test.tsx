@@ -108,6 +108,7 @@ vi.mock("../hooks/useExecutionEvents", () => ({ useExecutionEvents: () => {} }))
 
 const { RUN_IN_PROGRESS_POLL_MS } = await import("@/queries/runs");
 const { default: RequestBuilderProvider } = await import("./RequestBuilderProvider");
+const { finalizeStreamRun } = await import("./stream-finalization");
 const { useRequestBuilderContext } = await import("./RequestBuilderContext");
 
 const captured: { ctx: RequestBuilderContextValue | null } = { ctx: null };
@@ -153,7 +154,7 @@ const started = async (): Promise<StreamStartResult> => ({
 });
 
 /** A report whose one result carries a stored `events` node. */
-function reportWithEvents(body: string, warnings?: unknown[]) {
+function reportWithEvents(body: string, warnings?: unknown[], startedAt?: number) {
 	return {
 		results: [
 			{
@@ -169,6 +170,7 @@ function reportWithEvents(body: string, warnings?: unknown[]) {
 						totalEvents: 9,
 						eventsTruncated: true,
 						endReason: "completed" as const,
+						...(startedAt !== undefined && { startedAt }),
 					},
 					...(warnings && { warnings }),
 				},
@@ -807,6 +809,59 @@ describe("the streaming send branch", () => {
 			]);
 			expect(ctx().response).toBeNull();
 			expect(bodyOf("A")).toBeUndefined();
+		});
+
+		describe("the start the stored trace holds (#3805)", () => {
+			// Far from any clock reading, so neither source can be mistaken for the other.
+			const STORED_START = 1_000;
+
+			it("stands in when the Send left no start of its own", async () => {
+				// A feed held without a start; the in-session Send always stamps one.
+				useExecutionEventsStore.setState({
+					replacedFeeds: {
+						B: {
+							runId: "run_B",
+							sent: null,
+							sentAt: null,
+							leftOut: [],
+							finalized: false,
+						},
+					},
+				});
+				getRunReport.mockResolvedValue(
+					reportWithEvents("B stored", undefined, STORED_START)
+				);
+				const land = vi.fn();
+
+				// Mutation check: drop the `sentAt` spread in `eventsFromTrace` and the
+				// landed response has no start.
+				await finalizeStreamRun("run_B", land);
+
+				expect(land).toHaveBeenCalledTimes(1);
+				expect((land.mock.calls[0][1] as ResponseState).sentAt).toBe(STORED_START);
+			});
+
+			it("yields to the start the Send stamped, which the renderer's own clock wrote", async () => {
+				getRunReport.mockResolvedValue(
+					reportWithEvents("A stored", undefined, STORED_START)
+				);
+				render(renderFor("A", started));
+				const before = Date.now();
+				await act(async () => {
+					await ctx().executeRequest();
+				});
+				act(() => {
+					useExecutionEventsStore.getState().endStream("run_1", "completed", 9);
+				});
+
+				// Mutation check: spread `stored` after the claim in `withSendSnapshot`
+				// and this reads the stored start.
+				await waitFor(() => expect(bodyOf("A")).toBe("A stored"));
+				const sentAt = (useResponseStore.getState().getResponse("A") as ResponseState)
+					.sentAt;
+				expect(sentAt).not.toBe(STORED_START);
+				expect(sentAt).toBeGreaterThanOrEqual(before);
+			});
 		});
 
 		it("does not finalize again after the builder remounts", async () => {

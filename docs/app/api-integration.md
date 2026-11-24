@@ -1804,7 +1804,10 @@ Send does not - and only the last two steps differ:
    fetches `GET /runs/:id/report` and `restore-response.ts` maps the trace's
    `events` node and its `response.body` - the stream's bytes, stored once and
    read back into that list by the engine (#3770) - onto the response, which is
-   the record from then on. One fetch is enough: the engine sends `complete` only after the post-request
+   the record from then on. The node also carries `startedAt` (epoch ms, the
+   clock of each item's `receivedAt`, #3805) when the engine knew when the
+   transfer began; a row stored before it, or a stream refused before it began,
+   has none. One fetch is enough: the engine sends `complete` only after the post-request
    script has run and the run row and trace are stored (#3239).
 
 **The stream text path** (issue #3773) is the request's declared JSONPath for

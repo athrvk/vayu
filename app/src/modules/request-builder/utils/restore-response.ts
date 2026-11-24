@@ -81,6 +81,11 @@ export function timingFromTrace(
  * happened. Recomputing would quietly turn a truncated list into a complete
  * one.
  *
+ * `startedAt` comes back as `sentAt`: the stored start is the fallback for a
+ * stream the renderer holds no live start for, which is every one reopened from
+ * History. A renderer that did send it stamps its own over this one
+ * (`withSendSnapshot`).
+ *
  * Rows written before the node existed simply have no key, so every field
  * defaults - the same discipline the `rawRequest` and `httpVersion` fallbacks
  * above follow.
@@ -89,7 +94,7 @@ export function eventsFromTrace(
 	trace: NonNullable<RunResultSample["trace"]>
 ): Pick<
 	ResponseState,
-	"events" | "totalEvents" | "eventsTruncated" | "streamEndReason" | "streamText"
+	"events" | "totalEvents" | "eventsTruncated" | "streamEndReason" | "streamText" | "sentAt"
 > {
 	const node = trace.events;
 	if (!node) return {};
@@ -103,6 +108,10 @@ export function eventsFromTrace(
 		// gets no termination banner, which is honest. Every node the current
 		// engine writes carries one.
 		...(node.endReason && { streamEndReason: node.endReason }),
+		// The engine's own start, carried rather than recomputed from the run's end
+		// time (#3805): it is the zero of the Events offsets and the Timing tab's
+		// first event. Absent on a node stored before the field existed.
+		...(typeof node.startedAt === "number" && { sentAt: node.startedAt }),
 		// The engine joins it over every stored event, past the item cap, so it
 		// wins over concatenating `items` - which stops where the cap did.
 		...(typeof node.streamText === "string" && { streamText: node.streamText }),
