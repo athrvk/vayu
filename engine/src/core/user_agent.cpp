@@ -6,10 +6,9 @@
  */
 
 /**
- * The one translation unit that pastes the engine version into a string.
- *
- * Keep it that way: including `vayu/version.hpp` from a widely-included header
- * is what made every release rebuild the whole engine (see `user_agent.hpp`).
+ * The one translation unit that pastes the engine version into a string. Keep
+ * it so: `vayu/version.hpp` in a widely included header made every release
+ * rebuild the whole engine (`user_agent.hpp`).
  */
 
 #include "vayu/core/user_agent.hpp"
