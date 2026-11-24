@@ -54,9 +54,9 @@ A `binary` body - one file sent as the whole body - reads `file`, Postman's name
 `.file` answers `{ name, size? }`: `name` is the file name the request declares, else the last part of its path, and `size` its length in bytes, present once the send has read the file.
 Postman's `file.src`, the path, is never answered - a local path is one machine's filesystem and is not disclosed to a script, the rule a form-data file part already follows (issue #411) - see [pm-api-compatibility.md](../../app/pm-api-compatibility.md).
 
-## `graphql` bodies (issue #1111)
+## `graphql` bodies
 
-`.mode` reads `graphql` for a GraphQL body, and `.graphql` answers Postman's `{query, variables}` pair.
+`.mode` reads `graphql` for a GraphQL body, and `.graphql` answers Postman's `{query, variables}` pair (issue #1111).
 Vayu stores such a body as **one string** that is allowed to be either the `{"query": …}` envelope the request builder writes or the bare document an agent or a `curl` caller hands over; the pair is derived from that string by the same classifier the send itself goes through, so `.graphql.query` is the query that goes on the wire rather than a second reading of the same bytes.
 
 ```javascript

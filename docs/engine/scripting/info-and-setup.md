@@ -34,7 +34,7 @@ In a design-mode scenario run (`POST /runs` with a `scenario` block and no `mode
 A **scenario load run**'s deferred per-step script reads it too: each sampled response carries the virtual user's iteration it was actually sent in, so the number is a fact about that response rather than its position in a reservoir.
 
 **A single-request load run reports one too, since issue #994.**
-It used to read `undefined` there, on the rule that a *reservoir position* is not an iteration - and that rule is intact, because this is not one: each submission claims its index before it is sent, and the index travels with the response into the sample, exactly as `dataRowIndex` does.
+It does not read `undefined` there: a *reservoir position* is not an iteration, and this is not one - each submission claims its index before it is sent, and the index travels with the response into the sample, exactly as `dataRowIndex` does.
 It is the same counter the run's data rows are claimed from, so a script grading a sampled response can say which iteration produced it and which row it carried, and the two agree.
 An ordinary Send still reads `undefined`: one request is not a pass of anything.
 

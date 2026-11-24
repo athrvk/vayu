@@ -277,27 +277,13 @@
       "long_lines": 11,
       "max_cell": 1307
     },
-    "docs/engine/scripting/console-and-examples.md": {
-      "history": 1
-    },
-    "docs/engine/scripting/info-and-setup.md": {
-      "history": 1
-    },
     "docs/engine/scripting/limitations.md": {
-      "max_cell": 291,
-      "history": 1
-    },
-    "docs/engine/scripting/request.md": {
-      "history": 1
-    },
-    "docs/engine/scripting/response-headers-and-assertions.md": {
-      "history": 2
+      "max_cell": 291
     },
     "docs/engine/scripting/response.md": {
       "max_line": 524,
       "long_lines": 1,
-      "max_cell": 512,
-      "history": 2
+      "max_cell": 512
     },
     "docs/engine/scripting/sandbox.md": {
       "max_cell": 286
@@ -307,14 +293,10 @@
       "long_lines": 2,
       "max_cell": 696
     },
-    "docs/engine/scripting/test-and-expect.md": {
-      "history": 3
-    },
     "docs/engine/scripting/variables.md": {
-      "max_line": 516,
+      "max_line": 511,
       "long_lines": 1,
-      "max_cell": 467,
-      "history": 2
+      "max_cell": 462
     },
     "docs/ux-writing.md": {
       "max_line": 1352,

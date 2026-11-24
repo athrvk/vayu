@@ -38,7 +38,7 @@ Map and Set members are written as compact JSON (a string keeps its quotes), so 
 
 **The level travels with the line.**
 Each entry on the wire is `{ "source": "pre" | "test", "scope"?: "collection" | "folder" | "request", "level": "log" | "info" | "warn" | "error", "message": "...", "scriptRequest"?: <index> }` - `scriptRequest` only on a `pm.sendRequest` summary line, naming the call's record (#3633) - see [`consoleLogs` in the API reference](../api-reference/execute.md#post-execute).
-The four methods are bound to one C function distinguished by QuickJS's `magic` argument (`setup_console`), so the level is captured at the call; it cannot be recovered from the text afterwards, which is why it used to be lost.
+The four methods are bound to one C function distinguished by QuickJS's `magic` argument (`setup_console`), so the level is captured at the call; it cannot be recovered from the text afterwards, which is why it travels with the line.
 The app's Console tab draws `warn` and `error` in their status tokens and labels every non-`log` line in a gutter.
 `level` is the console method; which collection, folder or request script wrote the line is `scope` (#2522), absent on a line stored before the field.
 

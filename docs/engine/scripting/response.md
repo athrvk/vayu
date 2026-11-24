@@ -50,8 +50,8 @@ Where none was received it falls back to the canonical text for the code, so a c
 ## `status` is the reason phrase, `code` is the number
 
 Postman spells the two apart: `code` is the number and `status` is the phrase the status line carried.
-Vayu used to spell both as the number, so a lifted `if (res.status === 'OK')` guard was always false and `pm.expect(pm.response.status).to.eql('OK')` failed where Postman passes.
-`status` is now the phrase - the same string `reason()` answers, wire phrase where there was one and the registered text for the code where there was not - on **both** objects that carry a status: the response a post-request script reads, and the one a [`pm.sendRequest`](send-request.md#sending-a-request-from-a-script-pmsendrequest) callback receives.
+Spelling both as the number would make a lifted `if (res.status === 'OK')` guard always false and `pm.expect(pm.response.status).to.eql('OK')` fail where Postman passes.
+`status` is the phrase - the same string `reason()` answers, wire phrase where there was one and the registered text for the code where there was not - on **both** objects that carry a status: the response a post-request script reads, and the one a [`pm.sendRequest`](send-request.md#sending-a-request-from-a-script-pmsendrequest) callback receives.
 `code` is untouched on both.
 
 That is a break for a script written against vayu's old spelling:
@@ -186,7 +186,7 @@ A buffered send returns them *and* stores the same object there (issue #725), so
 
 A **collection run's step** is the same story with no live half at all: the run was answered `202` when it started, so each step's results reach the app only on its stored trace, under the same `scripts` node (issue #724).
 What a step publishes while the run is still going is the count - `tests: {passed, failed}` on its [`step` event](../api-reference/live-metrics.md#get-runsrunidlive) - because the event ring is fixed-size and a script may make hundreds of assertions.
-Both count **both scripts'** assertions (issue #810), which is what fails the step in the first place: a failing `pm.test` ends a step whichever script made it, and the list used to hold the test script's alone, so a step could be `failed` and named in its error line by an assertion its own Tests list did not contain.
+Both count **both scripts'** assertions (issue #810), which is what fails the step in the first place: a failing `pm.test` ends a step whichever script made it, and a list of the test script's alone would let a step be `failed` and named in its error line by an assertion its own Tests list did not contain.
 
 ## `pm.response.redirects` - the hops a send followed
 

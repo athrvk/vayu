@@ -69,9 +69,9 @@ Two limits:
 - **A later write replaces it.**
   An `extract.*` element writes a whole new variable, so its text replaces a value a script set earlier.
 
-### The third argument of `set` (#2664)
+### The third argument of `set`
 
-`set(name, value, options)` reads Postman's optional third argument (postman-collection 5.3.0), in either of its two shapes:
+`set(name, value, options)` reads Postman's optional third argument (postman-collection 5.3.0, #2664), in either of its two shapes:
 
 - **a string** is a type: `set('n', 1, 'number')`;
 - **an object** contributes `type` when it is a string and `secret` when it is a boolean: `set('token', t, { secret: true })`, `set('n', 1, { type: 'number' })`.
@@ -95,7 +95,7 @@ The variables editor and an MCP agent's withholding read the stored flag too.
 | Method | Returns | Notes |
 |---|---|---|
 | `get(name)` | the value a script set this run, as it was set; otherwise the stored text cast by its declared type; or `undefined` | a disabled variable reads as `undefined`; a declared `number` / `boolean` / `json` row always casts |
-| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set-2664)); turns `enabled` on; a name no `{{name}}` could read back (blank, starting or ending in whitespace, or containing `{` or `}`) is a `TypeError` naming the call, and nothing is stored ([below](#a-name-a-token-cannot-read-back-is-refused-3461)) |
+| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set)); turns `enabled` on; a name no `{{name}}` could read back (blank, starting or ending in whitespace, or containing `{` or `}`) is a `TypeError` naming the call, and nothing is stored ([below](#a-name-a-token-cannot-read-back-is-refused)) |
 | `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |
@@ -110,9 +110,9 @@ if (pm.environment.has('auth_token')) {
 console.log(pm.environment.toObject());
 ```
 
-#### A name a token cannot read back is refused (#3461)
+#### A name a token cannot read back is refused
 
-`{{ name }}` is looked up with the spaces, tabs and line breaks cut from both ends, and a reference stops at a brace.
+`{{ name }}` is looked up with the spaces, tabs and line breaks cut from both ends, and a reference stops at a brace (#3461).
 A variable stored as `''`, `' pad '` or `'a}}b'` could therefore never be referenced, and the next save of that scope through the API would answer `400` for the key.
 So `set` on any scope (`pm.environment`, `pm.globals`, `pm.collectionVariables`, `pm.variables`, and the legacy `postman.setEnvironmentVariable` / `setGlobalVariable`, which delegate to them) throws a `TypeError` for such a name, naming the call and the reason, and stores nothing.
 An extractor's `variable` is refused for the same names, in the same words (`variable_name_refusal`).
@@ -199,7 +199,7 @@ pm.variables.get('nonce'); // the number as set
   `{{data.column}}` is the row's own spelling and never reads the local scope.
 - **The writes are the scoped ones.**
   `set` keeps the value's type for the run and stores its string form for `{{name}}`,
-  exactly as [the named scopes' `set`](#a-value-keeps-its-type-for-the-run) does, and it reads [the third argument](#the-third-argument-of-set-2664) too, though a `secret` flag here is never stored or masked; `unset(name)` removes one local name, so the tiers below it answer again; `clear()` empties the local scope.
+  exactly as [the named scopes' `set`](#a-value-keeps-its-type-for-the-run) does, and it reads [the third argument](#the-third-argument-of-set) too, though a `secret` flag here is never stored or masked; `unset(name)` removes one local name, so the tiers below it answer again; `clear()` empties the local scope.
   None of the three touches the environment, the collections or the globals.
 - **Nothing stores it.**
   The run's variable write-back never reads it, the Variables panel and the variable popover never show it, and a run's stored snapshot does not carry it.

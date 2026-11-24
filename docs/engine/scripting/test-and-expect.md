@@ -221,7 +221,7 @@ pm.expect(value).to.be.above(0).and.still.be.below(10);
 Notes on the edges:
 
 - **`not` sets the negation for the rest of the chain; it does not flip it.** chai's rule, and the flag is never reset between assertions in one chain, so a second `.not` is a no-op rather than a double negative: `expect(s).to.not.include("+").and.to.not.include("/")` asserts that `s` contains neither.
-  It used to *toggle* (issue #883), which made that same line assert that `s` **does** include `/` - a silent inversion whose direction depended only on how many times the author had written `.not`.
+  It does not *toggle* (issue #883): toggling would make that same line assert that `s` **does** include `/` - a silent inversion whose direction depended only on how many times the author had written `.not`.
 - **`deep` changes the comparison, it is not a matcher.**
   `include`, `property`, `members` and `oneOf` compare strictly unless a `deep` appears in the chain.
 - **The language chains assert nothing** (issue #1053).
@@ -269,7 +269,7 @@ Notes on the edges:
 - **A throw reached through a comparison is the verdict** (#1048).
   A key, an array element or an array `length` behind a getter that throws is a read that did not happen, so the error reaches the test instead of being reported as "these differ" - which under `.not` would have been a pass.
   That holds for the reads an assertion makes before comparing, too: `include`, `oneOf`, `members`, `keys`, `property` (its nested walk included), `empty` and `length` stop at the read rather than answering about it.
-  And for the rendering the `Date` and `RegExp` comparisons run: an overridden `toJSON` or `toString` that throws used to leave both sides rendered as the empty string, which compared *equal*.
+  And for the rendering the `Date` and `RegExp` comparisons run: an overridden `toJSON` or `toString` that throws is reported, not rendered as the empty string - two such sides would compare *equal*.
   When both sides throw, the first side's error is the one reported.
 - **A cycle fails loudly, at the depth it closes** (#959).
   The walk carries the pairs of objects it is already comparing, so meeting one twice is a `RangeError` naming that repetition - not a wait for a depth limit to be reached.
@@ -290,7 +290,7 @@ Notes on the edges:
 - **The failure message names the argument.**
   `.to.throw(TypeError)` that caught a `RangeError` says so, rather than reporting that a function which threw did not throw.
 - **The ordering matchers type-assert both sides.**
-  `above`, `below`, `at.least` and `at.most` take a number or a `Date` and refuse anything else, which is chai's rule: `expect('5').to.be.above(3)` used to pass here through `ToNumber`, and now names what it was given.
+  `above`, `below`, `at.least` and `at.most` take a number or a `Date` and refuse anything else, which is chai's rule: `expect('5').to.be.above(3)` does not pass through `ToNumber`; it names what it was given.
   They compare like with like too - a `Date` read as milliseconds against a number is a comparison neither side wrote, so the mixed pair is refused.
 - **`throw` reads the error's `message`.**
   A string or a regular expression is matched against `err.message` alone, never `String(err)` - so `.to.throw('Error')` no longer passes for every `Error` thrown.

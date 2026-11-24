@@ -117,14 +117,14 @@ pm.response.to.not.have.status(500);                      // every member has a 
 
 `have.status` means two different things depending on the argument's type: a number is the status code, a string is compared against the reason phrase `pm.response.reason()` answers.
 **`status('200')` fails** - a string is always a reason phrase to compare, never a code coerced to one.
-**A number that is not a whole finite code is refused**, not truncated: `status(200.5)` used to compare as `200` and pass against a 200, and no response carries a fractional code, so the `TypeError` names what was written rather than reporting a verdict about the status that did arrive (#1048).
+**A number that is not a whole finite code is refused**, not truncated: `status(200.5)` would compare as `200` and pass against a 200, and no response carries a fractional code, so the `TypeError` names what was written rather than reporting a verdict about the status that did arrive (#1048).
 `status(NaN)` is refused the same way.
 
 `have.header`'s second argument is compared strictly against the header as it arrived on the wire.
 `header('X-Count', 5)` fails rather than stringifying `5` into agreement; the expected value must already be the string form.
 
 `have.body` accepts exactly three forms and, with no argument, asserts that there is a body at all.
-A string must equal the body **exactly** - this used to be a substring search.
+A string must equal the body **exactly**, not as a substring.
 A regular expression is run against the body text.
 An object is deep-equalled against the parsed JSON body.
 Any other argument type - a number, a boolean - is a `TypeError` naming the three accepted forms rather than a verdict: Postman silently asserts nothing for those inputs, and Vayu refuses a silent non-assertion instead (#998).
