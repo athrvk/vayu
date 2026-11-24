@@ -23,14 +23,17 @@
  * red too.
  */
 
-import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { describe, it, expect, afterEach } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import {
 	ROUTED_INPUTS,
 	TESTKIT_MODULE,
 	TESTKIT_PATH,
 	WORKFLOW_PATH,
+	entryExists,
+	filterGlob,
 	fromRepoRoot,
 	routedPaths,
 } from "./routed-inputs.testkit";
@@ -57,7 +60,9 @@ describe.each(ROUTED_INPUTS)("$filter", ({ filter, suite, readers, guards, route
 	 * most repeated defect in the file that documents it.
 	 */
 	it("routes every path a guard reads, and no other", () => {
-		expect([...routedPaths(workflow, filter)].sort()).toEqual([...routed].sort());
+		expect([...routedPaths(workflow, filter)].sort()).toEqual(
+			[...routed.map(filterGlob)].sort()
+		);
 		expect(workflow).toContain(`${filter}: \${{ steps.area.outputs.${filter} }}`);
 		expect(workflow).toContain(`needs.changes.outputs.${filter} == 'true'`);
 	});
@@ -79,7 +84,7 @@ describe.each(ROUTED_INPUTS)("$filter", ({ filter, suite, readers, guards, route
 
 	it("names paths that exist", () => {
 		for (const path of routed) {
-			expect(existsSync(fromRepoRoot(path)), path).toBe(true);
+			expect(entryExists(path), path).toBe(true);
 		}
 	});
 
@@ -110,6 +115,78 @@ describe.each(ROUTED_INPUTS)("$filter", ({ filter, suite, readers, guards, route
 				expect(source, `${guard.reader} reads ${read}`).toContain(basename(read));
 			}
 		}
+	});
+});
+
+/*
+ * A directory entry lets one registry line answer for every page under it, so a
+ * page split into a directory of pages (`docs/app/components/`) keeps routing
+ * as pages are added to it. The registry is compared with the filter by
+ * expanding the entry to the `**` glob, and an entry whose directory holds no
+ * Markdown is refused: the glob would match nothing and still look routed.
+ */
+describe("directory entries", () => {
+	const scratch: string[] = [];
+	afterEach(() => {
+		for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
+	});
+
+	function tree(files: string[]): string {
+		const root = mkdtempSync(join(tmpdir(), "routed-inputs-"));
+		scratch.push(root);
+		for (const file of files) {
+			const path = join(root, ...file.split("/"));
+			mkdirSync(join(path, ".."), { recursive: true });
+			writeFileSync(path, "");
+		}
+		return root;
+	}
+
+	it("expands a directory to the ** glob under it and leaves a file alone", () => {
+		expect(filterGlob("docs/app/components/")).toBe("docs/app/components/**");
+		expect(filterGlob("docs/app/pm-api-compatibility.md")).toBe(
+			"docs/app/pm-api-compatibility.md"
+		);
+	});
+
+	it("matches the ** entry a filter lists for it", () => {
+		const fixture = [
+			"            some_filter:",
+			"              - 'docs/app/components/**'",
+			"              - 'docs/index.md'",
+			"            other_filter:",
+			"              - 'docs/unrelated.md'",
+		].join("\n");
+		const registry = ["docs/app/components/", "docs/index.md"];
+		expect(routedPaths(fixture, "some_filter").sort()).toEqual(registry.map(filterGlob).sort());
+		expect(routedPaths(fixture, "some_filter").sort()).not.toEqual([...registry].sort());
+	});
+
+	it("exists when Markdown is under it, at any depth", () => {
+		const root = tree(["docs/app/components/index.md"]);
+		expect(entryExists("docs/app/components/", root)).toBe(true);
+		const nested = tree(["docs/app/components/deep/er/page.md"]);
+		expect(entryExists("docs/app/components/", nested)).toBe(true);
+	});
+
+	it("does not exist when the directory is missing, empty, or holds no Markdown", () => {
+		const root = tree(["docs/app/other/index.md", "docs/app/components/schema.json"]);
+		expect(entryExists("docs/app/missing/", root)).toBe(false);
+		expect(entryExists("docs/app/components/", root)).toBe(false);
+		mkdirSync(join(root, "docs", "app", "empty"));
+		expect(entryExists("docs/app/empty/", root)).toBe(false);
+	});
+
+	it("does not take a file for a directory", () => {
+		const root = tree(["docs/app/components.md"]);
+		expect(entryExists("docs/app/components/", root)).toBe(false);
+		expect(entryExists("docs/app/components.md", root)).toBe(true);
+	});
+
+	it("keeps a file entry's plain existence check", () => {
+		const root = tree(["docs/index.md"]);
+		expect(entryExists("docs/index.md", root)).toBe(true);
+		expect(entryExists("docs/missing.md", root)).toBe(false);
 	});
 });
 

@@ -30,6 +30,7 @@
  * C++, so the registry is the only part of the mechanism they share.
  */
 
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -45,6 +46,34 @@ export const repoRoot = join(here, "..", "..", "..");
  */
 export function fromRepoRoot(path: string): string {
 	return join(repoRoot, ...path.split("/"));
+}
+
+/**
+ * A registry entry that ends in `/` names a directory of pages, and the filter
+ * lists it as the `**` glob under it. A split page becomes a directory of pages
+ * (`docs/app/components/`), and one entry then answers for every page added
+ * to it, where a list of file names would need an edit per page.
+ */
+export function filterGlob(entry: string): string {
+	return entry.endsWith("/") ? `${entry}**` : entry;
+}
+
+function hasMarkdown(directory: string): boolean {
+	return readdirSync(directory).some((name) => {
+		const path = join(directory, name);
+		return statSync(path).isDirectory() ? hasMarkdown(path) : name.endsWith(".md");
+	});
+}
+
+/**
+ * Whether an entry still names something. A file entry must exist. A directory
+ * entry must hold at least one `.md` file at any depth: a glob over an empty or
+ * renamed directory matches nothing, routes nothing, and would read as routed.
+ */
+export function entryExists(entry: string, root: string = repoRoot): boolean {
+	const path = join(root, ...entry.split("/"));
+	if (!entry.endsWith("/")) return existsSync(path);
+	return existsSync(path) && statSync(path).isDirectory() && hasMarkdown(path);
 }
 
 /**
@@ -64,6 +93,9 @@ export const TESTKIT_PATH = "app/src/lib/routed-inputs.testkit.ts";
  * it or quietly stop being that guard's own list. It is usually a `.test.ts`,
  * but a `.testkit.ts` a suite imports is a reader too - the fixture it opens
  * turns those suites red exactly the same way.
+ *
+ * `paths` entries are files, except in `DOC_READING_GUARDS`, where an entry
+ * ending in `/` names a directory of pages (`filterGlob`, `entryExists`).
  */
 interface ReadingGuard {
 	readonly reader: string;

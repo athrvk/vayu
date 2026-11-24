@@ -262,6 +262,11 @@ jobs:
             # the union of the four guards' lists - so adding a page to a guard
             # is red until it is routed here, and routing a page no guard reads
             # is red too.
+            #
+            # A page split into a directory is one registry entry ending in `/`
+            # and one line here ending in `/**` (`docs/app/components/**`); the
+            # comparison expands the first to the second and refuses an entry
+            # whose directory holds no Markdown.
             app_doc_fixtures:
               - 'docs/engine/scripting.md'
               - 'docs/app/pm-api-compatibility.md'
