@@ -1242,6 +1242,28 @@ TEST (RunExportHtmlTest, NoResponseRemainderIsOneRowWhenTypesStopAtTheCap) {
     EXPECT_EQ (html.find ("HTTP 0"), std::string::npos);
 }
 
+// #3828: the same class rows close the page's Errors table. Mutation check:
+// drop `append_error_class_rows` from `errors_table` and the first expectation
+// fails.
+TEST (RunExportHtmlTest, TheErrorsTableListsTheMcpFailureClassesTheRunCounted) {
+    ordered_json document = read_document ("errors-and-budget-failed");
+    document["report"]["summary"]["errorClasses"] = { { "tool", 2 },
+        { "protocol", 31 }, { "protocolCodes", { { "-32602", 4 } } } };
+    const std::string html = render_run_export_html (document);
+
+    const std::vector<std::string> expected{ "HTTP 500", "HTTP 503", "timeout",
+        "connection_reset", "MCP protocol failures", "MCP tool failures" };
+    EXPECT_EQ (error_row_labels (html), expected);
+    EXPECT_NE (
+    html.find ("<th scope=\"row\">MCP protocol failures</th><td>31</td>"), std::string::npos);
+    EXPECT_NE (html.find ("<th scope=\"row\">MCP tool failures</th><td>2</td>"),
+    std::string::npos);
+
+    document["report"]["summary"].erase ("errorClasses");
+    const std::vector<std::string> plain{ "HTTP 500", "HTTP 503", "timeout", "connection_reset" };
+    EXPECT_EQ (error_row_labels (render_run_export_html (document)), plain);
+}
+
 // #2938: a flagged run's document has no `latency` section, and every row of
 // the table reads `-` rather than a zero. Mutation check: read the figure
 // through a default of 0 in `latency_table` and this fails.

@@ -5850,7 +5850,13 @@ The sections, in order:
     the per-type counts, whose types stop at the error store's cap; its count is
     the remainder (code 0 minus the types' sum), so the requests no type names
     are not lost and none is listed twice. With no error types at all it holds
-    the whole of code 0. The HTML report reads the same table.
+    the whole of code 0. A document whose `report.summary.errorClasses` counted
+    a class (#3828) closes the table with one `MCP transport failures`,
+    `MCP protocol failures` or `MCP tool failures` row per counted class, in
+    that order. They are the same failures seen by class, not further ones: a
+    failed reply is also under its HTTP status or its `mcp_*` type, so the rows
+    do not add up to the ones above them. Without the key, or with `{}`, there
+    are none. The HTML report reads the same table.
 12. `## Compared with <base reference>`, only when the document has a
     `comparison`: each metric's base, this run, change and a word from the
     delta's own `direction` (`improved`, `regressed`, `unchanged` for a change
