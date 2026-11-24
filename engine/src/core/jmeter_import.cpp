@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/jmeter_import.cpp
  * @brief The `.jmx` walker and the JMeter-class-to-element-kind mapping table
  *        (issue #1518). See the header for the shape and the validation rule.
  */

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/schema_validation.cpp
  * @brief Implementation of response schema validation (issue #628). See the
  *        header for the storage shape and the dialect-honesty rule.
  */

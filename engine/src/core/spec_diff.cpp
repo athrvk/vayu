@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/spec_diff.cpp
  * @brief The sync comparison (issue #654, moved engine-side by #854). See the
  *        header for the four rules this must not lose.
  *

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/import_document.cpp
  * @brief The four import parsers, engine-side (issue #877). See the header for
  *        what moved and why.
  *

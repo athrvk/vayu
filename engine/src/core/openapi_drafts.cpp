@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/openapi_drafts.cpp
  * @brief The requests an import of a document would build (issue #865).
  *        See the header for what a draft is and why it is not an identity.
  *

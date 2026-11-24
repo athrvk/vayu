@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/run_export_view.cpp
  * @brief The run-report document read into the sections every text renderer
  *        shares (#2131, #2135): a verdict, the run, the headline numbers,
  *        latency against budgets, a streaming run's events (#3240), a capacity

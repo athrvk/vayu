@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/metrics_collector.cpp
  * @brief Implementation of high-performance in-memory metrics collector
  */
 

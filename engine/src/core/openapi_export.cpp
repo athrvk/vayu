@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/openapi_export.cpp
  * @brief Assembling a collection back into an OpenAPI document (issue #855).
  *        See the header for the two directions and why neither invents.
  *
