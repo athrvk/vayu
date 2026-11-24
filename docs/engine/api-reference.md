@@ -7857,7 +7857,7 @@ timeout setting, and end when the engine stops.
 **A server that is not on this machine reaches nothing on it.** When
 `discoverUrl` names neither a loopback nor a link-local host, a document that
 names such a URL is refused (`oauth_discovery_local_endpoint_refused`), and the
-discovery's fetches, the registration and the callback's code exchange connect
+discovery's fetches, the registration and every token request of the config connect
 to no loopback or link-local address, by the URL or by the address its name
 resolves to. A token endpoint that resolves to one by the time the code
 arrives never receives the code or the PKCE verifier: the attempt fails with

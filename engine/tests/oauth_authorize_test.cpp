@@ -847,7 +847,7 @@ class OAuthDiscoveredAuthorizeTest : public OAuthAuthorizeTest {
         row.token_type    = "Bearer";
         row.refresh_token = "RT_OLD";
         row.expires_in    = 60;
-        row.created_at    = now_ms () - 3600 * 1000;
+        row.created_at    = now_ms () - (int64_t{ 3600 } * 1000);
         db_->save_oauth_token (row);
     }
     /// What `acquire_token` answers for @p config headlessly, as `/execute`
@@ -1207,8 +1207,8 @@ TEST_F (OAuthDiscoveredAuthorizeTest, TheStartRouteAnswersTheResolvedConfig) {
 /// The same MCP server and authorization server, named as hosts that are not
 /// on this machine and reached through a proxy that stands for one that can
 /// resolve them: every document the fixture serves names those hosts, so the
-/// attempt is discovered from a remote server and its exchange runs under the
-/// discovery's `LocalPeerRule`.
+/// attempt is discovered from a remote server and each token request of its
+/// config runs under the discovery's `LocalPeerRule`.
 class RemoteDiscoveredAuthorizeTest : public OAuthDiscoveredAuthorizeTest {
     protected:
     static constexpr const char* REMOTE_MCP = "http://mcp.example.test/mcp";
