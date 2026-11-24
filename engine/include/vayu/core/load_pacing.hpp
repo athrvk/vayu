@@ -201,7 +201,8 @@ requests_owed_by (double target_rps, std::chrono::nanoseconds elapsed) {
 
     const double seconds = std::chrono::duration<double> (elapsed).count ();
     const double owed = std::floor (target_rps * seconds * (1.0 + kProductSlack));
-    return static_cast<size_t> (std::min (owed, kMaxOwed));
+    // Parenthesized against windows.h min/max macros (`core/constants.hpp`).
+    return static_cast<size_t> ((std::min)(owed, kMaxOwed));
 }
 
 /**
@@ -243,8 +244,8 @@ split_tick_backlog (double target_rps, size_t owed, size_t taken, std::chrono::n
         return {};
     }
     const size_t catch_up_limit =
-    std::max (requests_owed_by (target_rps, scheduled + MAX_CATCH_UP_BACKLOG), taken);
-    const size_t to_submit = std::min (owed, catch_up_limit) - taken;
+    (std::max)(requests_owed_by (target_rps, scheduled + MAX_CATCH_UP_BACKLOG), taken);
+    const size_t to_submit = (std::min)(owed, catch_up_limit) - taken;
     return { to_submit, owed - taken - to_submit };
 }
 

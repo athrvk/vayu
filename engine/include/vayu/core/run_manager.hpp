@@ -109,7 +109,8 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
     }
     const auto ticks =
     std::max<size_t> (static_cast<size_t> (window_ms / tick_interval_ms), 1);
-    return std::min (ticks, max_ticks);
+    // Parenthesized against windows.h min/max macros (`core/constants.hpp`).
+    return (std::min)(ticks, max_ticks);
 }
 
 /**
@@ -152,7 +153,7 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
 
     const auto reserved = static_cast<size_t> (
     (static_cast<double> (duration_ms) / 1000.0) * target_rps * 1.2);
-    return std::max (reserved, MIN_RESERVED);
+    return (std::max)(reserved, MIN_RESERVED);
 }
 
 /**
@@ -192,7 +193,7 @@ natural_end_drain_ms (const std::optional<vayu::StreamBounds>& stream_bounds, in
 [[nodiscard]] inline int64_t collection_natural_end_drain_ms (
 const std::optional<vayu::StreamBounds>& longest_stream,
 int timeout_ms) {
-    return std::max (natural_end_drain_ms (longest_stream, timeout_ms),
+    return (std::max)(natural_end_drain_ms (longest_stream, timeout_ms),
     natural_end_drain_ms (std::nullopt, timeout_ms));
 }
 
@@ -269,7 +270,7 @@ class RequestElementTallies {
     [[nodiscard]] nlohmann::json build (
     const std::vector<vayu::core::CompiledElement>& elements) const {
         nlohmann::json out = nlohmann::json::array ();
-        const size_t count = std::min (elements.size (), counts_.size ());
+        const size_t count = (std::min)(elements.size (), counts_.size ());
         for (size_t i = 0; i < count; ++i) {
             counts_[i].append_report_row (out, elements[i]);
         }
