@@ -6,7 +6,6 @@
  */
 
 /**
- * @file core/svg_chart.cpp
  * @brief Line charts of a run's time series as inline `<svg>` (#2135).
  */
 

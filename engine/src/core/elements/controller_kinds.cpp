@@ -6,7 +6,6 @@
  */
 
 /**
- * @file controller_kinds.cpp
  * @brief `control.if`, `control.once`, `control.switch`, `control.throughput`
  *        (issue #1515): JMeter-style logic controllers that decide whether
  *        this occurrence sends at all, or which member a folder dispatches

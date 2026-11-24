@@ -6,7 +6,6 @@
  */
 
 /**
- * @file timer_think.cpp
  * @brief `timer.think` (issue #1514, gaussian and the run override added by
  *        #1498): a fixed, uniform-random or gaussian-random wait between
  *        this step and the next.

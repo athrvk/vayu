@@ -6,7 +6,6 @@
  */
 
 /**
- * @file script_kinds.cpp
  * @brief `script.pre` / `script.post` (issue #1513's registration, issue
  *        #1514's `compile` / `apply`), and `script.setup` / `script.teardown`
  *        (issue #1499), the same shape at the run's own boundary instead of a

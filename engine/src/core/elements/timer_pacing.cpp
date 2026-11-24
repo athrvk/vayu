@@ -6,7 +6,6 @@
  */
 
 /**
- * @file timer_pacing.cpp
  * @brief `timer.pacing` (issue #1498): holds a steady cadence for a request,
  *        a folder or the collection - "start this node every N ms" - across
  *        iterations, whatever the node's own duration was.

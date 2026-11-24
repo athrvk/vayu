@@ -6,7 +6,6 @@
  */
 
 /**
- * @file timer_throughput.cpp
  * @brief `timer.throughput` (issue #1571): holds a request, a folder or the
  *        collection to a target rate - "50 checkouts per minute" - rather
  *        than to a fixed gap between passes.

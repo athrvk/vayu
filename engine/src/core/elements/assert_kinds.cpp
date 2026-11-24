@@ -6,7 +6,6 @@
  */
 
 /**
- * @file assert_kinds.cpp
  * @brief `assert.status`, `assert.jsonpath`, `assert.jsonschema`,
  *        `assert.snapshot`, `assert.contains`, `assert.duration`,
  *        `assert.size` (issue #1514; `assert.jsonschema` #3806,
