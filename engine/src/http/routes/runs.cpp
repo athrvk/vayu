@@ -962,8 +962,8 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
  * An absent or unreadable summary leaves the report exactly as the sampled
  * results computed it - there is no second source to fall back to. Keys here
  * are the ones `vayu::core::build_run_summary_payload` writes;
- * runs_route_test.cpp round-trips the pair so the two sides cannot drift apart
- * silently.
+ * runs_route_report_summary_test.cpp round-trips the pair so the two sides
+ * cannot drift apart silently.
  */
 void apply_run_summary (const std::string& summary_json,
 vayu::DetailedReport& report,
@@ -1378,7 +1378,8 @@ void add_capacity_config (nlohmann::json& dst, const nlohmann::json& src) {
  * (build_run_summary): only the report's comparison reads it.
  *
  * Extracted (like get_runs_response above) so this is covered directly - see
- * runs_route_test.cpp - without the full report handler's DB/metrics reads.
+ * runs_route_report_test.cpp - without the full report handler's DB/metrics
+ * reads.
  */
 nlohmann::json build_run_report_config (const nlohmann::json& config) {
     nlohmann::json config_obj = nlohmann::json::object ();
@@ -2291,7 +2292,7 @@ nlohmann::json build_report_results (const std::vector<vayu::db::Result>& result
  * (#2895). `summary.partial` and `summary.summaryMissing` say which.
  *
  * Extracted so the wiring is covered without an in-process HTTP server - see
- * runs_route_test.cpp. Exceptions propagate to the route's try/catch (500).
+ * runs_route_report_test.cpp. Exceptions propagate to the route's try/catch (500).
  */
 std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
 const std::string& run_id,
@@ -2388,7 +2389,7 @@ std::string_view result_id) {
  * unset rather than answering 400, so a client on a newer vocabulary than the
  * engine gets a wider list, never an error.
  *
- * Non-static so runs_route_test.cpp can drive it with a built request.
+ * Non-static so runs_route_rows_test.cpp can drive it with a built request.
  */
 vayu::db::RunFilter run_filter_from_query (const httplib::Request& req) {
     vayu::db::RunFilter filter;

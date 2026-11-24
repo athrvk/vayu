@@ -306,7 +306,7 @@ TEST_F (DbRecoveryTest, TheScratchCleanupTakesTheMarkerWithIt) {
     // The marker is a seventh file beside a scratch database, and a leaked one
     // is read by the *next* `Database` opened at this path - so an unrelated
     // fixture would inherit a recovery record nothing in it provoked.
-    // `ScratchDatabaseCleanup` in db_test.cpp cannot catch this: it opens a
+    // `ScratchDatabaseCleanup` in db_run_summary_test.cpp cannot catch this: it opens a
     // clean database, which by design writes no marker at all.
     write_corrupt_database ();
     {
@@ -573,7 +573,7 @@ TEST_F (DbRecoveryTest, ALockedDatabaseIsRefusedAndLeftExactlyAsItWas) {
         // At the current version the migration has nothing to stamp, so the
         // lock is met by the probe's schema sync, the path this test pins. A
         // lock met by the migration's own writes is refused by
-        // `migrate_before_sync` itself (db_test.cpp).
+        // `migrate_before_sync` itself (db_migration_test.cpp).
         const RawConnection connection = open_raw (DB_PATH);
         ASSERT_EQ (exec_sql (connection.get (),
                    "PRAGMA user_version = " + std::to_string (vayu::db::SCHEMA_VERSION)),

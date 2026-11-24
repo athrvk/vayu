@@ -1963,7 +1963,7 @@ non-empty, `sampleRate` (issue #2892), so a report read after a restart still na
 populations its `actual` was the worse of; a check stored before the issue has none of them and
 nothing backfills them. The writer is
 `vayu::core::build_run_summary_payload` and the reader is `apply_run_summary`
-(`http/routes/runs.cpp`); `runs_route_test.cpp` round-trips the pair, so the key names cannot
+(`http/routes/runs.cpp`); `runs_route_report_summary_test.cpp` round-trips the pair, so the key names cannot
 drift apart silently.
 
 Do not confuse this **results** summary with the `summary` key on a `GET /runs` list row - that
