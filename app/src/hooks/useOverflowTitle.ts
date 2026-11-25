@@ -8,23 +8,18 @@
 import { useCallback, useEffect, useRef } from "react";
 
 /**
- * Attaches a native `title` tooltip to a truncating element - but only while
- * the text is actually cut off.
+ * Attaches a native `title` tooltip to a truncating element, only while the text is actually cut
+ * off. An unconditional `title` pops a tooltip on every hover, fully readable names included; the
+ * tooltip should only tell the user something the screen does not, appearing when the text is
+ * ellipsed and gone once the drawer is wide enough to read it.
  *
- * An unconditional `title` pops a tooltip on every hover, including names that
- * are fully readable. The tooltip should only ever tell the user something the
- * screen does not: it appears when the text is ellipsed and disappears when the
- * user widens the drawer enough to read it.
- *
- * The attribute is set imperatively rather than through state. Rendering it
- * would mean measure -> setState -> render -> measure, and a ResizeObserver
- * that calls setState during layout is the standard way to get a feedback loop.
- * Nothing else reads this attribute, so writing the DOM directly is both safe
+ * The attribute is set imperatively, not through state: rendering it would mean measure -> setState
+ * -> render -> measure, and a ResizeObserver that calls setState during layout is the standard way
+ * to get a feedback loop. Nothing else reads this attribute, so writing the DOM directly is safe
  * and cheaper.
  *
- * Requires the element to truncate (`overflow: hidden`), which is what makes
- * `scrollWidth > clientWidth` meaningful - without it the element grows and the
- * two are always equal.
+ * Requires the element to truncate (`overflow: hidden`), which makes `scrollWidth > clientWidth`
+ * meaningful; without it the element grows and the two are always equal.
  *
  * @param text The full text. Also the re-measure trigger when it changes.
  */
@@ -35,10 +30,9 @@ export function useOverflowTitle<T extends HTMLElement = HTMLElement>(text: stri
 		const el = ref.current;
 		if (!el) return;
 
-		// +1: scrollWidth and clientWidth are rounded to integers, so a
-		// sub-pixel layout can report a 1px difference with nothing clipped.
-		// Without this margin, rows show a tooltip repeating text already fully
-		// visible - the exact thing this hook exists to avoid.
+		// +1: scrollWidth and clientWidth are rounded to integers, so a sub-pixel layout can report
+		// a 1px difference with nothing clipped, and rows would show a tooltip repeating text
+		// already fully visible.
 		const overflowing = el.scrollWidth > el.clientWidth + 1;
 
 		if (overflowing && text) el.setAttribute("title", text);

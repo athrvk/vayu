@@ -6,21 +6,16 @@
  */
 
 /**
- * Whether the operating system asks for reduced motion.
+ * Whether the operating system asks for reduced motion. The collapsing itself is CSS (a
+ * `@media (prefers-reduced-motion: reduce)` block in `index.css`, beside the rule the in-app toggle
+ * drives); nothing needs JavaScript to stop animating. This exists so the *settings UI* can be
+ * honest: without it the Reduced motion row reads "off" while the app is visibly not animating, and
+ * the only explanation lives in another application's settings.
  *
- * The collapsing itself is CSS - a `@media (prefers-reduced-motion: reduce)`
- * block in `index.css`, alongside the rule the in-app toggle drives. Nothing
- * needs JavaScript to stop animating.
- *
- * This exists so the *settings UI* can be honest. Without it the Reduced motion
- * row reads "off" while the app is visibly not animating, and the only
- * explanation lives in another application's settings.
- *
- * `useSyncExternalStore` rather than state-plus-effect: the media query is an
- * external source of truth, so React should read it directly. The effect
- * version had to re-read on mount to close the gap between the initial render
- * and the subscription, which is a setState inside an effect - a cascading
- * render on every mount, and the lint rule that flags it is right.
+ * `useSyncExternalStore`, not state plus an effect: the media query is an external source of truth,
+ * so React should read it directly. An effect version must re-read on mount to close the gap
+ * between the first render and the subscription, a setState inside an effect: a cascading render on
+ * every mount, which the lint rule rightly flags.
  */
 
 import { useSyncExternalStore } from "react";

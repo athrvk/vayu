@@ -6,15 +6,12 @@
  */
 
 /**
- * A system notification was clicked (issue #1358).
+ * A system notification was clicked (#1358). The main process has already brought the window back;
+ * it cannot open what the notification was about, because the app's surfaces are the renderer's
+ * own, so it echoes the target the renderer sent with the notification and this opens it.
  *
- * The main process has already brought the window back; what it cannot do is
- * open what the notification was about, because the app's surfaces are the
- * renderer's own. So it echoes the target the renderer sent with the
- * notification, and this opens it.
- *
- * Mounted once, in `App`, for the reason `useMenuActions` is: the listener is
- * on the preload bridge, and a second mount would open two tabs per click.
+ * Mounted once, in `App`, for `useMenuActions`' reason: the listener is on the preload bridge, and
+ * a second mount would open two tabs per click.
  */
 
 import { useEffect } from "react";
