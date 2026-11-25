@@ -8,34 +8,28 @@
 /**
  * The schema explorer's tree model, and the index its search box reads.
  *
- * **Children are computed on demand, not built into a tree up front.** A schema
- * is a graph, not a tree: `User.posts` leads to `Post`, whose `author` leads
- * back to `User`. Eagerly materialising that either recurses forever or needs a
- * visited-set whose pruning decides for the user which branch they may open.
- * Asking the schema for one row's children when that row expands has neither
- * problem, and it is also what keeps a GitHub-scale schema off the critical
- * path - nothing is walked that nobody opened.
+ * **Children are computed on demand, not built into a tree up front.** A schema is a graph, not a
+ * tree: `User.posts` leads to `Post`, whose `author` leads back to `User`. Materialising it eagerly
+ * either recurses forever or needs a visited-set whose pruning decides for the user which branch
+ * they may open. Asking for one row's children when it expands has neither problem, and keeps a
+ * GitHub-scale schema off the critical path: nothing nobody opened is walked.
  *
- * **A field row carries the path it was reached by** (`rootPath`), which is the
- * one thing the insertion module cannot recover on its own. `Post.title` says
- * nothing about how to reach a `Post` from `Query`; `[Query.user, User.posts,
- * Post.title]` says exactly that, and it is free here because expanding rows is
- * how the user built it. Rows under the Types branch have no such path -
- * browsing `Post` directly is not a route from any root - and they say so with
- * a null, which is what makes the explorer refuse to insert them loudly rather
- * than guess a path through the graph.
+ * **A field row carries the path it was reached by** (`rootPath`), the one thing the insertion
+ * module cannot recover on its own. `Post.title` says nothing about how to reach a `Post` from
+ * `Query`; `[Query.user, User.posts, Post.title]` says exactly that, and it is free here because
+ * expanding rows is how the user built it. Rows under the Types branch have no such path (browsing
+ * `Post` directly is no route from any root) and say so with a null; insertion then borrows a
+ * one-hop route from the root fields below, or refuses out loud, rather than guessing a path
+ * through the graph.
  *
- * The search index *is* materialised, because a search has to see rows nobody
- * expanded. It is one pass over the type map with no traversal, so it is bounded
- * by the schema's size rather than by its shape.
+ * The search index *is* materialised, because a search has to see rows nobody expanded. It is one
+ * pass over the type map with no traversal, bounded by the schema's size, not its shape.
  *
- * **One route into the graph is materialised too: which root fields return a
- * given type.** It is the answer to the question a type row cannot otherwise
- * answer - "how do I ask for one of these?" - and it is what turns a `Post` row
- * from a dead end into `mutation { createPost { … } }`. It stops at the root
- * operation types on purpose: a one-hop answer is one the user can check at a
- * glance, whereas a search through the whole graph would offer routes nobody
- * chose and would be back to guessing, which is the thing `rootPath` exists to
+ * **One route into the graph is materialised too: which root fields return a given type.** It
+ * answers the question a type row cannot otherwise answer ("how do I ask for one of these?") and
+ * turns a `Post` row from a dead end into `mutation { createPost { … } }`. It stops at the root
+ * operation types on purpose: a one-hop answer is one the user can check at a glance, while a
+ * search through the whole graph would offer routes nobody chose, the guessing `rootPath` exists to
  * avoid. A type nothing returns says so instead of being given a route.
  */
 
@@ -70,12 +64,11 @@ export interface FieldStep {
 	parentTypeName: string;
 	fieldName: string;
 	/**
-	 * The concrete type this step's result must be narrowed to, when the field
-	 * declares an interface or a union and the route wants one of its members.
-	 *
-	 * `Query.node: Node` reaches a `Post`, and the only way to select `title`
-	 * through it is `node(id:) { ... on Post { title } }`. Absent on a step whose
-	 * field already returns what the route wanted, which is most of them.
+	 * The concrete type this step's result must be narrowed to, when the field declares an
+	 * interface or a union and the route wants one of its members. `Query.node: Node` reaches a
+	 * `Post`, and the only way to select `title` through it is
+	 * `node(id:) { ... on Post { title } }`. Absent on a step whose field already returns what the
+	 * route wanted, which is most.
 	 */
 	narrowTo?: string;
 }
@@ -87,9 +80,8 @@ export type SchemaNodeKind =
 	| "input-field"
 	| "enum-value"
 	/**
-	 * The "Returned by" container under a type row. A container like a branch:
-	 * it holds the root fields that answer with this type, and writes nothing
-	 * itself.
+	 * The "Returned by" container under a type row: like a branch, it holds the root fields that
+	 * answer with this type and writes nothing itself.
 	 */
 	| "returned-by"
 	/**
@@ -111,12 +103,10 @@ export interface SchemaArgument {
 }
 
 /**
- * The field an argument belongs to.
- *
- * An argument is not a selection - it is written *onto* a field - so inserting
- * one needs to know which field, and by which route. Carried on the row rather
- * than recovered from it: an argument row's own `name` is the argument's, and
- * reading a field out of it is exactly the misroute this exists to prevent.
+ * The field an argument belongs to. An argument is written *onto* a field, so inserting one needs
+ * to know which field, and by which route. Carried on the row rather than recovered from it: an
+ * argument row's own `name` is the argument's, and reading a field out of it is the misroute this
+ * exists to prevent.
  */
 export interface ArgumentOwner {
 	parentTypeName: string;
@@ -132,22 +122,18 @@ export interface SchemaTreeNode {
 	/** The name shown on the row. */
 	name: string;
 	/**
-	 * Arguments and result type as GraphQL spells them, e.g.
-	 * `(first: Int = 10): [Post!]!`. Empty for rows that have no signature.
-	 *
-	 * The whole signature, still - the row draws `returnType` instead, and this
-	 * is what the search index reads and what the row shows on hover. Folding the
-	 * arguments out of it would silently drop the middle tier of the search.
+	 * Arguments and result type as GraphQL spells them, e.g. `(first: Int = 10): [Post!]!`; empty
+	 * for rows with no signature. The whole signature, though the row draws `returnType` instead:
+	 * the search index reads this and the row shows it on hover, and folding the arguments out
+	 * would silently drop the middle tier of the search.
 	 */
 	signature: string;
 	/**
-	 * The result type as GraphQL spells it (`[Post!]!`), narrowed where the route
-	 * narrows (`Node → Post`). Empty on a row that answers with nothing: a
-	 * branch, a container, a type row, an enum value.
-	 *
-	 * What the row draws, because it is the short half of the signature and the
-	 * half a reader browsing is after. An argument list is unbounded, and drawn
-	 * inline it pushes the result type off the right edge of a 34% pane.
+	 * The result type as GraphQL spells it (`[Post!]!`), narrowed where the route narrows
+	 * (`Node → Post`); empty on a row that answers with nothing (a branch, a container, a type row,
+	 * an enum value). What the row draws: the short half of the signature, and the half a browsing
+	 * reader is after. An argument list is unbounded, and drawn inline it pushes the result type
+	 * off the right edge of a 34% pane.
 	 */
 	returnType: string;
 	/**
@@ -178,12 +164,10 @@ export interface SchemaTreeNode {
 }
 
 /*
- * Row ids, in one place.
- *
- * An id is both the expansion key and the address `treeLocationOf` reconstructs
- * to walk a search result back to its place in the tree. Spelled out at each
- * construction site, the two would be one edit away from disagreeing - and the
- * failure is a Reveal that silently expands nothing.
+ * Row ids, in one place. An id is both the expansion key and the address `treeLocationOf`
+ * reconstructs to walk a search result back to its place in the tree. Spelled out at each
+ * construction site, the two would be one edit from disagreeing, and the failure is a Reveal that
+ * silently expands nothing.
  */
 const branchNodeId = (branch: SchemaBranchId): string => `branch:${branch}`;
 const typeNodeId = (parentId: string, typeName: string): string => `${parentId}/type:${typeName}`;
@@ -204,21 +188,18 @@ const BRANCH_LABEL: Record<SchemaBranchId, string> = {
 	query: "Query",
 	mutation: "Mutation",
 	/*
-	 * Named for what it is rather than for what it holds. The engine's transport
-	 * is a single HTTP exchange, so a subscription can be read here and cannot be
-	 * run - hiding the branch would be the friendlier lie, and a user comparing
-	 * Vayu against a schema they know would conclude the explorer had missed
-	 * something.
+	 * Named for what it is rather than what it holds. The engine's transport is a single HTTP
+	 * exchange, so a subscription can be read here and not run; hiding the branch would be the
+	 * friendlier lie, and a user comparing against a schema they know would conclude the explorer
+	 * had missed something.
 	 */
 	subscription: "Subscription (not executable)",
 	types: "Types",
 };
 
 /**
- * The top-level rows, in reading order.
- *
- * A schema with no mutations has no Mutation branch - an empty branch invites
- * the user to open it and learn nothing.
+ * The top-level rows, in reading order. A schema with no mutations has no Mutation branch: an empty
+ * branch invites the user to open it and learn nothing.
  */
 export function schemaBranches(schema: GraphQLSchema): SchemaTreeNode[] {
 	const branches: SchemaBranchId[] = [];
@@ -246,11 +227,9 @@ export function schemaBranches(schema: GraphQLSchema): SchemaTreeNode[] {
 }
 
 /**
- * Every type the schema declares that the user wrote.
- *
- * Introspection types (`__Schema`, `__Type`, …) are the machinery behind the
- * pane the user is looking at, and the root operation types appear under their
- * own branches already.
+ * Every type the schema declares that the user wrote. Introspection types (`__Schema`, `__Type`, …)
+ * are the machinery behind this pane, and the root operation types already appear under their own
+ * branches.
  */
 function namedTypes(schema: GraphQLSchema): GraphQLNamedType[] {
 	const roots = new Set(
@@ -270,11 +249,9 @@ export interface RootFieldRef {
 	fieldName: string;
 	deprecated: boolean;
 	/**
-	 * The type the route narrows to, or null when the field returns it outright.
-	 *
-	 * Set for a field declaring an interface or union that the wanted type is a
-	 * member of - the route exists, and every selection along it has to say
-	 * `... on <that type>`.
+	 * The type the route narrows to, or null when the field returns it outright. Set for a field
+	 * declaring an interface or union the wanted type is a member of: the route exists, and every
+	 * selection along it has to say `... on <that type>`.
 	 */
 	narrowTo: string | null;
 }
@@ -282,16 +259,15 @@ export interface RootFieldRef {
 /**
  * Which root fields answer with which type, built once per schema.
  *
- * **Query and Mutation only.** A subscription is browsable here and cannot be
- * run (the engine sends one request and reads one response), so offering one as
- * the route to a type would hand the user an operation this app refuses to send.
+ * **Query and Mutation only.** A subscription is browsable here and cannot be run (the engine sends
+ * one request and reads one response), so offering one as the route to a type would hand the user
+ * an operation this app refuses to send.
  *
- * **Only types a selection can be written against are keyed.** A scalar is
- * returned by half the schema and selecting one is not a thing the user does; a
- * `String` row listing 200 root fields would be noise, and inserting "the
- * shortest route to a String" is not a query anybody wanted. This is also what
- * keeps the type-row rules and the tree's own children in step: both ask this
- * one function, so neither can offer a route the other refuses.
+ * **Only types a selection can be written against are keyed.** A scalar is returned by half the
+ * schema and selecting one is not a thing the user does: a `String` row listing 200 root fields
+ * would be noise, and "the shortest route to a String" is not a query anybody wanted. It also keeps
+ * the type-row rules and the tree's own children in step: both ask this one function, so neither
+ * can offer a route the other refuses.
  */
 const returnedByCache = new WeakMap<GraphQLSchema, Map<string, RootFieldRef[]>>();
 
@@ -322,10 +298,9 @@ function returnedByIndex(schema: GraphQLSchema): Map<string, RootFieldRef[]> {
 			};
 			add(named.name, ref);
 			/*
-			 * Still one hop. A field declaring `Node` reaches a `Post` on every
-			 * real request, and keying only the declared type is what left a
-			 * Relay-shaped schema - one `node` field, every concrete type behind
-			 * it - with no route to anything at all.
+			 * Still one hop. A field declaring `Node` reaches a `Post` on every real request; keyed
+			 * only on the declared type, a Relay-shaped schema (one `node` field, every concrete
+			 * type behind it) would have no route to anything.
 			 */
 			if (isInterfaceType(named) || isUnionType(named)) {
 				for (const member of schema.getPossibleTypes(named)) {
@@ -335,11 +310,9 @@ function returnedByIndex(schema: GraphQLSchema): Map<string, RootFieldRef[]> {
 		}
 	}
 	/*
-	 * A route that returns the type outright beats one that narrows to it, so a
-	 * schema declaring both keeps the answer it had before narrowing existed.
-	 * Then a deprecated root field, which is a route the schema is asking
-	 * clients to stop using, goes last and is never the one a click takes.
-	 * `sort` is stable, so within each group the declaration order survives.
+	 * A route that returns the type outright beats one that narrows to it. Then a deprecated root
+	 * field, a route the schema asks clients to stop using, goes last and is never the one a click
+	 * takes. `sort` is stable, so declaration order survives within each group.
 	 */
 	for (const refs of index.values()) {
 		refs.sort(
@@ -359,10 +332,8 @@ export function rootFieldsReturning(schema: GraphQLSchema, typeName: string): Ro
 }
 
 /**
- * The routes from a root operation type to `typeName`, best first.
- *
- * Every route is one step long by construction, which is what makes "the
- * shortest" a fact rather than a heuristic.
+ * The routes from a root operation type to `typeName`, best first. Every route is one step long by
+ * construction, which makes "the shortest" a fact rather than a heuristic.
  */
 export function rootPathsToType(schema: GraphQLSchema, typeName: string): FieldStep[][] {
 	return rootFieldsReturning(schema, typeName).map((ref) => [rootStep(ref)]);
@@ -383,10 +354,9 @@ export function childNodes(schema: GraphQLSchema, node: SchemaTreeNode): SchemaT
 	const members = typeMembers(schema, node);
 
 	/*
-	 * A field's arguments come before the fields of what it returns, because
-	 * that is the order they are written in: `posts(first: 10) { title }`. The
-	 * container is asked for before the type is even resolved, so a field whose
-	 * result type left the schema still lists what it takes.
+	 * A field's arguments come before the fields of what it returns, the order they are written in
+	 * (`posts(first: 10) { title }`). The container is asked for before the type is resolved, so a
+	 * field whose result type left the schema still lists what it takes.
 	 */
 	if (node.kind === "field") {
 		return node.args.length > 0 ? [argumentsNode(node), ...members] : members;
@@ -420,11 +390,9 @@ function branchChildren(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTree
 }
 
 /**
- * The root fields under a "Returned by" container.
- *
- * They carry a one-step `rootPath`, so activating one inserts the operation
- * that reaches the type - the same row, and the same insertion, the user would
- * have found by opening Query themselves.
+ * The root fields under a "Returned by" container. They carry a one-step `rootPath`, so activating
+ * one inserts the operation that reaches the type: the same row and insertion the user would have
+ * found by opening Query.
  */
 function returnedByChildren(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTreeNode[] {
 	if (!node.typeName) return [];
@@ -437,10 +405,9 @@ function returnedByChildren(schema: GraphQLSchema, node: SchemaTreeNode): Schema
 		const row = fieldNode(node.id, owner.name, field, ref.branch, []);
 		if (!ref.narrowTo) return [row];
 		/*
-		 * A narrowed route says so on the row, and leads to the type that was
-		 * asked for rather than the interface the field declares - otherwise
-		 * `node` under `Post` reads as returning a `Node` and expands into
-		 * `Node`'s one field, neither of which is what the row is offering.
+		 * A narrowed route says so on the row and leads to the type asked for, not the interface
+		 * the field declares; otherwise `node` under `Post` reads as returning a `Node` and expands
+		 * into `Node`'s one field, neither of which the row is offering.
 		 */
 		return [
 			{
@@ -459,12 +426,10 @@ function returnedByChildren(schema: GraphQLSchema, node: SchemaTreeNode): Schema
 }
 
 /**
- * The arguments of the field an "Arguments" container hangs under.
- *
- * Read back off the schema rather than off the container's own `args`: the row
- * carries what to *show*, and a row can outlive the schema it was built from by
- * a refresh. Asking the schema means an argument that is gone lists nothing
- * instead of offering an insertion that would not be legal.
+ * The arguments of the field an "Arguments" container hangs under, read off the schema rather than
+ * the container's own `args`: the row carries what to *show*, and can outlive the schema it was
+ * built from by a refresh. So an argument that is gone lists nothing instead of offering an
+ * insertion that would not be legal.
  */
 function argumentChildren(schema: GraphQLSchema, node: SchemaTreeNode): SchemaTreeNode[] {
 	const owner = node.argumentOwner;
@@ -485,10 +450,9 @@ function argumentsNode(fieldRow: SchemaTreeNode): SchemaTreeNode {
 		signature: "",
 		returnType: "",
 		/*
-		 * Empty, though the field's are right there: a container writes nothing
-		 * and answers with nothing, and a row carrying arguments is a row that
-		 * draws their count - which on this one would repeat the count already
-		 * on the field a line above it. Its children read the schema.
+		 * Empty, though the field's are right there: a container writes and answers nothing, and a
+		 * row carrying arguments draws their count, which here would repeat the count on the field
+		 * a line above. Its children read the schema.
 		 */
 		args: [],
 		argumentOwner: {
@@ -507,12 +471,10 @@ function argumentsNode(fieldRow: SchemaTreeNode): SchemaTreeNode {
 }
 
 /**
- * One argument row.
- *
- * Expandable when its type has members of its own, which is what makes an input
- * object worth clicking: `filter: PostFilter` opens into the fields the value
- * has to hold. Its `rootPath` is null - the route on the row is the field's, and
- * it lives in `argumentOwner` where nothing will mistake it for a selection.
+ * One argument row. Expandable when its type has members of its own, which makes an input object
+ * worth clicking: `filter: PostFilter` opens into the fields the value has to hold. Its `rootPath`
+ * is null: the route on the row is the field's, kept in `argumentOwner` where nothing will mistake
+ * it for a selection.
  */
 function argumentNode(
 	parentId: string,
@@ -685,10 +647,9 @@ function typeNode(
 		description: type.description ?? null,
 		deprecationReason: null,
 		branch,
-		// A type with no fields of its own is still expandable when something
-		// returns it: the "Returned by" container is a child like any other, and
-		// a row that holds one and says it holds nothing is the dead chevron
-		// pointing the other way.
+		// A type with no fields of its own is still expandable when something returns it: the
+		// "Returned by" container is a child like any other, and a row holding one that says it
+		// holds nothing is the dead chevron the other way.
 		expandable: hasChildren(type) || rootFieldsReturning(schema, type.name).length > 0,
 		rootPath: null,
 	};
@@ -734,26 +695,21 @@ function argsSignature(args: readonly SchemaArgument[]): string {
 }
 
 /**
- * A default value as GraphQL would print it, or null when the element declares
- * none.
+ * A default value as GraphQL would print it, or null when the element declares none.
  *
- * Read from the literal the schema carries (`default.literal`), not from the
- * runtime `defaultValue`: since graphql 17 anything built from SDL or from an
- * endpoint's introspection stores its default as that literal and leaves
- * `defaultValue` undefined, so reading the old field showed every default as
- * absent. Printing the literal also retires the guess the previous formatter
- * had to make - it took every string bare so that an enum default read as
- * `RELEVANCE` rather than `"RELEVANCE"`, which meant a genuine `String`
- * default printed as something the user could not type back. The literal
- * already carries that distinction.
+ * Read from the literal the schema carries (`default.literal`), not the runtime `defaultValue`:
+ * since graphql 17 anything built from SDL or an endpoint's introspection stores its default as
+ * that literal and leaves `defaultValue` undefined, so reading the old field shows every default as
+ * absent. The literal also keeps an enum default (`RELEVANCE`) apart from a `String` one
+ * (`"RELEVANCE"`), so nothing is guessed and a string default prints as something the user can type
+ * back.
  *
- * `default.value` is the other half of graphql's union, and `defaultValue` the
- * pre-17 spelling of the same thing; a schema built in code can still set
- * either, and graphql's own `isRequiredArgument` reads both, so a row that
- * skipped one would call a defaulted argument required in one file and
- * optional in the next. `valueToLiteral` renders a runtime value, and answers
- * undefined for a value the type cannot hold - a default worth omitting rather
- * than printing wrong.
+ * `default.value` is the other half of graphql's union, and `defaultValue` the pre-17 spelling of
+ * the same thing; a schema built in code can still set either, and graphql's own
+ * `isRequiredArgument` reads both, so a row that skipped one would call a defaulted argument
+ * required in one file and optional in the next. `valueToLiteral` renders a runtime value, and
+ * answers undefined for a value the type cannot hold: a default worth omitting rather than printing
+ * wrong.
  */
 function formatDefault(element: GraphQLArgument | GraphQLInputField): string | null {
 	const declared = element.default;
@@ -765,12 +721,9 @@ function formatDefault(element: GraphQLArgument | GraphQLInputField): string | n
 }
 
 /**
- * One row of the search index: a node, plus each field it matches on,
- * lowercased.
- *
- * Three fields rather than one concatenated haystack, because the ranking turns
- * on *which* of them matched - and folding case here rather than inside the
- * loop keeps a keystroke from re-lowercasing the whole schema.
+ * One row of the search index: a node, plus each field it matches on, lowercased. Three fields
+ * rather than one concatenated haystack, because the ranking turns on *which* matched; folding case
+ * here rather than in the loop keeps a keystroke from re-lowercasing the whole schema.
  */
 interface IndexEntry {
 	node: SchemaTreeNode;
@@ -785,12 +738,11 @@ export type SchemaMatchTier = "name" | "signature" | "description";
 export interface SchemaSearchMatch {
 	node: SchemaTreeNode;
 	/**
-	 * Which haystack the row was found through - not merely which offsets are
-	 * set. Both offsets are reported whatever the tier, so a name match whose
-	 * description happens to mention the term also carries a `descriptionStart`;
-	 * the two questions "where do I mark it" and "why is this row here" have
-	 * different answers, and reading the second off the first is what drew a
-	 * 1,100-character description above the results a user was reading.
+	 * Which haystack the row was found through, not merely which offsets are set. Both offsets are
+	 * reported whatever the tier, so a name match whose description mentions the term also carries
+	 * a `descriptionStart`; "where do I mark it" and "why is this row here" have different answers,
+	 * and reading the second off the first would draw a 1,100-character description above the
+	 * results a user was reading.
 	 */
 	tier: SchemaMatchTier;
 	/** Where the term matched in `node.name`, for highlighting. -1 for no match. */
@@ -806,32 +758,26 @@ export interface SchemaSearchIndex {
 /**
  * Every row the tree can show, flattened once.
  *
- * Fields are indexed under the type that owns them, and a field reachable from a
- * root operation type carries its one-step path - so searching for `search` and
- * pressing Enter inserts a working operation, exactly as expanding Query and
- * clicking it would. A field on a non-root type has no path, and inserting it
- * from the results is refused the same way it is from the Types branch.
+ * Fields are indexed under the type that owns them, and a field reachable from a root operation
+ * type carries its one-step path, so searching for `search` and pressing Enter inserts a working
+ * operation, as expanding Query and clicking it would. A field on a non-root type has no path;
+ * inserting it from the results borrows a route to its owner type (`rootedPath` in
+ * `insert-skeleton.ts`), as from the Types branch.
  *
- * **Every kind `childNodes` can produce is indexed, including the two leaf kinds
- * that lead nowhere.** An enum value and an input-object field are rows the user
- * can reach by expanding, so a search that skips them contradicts the reason
- * this index exists at all - it would answer "Nothing matches" for a name the
- * pane will happily show one click later. Both are named in a schema the way a
- * field is (`RELEVANCE`, `authorId`) and are exactly what someone filling in an
- * argument is looking for.
+ * **Every kind `childNodes` can produce is indexed, including the two leaf kinds that lead
+ * nowhere.** An enum value and an input-object field are rows the user can reach by expanding, so a
+ * search that skipped them would answer "Nothing matches" for a name the pane shows one click
+ * later. Both are named in a schema the way a field is (`RELEVANCE`, `authorId`) and are exactly
+ * what someone filling in an argument looks for. Both carry a null `rootPath`, being unreachable
+ * from a root operation type, and `insertionForNode` refuses both by kind, so a search hit lands on
+ * the same refusal as the tree row.
  *
- * Both carry a null `rootPath`, because neither is reachable from a root
- * operation type - and `insertionForNode` refuses both by kind, so a search hit
- * lands on the same refusal a Types-branch row does rather than guessing a
- * route through the graph.
- *
- * **Arguments are the one kind `childNodes` produces that is not indexed**, and
- * the exception is what the rule above is for rather than a hole in it: an
- * argument is already searchable through the field that takes it, whose whole
- * signature is the middle tier here - typing `first` lists `User.posts`, the row
- * the argument hangs under. Indexed as itself it would be a second `first` row
- * with no address (`treeLocationOf` cannot place one) naming a type that does
- * not declare it, which is a worse answer than the field.
+ * **Arguments are the one kind `childNodes` produces that is not indexed**, and the exception is
+ * what the rule above is for: an argument is already searchable through the field that takes it,
+ * whose whole signature is the middle tier here (typing `first` lists `User.posts`, the row the
+ * argument hangs under). Indexed as itself it would be a second `first` row with no address
+ * (`treeLocationOf` cannot place one) naming a type that does not declare it, a worse answer than
+ * the field.
  */
 export function buildSearchIndex(schema: GraphQLSchema): SchemaSearchIndex {
 	const entries: IndexEntry[] = [];
@@ -884,37 +830,30 @@ function entry(node: SchemaTreeNode): IndexEntry {
 }
 
 /**
- * The index rows matching `term`, in three tiers: name, then signature, then
- * description.
+ * The index rows matching `term`, in three tiers: name, then signature, then description.
  *
- * A signature match is kept but ranked below a name match: searching `Post`
- * should list the `Post` type and `Query.post` before every field that happens
- * to return one, and without the split the type is buried under its own users.
+ * A signature match is kept but ranked below a name match: searching `Post` should list the `Post`
+ * type and `Query.post` before every field that returns one, or the type is buried under its own
+ * users.
  *
- * **Descriptions are a third tier rather than more haystack.** They are prose -
- * whole sentences on a documented schema - so a common word (`the`, `id`,
- * `user`) matches most of the schema through them. Folded into the signature
- * tier that flood would drown the type matches that tier exists to surface;
- * ranked below it, a description hit is the last thing offered rather than the
- * first, which is the order a user reading a flat list expects. The pane still
- * has to say *why* such a row is in the list, since its name is unmarked - that
- * is what `descriptionStart` is for.
+ * **Descriptions are a third tier rather than more haystack.** They are prose (whole sentences on a
+ * documented schema), so a common word (`the`, `id`, `user`) matches most of the schema through
+ * them. Folded into the signature tier, that flood would drown the type matches that tier exists to
+ * surface; ranked below it, a description hit is offered last, the order a user reading a flat list
+ * expects. The pane still has to say *why* such a row is listed, since its name is unmarked: that
+ * is `descriptionStart`.
  *
- * Both offsets are reported whatever tier the row landed in, so a row whose
- * name *and* description mention the term marks both - and the tier is reported
- * beside them, because "mark it here" and "this is why the row is here" are
- * different questions and only the second decides how much of a description the
- * pane owes the reader.
+ * Both offsets are reported whatever tier the row landed in, so a row whose name *and* description
+ * mention the term marks both, and the tier is reported beside them: "mark it here" and "this is
+ * why the row is here" are different questions, and only the second decides how much of a
+ * description the pane owes the reader.
  *
- * **Inside the name tier, the closest match wins** - earliest offset first, and
- * among equal offsets the shortest name. An exact match needs no special case:
- * it is the degenerate one of offset 0 and no characters left over. Without it
- * the tier is in type-map declaration order and the `limit` cuts it arbitrarily,
- * which stopped being survivable once enum values and input fields joined the
- * index: on a schema declaring 60 enums of `POST_*` values before the `Post`
- * type, `post` returned 200 leaf rows and neither `Post` nor `Query.post`. The
- * other two tiers keep declaration order, having no offset into the name to sort
- * on and no measured overflow.
+ * **Inside the name tier, the closest match wins**: earliest offset first, and among equal offsets
+ * the shortest name. An exact match is the degenerate case of offset 0 and nothing left over. In
+ * declaration order, `limit` would cut the tier arbitrarily now that enum values and input fields
+ * are indexed: on a schema declaring 60 enums of `POST_*` values before the `Post` type, `post`
+ * would return 200 leaf rows and neither `Post` nor `Query.post`. The other two tiers keep
+ * declaration order, having no offset into the name to sort on and no measured overflow.
  */
 export function searchSchema(
 	index: SchemaSearchIndex,
@@ -938,11 +877,10 @@ export function searchSchema(
 	}
 
 	/*
-	 * The whole index is scanned before this, rather than stopping at `limit`
-	 * name matches: a better match than the first 200 is routinely declared
-	 * after them, which is the bug above. The scan is two `indexOf` calls per
-	 * entry over an index built once per schema, so it is a keystroke's worth of
-	 * work on a schema of any size the pane can render.
+	 * The whole index is scanned before this, not stopped at `limit` name matches: a better match
+	 * than the first 200 is routinely declared after them (the `POST_*` case above). The scan is
+	 * two `indexOf` calls per entry over an index built once per schema, a keystroke's worth of
+	 * work on any schema the pane can render.
 	 */
 	byName.sort((a, b) => a.matchStart - b.matchStart || a.node.name.length - b.node.name.length);
 
@@ -957,17 +895,14 @@ export interface NameSegments {
 }
 
 /**
- * Split a name around the match `searchSchema` located in it.
+ * Split a name around the match `searchSchema` located in it. Beside the search rather than in the
+ * row that draws it: this is index arithmetic, where an off-by-one silently mangles a name, and
+ * here it is testable without a DOM.
  *
- * Lives beside the search rather than in the row that draws it: this is index
- * arithmetic, where an off-by-one silently mangles a name, and here it is
- * testable without a DOM.
- *
- * A `matchStart` of -1 - a signature-only match, or a row that is not a search
- * result at all - returns the name whole, which is what leaves those rows
- * drawing exactly as they did before highlighting existed. `end` is clamped
- * because the caller owns the term's length and the match's: a term longer than
- * the tail of the name must yield the tail, not an empty slice.
+ * A `matchStart` of -1 (a signature-only match, or a row that is not a search result) returns the
+ * name whole, so those rows draw unhighlighted. `end` is clamped because the caller owns the term's
+ * length and the match's: a term longer than the tail of the name must yield the tail, not an empty
+ * slice.
  */
 export function splitAtMatch(name: string, matchStart: number, length: number): NameSegments {
 	if (matchStart < 0 || matchStart >= name.length || length <= 0) {
@@ -994,16 +929,13 @@ const GROUP_ORDER: readonly SchemaBranchId[] = ["query", "mutation", "subscripti
 /**
  * Search matches under the same headings the tree uses.
  *
- * **A flat list of names is unreadable on a real schema.** Three types can
- * declare a field called `accessScopes`, and flattened they are three identical
- * rows: nothing on screen says which one is reachable from Query, and the user
- * cannot pick. Grouping restores the half of the address the tree carried in its
- * shape - the branch - and the row itself restores the other half by naming its
- * owner.
+ * **A flat list of names is unreadable on a real schema.** Three types can declare a field called
+ * `accessScopes`, and flattened they are three identical rows: nothing says which is reachable from
+ * Query, and the user cannot pick. Grouping restores the half of the address the tree carried in
+ * its shape (the branch), and the row restores the other half by naming its owner.
  *
- * Ranking is *within* a group, not across: the order `searchSchema` decided is
- * preserved as the partition is made, so the closest name match is still the
- * first row of its group and a description match is still last in its own.
+ * Ranking is *within* a group, not across: the partition keeps the order `searchSchema` decided, so
+ * the closest name match is still first in its group and a description match still last in its own.
  */
 export function groupSearchMatches(matches: SchemaSearchMatch[]): SchemaSearchGroup[] {
 	const byBranch = new Map<SchemaBranchId, SchemaSearchMatch[]>();
@@ -1030,20 +962,17 @@ export interface TreeLocation {
 /**
  * Where a search result lives in the tree, so the pane can go there.
  *
- * A search row is built with an index-local id (`search:Post/Post.title`) and
- * cannot be found in the tree under it. Its address is recoverable, though: a
- * field of a root type hangs off that root's branch, and everything else hangs
- * off its owning type under Types - which is exactly the id `childNodes` builds
- * for it. Reconstructing rather than storing keeps one definition of where a row
- * lives; the ids come from the same builders the tree uses, so the two cannot
- * drift.
+ * A search row is built with an index-local id (`search:Post/Post.title`) and cannot be found in
+ * the tree under it. Its address is recoverable: a field of a root type hangs off that root's
+ * branch, and everything else off its owning type under Types, the id `childNodes` builds for it.
+ * Reconstructing rather than storing keeps one definition of where a row lives, and the ids come
+ * from the builders the tree uses, so the two cannot drift.
  *
- * Null for the rows that are not in the tree as themselves: a branch is already
- * the destination, a "Returned by" container exists only under an expanded type
- * row, and so do the "Arguments" container and its rows. An argument is also the
- * one row whose `ownerTypeName` names the type of the *field* it belongs to
- * rather than of itself, so the address below would be a field that does not
- * exist - the misroute this guard is here to refuse rather than compute.
+ * Null for rows that are not in the tree as themselves: a branch is already the destination, and a
+ * "Returned by" container, an "Arguments" container and its rows exist only under an expanded row.
+ * An argument's `ownerTypeName` also names the type of the *field* it belongs to rather than its
+ * own, so the address would be a field that does not exist: the misroute this guard refuses rather
+ * than computes.
  */
 export function treeLocationOf(node: SchemaTreeNode): TreeLocation | null {
 	const typesBranch = branchNodeId("types");
@@ -1078,11 +1007,9 @@ export interface SchemaTreeRow {
 }
 
 /**
- * The rows a user can see, in the order they see them.
- *
- * Children are asked for one expanded row at a time, so a schema nobody has
- * expanded costs one call for its branches - which is what keeps a
- * GitHub-scale schema off the render path.
+ * The rows a user can see, in the order they see them. Children are asked for one expanded row at a
+ * time, so a schema nobody has expanded costs one call for its branches, which keeps a GitHub-scale
+ * schema off the render path.
  */
 export function visibleRows(
 	schema: GraphQLSchema,

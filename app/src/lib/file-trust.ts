@@ -6,19 +6,17 @@
  */
 
 /**
- * The file-reference trust flag (`FileRef.unresolved`, `FormFieldEntry.unresolved`)
- * is the engine's answer for this machine, never the renderer's claim (#2356).
+ * The file-reference trust flag (`FileRef.unresolved`, `FormFieldEntry.unresolved`) is the engine's
+ * answer for this machine, never the renderer's claim (#2356).
  *
- * The engine derives it on every read that hands a body to an editor: `true`
- * for a concrete path it would refuse (neither under an allowed folder nor
- * picked), `false` for an allowed or picked path or one still holding `{{`, no
- * key for an empty path. It ignores the key on every write and send, so no
- * payload carries it: the `without*` helpers strip it on the way out.
+ * The engine derives it on every read that hands a body to an editor: `true` for a concrete path it
+ * would refuse (neither under an allowed folder nor picked), `false` for an allowed or picked path
+ * or one still holding `{{`, no key for an empty path. It ignores the key on every write and send,
+ * so no payload carries it: the `without*` helpers strip it on the way out.
  *
- * The editor writes one value of its own, between engine reads: a pick sets
- * `false`, because the pick is what the main process records as a grant
- * (preload `getFilePath`). A typed or pasted path carries no key until the
- * engine answers for it, and reads as unresolved meanwhile, because the engine
+ * The editor writes one value of its own between engine reads: a pick sets `false`, because the
+ * main process records the pick as a grant (preload `getFilePath`). A typed or pasted path carries
+ * no key until the engine answers for it, and reads as unresolved meanwhile, since the engine
  * refuses it unless it lies under an allowed folder.
  */
 

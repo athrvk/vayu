@@ -6,28 +6,21 @@
  */
 
 /**
- * Format Document for GraphQL, without deleting the user's comments.
+ * Format Document for GraphQL, keeping the user's comments. Not `print(parse(text))`: graphql-js's
+ * AST has nowhere to hang a `#` comment, so that round trip removes every one, and a formatter must
+ * never be destructive. Preserving comments is possible, so withdrawing the command would be the
+ * lazier half of "never lie".
  *
- * It used to be `print(parse(text))`. graphql-js's AST has nowhere to hang a
- * `#` comment, so the round trip silently removed every one of them - a
- * *destructive* formatter, which is the one thing a formatter may never be. The
- * options were to preserve comments or to withdraw the command; preserving them
- * is possible, so withdrawing would have been the lazier half of "never lie".
- *
- * Prettier's GraphQL parser keeps comments and is already in the tree. It is
- * loaded on demand rather than imported at module scope: Format Document is a
- * command most sessions never invoke, and a static import would put the whole
- * formatter in the startup bundle for all of them. Vite splits the dynamic
- * import into its own chunk, so the cost is paid by the first format and not
- * before.
+ * Prettier's GraphQL parser keeps comments and is already in the tree. Loaded on demand, not at
+ * module scope: most sessions never invoke Format Document, and a static import would put the whole
+ * formatter in the startup bundle. Vite splits the dynamic import into its own chunk, so the first
+ * format pays the cost.
  */
 
 /**
- * The formatted document, or null when it cannot be formatted.
- *
- * Null - not the original text - so the caller can skip the edit entirely
- * rather than replace the document with itself, which would push an undo entry
- * for a no-op. Unparseable input lands here, which is the normal mid-edit case.
+ * The formatted document, or null when it cannot be formatted (unparseable input, the normal
+ * mid-edit case). Null, not the original text, so the caller can skip the edit rather than replace
+ * the document with itself, which would push an undo entry for a no-op.
  */
 export async function formatGraphqlDocument(text: string): Promise<string | null> {
 	if (!text.trim()) return null;

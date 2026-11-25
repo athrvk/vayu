@@ -6,40 +6,33 @@
  */
 
 /**
- * What an engine that does not answer means, given the start it failed on.
- *
- * Two readers ask this: the health poll, which turns the answer into the Dock's
- * `starting` / `unreachable`, and the shared query retry policy
- * (`lib/query-client.ts`), which keeps every other query loading rather than
- * failed while the answer is `starting`. They live here rather than in
- * `queries/health.ts` because the query client cannot import that module:
- * `health.ts` reaches `services/api.ts`, which imports the query client.
+ * What an engine that does not answer means, given the start it failed on. Two readers ask: the
+ * health poll, which turns the answer into the Dock's `starting` / `unreachable`, and the shared
+ * query retry policy (`lib/query-client.ts`), which keeps every other query loading rather than
+ * failed while the answer is `starting`. Not in `queries/health.ts`, because the query client
+ * cannot import it: `health.ts` reaches `services/api.ts`, which imports the query client.
  */
 
 import { useEngineStore } from "@/stores/engine-store";
 import { TIMING } from "@/config/timing";
 
 /**
- * What a failed poll means, given the start it failed on.
+ * What a failed poll means, given the start it failed on. A refused connection is the same
+ * transport error either way, so only whether a start is in flight can tell an engine coming up
+ * from one that is not coming. `windowOpenedAt` is `null` when none is, and an engine that answered
+ * with nothing starting is unreachable at once, with no grace: it proved it could serve, so its
+ * silence is news.
  *
- * A refused connection is the same transport error either way, so the failure
- * itself cannot tell an engine coming up from one that is not coming - only
- * whether a start is in flight can. `windowOpenedAt` is `null` when none is, and
- * an engine that answered with nothing starting is unreachable immediately, with
- * no grace: it proved it could serve, so its silence is news.
+ * Judged against the window, not the session's age: the app restarts the engine itself
+ * (`useEngineRestart`), and the process that comes back does the same cold-start work as the first.
+ * Judged by the session, every restart would read as a failure, since an engine (the one it
+ * replaced) had answered (#1227).
  *
- * Judged against the window rather than against the session's own age, because
- * the app itself restarts the engine (`useEngineRestart`) and the process that
- * comes back does the same cold-start work as the first one. Reading the session
- * instead called every restart a failure, since an engine had answered - the one
- * this one replaced (#1227).
- *
- * Derived in the renderer, and this poll is the only thing that classifies. The
- * main process does push its sidecar's lifecycle (`engine:lifecycle`,
- * `hooks/useEngineLifecycle`), but as facts: `engineCrash` explains an
- * unreachable engine and lets the Dock offer Restart, and never writes
- * `engineStatus`. A second writer would have two sources for one label, one of
- * them a push that can arrive before or after the poll that confirms it.
+ * Derived in the renderer, and this poll is the only classifier. The main process pushes its
+ * sidecar's lifecycle (`engine:lifecycle`, `hooks/useEngineLifecycle`) as facts: `engineCrash`
+ * explains an unreachable engine and lets the Dock offer Restart, and never writes `engineStatus`.
+ * A second writer would give one label two sources, one of them a push that can arrive before or
+ * after the poll that confirms it.
  */
 export function engineStatusAfterFailedPoll(
 	windowOpenedAt: number | null,
@@ -62,11 +55,10 @@ export function engineStarting(): boolean {
 }
 
 /**
- * Why the main process left the app without an engine, when that is a reason
- * the user can act on (#2118) - today, another program holding every port the
- * engine may use. `null` when there is none, outside Electron, and when the
- * main process cannot be asked: the poll that asks is already reporting a
- * failure, and a failure to describe it must not add a second one.
+ * Why the main process left the app without an engine, when the user can act on it (#2118): today,
+ * another program holding every port the engine may use. `null` when there is none, outside
+ * Electron, and when the main process cannot be asked: the poll that asks is already reporting a
+ * failure, and failing to describe it must not add a second.
  */
 export async function readEngineStartFailure(): Promise<string | null> {
 	try {

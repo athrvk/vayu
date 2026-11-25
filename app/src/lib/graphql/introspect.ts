@@ -6,25 +6,22 @@
  */
 
 /**
- * Fetches a GraphQL schema by sending the standard introspection query through
- * the engine (`POST /compose` then `POST /execute`), avoiding CORS and giving
- * introspection the same credentials the request itself would send.
+ * Fetches a GraphQL schema by sending the standard introspection query through the engine
+ * (`POST /compose` then `POST /execute`), avoiding CORS and giving introspection the same
+ * credentials the request itself would send.
  *
- * Composition is the engine's (issue #226): the endpoint's `{{variables}}` and
- * its auth block - `inherit` walked through the collection chain, OAuth 2.0
- * included - are resolved by `POST /compose`, and the introspection query is
- * overlaid onto what comes back. Introspection therefore holds no resolution
- * logic of its own. It used to send only the request's header rows, so any
- * endpoint whose credentials came from the Auth panel answered 401 and the
- * schema never loaded (issue #228).
+ * Composition is the engine's (#226): the endpoint's `{{variables}}` and its auth block (`inherit`
+ * walked through the collection chain, OAuth 2.0 included) are resolved by `POST /compose`, and the
+ * introspection query is overlaid onto what comes back, so introspection holds no resolution logic
+ * of its own. Sending only the request's header rows would make any endpoint whose credentials come
+ * from the Auth panel answer 401, and the schema never load (#228).
  *
- * The execution is **transient** (issue #382): the engine runs it in full but
- * records no run row. Reusing `POST /execute` unqualified made every schema
- * load an ordinary design run - a History entry the user never made, holding
- * hundreds of KB of introspection response and the credentials the engine had
- * resolved into the request headers, and evicting a real run each time because
- * retention is count-based. Nothing about a background fetch belongs on disk,
- * so the flag rides every introspection rather than being a caller's choice.
+ * The execution is **transient** (#382): the engine runs it in full but records no run row.
+ * Otherwise every schema load would be an ordinary design run: a History entry the user never made,
+ * holding hundreds of KB of introspection response and the credentials resolved into the request
+ * headers, and evicting a real run each time because retention is count-based. Nothing about a
+ * background fetch belongs on disk, so the flag rides every introspection rather than being a
+ * caller's choice.
  */
 
 import { buildClientSchema, getIntrospectionQuery, type GraphQLSchema } from "graphql";
@@ -36,13 +33,10 @@ import type { ComposedRequest, ExecuteRequestRequest, HeaderLine, KeyValueEntry 
 import { composePathParams } from "@/modules/request-builder/utils/path-variables";
 
 /**
- * Why introspection failed, in the terms the user can act on.
- *
- * Every failure used to arrive as a bare `Error` and collapse into one badge
- * reading "introspection failed", so "your token expired" and "this endpoint
- * does not allow introspection" - opposite fixes - looked identical (#383).
- * The kind is decided here because this is the only layer that still holds the
- * evidence: the HTTP status, the GraphQL error list, the raw body.
+ * Why introspection failed, in terms the user can act on: as one bare error, "your token expired"
+ * and "this endpoint does not allow introspection", opposite fixes, would look identical (#383).
+ * Decided here because this is the only layer that still holds the evidence: the HTTP status, the
+ * GraphQL error list, the raw body.
  */
 export type IntrospectionFailureKind =
 	"auth" | "unsupported" | "http" | "network" | "parse" | "too-large";
@@ -58,12 +52,10 @@ export class IntrospectionError extends Error {
 }
 
 /**
- * The largest introspection response accepted, in characters of the raw body.
- *
- * Generous - a GitHub-scale schema introspects to a few MB - but finite: the
- * parse below is synchronous, so an unbounded response is an unbounded freeze
- * of the renderer's only thread. A cap that is never hit in practice is still
- * the difference between a readable error and a hung window.
+ * The largest introspection response accepted, in characters of the raw body. Generous (a
+ * GitHub-scale schema introspects to a few MB) but finite: the parse below is synchronous, so an
+ * unbounded response is an unbounded freeze of the renderer's only thread, and a cap never hit in
+ * practice is still the difference between a readable error and a hung window.
  */
 export const MAX_INTROSPECTION_CHARS = 20 * 1024 * 1024;
 
@@ -71,14 +63,11 @@ export const MAX_INTROSPECTION_CHARS = 20 * 1024 * 1024;
 const INTROSPECTION_DISABLED = /introspection/i;
 
 /**
- * Yield to the event loop so the browser can paint before the parse.
- *
- * `JSON.parse` of a multi-MB body plus `buildClientSchema` is tens of
- * milliseconds of main thread with no interruption point. Awaiting a macrotask
- * first does not make it cheaper - it makes it *late*, after the frame that
- * shows "loading", instead of inside the same synchronous run as the request
- * that produced it. A worker would move the cost off-thread entirely and is
- * disproportionate for a once-per-endpoint fetch.
+ * Yield to the event loop so the browser can paint before the parse. `JSON.parse` of a multi-MB
+ * body plus `buildClientSchema` is tens of milliseconds of main thread with no interruption point;
+ * awaiting a macrotask first does not make it cheaper but *late*, after the frame that shows
+ * "loading" rather than in the same synchronous run as the request. A worker would move the cost
+ * off-thread and is disproportionate for a once-per-endpoint fetch.
  */
 const yieldToPaint = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -92,10 +81,9 @@ function hostOf(url: string): string {
 }
 
 /**
- * What introspection needs in order to compose: the endpoint as the user typed
- * it, plus the scope that resolves it. Nothing here is resolved by the
- * renderer - `{{vars}}` and `inherit` go over unresolved on purpose, because
- * resolving them twice is the defect `POST /compose` exists to prevent.
+ * What introspection needs in order to compose: the endpoint as the user typed it, plus the scope
+ * that resolves it. The renderer resolves nothing: `{{vars}}` and `inherit` go over unresolved,
+ * because resolving them twice is the defect `POST /compose` exists to prevent.
  */
 export interface IntrospectionTarget {
 	/** Endpoint URL as typed, `{{variables}}` intact. */
@@ -107,9 +95,8 @@ export interface IntrospectionTarget {
 	 */
 	params?: readonly KeyValueEntry[];
 	/**
-	 * Header rows as typed (enabled-only, in order, a repeat repeated),
-	 * `{{variables}}` intact - lines, or the older single-valued record; compose
-	 * reads either.
+	 * Header rows as typed (enabled-only, in order, a repeat repeated), `{{variables}}` intact:
+	 * lines, or the older single-valued record; compose reads either.
 	 */
 	headers: HeaderLine[] | Record<string, string>;
 	/** The request's auth block, `inherit` included. Absent means no auth. */
@@ -120,18 +107,15 @@ export interface IntrospectionTarget {
 }
 
 /**
- * Overlay the introspection query onto a composed payload.
+ * Overlay the introspection query onto a composed payload. Only the three composed fields
+ * introspection needs carry over (url, headers and the concrete auth); the rest is dropped, because
+ * its body is not an introspection query and its script parts belong to sending the request, not to
+ * loading a schema in the background.
  *
- * Only the three composed fields introspection needs are carried over - url,
- * headers and the concrete auth. The rest of the composed request is
- * deliberately dropped: its body is not an introspection query, and its script
- * parts belong to sending the request, not to loading a schema in the
- * background.
- *
- * `environmentId` is the target's, not the composed payload's: it scopes the
- * cookie jar the engine sends through, and dropping it introspected a
- * cookie-session endpoint in the no-environment jar - so the endpoint answered
- * real requests and failed introspection with a confusing auth error (#382).
+ * `environmentId` is the target's, not the composed payload's: it scopes the cookie jar the engine
+ * sends through, and without it a cookie-session endpoint would be introspected in the
+ * no-environment jar, answering real requests and failing introspection with a confusing auth error
+ * (#382).
  */
 export function buildIntrospectionRequest(
 	composed: ComposedRequest,
@@ -171,15 +155,12 @@ function notJson(): IntrospectionError {
 }
 
 /**
- * Compose the endpoint's request without sending it.
- *
- * Its own step because the URL it answers is the one the introspection will
- * contact, and the caller that decides *whether to* (`schema-cache.ts`) has to
- * judge that URL and then send to exactly it - composing twice could give two
- * answers when a variable moved in between. A throw here is the engine's own
- * failure (it is down, the collection is gone, a variable didn't resolve), so
- * its message passes through as the failure rather than being framed as the
- * endpoint being unreachable.
+ * Compose the endpoint's request without sending it. Its own step because the URL it answers is the
+ * one introspection will contact, and the caller that decides *whether to* (`schema-cache.ts`) has
+ * to judge that URL and then send to exactly it; composing twice could give two answers when a
+ * variable moved in between. A throw here is the engine's own failure (it is down, the collection
+ * is gone, a variable did not resolve), so its message passes through as the failure rather than
+ * being framed as the endpoint being unreachable.
  */
 export async function composeIntrospection(target: IntrospectionTarget): Promise<ComposedRequest> {
 	try {
