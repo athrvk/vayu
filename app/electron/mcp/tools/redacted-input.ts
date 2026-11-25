@@ -6,16 +6,15 @@
  */
 
 /**
- * @brief The refusal of a credential slot written with the `<redacted>` marker
- *        (#3553), while the session cannot read secrets.
+ * @brief The refusal of a credential slot written with the `<redacted>` marker (#3553), while the
+ *        session cannot read secrets.
  *
- * A run's record shows a credential as the marker (`runOutputShape`), and an
- * agent that copies a request out of one writes the marker back. Stored, it
- * replaces the credential with a string that is none; sent, it authenticates
- * with that string. Each check judges the slot the way the read that withheld
- * it does (`withhold.ts`), so a field the read never hides - a body, a
- * description - may hold the text, and so may any slot once the user has chosen
- * to reveal secrets: the marker then stands for nothing.
+ * A run's record shows a credential as the marker (`runOutputShape`), and an agent that copies a
+ * request out of one writes the marker back. Stored, it replaces the credential with a string that
+ * is none; sent, it authenticates with that string. Each check judges the slot as the read that
+ * withheld it does (`withhold.ts`), so a field the read never hides (a body, a description) may
+ * hold the text, and so may any slot once the user has chosen to reveal secrets: the marker then
+ * stands for nothing.
  */
 
 import {

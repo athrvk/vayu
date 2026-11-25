@@ -21,13 +21,11 @@ import { boundText } from "./inline-body-bounds.js";
 import { collectionSubtree, readCollectionRows } from "./cascade.js";
 
 /**
- * A collection's binding to a stored OpenAPI document, as the collection row
- * carries it (`openapi`, issue #637).
- *
- * The engine stores `{}` for the unbound state and refuses a non-empty binding
- * that names no `specId`, so a row with a string `specId` is the only shape that
- * means "bound" - and the only one this reads. `specHash` is stamped engine-side
- * from the stored document at bind time; `syncedAt` is set by a spec sync.
+ * A collection's binding to a stored OpenAPI document, as the collection row carries it (`openapi`,
+ * issue #637). The engine stores `{}` for the unbound state and refuses a non-empty binding that
+ * names no `specId`, so a row with a string `specId` is the only shape that means "bound", and the
+ * only one this reads. `specHash` is stamped engine-side from the stored document at bind time;
+ * `syncedAt` is set by a spec sync.
  */
 export interface SpecBinding {
 	specId: string;
@@ -49,19 +47,17 @@ export function readSpecBinding(collection: unknown): SpecBinding | null {
 }
 
 /**
- * The document's text as `get_spec` hands it back, bounded (issue #767's rule
- * applied to a surface whose ceiling is far higher than a response body's).
+ * The document's text as `get_spec` hands it back, bounded (issue #767's rule applied to a surface
+ * whose ceiling is far higher than a response body's). A stored spec may be up to
+ * `maxSpecDocumentBytes`, megabytes for a real one (Stripe's is 12 MB, GitHub's 9.7 MB), so the
+ * whole of it in a tool result exceeds the result token limit outright. The cut is
+ * `MAX_INLINE_BODY_BYTES`, this codebase's answer to "how much text does an automated reader get",
+ * and `contentBytes` beside it is the engine's own count of the whole document, so a truncated read
+ * always says what it is a prefix of.
  *
- * A stored spec may be up to `maxSpecDocumentBytes` - megabytes for a real one:
- * Stripe's is 12 MB, GitHub's 9.7 MB - so the whole of it in a tool result
- * exceeds the result token limit outright. The cut is `MAX_INLINE_BODY_BYTES`,
- * this codebase's existing answer to "how much text does an automated reader
- * get", and `contentBytes` beside it is the engine's own count of the whole
- * document, so a truncated read always says what it is a prefix of.
- *
- * A document with no text answers `content: null` rather than dropping the
- * field: a caller that asked for the content and got a result without it cannot
- * tell "empty" from "this tool decided not to send it".
+ * A document with no text answers `content: null` rather than dropping the field: a caller that
+ * asked for the content and got a result without it cannot tell "empty" from "this tool decided not
+ * to send it".
  */
 export function boundSpecContent(document: unknown): Record<string, unknown> {
 	if (!isRecord(document) || typeof document.content !== "string") {
@@ -72,18 +68,14 @@ export function boundSpecContent(document: unknown): Record<string, unknown> {
 }
 
 /**
- * What a bind did, in a sentence (issue #862).
- *
- * The counts are already in the structured body; this says the two that change
- * what an agent should do next. **The cleared count is named on its own** - it
- * is the one thing a bind takes away rather than adds, and an agent that
- * re-bound a collection to the wrong document should learn that from the reply
- * rather than from a later run reporting no coverage. Unmatched requests are
- * named the same way, because they are what a `sync` would create operations
- * for and are the honest answer to "did this document fit this collection".
- *
- * Defensive about the shape for `readSpecBinding`'s reason: an engine answering
- * something unexpected must cost the caveat, never the result.
+ * What a bind did, in a sentence (issue #862). The counts are already in the structured body; this
+ * says the two that change what an agent should do next. **The cleared count is named on its own**:
+ * it is the one thing a bind takes away rather than adds, and an agent that re-bound a collection
+ * to the wrong document should learn that from the reply rather than from a later run reporting no
+ * coverage. Unmatched requests are named the same way, because they are what a `sync` would create
+ * operations for and are the honest answer to "did this document fit this collection". Defensive
+ * about the shape for `readSpecBinding`'s reason: an engine answering something unexpected must
+ * cost the caveat, never the result.
  */
 export function describeBind(outcome: unknown): string {
 	const count = (value: unknown): number => (typeof value === "number" ? value : 0);
@@ -116,23 +108,18 @@ export function describeBind(outcome: unknown): string {
 }
 
 /**
- * How many entries of one spec-diff bucket a tool result carries (issue #871).
- *
- * Nothing caps the buckets upstream: a document that renamed every operation
- * puts one `changed` entry per request in the collection, and each carries its
- * changed fields. Fifty is the number that keeps the common answer whole while
- * bounding the pathological one, and - the rule the run-report rows follow -
- * the *counts* stay true, so a cut list is visible as one rather than reading
- * as the whole drift.
+ * How many entries of one spec-diff bucket a tool result carries (issue #871). Nothing caps the
+ * buckets upstream: a document that renamed every operation puts one `changed` entry per request in
+ * the collection, each with its changed fields. Fifty keeps the common answer whole while bounding
+ * the pathological one, and, as the run-report rows do, the *counts* stay true, so a cut list is
+ * visible as one rather than reading as the whole drift.
  */
 export const MAX_SPEC_DIFF_ENTRIES = 50;
 
 /**
- * One bucket of `POST /specs/diff`, capped, with what it was cut from.
- *
- * The engine's own count is the second element rather than the length of the
- * first: an agent deciding whether a contract drifted reads the total, and a
- * total read off a cut list would say it did not.
+ * One bucket of `POST /specs/diff`, capped, with what it was cut from. The engine's own count is
+ * the second element rather than the length of the first: an agent deciding whether a contract
+ * drifted reads the total, and a total read off a cut list would say it did not.
  */
 export function boundedBucket(value: unknown, shape: (entry: Record<string, unknown>) => unknown) {
 	const entries = Array.isArray(value) ? value : [];
@@ -147,15 +134,12 @@ export function asRecord(value: unknown): Record<string, unknown> {
 }
 
 /**
- * A changed request, as an agent reads one.
- *
- * `draft` is dropped rather than passed through. It is what an apply *would*
- * write, and `POST /specs/sync` re-reads it off the document being stored
- * rather than being handed it (the same split `POST /specs/match` and
- * `POST /specs/bind` follow), so nothing on either side of this tool consumes
- * it - it would be the heaviest field in the answer and the "written but never
- * read" defect at once. The rendered `current` / `next` pair survives, which is
- * what says *what* moved; the engine already truncates both for display.
+ * A changed request, as an agent reads one. `draft` is dropped rather than passed through: it is
+ * what an apply *would* write, and `POST /specs/sync` re-reads it off the document being stored
+ * rather than being handed it (as `POST /specs/match` and `POST /specs/bind` do), so nothing on
+ * either side of this tool consumes it; it would be the heaviest field in the answer and the
+ * "written but never read" defect at once. The rendered `current` / `next` pair survives and says
+ * *what* moved; the engine already truncates both for display.
  */
 export function changedEntry(item: Record<string, unknown>): Record<string, unknown> {
 	const fields = Array.isArray(item.fields) ? item.fields : [];
@@ -213,17 +197,13 @@ function hasUserEdit(item: Record<string, unknown>): boolean {
 }
 
 /**
- * What a document would change, in a sentence (issue #871).
- *
- * The counts are in the structured body; this says the three things that change
- * what an agent should do next. **Hand-edited fields are named on their own**:
- * they are the one part of a drift that an apply may not take silently, and an
- * agent reading only "6 changed" would propose overwriting somebody's edit.
- * `unmapped` is named for the reason the diff reports it at all - a collection
- * half of which carries no operation is one this answer describes half of.
- *
- * Defensive about the shape for `describeBind`'s reason: an engine answering
- * something unexpected must cost the caveat, never the result.
+ * What a document would change, in a sentence (issue #871). The counts are in the structured body;
+ * this says the three things that change what an agent should do next. **Hand-edited fields are
+ * named on their own**: they are the one part of a drift that an apply may not take silently, and
+ * an agent reading only "6 changed" would propose overwriting somebody's edit. `unmapped` is named
+ * for the reason the diff reports it at all: a collection half of which carries no operation is one
+ * this answer describes half of. Defensive about the shape for `describeBind`'s reason: an
+ * unexpected engine answer must cost the caveat, never the result.
  */
 export function describeSpecDiff(answer: Record<string, unknown>): string {
 	const bucket = (value: unknown): number => (Array.isArray(value) ? value.length : 0);
@@ -276,24 +256,9 @@ function noServerUrlRemedy(skipped: readonly unknown[]): string {
 }
 
 /**
- * What a sync wrote, and what its policy declined, in a sentence (issue #871).
- *
- * **The declined half is not optional.** An agent reading "3 created, 5
- * updated" has been told what a safe apply did and nothing about what it
- * refused, and refusing is the point of the policy: a hand-edited field left
- * alone and a request not deleted are the two outcomes a caller would otherwise
- * assume did not exist. The counts are the engine's `skipped`, so this states
- * them rather than working them out.
- *
- * Defensive about the shape for `describeBind`'s reason: an engine answering
- * something unexpected must cost the caveat, never the result.
- */
-/**
- * What an import did, in a sentence - the caveat beside the JSON.
- *
- * `meta.skipped` is the half worth reading aloud: an import that silently
- * dropped a WebSocket request, a file body or an operation's `default` response
- * looks exactly like one that had none, and every parser tallies those precisely
+ * What an import did, in a sentence: the caveat beside the JSON. `meta.skipped` is the half worth
+ * reading aloud: an import that silently dropped a WebSocket request, a file body or an operation's
+ * `default` response looks exactly like one that had none, and every parser tallies those precisely
  * so a caller does not have to discover the loss later.
  */
 export function describeImport(answer: unknown): string {
@@ -371,15 +336,12 @@ export const importDocumentWriteInput = {
 };
 
 /**
- * The engine payload for an import or its preview.
- *
- * External `$ref`s are not followed: resolving one means fetching a URL or
- * reading a file beside the document, which is the import dialog's business (a
- * URL proxy and a gated IPC) and not an agent's. A document that names another
- * file imports whole and says so - `meta.skipped` carries no `external_ref`
- * count here, because nothing tried. An option the caller did not state is left
- * absent rather than defaulted here: the engine's default is the one the import
- * dialog offers, and restating it would be a second place for it to drift.
+ * The engine payload for an import or its preview. External `$ref`s are not followed: resolving one
+ * means fetching a URL or reading a file beside the document, which is the import dialog's business
+ * (a URL proxy and a gated IPC), not an agent's. A document that names another file imports whole
+ * and says so: `meta.skipped` carries no `external_ref` count here, because nothing tried. An
+ * option the caller did not state is left absent rather than defaulted: the engine's default is the
+ * one the import dialog offers, and restating it would be a second place to drift.
  */
 export function importPayload(args: Record<string, unknown>): Record<string, unknown> {
 	const sourceUrl = str(args, "sourceUrl");
@@ -396,10 +358,9 @@ export function importPayload(args: Record<string, unknown>): Record<string, unk
 }
 
 /**
- * What an import would create, read off the parsed tree without handing the
- * tree back: an OpenAPI spec parses into thousands of requests with bodies,
- * and a preview is asked "what, and what not", which the counts and names
- * answer. `meta` rides whole - it is what the import dialog shows.
+ * What an import would create, read off the parsed tree without handing the tree back: an OpenAPI
+ * spec parses into thousands of requests with bodies, and a preview asks "what, and what not",
+ * which counts and names answer. `meta` rides whole: it is what the import dialog shows.
  */
 export function summarizeImportTree(tree: unknown): Record<string, unknown> {
 	const answer = asRecord(tree);
@@ -456,14 +417,12 @@ interface PreviewedRequest {
 }
 
 /**
- * What binding @p content to @p collectionId would do, storing nothing
- * (the app's Spec tab preview, issue #718 / #869).
- *
- * Describe, then match: the same two reads the Spec tab makes, so the preview
- * and the bind share the engine's reader and its matching rule. `wouldClear` is
- * the tab's "stale stamps": a request that carries an operation today and
- * matches nothing in this document loses it on bind. The engine answers the
- * match in ids, so which of them carry a stamp is read off the subtree's rows.
+ * What binding @p content to @p collectionId would do, storing nothing (the app's Spec tab preview,
+ * issue #718 / #869). Describe, then match: the same two reads the Spec tab makes, so the preview
+ * and the bind share the engine's reader and matching rule. `wouldClear` is the tab's "stale
+ * stamps": a request that carries an operation today and matches nothing in this document loses it
+ * on bind. The engine answers the match in ids, so which of them carry a stamp is read off the
+ * subtree's rows.
  */
 export async function previewSpecBind(
 	client: EngineClient,
@@ -554,6 +513,15 @@ function num(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+/**
+ * What a sync wrote, and what its policy declined, in a sentence (issue #871). **The declined half
+ * is not optional.** An agent reading "3 created, 5 updated" has been told what a safe apply did
+ * and nothing about what it refused, and refusing is the point of the policy: a hand-edited field
+ * left alone and a request not deleted are the two outcomes a caller would otherwise assume did not
+ * exist. The counts are the engine's `skipped`, so this states them rather than working them out.
+ * Defensive about the shape for `describeBind`'s reason: an unexpected engine answer must cost the
+ * caveat, never the result.
+ */
 export function describeSync(answer: unknown, host: McpHost): string {
 	const outcome = asRecord(answer);
 	const count = (value: unknown): number => (typeof value === "number" ? value : 0);

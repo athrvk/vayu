@@ -180,14 +180,13 @@ export const READ_TOOLS: McpTool[] = [
 		handler: async (_args, ctx, signal) => {
 			try {
 				const value = await ctx.client.health(signal);
-				// Anything the outputSchema would reject is wrapped instead of
-				// returned bare. A declared outputSchema makes the SDK reject a
-				// non-error result whose `structuredContent` does not validate (and
-				// one with none at all), and that rejection surfaces as "Tool
-				// get_engine_health has an output schema but no structured content
-				// was provided" - blaming the schema and swallowing the body an
-				// operator needs to see. A mid-restart engine answering 200 with a
-				// bare string or a `status`-less object is exactly when it matters.
+				// Anything the outputSchema would reject is wrapped instead of returned bare. A
+				// declared outputSchema makes the SDK reject a non-error result whose
+				// `structuredContent` does not validate (or has none), and that rejection surfaces
+				// as "Tool get_engine_health has an output schema but no structured content was
+				// provided", blaming the schema and swallowing the body an operator needs to see. A
+				// mid-restart engine answering 200 with a bare string or a `status`-less object is
+				// exactly when it matters.
 				return isEngineHealthShape(value)
 					? structuredResult(value)
 					: structuredResult({ status: "unknown", raw: value ?? null });

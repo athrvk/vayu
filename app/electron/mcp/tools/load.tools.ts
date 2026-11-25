@@ -130,12 +130,11 @@ export const LOAD_TOOLS: McpTool[] = [
 			headers: requestHeadersInput.describe(asOn("run_request")),
 			body: z.string().optional().describe("Request body content."),
 			file: inlineFileInput.describe(asOn("run_request")),
-			// The two sibling tools have carried this text since they existed and
-			// this one carried nothing, so an agent load-testing a GraphQL endpoint
-			// had no way to discover the mode from the schema. The GET transport
-			// rule is part of that: a load run goes out through the event loop's
-			// `wire_url` / `has_wire_body` pair like any other send (#1228), so a
-			// GraphQL run left on the default GET carries no body at all.
+			// The two sibling tools state this text; here it is needed too, so an agent
+			// load-testing a GraphQL endpoint can discover the mode from the schema. The GET
+			// transport rule belongs to it: a load run goes out through the event loop's `wire_url`
+			// / `has_wire_body` pair like any other send (#1228), so a GraphQL run left on the
+			// default GET carries no body at all.
 			bodyType: z
 				.string()
 				.optional()
@@ -225,15 +224,13 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					"Target requests per second (open loop): constant_rps only; the engine refuses it on other modes. With no `mode`, it selects constant_rps."
 				),
-			// Streaming under load (issue #576). Forwarded verbatim and bounded
-			// only by the engine's own `constants::sse` ranges, on the
-			// thresholds precedent: the engine validates before the run row
-			// exists, so a value this schema accepts is one `POST /runs`
-			// accepts, and re-deriving the rule here would be a second copy to
-			// keep in step. A single-target run's caps are refused there without
-			// `stream`, which is what keeps an unbounded run from being mistaken
-			// for a capped one - so this schema does not quietly drop them either.
-			// On a `scenario` they are accepted alone and bound the steps whose
+			// Streaming under load (issue #576). Forwarded verbatim and bounded only by the
+			// engine's own `constants::sse` ranges, on the thresholds precedent: the engine
+			// validates before the run row exists, so a value this schema accepts is one
+			// `POST /runs` accepts, and re-deriving the rule would be a second copy to keep in
+			// step. A single-target run's caps are refused there without `stream`, which keeps an
+			// unbounded run from being mistaken for a capped one, so this schema does not quietly
+			// drop them either. On a `scenario` they are accepted alone and bound the steps whose
 			// saved request streams (#3235); `stream` itself is refused there.
 			stream: z
 				.boolean()
@@ -265,13 +262,11 @@ export const LOAD_TOOLS: McpTool[] = [
 					`In-flight cap (constant_rps only), 1-${MAX_IN_FLIGHT_BOUND}. Default max(targetRps * 10, 1000).`
 				),
 			thresholds: thresholdsInput.describe(asOn("run_collection")),
-			// Shaped exactly as the engine's `monitor` block and forwarded
-			// verbatim. The value bounds are deliberately not mirrored here the
-			// way `thresholds`' are: `monitor.series`' ceiling is the
-			// `monitorMaxSeries` **setting**, so a second copy in this schema
-			// would refuse blocks the engine accepts as soon as the user raises
-			// it - and `validate_run_config` already answers each one by field
-			// name. This layer types the shape; the engine owns the ranges.
+			// Shaped exactly as the engine's `monitor` block and forwarded verbatim. The value
+			// bounds are deliberately not mirrored as `thresholds`' are: `monitor.series`' ceiling
+			// is the `monitorMaxSeries` **setting**, so a second copy would refuse blocks the
+			// engine accepts once the user raises it, and `validate_run_config` already answers
+			// each one by field name. This layer types the shape; the engine owns the ranges.
 			monitor: z
 				.strictObject({
 					url: z
@@ -413,15 +408,13 @@ export const LOAD_TOOLS: McpTool[] = [
 			dataFileName: dataFileNameInput.describe(asOn("run_collection")),
 			dataFileHash: dataFileHashInput.describe(asOn("run_collection")),
 			dataFileCastNumbers: dataFileCastNumbersInput.describe(asOn("run_collection")),
-			// The other shape POST /runs accepts (issue #754). Mutually exclusive
-			// with every single-target argument, which the handler refuses by name
-			// rather than ignoring - see SINGLE_TARGET_LOAD_FIELDS.
-			//
-			// No `iterations` inside the block, unlike the design-mode runner's:
-			// a load run reads the *top-level* `iterations` (`scenario_load.cpp`
-			// takes it from the run config), and `scenario.iterations` is the
-			// design runner's per-run pass count, which this executor never looks
-			// at. Offering it here would be an argument written and never read.
+			// The other shape POST /runs accepts (issue #754). Mutually exclusive with every
+			// single-target argument, which the handler refuses by name rather than ignoring (see
+			// SINGLE_TARGET_LOAD_FIELDS). No `iterations` inside the block, unlike the design-mode
+			// runner's: a load run reads the *top-level* `iterations` (`scenario_load.cpp` takes it
+			// from the run config), and `scenario.iterations` is the design runner's per-run pass
+			// count, which this executor never looks at, so offering it here would be an argument
+			// written and never read.
 			scenario: z
 				.strictObject({
 					collectionId: z
@@ -438,12 +431,10 @@ export const LOAD_TOOLS: McpTool[] = [
 					"Load-test a collection's ordered sequence instead of one target. Cannot be combined with url/requestId or any single-target field. `concurrency` is the number of virtual users, each walking the whole plan with its own cookies; `iterations` (top level) is the total passes across all of them in iterations mode. Modes: constant_concurrency (default), ramp_up, iterations - constant_rps and capacity are refused, with the engine's reasoning."
 				),
 			// The run-level override block issue #1495 defines on `POST /runs`
-			// (`validate_elements_run_override`), now reaching a single target's
-			// own elements too (issue #1594), the same way it already reaches a
-			// scenario's. The engine's contract also takes `includeScriptTime`
-			// and `seed`, but no control anywhere in the product - app or MCP -
-			// sends either today, so they stay off this schema until something
-			// actually needs them.
+			// (`validate_elements_run_override`), reaching a single target's own elements too
+			// (issue #1594) as it reaches a scenario's. The engine's contract also takes
+			// `includeScriptTime` and `seed`, but nothing in the product (app or MCP) sends either,
+			// so they stay off this schema until something needs them.
 			elements: z
 				.strictObject({
 					timers: elementsTimersInput().describe(asOn("run_collection")),
@@ -587,13 +578,11 @@ export const LOAD_TOOLS: McpTool[] = [
 			// opt-out - see SINGLE_TARGET_LOAD_FIELDS.
 			applyDefaultHeaderOptOuts(args, payload);
 
-			// A saved request's unmarked pre-request script does not run under
-			// load unless this run's own `elements.scripts` forces every script
-			// inline (issue #1594) - `composeLoadRunRequest` already folds that
-			// override into `droppedPreRequestScripts` itself (0 whenever
-			// "allInline" applies), so a non-zero count here is always real. Say
-			// so rather than let an agent believe the request was prepared the
-			// way a Send prepares it.
+			// A saved request's unmarked pre-request script does not run under load unless this
+			// run's own `elements.scripts` forces every script inline (issue #1594);
+			// `composeLoadRunRequest` already folds that override into `droppedPreRequestScripts`
+			// (0 whenever "allInline" applies), so a non-zero count here is always real. Say so
+			// rather than let an agent believe the request was prepared as a Send prepares it.
 			const caveat =
 				composed.droppedPreRequestScripts > 0
 					? `\n\nNote: ${composed.droppedPreRequestScripts} pre-request script(s) on this saved request were NOT applied - they are not marked to run inline, and this run's own elements.scripts is not "allInline", so anything they sign or rewrite is missing from the requests this run sends.`

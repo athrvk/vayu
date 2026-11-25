@@ -21,17 +21,13 @@ const FORM_BODY_MODES = new Set(["form-data", "x-www-form-urlencoded"]);
 /**
  * The body an agent described, in the shape the engine reads.
  *
- * Both form modes carry their content as `fields` - the same
- * `{key, value, enabled}` rows the request builder and every importer produce
- * - so a `body` string is split on `&` into entries rather than handed over
- * whole. These two tools have advertised both modes all along while emitting
- * `{ mode, content }`, which the engine reads no `fields` from: before issue
- * #381 that meant an empty body on the wire, and now it is a refusal. Either
- * way the mode was documented and unusable; splitting here makes the schema's
- * promise true.
+ * Both form modes carry their content as `fields` (the `{key, value, enabled}` rows the request
+ * builder and every importer produce), so a `body` string is split on `&` into entries rather than
+ * handed over whole: `{ mode, content }` is a shape the engine reads no `fields` from, which was an
+ * empty body on the wire before issue #381 and is a refusal now.
  *
- * Every field produced here is a **text** part. A `form-data` file part
- * (issue #393) has no spelling in a `key=value` string, and the tools say so.
+ * Every field produced here is a **text** part. A `form-data` file part (issue #393) has no
+ * spelling in a `key=value` string, and the tools say so.
  */
 export function bodyPayload(bodyType: string, content: string): Record<string, unknown> {
 	if (!FORM_BODY_MODES.has(bodyType)) return { mode: bodyType, content };
