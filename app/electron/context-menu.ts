@@ -6,50 +6,41 @@
  */
 
 /**
- * The menu a right-click opens, everywhere Monaco does not draw one (#1359).
+ * The menu a right-click opens, everywhere Monaco does not draw one (#1359). Electron renders no
+ * context menu of its own, so without this a right-click on the URL bar, a header value, a variable
+ * row or a dialog input shows nothing: no mouse route to Paste in the field the app is pasted into
+ * most, and a body pane (Monaco, with its own menu) that behaves differently from the header row
+ * above it, which is breakage, not design.
  *
- * Electron renders no context menu of its own, so until this existed a
- * right-click on the URL bar, a header value, a variable row or a dialog input
- * showed nothing: there was no mouse route to Paste in the field the app is
- * pasted into most. Monaco carries its own menu, which made the body pane behave
- * differently from the header row above it - breakage rather than design.
+ * Two processes hold half the answer each, which is what this module's shape is about:
  *
- * Two processes hold half the answer each, which is what this module's shape is
- * about:
+ * - **Chromium knows the editing state.** `isEditable`, the selection, the link under the pointer
+ *   and which of Cut / Copy / Paste can act right now arrive in the `context-menu` params. Nothing
+ *   here re-derives them.
+ * - **The renderer knows the Vayu meaning.** That the field is the URL bar, that the pointer is on
+ *   a `{{token}}`, that this is a Monaco editor: none of it is visible from the main process. The
+ *   renderer announces it from its own `contextmenu` listener (see `src/lib/context-menu.ts`), and
+ *   this module consumes that announcement once.
  *
- * - **Chromium knows the editing state.** `isEditable`, the selection, the link
- *   under the pointer and which of Cut / Copy / Paste can act right now arrive
- *   in the `context-menu` params. Nothing here re-derives them.
- * - **The renderer knows the Vayu meaning.** That the field is the URL bar, that
- *   the pointer is on a `{{token}}`, that this is a Monaco editor: none of it is
- *   visible from the main process. The renderer announces it from its own
- *   `contextmenu` listener (see `src/lib/context-menu.ts`), and this module
- *   consumes that announcement once.
- *
- * Kept out of main.ts so it can be tested, the way `window-navigation.ts` is:
- * main.ts creates windows and starts the engine at import time, which no unit
- * test can do. `menuTemplateFor` is the whole decision and takes no Electron
- * type, so every row of the table in #1359 is a unit test rather than a
- * screenshot.
+ * Kept out of main.ts so it can be tested, as `window-navigation.ts` is: main.ts creates windows
+ * and starts the engine at import time, which no unit test can do. `menuTemplateFor` is the whole
+ * decision and takes no Electron type, so every row of the table in #1359 is a unit test rather
+ * than a screenshot.
  */
 
 import { isBrowsableUrl } from "./external-url.js";
 
 /**
- * Where the pointer is, in Vayu's terms rather than Chromium's.
- *
- * `own-menu` marks a surface that draws its own right-click menu - a collection
- * row, a tab (#1360) - and so wants none from here. Monaco keeps its own name
- * because it is not one of ours; both are answered the same way.
+ * Where the pointer is, in Vayu's terms rather than Chromium's. `own-menu` marks a surface that
+ * draws its own right-click menu (a collection row, a tab, #1360) and so wants none from here.
+ * Monaco keeps its own name because it is not one of ours; both are answered the same way.
  */
 export type ContextKind = "url-bar" | "monaco" | "own-menu";
 
 /**
- * What the renderer says sits under the pointer.
- *
- * Only what the main process cannot see itself: a read-only surface needs no
- * marker, because `selectionText` already answers it, and neither does a plain
- * editable field, because `isEditable` does.
+ * What the renderer says sits under the pointer: only what the main process cannot see. A read-only
+ * surface needs no marker, because `selectionText` answers it, and neither does a plain editable
+ * field, because `isEditable` does.
  */
 export interface ContextTarget {
 	/** The marked ancestor's kind, or `null` where there is no marker. */
@@ -82,14 +73,11 @@ export type ContextCommand =
 	| { type: "open-link"; url: string };
 
 /**
- * One row of the menu.
- *
- * The edit items are Electron roles rather than handlers of ours, for the same
- * reason the application menu's Edit items are (`main.ts`): a role edits through
- * the focused web contents, so the field's own undo history stays intact, and
- * the OS supplies the accelerator it prints beside the label. An app-drawn
- * accelerator here would be a second source of truth for a chord the platform
- * already owns.
+ * One row of the menu. The edit items are Electron roles, not handlers of ours, for the reason the
+ * application menu's Edit items are (`main.ts`): a role edits through the focused web contents, so
+ * the field's own undo history stays intact, and the OS supplies the accelerator it prints beside
+ * the label. An app-drawn accelerator here would be a second source of truth for a chord the
+ * platform already owns.
  */
 export type ContextMenuItem =
 	| { kind: "role"; role: "cut" | "copy" | "paste" | "selectAll"; enabled: boolean }
@@ -113,13 +101,11 @@ function commandWord(stripped: string): string {
 const CURL_EXE = /^(?:.*[\\/])?curl\.exe$/;
 
 /**
- * Whether the clipboard holds a command the request builder can import.
- *
- * Duplicated from `detectCommand` in `src/services/curl/detect-command.ts`,
- * whose parser this offer hands the text to: `tsconfig.node.json` has no `@/*`
- * mapping, so the main process cannot import a renderer module (see
- * `tsconfig.electron-test.json` for why that boundary is deliberate). The two
- * copies are held together by a test that drives both with the same table.
+ * Whether the clipboard holds a command the request builder can import. Duplicated from
+ * `detectCommand` in `src/services/curl/detect-command.ts`, whose parser this offer hands the text
+ * to: `tsconfig.node.json` has no `@/*` mapping, so the main process cannot import a renderer
+ * module (`tsconfig.electron-test.json` says why that boundary is deliberate). A test drives both
+ * copies with the same table.
  */
 export function commandOnClipboard(text: string): ClipboardCommand | null {
 	const stripped = text.trim().replace(/^[$>]\s+/, "");
@@ -130,12 +116,9 @@ export function commandOnClipboard(text: string): ClipboardCommand | null {
 }
 
 /**
- * Validate an announcement from the renderer.
- *
- * A menu decoration is not worth throwing over: an announcement that does not
- * parse means the extras are absent and the plain edit menu still opens, which
- * is the same outcome as a right-click on an unmarked field. Anything wider
- * would let a malformed message cost the user their menu.
+ * Validate an announcement from the renderer. A menu decoration is not worth throwing over: an
+ * announcement that does not parse means the extras are absent and the plain edit menu still opens,
+ * as on an unmarked field. Anything wider would let a malformed message cost the user their menu.
  */
 export function readContextTarget(value: unknown): ContextTarget {
 	if (typeof value !== "object" || value === null) return NO_CONTEXT_TARGET;
@@ -170,11 +153,10 @@ async function editableGroups(
 	const { canCut, canCopy, canPaste, canSelectAll } = params.editFlags;
 	const extras: ContextMenuItem[] = [];
 
-	// The URL bar already imports a curl or wget command that is *pasted* into it
-	// (`UrlInput.tsx`). This makes that behaviour discoverable rather than adding
-	// a second one, and it is offered nowhere else: a header value holding a
-	// command is text, not a request. Read behind that test rather than before
-	// it, so an ordinary right-click does not touch the clipboard at all.
+	// The URL bar already imports a curl or wget command *pasted* into it (`UrlInput.tsx`); this
+	// makes that discoverable rather than adding a second behaviour, and is offered nowhere else,
+	// since a header value holding a command is text, not a request. Read behind that test, not
+	// before it, so an ordinary right-click never touches the clipboard.
 	const clipboardText = target.kind === "url-bar" ? await readClipboardText() : "";
 	const command = clipboardText ? commandOnClipboard(clipboardText) : null;
 	if (command) {
@@ -200,21 +182,18 @@ async function editableGroups(
 }
 
 /**
- * The menu for one right-click, or an empty template where the app shows none.
- *
- * Empty in two cases, and they are different refusals: inside a Monaco editor
- * the editor's own menu is the answer, and on empty chrome with nothing
- * selected there is nothing to offer, which is what a native app does.
+ * The menu for one right-click, or an empty template where the app shows none. Empty in two cases,
+ * and they are different refusals: inside a Monaco editor the editor's own menu is the answer, and
+ * on empty chrome with nothing selected there is nothing to offer, which is what a native app does.
  */
 export async function menuTemplateFor(
 	params: ContextMenuParams,
 	target: ContextTarget,
 	readClipboardText: () => Promise<string>
 ): Promise<ContextMenuItem[]> {
-	// A surface that draws its own menu gets no second one over it. The renderer
-	// cannot suppress this from its side: Chromium raises the `context-menu`
-	// event on the web contents whatever the page's own listener does with the
-	// DOM event, so the marker is the only refusal that reaches here.
+	// A surface that draws its own menu gets no second one over it. The renderer cannot suppress
+	// this itself: Chromium raises `context-menu` on the web contents whatever the page's listener
+	// does with the DOM event, so the marker is the only refusal that reaches here.
 	if (target.kind === "monaco" || target.kind === "own-menu") return [];
 
 	const linkGroup: ContextMenuItem[] =
@@ -249,13 +228,11 @@ export async function menuTemplateFor(
 }
 
 /**
- * The last announcement, consumed by the menu it belongs to.
- *
- * Consume-once is the whole point: the renderer announces from its `contextmenu`
- * listener, which runs before the native event this pairs it with, so the value
- * waiting here is always the one for the click being answered. Clearing it on
- * read means a native event that arrives without an announcement gets the plain
- * menu rather than the previous click's extras.
+ * The last announcement, consumed by the menu it belongs to. Consume-once is the whole point: the
+ * renderer announces from its `contextmenu` listener, which runs before the native event this pairs
+ * it with, so the value waiting here is always the one for the click being answered. Clearing it on
+ * read means a native event that arrives without an announcement gets the plain menu, not the
+ * previous click's extras.
  */
 export interface ContextTargetStore {
 	announce(value: unknown): void;
@@ -284,12 +261,10 @@ export interface CommandEffects {
 }
 
 /**
- * Run one menu command.
- *
- * The two link actions are the main process's own; the two Vayu offers are the
- * renderer's, because importing a command rewrites the request in the store and
- * editing a variable opens the popover the token opens on click. Main forwards
- * them rather than reaching for a second way to do either.
+ * Run one menu command. The two link actions are the main process's own; the two Vayu offers are
+ * the renderer's, because importing a command rewrites the request in the store and editing a
+ * variable opens the popover the token opens on click. Main forwards them rather than reaching for
+ * a second way to do either.
  */
 export function runContextCommand(command: ContextCommand, effects: CommandEffects): void {
 	switch (command.type) {
@@ -324,12 +299,10 @@ export interface ContextMenuDeps {
 }
 
 /**
- * A template row in the shape `Menu.buildFromTemplate` takes.
- *
- * Spelled out rather than imported from `electron` so the decision above stays
- * free of Electron's types and its items stay comparable by value: a `click`
- * closure is the one thing a test cannot assert, which is why it is attached
- * here and nowhere earlier.
+ * A template row in the shape `Menu.buildFromTemplate` takes, spelled out rather than imported from
+ * `electron` so the decision above stays free of Electron's types and its items stay comparable by
+ * value. A `click` closure is the one thing a test cannot assert, which is why it is attached here
+ * and nowhere earlier.
  */
 export interface ElectronMenuItem {
 	role?: "cut" | "copy" | "paste" | "selectAll";
@@ -352,14 +325,11 @@ export function toElectronTemplate(
 }
 
 /**
- * Answer this window's right-clicks with the menu the pointer's context earns.
- *
- * The announcement is taken synchronously, before the clipboard read the URL
- * bar's offer may need: consume-once has to pair with the click that raised the
- * event, and Electron 44's `clipboard.readText` is a promise, so anything after
- * the await belongs to a later turn. A clipboard that refuses to be read costs
- * the offer and not the menu, for the reason `readContextTarget` gives - a
- * decoration is not worth a right-click that opens nothing.
+ * Answer this window's right-clicks with the menu the pointer's context earns. The announcement is
+ * taken synchronously, before the clipboard read the URL bar's offer may need: consume-once has to
+ * pair with the click that raised the event, and Electron 44's `clipboard.readText` is a promise,
+ * so anything after the await belongs to a later turn. A clipboard that refuses to be read costs
+ * the offer and not the menu, for the reason `readContextTarget` gives.
  */
 export function installContextMenu(contents: ContextMenuContents, deps: ContextMenuDeps): void {
 	contents.on("context-menu", (_event, params) => {

@@ -6,29 +6,18 @@
  */
 
 /**
- * Map OS system accent colors to Vayu's fixed accent color schemes.
+ * Maps an OS accent color (hex) to the nearest of Vayu's 8 fixed accent schemes by hue. Arbitrary
+ * accents are not allowed: each scheme's HSL values are hand-tuned to meet accessibility contrast
+ * rules. Low-saturation accents (like Windows Graphite) map to the graphite scheme, itself
+ * desaturated as the neutral choice.
  *
- * Windows and macOS expose the system accent color to applications, but Vayu
- * does not allow arbitrary accent colors - it has 8 hand-tuned schemes with
- * specific HSL values that satisfy accessibility contrast rules. This module
- * maps an OS accent (as a hex string) to the closest scheme by hue.
- *
- * The mapping is purely hue-based: extract HSL from the hex, find the nearest
- * reference hue, and apply that scheme. Low-saturation accents (like Windows
- * Graphite) map to the graphite scheme, which is itself desaturated as the
- * neutral choice.
- *
- * **Platform-gated**: the accent bridge installs nothing on Linux, where no
- * system accent color exists, and Electron's systemPreferences.getAccentColor()
- * returns undefined anyway.
+ * **Platform-gated**: the accent bridge installs nothing on Linux, which has no system accent color
+ * and where `systemPreferences.getAccentColor()` returns undefined anyway.
  *
  * Kept out of main.ts so it can be unit-tested without importing Electron.
  */
 
-/**
- * Reference hues for the 8 color schemes, extracted from app/src/index.css.
- * These are the hue values in degrees from the light-mode --primary HSL.
- */
+/** Each scheme's light-mode `--primary` hue in degrees, from app/src/index.css. */
 const SCHEME_HUES: Record<string, number> = {
 	sunset: 24,
 	sky: 192,
@@ -43,13 +32,10 @@ const SCHEME_HUES: Record<string, number> = {
 type ColorScheme = keyof typeof SCHEME_HUES;
 
 /**
- * Convert hex color (#rrggbbaa or #rrggbb) to HSL.
- *
- * Returns [h, s, l] where h is in degrees (0-360), s and l are in percent (0-100).
- * Throws if the hex string is not valid.
+ * `#rrggbbaa` or `#rrggbb` to `[h, s, l]`: h in degrees (0-360), s and l in percent (0-100). Throws
+ * on an invalid string.
  */
 function hexToHsl(hex: string): [number, number, number] {
-	// Remove # and convert to RGB
 	const cleaned = hex.replace(/^#/, "");
 	let r: number, g: number, b: number;
 
@@ -58,7 +44,6 @@ function hexToHsl(hex: string): [number, number, number] {
 		g = parseInt(cleaned.substring(2, 4), 16) / 255;
 		b = parseInt(cleaned.substring(4, 6), 16) / 255;
 	} else {
-		// Invalid format
 		throw new Error(`Invalid hex color format: ${hex}`);
 	}
 
@@ -88,14 +73,8 @@ function hexToHsl(hex: string): [number, number, number] {
 	return [h * 360, s * 100, l * 100];
 }
 
-/**
- * Find the nearest hue match in degrees.
- *
- * Handles wrap-around at 360/0 (red). Returns the closest hue by absolute
- * difference, accounting for the circular nature of hue space.
- */
+/** The scheme whose reference hue is nearest, measured around the circle (red wraps at 360/0). */
 function findNearestHue(targetHue: number): ColorScheme {
-	// Normalize target to 0-360
 	const normalized = ((targetHue % 360) + 360) % 360;
 
 	let nearest: ColorScheme = "graphite";
@@ -105,7 +84,6 @@ function findNearestHue(targetHue: number): ColorScheme {
 		// Skip graphite in the initial hue-based search (it's the fallback)
 		if (scheme === "graphite") continue;
 
-		// Calculate circular distance
 		let distance = Math.abs(normalized - refHue);
 		if (distance > 180) {
 			distance = 360 - distance;
@@ -121,11 +99,8 @@ function findNearestHue(targetHue: number): ColorScheme {
 }
 
 /**
- * Map OS accent color hex string to the nearest ColorScheme.
- *
- * Low saturation accents (s < 15%) map to graphite regardless of hue,
- * since graphite is the desaturated/neutral scheme. Otherwise, hue determines
- * the match by finding the closest reference hue.
+ * The scheme nearest an OS accent hex. Saturation under 15% maps to graphite, the neutral scheme,
+ * whatever the hue.
  */
 export function accentHexToColorScheme(hex: string | null | undefined): ColorScheme | null {
 	if (!hex || typeof hex !== "string") return null;
@@ -133,12 +108,10 @@ export function accentHexToColorScheme(hex: string | null | undefined): ColorSch
 	try {
 		const [h, s] = hexToHsl(hex);
 
-		// Low-saturation accents map to graphite (the neutral scheme)
 		if (s < 15) {
 			return "graphite";
 		}
 
-		// Hue-based matching for everything else
 		return findNearestHue(h);
 	} catch {
 		return null;
@@ -146,16 +119,12 @@ export function accentHexToColorScheme(hex: string | null | undefined): ColorSch
 }
 
 /**
- * Bridge OS system accent color changes to the renderer.
+ * Forwards OS accent changes to the renderer. Installed once per process, not per window, because
+ * `systemPreferences` is a process-wide emitter; the live window is read at send time, so a
+ * replacement window (macOS dock reopen) gets the first change after it opens.
  *
- * Installs once per process (not per window): systemPreferences is a
- * process-wide emitter. Reads the live window via a callback at send time,
- * so a replacement window (macOS dock reopen) receives the first accent
- * change after it existed.
- *
- * **Entirely gated by platform:** returns a no-op on any platform other than
- * Windows or macOS. Nothing is installed, no listener is registered, nothing
- * sends.
+ * **Entirely gated by platform:** a no-op on anything but Windows and macOS. Nothing is installed,
+ * no listener registered, nothing sent.
  */
 export interface AccentBridgeDeps {
 	/** Defaults to the host's. Injected so both branches can be tested. */
@@ -164,10 +133,7 @@ export interface AccentBridgeDeps {
 	getAccentColor: () => string | null;
 	/** Subscribe to changes. Callback fires when the accent changes. */
 	onAccentChanged: (callback: () => void) => () => void;
-	/**
-	 * The window as it is right now, or null. Read per call rather than
-	 * captured: on macOS the app outlives its window.
-	 */
+	/** The current window, or null; read per call, as on macOS the app outlives its window. */
 	window: () => { webContents: { send: (channel: string, data: unknown) => void } } | null;
 	/** Log function for warnings/errors. */
 	log: (msg: string, fields?: Record<string, unknown>) => void;
@@ -179,12 +145,10 @@ export function installAccentBridge(deps: AccentBridgeDeps): () => void {
 	const platform = deps.platform ?? process.platform;
 	const isSupported = platform === "win32" || platform === "darwin";
 
-	// No-op on unsupported platforms (Linux, etc.)
 	if (!isSupported) {
 		return () => {}; // Empty cleanup
 	}
 
-	// Subscribe to accent changes and forward to renderer
 	const unsubscribe = deps.onAccentChanged(() => {
 		const win = deps.window();
 		if (!win) return;
