@@ -6,16 +6,12 @@
  */
 
 /**
- * One row of the variables table (`VariableTableEditor`).
- *
- * `memo`-wrapped for the same reason `KeyValueRow` is (issue #1716): the table
- * used to render every row inline in a `.map`, so `updateVariable` rebuilding
- * the whole array on every keystroke re-rendered every row's `Input`, `Select`
- * and `SecretInput` on every character typed in any one of them. Extracting
- * the row and keying it by `variable.id` is what gives `memo` something
- * stable to compare against - the `id` and, for the row that changed, its own
- * `item` are the only props that move on a keystroke; every other row keeps
- * the identical `item` reference `VariableTableEditor` handed it last render.
+ * One row of the variables table (`VariableTableEditor`), `memo`-wrapped like `KeyValueRow`
+ * (#1716): `updateVariable` rebuilds the whole array on every keystroke, so unmemoised every row's
+ * `Input`, `Select` and `SecretInput` would re-render on every character typed in any one of them.
+ * Keying the row by `variable.id` gives `memo` something stable to compare: the `id` and, for the
+ * row that changed, its own `item` are the only props that move on a keystroke; every other row
+ * keeps the identical `item` reference `VariableTableEditor` handed it last render.
  */
 
 import { memo } from "react";
@@ -60,9 +56,8 @@ interface VariableRowProps {
 	onRemove: (id: string) => void;
 	onBlur: () => void;
 	/**
-	 * The scope this table edits, for the "Copy for agent" line; null while the
-	 * environment or collection it names is not loaded. Memoised by the parent
-	 * so it never defeats `memo`.
+	 * The scope this table edits, for the "Copy for agent" line; null while its environment or
+	 * collection is not loaded. Memoised by the parent, so it never defeats `memo`.
 	 */
 	scope: VariableScope | null;
 	/**
@@ -84,55 +79,48 @@ function VariableRow({
 }: VariableRowProps) {
 	const { copy, copied } = useCopy({ feedback: "icon" });
 	/*
-	 * A row is a secret field once it is persisted: an unsaved blank row masks
-	 * nothing, because there is no stored secret to protect and typing into a
-	 * password field you just created only hides your own keystrokes.
+	 * A row is a secret field once persisted: an unsaved blank row has no stored secret to protect,
+	 * and a password field you just created only hides your own keystrokes.
 	 */
 	const isSecretField = variable.secret && !variable.isNew;
 	/*
-	 * A secret never reaches the time card (#1786), masked or not: an unsaved
-	 * secret row shows its value plainly while it is typed, but the card is a
-	 * tooltip a screen share or a screenshot can catch.
+	 * A secret never reaches the time card (#1786), masked or not: an unsaved secret row shows its
+	 * value while typed, but the card is a tooltip a screen share or a screenshot can catch.
 	 */
 	const showsTime = !variable.secret && parseTimeValue(variable.value) !== null;
 	/*
-	 * A secret row names nothing for an agent to look up, and an unsaved or
-	 * unnamed row names nothing at all. The line is built from `{ name }` alone,
-	 * never the row, so the value cannot ride along.
+	 * A secret row names nothing for an agent to look up, and an unsaved or unnamed row names
+	 * nothing at all. The line is built from `{ name }` alone, never the row, so the value cannot
+	 * ride along.
 	 */
 	const name = trimVariableName(variable.key);
 	const referenceScope = !variable.secret && !variable.isNew && !nameError && name ? scope : null;
 	const nameErrorId = `${variable.id}-name-error`;
 	/*
-	 * Every control in the row is named by the variable it edits, with a
-	 * generic fallback for the unnamed blank row: a screen reader walking the
-	 * table otherwise hears a column of identical anonymous controls. A
-	 * placeholder is not a name (#2284).
+	 * Every control is named by the variable it edits, with a generic fallback for the unnamed
+	 * blank row; otherwise a screen reader walking the table hears a column of identical anonymous
+	 * controls. A placeholder is not a name (#2284).
 	 */
 	const valueLabel = name ? `Value of ${name}` : "Variable value";
 
 	return (
 		/*
-		 * Keyed by row id, not by index, at the call site in `VariableTableEditor`.
-		 * With an index key a delete reuses the mounted row one position down -
-		 * `SecretInput` included, reveal state and all - so deleting a revealed
-		 * secret displayed its successor unmasked (#621). The id follows the row,
-		 * so a deleted row's state is unmounted with it.
+		 * Keyed by row id, not index, at the call site in `VariableTableEditor`: with an index key
+		 * a delete reuses the mounted row one position down, `SecretInput` reveal state and all, so
+		 * deleting a revealed secret showed its successor unmasked (#621). The id follows the row,
+		 * so a deleted row's state unmounts with it.
 		 */
 		<tr className="group">
 			{/*
-			 * `px-1` is clearance for the focus ring, not decoration.
-			 * `Checkbox`'s `focus-visible:ring-1 ring-offset-1` draws
-			 * outside the box, and this cell sits against the scroll
-			 * container's clip edge when embedded - so with no
-			 * horizontal padding the ring lost its left side.
+			 * `px-1` is focus-ring clearance, not decoration: `Checkbox`'s
+			 * `focus-visible:ring-1 ring-offset-1` draws outside the box, and embedded, this cell
+			 * sits against the scroll container's clip edge, so with no horizontal padding the ring
+			 * loses its left side.
 			 *
-			 * Clearance rather than `.panel-clip` on the container: the
-			 * same `Checkbox` appears in the request builder's
-			 * key-value rows, where `KeyValueRow`'s `p-1` gives it the
-			 * same 4px and the ring reads as an outset hairline with a
-			 * gap. Tucking this one inward would have made one control
-			 * look like two, depending on the screen.
+			 * Clearance rather than `.panel-clip` on the container: the same `Checkbox` sits in the
+			 * request builder's key-value rows, where `KeyValueRow`'s `p-1` gives it the same 4px
+			 * and the ring reads as an outset hairline with a gap. Tucking this one inward would
+			 * make one control look like two, depending on the screen.
 			 */}
 			<td className="py-1 px-1">
 				<Checkbox
@@ -169,14 +157,10 @@ function VariableRow({
 			</td>
 			<td className="py-1 px-2">
 				{/*
-				 * `SecretInput` rather than a masked `Input`
-				 * and an eye of our own: that primitive was
-				 * extracted from this very cell so every
-				 * secret field in the app would share one
-				 * implementation, and the copy left behind
-				 * here missed the fixes it since received.
-				 * Reveal state belongs to the primitive -
-				 * unmounting on un-secret is what clears it.
+				 * `SecretInput`, not a masked `Input` with an eye of our own: the primitive was
+				 * extracted from this cell so every secret field shares one implementation, and the
+				 * copy once left here missed the fixes it later received. Reveal state belongs to
+				 * the primitive; unmounting on un-secret clears it.
 				 */}
 				{isSecretField ? (
 					<SecretInput
@@ -256,27 +240,20 @@ function VariableRow({
 						}
 						icon={<KeyRound className="size-icon" />}
 						onClick={() => {
-							// Un-securing a row swaps `SecretInput`
-							// out for a plain field, and its reveal
-							// state goes with it - so re-securing
-							// starts masked, without this handler
+							// Un-securing swaps `SecretInput` for a plain field and drops its
+							// reveal state, so re-securing starts masked without this handler
 							// tracking anything.
 							onUpdate(variable.id, "secret", !variable.secret);
 							onCommitNow();
 						}}
 						/*
-						 * Always visible, unlike the delete button beside it.
-						 *
-						 * This is a state toggle, not a row action. Hidden at
-						 * rest, "not secret" looked identical to "no control
-						 * here", so masking a value was undiscoverable unless
-						 * you happened to hover the row - and a keyboard user
-						 * tabbed onto something invisible, since it carried no
-						 * `group-focus-within` either.
-						 *
-						 * Quiet rather than absent: `muted-foreground` clears
-						 * the 3.0 non-text bar on every surface here, and the
-						 * on state stays clearly distinct on `warning-text`.
+						 * Always visible, unlike the delete button beside it: a state toggle, not a
+						 * row action. Hidden at rest, "not secret" would look identical to "no
+						 * control here", so masking a value would be undiscoverable without a
+						 * hover, and a keyboard user would tab onto something invisible (it carries
+						 * no `group-focus-within`). Quiet rather than absent: `muted-foreground`
+						 * clears the 3.0 non-text bar on every surface here, and the on state stays
+						 * distinct on `warning-text`.
 						 */
 						className={cn(
 							"size-control-sm transition-colors",

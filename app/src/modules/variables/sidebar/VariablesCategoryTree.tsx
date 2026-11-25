@@ -6,37 +6,26 @@
  */
 
 /**
- * Variables Category Tree
+ * The variables drawer's scope tree: Globals, Environments and Collections (with variables).
  *
- * Displays hierarchical tree of variable scopes:
- * - Globals
- * - Collections (with variables)
- * - Environments
+ * **A real WAI-ARIA tree, on the hook the collection tree uses** (#1217). Rename and Duplicate live
+ * only in the row's ⋯ menu, whose trigger is `tabIndex={-1}`, so without F2, Shift+F10, ContextMenu
+ * and Shift+Enter both are mouse-only, and no other surface offers them (`VariableTableEditor` has
+ * a delete fallback and nothing else). It also makes the sidebar one Tab stop for the tree rather
+ * than one per control.
  *
- * **A real WAI-ARIA tree, on the same hook the collection tree uses** (#1217).
- * Rename and Duplicate live only in the row's ⋯ menu, whose trigger is
- * `tabIndex={-1}`, so before this both actions were mouse-only: nothing here
- * listened for F2, Shift+F10, ContextMenu or Shift+Enter, and no other surface
- * offers them (`VariableTableEditor` has a delete fallback and nothing else).
- * The sidebar was also one Tab stop per control rather than one for the tree.
+ * `useRovingTreeFocus` is reused, not re-implemented: a hand-rolled copy would miss the primitive's
+ * fixes, and two lists of key guards drift apart. Rows declare what they can do through the hook's
+ * `data-tree-*` protocol; see `docs/design-system/tree-navigation.md` "Tree Navigation".
  *
- * `useRovingTreeFocus` is reused rather than re-implemented: a hand-rolled copy
- * would not receive the primitive's fixes, and the two lists of key guards would
- * drift the way this repo has watched them drift before. Rows declare what they
- * can do through the hook's `data-tree-*` protocol; see `docs/design-system/tree-navigation.md`
- * "Tree Navigation".
+ * Two shapes differ from the collection tree, deliberately:
  *
- * Two shapes here differ from the collection tree, deliberately:
- *
- *   - **The section headers are rows.** Globals, Environments and Collections
- *     are the three level-1 treeitems; the environments and collections lists
- *     are their level-2 children. That is what lets one arrow key walk the whole
- *     sidebar, and it gives the headers expand/collapse on Right/Left for free.
- *   - **"Add environment" stays a Tab stop**, outside the header row's treeitem.
- *     The tree owns no "create" key, so moving that button inside the roving
- *     tabindex would make creating an environment mouse-only - trading the
- *     defect this file just fixed for a new one. The tree is one stop; that
- *     button is the second.
+ * - **The section headers are rows.** Globals, Environments and Collections are the three level-1
+ *   treeitems, and the environment and collection lists their level-2 children, so one arrow key
+ *   walks the whole sidebar and the headers expand and collapse on Right/Left for free.
+ * - **"Add environment" stays a Tab stop**, outside the header row's treeitem: the tree owns no
+ *   "create" key, so inside the roving tabindex creating an environment would be mouse-only. The
+ *   tree is one stop; that button is the second.
  */
 
 import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
@@ -97,48 +86,40 @@ import { apiService } from "@/services/api";
 import { postmanEnvironmentExportMessage } from "./postman-environment-export";
 
 /**
- * Globals, Environments, Collections - the level-1 rows a screen reader counts
- * ("2 of 3"). A literal, because the three are written out in the JSX below
- * rather than mapped: two of them differ in shape.
+ * The level-1 rows a screen reader counts ("2 of 3"): Globals, Environments, Collections. A
+ * literal, because the JSX below writes the three out rather than mapping them: two of them differ
+ * in shape.
  */
 const SCOPE_SECTIONS = 3;
 
 /**
- * The left edge of everything inside a section's `role="group"`: the level-2
- * rows, and equally the empty line, the new-environment field, the loading
- * skeleton and a load error.
+ * The left edge of everything inside a section's `role="group"`: the level-2 rows, and equally the
+ * empty line, the new-environment field, the loading skeleton and a load error.
  *
- * 50px, past the header's chevron and icon, so a level-2 row reads as a child
- * of the header rather than a sibling of it. Named because it was four
- * different paddings before (#1372) - `px-3`, `pl-6`, `px-1`, and the rows'
- * own `pl-12.5` - which put up to four left edges under one expanded header.
- * The collection tree derives the same rule from its depth (`rowInsetPx`);
- * this tree is exactly two levels deep, so the value is a constant rather than
- * a function of one.
+ * 50px, past the header's chevron and icon, so a level-2 row reads as the header's child, not its
+ * sibling. Named because four paddings (`px-3`, `pl-6`, `px-1`, the rows' own `pl-12.5`) put up to
+ * four left edges under one expanded header (#1372). The collection tree derives the rule from
+ * depth (`rowInsetPx`); this tree is exactly two levels deep, so a constant.
  *
- * Always written *after* a `px-*` in the same class list, the order the rows
- * already use: `cn` is tailwind-merge, which drops an earlier `pl-*` when a
- * later `px-*` overrides it, and the row would silently lose its indent.
+ * Always written after a `px-*` in the same class list, the order the rows use: `cn` is
+ * tailwind-merge, which drops an earlier `pl-*` when a later `px-*` overrides it, and the row would
+ * silently lose its indent.
  */
 const GROUP_CHILD_INSET = "pl-12.5";
 
 /**
- * The same left edge for `ListSkeleton`, which cannot take it directly.
- *
- * The primitive pads each bar it draws with its own `px-2`, inside whatever the
- * caller puts on the wrapper, so the two stack: the inset above put the bars 8px
- * right of the rows they stand in for. 42 + 8 = the 50px above. The arithmetic
- * is held by a test rather than by this comment - it reads both classes off the
- * rendered skeleton and a rendered row, so changing either side fails.
+ * The same left edge for `ListSkeleton`, which cannot take it directly: the primitive pads each bar
+ * with its own `px-2` inside the wrapper's padding, so the two stack, and the inset above would put
+ * the bars 8px right of the rows they stand in for. 42 + 8 = the 50px above. A test holds the
+ * arithmetic, not this comment: it reads both classes off a rendered skeleton and row, so changing
+ * either side fails.
  */
 const GROUP_CHILD_SKELETON_INSET = "pl-10.5";
 
 export default function VariablesCategoryTree() {
-	// Fetches its own data, like the other three drawer views. It used to
-	// receive both lists as props from the Drawer, which read them with `= []`
-	// defaults and dropped `isLoading` - so an in-flight query rendered as an
-	// empty tree and told the user "No environments" when the truthful answer
-	// was "not loaded yet".
+	// Fetches its own data, like its sibling drawer views: as props from the Drawer, read there
+	// with `= []` defaults and without `isLoading`, an in-flight query rendered as an empty tree
+	// saying "No environments" rather than "not loaded yet".
 	const {
 		data: collections = [],
 		isLoading: isLoadingCollections,
@@ -153,25 +134,22 @@ export default function VariablesCategoryTree() {
 	} = useEnvironmentsQuery();
 
 	/*
-	 * A failed load is not an empty scope list. The drawer has three sibling
-	 * views, and the collections tree already says so when its query fails -
-	 * this view claiming "No collections" for the very same failure would make
-	 * one event look like two. Neither section here offers a create CTA, so the
-	 * reason to fix it is that symmetry, not a risk of a duplicate.
+	 * A failed load is not an empty scope list: the collections tree already says so when its query
+	 * fails, and this view claiming "No collections" for the same failure would make one event look
+	 * like two. Neither section here offers a create CTA, so the reason is that symmetry, not a
+	 * risk of a duplicate.
 	 *
-	 * Gated on `length === 0` per section: TanStack keeps the last good data
-	 * through a failed background refetch, and replacing a populated list with
-	 * an error would take away more than it tells. Each section reads its own
-	 * query - one scope failing says nothing about the other.
+	 * Gated on `length === 0` per section: TanStack keeps the last good data through a failed
+	 * background refetch, and replacing a populated list with an error would take away more than it
+	 * tells. Each section reads its own query; one scope failing says nothing about the other.
 	 */
 	const showCollectionsError = isCollectionsError && collections.length === 0;
 	const showEnvironmentsError = isEnvironmentsError && environments.length === 0;
 
 	/*
-	 * The pane variant centres inside `p-8`, which would break the rhythm of a
-	 * tree of 32px rows. `justify-start` undoes that centring, and the inset
-	 * puts the failure line where the rows it replaces would have started -
-	 * inside a group, one level shows one left edge.
+	 * The pane variant centres inside `p-8`, which breaks the rhythm of a tree of 32px rows:
+	 * `justify-start` undoes the centring, and the inset puts the failure line where the rows it
+	 * replaces would start (inside a group, one level shows one left edge).
 	 */
 	const inlineErrorClass = cn("justify-start px-3 py-2 text-xs", GROUP_CHILD_INSET);
 
@@ -194,9 +172,9 @@ export default function VariablesCategoryTree() {
 	const collectionsGroupId = useId();
 	const treeId = useId();
 	/**
-	 * The element a row's `aria-labelledby` points at (#3450): the row's own
-	 * name, so its accessible name is not computed from the ⋯ menu's label and
-	 * the variable-count badge inside it.
+	 * The element a row's `aria-labelledby` points at (#3450): the row's own name, so its
+	 * accessible name is not computed from the ⋯ menu's label and the variable-count badge inside
+	 * it.
 	 */
 	const nameIdFor = (scope: string, id = "") => `${treeId}-${scope}-${id}-name`;
 
@@ -221,7 +199,6 @@ export default function VariablesCategoryTree() {
 	};
 	const [environmentsExpanded, setEnvironmentsExpanded] = useState(true);
 
-	// Environment management state
 	const [creatingEnvironment, setCreatingEnvironment] = useState(false);
 	const [newEnvName, setNewEnvName] = useState(DEFAULT_ENVIRONMENT_NAME);
 	const [deletingEnvId, setDeletingEnvId] = useState<string | null>(null);
@@ -232,7 +209,6 @@ export default function VariablesCategoryTree() {
 	// the empty group points there rather than offering a create it cannot do.
 	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 
-	// Mutations
 	const createEnvironmentMutation = useCreateEnvironmentMutation();
 	const deleteEnvironmentMutation = useDeleteEnvironmentMutation();
 	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
@@ -246,21 +222,19 @@ export default function VariablesCategoryTree() {
 	};
 
 	/**
-	 * Report a failed create, duplicate, delete or rename as a plain error toast.
-	 * Not `reportFailed`: that parks the Dock on "Not saved", and none of these
-	 * leaves an unsaved edit (`save-store.ts`) - a failed rename puts the stored
-	 * name back. The fallback leads because the engine's message says why, never
-	 * what was being attempted.
+	 * A failed create, duplicate, delete or rename, as a plain error toast. Not `reportFailed`:
+	 * that parks the Dock on "Not saved", and none of these leaves an unsaved edit
+	 * (`save-store.ts`); a failed rename puts the stored name back. The fallback leads because the
+	 * engine's message says why, never what was being attempted.
 	 */
 	const reportFailure = (error: unknown, fallback: string) =>
 		showToast(error instanceof Error ? `${fallback} - ${error.message}` : fallback, "error");
 
 	/**
-	 * A rename registers no save context, so it reports under an id of its own
-	 * while the PUT is out; a failure withdraws that report and toasts. The field
-	 * stays mounted until the PUT settles: the hook has already closed the editor,
-	 * so the blur that follows is a no-op, and unmounting early would snap the row
-	 * back to the old name before the failure is reported.
+	 * A rename registers no save context, so it reports under an id of its own while the PUT is
+	 * out; a failure withdraws that report and toasts. The field stays mounted until the PUT
+	 * settles: the hook has already closed the editor, so the blur that follows is a no-op, and
+	 * unmounting early would snap the row back to the old name before the failure is reported.
 	 */
 	const submitRenameEnvironment = async (envId: string, name: string) => {
 		const current = environments.find((e) => e.id === envId);
@@ -282,14 +256,12 @@ export default function VariablesCategoryTree() {
 	};
 
 	/**
-	 * The one rename editor, for whichever row is renaming: this file renders
-	 * every row itself, so there is no per-row component to hold a hook, and only
-	 * one row renames at a time. The row focus returns to is looked up by
-	 * `data-environment-id` while the field is still mounted - the tree is one tab
-	 * stop and the field replaces the row's only focusable control, so an Escape
-	 * that left focus on `<body>` would drop the user out of the tree entirely.
-	 * `stopPropagation`: the tree binds its own keys on the `role="tree"` element
-	 * above this field.
+	 * The one rename editor, for whichever row is renaming: this file renders every row itself, so
+	 * no per-row component can hold a hook, and only one row renames at a time. The row focus
+	 * returns to is found by `data-environment-id` while the field is still mounted: the tree is
+	 * one tab stop and the field replaces the row's only focusable control, so an Escape that left
+	 * focus on `<body>` would drop the user out of the tree. `stopPropagation`: the tree binds its
+	 * own keys on the `role="tree"` element above this field.
 	 */
 	const rename = useInlineRename({
 		active: renamingEnvId !== null,
@@ -307,9 +279,8 @@ export default function VariablesCategoryTree() {
 	});
 
 	/**
-	 * A complete copy - name plus every variable - in a single call. Unlike a
-	 * collection, an environment has no nested children, so nothing is silently
-	 * left behind.
+	 * A complete copy (name and every variable) in one call: unlike a collection, an environment
+	 * has no nested children, so nothing is silently left behind.
 	 */
 	const duplicateEnvironment = async (env: Environment) => {
 		if (createEnvironmentMutation.isPending) return;
@@ -325,11 +296,10 @@ export default function VariablesCategoryTree() {
 	};
 
 	/**
-	 * Secret values are written blank (`includeSecrets` left to the engine's
-	 * default): a file leaving the machine should not carry them by one click on
-	 * a menu item. One export at a time, since a second click would download the
-	 * file twice. "Exported" only once the file is written (#3246): a cancelled
-	 * save dialog is silent.
+	 * Secret values are written blank (`includeSecrets` left to the engine's default): a file
+	 * leaving the machine should not carry them on one menu click. One export at a time, since a
+	 * second click would download the file twice. "Exported" only once the file is written (#3246);
+	 * a cancelled save dialog is silent.
 	 */
 	const exportingRef = useRef(false);
 	const exportEnvironment = async (env: Environment) => {
@@ -395,15 +365,14 @@ export default function VariablesCategoryTree() {
 		: null;
 
 	/*
-	 * A delete dialog is controlled with no trigger, so Radix aims its close-focus
-	 * at nothing and the row it was opened from is the one thing about to go: both
-	 * outcomes dropped the user on `<body>`, from a Delete key this tree only
-	 * gained in #1217. The tree's shared rule (#1218, #1234) answers it - the row
-	 * while it is still there, the successor once the removal actually lands.
+	 * A delete dialog is controlled with no trigger, so Radix aims its close-focus at nothing, and
+	 * the row it opened from is the one thing about to go: both outcomes would drop the user on
+	 * `<body>`, from a Delete key this tree gained in #1217. The tree's shared rule (#1218, #1234)
+	 * answers it: the row while it is still there, the successor once the removal actually lands.
 	 *
-	 * No last resort to name: every environment row is a level-2 child of the
-	 * Environments header, which survives the last of them, so `rowAfterRemoving`
-	 * always has that header to answer with.
+	 * No last resort is needed: every environment row is a level-2 child of the Environments
+	 * header, which survives the last of them, so `rowAfterRemoving` always has that header to
+	 * answer with.
 	 */
 	const deleteRefocus = useDeleteRefocus(
 		treeRef,
@@ -430,9 +399,8 @@ export default function VariablesCategoryTree() {
 			// A toast, not `reportFailed`: a delete is not an unsaved edit (`save-store.ts`).
 			reportFailure(error, "Couldn't delete the environment");
 		} finally {
-			// Both outcomes close it, because focus is handed back from the close
-			// and the decision of *where* is read from whether the row actually
-			// left - never from the confirm click.
+			// Both outcomes close it: focus is handed back from the close, and where is read from
+			// whether the row actually left, never from the confirm click.
 			setDeleteConfirmEnvId(null);
 			setDeletingEnvId(null);
 		}
@@ -491,15 +459,15 @@ export default function VariablesCategoryTree() {
 						</div>
 					</div>
 
-					{/* Environments Section (order here is not precedence) */}
-					{/* The header is a level-1 row: Right expands it, Left collapses
-					    it, Enter does either. `data-tree-toggle` and
-					    `data-tree-activate` are the same button because for a section
-					    header those two verbs are one - and the "+" is deliberately
-					    outside that row: the tree has no "create" key, so it is the
-					    sidebar's own tab stop rather than a control the keyboard
-					    cannot reach. DrawerSection owns the shape and spreads both
-					    sets of attributes through; see its own comment. */}
+					{/*
+					 * Environments section (order here is not precedence). The header is a level-1
+					 * row: Right expands it, Left collapses it, Enter does either;
+					 * `data-tree-toggle` and `data-tree-activate` are the same button because for a
+					 * section header the two verbs are one. The "+" is deliberately outside that
+					 * row: the tree has no "create" key, so it is the sidebar's own tab stop rather
+					 * than a control the keyboard cannot reach. DrawerSection owns the shape and
+					 * spreads both attribute sets through; see its own comment.
+					 */}
 					<DrawerSection
 						title="Environments"
 						icon={Cloud}
@@ -540,7 +508,6 @@ export default function VariablesCategoryTree() {
 					>
 						{environmentsExpanded && (
 							<div id={environmentsGroupId} role="group" className="mt-1">
-								{/* New Environment Input */}
 								{creatingEnvironment && (
 									<div className={cn("px-3 py-1", GROUP_CHILD_INSET)}>
 										<Input
@@ -646,29 +613,22 @@ export default function VariablesCategoryTree() {
 										const menuLabel = `More actions for environment ${environment.name}`;
 										return (
 											/*
-											 * Container + inner activator, never a
-											 * bare <div onClick>. The row carries a
-											 * RowActionsMenu, so it cannot be one
-											 * button (the collection rows below can,
-											 * and are). As a plain div it was not
-											 * focusable and not operable by keyboard
-											 * at all - the ⋯ menu was reachable but
-											 * selecting the environment was not.
-											 *
-											 * The button therefore stays and owns the
-											 * action. The row *additionally* delegates
-											 * clicks landing on its own box - the 50px
-											 * group inset, the gap, `px-3` - which
-											 * belong to no child and so had nowhere to
-											 * go. RequestItem carries the rule and why
-											 * the target check is what it is.
+											 * Container plus inner activator, never a bare <div
+											 * onClick>: the row carries a RowActionsMenu, so it
+											 * cannot be one button (the collection rows below can,
+											 * and are), and a plain div is neither focusable nor
+											 * keyboard-operable, leaving the ⋯ menu reachable but
+											 * selection not. The button owns the action; the row
+											 * also delegates clicks landing on its own box (the
+											 * 50px group inset, the gap, `px-3`), which belong to
+											 * no child. RequestItem carries the rule and why the
+											 * target check is what it is.
 											 */
 											<RowContextMenu
-												// The key belongs to the element the map
-												// returns, not to the row inside it: on a
-												// refetch React would otherwise rebuild every
-												// row, and a row that remounts drops the focus
-												// a delete just handed it.
+												// The key goes on the element the map returns, not
+												// the row inside it: otherwise a refetch rebuilds
+												// every row, and a remounted row drops the focus a
+												// delete just handed it.
 												key={environment.id}
 												label={menuLabel}
 												actions={rowActions}
@@ -738,14 +698,14 @@ export default function VariablesCategoryTree() {
 																	environmentId: environment.id,
 																})
 															}
-															// self-stretch: the row above is
+															// self-stretch: the row is
 															// `items-center`, which leaves this
-															// button - the only thing wired to
-															// selectCategory - as tall as its 18px
-															// label inside a 32px row. The band above
-															// and below it took the hover fill but
-															// not the click. Same fix as the
-															// collection and request rows.
+															// button (the only thing wired to
+															// selectCategory) as tall as its 18px
+															// label in a 32px row, so the band
+															// above and below would take the hover
+															// fill but not the click. Same fix as
+															// the collection and request rows.
 															className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch text-left"
 														>
 															<TruncatedText
@@ -943,10 +903,9 @@ export default function VariablesCategoryTree() {
 															collectionId: collection.id,
 														})
 													}
-													// The row carries no ⋯ menu, so the button
-													// covers all of it: the indent stays here
-													// rather than on the row, and no part of the
-													// 32px is dead to a click.
+													// No ⋯ menu here, so the button covers the
+													// whole row: the indent stays on it, not the
+													// row, and none of the 32px is dead to a click.
 													className={cn(
 														"flex min-w-0 flex-1 self-stretch items-center gap-2 px-3 text-left text-sm",
 														GROUP_CHILD_INSET

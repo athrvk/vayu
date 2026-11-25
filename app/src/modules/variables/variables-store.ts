@@ -5,14 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Variables UI State Store
- *
- * Manages the Variables panel UI state including:
- * - Selected category (globals, collection, environment)
- * - Active environment selection
- * - Editing state
- */
+/** The Variables UI state: the category selected in the tree. */
 
 import { create } from "zustand";
 
@@ -22,10 +15,8 @@ export type VariableCategory =
 	| { type: "environment"; environmentId: string };
 
 interface VariablesUIState {
-	// Currently selected category in the tree
 	selectedCategory: VariableCategory | null;
 
-	// Actions
 	setSelectedCategory: (category: VariableCategory | null) => void;
 	reset: () => void;
 }

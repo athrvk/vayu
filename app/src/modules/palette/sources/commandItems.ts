@@ -6,16 +6,12 @@
  */
 
 /**
- * The command registry, as palette results.
+ * The command registry, as palette results. A plain function, not a hook like its siblings: it owns
+ * no data, only maps `lib/commands` onto `PaletteItem`, because the palette reaches commands rather
+ * than defining actions.
  *
- * The "do Y" half of the palette. A plain function rather than a hook like its
- * siblings, because it owns no data: it maps `lib/commands` onto `PaletteItem`,
- * which is the whole point - the palette is a way of reaching a command, not a
- * second place actions are defined.
- *
- * Unavailable commands never reach the list. A row that cannot do anything is
- * worse than a missing one: it looks like the app is broken rather than like the
- * action wants a collection open.
+ * Unavailable commands never reach the list: a row that can do nothing looks like a broken app, not
+ * like an action that wants a collection open.
  */
 
 import { availableCommands, commandTitle, type CommandContext } from "@/lib/commands";
