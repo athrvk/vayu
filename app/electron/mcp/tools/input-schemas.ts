@@ -43,38 +43,11 @@ export const environmentIdInput = z
 	);
 
 /**
- * The refusal an ad-hoc send gets for `verifySSL: false`, and with it the
- * answer to the per-call TLS question issue #795 posed.
- *
- * The stored field is writable (`create_request` / `update_request`) and a
- * per-call one is not, because the two differ in what survives the call. A
- * stored `verifySSL: false` is a document: the app's Settings tab shows the box
- * unticked and prints a warning under it, `get_request` reads it back, and a
- * user can undo it. An argument on one send is visible only inside the agent's
- * own transcript - nothing in Vayu records that a certificate went unchecked,
- * so nobody can find it afterwards or take it back.
- *
- * The alternative considered was the `allowInsecureTls` safety toggle #795
- * sketched. Rejected: it would be a *global* permission - every allowlisted host
- * for the rest of the session, granted once for one dev box and then forgotten -
- * where the stored field is per request, and it would need a Settings control of
- * its own to be reachable at all, which is a second way to weaken TLS for a case
- * the first one already covers.
- *
- * `true` is accepted rather than refused alongside it: it is what the composed
- * payload already carries, so an agent restating the safe default should not be
- * argued with.
- */
-/**
- * What the engine puts on a request nobody wrote it into (issue #1229).
- *
- * Every execute path adds these, so an agent comparing the response it got
- * against the request it wrote is otherwise looking at headers no tool
- * mentioned - and an agent testing "what does this endpoint do with no
- * `User-Agent`" had no way to find out that it cannot simply omit one.
- *
- * One sentence in one place, carried whole by `run_request`, the tool that owns
- * the behaviour; the other tools that send traffic carry
+ * What the engine puts on a request nobody wrote it into (issue #1229). Every execute path adds
+ * these, so an agent comparing the response against the request it wrote would otherwise see
+ * headers no tool mentioned, and one testing "what does this endpoint do with no `User-Agent`"
+ * could not learn that it cannot simply omit one. One sentence in one place, carried whole by
+ * `run_request`, the tool that owns the behaviour; the other tools that send traffic carry
  * {@link ENGINE_DEFAULT_HEADERS_POINTER} (#2441).
  */
 export const ENGINE_DEFAULT_HEADERS_SENTENCE =
@@ -101,15 +74,14 @@ export const requestHeadersInput = z
 	);
 
 /**
- * A stored header list's `headers` argument, on the tools that write one: the
- * ordered `{key, value, enabled}` rows the reads return, or the single-valued
- * map, both read by `readHeaderRows`. A row is strict and declares
- * `valueWithheld` (#3556) and the members a stored row may carry beside them
- * (`HEADER_ROW_EXTRA_MEMBERS`), so a row written back as read reaches the
- * handler whole. `source` is a free string, not an enum: the engine writes only
- * the three marker values it knows but accepts any, and a refused row as read
- * is the defect this schema exists to prevent. @p description is the tool's own, since only a write over a stored
- * list has a stored value for a withheld row to keep.
+ * A stored header list's `headers` argument, on the tools that write one: the ordered
+ * `{key, value, enabled}` rows the reads return, or the single-valued map, both read by
+ * `readHeaderRows`. A row is strict and declares `valueWithheld` (#3556) and the members a stored
+ * row may carry beside them (`HEADER_ROW_EXTRA_MEMBERS`), so a row written back as read reaches the
+ * handler whole. `source` is a free string, not an enum: the engine writes only the three marker
+ * values it knows but accepts any, and refusing a row as read is the defect this schema exists to
+ * prevent. @p description is the tool's own, since only a write over a stored list has a stored
+ * value for a withheld row to keep.
  */
 export function storedHeadersInput(description: string) {
 	return z
@@ -132,15 +104,12 @@ export function storedHeadersInput(description: string) {
 }
 
 /**
- * The default headers one send refuses (issue #1337), as `disabledDefaultHeaders`.
- *
- * One fragment for the two tools that build a request payload: the field means
- * the same thing on `POST /execute` and `POST /runs`, and the engine reads it
- * off both through the same `read_default_header_opt_outs` (`utils/json.cpp`).
- *
- * Shape only. The engine owns what a usable header name is and refuses a bad
- * one by name, so a second copy of that rule here could only drift from it -
- * the same posture `thresholds` and the stream caps take.
+ * The default headers one send refuses (issue #1337), as `disabledDefaultHeaders`. One fragment for
+ * the two tools that build a request payload: the field means the same on `POST /execute` and
+ * `POST /runs`, and the engine reads it off both through `read_default_header_opt_outs`
+ * (`utils/json.cpp`). Shape only: the engine owns what a usable header name is and refuses a bad
+ * one by name, so a second copy of the rule could only drift (the posture `thresholds` and the
+ * stream caps take).
  */
 export const defaultHeaderOptOutsInput = z
 	.array(z.string())
@@ -149,6 +118,25 @@ export const defaultHeaderOptOutsInput = z
 		'Default headers this send refuses, by name (e.g. ["User-Agent", "Accept-Encoding"]). This is the only way to send a request with **no** User-Agent at all - writing one yourself replaces the value but still sends the header. Only the engine\'s own defaults are refusable; a name it adds nothing under is accepted and does nothing, and a name that cannot be a header name is refused by the engine. Nothing is stored: the refusal applies to this send alone.'
 	);
 
+/**
+ * The refusal an ad-hoc send gets for `verifySSL: false`, and with it the answer to the per-call
+ * TLS question issue #795 posed.
+ *
+ * The stored field is writable (`create_request` / `update_request`) and a per-call one is not,
+ * because the two differ in what survives the call. A stored `verifySSL: false` is a document: the
+ * Settings tab shows the box unticked with a warning under it, `get_request` reads it back, and a
+ * user can undo it. An argument on one send is visible only in the agent's own transcript; nothing
+ * in Vayu records that a certificate went unchecked, so nobody can find it afterwards or take it
+ * back.
+ *
+ * Rejected: the `allowInsecureTls` safety toggle #795 sketched. It would be a *global* permission
+ * (every allowlisted host for the rest of the session, granted once for one dev box and forgotten)
+ * where the stored field is per request, and it would need a Settings control of its own, a second
+ * way to weaken TLS for a case the first already covers.
+ *
+ * `true` is accepted rather than refused: it is what the composed payload already carries, so an
+ * agent restating the safe default should not be argued with.
+ */
 export const INSECURE_TLS_REFUSAL = `verifySSL: false is not accepted on a one-off send - a skipped certificate check has to leave a record, and an argument on a single call leaves none. Two ways forward: ask the user to ${TRUST_AUTHORITY_TOKEN}, which keeps verification on for every request; or save the request with create_request/update_request \`verifySSL: false\` and send it by id (run_request with \`requestId\` and no \`url\` sends a saved request exactly as stored). The app then shows that request as accepting any certificate, and the user can untick it.`;
 
 /**
@@ -184,22 +172,18 @@ export const validationScriptAliasInput = z
 	);
 
 /**
- * One data row bound to a single send (issue #601).
+ * One data row bound to a single send (issue #601). The agent-facing half of the app's
+ * Send-with-row: `{{data.column}}` tokens substitute against this row and both scripts read it as
+ * `pm.iterationData`, without a collection run existing. `run_collection_smoke` stays out of it: it
+ * has no scenario path (see docs/engine/mcp/collection-runs-and-mocks.md).
  *
- * The agent-facing half of what the app's Send-with-row does: `{{data.column}}`
- * tokens substitute against this row and both scripts read it as
- * `pm.iterationData`, without a collection run existing. `run_collection_smoke`
- * deliberately stays out of it - it has no scenario path at all (see docs/engine/mcp/collection-runs-and-mocks.md).
+ * The failure shape is named in the description because it is the useful half: a column the row
+ * does not carry is a `400` naming the token and the row's columns, and *nothing is sent*, so an
+ * agent reading the error can fix the request rather than wonder what went out.
  *
- * The failure shape is named in the description because it is the useful half:
- * a column the row does not carry is a `400` naming the token and the row's
- * columns, and *nothing is sent* - so an agent reading the error can fix the
- * request rather than wondering what went out.
- *
- * Credentials bind too (issue #642), and the description says which mode does
- * not: an agent that is told "auth cannot bind" writes the token somewhere else
- * for no reason, and one told nothing writes it into an oauth2 config and gets
- * a 400 it cannot explain.
+ * Credentials bind too (issue #642), and the description says which mode does not: an agent told
+ * "auth cannot bind" writes the token elsewhere for no reason, and one told nothing writes it into
+ * an oauth2 config and gets a 400 it cannot explain.
  */
 export const dataRowInput = z
 	.record(z.string(), z.unknown())
@@ -209,22 +193,16 @@ export const dataRowInput = z
 	);
 
 /**
- * Whether the bound contract is a gate, worded for the surface asking (issues
- * #720, #766).
+ * Whether the bound contract is a gate, worded for the surface asking (issues #720, #766). One
+ * fragment, because the flag means the same wherever it is offered (does a schema failure fail the
+ * unit) while two things are per-surface: which unit one verdict decides, and which way it
+ * defaults.
  *
- * One fragment rather than a copy per tool, because the flag means the same
- * thing wherever it is offered - does a schema failure fail the unit - while
- * two things about it are genuinely per-surface: which unit one verdict
- * decides, and which way it defaults.
- *
- * **`run_collection_smoke` defaults to `true`, where the engine's `POST /runs`
- * flag defaults to `false`**, and the divergence is deliberate rather than an
- * oversight: that tool has folded a checked-and-failed schema verdict into `ok`
- * since #681, says so in its own description, and an agent that has been
- * reading its matrix would silently start seeing contract failures pass if the
- * default moved. Each surface keeps the default its readers already have. Off,
- * the verdict still rides every row: it stops deciding pass/fail, it is never
- * withheld.
+ * **`run_collection_smoke` defaults to `true`, where the engine's `POST /runs` flag defaults to
+ * `false`**, deliberately: that tool has folded a checked-and-failed schema verdict into `ok` since
+ * #681, says so in its description, and an agent reading its matrix would silently see contract
+ * failures pass if the default moved. Each surface keeps the default its readers already have. Off,
+ * the verdict still rides every row: it stops deciding pass/fail and is never withheld.
  */
 export function failOnSchemaErrorInput(surface: {
 	/** What one verdict decides here: a smoke row's request, or a run's step. */
@@ -243,14 +221,12 @@ export function failOnSchemaErrorInput(surface: {
 }
 
 /**
- * Why a schema gate cannot ride a load run, in the executor's own terms rather
- * than a bare "unsupported" (issue #766).
- *
- * `failOnSchemaError` is *declared* on `start_load_run` so the refusal names the
- * flag and the surface that honours it, where an undeclared key gets only the
- * schema's `Unrecognized key`. It is refused on both of this tool's paths - a
- * scenario is not the reason, the executor is: `read_fail_on_schema_error` is
- * the scenario *runner*'s, and no load path reads it.
+ * Why a schema gate cannot ride a load run, in the executor's own terms rather than a bare
+ * "unsupported" (issue #766). `failOnSchemaError` is *declared* on `start_load_run` so the refusal
+ * names the flag and the surface that honours it, where an undeclared key gets only the schema's
+ * `Unrecognized key`. It is refused on both of this tool's paths: the reason is the executor, not
+ * the scenario, since `read_fail_on_schema_error` is the scenario *runner*'s and no load path reads
+ * it.
  */
 export const LOAD_RUN_SCHEMA_GATE_REFUSAL =
 	`"failOnSchemaError" does not apply to a load run: the load executor validates sampled ` +
@@ -261,10 +237,10 @@ export const LOAD_RUN_SCHEMA_GATE_REFUSAL =
 	`run_collection, which is where the gate takes effect.`;
 
 /**
- * Why `stopOnError` cannot ride a load run (issue #2526), declared to be refused
- * for the reason `LOAD_RUN_SCHEMA_GATE_REFUSAL` is: the answer names the runner
- * that reads it. The flag is the design-mode runner's - a virtual user's walk
- * has its own rule for a step with no response and never reads it.
+ * Why `stopOnError` cannot ride a load run (issue #2526), declared to be refused for the reason
+ * `LOAD_RUN_SCHEMA_GATE_REFUSAL` is: the answer names the runner that reads it. The flag is the
+ * design-mode runner's; a virtual user's walk has its own rule for a step with no response and
+ * never reads it.
  */
 export const LOAD_RUN_STOP_ON_ERROR_REFUSAL =
 	`"stopOnError" does not apply to a load run: only the design-mode runner reads it, and a ` +
@@ -296,15 +272,12 @@ export function elementsTimersInput() {
 }
 
 /**
- * The two fields a scenario block carries besides its collection id, declared
- * here because both scenario surfaces take them and they must mean the same
- * thing on each (issue #754): `run_collection` runs the plan once through the
- * design runner, `start_load_run` drives the same plan with virtual users.
- *
- * `iterations` is deliberately not among them - see the scenario block on
- * `start_load_run` for why a load run reads the top-level one instead.
- *
- * Whether to descend into sub-collections, and in which order that happens.
+ * The two fields a scenario block carries besides its collection id, declared once because both
+ * scenario surfaces take them and they must mean the same on each (issue #754): `run_collection`
+ * runs the plan once through the design runner, `start_load_run` drives the same plan with virtual
+ * users. `iterations` is deliberately not among them: see the scenario block on `start_load_run`
+ * for why a load run reads the top-level one. They are whether to descend into sub-collections, and
+ * in which order.
  */
 export const scenarioRecursiveInput = z
 	.boolean()
@@ -314,13 +287,11 @@ export const scenarioRecursiveInput = z
 	);
 
 /**
- * The inline data set, in the shape `POST /runs` reads it.
- *
- * Inline because the engine never opens a file - the app parses CSV/TSV/JSON and
- * sends rows, and a path an agent chose would be a trust boundary neither side
- * wants. The engine's own `maxScenarioDataRows` / `maxScenarioDataBytes` bound
- * the array and its 400 is surfaced verbatim rather than re-derived here, which
- * would be a second copy of a limit the user can raise in Settings.
+ * The inline data set, in the shape `POST /runs` reads it. Inline because the engine never opens a
+ * file: the app parses CSV/TSV/JSON and sends rows, and a path an agent chose would be a trust
+ * boundary neither side wants. The engine's `maxScenarioDataRows` / `maxScenarioDataBytes` bound
+ * the array and its 400 is surfaced verbatim, since re-deriving it here would be a second copy of a
+ * limit the user can raise in Settings.
  */
 export const scenarioDataInput = z
 	.array(z.record(z.string(), z.unknown()))
@@ -330,13 +301,12 @@ export const scenarioDataInput = z
 	);
 
 /**
- * Which file a run's rows came from (issue #2051), declared once for every
- * place a data set is accepted: `run_collection`'s `data`, and `start_load_run`'s
- * top-level `data` and `scenario.data`. Stored verbatim on the run and served
- * back on `list_runs` and the report, so an agent re-running "with the same
- * file" can check it before it sends the rows. A name, never a path: the engine
- * opens nothing, and refuses a separator in it as this schema does. Either one
- * without rows is refused engine-side, by name.
+ * Which file a run's rows came from (issue #2051), declared once for every place a data set is
+ * accepted: `run_collection`'s `data` and `start_load_run`'s top-level `data` and `scenario.data`.
+ * Stored verbatim on the run and served back on `list_runs` and the report, so an agent re-running
+ * "with the same file" can check before it sends the rows. A name, never a path: the engine opens
+ * nothing and refuses a separator in it, as this schema does. Either one without rows is refused
+ * engine-side, by name.
  */
 export const dataFileNameInput = z
 	.string()
@@ -372,13 +342,11 @@ export const dataFileCastNumbersInput = z
 	);
 
 /**
- * Pass/fail budgets, declared once and forwarded verbatim by both
- * `run_collection` and `start_load_run` (issue #1564): the engine judges a
- * design-mode collection run against them exactly as it always has a load
- * run, so the schema and the report shape are the same on both tools rather
- * than two hand-written copies that could drift. The bounds mirror the
- * engine's, so a value this schema accepts is one `POST /runs` accepts; an
- * empty object is rejected there rather than starting a run nothing will
+ * Pass/fail budgets, declared once and forwarded verbatim by `run_collection` and `start_load_run`
+ * (issue #1564): the engine judges a design-mode collection run against them as it always has a
+ * load run, so schema and report shape are the same on both tools rather than two hand-written
+ * copies that could drift. The bounds mirror the engine's, so a value this schema accepts is one
+ * `POST /runs` accepts; an empty object is rejected there rather than starting a run nothing will
  * judge, so it is rejected here too, by name.
  */
 export const thresholdsInput = z
@@ -392,20 +360,17 @@ export const thresholdsInput = z
 		streamTimeToFirstEventP95Ms: z.number().positive().max(86_400_000).optional(),
 		streamTimeToFirstMatchP95Ms: z.number().positive().max(86_400_000).optional(),
 		streamEventsPerSecondMin: z.number().positive().max(1_000_000_000).optional(),
-		// Not a budget - whether a missed one fails the run, not itself
-		// measured against anything, so it is excluded from the
-		// at-least-one-budget refinement below. Kept under 80 characters:
-		// both tools share this object, so a longer one is paid twice (#3747).
+		// Not a budget: whether a missed one fails the run, not measured against anything, so
+		// excluded from the at-least-one-budget refinement below. Kept under 80 characters: both
+		// tools share this object, so a longer one is paid twice (#3747).
 		failRun: z
 			.boolean()
 			.optional()
 			.describe("When true, a missed budget sets the run's status to failed. Default false."),
 	})
-	// Open, unlike the other input objects (#3556): a
-	// `custom.<name>.<stat>` budget (issue #1500) is a key this schema
-	// cannot name. `catchall` accepts a number under any key and forwards
-	// it as-is; the engine's own `validate_thresholds` is the real gate on
-	// its shape.
+	// Open, unlike the other input objects (#3556): a `custom.<name>.<stat>` budget (issue #1500)
+	// is a key this schema cannot name. `catchall` accepts a number under any key and forwards it
+	// as-is; the engine's `validate_thresholds` is the real gate on its shape.
 	.catchall(z.number())
 	.refine((t) => Object.keys(t).filter((key) => key !== "failRun").length > 0, {
 		// `error`, not zod 3's `message`: v4 still reads the old key as a
@@ -484,17 +449,14 @@ export const streamBudgetMsInput = z
 	);
 
 /**
- * One entry of a request or collection's `elements` list (issue #1512):
- * extractors, assertions, timers, controllers and scripts, each a `kind` plus
- * its own `config`. `kind` is a bare string rather than a Zod enum - the
- * engine's registry is the authority on what kinds exist (`GET
- * /elements/kinds`, served here by `list_element_kinds` and the
- * `vayu://elements/kinds` resource), and enumerating them here would need a
- * tool change every time the engine adds one.
- * `element-kinds.conformance.test.ts` is what keeps this schema, the tool and
- * the resource from silently drifting apart. Strict at this level, the members a
- * stored element carries (`ElementDef`); `config` stays an open record, judged
- * engine-side against the kind's own schema.
+ * One entry of a request or collection's `elements` list (issue #1512): extractors, assertions,
+ * timers, controllers and scripts, each a `kind` plus its own `config`. `kind` is a bare string,
+ * not a Zod enum: the engine's registry is the authority on what kinds exist
+ * (`GET /elements/kinds`, served here by `list_element_kinds` and the `vayu://elements/kinds`
+ * resource), and enumerating them would need a tool change whenever the engine adds one;
+ * `element-kinds.conformance.test.ts` keeps this schema, the tool and the resource from drifting
+ * apart. Strict at this level, the members a stored element carries (`ElementDef`); `config` stays
+ * an open record, judged engine-side against the kind's own schema.
  */
 export const elementSchema = z.strictObject({
 	id: z.string().optional().describe("Element id; omit to let the engine assign one."),
@@ -519,12 +481,10 @@ const storedElementSchema = elementSchema.extend({
 });
 
 /**
- * The `elements` argument every write tool that stores them declares -
- * `create_request` / `update_request` / `create_collection` /
- * `update_collection`. Whole-list semantics (`scope` names what "whole" means
- * for that tool): passing it replaces the stored list entirely, the same rule
- * `headers` and `auth` already follow, because there is no per-entry patch to
- * offer over a JSON column.
+ * The `elements` argument every write tool that stores them declares (`create_request` /
+ * `update_request` / `create_collection` / `update_collection`). Whole-list semantics (`scope`
+ * names what "whole" means for that tool): passing it replaces the stored list, as `headers` and
+ * `auth` do, because a JSON column has no per-entry patch to offer.
  */
 export function elementsInput(scope: string) {
 	return z
@@ -536,25 +496,20 @@ export function elementsInput(scope: string) {
 }
 
 /**
- * A saved request's `script.pre` / `script.post` elements, offered under
- * their pre-#1512 names so an agent that only knows scripts keeps working
- * (issue #1517). `create_request` and `update_request` translate a non-empty
- * string into a `script.pre` / `script.post` entry before calling the engine
- * - which now refuses `preRequestScript` / `postRequestScript` as wire fields
- * outright (issue #1514) - and fold it into whatever `elements` list is
- * already stored, via `upsertScriptElement`. On an update the two cannot both
- * be given: an explicit `elements` argument already states the whole list, so
- * folding a sugar script on top of it would leave one of the two silently
- * losing.
+ * A saved request's `script.pre` / `script.post` elements, offered under their pre-#1512 names so
+ * an agent that only knows scripts keeps working (issue #1517). `create_request` and
+ * `update_request` translate a non-empty string into a `script.pre` / `script.post` entry before
+ * calling the engine, which refuses `preRequestScript` / `postRequestScript` as wire fields (issue
+ * #1514), and fold it into whatever `elements` list is stored, via `upsertScriptElement`. On an
+ * update the two cannot both be given: an explicit `elements` argument already states the whole
+ * list, so folding a sugar script on top would leave one of the two silently losing.
  *
- * One name per script here, deliberately. The `tests` alias exists on the
- * *run* tools because the engine spells an ad-hoc run body that way
- * (`readValidationScript`); a second name for a stored field would be a
- * second name to keep in step and a second way for an agent to half-write a
- * script.
+ * One name per script here, deliberately. The `tests` alias exists on the *run* tools because the
+ * engine spells an ad-hoc run body that way (`readValidationScript`); a second name for a stored
+ * field would be a second name to keep in step and a second way to half-write a script.
  *
- * `clearable` appends the merge rule, which is `update_request`'s alone - on a
- * create there is no stored script to keep.
+ * `clearable` appends the merge rule, which is `update_request`'s alone: a create has no stored
+ * script to keep.
  */
 export function storedScriptInput(which: "pre" | "post", clearable: boolean) {
 	const what =
@@ -573,16 +528,12 @@ export function storedScriptInput(which: "pre" | "post", clearable: boolean) {
 }
 
 /**
- * A collection's `script.pre` / `script.post` elements - the ones that run
- * around *every* request in it, not around one (issue #759). Same
- * elements-backed sugar {@link storedScriptInput} is for requests.
- *
- * A separate fragment from `storedScriptInput` rather than a parameter on it,
- * because what an agent has to know here is the scope: a script written onto a
- * collection runs for every request below it, including the ones in its
- * sub-collections, so the blast radius of a wrong one is a whole tree rather
- * than a row. Both take the same clearing rule the request scripts do on an
- * update - an empty string is a value, not an omission.
+ * A collection's `script.pre` / `script.post` elements: the ones that run around *every* request in
+ * it, not one (issue #759). The same elements-backed sugar {@link storedScriptInput} is for
+ * requests, a separate fragment because what an agent has to know here is the scope: a script
+ * written onto a collection runs for every request below it, sub-collections included, so a wrong
+ * one's blast radius is a whole tree. Both take the same clearing rule on an update: an empty
+ * string is a value, not an omission.
  */
 export function collectionScriptInput(which: "pre" | "post") {
 	const when =
@@ -639,16 +590,15 @@ function authModeError(input: unknown, modes: readonly string[]): string {
 }
 
 /**
- * Optional auth block. Callers can copy a saved request's `auth` object verbatim
- * (read via get_request, or list_requests with `fields: "full"`). The engine applies it - bearer/basic/apikey and
- * oauth2 (using its token cache) - after `{{variables}}` inside it are resolved;
- * `inherit` resolves against the collection chain (supply collectionId).
+ * Optional auth block. Callers can copy a saved request's `auth` object verbatim (read via
+ * get_request, or list_requests with `fields: "full"`). The engine applies it (bearer/basic/apikey
+ * and oauth2, using its token cache) after `{{variables}}` inside it are resolved; `inherit`
+ * resolves against the collection chain (supply collectionId).
  *
- * `mode` is closed and `.passthrough()` stays: the members each mode reads
- * (token, username, config…) belong to the engine, which is the only place that
- * knows them. `in` is optional because the engine defaults an api key to a
- * header; a Postman-style `addTo` is refused because the engine would read
- * nothing from it and send the key in a header.
+ * `mode` is closed and `.passthrough()` stays: the members each mode reads (token, username,
+ * config…) belong to the engine, the only place that knows them. `in` is optional because the
+ * engine defaults an api key to a header; a Postman-style `addTo` is refused because the engine
+ * would read nothing from it and send the key in a header.
  */
 function authBlock(modes: readonly string[]) {
 	return z
@@ -674,15 +624,12 @@ export const authInput = authBlock(AUTH_MODES).describe(
 );
 
 /**
- * The auth block as it is *stored* on a document, described for the resource
- * holding it (issue #759).
- *
- * The same schema `run_request` and `start_load_run` take - one definition, not
- * a copy - because a saved request's auth and an ad-hoc one are the same object
- * in the same shape, and an agent that read a request's `auth` over
- * `get_request` must be able to write it back verbatim. What differs per
- * subject is only which modes are meaningful: a request may `inherit` (its
- * default), while a collection never does ({@link storedCollectionAuthInput}).
+ * The auth block as it is *stored* on a document, described for the resource holding it (issue
+ * #759). The same schema `run_request` and `start_load_run` take (one definition, not a copy),
+ * because a saved request's auth and an ad-hoc one are the same object and an agent that read a
+ * request's `auth` over `get_request` must be able to write it back verbatim. What differs per
+ * subject is only which modes are meaningful: a request may `inherit` (its default), a collection
+ * never does ({@link storedCollectionAuthInput}).
  */
 export function storedAuthInput(subject: string, extra: string) {
 	return authInput.describe(
@@ -691,11 +638,10 @@ export function storedAuthInput(subject: string, extra: string) {
 }
 
 /**
- * A collection's stored auth block (#3445): {@link authInput} without `inherit`,
- * which `create_collection` / `update_collection` would otherwise forward for
- * the engine to refuse. A folder is a collection, so this covers both. `inherit`
- * stays in the shared `authInput`: `run_request`, `start_load_run` and a saved
- * request's auth all legitimately use it.
+ * A collection's stored auth block (#3445): {@link authInput} without `inherit`, which
+ * `create_collection` / `update_collection` would otherwise forward for the engine to refuse. A
+ * folder is a collection, so this covers both. `inherit` stays in the shared `authInput`, which
+ * `run_request`, `start_load_run` and a saved request's auth all use.
  */
 export function storedCollectionAuthInput(extra: string) {
 	return authBlock(COLLECTION_AUTH_MODES).describe(
@@ -704,27 +650,22 @@ export function storedCollectionAuthInput(extra: string) {
 }
 
 /**
- * The **Settings** tab's seven per-request fields, as the engine stores them on
- * the row (issues #759, #795, #3773).
+ * The **Settings** tab's eight per-request fields, as the engine stores them on the row (issues
+ * #759, #795, #3773). One definition spread into both `create_request` and `update_request`: the
+ * fields mean the same on either verb, and the merge-patch difference is carried by the surrounding
+ * tool description rather than by two copies of eight schemas. Ranges are the engine's own
+ * (`apply_request_fields`), not new numbers: `maxRedirects` is clamped to 0-100 there, and an
+ * unrecognized `httpVersion` is a 400 rather than a coercion, which is why the enum is closed here
+ * too.
  *
- * One definition spread into both `create_request` and `update_request`: the
- * fields mean the same thing on either verb, and the merge-patch difference is
- * carried by the surrounding tool description rather than by two copies of five
- * schemas. Ranges are the engine's own (`apply_request_fields`) rather than new
- * numbers - `maxRedirects` is clamped to 0-100 there, and an unrecognized
- * `httpVersion` is a 400 rather than a coercion, which is why the enum is
- * closed here too.
- *
- * `verifySSL` is the one whose description has to say what the field *means*
- * rather than what it sets: it is the only setting here whose off position is a
- * security downgrade, and an agent that reads "certificate verification" as a
- * strictness knob would turn it off to make a handshake stop failing. The
- * merge-patch rule matters more for it than for the other four for the same
- * reason - a defaulted `true` on an unrelated update would silently re-enable
- * verification a user turned off, and the request would then fail against the
- * host it was written for. With @p statedOn (update_request names
- * create_request), the long descriptions point there instead (#3747); the
- * pointer on `verifySSL` still says to read the full one before turning it off.
+ * `verifySSL`'s description has to say what the field *means* rather than what it sets: it is the
+ * only setting whose off position is a security downgrade, and an agent that reads "certificate
+ * verification" as a strictness knob would turn it off to make a handshake stop failing. The
+ * merge-patch rule matters more for it than for the other seven for the same reason: a defaulted
+ * `true` on an unrelated update would silently re-enable verification a user turned off, and the
+ * request would then fail against the host it was written for. With @p statedOn (update_request
+ * names create_request), the long descriptions point there instead (#3747); the pointer on
+ * `verifySSL` still says to read the full one before turning it off.
  */
 export function requestSettingsInput(statedOn?: string) {
 	const described = (full: string, specific?: string) =>
@@ -808,11 +749,10 @@ export function requestSettingsInput(statedOn?: string) {
 }
 
 /**
- * The stored settings a call named, forwarded verbatim; an unnamed one is absent.
- *
- * Every key {@link requestSettingsInput} declares appears here - the schema
- * declares the shape, this list is what the payload builder actually reads, so a
- * field added to one and not the other is an argument the engine never sees.
+ * The stored settings a call named, forwarded verbatim; an unnamed one is absent. Every key
+ * {@link requestSettingsInput} declares appears here: the schema declares the shape, this list is
+ * what the payload builder reads, so a field added to one and not the other is an argument the
+ * engine never sees.
  */
 export const REQUEST_SETTINGS_KEYS = [
 	"followRedirects",
@@ -826,14 +766,11 @@ export const REQUEST_SETTINGS_KEYS = [
 ] as const;
 
 /**
- * Lay the caller's stored-settings fields onto a request payload.
- *
- * Values pass through unvalidated on purpose: the schema above owns the shapes,
- * and the engine owns the ranges - re-deriving either here would be a second
- * copy that refuses what the engine accepts the moment one side moves. What
- * this owns is the *absent* rule, which is the merge-patch contract: a field the
- * caller did not name is never written, so an update cannot silently reset the
- * redirect policy a user set in the app.
+ * Lay the caller's stored-settings fields onto a request payload. Values pass through unvalidated
+ * on purpose: the schema owns the shapes and the engine the ranges, and re-deriving either here
+ * would be a copy that refuses what the engine accepts once one side moves. What this owns is the
+ * *absent* rule, the merge-patch contract: a field the caller did not name is never written, so an
+ * update cannot silently reset the redirect policy a user set in the app.
  */
 export function applyRequestSettings(
 	args: Record<string, unknown>,
