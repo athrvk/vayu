@@ -8,35 +8,24 @@
 /* global setTimeout */
 
 /**
- * Toast Store
+ * The queue behind the toast UI. It holds what to show; the Radix Toast primitive in
+ * `components/ui/toast.tsx` owns when: the dismiss timer, pausing on hover, focus and window blur,
+ * swipe, and the open/closed state the exit animation keys off.
  *
- * The queue behind the toast UI. It holds *what* to show; the Radix Toast
- * primitive in `components/ui/toast.tsx` owns *when* - the dismiss timer,
- * pausing on hover, focus and window blur, swipe, and the open/closed state the
- * exit animation keys off.
+ * One timer is still ours, and it is not the dismiss timer: **a dismissed toast is closed first and
+ * dropped `TIMING.TOAST_EXIT_MS` later.** Deleting the entry inside `onOpenChange(false)` would
+ * unmount the element in the same update that sets `data-state="closed"`, and Radix cannot animate
+ * a node whose parent already removed it: the exit would never get a frame. Holding the entry for
+ * the length of the animation gives the primitive something to animate.
  *
- * One timer is still ours, and it is not the dismiss timer: **a dismissed toast
- * is closed first and dropped `TIMING.TOAST_EXIT_MS` later.** Deleting the entry inside
- * `onOpenChange(false)` unmounts the element in the same update that sets
- * `data-state="closed"`, and Radix cannot animate a node whose parent has
- * already removed it - the exit never gets a frame, and only the enter animation
- * ships. Holding the entry for the length of the animation is what gives the
- * primitive something to animate.
+ * Toasts render through the app's design tokens, and a shadcn primitive keeps that: it is source in
+ * this repo wearing our own token classes, like `dialog.tsx` and `popover.tsx`. A library that
+ * ships its own stylesheet does not, which is why `sonner` was not adopted.
  *
- * This store used to carry that timer, and a note that the toast was "kept
- * in-house (rather than a toast library) so toasts render through the app's
- * design tokens". The token concern was right and still holds - it just never
- * required hand-rolling. A shadcn primitive is source in this repo wearing our
- * own token classes, exactly like `dialog.tsx` and `popover.tsx`; read
- * literally, the old note would have ruled those out too. What it actually
- * ruled out was a library that ships its own stylesheet, which is still the
- * reason `sonner` was not adopted.
- *
- * What is left is the policies the primitive has no opinion about: dedup, a
- * cap, a severity floor and a duration scale. The values themselves are not
- * here - the delays live in `config/timing.ts` and everything user-configurable
- * in `constants/toast.ts`, read off the client-settings store at enqueue - so
- * this file still holds behaviour rather than configuration.
+ * What is left here is the policies the primitive has no opinion about: dedup, a cap, a severity
+ * floor and a duration scale. The values are elsewhere (the delays in `config/timing.ts`,
+ * everything user-configurable in `constants/toast.ts`, read off the client-settings store at
+ * enqueue), so this file holds behaviour, not configuration.
  */
 
 import { create } from "zustand";
@@ -95,18 +84,16 @@ export const useToastStore = create<ToastState>((set, get) => ({
 		const resolvedVariant = opts.variant ?? "info";
 
 		/*
-		 * Read, not subscribed. `showToast` is called from services, query
-		 * callbacks and event handlers as often as from components, so there is no
-		 * hook to hang a subscription on - and the preference only has to be right
-		 * at the moment the toast is created.
+		 * Read, not subscribed: `showToast` is called from services, query callbacks and event
+		 * handlers as often as from components, so there is no hook to hang a subscription on, and
+		 * the preference only has to be right at the moment the toast is created.
 		 */
 		const prefs = useClientSettingsStore.getState().notifications;
 
 		/*
-		 * Below the floor: never queued, but still handed back an id. Callers keep
-		 * the id to dismiss a toast early, and that has to stay a safe no-op
-		 * rather than something every call site must guard - muting a
-		 * notification should not become a crash where it was raised.
+		 * Below the floor: never queued, but still handed back an id. Callers keep the id to
+		 * dismiss a toast early, which has to stay a safe no-op rather than a guard at every call
+		 * site: muting a notification should not become a crash where it was raised.
 		 */
 		if (!passesSeverityFloor(resolvedVariant, prefs.minSeverity)) return crypto.randomUUID();
 
@@ -117,10 +104,9 @@ export const useToastStore = create<ToastState>((set, get) => ({
 			variant: resolvedVariant,
 			...(opts.action ? { action: opts.action } : {}),
 			/*
-			 * An explicit duration wins: a caller that names one means it. The
-			 * scale otherwise multiplies the variant's tuned value rather than
-			 * replacing it, so an error still outlasts a confirmation at every
-			 * setting.
+			 * An explicit duration wins: a caller that names one means it. Otherwise the scale
+			 * multiplies the variant's tuned value rather than replacing it, so an error still
+			 * outlasts a confirmation at every setting.
 			 */
 			duration:
 				opts.duration ??
@@ -129,12 +115,11 @@ export const useToastStore = create<ToastState>((set, get) => ({
 		};
 
 		/*
-		 * Dedup, not stack. Several producers here fire the same string
-		 * repeatedly - the OAuth2 load-test guard retries, and an SSE stream can
-		 * fail every reconnect - and four identical copies of one sentence say
-		 * nothing the first did not. Dropping the old entry and appending the new
-		 * one restarts the primitive's timer, so a recurring failure stays on
-		 * screen rather than expiring mid-retry.
+		 * Dedup, not stack. Several producers fire the same string repeatedly (the OAuth2 load-test
+		 * guard retries, an SSE stream can fail every reconnect), and four identical copies of one
+		 * sentence say nothing the first did not. Dropping the old entry and appending the new one
+		 * restarts the primitive's timer, so a recurring failure stays on screen rather than
+		 * expiring mid-retry.
 		 */
 		const withoutDuplicate = get().toasts.filter(
 			(t) => !(t.message === resolved.message && t.variant === resolved.variant)

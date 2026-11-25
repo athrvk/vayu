@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Health Query
- *
- * TanStack Query hook for engine health check with automatic polling.
- */
+/** The engine health query, polled automatically. */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
@@ -30,13 +26,10 @@ import {
 import { describeCrashEndedRuns } from "@/lib/engine-crash";
 
 /**
- * How hard to poll `/health`, given how the last poll went.
- *
- * Two speeds, because the disconnected state is no longer only an engine that
- * crashed: the window now loads while the engine is still starting, so the
- * first seconds of an ordinary launch are spent here and the poll that ends
- * them is on the startup path. Extracted so both branches are assertable
- * without driving a timer.
+ * How hard to poll `/health`, given how the last poll went. Two speeds, because the disconnected
+ * state is not only an engine that crashed: the window loads while the engine is still starting, so
+ * the first seconds of an ordinary launch are spent here and the poll that ends them is on the
+ * startup path. Extracted so both branches are assertable without driving a timer.
  */
 export function healthPollIntervalMs(
 	status: "error" | "pending" | "success",
@@ -49,15 +42,12 @@ export function healthPollIntervalMs(
 }
 
 /**
- * Ask the main process why there is no engine, and let the answer overrule the
- * startup grace: a start it has already given up on is not worth 45 seconds of
- * "Starting…".
- *
- * Skipped once a poll has answered, because the engine that did is the
- * authority and this read may have been in flight when it came up. Skipped too
- * when a restart opened a new start window meanwhile (`useEngineRestart`): the
- * reply then describes the start Retry just cleared, and writing it back would
- * put the old sentence, and the unreachable status, over the retry in flight.
+ * Ask the main process why there is no engine, and let the answer overrule the startup grace: a
+ * start it has already given up on is not worth 45 seconds of "Starting…". Skipped once a poll has
+ * answered, because the engine that did is the authority and this read may have been in flight when
+ * it came up. Skipped too when a restart opened a new start window meanwhile (`useEngineRestart`):
+ * the reply then describes the start Retry just cleared, and writing it back would put the old
+ * sentence, and the unreachable status, over the retry in flight.
  */
 function adoptEngineStartFailure(): void {
 	const startedIn = useEngineStore.getState().engineStartWindow;
@@ -71,14 +61,12 @@ function adoptEngineStartFailure(): void {
 }
 
 /**
- * The engine-lost notification's body: the transport's reason, plus one
- * sentence when the crash the sidecar pushed ended a run (#3605). That crash's
- * record is spent here (`consumeCrashEndedRuns`), so a restart that then fails
- * and loses the engine again does not claim the run a second time.
- *
- * A poll that fails before the crash push lands posts the reason alone, and
- * nothing is posted afterwards: the run is on the dashboard, and one
- * notification per loss is the rule this function sits under.
+ * The engine-lost notification's body: the transport's reason, plus one sentence when the crash the
+ * sidecar pushed ended a run (#3605). That crash's record is spent here (`consumeCrashEndedRuns`),
+ * so a restart that then fails and loses the engine again does not claim the run a second time. A
+ * poll that fails before the crash push lands posts the reason alone, and nothing is posted
+ * afterwards: the run is on the dashboard, and one notification per loss is the rule this function
+ * sits under.
  */
 function engineLostBody(reason: string): string {
 	const { crashEndedRuns, consumeCrashEndedRuns } = useEngineStore.getState();
@@ -88,10 +76,7 @@ function engineLostBody(reason: string): string {
 	return `${reason.replace(/[.!?]?\s*$/, ".")} ${ended}`;
 }
 
-/**
- * Engine health check with automatic polling
- * Updates engine store with connection status
- */
+/** Polls engine health and writes the connection status to the engine store. */
 export function useHealthQuery() {
 	const setEngineStatus = useEngineStore((s) => s.setEngineStatus);
 	const setEngineError = useEngineStore((s) => s.setEngineError);
@@ -102,33 +87,26 @@ export function useHealthQuery() {
 	const queryClient = useQueryClient();
 
 	/**
-	 * The launch's own start window, opened where the wait actually begins.
+	 * The launch's own start window, opened where the wait actually begins. Mount is the right
+	 * moment: `App` mounts the hook once, at first paint, which is when the main process spawned
+	 * the engine and started spending its own budget on the same wait. Opened in an effect, not in
+	 * render, because a clock read during render is impure (`react-hooks/purity`); nothing can have
+	 * polled before this runs, provided this effect stays declared ahead of the sync effect below.
+	 * In the other order a launch's first failure would find no window open and report the failure
+	 * this exists to hide, which "records no reason…" in `health.test.ts` catches.
 	 *
-	 * Mount is the right moment: the hook is mounted once by `App`, at first
-	 * paint, which is when the main process spawned the engine and started
-	 * spending its own budget on the same wait. Opened in an effect rather than
-	 * in render, because a clock read during render is impure
-	 * (`react-hooks/purity`) - and nothing can have polled before this runs,
-	 * provided this effect stays declared ahead of the sync effect below. In the
-	 * other order a launch's first failure would find no window open at all and
-	 * report the failure this exists to hide - which is what "records no
-	 * reason…" in `health.test.ts` catches.
-	 *
-	 * The window lives in the engine store rather than in a ref here, because the
-	 * restart path opens one too (#1227); see `engine-store.ts`.
+	 * The window lives in the engine store, not in a ref here, because the restart path opens one
+	 * too (#1227); see `engine-store.ts`.
 	 */
 	useEffect(() => {
 		openEngineStartWindow(Date.now());
 	}, [openEngineStartWindow]);
 
 	/**
-	 * Set by a poll that failed, cleared by the recovery it earns.
-	 *
-	 * An engine that answers is not by itself news - on an ordinary launch every
-	 * query is already in flight and refetching them all would be a second boot's
-	 * worth of requests for nothing. Only a health poll that actually failed
-	 * means there are queries out there holding an error the engine has since
-	 * stopped deserving.
+	 * Set by a poll that failed, cleared by the recovery it earns. An engine that answers is not by
+	 * itself news: on an ordinary launch every query is already in flight, and refetching them all
+	 * would be a second boot's worth of requests for nothing. Only a health poll that actually
+	 * failed means some queries hold an error the engine has since stopped deserving.
 	 */
 	const sawDisconnect = useRef(false);
 
@@ -138,11 +116,10 @@ export function useHealthQuery() {
 		// Hard while it is not answering, hardest while it is still starting,
 		// cheap once it is.
 		refetchInterval: (q) => healthPollIntervalMs(q.state.status, engineStarting()),
-		// One retry absorbs a single dropped poll of an engine that was serving.
-		// None while a start is in flight: the retry waits TanStack's default
-		// second before the failure surfaces, and the failure is what hands the
-		// query to the startup poll and marks the queries that raced the engine
-		// for the refetch below.
+		// One retry absorbs a single dropped poll of an engine that was serving. None while a start
+		// is in flight: the retry waits TanStack's default second before the failure surfaces, and
+		// the failure is what hands the query to the startup poll and marks the queries that raced
+		// the engine for the refetch below.
 		retry: (failureCount) => !engineStarting() && failureCount < 1,
 		// Don't show stale data for health checks
 		staleTime: 0,
@@ -157,34 +134,29 @@ export function useHealthQuery() {
 			setEngineStatus("connected");
 			setEngineError(null);
 			useEngineStore.getState().setEngineStartFailure(null);
-			// Absent means a clean start, so it clears rather than being left
-			// alone - the engine that answered this poll is the authority on
-			// what its own startup did, including a different engine answering
-			// on the port after a restart.
+			// Absent means a clean start, so it clears rather than being left alone: the engine
+			// that answered this poll is the authority on what its own startup did, including a
+			// different engine answering on the port after a restart.
 			setEngineRecovery(query.data.recovery ?? null);
 			setWorkers(query.data.workers);
 
-			// Nothing else in the app notices an engine that comes back. While a
-			// start is in flight a refused connection (`EngineUnreachableError`)
-			// does not spend a query's retry budget (`isEngineStartFailure`), but
-			// outside that window every other query gives up after its budget,
-			// so collections, runs and config settle into an error state that no
-			// interval revisits - after an engine crash, or a start that outlived
-			// its window. `refetchOnReconnect` does not cover this: it fires on
-			// the browser's online/offline event, which localhost never changes.
-			// Same move the manual restart makes (`useEngineRestart`), for the
-			// same reason.
+			// Nothing else in the app notices an engine that comes back. While a start is in flight
+			// a refused connection (`EngineUnreachableError`) does not spend a query's retry budget
+			// (`isEngineStartFailure`), but outside that window every other query gives up after
+			// its budget, so collections, runs and config settle into an error state no interval
+			// revisits: after an engine crash, or a start that outlived its window.
+			// `refetchOnReconnect` does not cover this: it fires on the browser's online/offline
+			// event, which localhost never changes. The same move the manual restart makes
+			// (`useEngineRestart`), for the same reason.
 			if (sawDisconnect.current) {
 				sawDisconnect.current = false;
 				void queryClient.invalidateQueries();
 				void reportServicesStoppedByOutage(queryClient);
-				// The same gap one layer down: a dirty editor's own auto-save
-				// retry backs off up to SAVE_RETRY_MAX_DELAY_MS, and an engine
-				// that came back sooner than that should not wait for it. Every
-				// dirty registered context is safe to flush here - unlike the
-				// quit flush, nothing about a reconnect implies urgency for a
-				// context that has never failed, and `flushAll` on one with
-				// nothing pending is a no-op.
+				// The same gap one layer down: a dirty editor's own auto-save retry backs off up to
+				// SAVE_RETRY_MAX_DELAY_MS, and an engine that came back sooner should not wait for
+				// it. Every dirty registered context is safe to flush here: unlike the quit flush,
+				// nothing about a reconnect implies urgency for a context that has never failed,
+				// and `flushAll` on one with nothing pending is a no-op.
 				void useSaveStore.getState().flushAll();
 			}
 		} else if (query.isError) {
@@ -197,11 +169,10 @@ export function useHealthQuery() {
 			// the transition, and only the previous value says whether this poll
 			// is one.
 			const previousStatus = useEngineStore.getState().engineStatus;
-			// Read, not subscribed. A window opened while the query's last state is
-			// still a success - which is exactly what a restart does - would re-run
-			// this effect into the branch above and close the window it had just
-			// opened. So the window is consulted when a poll settles, and the poll
-			// after it is what re-reads a window that closed meanwhile; a failing
+			// Read, not subscribed. A window opened while the query's last state is still a success
+			// (which is exactly what a restart does) would re-run this effect into the branch above
+			// and close the window it had just opened. So the window is consulted when a poll
+			// settles, and the poll after it re-reads a window that closed meanwhile; a failing
 			// poll is already on the fast cadence.
 			const { engineStartWindow, engineStartFailure } = useEngineStore.getState();
 			// A known start failure stays unreachable between polls; the grace
@@ -248,11 +219,10 @@ export function useHealthQuery() {
 	]);
 
 	/*
-	 * Every answered poll restates its verdict, an unchanged one included. A
-	 * crash pushed since the last answer holds the app off `connected` until the
-	 * poll speaks again (`selectKnownEngineStatus`, #3493), and an answer equal to
-	 * the last keeps `query.data` (structural sharing), so the effect above does
-	 * not run for it.
+	 * Every answered poll restates its verdict, an unchanged one included. A crash pushed since the
+	 * last answer holds the app off `connected` until the poll speaks again
+	 * (`selectKnownEngineStatus`, #3493), and an answer equal to the last keeps `query.data`
+	 * (structural sharing), so the effect above does not run for it.
 	 */
 	const answeredOkAt = query.data?.status === "ok" ? query.dataUpdatedAt : 0;
 	useEffect(() => {

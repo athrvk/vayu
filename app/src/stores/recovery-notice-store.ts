@@ -6,22 +6,17 @@
  */
 
 /**
- * Recovery Notice Store
+ * Which startup-recovery event the user has been told about (#922), as the epoch-ms timestamp the
+ * engine stamped it with.
  *
- * Which startup-recovery event the user has already been told about (issue
- * #922), as the epoch-millisecond timestamp the engine stamped it with.
+ * The record is the engine's: a marker file beside the database, reported on `GET /health` while it
+ * stands, because a record that cleared itself once read would be lost whenever the engine
+ * restarted before the app polled. Showing a notice about it once is this side's job, and one
+ * timestamp is the whole of it: a later recovery carries a later `at`, so it surfaces again with no
+ * per-event bookkeeping.
  *
- * The *record* is the engine's - a marker file beside the database, reported on
- * `GET /health` for as long as it stands, because a record that cleared itself
- * as soon as something read it would be lost whenever the engine restarted
- * before the app polled. Showing a notice about it exactly once is this side's
- * job, and one timestamp is the whole of it: a later recovery carries a later
- * `at` and is a different event, so it surfaces again without any bookkeeping
- * per event.
- *
- * Persisted because "does not repeat on the next launch" is the point. Session
- * state would re-announce a wipe every time the window opened against an engine
- * that was already running.
+ * Persisted because "does not repeat on the next launch" is the point: session state would
+ * re-announce a wipe every time the window opened against an engine already running.
  */
 
 import { create } from "zustand";
@@ -39,15 +34,10 @@ interface PersistedRecoveryNotice {
 }
 
 /**
- * Normalize a persisted payload.
- *
- * A non-finite value would compare `false` against every real timestamp and
- * silently re-show a notice the user dismissed, so anything that is not a
- * number reads as "nothing acknowledged" - the safe direction, since the
- * notice is dismissible.
- *
- * Wired as both `migrate` and `merge`, as `data-file-store` is and for the same
- * reason: `migrate` only runs on a version change, `merge` runs on every
+ * Normalize a persisted payload. A non-finite value would compare `false` against every real
+ * timestamp and re-show a dismissed notice, so anything but a finite number reads as "nothing
+ * acknowledged", the safe direction since the notice is dismissible. Wired as both `migrate` and
+ * `merge`, as `data-file-store` is: `migrate` runs only on a version change, `merge` on every
  * rehydrate.
  */
 function normalizeRecoveryNotice(persisted: unknown): PersistedRecoveryNotice {

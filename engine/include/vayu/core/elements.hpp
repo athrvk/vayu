@@ -70,8 +70,7 @@ struct TimersOverride;
  * lives with whoever builds that list (`ScenarioLoadState`'s constructor,
  * `scenario_load.cpp`), not here. `advance` is a compare-exchange retry loop,
  * never a mutex: the load path's completion callback runs on every event-loop
- * worker at once, and per `engine/CLAUDE.md`'s hot-path discipline nothing on
- * it blocks for a lock.
+ * worker at once, and nothing on it blocks for a lock.
  */
 class SharedPacingClocks {
     public:

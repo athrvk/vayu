@@ -6,25 +6,20 @@
  */
 
 /**
- * Collection Mock Server Queries (issue #481 phase 2)
+ * Collection mock server queries (#481 phase 2). A mock is a listener the engine holds until it is
+ * stopped or the process ends, so, as with an inbox or an issuer, nothing here is stored state the
+ * app could rebuild: every hook reads the engine back.
  *
- * A mock is a listener the engine holds until it is stopped or the process
- * ends, so - as with an inbox or an issuer - none of this is stored state the
- * app could rebuild: every hook here reads the engine back.
+ * The list is polled (`TIMING.SERVICES_POLL_INTERVAL_MS`) because this window is not the only
+ * client with the lifecycle: the routes answer curl, and the Services drawer and the collection
+ * header both promise to show a running mock wherever it was started from.
  *
- * The list is polled (`TIMING.SERVICES_POLL_INTERVAL_MS`) because this window
- * is not the only client with the lifecycle: the routes answer curl, and the
- * Services drawer and the collection header both promise to show a running mock
- * wherever it was started from.
- *
- * The route table's *shape* is not re-fetched on mount - it is a snapshot
- * taken when the mock started and cannot change under a running mock, editing
- * the collection means restarting. Each route's `hits`, though, changes live
- * as traffic arrives (the engine's own docs for `GET /mock/:id/routes` say
- * so), so the query still polls, at `TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS`
- * like the activity log - `staleTime: Infinity` only means mounting a second
- * reader of the same query does not force a redundant fetch, not that the
- * interval stops firing.
+ * The route table's shape is not re-fetched on mount: it is a snapshot taken when the mock started
+ * and cannot change under a running mock (editing the collection means restarting). Each route's
+ * `hits` changes live as traffic arrives (the engine's own docs for `GET /mock/:id/routes` say so),
+ * so the query still polls, at `TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS` like the activity log:
+ * `staleTime: Infinity` only means a second reader mounting does not force a redundant fetch, not
+ * that the interval stops firing.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,11 +29,9 @@ import type { StartMockServerRequest } from "@/types";
 import { queryKeys } from "./keys";
 
 /**
- * Every mock this engine is running. A stopped one is gone, not listed.
- *
- * `enabled` is for the tab descriptors, which need the list only while a
- * mock-server tab is open; see `useInboxesQuery` for why a reader that may not
- * need the answer must not keep a poll alive.
+ * Every mock this engine is running; a stopped one is gone, not listed. `enabled` is for the tab
+ * descriptors, which need the list only while a mock-server tab is open; see `useInboxesQuery` for
+ * why a reader that may not need the answer must not keep a poll alive.
  */
 export function useMockServersQuery(options: { enabled?: boolean } = {}) {
 	return useQuery({
@@ -50,10 +43,8 @@ export function useMockServersQuery(options: { enabled?: boolean } = {}) {
 }
 
 /**
- * One mock's route table.
- *
- * Disabled without a mock id so a surface can call it unconditionally before
- * anything is started.
+ * One mock's route table. Disabled without a mock id, so a surface can call it unconditionally
+ * before anything is started.
  */
 export function useMockServerRoutesQuery(mockId: string | null) {
 	return useQuery({
@@ -66,9 +57,8 @@ export function useMockServerRoutesQuery(mockId: string | null) {
 }
 
 /**
- * One mock's activity log - what it has served, newest first. Polled like
- * the route table: unlike the route table's shape, this changes on its own as
- * traffic arrives, with nothing in this window driving it.
+ * One mock's activity log (what it has served, newest first), polled like the route table: unlike
+ * the table's shape, it changes on its own as traffic arrives.
  */
 export function useMockActivityQuery(mockId: string | null) {
 	return useQuery({

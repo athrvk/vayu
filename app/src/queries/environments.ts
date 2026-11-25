@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Environments Queries
- *
- * TanStack Query hooks for environment CRUD operations.
- */
+/** TanStack Query hooks for environment CRUD. */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
@@ -20,9 +16,7 @@ import type { Environment, CreateEnvironmentRequest, UpdateEnvironmentRequest } 
 
 // ============ Environment Queries ============
 
-/**
- * Fetch all environments
- */
+/** Fetch all environments */
 export function useEnvironmentsQuery() {
 	return useQuery({
 		queryKey: queryKeys.environments.list(),
@@ -32,9 +26,7 @@ export function useEnvironmentsQuery() {
 
 // ============ Environment Mutations ============
 
-/**
- * Create a new environment
- */
+/** Create a new environment */
 export function useCreateEnvironmentMutation() {
 	const queryClient = useQueryClient();
 
@@ -49,9 +41,7 @@ export function useCreateEnvironmentMutation() {
 	});
 }
 
-/**
- * Update an existing environment
- */
+/** Update an existing environment */
 export function useUpdateEnvironmentMutation() {
 	const queryClient = useQueryClient();
 
@@ -82,10 +72,9 @@ export function useUpdateEnvironmentMutation() {
 export const setActiveEnvironmentMutationKey = ["environments", "set-active"] as const;
 
 /**
- * Counts the switches started, so a failing one can tell whether a newer
- * switch has taken over the store since (#3355). Module-level because the
- * mutation is a hook: two components mounting it share one engine and one
- * store, so they share this state.
+ * Counts the switches started, so a failing one can tell whether a newer switch has since taken
+ * over the store (#3355). Module-level because the mutation is a hook: two components mounting it
+ * share one engine and one store, so they share this state.
  */
 let latestSwitchSeq = 0;
 
@@ -93,38 +82,33 @@ let latestSwitchSeq = 0;
 let switchesInFlight = 0;
 
 /**
- * The active environment the engine is known to hold: what the store showed
- * when no switch was in flight, then the id of each PUT that landed. The store
- * itself cannot answer this while switches are pending, because it holds the
- * newest optimistic choice and not the last accepted one.
+ * The active environment the engine is known to hold: what the store showed when no switch was in
+ * flight, then the id of each PUT that landed. The store cannot answer this while switches are
+ * pending: it holds the newest optimistic choice, not the last accepted one.
  */
 let settledActiveId: string | null = null;
 
 /**
  * Switch the active environment, or clear it (`null`).
  *
- * One PUT does the whole switch: the engine deactivates the previous
- * environment in the same transaction, so there is no second request to write
- * and no window where two environments are active. That is also why this
- * invalidates the list instead of patching the response into it - the response
- * describes the environment that was activated, while the row that was
- * *de*activated changed server-side without appearing in any response body.
- * Patching only the response would leave the old one reading active forever.
+ * One PUT does the whole switch: the engine deactivates the previous environment in the same
+ * transaction, so there is no second request to write and no window where two environments are
+ * active. That is also why this invalidates the list instead of patching the response into it: the
+ * response describes the activated environment, while the deactivated row changed server-side
+ * without appearing in any response body, and would read active forever.
  *
- * The session store is written optimistically because the switcher, the
- * resolver and every composed payload read it, and rolled back if the engine
- * refuses - a selection the engine did not accept must not survive in the UI,
- * or the next launch would silently disagree with the one before it. The
- * rollback target is `settledActiveId`, never the store's value at the time the
- * switch started: with A active, a switch to B then C that both fail would
- * otherwise restore B, which the engine refused. A refusal rolls back only
- * while it is still the latest switch: a newer one has already replaced the
- * optimistic value and is about to hold or restore on its own account. The
- * `scope` makes the PUTs run one at a time in the order issued, so the engine
- * ends holding the last switch that landed, and a clear deactivates
- * `settledActiveId` - the row the engine really holds - rather than an
- * optimistic choice it may have refused. The optimistic write in `onMutate` is
- * not queued, so the switcher still answers at once (#3355).
+ * The session store is written optimistically, because the switcher, the resolver and every
+ * composed payload read it, and rolled back if the engine refuses: a selection the engine did not
+ * accept must not survive in the UI, or the next launch would silently disagree with the one before
+ * it. The rollback target is `settledActiveId`, never the store's value when the switch started:
+ * with A active, a switch to B then C that both fail would otherwise restore B, which the engine
+ * refused. A refusal rolls back only while it is still the latest switch: a newer one has already
+ * replaced the optimistic value and will hold or restore on its own account.
+ *
+ * The `scope` makes the PUTs run one at a time in the order issued, so the engine ends holding the
+ * last switch that landed, and a clear deactivates `settledActiveId` (the row the engine really
+ * holds) rather than an optimistic choice it may have refused. The optimistic write in `onMutate`
+ * is not queued, so the switcher still answers at once (#3355).
  */
 export function useSetActiveEnvironmentMutation() {
 	const queryClient = useQueryClient();
@@ -159,10 +143,9 @@ export function useSetActiveEnvironmentMutation() {
 }
 
 /**
- * Delete an environment. A soft delete (#2970): the engine moves it to the
- * Trash and clears its active flag, so `trash.all` is invalidated for an open
- * Trash view to list it - the same cross-boundary invalidation the collection
- * and request deletes make.
+ * Delete an environment. A soft delete (#2970): the engine moves it to the Trash and clears its
+ * active flag, so `trash.all` is invalidated for an open Trash view to list it, as the collection
+ * and request deletes do.
  */
 export function useDeleteEnvironmentMutation() {
 	const queryClient = useQueryClient();
@@ -181,13 +164,11 @@ export function useDeleteEnvironmentMutation() {
 			});
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 			/*
-			 * Deleting the active environment has to clear the session id, and it
-			 * belongs here rather than in either delete flow: the switcher only
-			 * *displays* "No Environment" through a defensive `find()`, while the
-			 * id itself keeps riding on every /compose and /runs payload and
-			 * persists to localStorage across restarts. Both delete call sites
-			 * (the editor's danger zone and the sidebar tree) go through this
-			 * mutation, so one cleanup covers both.
+			 * Deleting the active environment has to clear the session id, here rather than in
+			 * either delete flow: the switcher only displays "No Environment" through a defensive
+			 * `find()`, while the id keeps riding on every /compose and /runs payload and persists
+			 * to localStorage across restarts. Both delete call sites (the editor's danger zone and
+			 * the sidebar tree) go through this mutation, so one cleanup covers both.
 			 */
 			if (useSessionStore.getState().activeEnvironmentId === deletedId) {
 				useSessionStore.getState().setActiveEnvironmentId(null);
