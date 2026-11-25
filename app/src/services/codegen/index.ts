@@ -6,23 +6,18 @@
  */
 
 /**
- * Generating a runnable snippet for a request.
+ * Generating a runnable snippet for a request, the outward twin of the curl parser in
+ * `services/curl/`. Every target is a pure function of a `SnippetRequest`, so the whole surface is
+ * unit-testable without a renderer.
  *
- * Vayu has parsed curl *in* since early on (`services/curl/`) and generated
- * nothing *out*; this closes that symmetry. Every target is a pure function of
- * a `SnippetRequest`, so the whole surface is unit-testable without a renderer.
+ * Adding a target is one entry in `CODE_TARGETS` and one pure function. Quoting is per target,
+ * never a flag on another one: PowerShell escapes a quote by doubling it and POSIX by closing and
+ * reopening, and a "same generator, different quote character" shortcut is precisely how generators
+ * emit broken commands.
  *
- * Adding a target is one entry in `CODE_TARGETS` and one pure function - which
- * is the interface curl and fetch were built behind, and what HTTPie, Python and
- * PowerShell then cost. Quoting is per target, never a flag on another one:
- * PowerShell escapes a quote by doubling it and POSIX by closing and reopening,
- * and a "same generator, different quote character" shortcut is precisely how
- * generators emit broken commands.
- *
- * The input the UI feeds these is `POST /compose`'s output - the fully resolved
- * request, variables substituted and `inherit` auth walked - so a Vayu snippet
- * is what will actually be sent rather than the template it was written as.
- * That is a promise a template-based generator cannot make.
+ * The input the UI feeds these is `POST /compose`'s output, the fully resolved request (variables
+ * substituted, `inherit` auth walked), so a Vayu snippet is what will actually be sent, not the
+ * template it was written as. A template-based generator cannot make that promise.
  */
 
 import { generateCurl } from "./curl";

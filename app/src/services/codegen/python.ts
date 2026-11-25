@@ -8,12 +8,11 @@
 /**
  * Python, via `requests`.
  *
- * String literals come from `JSON.stringify`, which is not a shortcut: JSON's
- * escape set (`\"`, `\\`, `\n`, `\r`, `\t`, `\uXXXX`) is a strict subset of
- * Python 3's, every one of them means the same thing in both, and a `'` needs
- * no escape inside the double quotes it emits. Unicode passes through as
- * itself, which Python 3 source takes as UTF-8. A hand-rolled escape table is
- * how a generator ends up emitting a raw newline inside a `"`.
+ * String literals come from `JSON.stringify`, and that is not a shortcut: JSON's escape set (`\"`,
+ * `\\`, `\n`, `\r`, `\t`, `\uXXXX`) is a strict subset of Python 3's, each means the same in both,
+ * and a `'` needs no escape inside the double quotes it emits. Unicode passes through as itself,
+ * which Python 3 source reads as UTF-8. A hand-rolled escape table is how a generator emits a raw
+ * newline inside a `"`.
  */
 
 import { fileBaseName } from "@/lib/file-path";
@@ -48,11 +47,10 @@ function pairListLiteral(entries: Array<[string, string]>): string[] {
 }
 
 /**
- * A multipart text part as a `files` pair: requests' `(filename, content[,
- * type])` tuple with no filename. A bare string in `files=` is read as a file
- * upload and sent with `filename=<key>`, which a text field must not carry; the
- * `None` filename is the one spelling that keeps it a field, with or without a
- * declared Content-Type.
+ * A multipart text part as a `files` pair: requests' `(filename, content[, type])` tuple with no
+ * filename. A bare string in `files=` is read as a file upload and sent with `filename=<key>`,
+ * which a text field must not carry; the `None` filename is the one spelling that keeps it a field,
+ * with or without a declared Content-Type.
  */
 function textPartEntry({ key, value, contentType }: PreparedTextPart): string {
 	const parts = [
@@ -111,9 +109,8 @@ export function generatePython(
 		...headerEncodingNotes(prepared, "requests"),
 		...transferNotes(prepared),
 	];
-	// Said rather than emitted: this target's stock idiom buffers the whole
-	// body, so a snippet that looked like the request would simply hang on an
-	// endless stream. A stated limit is better than a command that stalls.
+	// Said rather than emitted: this target's stock idiom buffers the whole body, so a snippet that
+	// looked like the request would hang on an endless stream.
 	if (prepared.stream) {
 		notes.push(
 			"The response is an event stream. This snippet buffers it; pass stream=True to requests and iterate response.iter_lines() to consume events as they arrive."
@@ -163,10 +160,9 @@ export function generatePython(
 						part.kind === "file" ? filePartEntry(part) : textPartEntry(part)
 					)
 				: pairListLiteral(prepared.body.fields);
-		// requests spells a file part as a tuple: (filename, fileobj, type). The
-		// handles are deliberately not closed - a pasted snippet is one call, and
-		// a `with` block per file would bury the request in scaffolding. Said out
-		// loud rather than left to be noticed.
+		// requests spells a file part as a tuple: (filename, fileobj, type). The handles are
+		// deliberately not closed: a pasted snippet is one call, and a `with` block per file would
+		// bury the request in scaffolding. The note says so.
 		if (
 			prepared.body.kind === "form-data" &&
 			prepared.body.parts.some((p) => p.kind === "file")
@@ -174,9 +170,8 @@ export function generatePython(
 			notes.push("File handles are opened inline and left for the interpreter to close.");
 		}
 		lines.push(`${name} = [`, ...entries, "]", "");
-		// `files=` is what makes requests send multipart; `data=` with a list of
-		// pairs is urlencoded. A multipart body passed as `data=` is silently urlencoded,
-		// which is the mistake this branch exists to avoid.
+		// `files=` is what makes requests send multipart; `data=` with a list of pairs is
+		// urlencoded, so a multipart body passed as `data=` would be silently urlencoded.
 		callArgs.push(`    ${name}=${name},`);
 	}
 

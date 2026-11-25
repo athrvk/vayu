@@ -6,18 +6,15 @@
  */
 
 /**
- * Everything both targets have to agree on before either starts quoting.
+ * Everything the targets have to agree on before any of them starts quoting.
  *
- * Auth is the reason this file exists. The engine keeps `auth` as its own field
- * and applies it at send time, so a snippet built from the composed payload's
- * headers alone would be a request that authenticates in Vayu and 401s in a
- * terminal. Flattening it here - once - means curl and fetch cannot disagree
- * about what a bearer token becomes, and the modes neither of them can
- * reproduce produce the same note in both.
+ * Auth is the reason this file exists. The engine keeps `auth` as its own field and applies it at
+ * send time, so a snippet built from the composed payload's headers alone would authenticate in
+ * Vayu and 401 in a terminal. Flattening it here, once, means no two targets can disagree about
+ * what a bearer token becomes, and a mode none of them can reproduce gets the same note in each.
  *
- * Masking also happens here rather than over the finished string. A secret is
- * masked *before* quoting, so a value containing a quote character is still
- * found: after quoting it no longer matches itself.
+ * Masking also happens here, not over the finished string. A secret is masked *before* quoting, so
+ * a value containing a quote character is still found: after quoting it no longer matches itself.
  */
 
 import {
@@ -87,10 +84,9 @@ export type PreparedBody =
 	| { kind: "urlencoded"; fields: Array<[string, string]> };
 
 /**
- * The note for a client with no spelling for a text part's Content-Type: the
- * part is written untyped, and this says which ones, rather than leaving a
- * snippet that reads like the request and sends something else. Undefined when
- * no part declares one.
+ * The note for a client with no spelling for a text part's Content-Type: the part is written
+ * untyped, and this says which ones, rather than leave a snippet that reads like the request and
+ * sends something else. Undefined when no part declares one.
  */
 export function untypedTextPartNote(
 	body: PreparedBody | undefined,
@@ -109,11 +105,10 @@ export interface PreparedRequest {
 	url: string;
 	headers: Array<[string, string]>;
 	/**
-	 * Basic credentials stay structured instead of being pre-encoded: curl says
-	 * this with `-u` and never sees the base64, while fetch has to build the
-	 * header itself. Encoding here would force curl to render a blob no reader
-	 * can check. The URL's own `user:pass@` lands here too, so no target's URL
-	 * carries it.
+	 * Basic credentials stay structured, not pre-encoded: curl says this with `-u` and never sees
+	 * the base64, while fetch has to build the header itself, and encoding here would force curl to
+	 * render a blob no reader can check. The URL's own `user:pass@` lands here too, so no target's
+	 * URL carries it.
 	 */
 	basicAuth: { username: string; password: string } | null;
 	body: PreparedBody | undefined;
@@ -294,22 +289,16 @@ export function createSecretMasker(
 /**
  * The Content-Type a body mode is sent under when the request declares none.
  *
- * The engine's `implied_content_type` (`engine/src/http/form_body.cpp`) is what
- * reaches the wire, and this is the same table for the snippet: a mode whose
- * meaning includes its media type - JSON's, GraphQL's and JSON-RPC's JSON
- * envelopes, XML's document, and `text` as `text/plain` - carries it. A text
- * body that is really a CSV or a JWT declares its own header, which wins.
+ * The engine's `implied_content_type` (`engine/src/http/form_body.cpp`) is what reaches the wire,
+ * and this is the same table for the snippet: a mode whose meaning includes its media type (JSON's,
+ * GraphQL's and JSON-RPC's JSON envelopes, XML's document, and `text` as `text/plain`) carries it.
+ * A text body that is really a CSV or a JWT declares its own header, which wins.
  *
- * Without this, every snippet fell through as raw content with **no** header,
- * so a copied curl of a GraphQL request went out as libcurl's default
- * `application/x-www-form-urlencoded` and most servers answered 400 - a snippet
- * that does not do what the app just did. `json` fell through the same way
- * (issue #1445): the engine implies `application/json` for it exactly like
- * GraphQL and JSON-RPC, so a snippet that carried no header for a json-mode
- * body was already wrong the day it was generated, and pasting it back through
- * `parseCurl` landed it as `text` rather than `json`. The form modes are absent
- * on purpose: their generators express the body as `-F` / `--data-urlencode`
- * and the client writes the header itself, boundary included.
+ * Without it a snippet carries **no** header: a copied curl of a GraphQL request goes out as
+ * libcurl's default `application/x-www-form-urlencoded`, which most servers answer with a 400, and
+ * a json-mode body pasted back through `parseCurl` lands as `text`, not `json` (#1445). The form
+ * modes are absent on purpose: their generators express the body as `-F` / `--data-urlencode` and
+ * the client writes the header itself, boundary included.
  */
 export const IMPLIED_CONTENT_TYPE: Readonly<Record<string, string>> = {
 	json: "application/json",
@@ -320,12 +309,10 @@ export const IMPLIED_CONTENT_TYPE: Readonly<Record<string, string>> = {
 };
 
 /**
- * The header rows plus the one this body implies, if it is not already declared.
- *
- * A declared Content-Type wins, case-insensitively and whatever its value - the
- * same rule the engine applies (`body_content_type_header`) and the request
- * builder applies (`body/content-type.ts`): someone who typed
- * `application/soap+xml` means it.
+ * The header rows plus the one this body implies, if it is not already declared. A declared
+ * Content-Type wins, case-insensitively and whatever its value, the rule the engine
+ * (`body_content_type_header`) and the request builder (`body/content-type.ts`) apply: someone who
+ * typed `application/soap+xml` means it.
  */
 function withImpliedContentType(
 	headers: Array<[string, string]>,
@@ -342,14 +329,13 @@ function withImpliedContentType(
 }
 
 /**
- * The Content-Type a `binary` body is snippeted under when no header declares
- * one: the file's own declared type, else `application/octet-stream`. Always
- * a value, never absent, because every client here has a worse default for a
- * file body than "bytes" - curl's `--data-binary` sends
- * `application/x-www-form-urlencoded`, and a server that believes it parses
- * the file as form fields. The engine's extension table (a `.png` goes out as
- * `image/png`) is not mirrored here; a snippet that wants that type names it
- * on the file or as a header, and octet-stream is the honest fallback.
+ * The Content-Type a `binary` body is snippeted under when no header declares one: the file's own
+ * declared type, else `application/octet-stream`. Always a value, because every client here has a
+ * worse default for a file body than "bytes": curl's `--data-binary` sends
+ * `application/x-www-form-urlencoded`, and a server that believes it parses the file as form
+ * fields. The engine's extension table (a `.png` goes out as `image/png`) is not mirrored here; a
+ * snippet that wants that type names it on the file or as a header, and octet-stream is the honest
+ * fallback.
  */
 function binaryContentType(body: SnippetBody): string {
 	const declared = body.file?.contentType?.trim();
@@ -494,14 +480,11 @@ function typedCookieValue(rows: readonly string[]): string {
 }
 
 /**
- * Join repeated `Cookie` rows into one, leaving every other repeat alone.
- *
- * The engine sends the typed `Cookie` rows as a single line
- * (`typedCookieValue`) while any other repeated header goes out as separate
- * lines. curl and HTTPie can repeat a header, so they fold only this one - and
- * need no note, because the folded line is what Vayu sends. The line sits where
- * the first `Cookie` row was and keeps that row's spelling; when no row reaches
- * the wire there is no line.
+ * Join repeated `Cookie` rows into one, leaving every other repeat alone. The engine sends the
+ * typed `Cookie` rows as one line (`typedCookieValue`) and any other repeated header as separate
+ * lines. curl and HTTPie can repeat a header, so they fold only this one, and need no note: the
+ * folded line is what Vayu sends. The line sits where the first `Cookie` row was and keeps that
+ * row's spelling; when no row reaches the wire there is no line.
  */
 export function foldRepeatedCookies(
 	headers: ReadonlyArray<[string, string]>
@@ -517,16 +500,13 @@ export function foldRepeatedCookies(
 }
 
 /**
- * Fold every header a client with one value per name cannot repeat into a single
- * entry, and say so. The entry sits where the name first appeared, keeps that
- * row's spelling and joins the values with ", " - `Cookie` as the engine does
- * (`typedCookieValue`) - and the note names each name that was joined, because
- * Vayu sends those rows as separate lines - except `Cookie`, which it sends as
- * the same "; " join (issue #2788).
+ * Fold every header a client with one value per name cannot repeat into a single entry, and say so.
+ * The entry sits where the name first appeared, keeps that row's spelling and joins the values with
+ * ", ", or `Cookie`'s as the engine does (`typedCookieValue`). The note names each joined name and
+ * how Vayu sends it: as separate lines, or for `Cookie` as the same "; " join (#2788).
  *
- * For `fetch`, `requests` and `Invoke-RestMethod`, whose header map is a
- * dictionary. curl and HTTPie repeat a header and fold only `Cookie`
- * (`foldRepeatedCookies`).
+ * For `fetch`, `requests` and `Invoke-RestMethod`, whose header map is a dictionary. curl and
+ * HTTPie repeat a header and fold only `Cookie` (`foldRepeatedCookies`).
  */
 export function foldRepeatedHeaders(
 	headers: ReadonlyArray<[string, string]>,
@@ -580,21 +560,19 @@ export function timeoutSeconds(ms: number): number {
 }
 
 /**
- * Flatten a request into what a static client has to send, with auth applied
- * and secrets already hidden.
+ * Flatten a request into what a static client has to send, with auth applied and secrets already
+ * hidden.
  *
- * A header the request already carries wins over the one its auth would write,
- * as in the engine's `apply_auth` (`engine/src/http/auth_resolver.cpp`), pinned
- * to it by `engine/tests/fixtures/auth-header-precedence.json` (issue #2475):
- * appending both made a snippet send two `Authorization` lines where Vayu sends
- * one. A query-located API key is a URL parameter, not a header, and is never
- * skipped.
+ * A header the request already carries wins over the one its auth would write, as in the engine's
+ * `apply_auth` (`engine/src/http/auth_resolver.cpp`), pinned to it by
+ * `engine/tests/fixtures/auth-header-precedence.json` (#2475): appending both would make a snippet
+ * send two `Authorization` lines where Vayu sends one. A query-located API key is a URL parameter,
+ * not a header, and is never skipped.
  *
- * The URL's `user:pass@` is taken off the URL for every target. It is Basic
- * credentials only where nothing else authorizes the request: libcurl sends it
- * unless an `Authorization` header is set, which any header-writing auth or a
- * typed one is, and then it is dropped with a note. The password is masked as a
- * secret whether it is kept or not.
+ * The URL's `user:pass@` is taken off the URL for every target. It is Basic credentials only where
+ * nothing else authorizes the request: libcurl sends it unless an `Authorization` header is set,
+ * which any header-writing auth or a typed one is, and then it is dropped with a note. The password
+ * is masked as a secret whether it is kept or not.
  */
 export function prepareRequest(
 	request: SnippetRequest,
@@ -602,13 +580,11 @@ export function prepareRequest(
 ): PreparedRequest {
 	const notes: string[] = [];
 
-	// Path variables first, as the engine composes them (issue #1764), so a
-	// query-located API key appended below lands after the substituted path.
-	// Raw under `disableUrlEncoding` (issue #1765), as the engine substitutes.
-	// Then the URL written as Send puts it on the wire (issue #2465): the
-	// `{{token}}`s stay (a snippet is templated), the literal text around them
-	// is encoded and the host lowercased, so the snippet carries the line Vayu
-	// sends and not the one typed.
+	// Path variables first, as the engine composes them (#1764), so a query-located API key
+	// appended below lands after the substituted path; raw under `disableUrlEncoding` (#1765), as
+	// the engine substitutes. Then the URL written as Send puts it on the wire (#2465): the
+	// `{{token}}`s stay (a snippet is templated), the literal text around them is encoded and the
+	// host lowercased, so the snippet carries the line Vayu sends, not the one typed.
 	const encode = request.disableUrlEncoding !== true;
 	let url = resolveUrlTemplate(
 		substitutePathVariables(request.url ?? "", request.params ?? [], undefined, { encode }),
@@ -688,16 +664,14 @@ export function prepareRequest(
 	if (graphqlQuery !== undefined) url = urlWithQuery(url, graphqlQuery);
 	const body = graphqlQuery === undefined ? normalizeBody(request.body) : undefined;
 	if (body && (request.body as SnippetBody).mode === "mcp") notes.push(MCP_BODY_NOTE);
-	// Absent means following: the engine's own default (issue #1445), unlike
-	// curl's, which is why the flag is worth emitting on the common case
-	// rather than only when it departs from one.
+	// Absent means following: the engine's own default (#1445), unlike curl's, which is why the
+	// flag is worth emitting on the common case.
 	const followRedirects = request.followRedirects !== false;
 
-	// After auth, so a header the request carries under any name still counts as
-	// declared; and only when there is a body, because a mode with nothing in it
-	// sends none - the engine's `has_wire_body` gate, which `normalizeBody`
-	// applied by returning undefined and a GraphQL GET applied by moving its
-	// document into the URL.
+	// After auth, so a header the request carries under any name still counts as declared; and only
+	// when there is a body, because a mode with nothing in it sends none: the engine's
+	// `has_wire_body` gate, which `normalizeBody` applies by returning undefined and a GraphQL GET
+	// by moving its document into the URL.
 	const withContentType = body ? withImpliedContentType(headers, request.body) : headers;
 
 	// Mask last, over everything at once, so a credential and a secret variable
@@ -733,16 +707,13 @@ const ABOVE_LATIN1 = /[\u0100-\uffff]/;
 const LATIN1_HIGH = /[\u0080-\u00ff]/;
 
 /**
- * Notes for header values a Latin-1 client cannot send the way Vayu does.
- *
- * Vayu writes a header value as UTF-8. `fetch` and `requests` take a header
- * as Latin-1: a character above U+00FF makes them throw before anything is
- * sent, and one in U+0080..U+00FF goes out as a single byte where Vayu sends
- * two, so the server reads a different value. Nothing is transcoded - the
- * snippet stays the request as written and says where the client differs.
- * The basic-auth pair counts as the `Authorization` value both targets build
- * from it (`btoa`, the `auth=` tuple), and a masked value is the placeholder
- * the snippet actually carries.
+ * Notes for header values a Latin-1 client cannot send the way Vayu does. Vayu writes a header
+ * value as UTF-8. `fetch` and `requests` take a header as Latin-1: a character above U+00FF makes
+ * them throw before anything is sent, and one in U+0080..U+00FF goes out as one byte where Vayu
+ * sends two, so the server reads a different value. Nothing is transcoded: the snippet stays the
+ * request as written and says where the client differs. The basic-auth pair counts as the
+ * `Authorization` value both targets build from it (`btoa`, the `auth=` tuple), and a masked value
+ * is the placeholder the snippet actually carries.
  */
 export function headerEncodingNotes(
 	prepared: PreparedRequest,
@@ -782,10 +753,9 @@ function apiKeyHeaderName(auth: Record<string, unknown> | undefined): string | u
 }
 
 /**
- * The credential values in a request, so the caller can hand them back as
- * secrets to mask. Auth credentials are secret whether or not they came from a
- * variable marked secret - a bearer token typed literally into the auth tab is
- * exactly as sensitive as one that came from a `{{token}}`.
+ * The credential values in a request, for the caller to hand back as secrets to mask. Auth
+ * credentials are secret whether or not they came from a variable marked secret: a bearer token
+ * typed literally into the auth tab is as sensitive as one from a `{{token}}`.
  */
 export function authSecrets(auth: Record<string, unknown> | undefined): string[] {
 	if (!auth) return [];
