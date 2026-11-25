@@ -6,28 +6,24 @@
  */
 
 /**
- * Monaco loader - the boundary that keeps the editor out of startup (#1146).
- *
- * `lib/monaco-setup.ts` was imported from `main.tsx` before React rendered, so
- * the monaco barrel and `graphql-language-service` were parsed on every cold
- * start whether or not the user ever opened an editor. This module imports it
- * dynamically instead, the first time a `CodeEditor` is about to mount.
+ * Monaco loader: the boundary that keeps the editor out of startup (#1146). `lib/monaco-setup.ts`
+ * parses the monaco barrel and `graphql-language-service`, so this module imports it dynamically,
+ * the first time a `CodeEditor` is about to mount, rather than from `main.tsx` on every cold start
+ * whether or not an editor is ever opened.
  *
  * Two rules hold the ordering together, and both are load-bearing:
  *
- * 1. **`loader.config({ monaco })` must run before anything calls
- *    `loader.init()`.** `@monaco-editor/loader`'s `init()` injects
- *    `<script src="https://cdn.jsdelivr.net/…/vs/loader.js">` when no instance
- *    has been configured - a network fetch a desktop app has no business making
- *    and cannot complete offline. `ensureMonaco()` imports the setup module
- *    (which configures) before any editor renders, and is the only way monaco
- *    is brought in.
- * 2. **Registering a provider must not trigger the load.** The `pm.*`
- *    completions, `{{variable}}` completions and script type definitions
- *    register from `App`, which mounts long before any editor. They call
- *    `useLoadedMonaco()`, which subscribes and stays `null` until an editor has
- *    loaded monaco - `@monaco-editor/react`'s `useMonaco()` would call `init()`
- *    from that same mount and undo rule 1 and the split at once.
+ * 1. **`loader.config({ monaco })` must run before anything calls `loader.init()`.**
+ *    `@monaco-editor/loader`'s `init()` injects
+ *    `<script src="https://cdn.jsdelivr.net/…/vs/loader.js">` when no instance has been configured:
+ *    a network fetch a desktop app has no business making and cannot complete offline.
+ *    `ensureMonaco()` imports the setup module (which configures) before any editor renders, and is
+ *    the only way monaco is brought in.
+ * 2. **Registering a provider must not trigger the load.** The `pm.*` completions, `{{variable}}`
+ *    completions and script type definitions register from `App`, which mounts long before any
+ *    editor. They call `useLoadedMonaco()`, which subscribes and stays `null` until an editor has
+ *    loaded monaco; `@monaco-editor/react`'s `useMonaco()` would call `init()` from that same mount
+ *    and undo rule 1 and the split at once.
  */
 
 import { useSyncExternalStore } from "react";
