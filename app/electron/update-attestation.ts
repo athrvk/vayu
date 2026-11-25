@@ -6,21 +6,18 @@
  */
 
 /**
- * Whether a downloaded installer is one `release.yml` built for this exact
- * release (#2372).
+ * Whether a downloaded installer is one `release.yml` built for this exact release (#2372).
  *
- * The updater otherwise installs whatever the release's `latest*.yml` names,
- * and nothing is code-signed. The publish job attests every installer with
- * `actions/attest-build-provenance`, so the check is the one
- * `gh attestation verify --signer-workflow` makes (`install.sh` pins the same
- * workflow): look the file's SHA-256 up in GitHub's attestations API, verify
- * each Sigstore bundle against the public-good trusted root, then hold the
- * verified certificate to `release.yml` at tag `v<version>`. Pinning the tag,
- * not just the workflow, is what refuses an older genuine installer
+ * The updater otherwise installs whatever the release's `latest*.yml` names, and nothing is
+ * code-signed. The publish job attests every installer with `actions/attest-build-provenance`, so
+ * the check is the one `gh attestation verify --signer-workflow` makes (`install.sh` pins the same
+ * workflow): look the file's SHA-256 up in GitHub's attestations API, verify each Sigstore bundle
+ * against the public-good trusted root, then hold the verified certificate to `release.yml` at tag
+ * `v<version>`. Pinning the tag, not just the workflow, is what refuses an older genuine installer
  * re-uploaded under a newer release.
  *
- * The Sigstore packages are imported on first use: only the silent-install
- * platforms ever verify, and never before a download has finished.
+ * The Sigstore packages are imported on first use: only the silent-install platforms ever verify,
+ * and never before a download has finished.
  */
 
 import { createHash } from "node:crypto";
@@ -43,16 +40,14 @@ export interface InstallerAttestationCheck {
 	/** The release it was downloaded for, without the `v`: `"0.44.0"`. */
 	version: string;
 	/**
-	 * Where the TUF metadata and trusted root refreshed from the Sigstore CDN
-	 * are cached (`sigstore-trusted-root.ts`); a directory under the app's
-	 * `userData`. Laid out as `@sigstore/tuf` laid it out, so a cache an earlier
-	 * build wrote is read as it stands.
+	 * Where the TUF metadata and trusted root refreshed from the Sigstore CDN are cached
+	 * (`sigstore-trusted-root.ts`); a directory under the app's `userData`. Laid out as
+	 * `@sigstore/tuf` laid it out, so a cache an earlier build wrote is read as it stands.
 	 */
 	sigstoreCacheDir: string;
 	/**
-	 * Defaults to Electron's `net.fetch`, which follows the system proxy. One
-	 * function serves the attestation lookup and the TUF refresh, so neither
-	 * can bypass the proxy on its own.
+	 * Defaults to Electron's `net.fetch`, which follows the system proxy. One function serves the
+	 * attestation lookup and the TUF refresh, so neither can bypass the proxy on its own.
 	 */
 	fetch?: AttestationFetch;
 	/** Skips the TUF refresh entirely; tests inject a snapshot. */
@@ -73,9 +68,8 @@ const SOURCE_REPOSITORY_URI_OID = [1, 3, 6, 1, 4, 1, 57264, 1, 12];
 const RELEASE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 /**
- * Never throws: every failure, including one this module did not anticipate,
- * is a refusal with a reason, and there is no path that accepts after a
- * failure.
+ * Never throws: every failure, including one this module did not anticipate, is a refusal with a
+ * reason, and there is no path that accepts after a failure.
  */
 export async function verifyInstallerAttestation(
 	check: InstallerAttestationCheck
@@ -202,9 +196,8 @@ async function bundleVerifier(trustedRoot: SigstoreTrustedRoot): Promise<BundleV
 		import("@sigstore/bundle"),
 		import("@sigstore/verify"),
 	]);
-	// The default thresholds: one transparency-log entry, one SCT, one
-	// timestamp. The certificate lives ten minutes, so it is checked at the
-	// Rekor entry's integrated time, not now.
+	// The default thresholds: one transparency-log entry, one SCT, one timestamp. The certificate
+	// lives ten minutes, so it is checked at the Rekor entry's integrated time, not now.
 	const verifier = new Verifier(toTrustMaterial(trustedRoot));
 	return (json) => {
 		const bundle = bundleFromJSON(json);
@@ -245,9 +238,8 @@ function signerProblem(signer: Signer, version: string): string | undefined {
 }
 
 /**
- * Exactly one extension with this OID, holding exactly this string. Compared
- * as DER, which is how Fulcio writes it, so the certificate's bytes are never
- * parsed here.
+ * Exactly one extension with this OID, holding exactly this string. Compared as DER, which is how
+ * Fulcio writes it, so the certificate's bytes are never parsed here.
  */
 function hasExtension(identity: Signer["identity"], oid: number[], expected: string): boolean {
 	const matches = (identity?.oids ?? []).filter(
