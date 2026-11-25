@@ -5,10 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Window State Manager
- * Persists and restores window size, position, and maximized / full-screen state
- */
+/** Persists and restores window size, position, and maximized / full-screen state. */
 
 import { createJsonStore } from "./json-store.js";
 import { BrowserWindow, screen } from "electron";
@@ -29,13 +26,11 @@ interface WindowStateOptions {
 }
 
 /*
- * Read before the window is built, which is before `app.whenReady` resolves on
- * a cold launch - so a corrupt window-state.json must be an empty store rather
- * than a throw, or Electron shows "A JavaScript error occurred in the main
- * process" and the app never starts, on every launch until the user finds and
- * deletes a hidden file. `createJsonStore` answers every unreadable file that
- * way; starting over is the right failure mode for a file whose only job is
- * window geometry.
+ * Read before the window is built, which is before `app.whenReady` resolves on a cold launch, so a
+ * corrupt window-state.json must be an empty store rather than a throw, or Electron shows "A
+ * JavaScript error occurred in the main process" and the app never starts, on every launch until
+ * the user finds and deletes a hidden file. `createJsonStore` answers every unreadable file that
+ * way; starting over is the right failure mode for a file whose only job is window geometry.
  */
 const store = createJsonStore<{ windowState: WindowState }>("window-state");
 
@@ -44,15 +39,14 @@ function isFiniteNumber(value: unknown): value is number {
 }
 
 /**
- * What `store.get` returns is JSON off disk, not a `WindowState` - the type
- * parameter describes what we wrote, not what is there now. A hand edit or a
- * half-finished write can leave any shape at all, and every field here is passed
- * straight to the `BrowserWindow` constructor, so `width: "abc"` reaches Electron.
+ * What `store.get` returns is JSON off disk, not a `WindowState`: the type parameter describes what
+ * we wrote, not what is there now. A hand edit or a half-finished write can leave any shape at all,
+ * and every field here is passed straight to the `BrowserWindow` constructor, so `width: "abc"`
+ * reaches Electron.
  *
- * Each field falls back on its own: a default is a perfectly good value for any
- * one of them, and nothing about the geometry couples them. The exception is the
- * position, which BrowserWindow honours as a pair or not at all - so one bad axis
- * drops both and the window is centred.
+ * Each field falls back on its own: a default is a perfectly good value for any one of them, and
+ * nothing about the geometry couples them. The exception is the position, which BrowserWindow
+ * honours as a pair or not at all, so one bad axis drops both and the window is centred.
  */
 function sanitizeWindowState(saved: unknown, defaults: WindowState): WindowState {
 	if (typeof saved !== "object" || saved === null || Array.isArray(saved)) {
@@ -100,7 +94,6 @@ export function loadWindowState(options: WindowStateOptions): WindowState {
 		});
 
 		if (!isOnDisplay) {
-			// Position is off-screen, reset to center
 			delete state.x;
 			delete state.y;
 		}
@@ -126,11 +119,10 @@ function saveWindowState(window: BrowserWindow): void {
 		return;
 	}
 
-	// A maximized or full-screen window reports the display's bounds, which would
-	// restore as a window the size of the screen with nothing to un-maximize back
-	// to. Keep the previous normal bounds instead. They come off disk, so they get
-	// the same scrubbing a load does - otherwise this re-persists whatever garbage
-	// was already in the file.
+	// A maximized or full-screen window reports the display's bounds, which would restore as a
+	// window the size of the screen with nothing to un-maximize back to. Keep the previous normal
+	// bounds instead. They come off disk, so they get the same scrubbing a load does, otherwise
+	// this re-persists whatever garbage was already in the file.
 	const existingState = sanitizeWindowState(store.get("windowState"), {
 		width: bounds.width,
 		height: bounds.height,
@@ -148,7 +140,6 @@ function saveWindowState(window: BrowserWindow): void {
 }
 
 export function trackWindowState(window: BrowserWindow): void {
-	// Debounce resize/move to avoid excessive writes
 	let saveTimeout: NodeJS.Timeout | null = null;
 	const debouncedSave = () => {
 		if (saveTimeout) clearTimeout(saveTimeout);

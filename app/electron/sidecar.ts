@@ -33,31 +33,23 @@ import { appLogger } from "./app-log.js";
 import { readMcpPort } from "./mcp/store.js";
 
 /**
- * The directory the engine keeps its state in - logs, database and lock file.
+ * The directory the engine keeps its state in: logs, database and lock file.
  *
  * Production:
  *   - macOS: ~/Library/Application Support/Vayu
  *   - Windows: %APPDATA%/Vayu
- *   - Linux: ~/.config/Vayu
- * Development: <repo>/engine/data
+ *   - Linux: ~/.config/Vayu Development: <repo>/engine/data
  *
- * Module-level rather than a method because callers outside the sidecar need it
- * when there is no sidecar instance to ask: `app:getPaths` answers Settings
- * whether or not the engine came up.
+ * Module-level rather than a method because callers outside the sidecar need it when there is no
+ * sidecar instance to ask: `app:getPaths` answers Settings whether or not the engine came up.
  */
 export function engineDataDirectory(): string {
 	if (isDevelopmentBuild()) {
-		// In development, use a local directory in the engine folder
 		return path.join(app.getAppPath(), "..", "engine", "data");
 	}
-	// In production, use the app's userData directory
-	// app.getPath("userData") returns platform-specific paths
 	return app.getPath("userData");
 }
 
-/**
- * Check if a port is available
- */
 function isPortAvailable(port: number): Promise<boolean> {
 	return new Promise((resolve) => {
 		const server = net.createServer();
@@ -97,10 +89,9 @@ export interface EngineHealthAnswer {
 }
 
 /**
- * The Vayu engine answering on this port, or null when none does (#2153).
- * `status: "ok"` alone is what any service's health route says; the engine's
- * `/health` also carries a string `version` and a numeric `workers`, and a reply
- * without both is another program, treated as a held port.
+ * The Vayu engine answering on this port, or null when none does (#2153). `status: "ok"` alone is
+ * what any service's health route says; the engine's `/health` also carries a string `version` and
+ * a numeric `workers`, and a reply without both is another program, treated as a held port.
  */
 async function probeEngineHealth(port: number): Promise<EngineHealthAnswer | null> {
 	const data = await fetchHealth(port);
@@ -113,18 +104,17 @@ async function probeEngineHealth(port: number): Promise<EngineHealthAnswer | nul
 }
 
 /**
- * Whether two data-directory paths name the same directory, as the engine
- * reports one on `/health` (#3328): absolute, lexically normalised, symlinks
- * as written. Both sides are resolved and lose any trailing separator.
+ * Whether two data-directory paths name the same directory, as the engine reports one on `/health`
+ * (#3328): absolute, lexically normalised, symlinks as written. Both sides are resolved and lose
+ * any trailing separator.
  *
- * Case is folded on Windows only, where the file system ignores it and a drive
- * letter's case varies by whoever spelled the path. macOS is left exact: the
- * app's own engine reports the very string the app passed it, so folding would
- * recognise no orphan that exact comparison misses, and on a case-sensitive
- * APFS volume it would take two directories for one.
+ * Case is folded on Windows only, where the file system ignores it and a drive letter's case varies
+ * by whoever spelled the path. macOS is left exact: the app's own engine reports the very string
+ * the app passed it, so folding would recognise no orphan that exact comparison misses, and on a
+ * case-sensitive APFS volume it would take two directories for one.
  *
- * The path flavour follows `process.platform` rather than the `path` default
- * (the same choice in production) so a test can stub the platform.
+ * The path flavour follows `process.platform` rather than the `path` default (the same choice in
+ * production) so a test can stub the platform.
  */
 export function isSameDataDirectory(reported: string, own: string): boolean {
 	const windows = process.platform === "win32";
@@ -147,9 +137,8 @@ function newGrantSecret(): string {
 /**
  * Ask the engine to shut itself down over HTTP.
  *
- * The engine answers the POST before it stops, so a `true` here means the
- * request was accepted, never that the process is gone - the caller still has
- * to watch for the exit.
+ * The engine answers the POST before it stops, so a `true` here means the request was accepted,
+ * never that the process is gone: the caller still has to watch for the exit.
  */
 async function requestEngineShutdown(port: number): Promise<boolean> {
 	try {
@@ -166,11 +155,10 @@ async function requestEngineShutdown(port: number): Promise<boolean> {
 /**
  * A number we are willing to hand to `process.kill`.
  *
- * The PID comes out of a lock file on disk, so it is whatever that file says.
- * Zero and negatives are not PIDs: `process.kill` reads them as *process
- * group* targets on Unix, so a truncated or garbled lock file would aim the
- * probe - and, through `killVayuEngineProcess`, a SIGKILL - at this app's own
- * process group.
+ * The PID comes out of a lock file on disk, so it is whatever that file says. Zero and negatives
+ * are not PIDs: `process.kill` reads them as *process group* targets on Unix, so a truncated or
+ * garbled lock file would aim the probe, and through `killVayuEngineProcess` a SIGKILL, at this
+ * app's own process group.
  */
 function isPlausiblePid(pid: number): boolean {
 	return Number.isInteger(pid) && pid > 0;
@@ -179,24 +167,21 @@ function isPlausiblePid(pid: number): boolean {
 /**
  * Can we rule out this PID without spawning anything?
  *
- * Signal 0 delivers nothing - it is an existence-and-permission probe, and
- * libuv implements it on Windows too (`OpenProcess` plus an exit-code check, so
- * a process that has terminated while someone still holds a handle to it
- * reports `ESRCH` rather than "alive"). That makes it the cheap first half of
- * the question on every platform, which matters because the dominant case at
- * startup is a leftover lock file naming a PID that is long gone: the engine
- * only releases its lock on a clean shutdown and never unlinks the file, so
- * every ordinary boot asks about a dead PID. Windows used to answer that by
- * spawning cmd.exe + tasklist - 52.5 ms median, measured, on the main-process
+ * Signal 0 delivers nothing: it is an existence-and-permission probe, and libuv implements it on
+ * Windows too (`OpenProcess` plus an exit-code check, so a process that has terminated while
+ * someone still holds a handle to it reports `ESRCH` rather than "alive"). That makes it the cheap
+ * first half of the question on every platform, which matters because the dominant case at startup
+ * is a leftover lock file naming a PID that is long gone: the engine only releases its lock on a
+ * clean shutdown and never unlinks the file, so every ordinary boot asks about a dead PID.
+ * Answering that by spawning cmd.exe + tasklist cost 52.5 ms median (measured) on the main-process
  * event loop, every launch.
  *
- * Only `ESRCH` is proof, and the asymmetry is deliberate. Every other failure
- * means we could not tell - `EPERM` for a process we may not signal, and on
- * Windows an `OpenProcess` denial that libuv reports as `EACCES` rather than
- * `EPERM`, since it comes back through the generic Win32 error translation.
- * Reading "could not tell" as "gone" would let a *running* engine be declared
- * stale, its lock deleted underneath it; so an unclear answer costs a
- * subprocess and lets the name check decide.
+ * Only `ESRCH` is proof, and the asymmetry is deliberate. Every other failure means we could not
+ * tell: `EPERM` for a process we may not signal, and on Windows an `OpenProcess` denial that libuv
+ * reports as `EACCES` rather than `EPERM`, since it comes back through the generic Win32 error
+ * translation. Reading "could not tell" as "gone" would let a *running* engine be declared stale,
+ * its lock deleted underneath it; so an unclear answer costs a subprocess and lets the name check
+ * decide.
  */
 function isPidCertainlyDead(pid: number): boolean {
 	try {
@@ -210,12 +195,10 @@ function isPidCertainlyDead(pid: number): boolean {
 /**
  * What holds a lock file's PID, as far as the OS will say.
  *
- * `not-engine` is proof: nothing holds the PID, or the name read back is not
- * vayu-engine. `unknown` is a live PID whose name could not be read (`ps`
- * missing from a minimal container, `tasklist` failing), and it is neither
- * answer (#2422): read as `not-engine` it deleted a live engine's lock, and
- * read as `engine` it would aim the force-kill at whatever inherited a
- * recycled PID.
+ * `not-engine` is proof: nothing holds the PID, or the name read back is not vayu-engine. `unknown`
+ * is a live PID whose name could not be read (`ps` missing from a minimal container, `tasklist`
+ * failing), and it is neither answer (#2422): read as `not-engine` it would delete a live engine's
+ * lock, and read as `engine` it would aim the force-kill at whatever inherited a recycled PID.
  */
 type EngineProcessState = "engine" | "not-engine" | "unknown";
 
@@ -248,11 +231,10 @@ function classifyLiveProcess(pid: number): EngineProcessState {
 /**
  * Is this PID a running vayu-engine?
  *
- * Cheap first, subprocess second: a PID nothing holds is answered by the signal-0
- * probe alone, and only a live PID is worth paying a `tasklist` / `ps` for. The
- * name check is not optional politeness - it prevents PID reuse issues where a
- * different process might have reused the same PID that was previously held by
- * vayu-engine.
+ * Cheap first, subprocess second: a PID nothing holds is answered by the signal-0 probe alone, and
+ * only a live PID is worth paying a `tasklist` / `ps` for. The name check is not optional
+ * politeness: it prevents PID reuse issues where a different process might have reused the PID a
+ * vayu-engine held earlier.
  */
 function engineProcessState(pid: number): EngineProcessState {
 	if (!isPlausiblePid(pid)) return "not-engine";
@@ -263,11 +245,10 @@ function engineProcessState(pid: number): EngineProcessState {
 /**
  * Force-kill a vayu-engine process by PID.
  *
- * Name-verified first, for the same reason `engineProcessState` verifies: the
- * PID comes from a lock file written by a process that may be long gone, and
- * killing whatever inherited that PID would be far worse than leaving an engine
- * running. So only a confirmed engine is killed, never an `unknown` one.
- * Returns whether a kill was actually issued.
+ * Name-verified first, for the same reason `engineProcessState` verifies: the PID comes from a lock
+ * file written by a process that may be long gone, and killing whatever inherited that PID would be
+ * far worse than leaving an engine running. So only a confirmed engine is killed, never an
+ * `unknown` one. Returns whether a kill was actually issued.
  */
 function killVayuEngineProcess(pid: number): boolean {
 	if (engineProcessState(pid) !== "engine") {
@@ -287,9 +268,6 @@ function killVayuEngineProcess(pid: number): boolean {
 	}
 }
 
-/**
- * Read PID from lock file
- */
 function readPidFromLock(lockPath: string): number | null {
 	try {
 		if (!fs.existsSync(lockPath)) {
@@ -308,9 +286,8 @@ function readPidFromLock(lockPath: string): number | null {
 }
 
 /**
- * Read the lock file's PID and classify what holds it; null when there is no
- * readable PID. `classify` checks the name as well as the PID, so a recycled
- * PID is not mistaken for the engine.
+ * Read the lock file's PID and classify what holds it; null when there is no readable PID.
+ * `classify` checks the name as well as the PID, so a recycled PID is not mistaken for the engine.
  */
 function checkLockFile(
 	lockPath: string,
@@ -323,11 +300,10 @@ function checkLockFile(
 /**
  * The OS- and network-facing half of the sidecar.
  *
- * Everything here talks to a real process, a real port or a real clock, which
- * is exactly what a test cannot have: adoption, shutdown and the restart/quit
- * race are all *ownership* logic, and driving them through real engines would
- * mean 45-second health waits and a spawned binary per assertion. Production
- * passes `defaultSidecarSystem`.
+ * Everything here talks to a real process, a real port or a real clock, which is exactly what a
+ * test cannot have: adoption, shutdown and the restart/quit race are all *ownership* logic, and
+ * driving them through real engines would mean 45-second health waits and a spawned binary per
+ * assertion. Production passes `defaultSidecarSystem`.
  */
 export interface SidecarSystem {
 	/**
@@ -376,13 +352,12 @@ export const defaultSidecarSystem: SidecarSystem = {
 /**
  * How this instance came to be attached to the engine it is talking to.
  *
- * `spawned` is the ordinary case and, once `start()` returns, the only one.
- * `adopted` is an engine serving this app's data directory that was already up
- * when we started - after the single-instance lock in main.ts, an orphan of a
- * crashed session or an engine started by hand on that directory - held only
- * while it is being stopped: it does not hold this session's grant secret, so
- * it is replaced and never used (#2356). It is ownership all the same, so a
- * quit landing during the replacement still stops it (#270).
+ * `spawned` is the ordinary case and, once `start()` returns, the only one. `adopted` is an engine
+ * serving this app's data directory that was already up when we started (after the single-instance
+ * lock in main.ts: an orphan of a crashed session or an engine started by hand on that directory),
+ * held only while it is being stopped: it does not hold this session's grant secret, so it is
+ * replaced and never used (#2356). It is ownership all the same, so a quit landing during the
+ * replacement still stops it (#270).
  */
 type Ownership =
 	| { kind: "none" }
@@ -440,10 +415,8 @@ const CHILD_EXPECTED_STATES: ReadonlySet<EngineLifecycle["kind"]> = new Set([
 ]);
 
 /**
- * Why a spawned engine is never going to answer.
- *
- * Recorded by the child's `exit` and `error` handlers so `waitForEngine` can
- * stop polling a port nothing is listening on.
+ * Why a spawned engine is never going to answer. Recorded by the child's `exit` and `error`
+ * handlers so `waitForEngine` can stop polling a port nothing is listening on.
  */
 type SpawnFailure =
 	| { kind: "exit"; code: number | null; signal: NodeJS.Signals | null; stderr: string[] }
@@ -452,11 +425,10 @@ type SpawnFailure =
 /**
  * Raised when the readiness budget is spent but the engine is still alive.
  *
- * Distinct from every other start failure because it is the one that is not a
- * failure of the engine: a large run history, a cold disk or an antivirus scan
- * can push `db.init()` past the budget on a machine where the engine then comes
- * up perfectly well. The launch path treats it as "not yet", not as "never" -
- * quitting here killed engines that were seconds from answering.
+ * Distinct from every other start failure because it is not a failure of the engine: a large run
+ * history, a cold disk or an antivirus scan can push `db.init()` past the budget on a machine where
+ * the engine then comes up perfectly well. The launch path treats it as "not yet", not "never";
+ * quitting here would kill engines that were seconds from answering.
  */
 export class EngineNotReadyError extends Error {
 	constructor(budgetMs: number) {
@@ -472,16 +444,15 @@ export class EngineNotReadyError extends Error {
 export type PortHolder = "program" | "vayu-engine";
 
 /**
- * Raised when every candidate port is held by something this app may not stop
- * (#2118): another program, or a Vayu engine serving another data directory
- * (#3328). Like `EngineNotReadyError` it leaves the app up: the user can free
- * the port and press Retry, so the message is the sentence they read.
+ * Raised when every candidate port is held by something this app may not stop (#2118): another
+ * program, or a Vayu engine serving another data directory (#3328). Like `EngineNotReadyError` it
+ * leaves the app up: the user can free the port and press Retry, so the message is the sentence
+ * they read.
  *
- * Several `ports` means a first start found every candidate held. The renderer
- * is told one port once, so the start narrows to the first (`claimPort`) and
- * Retry looks at that one alone: the sentence names it as the one to free and
- * mentions the fallbacks only as context. `holder` is therefore what holds the
- * first port, whatever holds the fallbacks.
+ * Several `ports` means a first start found every candidate held. The renderer is told one port
+ * once, so the start narrows to the first (`claimPort`) and Retry looks at that one alone: the
+ * sentence names it as the one to free and mentions the fallbacks only as context. `holder` is
+ * therefore what holds the first port, whatever holds the fallbacks.
  */
 export class EnginePortInUseError extends Error {
 	constructor(ports: readonly number[], holder: PortHolder = "program") {
@@ -497,9 +468,8 @@ export class EnginePortInUseError extends Error {
 }
 
 /**
- * Where `start()` will run the engine, and whether our own engine already
- * answers `/health` there (it reports this app's data directory; an engine
- * reporting none never counts).
+ * Where `start()` will run the engine, and whether our own engine already answers `/health` there
+ * (it reports this app's data directory; an engine reporting none never counts).
  */
 interface PortChoice {
 	port: number;
@@ -519,9 +489,8 @@ function describeSpawnFailure(failure: SpawnFailure): string {
 		return `Couldn't start Vayu's engine: ${failure.message}`;
 	}
 
-	// A signal means something killed it; a code means it decided to leave. Only
-	// one of the two is ever set, and naming the wrong one reads as a crash that
-	// did not happen.
+	// A signal means something killed it; a code means it decided to leave. Only one of the two is
+	// ever set, and naming the wrong one reads as a crash that did not happen.
 	const cause =
 		failure.signal !== null
 			? `killed by signal ${failure.signal}`
@@ -536,9 +505,8 @@ export class EngineSidecar {
 	private process: ChildProcess | null = null;
 	private ownership: Ownership = { kind: "none" };
 	/**
-	 * The ports `start()` may use. Narrowed to the one it settles on by the first
-	 * start, so a restart never moves the engine out from under a renderer that
-	 * was told the port once.
+	 * The ports `start()` may use. Narrowed to the one it settles on by the first start, so a
+	 * restart never moves the engine out from under a renderer that was told the port once.
 	 */
 	private candidates: readonly number[];
 	private port: number;
@@ -552,20 +520,18 @@ export class EngineSidecar {
 	private binaryPath: string;
 	private system: SidecarSystem;
 	/**
-	 * Set once the app is on its way out, and never cleared. Read at every point
-	 * in a start or restart that could otherwise spawn - a spawn that lands after
-	 * the quit path has taken its last look at the sidecar is a process nothing
-	 * kills. A flag rather than the lifecycle's `stopping`, which an ordinary
-	 * `stop()` also passes through.
+	 * Set once the app is on its way out, and never cleared. Read at every point in a start or
+	 * restart that could otherwise spawn: a spawn that lands after the quit path has taken its last
+	 * look at the sidecar is a process nothing kills. A flag rather than the lifecycle's
+	 * `stopping`, which an ordinary `stop()` also passes through.
 	 */
 	private shuttingDown = false;
 	private lifecycle: EngineLifecycle = { kind: "idle" };
 	private readonly lifecycleListeners = new Set<EngineLifecycleListener>();
 	private readonly readyAfterSlowHooks = new Set<() => void>();
 	/**
-	 * The tail of the operation queue. `start`, `stop`, `restart` and `shutdown`
-	 * each run after the one before has settled, so two of them never drive the
-	 * child at once.
+	 * The tail of the operation queue. `start`, `stop`, `restart` and `shutdown` each run after the
+	 * one before has settled, so two of them never drive the child at once.
 	 */
 	private queueTail: Promise<void> = Promise.resolve();
 	/** The queued or running restart, which a second request joins. */
@@ -671,20 +637,15 @@ export class EngineSidecar {
 		return run;
 	}
 
-	/**
-	 * Get the lock file path
-	 * This should match the path used by the engine: {dataDir}/vayu.lock
-	 */
+	/** Must match the path the engine uses: {dataDir}/vayu.lock. */
 	private getLockFilePath(): string {
 		return path.join(this.dataDir, ENGINE_LOCK_FILE);
 	}
 
 	/**
-	 * Get the path to the vayu-engine binary
 	 * Development:
 	 *   - All platforms: ../engine/build/vayu-engine[.exe]
-	 *   - Legacy Windows multi-config layout: ../engine/build/Debug/vayu-engine.exe
-	 * Production:
+	 *   - Legacy Windows multi-config layout: ../engine/build/Debug/vayu-engine.exe Production:
 	 *   - macOS: Contents/Resources/bin/vayu-engine
 	 *   - Windows: resources/bin/vayu-engine.exe
 	 *   - Linux: resources/bin/vayu-engine
@@ -705,16 +666,11 @@ export class EngineSidecar {
 			];
 			return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
 		} else {
-			// In production, the binary is in resources/bin
-			// process.resourcesPath points to the Resources directory
 			const prodBinaryPath = path.join(process.resourcesPath, "bin", binaryName);
 			return prodBinaryPath;
 		}
 	}
 
-	/**
-	 * Ensure the data directory exists
-	 */
 	private ensureDataDirectory(): void {
 		if (!fs.existsSync(this.dataDir)) {
 			fs.mkdirSync(this.dataDir, { recursive: true });
@@ -723,17 +679,16 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * Stop a healthy engine this session did not spawn, so the caller can spawn
-	 * one in its place (#2356). Only ever one serving this app's data directory
-	 * (#3328): an engine serving another's is not this app's to stop.
+	 * Stop a healthy engine this session did not spawn, so the caller can spawn one in its place
+	 * (#2356). Only ever one serving this app's data directory (#3328): an engine serving another's
+	 * is not this app's to stop.
 	 *
-	 * Every write to file trust - a picked file, an allowed folder - needs the
-	 * grant secret the engine was spawned with, and an engine already running was
-	 * given another session's secret or none. Nothing writes the secret where it
-	 * could be read back, so it cannot be handed one now: adopting it would leave
-	 * every such write refused for the whole session. The same stop retires
-	 * #1492's version mismatch, a daemon built for another Vayu version, which no
-	 * longer needs a probe of its own.
+	 * Every write to file trust (a picked file, an allowed folder) needs the grant secret the
+	 * engine was spawned with, and an engine already running was given another session's secret or
+	 * none. Nothing writes the secret where it could be read back, so it cannot be handed one now:
+	 * adopting it would leave every such write refused for the whole session. The same stop retires
+	 * #1492's version mismatch, a daemon built for another Vayu version, which no longer needs a
+	 * probe of its own.
 	 */
 	private async replaceAnsweringEngine(pid: number | null): Promise<void> {
 		this.transition({ kind: "replacing" });
@@ -750,24 +705,23 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * Stop a live process the lock file names that did not answer `/health`
-	 * (issue #1905), so the caller can spawn one in its place.
+	 * Stop a live process the lock file names that did not answer `/health` (#1905), so the caller
+	 * can spawn one in its place.
 	 *
-	 * The lock PID is verified to be a Vayu engine, so a missing `/health`
-	 * answer means that engine is either still starting - an orphan from a
-	 * crashed session reads its database and runs migrations before it listens -
-	 * or hung. Spawning beside it loses the flock, and reporting the port as
-	 * held would blame another program for our own engine. So it is given the
-	 * budget a freshly spawned engine gets: one that answers is asked to shut
-	 * down like any other engine found running, and one that does not is killed.
+	 * The lock PID is verified to be a Vayu engine, so a missing `/health` answer means that engine
+	 * is either still starting (an orphan from a crashed session reads its database and runs
+	 * migrations before it listens) or hung. Spawning beside it loses the flock, and reporting the
+	 * port as held would blame another program for our own engine. So it is given the budget a
+	 * freshly spawned engine gets: one that answers is asked to shut down like any other engine
+	 * found running, and one that does not is killed.
 	 *
-	 * A PID whose name could not be read arrives here too, and the kill refuses
-	 * it; the cost is the budget plus the stop's grace period, after which the
-	 * spawn goes ahead and the engine's own data-directory lock decides.
+	 * A PID whose name could not be read arrives here too, and the kill refuses it; the cost is the
+	 * budget plus the stop's grace period, after which the spawn goes ahead and the engine's own
+	 * data-directory lock decides.
 	 *
-	 * Only an answer from our own engine ends the wait (#3328): a Vayu engine
-	 * serving another data directory that takes the port meanwhile is never sent
-	 * `/shutdown`, and the port check after the kill reports it.
+	 * Only an answer from our own engine ends the wait (#3328): a Vayu engine serving another data
+	 * directory that takes the port meanwhile is never sent `/shutdown`, and the port check after
+	 * the kill reports it.
 	 */
 	private async replaceLockedEngine(pid: number): Promise<void> {
 		this.transition({ kind: "replacing" });
@@ -865,9 +819,8 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * No live lock: each candidate in turn. One where our engine answers is
-	 * taken over (replaced on that port), a free one is taken, a held one is
-	 * skipped.
+	 * No live lock: each candidate in turn. One where our engine answers is taken over (replaced on
+	 * that port), a free one is taken, a held one is skipped.
 	 */
 	private async choosePortUnlocked(): Promise<PortChoice> {
 		let firstHolder: PortHolder | undefined;
@@ -883,14 +836,12 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * A live lock means our own engine is up somewhere, so every candidate is
-	 * asked for `/health` before any free port is taken: a crash orphan on a
-	 * fallback port is replaced there even once the default has come free. When
-	 * it answers nowhere it is starting (not listening, so its port reads free)
-	 * or hung (holding a port no probe can tell from another program's), and the
-	 * wait in `replaceLockedEngine` watches the first free candidate, or the
-	 * first not held by another Vayu engine when none is free. A port such an
-	 * engine answers on cannot be where ours is.
+	 * A live lock means our own engine is up somewhere, so every candidate is asked for `/health`
+	 * before any free port is taken: a crash orphan on a fallback port is replaced there even once
+	 * the default has come free. When it answers nowhere it is starting (not listening, so its port
+	 * reads free) or hung (holding a port no probe can tell from another program's), and the wait
+	 * in `replaceLockedEngine` watches the first free candidate, or the first not held by another
+	 * Vayu engine when none is free. A port such an engine answers on cannot be where ours is.
 	 */
 	private async choosePortLocked(): Promise<PortChoice> {
 		const unclaimed: number[] = [];
@@ -942,15 +893,12 @@ export class EngineSidecar {
 				: this.replaceLockedEngine(lockedPid));
 			return;
 		}
-		// An engine from a previous session or crash with no live lock to read a
-		// PID from, so it is watched by port only - `stopAdopted` falls back to
-		// health for the exit.
+		// An engine from a previous session or crash with no live lock to read a PID from, so it is
+		// watched by port only; `stopAdopted` falls back to health for the exit.
 		if (choice.answering) await this.replaceAnsweringEngine(readPidFromLock(lockPath));
 	}
 
-	/**
-	 * Start the engine process, after any start, stop or restart already queued.
-	 */
+	/** Start the engine process, after any start, stop or restart already queued. */
 	start(): Promise<void> {
 		return this.enqueue(() => this.runStart());
 	}
@@ -973,7 +921,6 @@ export class EngineSidecar {
 
 	private async launch(): Promise<void> {
 		this.transition({ kind: "choosingPort" });
-		// Ensure data directory exists first
 		this.ensureDataDirectory();
 
 		const lockPath = this.getLockFilePath();
@@ -988,9 +935,8 @@ export class EngineSidecar {
 			throw new EnginePortInUseError([this.port], foreign ? "vayu-engine" : "program");
 		}
 
-		// Check if binary exists. The remediation names `build.py` because that is
-		// the repo's single build entry point, and a raw cmake line skips the vcpkg
-		// toolchain wiring build.py does for you.
+		// The remediation names `build.py` because that is the repo's single build entry point, and
+		// a raw cmake line skips the vcpkg toolchain wiring build.py does for you.
 		if (!fs.existsSync(this.binaryPath)) {
 			throw new Error(
 				`Engine binary not found at: ${this.binaryPath}\n\n` +
@@ -1032,12 +978,11 @@ export class EngineSidecar {
 		child: ChildProcess;
 		spawnFailure: () => SpawnFailure | null;
 	} {
-		// Spawn the engine process. `--verbose 0` in production: the engine writes
-		// its own structured records to `engine_<stamp>.log` (#1557) regardless,
-		// so nothing here reads its console text any more (#1558) - dev keeps `2`
-		// for a developer watching a terminal. A fresh grant secret per spawn: the
-		// engine takes it out of its own environment at start, so a restart
-		// cannot reuse the last one and does not need to.
+		// `--verbose 0` in production: the engine writes its own structured records to
+		// `engine_<stamp>.log` (#1557) regardless, so nothing here reads its console text (#1558);
+		// dev keeps `2` for a developer watching a terminal. A fresh grant secret per spawn: the
+		// engine takes it out of its own environment at start, so a restart cannot reuse the last
+		// one and does not need to.
 		const grantSecret = newGrantSecret();
 		const child = this.system.spawnEngine(
 			this.binaryPath,
@@ -1065,11 +1010,10 @@ export class EngineSidecar {
 			child.stdout.resume();
 		}
 
-		// Kept for the failure message: an engine that dies at spawn has usually
-		// said why on stderr, and that line is the difference between "exit code 127"
-		// and "cannot open shared object file". Not re-printed, for the same
-		// reason stdout is not: only the tail this app cannot get any other way
-		// (the engine has no file yet) is worth keeping.
+		// Kept for the failure message: an engine that dies at spawn has usually said why on
+		// stderr, and that line is the difference between "exit code 127" and "cannot open shared
+		// object file". Not re-printed, for the same reason stdout is not: only the tail this app
+		// cannot get any other way (the engine has no file yet) is worth keeping.
 		const stderrTail: string[] = [];
 
 		if (child.stderr) {
@@ -1088,9 +1032,8 @@ export class EngineSidecar {
 			child.stderr.resume();
 		}
 
-		// Scoped to this spawn rather than to the instance: a restart's replacement
-		// is a different child, and its wait must not inherit the reason the
-		// previous one died.
+		// Scoped to this spawn rather than to the instance: a restart's replacement is a different
+		// child, and its wait must not inherit the reason the previous one died.
 		let failure: SpawnFailure | null = null;
 
 		child.on("exit", (code, signal) => {
@@ -1121,10 +1064,9 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * Forget a child that exited or errored, and report a crash when nobody
-	 * asked it to go. Only while it is still the current child: a restart's
-	 * replacement is already spawned by the time a slow `exit` can land, and
-	 * clearing then would drop the handle to a live engine.
+	 * Forget a child that exited or errored, and report a crash when nobody asked it to go. Only
+	 * while it is still the current child: a restart's replacement is already spawned by the time a
+	 * slow `exit` can land, and clearing then would drop the handle to a live engine.
 	 */
 	private childLeft(child: ChildProcess, crash: EngineLifecycle & { kind: "crashed" }): void {
 		if (this.process !== child) return;
@@ -1140,22 +1082,20 @@ export class EngineSidecar {
 	/**
 	 * Wait for the engine to be ready by polling the health endpoint.
 	 *
-	 * `spawnFailure` reports what the child we just spawned did instead of coming
-	 * up, and is the loop's early exit: polling out the remaining attempts against
-	 * a process that has already gone only delays the error the user needs.
+	 * `spawnFailure` reports what the child we just spawned did instead of coming up, and is the
+	 * loop's early exit: polling out the remaining attempts against a process that has already gone
+	 * only delays the error the user needs.
 	 *
-	 * The gap between probes ramps rather than sitting flat, because the first
-	 * probe cannot succeed - nothing is listening microseconds after `spawn()`
-	 * returns - so a flat interval made its own length the floor on every healthy
-	 * launch. Spending the budget as `ENGINE_HEALTH_POLL_BUDGET_MS` of accumulated
-	 * waiting rather than as a fixed attempt count keeps that ceiling exactly
-	 * where the engine's own startup housekeeping is priced against it, while
-	 * letting the early attempts be cheap.
+	 * The gap between probes ramps rather than sitting flat, because the first probe cannot succeed
+	 * (nothing is listening microseconds after `spawn()` returns), so a flat interval would make
+	 * its own length the floor on every healthy launch. Spending the budget as
+	 * `ENGINE_HEALTH_POLL_BUDGET_MS` of accumulated waiting rather than as a fixed attempt count
+	 * keeps that ceiling exactly where the engine's own startup housekeeping is priced against it,
+	 * while letting the early attempts be cheap.
 	 *
-	 * Throws `EngineNotReadyError` when the budget is spent and the child is
-	 * still alive; the caller decides what a slow engine costs. The child is
-	 * `slow` from then on and still watched, so it becomes `ready` when it
-	 * answers.
+	 * Throws `EngineNotReadyError` when the budget is spent and the child is still alive; the
+	 * caller decides what a slow engine costs. The child is `slow` from then on and still watched,
+	 * so it becomes `ready` when it answers.
 	 */
 	private async waitForEngine(
 		child: ChildProcess,
@@ -1194,22 +1134,20 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * Does any Vayu engine answer on this sidecar's port? The readiness question
-	 * after a spawn and while an adopted engine leaves, where whose engine it is
-	 * adds nothing: the port was found free just before the spawn, and the
-	 * adopted engine was already identified as ours.
+	 * Does any Vayu engine answer on this sidecar's port? The readiness question after a spawn and
+	 * while an adopted engine leaves, where whose engine it is adds nothing: the port was found
+	 * free just before the spawn, and the adopted engine was already identified as ours.
 	 */
 	private async engineAnswers(): Promise<boolean> {
 		return (await this.system.probeHealth(this.port)) !== null;
 	}
 
 	/**
-	 * The ramped health poll behind `waitForEngine`, shared with the wait on a
-	 * lock-file engine that has not answered yet (#1905). `answered` is the
-	 * probe each round asks.
+	 * The ramped health poll behind `waitForEngine`, shared with the wait on a lock-file engine
+	 * that has not answered yet (#1905). `answered` is the probe each round asks.
 	 *
-	 * @returns `true` once `answered` does, `false` when the budget is spent.
-	 *          A `spawnFailure` that reports a dead child throws instead.
+	 * @returns `true` once `answered` does, `false` when the budget is spent. A `spawnFailure` that
+	 *        reports a dead child throws instead.
 	 */
 	private async pollWithinBudget(
 		spawnFailure: () => SpawnFailure | null,
@@ -1250,11 +1188,10 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * Stop the engine this instance is attached to - spawned or adopted.
+	 * Stop the engine this instance is attached to, spawned or adopted.
 	 *
-	 * An adopted engine is not our child, so there is no `exit` event to wait on
-	 * and `kill()` on a handle we do not have is not available either: it is
-	 * asked over HTTP, watched by PID (or by health, when no lock PID was
+	 * An adopted engine is not our child, so there is no `exit` event to wait on and no handle to
+	 * `kill()`: it is asked over HTTP, watched by PID (or by health, when no lock PID was
 	 * readable), and force-killed by PID if it outlives the grace period.
 	 */
 	stop(): Promise<void> {
@@ -1347,9 +1284,8 @@ export class EngineSidecar {
 			}
 		}
 
-		// Ownership is released either way: a survivor we could not kill is not
-		// ours to keep claiming, and saying otherwise would make `isRunning()`
-		// lie in the other direction.
+		// Ownership is released either way: a survivor we could not kill is not ours to keep
+		// claiming, and saying otherwise would make `isRunning()` lie in the other direction.
 		this.ownership = { kind: "none" };
 		appLogger().info("sidecar", gone ? "Adopted engine stopped" : "Adopted engine released");
 	}
@@ -1375,16 +1311,11 @@ export class EngineSidecar {
 		return false;
 	}
 
-	/**
-	 * Get the engine API URL
-	 */
 	getApiUrl(): string {
 		return `http://127.0.0.1:${this.port}`;
 	}
 
-	/**
-	 * Whether the engine this app is using is alive - however we came by it.
-	 */
+	/** Whether the engine this app is using is alive, however we came by it. */
 	isRunning(): boolean {
 		return this.ownership.kind !== "none";
 	}
@@ -1406,10 +1337,9 @@ export class EngineSidecar {
 	/**
 	 * Restart the engine process with retry logic and exponential backoff.
 	 *
-	 * Queued behind whatever is running, so a restart requested during the first
-	 * start's health poll waits for that start rather than killing the child it
-	 * is polling. A restart requested while another is queued or running joins
-	 * it, and gets the same promise.
+	 * Queued behind whatever is running, so a restart requested during the first start's health
+	 * poll waits for that start rather than killing the child it is polling. A restart requested
+	 * while another is queued or running joins it, and gets the same promise.
 	 */
 	restart(maxRetries: number = ENGINE_RESTART_MAX_RETRIES): Promise<void> {
 		if (this.pendingRestart) return this.pendingRestart;
@@ -1434,7 +1364,6 @@ export class EngineSidecar {
 				this.assertNotShuttingDown();
 
 				if (attempt > 0) {
-					// Calculate exponential delay: baseDelay * 2^(attempt-1)
 					const delay = baseDelay * Math.pow(2, attempt - 1);
 					appLogger().info("sidecar", "Retry attempt after delay", {
 						attempt,
@@ -1487,10 +1416,9 @@ export class EngineSidecar {
 	/**
 	 * Stop the engine for good, on the way out of the app.
 	 *
-	 * Distinct from `stop()` because quit is one-way: further restarts are
-	 * refused from here on, and a start or restart already queued is waited out
-	 * rather than raced, so the engine cannot be spawned again behind the
-	 * shutdown. Each of those checks the flag before it spawns.
+	 * Distinct from `stop()` because quit is one-way: further restarts are refused from here on,
+	 * and a start or restart already queued is waited out rather than raced, so the engine cannot
+	 * be spawned again behind the shutdown. Each of those checks the flag before it spawns.
 	 */
 	shutdown(): Promise<void> {
 		this.shuttingDown = true;

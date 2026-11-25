@@ -8,14 +8,13 @@
 /**
  * No spellcheck dictionary is ever fetched (#1355).
  *
- * `webPreferences.spellcheck: false` only switches the checker off for one
- * renderer. The Hunspell download belongs to the *session's* spellcheck
- * service, which loads its language list when the session is created - so the
- * default session fetched `en-US` from Google's CDN at launch, and the OAuth
- * window's partition did it again, with every window already opted out.
- * `setSpellCheckerEnabled(false)` does not stop it; an empty language list
- * does. Electron documents the call as a no-op on macOS, where the OS checker
- * is used and nothing is downloaded, so it is made unconditionally.
+ * `webPreferences.spellcheck: false` only switches the checker off for one renderer. The Hunspell
+ * download belongs to the *session's* spellcheck service, which loads its language list when the
+ * session is created, so the default session would fetch `en-US` from Google's CDN at launch and
+ * the OAuth window's partition would do it again, with every window already opted out.
+ * `setSpellCheckerEnabled(false)` does not stop it; an empty language list does. Electron documents
+ * the call as a no-op on macOS, where the OS checker is used and nothing is downloaded, so it is
+ * made unconditionally.
  */
 
 import type { App, Session } from "electron";
@@ -28,10 +27,9 @@ export function dropSpellCheckerLanguages(target: Pick<Session, "setSpellChecker
 /**
  * Apply `dropSpellCheckerLanguages` to every session the app ever creates.
  *
- * Must run before the first session exists - at module scope, ahead of
- * `app.whenReady` - because the download starts at creation: a listener
- * registered later misses the default session, and `session-created` also
- * covers each `fromPartition` session the OAuth window opens.
+ * Must run before the first session exists (at module scope, ahead of `app.whenReady`) because the
+ * download starts at creation: a listener registered later misses the default session, and
+ * `session-created` also covers each `fromPartition` session the OAuth window opens.
  */
 export function suppressDictionaryDownloads(target: Pick<App, "on">): void {
 	target.on("session-created", dropSpellCheckerLanguages);
