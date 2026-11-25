@@ -7,17 +7,16 @@
 
 /**
  * Which definition a variable edit lands on: the one the resolver named.
+ * `ResolvedVariable.sourceId` is the resolver's own statement of which environment or collection a
+ * value came from, and an edit goes there and nowhere else: re-deriving a target (the request's own
+ * collection, the active environment) disagrees with the resolver whenever the winner is an
+ * ancestor's definition, and the edit then lands as a copy in a collection that never defined the
+ * name (#3683).
  *
- * `ResolvedVariable.sourceId` is the resolver's own statement of which
- * environment or collection a value came from. An edit goes there and nowhere
- * else - re-deriving a target (the request's own collection, the active
- * environment) disagrees with the resolver whenever the winner is an
- * ancestor's definition, and the edit then lands as a copy in a collection that
- * never defined the name (#3683). The context bar (`useVariableCommit`) and the
- * token popover (`useVariableWriter`) both read their target through this, so
- * they cannot drift apart. What each does with the target differs - the bar
- * reads the query cache and awaits `mutateAsync`, the writer reads hook data
- * and fires `mutate` - so only the naming is shared.
+ * The context bar (`useVariableCommit`) and the token popover (`useVariableWriter`) both read their
+ * target through this, so they cannot drift apart. What each does with the target differs (the bar
+ * reads the query cache and awaits `mutateAsync`, the writer reads hook data and fires `mutate`),
+ * so only the naming is shared.
  */
 
 import type { VariableScope } from "@/types";

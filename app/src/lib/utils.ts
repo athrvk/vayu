@@ -11,30 +11,25 @@ import { extendTailwindMerge } from "tailwind-merge";
 /**
  * The scale's custom steps, told to tailwind-merge as *sizes*.
  *
- * `text-<something>` is a font size or a text colour, and tailwind-merge tells
- * them apart from a list of names it ships: an unknown one is read as a colour.
- * So `cn("text-hero ...", "text-foreground")` dropped the size and left the
- * hero metric rendering at body size - silently, because the class simply was
- * not in the output (#1409). `text-md` survived the same shape only because
- * "md" is already one of the size labels it knows, and `text-sm` because it is
+ * `text-<something>` is a font size or a text colour, and tailwind-merge tells them apart from a
+ * list of names it ships: an unknown one is read as a colour. Unregistered,
+ * `cn("text-hero ...", "text-foreground")` drops the size and leaves the hero metric rendering at
+ * body size, silently, because the class is simply not in the output (#1409). `text-md` survives
+ * the same shape only because "md" is already a size label it knows, and `text-sm` because it is
  * stock; a step named for what it is for is exactly the case that breaks.
  *
- * The chrome/target/icon floor steps (issue #1679) are the same defect in the
- * other direction: `h-control-sm`, `size-target` and the rest are unknown to
- * tailwind-merge's height/width/size groups, so `cn("h-control-sm", "h-6")` -
- * a Button's own size variant next to a caller's override - kept *both*
- * classes instead of dropping the earlier one. With both present, Tailwind's
- * generated stylesheet decides by declaration order rather than the caller's
- * intent, and `.h-control-sm` sorts after `.h-6`, so the override silently
- * lost. Confirmed live: `twMerge("h-6", "h-control-sm")` returned both
- * classes before this, one after.
+ * The chrome/target/icon floor steps (#1679) are the same defect in the other direction:
+ * `h-control-sm`, `size-target` and the rest are unknown to tailwind-merge's height/width/size
+ * groups, so unregistered, `cn("h-control-sm", "h-6")` (a Button's own size variant next to a
+ * caller's override) keeps *both* classes instead of dropping the earlier one. Tailwind's generated
+ * stylesheet then decides by declaration order rather than the caller's intent, and `.h-control-sm`
+ * sorts after `.h-6`, so the override silently loses.
  *
- * Registered here rather than worked around at the call sites: every
- * `text-hero`/`text-metric` and every `h-band`/`h-banner`/`h-control`/
- * `h-control-sm`/`h-control-xs`/`h-target`/`size-target`/`size-control-sm`/`size-icon`/`size-icon-sm` in the
- * app goes through `cn()` or a plain string, and a call site that "knows"
- * about the merge order is the kind of hand-rolled copy this repo keeps out
- * of components.
+ * Registered here rather than worked around at the call sites: every `text-hero`/`text-metric` and
+ * every `h-band`, `h-banner`, `h-control`, `h-control-sm`, `h-control-xs`, `h-target`,
+ * `size-target`, `size-control-sm`, `size-icon` and `size-icon-sm` in the app goes through `cn()`
+ * or a plain string, and a call site that "knows" about the merge order is the kind of hand-rolled
+ * copy this repo keeps out of components.
  */
 const FLOOR_STEPS = [
 	"band",

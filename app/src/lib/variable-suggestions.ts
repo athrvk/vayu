@@ -6,19 +6,16 @@
  */
 
 /**
- * What a `{{` offers, in the order it is offered.
+ * What a `{{` offers, in the order it is offered. Two components need the *same* list:
+ * `VariableAutocomplete` draws it, and `VariableInput` steps through it with the arrow keys. With
+ * the ordering inside the drawing component the input has no way to know what "the next item" is,
+ * and faking navigation with a synthetic keydown at `document.querySelector("[cmdk-root]")` reaches
+ * the first `cmdk` list in the whole document, which is not necessarily the one hanging off the
+ * field the user is typing in (#1215).
  *
- * Two components need this list and they need the *same* one:
- * `VariableAutocomplete` draws it, and `VariableInput` steps through it with
- * the arrow keys. While the ordering lived inside the drawing component the
- * input had no way to know what "the next item" was, so it faked navigation by
- * dispatching a synthetic keydown at `document.querySelector("[cmdk-root]")` -
- * the first `cmdk` list in the whole document, which is not necessarily the one
- * hanging off the field the user is typing in (issue #1215).
- *
- * The list is flat and ordered; `group` says which heading an entry falls
- * under. Flat rather than nested because the input navigates positions and the
- * renderer draws headings - one shape serves both, and the order is the shape.
+ * The list is flat and ordered; `group` says which heading an entry falls under. Flat rather than
+ * nested because the input navigates positions and the renderer draws headings: one shape serves
+ * both, and the order is the shape.
  */
 
 import type { DataContractScope, ResolvedVariable, VariableScope } from "@/types";
@@ -29,11 +26,9 @@ import { ITERATION_VARIABLES } from "@/lib/iteration-variables";
 export type VariableSuggestionGroup = "variables" | "iteration" | "columns" | "dynamic";
 
 /**
- * The headings, and the order the groups appear in.
- *
- * Declared once, here, because the renderer reads both the label and the order
- * from it - a second copy of the order is how a group ends up drawn in one
- * place and navigated in another.
+ * The headings, and the order the groups appear in. Declared once, here, because the renderer reads
+ * both the label and the order from it; a second copy of the order is how a group ends up drawn in
+ * one place and navigated in another.
  */
 export const VARIABLE_SUGGESTION_GROUPS: ReadonlyArray<{
 	group: VariableSuggestionGroup;
@@ -60,14 +55,12 @@ export interface VariableSuggestion {
 }
 
 /**
- * A suggestion's identity, distinct from the name it writes.
- *
- * The name is not unique: a data file's column is offered bare as well as
- * prefixed (issue #1007), and a workspace variable may be named the same thing
- * - so two entries can write `{{email}}` while meaning different rows. `cmdk`
- * keys its highlight by an item's `value`, and `VariableInput` steps through
- * these keys, so both would otherwise treat the pair as one item: the highlight
- * would paint on both and an arrow press would appear to stick.
+ * A suggestion's identity, distinct from the name it writes. The name is not unique: a data file's
+ * column is offered bare as well as prefixed (#1007), and a workspace variable may be named the
+ * same thing, so two entries can write `{{email}}` while meaning different rows. `cmdk` keys its
+ * highlight by an item's `value`, and `VariableInput` steps through these keys, so both would
+ * otherwise treat the pair as one item: the highlight would paint on both and an arrow press would
+ * appear to stick.
  */
 export function variableSuggestionKey(suggestion: VariableSuggestion): string {
 	return `${suggestion.group}:${suggestion.name}`;
@@ -104,12 +97,9 @@ export function buildVariableSuggestions({
 	);
 
 	/*
-	 * Columns are offered from the contract rather than from `variables`, because
-	 * the namespace is disjoint from the scopes - a stored variable named
-	 * `data.email` cannot shadow the column.
-	 *
-	 * Each column offers both spellings a bound row answers (issue #1007): the
-	 * prefixed one first, then bare.
+	 * Columns are offered from the contract rather than from `variables`, because the namespace is
+	 * disjoint from the scopes: a stored variable named `data.email` cannot shadow the column. Each
+	 * column offers both spellings a bound row answers (#1007), the prefixed one first, then bare.
 	 */
 	const columns: VariableSuggestion[] = [];
 	for (const column of dataColumns?.columns ?? []) {

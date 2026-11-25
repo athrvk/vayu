@@ -6,28 +6,22 @@
  */
 
 /**
- * The services an engine restart took with it (#3493).
+ * The services an engine restart took with it (#3493). Every inbox, mock server and OAuth issuer is
+ * a listener inside the engine process, so a crash or a restart stops all of them and the engine
+ * that comes back answers the Services drawer with its first-run empty states. This keeps what the
+ * cache said was running when the outage began, compares it with what the engine reports once it is
+ * back, and raises one notice naming what is gone.
  *
- * Every inbox, mock server and OAuth issuer is a listener inside the engine
- * process, so a crash or a restart stops all of them and the engine that comes
- * back answers the Services drawer with its first-run empty states. This keeps
- * what the cache said was running when the outage began, compares it with what
- * the engine reports once it is back, and raises one notice naming what is
- * gone.
+ * **The snapshot is taken when the outage begins, not at reconnect.** The lists poll on their own
+ * (`SERVICES_POLL_INTERVAL_MS`), so by the time a reconnect is noticed one of them may already hold
+ * the new engine's answer. Only what the cache says is running counts: a stop the list has not
+ * shown yet is named as if the restart had done it, which no read could tell apart.
  *
- * **The snapshot is taken when the outage begins, not at reconnect.** The
- * lists poll on their own (`SERVICES_POLL_INTERVAL_MS`), so by the time a
- * reconnect is noticed one of them may already hold the new engine's answer.
- * Only what the cache says is running counts: a stop the list has not shown
- * yet is named as if the restart had done it, which no read could tell apart.
- *
- * **One pending snapshot, module state rather than either caller's.** The
- * health poll's reconnect (`queries/health.ts`) and the manual restart
- * (`hooks/useEngineRestart.ts`) both record and both report, often for the same
- * outage. The first record of an outage wins, and the first report takes the
- * snapshot, so the second finds nothing and a single outage raises one notice.
- * A snapshot a failed report put back is still that outage's, so the next
- * outage's first record replaces it.
+ * **One pending snapshot, module state rather than either caller's.** The health poll's reconnect
+ * (`queries/health.ts`) and the manual restart (`hooks/useEngineRestart.ts`) both record and both
+ * report, often for the same outage. The first record of an outage wins, and the first report takes
+ * the snapshot, so the second finds nothing and a single outage raises one notice. A snapshot a
+ * failed report put back is still that outage's, so the next outage's first record replaces it.
  */
 
 import { isCancelledError, type QueryClient, type QueryKey } from "@tanstack/react-query";
@@ -140,12 +134,10 @@ interface OutageSnapshot {
 let pending: OutageSnapshot | null = null;
 
 /**
- * Keep what the cache says is running, at the first sign of an outage.
- *
- * A no-op while this outage's snapshot is pending: later in the same outage the
- * cache can only be as old or older. A restored one is replaced, by nothing if
- * nothing runs now, because what ran before the last outage says nothing about
- * what this one stopped.
+ * Keep what the cache says is running, at the first sign of an outage. A no-op while this outage's
+ * snapshot is pending: later in the same outage the cache can only be as old or older. A restored
+ * one is replaced, by nothing if nothing runs now, because what ran before the last outage says
+ * nothing about what this one stopped.
  */
 export function recordServicesBeforeOutage(queryClient: QueryClient): void {
 	if (pending !== null && !pending.restored) return;
@@ -191,12 +183,10 @@ async function fetchServiceLists(queryClient: QueryClient): Promise<ServiceLists
 }
 
 /**
- * On reconnect, name what the outage stopped, once.
- *
- * A read that fails raises nothing: not knowing what runs now is no evidence
- * that anything stopped. The snapshot then goes back, marked restored, for a
- * later report of the same outage (the other reconnect path), unless an outage
- * that began meanwhile has already recorded its own.
+ * On reconnect, name what the outage stopped, once. A read that fails raises nothing: not knowing
+ * what runs now is no evidence that anything stopped. The snapshot then goes back, marked restored,
+ * for a later report of the same outage (the other reconnect path), unless an outage that began
+ * meanwhile has already recorded its own.
  */
 export async function reportServicesStoppedByOutage(queryClient: QueryClient): Promise<void> {
 	if (pending === null) return;

@@ -6,15 +6,12 @@
  */
 
 /**
- * Read the dashboard's live-run config back out of a run's stored snapshot
- * (issue #1935).
- *
- * A run the app starts hands the dashboard its own arguments. A run an MCP
- * agent starts has none to hand over, so the only record of what it asked for
- * is the `configSnapshot` the engine stored with the row. The snapshot is the
- * request body as sent, so a key can be absent, and the engine accepts a bare
- * number for a duration where the app always sends a string - the dashboard's
- * duration parsing reads a string.
+ * Read the dashboard's live-run config back out of a run's stored snapshot (#1935). A run the app
+ * starts hands the dashboard its own arguments; a run an MCP agent starts has none to hand over, so
+ * the only record of what it asked for is the `configSnapshot` the engine stored with the row. The
+ * snapshot is the request body as sent, so a key can be absent, and the engine accepts a bare
+ * number for a duration where the app always sends a string, which is what the dashboard's duration
+ * parsing reads.
  */
 
 import type { LoadTestRequestInfo, LoadTestRunConfig } from "@/stores/dashboard-store";
