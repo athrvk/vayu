@@ -6,13 +6,13 @@
  */
 
 /**
- * @brief The refcounted 1 ms timer request, and the one OS call behind it
+ * The refcounted 1 ms timer request, and the one OS call behind it.
  *
  * Portable on purpose, unlike its two neighbours in this directory: the
  * refcount, the scope and the balance rule are the same everywhere, and only
- * the two `timeapi.h` calls are Windows'. Splitting it the other way - the
- * count here, the call in `platform_windows.cpp` - would spread one mechanism
- * over three files and leave the invariant testable on one CI leg only.
+ * the two `timeapi.h` calls are Windows'. Splitting it the other way (the count
+ * here, the call in `platform_windows.cpp`) would spread one mechanism over
+ * three files and leave the invariant testable on one CI leg only.
  */
 
 #include "vayu/platform/platform.hpp"
