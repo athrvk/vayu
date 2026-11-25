@@ -6,12 +6,10 @@
  */
 
 /**
- * "Save to request" for a run no saved request stands behind (issue #1817): an
- * agent's `send_request` runs inline and never touches the requests table, so
- * the run is the only record there is.
- *
- * Pure on purpose, like `save-run-to-request.ts` beside it: the view hands the
- * preset to `useNewRequest`, which owns where the request lands.
+ * "Save to request" for a run no saved request stands behind (#1817): an agent's `send_request`
+ * runs inline and never touches the requests table, so the run is the only record. Pure, like
+ * `save-run-to-request.ts`: the view hands the preset to `useNewRequest`, which owns where the
+ * request lands.
  */
 
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
@@ -32,13 +30,11 @@ export function isUnsavedAgentRun(run: Run): boolean {
 }
 
 /**
- * The description stamped on the request a run is saved as, so the provenance
- * survives the save: `Saved from a run started by Claude Code on 10/5/26`.
- *
- * The product name, never the identifier the client sent, whenever the table
- * knows it - an identifier it does not know reads as sent, and an agent that
- * sent none is "an MCP client". The date is the day the run started, in the
- * app's one date format (`formatInstant`), not the day it was saved.
+ * The description stamped on the request a run is saved as, so the provenance survives the save:
+ * `Saved from a run started by Claude Code on 10/5/26`. The product name, never the client's sent
+ * identifier, whenever the table knows it; an unknown identifier reads as sent, and an agent that
+ * sent none is "an MCP client". The date is the day the run started, in the app's one date format
+ * (`formatInstant`), not the save day.
  */
 export function savedFromRunDescription(run: Run, options: FormatOptions = {}): string {
 	const client = mcpClientDisplayName(run.origin?.client);
@@ -47,10 +43,9 @@ export function savedFromRunDescription(run: Run, options: FormatOptions = {}): 
 }
 
 /**
- * The name a request saved from a run starts with: the one the agent gave it
- * when it was not the placeholder, else `METHOD url` without the query - which
- * can hold anything, and a name is shown on every surface. A url the engine
- * withheld names nothing, so the method alone stands in for it.
+ * A request saved from a run starts with the name the agent gave it when not the placeholder, else
+ * `METHOD url` without the query (which can hold anything, and a name shows on every surface). A
+ * url the engine withheld names nothing, so the method alone stands in.
  */
 export function requestNameFromRun(run: Run, seed: DesignRunSeed): string {
 	// `GET /runs/:id` sends the snapshot and no `summary` (that is list rows only).

@@ -5,9 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Displays details for a load test run with tabs for overview, performance, and samples.
- */
+/** A load run's report, with Overview, Performance and Samples tabs (and Steps for a sequence). */
 
 import { useState, useMemo, useEffect } from "react";
 import {
@@ -67,10 +65,9 @@ import type { SampleDestination, SampleFilter } from "./sample-filter";
 import { RUN_TYPE_NAME, type LoadTestDetailProps, type SeriesFailure } from "../types";
 
 /**
- * What the request bar says a collection run was: the collection, its length
- * and its concurrency, each only when known. `TruncatedText` measures one
- * string, so the sentence is built rather than composed out of nodes it would
- * have to flatten.
+ * What the request bar says a collection run was: the collection, its length and its concurrency,
+ * each only when known. `TruncatedText` measures one string, so the sentence is built, not composed
+ * of nodes it would have to flatten.
  */
 function describeSequence(target: {
 	collectionName?: string;
@@ -101,26 +98,22 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const [sampleFilter, setSampleFilter] = useState<SampleFilter>("all");
 	const [sampleToExpand, setSampleToExpand] = useState<number>();
 	const [comparing, setComparing] = useState(false);
-	// What actually happened, beside the protocol the run asked for. A 0 covers
-	// both "no request was downgraded" and "this run predates the count" - the
-	// engine does not distinguish them (see the field's doc in types/domain.ts),
-	// and neither should draw a warning, so `undefined` folding into 0 loses
-	// nothing.
+	// What happened, beside the protocol the run asked for. A 0 covers both "none downgraded" and
+	// "the run predates the count" (the engine does not tell them apart, see the field's doc in
+	// types/domain.ts), and neither draws a warning, so folding `undefined` into 0 loses nothing.
 	const downgradedRequests = report.summary.httpVersionDowngraded ?? 0;
 
 	/*
-	 * A collection load run: `type: "load"` (it publishes ticks and reports
-	 * percentiles like any load run), but its target is a sequence, so it has no
-	 * single method or URL and reports its per-step numbers as a breakdown
-	 * rather than as `results[]` rows.
+	 * A collection load run: `type: "load"` (it publishes ticks and reports percentiles like any
+	 * load run), but its target is a sequence, so it has no single method or URL and reports
+	 * per-step numbers as a breakdown, not `results[]` rows.
 	 *
-	 * Two questions, two answers. Whether the run *is* a collection run decides
-	 * the request bar, and the snapshot identity in `metadata.scenario` answers it
-	 * for every such run; a run the engine did not finish has no stored summary
-	 * and so no breakdown, and reading the breakdown for this would name it
-	 * "GET Unknown URL" (#3569). The breakdown's presence decides the Steps tab
-	 * alone, because that is what the tab renders. A report from an engine that
-	 * predates `metadata.scenario` is recognised by its breakdown instead.
+	 * Two questions, two answers. Whether the run *is* a collection run decides the request bar,
+	 * and `metadata.scenario`'s snapshot identity answers it for every such run; a run the engine
+	 * did not finish has no stored summary and so no breakdown, and reading the breakdown for this
+	 * would name it "GET Unknown URL" (#3569). The breakdown's presence decides the Steps tab
+	 * alone, as that is what the tab renders. A report from an engine predating `metadata.scenario`
+	 * is recognised by its breakdown instead.
 	 */
 	const scenarioSteps = report.scenario?.steps;
 	const hasStepBreakdown = !!scenarioSteps?.length;
@@ -140,10 +133,9 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			})
 		: "";
 
-	// Fetch the persisted time-series once, here, so both the Overview stat cards
-	// (breakpoint / saturation, derived below) and the Performance tab charts
-	// read the same data - one query, shared cache. One request, never paged: a
-	// long run arrives downsampled (#2547).
+	// The persisted time series, fetched once here so the Overview stat cards (breakpoint,
+	// saturation, derived below) and the Performance charts read the same data from one query. One
+	// request, never paged: a long run arrives downsampled (#2547).
 	const {
 		data: timeSeriesData,
 		isLoading: isLoadingSeries,
@@ -164,11 +156,10 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	// Set only when the engine folded the series; the charts say what a point is.
 	const ticksPerBucket = timeSeriesData?.bucketed ? timeSeriesData.ticksPerBucket : undefined;
 
-	// Server vitals, only for a run that actually recorded some: the report's
-	// `monitor` section is the run's own record of what the scrape did, so a run
-	// that monitored nothing (or whose every scrape failed) never issues the
-	// fetch at all. One request, never paged and folded by the engine when the
-	// run scraped more than the History point budget (#2611), like the ticks.
+	// Server vitals, only for a run that recorded some: the report's `monitor` section is the run's
+	// own record of the scrape, so a run that monitored nothing (or whose every scrape failed)
+	// never fetches. One request, never paged, folded by the engine past the History point budget
+	// (#2611), like the ticks.
 	const hasMonitorSamples = (report.monitor?.samples ?? 0) > 0;
 	const {
 		data: monitorData,
@@ -189,17 +180,14 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const monitorTicksPerBucket = monitorData?.bucketed ? monitorData.ticksPerBucket : undefined;
 
 	/*
-	 * The breakpoint and the anomaly windows are derived from the series the
-	 * charts plot, whatever its shape (#2547). A run of at most
-	 * HISTORY_SERIES_MAX_POINTS ticks arrives raw, one tick a second, and both
-	 * behave as they always have. A longer run arrives as buckets whose p99 is
-	 * the worst second in each, so neither can miss a second over a threshold:
-	 * the breakpoint lands on the bucket holding the first such second (its time
-	 * the bucket's end, its concurrency the bucket's peak), and the 5xx onset on
-	 * the bucket it appeared in. The detector's tick counts then count buckets:
-	 * a 15-bucket baseline, and a window needs two hot buckets, so a slowdown
-	 * shorter than that goes unnamed while the breakpoint still marks it. The
-	 * chart section says so beside the charts.
+	 * The breakpoint and the anomaly windows are derived from the series the charts plot, whatever
+	 * its shape (#2547). A run of at most HISTORY_SERIES_MAX_POINTS ticks arrives raw, one tick a
+	 * second. A longer run arrives as buckets whose p99 is the worst second in each, so neither can
+	 * miss a second over a threshold: the breakpoint lands on the bucket holding the first such
+	 * second (its time the bucket's end, its concurrency the bucket's peak), and the 5xx onset on
+	 * the bucket it appeared in. The detector's tick counts then count buckets (a 15-bucket
+	 * baseline, two hot buckets for a window), so a shorter slowdown goes unnamed while the
+	 * breakpoint still marks it; the chart section says so beside the charts.
 	 */
 
 	// The report alone can't supply the capacity breakpoint (it needs the per-tick
@@ -231,9 +219,8 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		};
 	}, [report, timeSeries, sloThresholdMs]);
 
-	// The run's degradation windows, from the same series the charts plot. Derived
-	// once here and handed to both tabs: Overview names them, Performance shades
-	// them, and neither re-derives.
+	// The run's degradation windows, from the series the charts plot, derived once and handed to
+	// both tabs: Overview names them, Performance shades them.
 	const anomalies = useMemo(() => detectAnomalies(timeSeries), [timeSeries]);
 
 	// One line on whether the run's OAuth 2.0 credential was kept current - the
@@ -250,10 +237,9 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const identity = run ? runIdentity(run) : null;
 
 	/*
-	 * A "Compare with…" chosen on this run's History row (#2164) lands here as
-	 * a store intent, because `openTab` can only name the run. Taken once, so
-	 * reopening the tab later opens on the report. The tab may already be open,
-	 * so this cannot be a mount-time initial state.
+	 * A "Compare with…" chosen on this run's History row (#2164) lands as a store intent, because
+	 * `openTab` can only name the run, and the tab may already be open, so it cannot be a
+	 * mount-time initial state. Taken once, so reopening the tab later opens on the report.
 	 */
 	const compareRequested = useTabsStore(
 		(s) => s.navIntent?.kind === "compare" && s.navIntent.target === runId
@@ -286,10 +272,9 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	);
 
 	/*
-	 * Everything the report says about the run before its tabs: the verdict, the
-	 * target, the configuration, the baseline strip and the auth note. It scrolls
-	 * with the body (above the tab panel, or above the comparison) so the fixed
-	 * header stays at one row plus the tab strip.
+	 * Everything the report says about the run before its tabs: the verdict, the target, the
+	 * configuration, the baseline strip and the auth note. It scrolls with the body (above the tab
+	 * panel or the comparison), so the fixed header stays one row plus the tab strip.
 	 */
 	const runContext = (
 		<div className="flex flex-col gap-3">
@@ -327,9 +312,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			    see BaselineComparison. */}
 			<BaselineComparison report={report} runId={runId} />
 
-			{/* What kept the run authorized. Drawn only when the engine was able to
-			    refresh at all - a run without the section reports nothing here,
-			    exactly as every run did before mid-run refresh existed. */}
+			{/* What kept the run authorized, only when the engine could refresh at all. */}
 			{authNote && (
 				<div
 					className={`flex items-center gap-2 text-sm p-3 border rounded-md bg-background/50 ${
@@ -352,11 +335,10 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			{/* Fixed Header: where this run sits, and nothing else. */}
 			<div className="border-b bg-card px-6 py-2">
 				{/*
-				 * Where this report sits (#1691). A run report opens from the History
-				 * drawer and said nothing about where it came from; "History" reveals
-				 * that list rather than toggling it, so the crumb always shows the
-				 * list it names. The run's own crumb is inert - you are already on it,
-				 * and its url and method are the bar at the top of the body.
+				 * Where this report sits (#1691): it opens from the History drawer, and "History"
+				 * reveals that list rather than toggling it, so the crumb always shows the list it
+				 * names. The run's own crumb is inert: you are on it, and its url and method are
+				 * the bar at the top of the body.
 				 */}
 				<div className="flex items-center gap-2">
 					<TabBreadcrumb

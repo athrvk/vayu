@@ -6,9 +6,8 @@
  */
 
 /**
- * How the Samples tab orders and narrows the rows a run stored (#2212).
- *
- * Pure, so the chip definitions and the order are pinned without a DOM.
+ * How the Samples tab orders and narrows the rows a run stored (#2212); pure, so the chips and the
+ * order are pinned without a DOM.
  */
 
 import { httpStatusClass, isErrorStatus, type HttpStatusClass } from "@/constants/http-status";
@@ -30,19 +29,15 @@ export const SAMPLE_FILTER_LABEL: Record<SampleFilter, string> = {
 /** A sample and its place in the time-ordered list, before any filter narrows it. */
 export interface NumberedSample {
 	/**
-	 * 1-based rank by timestamp among every sample the run shows. It is the row's
-	 * number on screen and its identity for expansion: a filter never renumbers
-	 * a row, and unlike `sample.id` it exists on a report from an engine older
-	 * than 0.15.0.
+	 * 1-based rank by timestamp among every sample the run shows: the row's number on screen and
+	 * its identity for expansion. A filter never renumbers a row, and unlike `sample.id` it exists
+	 * on a report from an engine older than 0.15.0.
 	 */
 	number: number;
 	sample: SampleResult;
 }
 
-/**
- * Oldest first. The sort is stable, so rows sharing a millisecond keep the
- * order the report listed them in.
- */
+/** Oldest first. The sort is stable, so rows sharing a millisecond keep the report's order. */
 export function numberByTime(samples: SampleResult[]): NumberedSample[] {
 	return [...samples]
 		.sort((a, b) => a.timestamp - b.timestamp)
@@ -50,11 +45,10 @@ export function numberByTime(samples: SampleResult[]): NumberedSample[] {
 }
 
 /**
- * Slow is the engine's own verdict, `trace.isSlow` - a completion at or over the
- * run's `slow_threshold_ms`, stamped when it was traced - which is what the
- * sample row's slow callout reads. Re-deriving it from `slowRequests.thresholdMs`
- * and `latencyMs` would be a second definition; a sample with no trace carries
- * no verdict and is not slow.
+ * Slow is the engine's own verdict, `trace.isSlow` (a completion at or over the run's
+ * `slow_threshold_ms`, stamped when traced), which the sample row's slow callout reads. Re-deriving
+ * it from `slowRequests.thresholdMs` and `latencyMs` would be a second definition; a sample with no
+ * trace carries no verdict and is not slow.
  */
 export function isSlowSample(sample: SampleResult): boolean {
 	return sample.trace?.isSlow === true;
