@@ -6,40 +6,32 @@
  */
 
 /**
- * "Which declared columns do the requests actually use?" - the Data tab's
- * referenced-columns panel (issue #600).
+ * "Which declared columns do the requests actually use?", the Data tab's referenced-columns panel
+ * (issue #600). The contract and the requests drift apart in both directions, invisibly until a
+ * run: a renamed column leaves `{{data.emial}}` behind, and a column nobody references makes a file
+ * wider than it needs to be. The diff beside this one compares the contract to a *file*; this
+ * compares it to the requests and needs no file.
  *
- * The contract and the requests drift apart in both directions and neither is
- * visible until a run: a renamed column leaves `{{data.emial}}` behind, and a
- * column nobody references makes a file wider than it needs to be. The diff
- * beside this one compares the contract to a *file*; this compares it to the
- * requests, which needs no file at all.
+ * **Which requests.** Everything the contract answers for, this collection and every descendant
+ * down to one declaring its own, as that is the set the chain rule binds
+ * (`collectionsUnderContract`). Auditing the leaf alone would call a column unreferenced while a
+ * request one level down references it.
  *
- * **Which requests.** Everything the contract answers for - this collection and
- * every descendant down to one that declares its own - because that is the set
- * the chain rule binds (`collectionsUnderContract`). Auditing the leaf alone
- * would call a column unreferenced while a request one level down references
- * it.
+ * **Scripts are labeled, never claimed.** `pm.iterationData.get(key)` computes its name at run
+ * time, so the scan finds literals only and says so.
  *
- * **Scripts are labeled, never claimed.** `pm.iterationData.get(key)` computes
- * its name at run time, so the scan finds literals only and says so.
+ * **What a request sends, not what it holds** (issue #729). `useColumnAudit` resolves two audited
+ * surfaces as the run does: a request's `inherit` auth becomes the chain's credentials
+ * (`resolveEffectiveAuth`), which a data row binds per iteration (#591), and the collection chain's
+ * own scripts run for every step ahead of the request's. Auditing the stored rows would call a
+ * column bound into a basic-auth pair "declared but not referenced".
  *
- * **What a request sends, not what it holds** (issue #729). Two of the audited
- * surfaces are resolved by `useColumnAudit` rather than read off the row,
- * because the run resolves them the same way: a request's `inherit` auth becomes the chain's
- * credentials (`resolveEffectiveAuth`), which a data row binds per iteration
- * (#591), and the collection chain's own scripts run for every step ahead
- * of the request's. Auditing the rows as stored called a column bound into a
- * basic-auth pair "declared but not referenced".
- *
- * **A declared column can share a name with a variable** (issue #1007): while a
- * row is bound, a bare `{{name}}` reads the column, above the active
- * environment - so a request that resolves one way in this panel's preview
- * (with no row bound, the variable answers) sends a different value once a run
- * actually binds a row. The panel cannot tell whether a request means the
- * column or was written before the collision existed, so it states the fact
- * rather than picking a side - a calm note, not a warning, listed alongside
- * whichever bucket the column already fell into.
+ * **A declared column can share a name with a variable** (issue #1007): while a row is bound, a
+ * bare `{{name}}` reads the column, above the active environment, so a request that resolves one
+ * way in this panel's preview (no row bound, the variable answers) sends a different value once a
+ * run binds a row. The panel cannot tell whether a request means the column or predates the
+ * collision, so it states the fact as a calm note, not a warning, beside whichever bucket the
+ * column already fell into.
  */
 
 import { useMemo } from "react";
@@ -102,11 +94,9 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 	// is one list that can disagree with itself.
 	const declared = useMemo(() => collection.dataSchema?.columns ?? [], [collection.dataSchema]);
 	const { data: collections = [] } = useCollectionsQuery();
-	// The same three-scope answer a plain Send would preview for this
-	// collection - globals, its own chain, the active environment. Not the
-	// resolved *value*, only whether a definition exists: that is all a
-	// collision note needs, and it is what stays true regardless of which row a
-	// run eventually binds.
+	// The three-scope answer a plain Send would preview for this collection (globals, its own
+	// chain, the active environment), asked only whether a definition exists: all a collision note
+	// needs, and true whichever row a run binds.
 	const { getVariable } = useVariableResolver({ collectionId: collection.id });
 	const collidingColumns = useMemo(
 		() => declared.filter((column) => getVariable(column) !== null),
