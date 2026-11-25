@@ -5,8 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-// Collections UI State Store
-// Server state (collections, requests) is now managed by TanStack Query
+// UI state of the collections tree; server state (collections, requests) is TanStack Query's.
 
 import { create } from "zustand";
 
@@ -17,11 +16,8 @@ interface CollectionsUIState {
 	// Actions
 	toggleCollectionExpanded: (collectionId: string) => void;
 	/**
-	 * Expand one collection, idempotently.
-	 *
-	 * A toggle guarded by a read of the set it toggles would depend on
-	 * `expandedCollectionIds`, which forced the ⋯ menu's actions to be rebuilt on
-	 * every expand.
+	 * Expand one collection, idempotently. A toggle guarded by a read of the set it toggles would
+	 * depend on `expandedCollectionIds` and rebuild the ⋯ menu's actions on every expand.
 	 */
 	expandCollection: (collectionId: string) => void;
 	expandCollections: (collectionIds: string[]) => void;

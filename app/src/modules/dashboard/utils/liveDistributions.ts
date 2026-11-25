@@ -6,15 +6,12 @@
  */
 
 /**
- * What the live view's Row 3 cards draw: the run-so-far latency distribution and
- * the per-phase means and percentiles, which the engine sends on the gate frame
- * alone (issue #2782).
- *
- * The newest tick is almost never a gate frame (about one in ten), so a reader
- * of `metrics` would flicker between the cards' data and nothing. The adapters
- * below take the latest frame that carries the key, and return the shapes the
- * History cards already take (`Pick<RunReport, ...>`), so the live and stored
- * views share one chart, one waterfall and one percentile table.
+ * What the live view's Row 3 cards draw: the run-so-far latency distribution and the per-phase
+ * means and percentiles, which the engine sends on the gate frame alone (issue #2782). The newest
+ * tick is a gate frame about one time in ten, so a reader of `metrics` would flicker between the
+ * cards' data and nothing; these adapters take the latest frame carrying the key and return the
+ * shapes the History cards already take (`Pick<RunReport, ...>`), so the live and stored views
+ * share one chart, one waterfall and one percentile table.
  */
 
 import type { LivePhaseDistributions, LoadTestMetrics, RunReport } from "@/types";

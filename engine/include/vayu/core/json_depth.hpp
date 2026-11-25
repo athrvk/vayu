@@ -8,17 +8,15 @@
  */
 
 /**
- * @file core/json_depth.hpp
  * @brief The engine's one nesting-depth rule for a parsed JSON tree.
  *
  * nlohmann's parser is iterative, so a document of any depth parses; what
  * recurses is everything downstream (`dump`, a copy, a comparison, the schema
- * translation). A tree built from text an attacker chose therefore has to be
- * bounded before anything walks it. The OpenAPI document reader calls this;
- * the element pipeline's response-body parse applies the same measure while it
- * builds the tree (`utils::parse_ordered_json`), and
- * `ordered_json_parse_test.cpp` holds the two to one answer to "how deep is too
- * deep".
+ * translation), so a tree built from text an attacker chose has to be bounded
+ * before anything walks it. The OpenAPI document reader calls this; the element
+ * pipeline's response-body parse applies the same measure while it builds the
+ * tree (`utils::parse_ordered_json`), and `ordered_json_parse_test.cpp` holds
+ * the two to one answer to "how deep is too deep".
  */
 
 #include <cstddef>

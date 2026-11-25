@@ -6,27 +6,23 @@
  */
 
 /**
- * Roving tabindex for the collection tree (WAI-ARIA treeview pattern).
+ * Roving tabindex for the collection tree (WAI-ARIA treeview pattern). The tree is a single tab
+ * stop and arrow keys move between rows, so tabbing past it costs one press, not one per row (17
+ * for a workspace with 2 collections and 4 requests).
  *
- * The tree is a single tab stop. Arrow keys move between rows, so tabbing past
- * the tree costs one press instead of one per row (17 for a workspace with 2
- * collections and 4 requests).
+ * Visible order comes from the DOM (`[role="treeitem"]` in document order, collapsed subtrees
+ * unrendered), except in a windowed tree, which mounts only the rows in view and passes them all as
+ * a `TreeRowModel` to walk instead.
  *
- * Visible order comes from the DOM (`[role="treeitem"]` in document order),
- * collapsed subtrees unrendered - except in a windowed tree, which mounts only
- * the rows in view and passes them all as a `TreeRowModel` to be walked instead.
+ * **Depth comes from `aria-level`** (`parentIndex` in `tree-focus.ts`, the delete refocus's
+ * reading, #1237): a row's children render beside it, not within it, and two trees render no
+ * nesting at all, so the DOM states order but not hierarchy. Every consumer's rows announce their
+ * level; one that omits it gets a tree of roots, where ArrowLeft moves nowhere and `*` calls every
+ * row a sibling.
  *
- * **Depth, though, comes from `aria-level`** - `parentIndex` in `tree-focus.ts`,
- * the same reading the delete refocus uses (#1237). Order is the one thing the
- * DOM states plainly here; hierarchy it does not, since a row's children are
- * rendered beside it rather than within it and two trees render no nesting at
- * all. Every row of every consumer already announces its level, because that
- * same shape is why the hierarchy has to be announced. A consumer that omits it
- * gets a tree of roots: ArrowLeft moves nowhere and `*` calls every row a
- * sibling.
+ * Rows expose their behaviour through data attributes, so nothing is threaded through
+ * CollectionItem's props:
  *
- * Rows expose their behaviour through data attributes rather than props, so
- * this needs nothing threaded through CollectionItem's prop list:
  *   data-tree-activate  the primary control (open the collection/request)
  *   data-tree-toggle    expand/collapse control (collections only)
  *   data-tree-menu      row actions            (Shift+F10 / Menu / Shift+Enter)
@@ -35,34 +31,27 @@
  *   data-tree-label     the row's name         (typeahead)
  *   data-tree-move-*    reorder controls       (Alt+Arrow)
  *
- * Focus is deliberately separate from selection: arrows move focus without
- * opening anything; Enter/Space opens.
+ * Focus is separate from selection: arrows move focus without opening anything; Enter/Space opens.
  *
- * **Two of those keys do not exist on a Mac keyboard**, which is why each has a
- * second binding (#931):
+ * **Two of those keys do not exist on a Mac keyboard**, so each has a second binding (#931):
  *
- *   - The key labelled "delete" on a Mac reports `"Backspace"`. `"Delete"` is
- *     forward-delete, Fn+Delete, which effectively nobody presses - so a
- *     `"Delete"`-only handler is dead on macOS. Both are accepted here on every
- *     platform rather than behind an `isMac` fork: Backspace-to-delete is
- *     standard list behaviour, and the control this clicks is a soft delete
- *     with an undo toast, so a mistaken press costs an Undo rather than data.
- *   - Mac keyboards have no Menu key, and F10 is a media key by default, so the
- *     row menu had no keyboard path at all there. **Shift+Enter** is the third
- *     one; plain Enter still activates.
+ *   - The Mac key labelled "delete" reports `"Backspace"`; `"Delete"` is forward-delete
+ *     (Fn+Delete), which effectively nobody presses, so a `"Delete"`-only handler is dead on macOS.
+ *     Both are accepted on every platform, not behind an `isMac` fork: Backspace-to-delete is
+ *     standard list behaviour, and the control it clicks is a soft delete with an undo toast, so a
+ *     mistaken press costs an Undo, not data.
+ *   - Mac keyboards have no Menu key and F10 is a media key by default, which leaves the row menu
+ *     no other keyboard path there: **Shift+Enter** is the third binding. Plain Enter still
+ *     activates.
  *
- * **F2 keeps no second binding, deliberately** (#935). It is a media key by
- * default on a Mac too, so it shares the F10 problem - but not its consequence:
- * rename is reachable without it by double-click and by the row menu (itself
- * reachable from the keyboard through Shift+Enter), whereas the row menu had no
- * path at all. Adding a chord for it would spend one of the few free ones on a
- * key that is only inconvenient, so this is recorded rather than fixed.
+ * **F2 keeps no second binding, deliberately** (#935). It is a media key on a Mac too, but rename
+ * is reachable by double-click and by the row menu (itself reachable through Shift+Enter), so a
+ * chord spent on it would buy convenience, not a path, out of the few free ones.
  *
- * **Ctrl/Cmd is the app's, not the tree's**, and the bail-out for it is in
- * `onKeyDown` rather than in each case: the named cases match on `e.key` alone
- * and `take()` stops propagation, so with a row focused - the normal state
- * after opening a request - `mod+Enter` re-activated the row and the window's
- * send listener never heard it (#935, from #931's review).
+ * **Ctrl/Cmd is the app's, not the tree's**, with the bail-out in `onKeyDown`, not in each case:
+ * the named cases match on `e.key` alone and `take()` stops propagation, so with a row focused (the
+ * normal state after opening a request) `mod+Enter` would re-activate the row and the window's send
+ * listener would never hear it (#935, from #931's review).
  */
 
 import { useCallback, useEffect, useRef, type RefObject } from "react";
@@ -79,14 +68,11 @@ import {
 } from "./tree-focus";
 
 /**
- * Alt+Arrow moves the row itself, rather than the focus - the keyboard half of
- * drag-and-reorder (#364 decision 8). Left and right are "out of" and "into",
- * matching the plain arrows' collapse/expand direction so the pair reads as one
- * mental model rather than two.
- *
- * Alt is the modifier because the tree owns the bare arrows for navigation and
- * the app owns Ctrl/Cmd; a chord is also why the row menu carries a
- * "Move to…" action that needs no keyboard at all.
+ * Alt+Arrow moves the row itself, not the focus: the keyboard half of drag-and-reorder (#364
+ * decision 8). Left and right are "out of" and "into", matching the plain arrows' collapse/expand
+ * direction so the pair reads as one model. Alt because the tree owns the bare arrows and the app
+ * owns Ctrl/Cmd; that it is a chord is also why the row menu has a "Move to…" that needs no
+ * keyboard.
  */
 const MOVE_CONTROL: Record<string, string> = {
 	ArrowUp: "[data-tree-move-up]",
@@ -96,14 +82,10 @@ const MOVE_CONTROL: Record<string, string> = {
 };
 
 /**
- * A row's name, for typeahead.
- *
- * `data-tree-label` rather than `textContent`: a request row's text starts with
- * its method badge, so "Get users" reads as "GETGet users" and typing `g`,`e`
- * matches by accident while typing `l` for "List orders" matches nothing at all.
- * A collection row ends with its child count for the same reason. The attribute
- * is the name the user actually sees. Falls back to the text so a row that has
- * not declared one is merely imprecise rather than unreachable.
+ * A row's name, for typeahead. `data-tree-label`, not `textContent`: a request row's text starts
+ * with its method badge ("GETGet users", so `g`,`e` matches by accident and `l` for "List orders"
+ * matches nothing), and a collection row's ends with its child count. Falls back to the text, so a
+ * row declaring none is imprecise rather than unreachable.
  */
 function labelOf(el: HTMLElement): string {
 	return (el.getAttribute("data-tree-label") ?? el.textContent ?? "").trim().toLowerCase();
@@ -136,14 +118,13 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>, model
 			const current = active.closest<HTMLElement>(ITEM);
 			if (!current || !treeRef.current?.contains(current)) return;
 
-			// Never hijack typing in a rename field. The set is the one the send
-			// chord's handler excludes, widened by the plain input a rename is -
-			// one definition, so the two guards cannot drift apart again.
+			// Never hijack typing in a rename field: the send chord handler's exclusion set,
+			// widened by the plain input a rename is, one definition so the two guards cannot drift
+			// apart.
 			if (isTextEntryTarget(active)) return;
 
-			// Ctrl/Cmd chords belong to the app. Bailing out here rather than in
-			// each case is what lets the window handlers hear them at all - see
-			// the header note.
+			// Ctrl/Cmd chords belong to the app; bailing out here, not per case, is what lets the
+			// window handlers hear them (see the header note).
 			if (e.ctrlKey || e.metaKey) return;
 
 			const nav = treeNavigator(model, current, items, focusItem);
@@ -186,12 +167,11 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>, model
 					// second press steps into them - no flushSync needed.
 					if (expanded === "false") click("[data-tree-toggle]");
 					else if (expanded === "true") {
-						// Expanded: move to the *first child*, and nowhere at all if
-						// there is none. An empty folder renders an "Empty collection"
-						// div rather than a treeitem, so the next row in document
-						// order is its sibling and stepping to it was an ArrowDown
-						// wearing ArrowRight's key (#931 review). Parentage decides,
-						// the same reading the `*` case uses.
+						// Expanded: move to the *first child*, or nowhere if there is none. An
+						// empty folder renders an "Empty collection" div, not a treeitem, so the
+						// next row in document order is its sibling, and stepping there would be
+						// ArrowDown wearing ArrowRight's key (#931 review). Parentage decides, as
+						// in the `*` case.
 						if (i >= 0 && parentIndex(nav.levels, i + 1) === i) nav.focus(i + 1);
 					}
 					break;
@@ -233,11 +213,9 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>, model
 					break;
 				case "*": {
 					take();
-					// Expand every sibling folder of the focused row. Siblinghood
-					// comes from the announced hierarchy rather than from props:
-					// two rows are siblings when they share a parent, which is
-					// none for two roots. Already-expanded rows are skipped, so
-					// this never collapses anything.
+					// Expand every sibling folder of the focused row, siblings by the announced
+					// hierarchy (a shared parent, none for two roots). Already-expanded rows are
+					// skipped, so this never collapses anything.
 					nav.expand(siblingIndices(nav.levels, i).filter(nav.isCollapsed));
 					break;
 				}
@@ -253,18 +231,16 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>, model
 					const prefix = (stale ? "" : typeahead.current.prefix) + e.key.toLowerCase();
 					typeahead.current = { prefix, at: now };
 
-					// Repeating one letter cycles through the rows starting with it,
-					// rather than building "ppp" - which no row can match, so the
-					// most natural way to ask for "the next Payments-ish row" would
-					// silently do nothing. The ARIA practices call this out by name.
+					// Repeating one letter cycles through the rows starting with it rather than
+					// building "ppp", which no row matches, so asking for "the next Payments-ish
+					// row" would silently do nothing (the ARIA practices name this).
 					const repeated = [...prefix].every((c) => c === prefix[0]);
 					const search = repeated ? prefix[0] : prefix;
 
-					// A single letter searches from the row *after* the current one,
-					// so pressing it again steps on. A longer prefix includes the
-					// current row, which is the one it most likely still describes -
-					// otherwise typing "in" would jump off "Invoices" the moment the
-					// "n" landed.
+					// A single letter searches from the row *after* the current one, so pressing it
+					// again steps on. A longer prefix includes the current row, which it most
+					// likely still describes: otherwise typing "in" would jump off "Invoices" as
+					// the "n" landed.
 					const start = search.length === 1 ? i + 1 : i;
 					const count = nav.levels.length;
 					for (let n = 0; n < count; n++) {

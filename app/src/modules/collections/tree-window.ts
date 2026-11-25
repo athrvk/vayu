@@ -6,13 +6,10 @@
  */
 
 /**
- * The arithmetic of the collection tree's window (#2543): which rows a viewport
- * needs mounted, and how much list the rows it skips stand for.
- *
- * Every length here is in spacing units (`--spacing`), the unit the rows are
- * sized in. The rows' heights are not one constant - the gap above a row
- * depends on its depth, and the new-folder form is taller - so positions are a
- * prefix sum over each row's stride rather than an index times a pitch.
+ * The arithmetic of the collection tree's window (#2543): which rows a viewport needs mounted, and
+ * how much list the skipped rows stand for. Lengths are in spacing units (`--spacing`), the rows'
+ * unit. Row heights vary (the gap above a row depends on its depth, and the new-folder form is
+ * taller), so positions are a prefix sum over each row's stride, not an index times a pitch.
  */
 
 /** `offsets[i]` is where row `i`'s stride starts; `offsets[count]` is the list's height. */

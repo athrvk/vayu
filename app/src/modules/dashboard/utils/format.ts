@@ -7,26 +7,22 @@
 
 import { formatFixed } from "@/lib/format-number";
 
-/**
- * Dashboard formatting helpers.
- */
+/** Dashboard formatting helpers. */
 
 const pluralRules = new Intl.PluralRules("en-US");
 
 /**
- * Pick the whole sentence for `count`, by the same `Intl.PluralRules` category
- * as `pluralize`. For a sentence whose verb (or more) agrees with the count,
- * where swapping the noun alone leaves "1 request are removed"; each form is
- * written out so it can be read, and grepped, as a sentence.
+ * Pick the whole sentence for `count`, by `pluralize`'s `Intl.PluralRules` category: for a sentence
+ * whose verb (or more) agrees with the count, where swapping the noun alone gives "1 request are
+ * removed". Each form is written out so it can be read, and grepped, as a sentence.
  */
 export function pickByCount(count: number, forms: { one: string; other: string }): string {
 	return forms[pluralRules.select(count) === "one" ? "one" : "other"];
 }
 
 /**
- * Pick the singular or plural form of a noun for `count`, via
- * `Intl.PluralRules` rather than a hand-rolled "s" suffix or "(s)" - see
- * docs/ux-writing.md's numbers-and-units rule.
+ * Pick the singular or plural of a noun for `count` via `Intl.PluralRules`, not a hand-rolled "s"
+ * suffix or "(s)" (docs/ux-writing.md's numbers-and-units rule).
  */
 export function pluralize(
 	count: number,
@@ -50,11 +46,10 @@ export function formatCount(value: number, decimals = 0): string {
 }
 
 /**
- * A measured rate (events/s) in the reader's locale, by the engine's rule for a
- * run figure (`format_run_figure`, `run_export_view.cpp`), so the card and an
- * exported report spell one rate alike: 2 decimals below 10, none above, and a
- * positive rate too small for 2 decimals reads `<0.01`, never a zero it did not
- * measure. `-` for a non-finite value.
+ * A measured rate (events/s) in the reader's locale, by the engine's rule for a run figure
+ * (`format_run_figure`, `run_export_view.cpp`), so the card and an exported report spell one rate
+ * alike: 2 decimals below 10, none above, and a positive rate too small for 2 decimals reads
+ * `<0.01`, never a zero it did not measure. `-` for a non-finite value.
  */
 export function formatRate(value: number): string {
 	if (!Number.isFinite(value)) return "-";
@@ -64,26 +59,22 @@ export function formatRate(value: number): string {
 
 export interface FormatDurationOptions {
 	/**
-	 * Round each component to the nearest unit instead of truncating. A
-	 * stopwatch someone is actually reading (how long the host was asleep)
-	 * should not floor 6m 12s down to 6m 11s; an elapsed-time counter that
-	 * ticks every second should, so it never appears to skip a second.
+	 * Round each component to the nearest unit instead of truncating: a stopwatch someone reads
+	 * (how long the host was asleep) should not floor 6m 12s to 6m 11s, while an elapsed-time
+	 * counter ticking every second should, so it never seems to skip a second.
 	 */
 	round?: boolean;
 	/**
-	 * Drop a trailing unit that comes out to zero ("2h" rather than "2h 0m").
-	 * Useful for a one-line prose sentence; a fixed-width readout wants both
-	 * units shown every time.
+	 * Drop a trailing unit that comes out to zero ("2h", not "2h 0m"), for a one-line prose
+	 * sentence; a fixed-width readout wants both units every time.
 	 */
 	omitZeroUnit?: boolean;
 }
 
 /**
- * Format a millisecond duration as a compact human-readable string, e.g.
- * "45s", "6m 12s", "1h 4m". The formatter for prose and labels; see
- * `formatSleepDuration` in `hostSleep.ts` for the "round + omit a zero unit"
- * case a sentence like "Host asleep 2h" wants, and `formatClock` for the
- * fixed-width MM:SS readout of a ticking counter.
+ * A millisecond duration as a compact string ("45s", "6m 12s", "1h 4m"), for prose and labels. See
+ * `formatSleepDuration` in `hostSleep.ts` for the "round + omit a zero unit" case a sentence like
+ * "Host asleep 2h" wants, and `formatClock` for a ticking counter's fixed-width MM:SS.
  */
 export function formatDuration(ms: number, options: FormatDurationOptions = {}): string {
 	const { round = false, omitZeroUnit = false } = options;
@@ -105,10 +96,9 @@ export function formatDuration(ms: number, options: FormatDurationOptions = {}):
 }
 
 /**
- * Format a millisecond duration as a fixed-width stopwatch, "MM:SS". Seconds
- * truncate, so a counter ticking at sub-second resolution never skips ahead,
- * and minutes do not roll into hours ("75:00") - the width a header slot is
- * sized for. A negative duration reads as zero.
+ * A millisecond duration as a fixed-width "MM:SS" stopwatch. Seconds truncate, so a sub-second
+ * counter never skips ahead, and minutes do not roll into hours ("75:00"), the width a header slot
+ * is sized for. A negative duration reads as zero.
  */
 export function formatClock(ms: number): string {
 	const totalSeconds = Math.floor(Math.max(0, ms) / 1000);
@@ -118,10 +108,9 @@ export function formatClock(ms: number): string {
 }
 
 /**
- * An error rate in percent as digits, never `0.0` for a rate above zero: a rate
- * that rounds to nothing at `digits` reads `<0.1` (or `<0.01`), so the number and
- * the colour it is drawn in cannot disagree about whether errors happened. Zero
- * stays `0.0`, the one value that is neutral.
+ * An error rate in percent as digits, never `0.0` for a rate above zero: one that rounds to nothing
+ * at `digits` reads `<0.1` (or `<0.01`), so the number and the colour it is drawn in cannot
+ * disagree about whether errors happened. Zero stays `0.0`, the one neutral value.
  */
 export function formatErrorPercent(percent: number, digits = 1): string {
 	const fixed = formatFixed(percent, digits);

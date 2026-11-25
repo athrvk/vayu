@@ -6,14 +6,11 @@
  */
 
 /**
- * Joining scraped server vitals onto the run's own timeline.
- *
- * The two series are sampled by different clocks: ticks land on the engine's
- * cadence (100ms live, 1s persisted) and monitor samples on whatever scrape
- * interval the user chose, which may be slower, faster, or drifting against it.
- * `uPlot.AlignedData` has one shared x column, so a chart that draws both needs
- * the vitals resampled onto the ticks' x axis - that resampling is here, pure
- * and unit-tested, rather than inside a chart component.
+ * Joining scraped server vitals onto the run's own timeline. The two series run on different
+ * clocks: ticks on the engine's cadence (100ms live, 1s persisted), monitor samples on the scrape
+ * interval the user chose, slower, faster or drifting against it. `uPlot.AlignedData` has one
+ * shared x column, so a chart drawing both needs the vitals resampled onto the ticks' x axis, done
+ * here, pure and unit-tested, rather than in a chart component.
  */
 
 import type { LoadTestMetrics, MonitorSample } from "@/types";
@@ -31,15 +28,12 @@ export interface JoinedMonitorSeries {
 const EMPTY: JoinedMonitorSeries = { times: [], names: [], columns: [] };
 
 /**
- * How long a reading is allowed to stand in for later ticks, derived from the
- * scrape cadence the samples actually show.
- *
- * A gauge read every 5s must still draw across the four 1s ticks after it, or
- * the line would be four fifths holes. But a reading must not be held across a
- * scrape that *failed*: that would draw a flat line over an outage, which is
- * the one thing the overlay exists to make visible. So the window is a small
- * multiple of the observed median spacing - long enough to bridge the cadence,
- * short enough that a missed scrape shows as a gap.
+ * How long a reading may stand in for later ticks, derived from the scrape cadence the samples
+ * show. A gauge read every 5s must still draw across the four 1s ticks after it, or the line would
+ * be four fifths holes, but must not be held across a scrape that *failed*: a flat line over an
+ * outage hides the one thing the overlay exists to make visible. So the window is a small multiple
+ * of the observed median spacing, long enough to bridge the cadence and short enough that a missed
+ * scrape shows as a gap.
  */
 export function stalenessWindowMs(samples: MonitorSample[]): number {
 	const FLOOR_MS = 2000;
@@ -63,26 +57,20 @@ export function monitorSeriesNames(samples: MonitorSample[]): string[] {
 }
 
 /**
- * Resample @p samples onto @p history's tick timeline.
+ * Resample @p samples onto @p history's tick timeline. Each tick takes the newest reading at or
+ * before it (a gauge holds its value until the next scrape; interpolating between two readings
+ * would invent numbers the target never reported), or `null` when that reading is older than
+ * {@link stalenessWindowMs}, which makes a failed scrape read as a gap rather than a plateau. Ticks
+ * before the first scrape are `null` for the same reason.
  *
- * Each tick takes the newest reading at or before it (a gauge holds its value
- * until the next scrape - interpolating between two readings would invent
- * numbers the target never reported), or `null` when the newest reading is
- * older than {@link stalenessWindowMs} - which is what makes a failed scrape
- * read as a gap rather than a plateau. Ticks before the first scrape are `null`
- * for the same reason.
+ * Both inputs are time-ordered by their producers; the samples are sorted defensively because they
+ * arrive from two sources (live SSE frames and a paginated history fetch).
  *
- * Both inputs are time-ordered by their producers; the samples are sorted
- * defensively because they arrive from two sources (live SSE frames and a
- * paginated history fetch).
- *
- * A downsampled history series (#2547) needs nothing different: a bucket's
- * `timestamp` is its last tick's, so it takes the reading as of the bucket's
- * end, as a tick does. Readings between two bucket ends are not drawn, which
- * is the point-reading rule above at the bucket's width. The scrapes are
- * folded too when a run stored more than the History budget (#2611): a
- * folded sample is stamped with its last scrape's time, and the staleness
- * window is derived from the samples' own spacing, so it widens to match.
+ * A downsampled history series (#2547) needs nothing different: a bucket's `timestamp` is its last
+ * tick's, so it takes the reading as of the bucket's end, and readings between two bucket ends are
+ * not drawn (the point-reading rule at the bucket's width). The scrapes are folded too when a run
+ * stored more than the History budget (#2611): a folded sample carries its last scrape's time, and
+ * the staleness window, derived from the samples' own spacing, widens to match.
  */
 export function joinMonitorToTimeline(
 	history: LoadTestMetrics[],
