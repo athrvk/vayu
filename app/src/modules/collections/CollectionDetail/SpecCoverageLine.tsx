@@ -6,23 +6,16 @@
  */
 
 /**
- * The Spec tab's answer to "when did we last exercise this contract, and how
- * much of it" (issue #629).
+ * The Spec tab's answer to "when did we last exercise this contract, and how much of it" (issue
+ * #629): one line, and a link to the run that produced it, on the binding page where a reader asks.
  *
- * The binding page is where a reader asks that question, and until this it
- * could only be answered by finding the run in History and opening its report.
- * One line, and a link to the run that produced it.
+ * **It reports the run's own coverage, not a recomputation.** The numbers come off the stored
+ * report, computed against the document the run was *planned* with, so a collection synced since
+ * shows what the older run covered rather than a figure re-derived against today's contract. That
+ * is the report's own pin, and re-deriving here would be a second, quietly disagreeing answer.
  *
- * **It reports the run's own coverage, not a recomputation.** The numbers come
- * off the stored report, which was computed against the document the run was
- * *planned* with - so a collection that has synced since shows what the older
- * run actually covered rather than a figure re-derived against today's
- * contract. That is the same pin the report itself carries, and re-deriving
- * here would be a second, quietly disagreeing answer.
- *
- * Silent in three cases, all of them honest: no run of this collection yet, a
- * last run that was not measured against a contract, and a report that has not
- * loaded. None of them is "0% covered".
+ * Silent in three honest cases, none of them "0% covered": no run of this collection yet, a last
+ * run not measured against a contract, and a report that has not loaded.
  */
 
 import { useLastCollectionRunQuery, useRunReportQuery } from "@/queries/runs";
