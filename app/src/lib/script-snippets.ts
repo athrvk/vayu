@@ -6,19 +6,16 @@
  */
 
 /**
- * Which templates a script editor offers, and under which headings.
+ * Which templates a script editor offers, and under which headings. The engine's completion table
+ * is the single source for what the editor advertises (`GET /scripting/completions`), and its
+ * snippet entries carry the two things a list needs that a completion popup does not: which script
+ * kind the template belongs in, and the heading to file it under. This module is the whole of the
+ * renderer's opinion about them, a pure read over the payload, so a panel test drives it without a
+ * Monaco instance and without the network.
  *
- * The engine's completion table is the single source for what the editor
- * advertises (`GET /scripting/completions`), and its snippet entries carry the
- * two things a list needs that a completion popup does not: which script kind
- * the template belongs in, and the heading to file it under. This module is the
- * whole of the renderer's opinion about them - a pure read over the payload, so
- * a panel test drives it without a Monaco instance and without the network.
- *
- * An unknown group is listed rather than dropped. The engine test pins the six
- * below, so a seventh means the engine gained one and this renderer has not been
- * rebuilt yet: showing it under its own heading loses nothing, where dropping it
- * would hide a template the engine deliberately shipped.
+ * An unknown group is listed rather than dropped. The engine test pins the six below, so a seventh
+ * means the engine gained one and this renderer has not been rebuilt yet: showing it under its own
+ * heading loses nothing, where dropping it would hide a template the engine deliberately shipped.
  */
 
 import type { ScriptCompletion, ScriptSnippetContext } from "@/types/domain";

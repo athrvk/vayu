@@ -6,29 +6,25 @@
  */
 
 /**
- * The script editor's warning on a bare `Intl` (#3129).
+ * The script editor's warning on a bare `Intl` (#3129). The script runtime has no `Intl` global and
+ * installs none, and its `toLocale*` methods ignore their locale and options, so a script that
+ * formats with `Intl` throws a `ReferenceError` at send time, or formats the wrong thing. The
+ * editor says so while the script is typed.
  *
- * The script runtime has no `Intl` global and installs none, and its
- * `toLocale*` methods ignore their locale and options, so a script that
- * formats with `Intl` throws a `ReferenceError` at send time, or formats the
- * wrong thing. The editor says so while the script is typed.
+ * **A warning marker, not a declaration.** The editor's TypeScript worker resolves `Intl` against
+ * the stock `lib.es*.d.ts` and so reports nothing. The marker is written under an owner of our own
+ * (see `INTL_MARKER_OWNER`).
  *
- * **A warning marker, not a declaration.** The editor's TypeScript worker
- * resolves `Intl` against the stock `lib.es*.d.ts` and so reports nothing. The
- * marker is written under an owner of our own (see `INTL_MARKER_OWNER`).
+ * **Not an AST parse.** `findIntlReferences` is one pass of a small tokenizer that knows exactly
+ * the things that make a regex over the raw text wrong: strings, template text (but not its
+ * `${...}` expressions), comments and regex literals. It reads an identifier as a whole word, so
+ * `MyIntl` and `Intl2` are other names, and it reads the token before the word, so `obj.Intl` and
+ * `x?.Intl` are property accesses and not the global.
  *
- * **Not an AST parse.** `findIntlReferences` is one pass of a small tokenizer
- * that knows exactly the things that make a regex over the raw text wrong:
- * strings, template text (but not its `${...}` expressions), comments and
- * regex literals. It reads an identifier as a whole word, so `MyIntl` and
- * `Intl2` are other names, and it reads the token before the word, so `obj.Intl`
- * and `x?.Intl` are property accesses and not the global.
- *
- * Two things stay unflagged because the name is then the user's own: an
- * object-literal key (`{ Intl: 1 }`), and every `Intl` in a script that
- * declares one (`const`, `let`, `var`, `function`, `class`). The declaring
- * script owns the name wherever it is used, so the whole script is left alone
- * rather than guessing at scopes. A parameter or a destructured binding is not
+ * Two things stay unflagged because the name is then the user's own: an object-literal key
+ * (`{ Intl: 1 }`), and every `Intl` in a script that declares one (`const`, `let`, `var`,
+ * `function`, `class`). The declaring script owns the name wherever it is used, so the whole script
+ * is left alone rather than guessing at scopes. A parameter or a destructured binding is not
  * recognised as a declaration and is still flagged.
  */
 
