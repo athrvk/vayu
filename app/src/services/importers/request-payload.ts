@@ -8,13 +8,12 @@
 /**
  * One parsed request draft as the fields an engine write carries.
  *
- * Two callers build a request row out of a draft now: the import orchestrator,
- * which sends the whole tree to `POST /import/apply`, and the OpenAPI sync,
- * which sends the operations a re-fetched document added to `POST /specs/sync`
- * (issue #655). A second copy of this mapping is exactly the shape of bug this
- * repo keeps finding - a field added for one path and silently missing on the
- * other - so the mapping lives here and the two callers add only what is
- * genuinely theirs (a temp id, an owner, a position).
+ * Two callers build a request row out of a draft: the import orchestrator, which sends the whole
+ * tree to `POST /import/apply`, and the OpenAPI sync, which sends the operations a re-fetched
+ * document added to `POST /specs/sync` (#655). A second copy of this mapping is exactly the bug
+ * this repo keeps finding (a field added for one path and silently missing on the other), so the
+ * mapping lives here and the two callers add only what is genuinely theirs (a temp id, an owner, a
+ * position).
  */
 
 import type { ImportApplyRequestItem } from "@/types";
@@ -62,20 +61,18 @@ export function requestFieldsFromDraft(r: RequestDraft): DraftRequestFields {
 		...(r.postmanProtocolBehavior !== undefined
 			? { postmanProtocolBehavior: r.postmanProtocolBehavior }
 			: {}),
-		// Saved example responses ride nested on their request rather than as a
-		// section of their own: nothing references them, so they need no temp id,
-		// and the engine writes them in the same transaction. Spread for the same
-		// reason as the two fields above - a parser that has no examples must not
-		// send `examples: []`, which reads as "this request documents no
+		// Saved example responses ride nested on their request, not as a section of their own:
+		// nothing references them, so they need no temp id, and the engine writes them in the same
+		// transaction. Spread for the same reason as the two fields above: a parser that has no
+		// examples must not send `examples: []`, which reads as "this request documents no
 		// responses" rather than "this format has none".
 		...(r.examples !== undefined ? { examples: r.examples } : {}),
 		// Spread for the same reason as the fields above: a format with no concept
 		// of a spec operation must not send `specOperation: null`, which the engine
 		// reads as "clear it" rather than "never had one".
 		...(r.specOperation !== undefined ? { specOperation: r.specOperation } : {}),
-		// A mock choice the source stated (issue #1649) - which the engine's own
-		// flattener has always carried and this one did not, so an import
-		// through the dialog reverted every mock route to "first".
+		// A mock choice the source stated (#1649), carried as the engine's own flattener carries
+		// it: dropped, every mock route imported through the dialog would revert to "first".
 		...(r.mockResponseMode !== undefined ? { mockResponseMode: r.mockResponseMode } : {}),
 		...(r.mockExampleIndex !== undefined ? { mockExampleIndex: r.mockExampleIndex } : {}),
 	};
