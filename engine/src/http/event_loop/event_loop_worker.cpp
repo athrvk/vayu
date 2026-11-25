@@ -47,10 +47,10 @@ std::string curl_address_list (const ::addrinfo* addresses) {
     std::string list;
     for (const ::addrinfo* rp = addresses; rp != nullptr; rp = rp->ai_next) {
         // The two casts below are the sockets API's own idiom, not a defect:
-        // `ai_addr` is a `sockaddr*` precisely so one field can carry either
-        // family, and `ai_family` - tested first, on the same record - is what
-        // says which one it is. There is no narrower spelling; POSIX defines
-        // the family structs to be reinterpretable through `sockaddr`.
+        // `ai_addr` is a `sockaddr*` so one field can carry either family, and
+        // `ai_family`, tested first on the same record, says which it is. POSIX
+        // defines the family structs to be reinterpretable through `sockaddr`,
+        // so there is no narrower spelling.
         std::string address;
         if (rp->ai_family == AF_INET6) {
             std::array<char, INET6_ADDRSTRLEN> ip_str{};
@@ -114,12 +114,12 @@ void complete_transfer (TransferData& data, Result<Response> result) {
 }
 
 /**
- * The single definition of what a cancelled transfer looks like. Both paths
- * that can cancel one - an in-flight transfer removed from curl, and a request
- * that never left the pending queue - go through here, so a stopped run's
- * accounting sees one shape rather than two. The result is an Error rather
- * than a zero-status Response because no response was ever received;
- * load_strategy::handle_result decides from the run whether it is an error.
+ * The one shape a cancelled transfer has. Both paths that cancel one (an
+ * in-flight transfer removed from curl, a request that never left the pending
+ * queue) go through here, so a stopped run's accounting sees one shape, not
+ * two. An Error, not a zero-status Response, because no response was received;
+ * load_strategy::handle_result decides from the run whether it counts as an
+ * error.
  */
 void complete_as_cancelled (TransferData& data) {
     complete_transfer (data, Error{ ErrorCode::Cancelled, "Request cancelled" });
@@ -233,7 +233,6 @@ CURL* CurlHandlePool::acquire () {
         return handle;
     }
 
-    // Pool empty - create new handle
     CURL* handle = curl_easy_init ();
     if (handle) {
         total_created_++;
@@ -261,19 +260,18 @@ EventLoopWorker::EventLoopWorker (EventLoopConfig cfg, unsigned worker_index, un
         throw std::runtime_error ("Failed to initialize curl_multi for worker");
     }
 
-    // Set multi handle options for high-performance
     set_opt<CURLMOPT_MAXCONNECTS> (multi_handle, static_cast<long> (config.max_concurrent));
     set_opt<CURLMOPT_MAX_HOST_CONNECTIONS> (
     multi_handle, static_cast<long> (config.max_per_host));
 
-    // Allow HTTP/2 multiplexing on any transfer whose request opted into
-    // HTTP/2 (curl_utils.cpp sets CURLOPT_HTTP_VERSION per request from
-    // request.http_version). This setting itself is inert on an HTTP/1.1
-    // transfer, so it is left unconditional here rather than gated per-run.
+    // HTTP/2 multiplexing for any transfer whose request opted into HTTP/2
+    // (curl_utils.cpp sets CURLOPT_HTTP_VERSION per request from
+    // request.http_version). Inert on an HTTP/1.1 transfer, so it stays
+    // unconditional rather than gated per run.
     set_opt<CURLMOPT_PIPELINING> (multi_handle, CURLPIPE_MULTIPLEX);
 
-    // Set max total connections (connection pool size)
-    // Higher value = more reusable connections available
+    // Caps the connections open at once; a transfer past the cap waits for one.
+    // The cache of idle connections kept for reuse is MAXCONNECTS above.
     set_opt<CURLMOPT_MAX_TOTAL_CONNECTIONS> (
     multi_handle, static_cast<long> (config.max_concurrent * 2U));
 }
@@ -367,7 +365,6 @@ bool EventLoopWorker::submit_pending_transfers (size_t& local_active) {
     bool took_work = false;
     std::unique_ptr<TransferData> data;
 
-    // Fetch Phase: get up to max_concurrent items.
     while (local_active < config.max_concurrent) {
         if (!pending_queue.pop (data)) {
             break;
@@ -392,11 +389,9 @@ bool EventLoopWorker::submit_pending_transfers (size_t& local_active) {
         }
 
         CURL* easy = handle_pool_.acquire ();
-        // Note: setup_easy_handle might take time, good to do it outside locks
         easy = setup_easy_handle (easy, data.get (), config, &dns_cache ());
 
         if (!easy) {
-            // Handle creation failure
             complete_transfer (*data,
             Error{ ErrorCode::InternalError, "Couldn't create a curl handle" });
             continue;
@@ -411,11 +406,9 @@ bool EventLoopWorker::submit_pending_transfers (size_t& local_active) {
             continue;
         }
 
-        // Track active transfer
         {
             // No lock needed - private resource
             active_transfers[easy] = std::move (data);
-            // Update atomic size
             current_active_count.store (active_transfers.size (), std::memory_order_relaxed);
             local_active++; // Local cache update for loop condition
         }
@@ -481,8 +474,8 @@ void EventLoopWorker::deliver (ActiveTransfers::iterator active, Result<Response
 
 void EventLoopWorker::wait_for_work (int still_running) {
     if (still_running > 0) {
-        // Wait for IO activity, but allow interruption via curl_multi_wakeup
-        // Use a short timeout to keep checking the queue even if no IO events
+        // Wait for IO, interruptible by curl_multi_wakeup, with a short timeout
+        // so the queue is checked even when no IO arrives.
         curl_multi_poll (multi_handle, nullptr, 0,
         core::constants::event_loop::POLL_TIMEOUT_MS, nullptr);
         return;
@@ -514,9 +507,9 @@ void EventLoopWorker::wait_for_work (int still_running) {
 
 namespace {
 /// Warn about a denied pin or priority request once per process, not once per
-/// worker thread - a run with 8 workers on a container that refuses both asks
-/// would otherwise log the same denial 8 times, and every worker denies it the
-/// same way for the same reason.
+/// worker thread: every worker is denied the same way for the same reason, so a
+/// run with 8 workers on a container that refuses both asks would log the same
+/// denial 8 times.
 std::atomic<bool> g_pin_denied_logged{ false };
 std::atomic<bool> g_priority_denied_logged{ false };
 } // namespace
@@ -524,12 +517,11 @@ std::atomic<bool> g_priority_denied_logged{ false };
 void EventLoopWorker::run_loop () {
     // Both asks share one gate: whether there is a CPU to spare
     // (core::worker_cpu_index, #1667's "never 1:1" rule). Priority is not
-    // requested on its own, even if pinning is denied by the OS - elevating
-    // every worker's scheduling priority with no dedicated core to run on
-    // just means they all compete more aggressively for the same cores as
-    // everything else sharing the machine (the Electron UI this engine is a
-    // sidecar for, its own HTTP server and pacing thread), which risks
-    // starving those instead of pacing more accurately.
+    // requested alone, even when the OS denies pinning: raising every worker's
+    // priority with no dedicated core makes them all compete harder for the
+    // cores everything else shares (the Electron UI this engine is a sidecar
+    // for, its own HTTP server and pacing thread), which risks starving those
+    // instead of pacing more accurately.
     if (auto cpu = core::worker_cpu_index (
         worker_index_, num_workers_, std::thread::hardware_concurrency ())) {
         if (!vayu::platform::pin_current_thread (*cpu) &&
@@ -563,10 +555,10 @@ void EventLoopWorker::run_loop () {
             return;
         }
 
-        // 1. Process pending queue (Lock-free Consumer).
-        // Use atomic load for the active-count check (lock-free hot path). The
-        // check is "loose": a data race only leads to trying to add and finding
-        // the map full, which is fine.
+        // 1. Process pending queue (lock-free consumer). The active count is a
+        //    relaxed atomic load on the hot path; the check is "loose": a stale
+        //    value only means trying to add and finding the map full, which is
+        //    fine.
         size_t local_active = current_active_count.load (std::memory_order_relaxed);
         bool did_work = submit_pending_transfers (local_active);
 
@@ -587,15 +579,14 @@ void EventLoopWorker::run_loop () {
 void EventLoopWorker::submit (std::unique_ptr<TransferData> data) {
     // SPSC Queue is safe for single producer.
     while (!pending_queue.push (data)) {
-        // Queue full.
-        // Spin/Yield. This is backpressure to the producer.
+        // Queue full: spin and yield, the producer's backpressure.
         std::this_thread::yield ();
     }
 
     // Signal the worker
     bool was_empty = !queue_has_items.exchange (true, std::memory_order_release);
-    // Always wake up curl_multi_poll, even if queue wasn't empty
-    // (because worker might be sleeping in poll despite having items if it just processed a batch)
+    // Wake curl_multi_poll even when the queue was not empty: the worker may be
+    // sleeping in poll with items queued while it processed a batch.
     curl_multi_wakeup (multi_handle);
 
     if (was_empty) {

@@ -59,10 +59,10 @@ int scheme_default_port (const std::string& url) {
     return vayu::utils::ascii_lower_equal (vayu::http::url_scheme (url), "https") ? 443 : 80;
 }
 
-/// A digit run from a user-supplied URL can exceed any integer type.
-/// `parse_number` reports that as an empty optional where std::stoi would
-/// throw - and this runs on the event loop worker thread, which has no
-/// handler, so an escaping exception terminates the whole daemon.
+/// A URL's digit run can overflow any integer type. `parse_number` answers that
+/// with an empty optional where std::stoi throws, and this runs on the event
+/// loop worker thread, which has no handler, so an escaping exception
+/// terminates the daemon.
 std::optional<int> parse_port (std::string_view digits) {
     const std::optional<int> port = vayu::utils::parse_number<int> (digits);
     if (port.has_value () && *port >= kMinPort && *port <= kMaxPort) {
@@ -195,14 +195,14 @@ std::optional<Error> validate_transferable (const Request& request) {
             return Error{ ErrorCode::UnsendableFile, std::move (*unplanned) };
         }
     }
-    // Header text that would end or truncate the line it is written into. Here
-    // rather than in `build_request_header_list` because that function has no
-    // error channel - `append` can only drop, and a silent drop is the quiet
-    // wrong request this refusal exists to prevent. This gate runs before any
-    // driver configures a handle, so it covers every origin at once: a composed
-    // variable, a script's assignment to `pm.request.headers`, an auth
-    // credential, an import, a raw `POST /execute` payload. See header_text.hpp
-    // for why the rule is a refusal and where its other layers live.
+    // Header text that would end or truncate the line it is written into.
+    // Refused here, not in `build_request_header_list`, which has no error
+    // channel: `append` can only drop, and a silent drop is the wrong request
+    // this refusal prevents. This gate runs before any driver configures a
+    // handle, so it covers every origin at once: a composed variable, a
+    // script's assignment to `pm.request.headers`, an auth credential, an
+    // import, a raw `POST /execute` payload. header_text.hpp says why the rule
+    // is a refusal and where its other layers live.
     if (auto problem = vayu::http::unsendable_header_text (request)) {
         return Error{ ErrorCode::InternalError, std::move (*problem) };
     }
@@ -261,10 +261,10 @@ size_t read_approved (char* buffer, size_t size, size_t nitems, void* arg) {
     return *got;
 }
 
-/// libcurl rewinds a form part's body at the start of each transfer, and for
-/// an auth retry. It passes only
-/// `SEEK_SET` (as of 8.23, to an upload's and a part's callback alike), so any
-/// other origin is answered as unseekable rather than guessed at.
+/// libcurl rewinds a form part's body at the start of each transfer, and for an
+/// auth retry. It passes only `SEEK_SET` (as of 8.23, to an upload's and a
+/// part's callback alike), so any other origin is answered as unseekable rather
+/// than guessed at.
 int seek_approved (void* arg, curl_off_t offset, int origin) {
     auto* reader = static_cast<FileReader*> (arg);
     if (origin != SEEK_SET || offset < 0 ||
@@ -363,11 +363,9 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
         uploads = attach_binary (curl, request, source);
     } else if (has_body) {
         // Setting POSTFIELDS switches curl's method to POST, so it goes first
-        // and the method is (re-)asserted below.
-        //
-        // COPYPOSTFIELDS rather than POSTFIELDS because the body is built here
-        // and dies at the end of this scope, while POSTFIELDS keeps only a
-        // pointer that has to outlive the transfer.
+        // and the method is re-asserted below. COPYPOSTFIELDS, not POSTFIELDS:
+        // this body dies at the end of the scope, and POSTFIELDS keeps only a
+        // pointer, which must outlive the transfer.
         const std::string body = vayu::http::wire_body_bytes (request);
         set_opt<CURLOPT_POSTFIELDSIZE> (curl, static_cast<long> (body.size ()));
         set_opt<CURLOPT_COPYPOSTFIELDS> (curl, body.c_str ());
@@ -394,28 +392,27 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
     case HttpMethod::POST:
         // CURLOPT_POST would *discard* a multipart body: it switches curl back
         // to a POSTFIELDS-style post, and the mime attached above goes with it.
-        // MIMEPOST already makes the request a POST, so re-asserting the verb
-        // is both unnecessary and destructive here.
+        // MIMEPOST already makes the request a POST.
         if (source.mime == nullptr) {
             set_opt<CURLOPT_POST> (curl, 1L);
-            // CURLOPT_POST alone does not say "no body" - it says "a body, of a
-            // length I have not told you", and libcurl then reads that body
-            // from its default read callback, which is `stdin`. Declaring the
-            // length as zero is what makes a bodyless POST a bodyless POST.
+            // CURLOPT_POST alone does not say "no body": it says "a body of a
+            // length I have not told you", which libcurl then reads from its
+            // default read callback, `stdin`. Declaring the length as zero is
+            // what makes a bodyless POST bodyless.
             //
-            // Without it the request goes out chunked and length-less, which
-            // the servers that answer a trigger or a logout POST are entitled
-            // to refuse with a 411 - and which no other client sends. Worse
-            // where stdin is not already at EOF: the read happens inside
-            // libcurl's callback on the transfer thread, so CURLOPT_TIMEOUT_MS
-            // never fires and the transfer blocks until stdin closes. The app
-            // spawns the daemon with stdin ignored and a shell redirects it
-            // from /dev/null, so both EOF at once and hid this; an engine
-            // started by hand on a terminal, or under a parent that pipes stdin
-            // and never writes to it, hangs outright.
+            // Without it the request goes out chunked and length-less, which a
+            // server answering a trigger or a logout POST is entitled to refuse
+            // with a 411, and which no other client sends. Worse where stdin is
+            // not at EOF: the read happens inside libcurl's callback on the
+            // transfer thread, so CURLOPT_TIMEOUT_MS never fires and the
+            // transfer blocks until stdin closes. The app spawns the daemon
+            // with stdin ignored and a shell redirects it from /dev/null, so
+            // both are at EOF at once, which hides this; an engine started by
+            // hand on a terminal, or under a parent that pipes stdin and never
+            // writes to it, hangs outright.
             //
             // The body-bearing branch above sets POSTFIELDSIZE for the same
-            // reason; this is the case with no body to set it for.
+            // reason.
             if (!has_body) {
                 set_opt<CURLOPT_POSTFIELDSIZE> (curl, 0L);
             }
@@ -458,11 +455,11 @@ std::string body_content_type_value (const Request& request) {
     if (implied.empty ()) {
         return {};
     }
-    // A Content-Type the caller set wins - the same rule the request builder
-    // applies renderer-side, where "someone who typed this means it". For a
-    // binary body an empty row is absent rather than a removal, as an empty
-    // `FileRef::content_type` is: the file's own type then applies, where a
-    // removal would leave the upload with no type at all.
+    // A Content-Type the caller set wins, the rule the request builder applies
+    // renderer-side: "someone who typed this means it". For a binary body an
+    // empty row is absent, not a removal, as an empty `FileRef::content_type`
+    // is: the file's own type then applies, where a removal would leave the
+    // upload with no type at all.
     const bool declared = std::any_of (request.headers.begin (),
     request.headers.end (), [&request] (const HeaderLine& line) {
         return CaseInsensitiveLess::equal (line.name, "Content-Type") &&
@@ -500,10 +497,10 @@ bool libcurl_defaults_content_type (const Request& request) {
 /// libcurl adds `Expect: 100-continue` to an HTTP/1.1 body over 1 MiB and then
 /// waits a second for an interim reply a server may never send, so it stays
 /// only where `sendExpectContinue` is on. @p lists_expect is a typed Expect
-/// row, blank ones included: libcurl adds none of its own beside a listed
-/// `Expect` in either spelling, so the row is sent as typed and nothing needs
-/// removing. Refusing the declared row removes libcurl's own line when the
-/// policy would have let it stay.
+/// row, blank ones included: beside a listed `Expect` in either spelling
+/// libcurl adds none of its own, so the row is sent as typed and nothing needs
+/// removing. Refusing the declared row removes libcurl's line where the policy
+/// would have kept it.
 bool removes_libcurl_expect (const Request& request,
 const DefaultHeaderPolicy& policy,
 bool lists_expect) {
@@ -689,9 +686,9 @@ HeaderList* sent) {
     }
 
     if (!policy.correlation_header.empty () && adds_default (policy.correlation_header)) {
-        // Generated here rather than resolved with the policy, so every
-        // transfer of a load run carries its own id instead of replaying the
-        // one that was stored - the defect issue #1229 was filed for.
+        // Generated here, not resolved with the policy, so every transfer of a
+        // load run carries its own id instead of replaying the stored one
+        // (#1229).
         append (policy.correlation_header, vayu::utils::generate_id (""));
     }
 
@@ -700,8 +697,8 @@ HeaderList* sent) {
     if (negotiates_compression (request, policy)) {
         // Recorded, not appended: libcurl writes this line itself from
         // `CURLOPT_ACCEPT_ENCODING` (see apply_default_header_options), which
-        // is what makes it decode the response. Appending it here as well
-        // would put the header on the wire twice.
+        // is what makes it decode the response. Appending it too would put the
+        // header on the wire twice.
         record ("Accept-Encoding", policy.accept_encoding);
     }
 
@@ -879,29 +876,27 @@ bool proxy_refused_tunnel (CURL* curl) {
 namespace {
 
 /**
- * The user's trust anchors (issue #706) and the native-store flag.
- *
- * Written on every handle, empty path included, for the reason the proxy options
- * are: handles are reused, so a bundle left behind by a previous policy would
- * outlive the setting that asked for it. Null restores the backend's own default.
+ * The user's trust anchors (issue #706) and the native-store flag. Written on
+ * every handle, empty path included, as the proxy options are: handles are
+ * reused, so a bundle a previous policy left would outlive the setting that
+ * asked for it. Null restores the backend's own default.
  */
 void apply_ca_options (CURL* curl, const TransportPolicy& policy) {
     const char* const bundle = policy.ca_bundle_path.empty () ?
     static_cast<const char*> (nullptr) :
     policy.ca_bundle_path.c_str ();
 
-    // The return code is checked because this is the one transport option a
-    // TLS backend can refuse outright - `CURLE_NOT_BUILT_IN` from a backend
-    // with no CAINFO support - and a silently ignored bundle means every
-    // request fails verification with nothing anywhere saying the certificates
-    // were never loaded. Logged once per process: the load path applies a
-    // policy per transfer, and a per-request line would be the log.
+    // The return code is checked because this is the one transport option a TLS
+    // backend can refuse outright (`CURLE_NOT_BUILT_IN` from a backend without
+    // CAINFO support), and an ignored bundle fails every request's verification
+    // with nothing saying the certificates were never loaded. Logged once per
+    // process: the load path applies a policy per transfer, and a per-request
+    // line would be the log.
     //
-    // The bundle is written for the proxy's TLS leg as well (#2469): libcurl
-    // keeps the proxy's trust anchors in their own options, defaulting to the
-    // backend's store rather than to what the origin leg was given, so an
-    // https:// proxy behind an internal CA would otherwise fail verification
-    // with the CA pasted.
+    // Written for the proxy's TLS leg too (#2469): libcurl keeps the proxy's
+    // trust anchors in options of their own, defaulting to the backend's store
+    // rather than to the origin leg's, so an https:// proxy behind an internal
+    // CA would fail verification with the CA pasted.
     const CURLcode origin_result = set_opt<CURLOPT_CAINFO> (curl, bundle);
     const CURLcode proxy_result  = set_opt<CURLOPT_PROXY_CAINFO> (curl, bundle);
     const CURLcode ca_result = origin_result != CURLE_OK ? origin_result : proxy_result;
@@ -922,30 +917,28 @@ void apply_ca_options (CURL* curl, const TransportPolicy& policy) {
     // materialized file already carries the system anchors on the platforms
     // that keep them in a file.
     //
-    // Windows is the platform that does not, and there (#851) it is an OpenSSL
-    // build like the others - so the flag is unconditional there, not only
-    // when a bundle is in force. An OpenSSL build on Windows has no CA file to
-    // fall back to: `curl_version_info()->cainfo` names a path from the
-    // machine the port was built on, which does not exist on the user's, so a
-    // Windows handle without this flag and without a paste trusts *nothing*
-    // and every HTTPS request fails verification. With it, #706's additive
-    // rule reads "the native store plus whatever the user pasted" on Windows
-    // too - the store supplying the anchors the merged file does elsewhere.
+    // Windows does not, and there (#851) it is an OpenSSL build like the
+    // others, so the flag is unconditional there, not only when a bundle is in
+    // force. It has no CA file to fall back to: `curl_version_info()->cainfo`
+    // names a path from the machine the port was built on, so a Windows handle
+    // with neither this flag nor a paste trusts *nothing* and every HTTPS
+    // request fails verification. With it, #706's additive rule reads "the
+    // native store plus whatever the user pasted" on Windows too.
     //
     // macOS sets it unconditionally too. The port builds curl with
     // `USE_APPLE_SECTRUST`, which consults the Keychain only under this flag
     // and only after OpenSSL's own check against the file has failed, so the
     // flag adds trust and never narrows it. Without it a handle with nothing
-    // pasted trusted `/etc/ssl/cert.pem` alone: a chain the Keychain accepts
-    // and that file does not (a newer root, an admin-installed CA) failed
-    // with "unable to get local issuer certificate". This build sets no
+    // pasted trusts `/etc/ssl/cert.pem` alone, and a chain the Keychain accepts
+    // and that file does not (a newer root, an admin-installed CA) fails with
+    // "unable to get local issuer certificate". This build sets no
     // `CURLOPT_CRLFILE`, the one option curl refuses beside SecTrust.
     //
-    // Written in both directions - the default `0` where no bundle is set and
-    // the native store is not the anchor source - because a reused handle
-    // would otherwise keep a flag the current policy never asked for, the rule
-    // every option here follows. The proxy leg has its own copy of the flag
-    // and takes the same value, for the reason the bundle is shared above.
+    // Written in both directions (the default `0` where no bundle is set and
+    // the native store is not the anchor source) because a reused handle would
+    // otherwise keep a flag the current policy never asked for. The proxy leg
+    // has its own copy of the flag and takes the same value, for the reason the
+    // bundle is shared above.
     long ssl_options = 0L;
 #if defined(_WIN32) || defined(__APPLE__)
     ssl_options |= static_cast<long> (CURLSSLOPT_NATIVE_CA);
@@ -968,11 +961,10 @@ void apply_proxy_options (CURL* curl, const TransportPolicy& policy) {
         set_opt<CURLOPT_PROXY> (curl, static_cast<const char*> (nullptr));
         break;
     case ProxyMode::System:
-        // What the app resolved from the OS, or - when nothing resolved, which
-        // is every headless run - the same null the environment mode writes.
-        // The resolver has already decided which of those this is; an empty
-        // `proxy_url` under `system` *is* the documented fallback, not a
-        // half-configured state to guess about here (issue #708).
+        // What the app resolved from the OS, or, when nothing resolved (every
+        // headless run), the same null the environment mode writes. An empty
+        // `proxy_url` under `system` *is* the resolver's documented fallback,
+        // not a half-configured state to guess about (issue #708).
         set_opt<CURLOPT_PROXY> (curl,
         policy.proxy_url.empty () ? static_cast<const char*> (nullptr) :
                                     policy.proxy_url.c_str ());
@@ -988,25 +980,24 @@ void apply_proxy_options (CURL* curl, const TransportPolicy& policy) {
         break;
     }
 
-    // The bypass list, and the null-versus-empty distinction is load-bearing:
-    // libcurl falls back to the process's `no_proxy` variable whenever
-    // CURLOPT_NOPROXY is null, and an empty string means "exempt nothing".
+    // The bypass list, where null versus empty is load-bearing: libcurl falls
+    // back to the process's `no_proxy` variable whenever CURLOPT_NOPROXY is
+    // null, and an empty string means "exempt nothing".
     //
     // So `manual` always writes the list, empty or not. A user who names a
     // proxy in Settings has said where their traffic goes, and an inherited
-    // `no_proxy` quietly exempting half of it is the same invisible failure
-    // this issue exists to end - it is also not hypothetical: a container that
-    // exports `no_proxy=...,127.0.0.1,...` bypassed a configured proxy for
-    // every local target and reported nothing.
+    // `no_proxy` quietly exempting half of it is an invisible failure, and not
+    // a hypothetical one: a container that exports `no_proxy=...,127.0.0.1,...`
+    // bypassed a configured proxy for every local target and reported nothing.
     //
-    // `environment` leaves it null on purpose: that mode *is* "do what the
-    // environment says", `no_proxy` included, unless a bypass list overrides
-    // it. `off` has no proxy for a list to modify.
+    // `environment` leaves it null: that mode *is* "do what the environment
+    // says", `no_proxy` included, unless a bypass list overrides it. `off` has
+    // no proxy for a list to modify.
     //
-    // `system` follows whichever of those two it actually resolved to: with a
-    // proxy in force the user's bypass list is the whole rule, exactly as under
-    // `manual`, and with nothing resolved it is the environment mode and must
-    // leave `no_proxy` alone.
+    // `system` follows whichever of those two it resolved to: with a proxy in
+    // force the user's bypass list is the whole rule, as under `manual`, and
+    // with nothing resolved it is the environment mode and leaves `no_proxy`
+    // alone.
     switch (policy.proxy_mode) {
     case ProxyMode::System:
         if (!policy.proxy_url.empty () || !policy.proxy_bypass.empty ()) {
@@ -1037,29 +1028,23 @@ void apply_proxy_options (CURL* curl, const TransportPolicy& policy) {
  * for a URL whose scheme is not `https`, because a certificate is only ever
  * presented in a TLS handshake.
  *
- * Every option is written in both directions, the rule the rest of this function
- * follows: a reused handle must not keep an identity the current policy never
- * asked for.
+ * Every option is written in both directions: a reused handle must not keep an
+ * identity the current policy never asked for.
  */
 const ClientCertRule* apply_client_certificate (CURL* curl,
 const TransportPolicy& policy,
 const std::string& url) {
-    // Cookies need no thought here, and that is worth stating because it looks
-    // like they should: libcurl owns the wire cookies and matches them on the
-    // *origin* host, never the proxy hop, and curl 8.21's cross-origin
-    // redirect-cookie rule keys on origin too. A proxy changes which socket
-    // the bytes leave by and nothing about which jar lines apply.
+    // Cookies need no thought here, though it looks like they should: libcurl
+    // owns the wire cookies and matches them on the *origin* host, never the
+    // proxy hop, and curl 8.21's cross-origin redirect-cookie rule keys on
+    // origin too. A proxy changes which socket the bytes leave by and nothing
+    // about which jar lines apply.
 
-    // The client certificate for this target (issue #707). Written on every
-    // handle, null included, for the reason every option above is: handles are
-    // reused, and a certificate left behind by a previous transfer would be
-    // presented to a host that never registered one.
-    //
-    // The lookup is skipped entirely - URL parse included - when the registry
-    // is empty, which is every user who has not opted into mTLS. It is skipped
-    // for a cleartext URL too (#3260): libcurl ignores the certificate options
-    // there, so a match would only make the response claim a certificate that
-    // never reached the wire.
+    // The client certificate for this target (issue #707). The lookup, URL
+    // parse included, is skipped when the registry is empty, which is every
+    // user who has not opted into mTLS. It is skipped for a cleartext URL too
+    // (#3260): libcurl ignores the certificate options there, so a match would
+    // only make the response claim a certificate that never reached the wire.
     const ClientCertRule* matched = nullptr;
     if (!policy.client_certificates.empty () &&
     vayu::utils::ascii_lower_equal (vayu::http::url_scheme (url), "https")) {
@@ -1070,10 +1055,8 @@ const std::string& url) {
     matched != nullptr ? matched->cert_path.c_str () : static_cast<const char*> (nullptr));
     // What that file is (issue #833). Without it libcurl reads whatever is
     // there as PEM, so a registered `p12` bundle would be handed to the wrong
-    // parser - and on a Schannel build, which took no PEM pair at all, that
-    // meant presenting nothing a user registered. Written on every handle for
-    // the same reason as the path beside it, and null on no match so a pooled
-    // handle cannot keep the type a previous transfer set.
+    // parser. Null on no match, so a pooled handle cannot keep the type a
+    // previous transfer set.
     set_opt<CURLOPT_SSLCERTTYPE> (curl,
     matched != nullptr ? curl_ssl_cert_type (matched->format) :
                          static_cast<const char*> (nullptr));
@@ -1117,25 +1100,25 @@ bool refuses_local_peer (ConnectedPeerCheck* check, const char* peer_ip, int pee
 }
 
 /**
- * libcurl's pre-request callback: refuse the connection about to carry the
+ * libcurl's pre-request callback: refuses the connection about to carry the
  * request when its peer is one of Vayu's own ports (#2355), or one the
  * transfer's `LocalPeerRule` refuses (#2364).
  *
- * It runs for every connection a transfer uses, reused ones included, after
- * the connect and before a byte of the request is written - so a redirect hop
- * and a name that resolves to loopback are judged by the address libcurl
- * actually reached. With a proxy in force that address is the proxy's: the
- * reserved ports still refuse it, the reference rule passes it. The abort
- * surfaces as `CURLE_ABORTED_BY_CALLBACK`, which `curl_to_error`
- * recognises by asking the reserved-port predicate the same question, or by
- * the refusal the check recorded.
+ * It runs for every connection a transfer uses, reused ones included, after the
+ * connect and before a byte of the request is written, so a redirect hop and a
+ * name that resolves to loopback are judged by the address libcurl reached.
+ * With a proxy in force that address is the proxy's: the reserved ports still
+ * refuse it, the reference rule passes it. The abort surfaces as
+ * `CURLE_ABORTED_BY_CALLBACK`, which `curl_to_error` recognises by asking the
+ * reserved-port predicate the same question, or by the refusal the check
+ * recorded.
  *
  * Every call is counted on the check, when there is one: libcurl makes it once
- * per request it is about to write, which is the only place a replay on a new
- * connection shows (#2799, `connection_replays`).
+ * per request it is about to write, the only place a replay on a new connection
+ * shows (#2799, `connection_replays`).
  *
- * Fails closed: an exception must not cross libcurl's C frames, and a
- * predicate that could not answer is no reason to send.
+ * Fails closed: an exception must not cross libcurl's C frames, and a predicate
+ * that could not answer is no reason to send.
  */
 int refuse_forbidden_peer (void* clientp,
 // `curl_prereq_callback` fixes the type: libcurl reads the pointer back
@@ -1168,12 +1151,11 @@ int /*conn_local_port*/) {
  * after a reused one was dropped or refused before a response byte (#2799).
  *
  * libcurl does that on its own (`Curl_retry_request`, no option turns it off)
- * and reports nothing; the pre-request callback is the one trace it leaves.
- * Each request written is one call, and each of the @p followed redirect hops
- * is one more, which is not a replay: `check` counts over the whole chain. A
- * transfer that never reached the callback reads 0. `CURLINFO_NUM_CONNECTS`
- * cannot answer this: a fresh request and a replay of a dead reused
- * connection both open one.
+ * and reports nothing; the pre-request callback is its one trace. Each request
+ * written is one call, and each of the @p followed redirect hops is one more
+ * that is not a replay: `check` counts over the whole chain. A transfer that
+ * never reached the callback reads 0. `CURLINFO_NUM_CONNECTS` cannot answer
+ * this: a fresh request and a replay of a dead reused connection both open one.
  */
 int connection_replays (const ConnectedPeerCheck& check, int followed) {
     return std::max (0, check.requests_started - 1 - followed);
@@ -1182,12 +1164,11 @@ int connection_replays (const ConnectedPeerCheck& check, int followed) {
 } // namespace
 
 /**
- * The reserved port this handle's last connection reached, or nullopt.
- *
- * What tells `refuse_forbidden_peer`'s reserved-port abort apart from every other
+ * The reserved port this handle's last connection reached, or nullopt. It tells
+ * `refuse_forbidden_peer`'s reserved-port abort apart from every other
  * `CURLE_ABORTED_BY_CALLBACK` (a stream's own cap, a stop): the peer it was
- * judged on is still the handle's primary address, so the same predicate
- * gives the same answer.
+ * judged on is still the handle's primary address, so the same predicate gives
+ * the same answer.
  */
 std::optional<int> reserved_peer_port (CURL* curl) {
     if (!curl) {
@@ -1208,32 +1189,29 @@ std::optional<int> reserved_peer_port (CURL* curl) {
 
 /**
  * Whether a failure with no mapping of its own happened on a TLS connection
- * that never answered - the shape every client-certificate refusal takes, and
+ * that never answered: the shape every client-certificate refusal takes, and
  * one no CURLcode names (issue #802).
  *
- * Three failures arrive this way and not one of them is internal to this
- * engine: a key the stored passphrase does not open
- * (`CURLE_BAD_FUNCTION_ARGUMENT` here, where the curl command line reports
- * `CURLE_SSL_CERTPROBLEM` for the same event), a certificate the server will
- * not accept, and a certificate the server demanded and did not get. The last
- * two are `CURLE_RECV_ERROR`, because under TLS 1.3 the server's verdict about
- * the *client* arrives after the client's own handshake has finished - so
- * libcurl reports the ordinary code of a connection that went away
- * mid-request, carrying the alert in its message ("tlsv13 alert certificate
+ * Three failures arrive this way, none internal to this engine: a key the
+ * stored passphrase does not open (`CURLE_BAD_FUNCTION_ARGUMENT` here, where
+ * the curl command line reports `CURLE_SSL_CERTPROBLEM` for the same event), a
+ * certificate the server will not accept, and a certificate the server demanded
+ * and did not get. The last two are `CURLE_RECV_ERROR`: under TLS 1.3 the
+ * server's verdict about the *client* arrives after the client's own handshake
+ * has finished, so libcurl reports the ordinary code of a connection gone
+ * mid-request, with the alert in its message ("tlsv13 alert certificate
  * required", "tlsv1 alert unknown ca").
  *
- * The test is deliberately about that shape rather than about those three
- * codes. An enumeration would be a list to extend every time a backend spread
- * one event across another code - the trap `proxy_refused_tunnel` above exists
- * to avoid - and it is consulted only where the mapping has already run out of
- * meanings, or where its meaning ("the target failed the exchange") is the
- * very one this shape refines, so nothing with a more specific answer reaches
- * it.
+ * The test reads that shape, not those three codes. A list of codes would need
+ * extending whenever a backend spread one event across another code (the trap
+ * `proxy_refused_tunnel` exists to avoid), and this is consulted only where the
+ * mapping has run out of meanings, or where its meaning ("the target failed the
+ * exchange") is the one this shape refines, so nothing with a more specific
+ * answer reaches it.
  *
- * What it costs: an https endpoint that accepts a connection and hangs up
- * before answering for a reason of its own reads as a TLS error rather than
- * a connection failure; libcurl's own message travels with the code either
- * way.
+ * The cost: an https endpoint that accepts a connection and hangs up before
+ * answering, for a reason of its own, reads as a TLS error, not a connection
+ * failure; libcurl's own message travels with the code either way.
  */
 bool tls_connection_never_answered (CURL* curl) {
     if (!curl) {
@@ -1291,12 +1269,12 @@ bool has_space_or_control (std::string_view url) {
 }
 
 /**
- * The sentence for a URL libcurl refused as malformed, derived from the URL
- * the transfer was handed (`wire_url`) and not from libcurl's wording, which
- * names a component ("Bad query") rather than the byte. With encoding on, a
- * space survives `wire_url` only in the authority, where the toggle is no
- * remedy, so it is named only when the request turned encoding off. Empty when
- * the URL holds no such byte, which leaves libcurl's text to stand.
+ * The sentence for a URL libcurl refused as malformed, derived from the URL the
+ * transfer was handed (`wire_url`), not from libcurl's wording, which names a
+ * component ("Bad query") rather than the byte. With encoding on, a space
+ * survives `wire_url` only in the authority, where the encoding toggle is no
+ * remedy, so the toggle is named only when the request turned encoding off.
+ * Empty when the URL holds no such byte, which leaves libcurl's text to stand.
  */
 std::string malformed_url_message (const Request& request) {
     if (!has_space_or_control (vayu::http::wire_url (request))) {
@@ -1311,13 +1289,13 @@ std::string malformed_url_message (const Request& request) {
     return text;
 }
 
-/// Whether the proxy's own certificate is what failed verification. The code
-/// alone cannot say: `CURLE_PEER_FAILED_VERIFICATION` is the same answer for
-/// the proxy's certificate and the origin's. `CURLINFO_PROXY_SSL_VERIFYRESULT`
-/// is the backend's verdict on the proxy leg and stays 0 for an http:// proxy
-/// and for a transfer with no proxy, so a non-zero value here names the hop
-/// (#2469). Gated on the code because a backend can leave a non-zero result
-/// behind on a leg whose verification was switched off.
+/// Whether the proxy's own certificate is what failed verification, which the
+/// code alone cannot say: `CURLE_PEER_FAILED_VERIFICATION` is the same answer
+/// for the proxy's certificate and the origin's.
+/// `CURLINFO_PROXY_SSL_VERIFYRESULT` is the backend's verdict on the proxy leg
+/// and stays 0 for an http:// proxy and for no proxy, so a non-zero value names
+/// the hop (#2469). Gated on the code because a backend can leave a non-zero
+/// result on a leg whose verification was switched off.
 bool proxy_certificate_rejected (CURL* curl, CURLcode code) {
     if (!curl || code != CURLE_PEER_FAILED_VERIFICATION) {
         return false;
@@ -1408,12 +1386,12 @@ const ConnectedPeerCheck* peer_check) {
     }
 
     // Checked before the code, not as a fallback under it: a proxy that
-    // answered the CONNECT with a 4xx is a proxy failure whatever CURLcode
-    // came out, and curl spreads that one event across at least two of them
+    // answered the CONNECT with a 4xx is a proxy failure whatever CURLcode came
+    // out, and curl spreads that event across at least two
     // (`CURLE_COULDNT_CONNECT` for the refusal, `CURLE_RECV_ERROR` when the
-    // tunnel dies after). Deciding from the connect code first means the
-    // mapping does not have to enumerate them. A proxy nothing answers is the
-    // other proxy failure, and reads off `CURLE_COULDNT_CONNECT` below.
+    // tunnel dies after), so deciding from the connect code first spares the
+    // mapping a list of them. A proxy nothing answers is the other proxy
+    // failure, read off `CURLE_COULDNT_CONNECT` below.
     if (code != CURLE_OK && proxy_refused_tunnel (curl)) {
         error.code = ErrorCode::ProxyError;
         return error;
@@ -1655,10 +1633,9 @@ std::vector<HeaderLine> location_lines (CURL* curl) {
 
 /**
  * What is left of @p request's timeout for a redirected hop once the chain's
- * transfers have taken @p spent_seconds: one deadline spans the chain, as it
- * did when libcurl followed inside one transfer. 0 where there is no
- * whole-chain bound to share: no timeout, or a bounded stream, whose duration
- * cap spans the chain on its own.
+ * transfers have taken @p spent_seconds: one deadline spans the whole chain. 0
+ * where there is no whole-chain bound to share: no timeout, or a bounded
+ * stream, whose duration cap spans the chain on its own.
  */
 std::expected<long, Error> hop_timeout_ms (const Request& request, double spent_seconds) {
     if (request.timeout_ms <= 0 || request.stream_bounds) {
@@ -1719,7 +1696,6 @@ RedirectState::RedirectState (TransferData& data)
 }
 
 CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& config, DnsCache* dns_cache) {
-    // Use provided handle or create new one
     if (!curl) {
         curl = curl_easy_init ();
         if (!curl) {
@@ -1738,22 +1714,21 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
     pin_resolved_address (curl, *data, url, config, dns_cache);
 
-    // Set method and body (shared with the single-request client - see
-    // apply_method_and_body for why the two are set together and in that order)
+    // Shared with the single-request client; apply_method_and_body says why
+    // method and body are set together, in that order.
     apply_method_and_body (curl, request, data->body);
 
-    // Bound what one transfer may buffer in memory. write_callback reports the
+    // Bounds what one transfer may buffer in memory. write_callback reports an
     // overrun by returning a short count, which curl turns into a failed
-    // transfer, so the run sees a normal error completion rather than growing
-    // until the daemon is OOM-killed.
+    // transfer, so the run sees an error completion instead of growing until
+    // the daemon is OOM-killed.
     data->max_response_bytes = config.max_response_body_bytes;
 
     // A bounded stream's caps (issue #576), copied onto the transfer so both
     // callbacks read them without reaching back through the request. The
-    // deadline is computed once here rather than per callback: `submitted_at`
-    // is the run's own view of when this transfer began, and it is what
-    // `queue_wait_ms` is measured from, so the duration cap covers the same
-    // span the report attributes to the transfer.
+    // deadline is computed once, here, from `submitted_at`: the run's own view
+    // of when this transfer began and what `queue_wait_ms` is measured from, so
+    // the duration cap covers the span the report attributes to the transfer.
     if (const auto& bounds = request.stream_bounds) {
         data->stream.start (*bounds, data->submitted_at);
     }
@@ -1772,19 +1747,17 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // previous transfer negotiated would otherwise carry into this one.
     apply_default_header_options (curl, request, config.default_headers);
 
-    // Per-transfer cookie state, for the scenario load path's virtual users.
-    // Enable the engine, flush, then seed - the ordering `apply_jar_cookies`
-    // above already uses. See cookie_jar.hpp for why libcurl, not us, decides
-    // what actually goes on the wire.
+    // Per-transfer cookie state, for the scenario load path's virtual users:
+    // enable the engine, flush, then seed, the order `apply_jar_cookies` uses.
+    // cookie_jar.hpp says why libcurl, not us, decides what goes on the wire.
     //
-    // Handles come from a pool and are reused, so a session left on one would
-    // reach whichever virtual user acquires it next - the opposite of "1,000
-    // VUs are 1,000 users". `CurlHandlePool::acquire` already calls
-    // `curl_easy_reset`, which frees the handle's cookie store as well, so the
-    // "ALL" flush below is redundant *today*: no test can redden it, and none
-    // pretends to. It stays because the pool's reset is another component's
-    // implementation detail on a path where the failure is silent - a load run
-    // that reported numbers for a session it should never have had.
+    // Handles are pooled, so a session left on one would reach whichever
+    // virtual user acquires it next, the opposite of "1,000 VUs are 1,000
+    // users". `CurlHandlePool::acquire` already calls `curl_easy_reset`, which
+    // frees the handle's cookie store too, so the "ALL" flush below is
+    // redundant and no test can redden it. It stays because the pool's reset is
+    // another component's detail on a path where the failure is silent: a load
+    // run that reports numbers for a session it should never have had.
     if (request.track_cookies) {
         set_opt<CURLOPT_COOKIEFILE> (curl, "");
         set_opt<CURLOPT_COOKIELIST> (curl, "ALL");
@@ -1820,29 +1793,26 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // (`next_redirect_hop`, #3302), because libcurl hands a client certificate
     // only to the origin a transfer started at.
 
-    // TLS verification and the proxy, both from the run-scoped policy. Run-
-    // scoped rather than per-request because libcurl only reuses a cached
-    // connection when its proxy and TLS config match, so varying either per
-    // transfer would partition every worker's pool and multiply handshakes
-    // (epic decision 3 of #704). The transfer's own check carries no rule here;
-    // it is what counts a replay (#2799). A redirect hop applies it again,
-    // against its own URL.
+    // TLS verification and the proxy, from the run-scoped policy: libcurl
+    // reuses a cached connection only when its proxy and TLS config match, so
+    // varying either per transfer would partition every worker's pool and
+    // multiply handshakes (epic decision 3 of #704). The transfer's own check
+    // carries no rule here; it counts replays (#2799). A redirect hop applies
+    // the policy again, against its own URL.
     apply_transport_policy (
     curl, config.transport, request.verify_ssl, url, &data->peer_check);
 
     // =========================================================================
     // HIGH-PERFORMANCE OPTIMIZATIONS (Phase 1 - Target: 60k RPS)
-    // Config values passed via EventLoopConfig for runtime configurability
     // =========================================================================
 
-    // DNS Caching: Cache DNS lookups to avoid resolver saturation
-    // This is critical - DNS was causing 84% of errors at 10k RPS
-    // Setting to 0 disables caching (resolves every request)
+    // Caches DNS lookups so a high-rate run does not saturate the resolver:
+    // uncached, DNS caused 84% of errors at 10k RPS. 0 disables the cache and
+    // resolves every request.
     set_opt<CURLOPT_DNS_CACHE_TIMEOUT> (curl, config.dns_cache_timeout);
 
-    // TCP Keep-Alive: Reuse connections and detect dead sockets faster
-    // Setting idle time to 0 disables keep-alive entirely
-    // Using constants directly; these settings require restart to take effect
+    // TCP keep-alive finds dead sockets on reused connections; an idle time of
+    // 0 disables it. Compile-time constants, so a change needs a rebuild.
     long keepalive_idle = vayu::core::constants::event_loop::TCP_KEEPALIVE_IDLE_SECONDS;
     long keepalive_interval = vayu::core::constants::event_loop::TCP_KEEPALIVE_INTERVAL_SECONDS;
 
@@ -1851,15 +1821,12 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
         set_opt<CURLOPT_TCP_KEEPIDLE> (curl, keepalive_idle);
         set_opt<CURLOPT_TCP_KEEPINTVL> (curl, keepalive_interval);
     } else {
-        // Disable TCP keep-alive when idle time is 0
         set_opt<CURLOPT_TCP_KEEPALIVE> (curl, 0L);
     }
 
-    // Protocol selection follows the request's field.
     set_opt<CURLOPT_HTTP_VERSION> (
     curl, vayu::http::to_curl_http_version (request.http_version));
 
-    // Connection reuse: Don't close connection after request
     set_opt<CURLOPT_FORBID_REUSE> (curl, 0L);
 
     // TCP_NODELAY: Disable Nagle's algorithm for lower latency
@@ -1867,7 +1834,6 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
     // =========================================================================
 
-    // Verbose output for debugging
     if (config.verbose) {
         set_opt<CURLOPT_VERBOSE> (curl, 1L);
         set_opt<CURLOPT_DEBUGFUNCTION> (curl, debug_callback);
@@ -1905,19 +1871,19 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
         followed = data->redirects->chain.hop ().followed;
     }
 
-    // Negotiated protocol - what actually got used, not what was requested.
-    // Empty when curl reports CURL_HTTP_VERSION_NONE or anything this driver
-    // doesn't recognize; see http_version_from_curl for why that's not
-    // coerced into a guessed "HTTP/1.1".
+    // The negotiated protocol, not the requested one. Empty when curl reports
+    // CURL_HTTP_VERSION_NONE or anything this driver does not recognise;
+    // http_version_from_curl says why that is not coerced into a guessed
+    // "HTTP/1.1".
     long negotiated_version = 0;
     get_info<CURLINFO_HTTP_VERSION> (curl, &negotiated_version);
     response.http_version = vayu::http::http_version_from_curl (negotiated_version);
 
-    // Same question the single-request driver asks, through the same helper -
-    // the load path is where an unnoticed downgrade does the most damage, since
-    // its whole output is numbers attributed to a protocol. No log line here,
-    // unlike client.cpp: this runs once per transfer, and a run that downgrades
-    // downgrades every one of them. The flag rides out on each trace instead.
+    // The single-request driver's question, through the same helper: the load
+    // path is where an unnoticed downgrade does the most damage, since its
+    // whole output is numbers attributed to a protocol. No log line, unlike
+    // client.cpp: this runs per transfer, and a run that downgrades downgrades
+    // every one. The flag rides out on each trace instead.
     response.http_version_downgraded = vayu::http::http_version_downgraded (
     data->request.http_version, response.http_version);
 
@@ -1925,21 +1891,20 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // request on the wire twice.
     response.connection_replays = connection_replays (data->peer_check, followed);
 
-    // Perceived latency: wall-clock from submit() to now. steady_clock is
-    // monotonic so it's not affected by NTP jumps.
+    // Perceived latency, submit() to now, on steady_clock, which is monotonic,
+    // so an NTP step cannot skew it.
     auto completion = std::chrono::steady_clock::now ();
     double perceived_ms =
     std::chrono::duration<double, std::milli> (completion - data->submitted_at).count ();
     apply_transfer_timing (response.timing, phase_times, perceived_ms);
 
     // queue_wait_ms is clamped at 0 to absorb sub-microsecond clock jitter
-    // where perceived_ms can appear marginally smaller than wire_ms. A
-    // discrepancy larger than 1ms indicates a real problem (wrong stamp point,
-    // clock skew between steady_clock and curl's TOTAL_TIME, etc.) - debug
-    // builds trip an assert; release builds log a warning so the signal isn't
-    // lost silently in the clamp. Without this, a future regression that
-    // moves `submitted_at` later in the pipeline would zero out queue_wait_ms
-    // in production while CI stays green.
+    // where perceived_ms reads marginally below wire_ms. A gap past 1ms is a
+    // real fault (a wrong stamp point, skew between steady_clock and curl's
+    // TOTAL_TIME): debug builds assert and release builds warn, so the clamp
+    // does not hide it. Without this, a regression that moves `submitted_at`
+    // later in the pipeline would zero queue_wait_ms in production while CI
+    // stays green.
     const double delta = perceived_ms - response.timing.wire_ms;
     assert (delta > -1.0 && "perceived_ms - wire_ms below -1ms - clock issue?");
     if (delta < -1.0) {
@@ -1983,15 +1948,15 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     data->stream.report (response);
 
     // A cap ended this stream, which is what a bounded stream under load is
-    // *supposed* to do (issue #576), so it completes successfully rather than
-    // as the aborted write or aborted callback libcurl reports. Ahead of the
-    // error branch and deliberately not folded into it: the run's completion
-    // accounting treats this like any other success, which is what keeps
-    // `in_flight()` balanced and the refill loop untouched.
+    // *supposed* to do (issue #576), so it completes as a success, not as the
+    // aborted write or callback libcurl reports. Ahead of the error branch and
+    // deliberately apart from it: the run's completion accounting treats this
+    // as any other success, which keeps `in_flight()` balanced and the refill
+    // loop untouched.
     //
-    // `body_limit_exceeded` still wins - it is checked first below only because
-    // it cannot be set at the same time as this: write_callback returns at the
-    // byte cap without ever marking the tally's cap reached.
+    // `body_limit_exceeded` still wins, though it cannot be set together with
+    // this: write_callback returns at the byte cap without marking the tally's
+    // cap reached.
     //
     // Only a stream ends this way: `stream_events` is set exactly when the
     // reply announced `text/event-stream` (#3771). A cap that passed on any
@@ -2017,13 +1982,11 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
         return response;
     }
 
-    // Get response info
     long http_code = 0;
     get_info<CURLINFO_RESPONSE_CODE> (curl, &http_code);
     response.status_code = static_cast<int> (http_code);
-    // header_callback captures the wire reason phrase. Only fall back to
-    // the code→phrase lookup when the server (or HTTP/2+ stack) didn't
-    // supply one.
+    // header_callback captures the wire reason phrase; the code's phrase is the
+    // fallback when the server (or an HTTP/2+ stack) supplied none.
     if (response.status_text.empty ()) {
         response.status_text = vayu::http::status_text (response.status_code);
     }

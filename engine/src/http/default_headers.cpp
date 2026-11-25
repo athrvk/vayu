@@ -73,12 +73,12 @@ const std::string& built_accept_encodings () {
     return value;
 }
 
-/// A lowercase RFC 4122 v4 UUID - `generateUUID()`'s exact shape, and the only
+/// A lowercase RFC 4122 v4 UUID: `generateUUID()`'s exact shape, and the only
 /// `X-Request-ID` value the repair pass treats as the renderer's rather than
 /// the user's own (issue #1491). `generateUUID()` fixes the version nibble at
 /// `4` and the variant nibble at `8`/`9`/`a`/`b`, and its `toString(16)` never
-/// emits an uppercase digit; a v1 UUID, an uppercase one, or any other shape a
-/// caller pinned deliberately was never a value this renderer produced.
+/// emits an uppercase digit, so a v1 UUID, an uppercase one or any other shape
+/// is one a caller pinned, never one this renderer produced.
 bool is_bare_uuid (std::string_view value) {
     constexpr std::string_view LAYOUT = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
     constexpr size_t VERSION_INDEX    = 14;
@@ -108,10 +108,10 @@ bool is_bare_uuid (std::string_view value) {
     return variant == '8' || variant == '9' || variant == 'a' || variant == 'b';
 }
 
-/// A plain `MAJOR.MINOR.PATCH` version string - the only shape
-/// `VAYU_VERSION_STRING` has ever taken, and the only `X-Vayu-Version` /
-/// `User-Agent` value the repair pass treats as the engine's own rather than
-/// something a user typed by hand (issue #1491).
+/// A plain `MAJOR.MINOR.PATCH` version string: the only shape
+/// `VAYU_VERSION_STRING` takes, and the only `X-Vayu-Version` / `User-Agent`
+/// value the repair pass treats as the engine's own rather than something a
+/// user typed (issue #1491).
 bool is_plain_semver (std::string_view value) {
     size_t start   = 0;
     int num_groups = 0;
@@ -309,10 +309,10 @@ std::optional<std::string> strip_legacy_managed_headers (const std::string& head
         !legacy_managed_row (row["key"].get<std::string> (), row_value (row))) {
             continue;
         }
-        // Disable, do not delete (issue #1491): the row is what the wire
-        // stops carrying, and the marker is what lets a user tell it apart
-        // from one they typed and re-enable it from the table, the same way
-        // #1481's `source` already lets a body-mode row be told apart.
+        // Disable, do not delete (issue #1491): the row is what the wire stops
+        // carrying, and the marker lets a user tell it apart from one they
+        // typed and re-enable it from the table, as #1481's `source` lets a
+        // body-mode row be told apart.
         if (row_enabled (row)) {
             row["enabled"] = false;
             changed        = true;
