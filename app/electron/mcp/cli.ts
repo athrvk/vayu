@@ -6,17 +6,15 @@
  */
 
 /**
- * @brief Standalone stdio MCP server. Reuses the exact same tool registry and
- *        server factory as the Electron-hosted Streamable HTTP server, but over
- *        stdio - the transport stdio-only clients (Zed) and headless/CI setups
- *        need. Run: `node dist-electron/mcp/cli.js` (requires a running engine).
+ * @brief Standalone stdio MCP server. Reuses the exact same tool registry and server factory as the
+ *        Electron-hosted Streamable HTTP server, but over stdio: the transport stdio-only clients
+ *        (Zed) and headless/CI setups need. Run: `node dist-electron/mcp/cli.js` (requires a
+ *        running engine).
  *
- *        stdout is the JSON-RPC channel; all human logging goes to stderr,
- *        text always (#1558) - `VAYU_LOG_DIR`, unset by default, also gets a
- *        JSON-lines `mcp_<stamp>.log` there (its own prefix: this process
- *        shares no file with the Electron-hosted transport, which has no
- *        directory to hand it - a standalone `node dist-electron/mcp/cli.js`
- *        has no `app` module to derive one from).
+ * stdout is the JSON-RPC channel; all human logging goes to stderr, text always (#1558).
+ * `VAYU_LOG_DIR`, unset by default, also gets a JSON-lines `mcp_<stamp>.log` there (its own prefix:
+ * this process shares no file with the Electron-hosted transport, which has no directory to hand
+ * it, and a standalone `node dist-electron/mcp/cli.js` has no `app` module to derive one from).
  */
 
 import { serveStdio } from "@modelcontextprotocol/server/stdio";

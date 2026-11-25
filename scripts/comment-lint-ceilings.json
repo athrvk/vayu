@@ -1,8 +1,6 @@
 {
   "files": {
     "app/electron/mcp/engine-client.ts": 2,
-    "app/electron/mcp/listener.ts": 1,
-    "app/electron/mcp/status.ts": 1,
     "app/electron/mcp/tools/collection-runs.tools.ts": 1,
     "app/electron/mcp/tools/environments.tools.ts": 1,
     "app/electron/mcp/tools/input-schemas.ts": 1,
