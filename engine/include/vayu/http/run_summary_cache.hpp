@@ -21,15 +21,15 @@ namespace vayu::http {
 /**
  * @brief What a `GET /runs` row derives from stored JSON, kept between calls.
  *
- * `GET /runs` is the polled endpoint (issue #1150): the history sidebar, the
- * welcome screen and the command palette each re-ask every 5 seconds while they
- * are on screen. Two parts of a row are rebuilt from a stored JSON column, and
- * each is kept here in its own bounded, run-id-keyed table:
+ * `GET /runs` is the polled endpoint (#1150): the history sidebar, the welcome
+ * screen and the command palette each re-ask every 5 seconds while they are on
+ * screen. Two parts of a row are rebuilt from a stored JSON column, and each is
+ * kept here in its own bounded, run-id-keyed table:
  *
- * - **The compact `summary`**, built from `config_snapshot`. Every call used to
- *   re-parse it - one JSON parse per row, so 50 a tick at the default page size
- *   and up to 500 at the largest the route allows, all producing what the
- *   previous tick already produced.
+ * - **The compact `summary`**, built from `config_snapshot`. Uncached, every
+ *   call re-parses it - one JSON parse per row, so 50 a tick at the default
+ *   page size and up to 500 at the largest the route allows, all producing what
+ *   the previous tick already produced.
  * - **A load or collection run's `resultSummary`** (#2130, #2954), built from
  *   the stored run `summary`, the whole-run results that are far larger than
  *   the snapshot.
@@ -37,12 +37,12 @@ namespace vayu::http {
  * **Keyed by run id, and that is exact rather than merely likely.** A run's
  * `config_snapshot` is written once, by `Database::create_run`, from the two
  * call sites in `execution.cpp` that start a run. Every later write to a run
- * row - status, end time, report summary, baseline, the startup reconcile -
- * is a read-modify-write that puts back the snapshot string it just read.
- * Nothing edits a snapshot in place, so a run id names one snapshot for the
- * whole life of the row, and an entry can never go stale. Deleting or pruning
- * a run leaves an entry no request can reach again; capacity, not
- * invalidation, is what reclaims it, and ids are never reused.
+ * row - status, end time, report summary, baseline, the startup reconcile - is
+ * a read-modify-write that puts back the snapshot string it just read. Nothing
+ * edits a snapshot in place, so a run id names one snapshot for the whole life
+ * of the row, and an entry can never go stale. Deleting or pruning a run leaves
+ * an entry no request can reach again; capacity, not invalidation, is what
+ * reclaims it, and ids are never reused.
  *
  * **A run's stored `summary` is write-once too, but only from terminal status
  * on.** Its three writers (`Database::update_run_summary`, called from
@@ -60,8 +60,8 @@ namespace vayu::http {
  * which `/health`, this poll and SSE all serialize on (see
  * `Database::with_lock`). A `build` callable runs under the table's mutex, so
  * it only parses the string it was handed: it must never touch the database.
- * Both lookups return a copy, so no reference into the storage escapes the
- * lock and a caller cannot read an entry another thread is evicting.
+ * Both lookups return a copy, so no reference into the storage escapes the lock
+ * and a caller cannot read an entry another thread is evicting.
  */
 class RunSummaryCache {
     public:

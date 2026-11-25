@@ -18,7 +18,6 @@
 #include "vayu/types.hpp"
 
 /**
- * @file mcp_body.hpp
  * @brief An MCP request over Streamable HTTP, modern era (#3762): the body's
  *        `_meta` and the headers the transport mirrors out of the body.
  *

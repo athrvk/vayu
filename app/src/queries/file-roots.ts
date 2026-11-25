@@ -6,13 +6,10 @@
  */
 
 /**
- * Allowed-folder queries (Settings > Files).
- *
- * The engine sends a request-body file nobody chose in the editor - an
- * imported path, a `{{var}}` path, a data-row path - only when it lies under
- * one of these folders. Three readers: the Settings card, the binary body
- * editor (whether its unresolved path is covered already) and the import
- * preview's "Allow folder" action.
+ * Allowed-folder queries (Settings > Files). The engine sends a request-body file nobody chose in
+ * the editor (an imported path, a `{{var}}` path, a data-row path) only when it lies under one of
+ * these folders. Three readers: the Settings card, the binary body editor (whether its unresolved
+ * path is already covered) and the import preview's "Allow folder" action.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,10 +25,9 @@ export function useFileRootsQuery() {
 }
 
 /**
- * Open the folder picker and allow what the user chooses (#2356): the main
- * process makes the write, so this takes neither a folder nor a title nor a
- * starting point (#2378). Resolves with the engine's answer, `cancelled`
- * included.
+ * Open the folder picker and allow what the user chooses (#2356): the main process makes the write,
+ * so this takes no folder, title or starting point (#2378). Resolves with the engine's answer,
+ * `cancelled` included.
  */
 export function useAllowChosenFolderMutation() {
 	const queryClient = useQueryClient();

@@ -11,7 +11,6 @@
 #include <string>
 
 /**
- * @file graphql_body.hpp
  * @brief The GraphQL-over-HTTP envelope, applied at the engine's chokepoint.
  *
  * A `graphql` body is stored as one string, and the string is allowed to be
@@ -20,12 +19,12 @@
  * sendable - a GraphQL server reads its query out of a JSON object - so the
  * engine normalizes here, once, for every client rather than in each of them.
  *
- * It was in each of them, and only one had it: the renderer enveloped in its
- * own serializer (`app/src/lib/graphql/graphql-body.ts`), so MCP `run_request`
- * and any raw `POST /execute` sent the bare document and were answered with a
- * 400. That is the repo's "a hand-rolled copy of a primitive does not receive
- * the primitive's fixes" rule landing on a process boundary; the fix is to put
- * the primitive under both clients instead of beside one of them.
+ * An envelope only the renderer's serializer applies
+ * (`app/src/lib/graphql/graphql-body.ts`) would leave MCP `run_request` and any
+ * raw `POST /execute` sending the bare document, answered with a 400. That is
+ * the repo's "a hand-rolled copy of a primitive does not receive the
+ * primitive's fixes" rule on a process boundary, so the primitive sits under
+ * every client instead of beside one of them.
  */
 
 namespace vayu::http {
@@ -79,10 +78,10 @@ namespace vayu::http {
  *
  * GraphQL-over-HTTP defines two transports, and the method picks between them:
  * POST carries the envelope as a JSON body, GET carries the same fields as
- * query parameters (`?query=…&operationName=…&variables=…`) and **no body**.
- * A body on GET is undefined by that specification, and the servers that
- * answer it answer `400 Bad Request` with nothing that says why - which is
- * exactly what a request built from Vayu's default GET used to get (#1228).
+ * query parameters (`?query=…&operationName=…&variables=…`) and **no body**. A
+ * body on GET is undefined by that specification, and the servers that answer
+ * it answer `400 Bad Request` with nothing that says why - which is what a
+ * request built from Vayu's default GET would get (#1228).
  *
  * The parameters come back already percent-encoded and joined, the shape
  * @ref compose_query answers with, for @ref url_with_query to merge into the
@@ -97,17 +96,17 @@ namespace vayu::http {
  * and a fraction or exponent form is a double (`1e2` -> `100.0`). The POST
  * transport sends the envelope byte for byte and has no such rule.
  *
- * **Nothing** - meaning "send this the way it has always been sent" - for the
- * four cases where the fields cannot be recovered:
+ * **Nothing** - meaning "send it as a body" - for the four cases where the
+ * fields cannot be recovered:
  *
  * - An empty body. There is nothing to carry.
  * - Content that is shaped like an envelope but does not parse - the same case
  *   @ref graphql_wire_body passes through rather than wrapping, for the same
- *   reason: acting on a body we could not read is acting on ignorance, and
- *   here it would mean sending a request whose query we invented.
+ *   reason: acting on a body we could not read is acting on ignorance, and here
+ *   it would mean sending a request whose query we invented.
  * - An envelope nested deeper than `constants::request_body::MAX_JSON_DEPTH`
  *   levels, its own root counted (#2672). It is a string field, so the
- *   request-body bound never looked inside it, and encoding `variables` or
+ *   request-body bound does not look inside it, and encoding `variables` or
  *   `extensions` re-serializes them recursively. Unreadable, like the one
  *   above, and the body carries it verbatim.
  * - An envelope carrying a member this transport has no parameter for, or one
@@ -116,9 +115,9 @@ namespace vayu::http {
  *   server; dropping them silently would send a *different* request, so the
  *   body transport - which carries them verbatim - stays the honest answer.
  *
- * The caller that turns this into a decision is `wire_url` / `has_wire_body`
- * in `form_body.hpp`, which is where the method is in scope; this function
- * knows only about content.
+ * The caller that turns this into a decision is `wire_url` / `has_wire_body` in
+ * `form_body.hpp`, which is where the method is in scope; this function knows
+ * only about content.
  */
 [[nodiscard]] std::optional<std::string> graphql_get_parameters (const std::string& content);
 

@@ -6,16 +6,13 @@
  */
 
 /**
- * OAuth 2.0 Mock Issuer Queries (issue #479)
+ * OAuth 2.0 mock issuer queries (#479). An issuer is a listener the engine holds until it is
+ * stopped or the process ends, so, as with an inbox, nothing here is stored state the app could
+ * rebuild: every hook reads the engine back.
  *
- * An issuer is a listener the engine holds until it is stopped or the process
- * ends, so - as with an inbox - none of this is stored state the app could
- * rebuild: every hook here reads the engine back.
- *
- * The list is polled (`TIMING.SERVICES_POLL_INTERVAL_MS`) because this window
- * is not the only client with the lifecycle: the MCP tools hand it to an agent
- * and the routes answer curl. A mutation invalidating the list covers what this
- * app did; the poll covers everything else.
+ * The list is polled (`TIMING.SERVICES_POLL_INTERVAL_MS`) because this window is not the only
+ * client with the lifecycle: the MCP tools hand it to an agent and the routes answer curl. A
+ * mutation invalidating the list covers what this app did; the poll covers everything else.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

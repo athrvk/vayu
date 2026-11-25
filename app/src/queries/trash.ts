@@ -6,22 +6,17 @@
  */
 
 /**
- * Trash Queries
+ * The read side of the engine's soft delete (#988): deleting a collection, a request, an
+ * environment (#2970), a saved example (#2971) or a client certificate (#2973) stamps the row and
+ * keeps it, and these are how the app sees what it stamped.
  *
- * The read side of the engine's soft delete (issue #988): deleting a collection,
- * a request, an environment (#2970), a saved example (#2971) or a client
- * certificate (#2973) stamps the row and keeps it, and these are how the app
- * sees what it stamped.
- *
- * **Both mutations invalidate across the live/deleted boundary, in opposite
- * directions.** A restore puts rows back into the tree, the Variables view and
- * the certificate registry, so it invalidates the collection, request,
- * environment and client-certificate caches as well as this list; a purge only
- * destroys rows that were already filtered out of every live read, so it
- * invalidates nothing but this list. The delete mutations in `collections.ts`,
- * `environments.ts` and `client-certificates.ts` are the third side of the same
- * triangle - they invalidate `trash.all`, because a delete is what *adds* an
- * entry here.
+ * **Both mutations invalidate across the live/deleted boundary, in opposite directions.** A restore
+ * puts rows back into the tree, the Variables view and the certificate registry, so it invalidates
+ * the collection, request, environment and client-certificate caches as well as this list; a purge
+ * only destroys rows already filtered out of every live read, so it invalidates nothing but this
+ * list. The delete mutations in `collections.ts`, `environments.ts`, `request-examples.ts` and
+ * `client-certificates.ts` are the third side of the same triangle: they invalidate `trash.all`,
+ * because a delete is what adds an entry here.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -33,12 +28,10 @@ import { queryKeys } from "./keys";
 import type { ListTrashResponse } from "@/types";
 
 /**
- * Every deleted root, newest first.
- *
- * No `staleTime`: the list changes only through the three mutations that
- * invalidate it and through the startup retention purge, so the default is
- * already the cheapest correct answer - and a stale window here would show a
- * restored item still sitting in the trash.
+ * Every deleted root, newest first. No `staleTime`: the list changes only through the three
+ * mutations that invalidate it and the startup retention purge, so the default is already the
+ * cheapest correct answer, and a stale window here would show a restored item still sitting in the
+ * trash.
  */
 export function useTrashQuery() {
 	return useQuery<ListTrashResponse>({
@@ -50,33 +43,27 @@ export function useTrashQuery() {
 /**
  * Put one deleted root back.
  *
- * Coarse invalidation of `collections.all` and `requests.all`, matching what
- * `useDeleteCollectionMutation` does for the same reason: which rows a restore
- * brought back is engine-side knowledge (the cohort is defined by a timestamp
- * the client never sees), so a client patching caches surgically would drift
- * from the engine's answer. `prefetch.allRequests` goes with them - it is the
- * warm-cache pass over every collection's requests, and a restored collection
- * is one it has never seen.
+ * Coarse invalidation of `collections.all` and `requests.all`, as `useDeleteCollectionMutation`
+ * does and for the same reason: which rows a restore brought back is engine-side knowledge (the
+ * cohort is defined by a timestamp the client never sees), so a client patching caches surgically
+ * would drift from the engine's answer. `prefetch.allRequests` goes with them: it is the warm-cache
+ * pass over every collection's requests, and a restored collection is one it has never seen.
  *
- * `environments.all` (list and details) goes too, unconditionally: the answer
- * names the entry's kind, but a restore is rare enough that branching on it
- * buys nothing. A restored environment's variables can resolve again, so every
- * composition is dropped, as `useUpdateEnvironmentMutation` does. The restore
- * never re-activates it (the engine returns it inactive), so the session's
- * active environment is left alone.
+ * `environments.all` (list and details) goes too, unconditionally: the answer names the entry's
+ * kind, but a restore is rare enough that branching on it buys nothing. A restored environment's
+ * variables can resolve again, so every composition is dropped, as `useUpdateEnvironmentMutation`
+ * does. The restore never re-activates it (the engine returns it inactive), so the session's active
+ * environment is left alone.
  *
- * `clientCertificates.all` goes too, on the same terms: the registry card lists
- * only live entries, and a restored certificate is presented to its host again
- * on the next send, so a card showing the old list would misstate what is
- * registered. A restore the engine refuses with a 409 (a live entry already
- * holds the host and port) takes the failure path below.
+ * `clientCertificates.all` goes too, on the same terms: the registry card lists only live entries,
+ * and a restored certificate is presented to its host again on the next send, so a card showing the
+ * old list would misstate what is registered. A restore the engine refuses with a 409 (a live entry
+ * already holds the host and port) takes the failure path below.
  *
- * A failure invalidates the list too (issue #1438). The row this acted on is
- * one the list said existed, so the likeliest failure is that it no longer
- * does - an agent purged it, or restored it, between the drawer's last read and
- * this click. Leaving the list alone there keeps a phantom row on screen that
- * fails the same way on every further click; refetching either removes it or
- * proves it real.
+ * A failure invalidates the list too (#1438). The row this acted on is one the list said existed,
+ * so the likeliest failure is that it no longer does (an agent purged or restored it between the
+ * drawer's last read and this click). Leaving the list alone keeps a phantom row on screen that
+ * fails the same way on every further click; refetching either removes it or proves it real.
  */
 export function useRestoreTrashMutation() {
 	const queryClient = useQueryClient();
@@ -98,18 +85,14 @@ export function useRestoreTrashMutation() {
 }
 
 /**
- * Destroy one deleted root for good.
+ * Destroy one deleted root for good. Only the trash list is invalidated: every other cache stopped
+ * serving these rows when they were stamped, so purging them changes nothing a live read can see,
+ * and invalidating the tree would refetch it to produce the same answer.
  *
- * Only the trash list is invalidated. Every other cache stopped serving these
- * rows when they were stamped, so purging them changes nothing a live read can
- * see - invalidating the tree here would refetch it to produce the same answer.
- *
- * The failure path is the restore's, for the same reason and no other: a purge
- * that fails on a row the list still shows is the same phantom, and the rule is
- * worth having whole rather than on one of the two buttons a trash row carries.
- *
- * A purged collection's spec-file and data-file bindings go with its row,
- * engine-side (#2765); nothing on this side holds a copy to clear.
+ * The failure path is the restore's, for the same reason and no other: a purge that fails on a row
+ * the list still shows is the same phantom, and the rule is worth having whole rather than on one
+ * of the two buttons a trash row carries. A purged collection's spec-file and data-file bindings go
+ * with its row, engine-side (#2765); nothing on this side holds a copy to clear.
  */
 export function usePurgeTrashMutation() {
 	const queryClient = useQueryClient();

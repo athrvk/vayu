@@ -6,27 +6,23 @@
  */
 
 /**
- * Scenario Run State Store (live collection-run steps)
+ * The live half of a scenario run tab (live collection-run steps). `ScenarioRunService` pushes the
+ * `step` SSE events in here in batches and `ScenarioRunView` reads them, so the stream survives
+ * navigating away from the tab and back: the same split, for the same reason, as `LoadTestService`
+ * and `dashboard-store`.
  *
- * The live half of a scenario run tab. `ScenarioRunService` pushes the `step`
- * SSE events in here in batches and `ScenarioRunView` reads them, so the stream
- * survives navigating away from the tab and back - the same split, for the same
- * reason, as `LoadTestService` and `dashboard-store`.
+ * **Batches, not events** (#1153). The service buffers on the live-refresh cadence and commits what
+ * it collected in one `set()`, so a run whose steps return in a millisecond costs the renderer what
+ * a slow one does. The summary beside the rows is folded in the same pass, not recounted by the
+ * view, which keeps a commit's cost off the length of the run (the `dashboard-store` aggregate
+ * stance, for the same reason).
  *
- * **Batches, not events** (issue #1153). The service buffers on the live-refresh
- * cadence and commits what it collected in one `set()`, so a run whose steps
- * come back in a millisecond costs the renderer what a slow one does. The
- * summary beside the rows is folded in the same pass rather than recounted by
- * the view, which is what keeps the cost of a commit off the length of the run -
- * the `dashboard-store` aggregate stance, for the same reason.
+ * It holds **one** run: a scenario is sequential, and the engine runs one at a time from this app.
+ * Starting a second replaces the first rather than accumulating, so a stale run's steps can never
+ * be read as the current one's.
  *
- * It holds **one** run: a scenario is sequential, and the engine runs one at a
- * time from this app. Starting a second one replaces the first rather than
- * accumulating, so a stale run's steps can never be read as the current one's.
- *
- * Once a run reaches a terminal status its stored `results` rows are the
- * complete record and the view reads those instead - what lives here is only
- * ever what has arrived so far.
+ * Once a run reaches a terminal status its stored `results` rows are the complete record and the
+ * view reads those; what lives here is only what has arrived so far.
  */
 
 import { create } from "zustand";
@@ -45,28 +41,24 @@ interface ScenarioRunState {
 	/** Steps reported so far, in plan order. */
 	steps: ScenarioStepRow[];
 	/**
-	 * What the header says about {@link steps}, folded as they arrive rather
-	 * than recounted per commit. Read by `ScenarioRunView` for the four count
-	 * chips and the two whole-list questions the rows answer - which is the
-	 * only thing that makes storing it worth the field.
+	 * What the header says about {@link steps}, folded as they arrive, not recounted per commit.
+	 * Read by `ScenarioRunView` for the four count chips and the two whole-list questions the rows
+	 * answer, which is all that makes storing it worth the field.
 	 */
 	summary: StepListSummary;
 	/**
-	 * Bumped whenever {@link steps} changed by anything other than growing at
-	 * its end - a run starting, a replay replacing a row in place, a gap-resume
-	 * splicing one in. Constant while the list only appends.
+	 * Bumped whenever {@link steps} changed by anything but growing at its end (a run starting, a
+	 * replay replacing a row in place, a gap-resume splicing one in); constant while the list only
+	 * appends.
 	 *
-	 * Read by `useFilteredSteps` (issue #1205), which keeps the rows a chip or
-	 * the search box matched and extends them with the batch that just arrived
-	 * rather than re-filtering the whole run per commit. Every commit hands the
-	 * view a new array, so "the same list, longer" and "a different list" are
-	 * indistinguishable from the rows alone; this is the fold telling it, in one
-	 * number rather than a comparison of the two lists.
+	 * Read by `useFilteredSteps` (#1205), which extends the rows a chip or the search box matched
+	 * with the batch that just arrived rather than re-filtering the whole run per commit. Every
+	 * commit hands the view a new array, so "the same list, longer" and "a different list" look
+	 * alike from the rows; this number is the fold telling it, with no comparison of the two lists.
 	 *
-	 * Monotone, and never reset: a reader that missed a commit - React may
-	 * render once for two of them - sees the number move and rebuilds, where a
-	 * value that could return to one it had already seen would let a stale
-	 * prefix through.
+	 * Monotone, and never reset: a reader that missed a commit (React may render once for two) sees
+	 * the number move and rebuilds, where a value that could return to one it had seen would let a
+	 * stale prefix through.
 	 */
 	appendEpoch: number;
 	/**
@@ -81,11 +73,10 @@ interface ScenarioRunState {
 	/** A transport failure on the stream; cleared by the next `startRun`. */
 	error: string | null;
 	/**
-	 * The engine's process ended while this window watched the run (#3605), so
-	 * the run ended with it; {@link error} then says so. Stands until the next
-	 * `startRun`. Read by `ScenarioRunView`, whose callout must not promise a
-	 * run that keeps executing, and by `RunAnnouncer` (#3621), which says the run
-	 * ended: {@link endedAs} stays null for it, so this flag is the only record.
+	 * The engine's process ended while this window watched the run (#3605), so the run ended with
+	 * it; {@link error} then says so. Stands until the next `startRun`. Read by `ScenarioRunView`,
+	 * whose callout must not promise a run that keeps executing, and by `RunAnnouncer` (#3621):
+	 * {@link endedAs} stays null for it, so this flag is the only record.
 	 */
 	endedByEngineStop: boolean;
 	/**
@@ -96,10 +87,9 @@ interface ScenarioRunState {
 	 */
 	endedAs: TerminalRunStatus | null;
 	/**
-	 * The stored report's budget block, written with {@link endedAs} in the
-	 * same `runEnded` so the one announcement of the ending can name a missed
-	 * budget (#3539). Null for a run that declared none, one still running, or
-	 * one whose report could not be read. Read by `RunAnnouncer`.
+	 * The stored report's budget block, written with {@link endedAs} in the same `runEnded` so the
+	 * one announcement of the ending can name a missed budget (#3539). Null for a run that declared
+	 * none, one still running, or one whose report could not be read. Read by `RunAnnouncer`.
 	 */
 	thresholdValidation: RunReport["thresholdValidation"] | null;
 
@@ -122,9 +112,8 @@ interface ScenarioRunState {
 	 */
 	streamLost: (runId: string, message: string) => void;
 	/**
-	 * The engine's process ended under the run: {@link streamLost}'s write,
-	 * with {@link endedByEngineStop} raised beside it, since this run does not
-	 * keep executing.
+	 * The engine's process ended under the run: {@link streamLost}'s write with
+	 * {@link endedByEngineStop} raised beside it, since this run does not keep executing.
 	 */
 	engineStopped: (runId: string, message: string) => void;
 	/**
