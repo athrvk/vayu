@@ -6,64 +6,51 @@
  */
 
 /**
- * Bundling a multi-file OpenAPI document into one, before it is parsed
- * (issue #649).
+ * Bundling a multi-file OpenAPI document into one, before it is parsed (#649).
  *
- * **The defect this closes.** The parsers resolve `#/`-rooted pointers against
- * the document they were handed, and nothing else. A `$ref` naming another file
- * - `"./schemas/pet.yaml#/Pet"`, `"https://acme.dev/common.yaml#/Error"` - keeps
- * its whole string as the pointer, so the walk lands on `undefined` and the
- * caller reads that as *the spec documented nothing here*: an empty body stub,
- * a parameter that vanished, an example that never imported. No error, no count,
- * nothing the preview could name. Multi-file specs are the norm at the size of
- * API this feature exists for.
+ * **Why it runs first.** The parser resolves `#/`-rooted pointers against the document it was
+ * handed, and nothing else. A `$ref` naming another file (`"./schemas/pet.yaml#/Pet"`,
+ * `"https://acme.dev/common.yaml#/Error"`) keeps its whole string as the pointer, so the walk lands
+ * on `undefined`, which reads as *the spec documented nothing here*: an empty body stub, a
+ * parameter that vanished, an example that never imported, with no error or count the preview could
+ * name. Multi-file specs are the norm at the size of API this feature exists for.
  *
- * So this runs first, replaces every external ref it can reach with an
- * in-document one, and **counts the ones it cannot** so the import preview can
- * say so. Nothing here guesses: an unreachable ref is left exactly as written
- * and reported, never quietly deleted.
+ * So this runs first, replaces every external ref it can reach with an in-document one, and
+ * **counts the ones it cannot** so the import preview can say so. Nothing here guesses: an
+ * unreachable ref is left exactly as written and reported, never quietly deleted.
  *
- * **It holds no parser of its own** (issue #877). It reads a document into a
- * tree through the engine (`POST /import/document`) - the same reader that
- * answers what a stored document declares - so this file assembles bytes and
- * never interprets them: a `$ref` is followed, its target inlined, and the
- * result re-serialized. That distinction is why the bundler stayed here when
- * every parser moved: deterministic fetch-time assembly is not an opinion about
- * what a document says, and the two channels it assembles from - the engine's
- * URL proxy and the main-process-gated `specFile:read` IPC - are the renderer's
- * to reach.
+ * **It holds no parser of its own** (#877). It reads a document into a tree through the engine
+ * (`POST /import/document`), the same reader that answers what a stored document declares, so this
+ * file assembles bytes and never interprets them: a `$ref` is followed, its target inlined, and the
+ * result re-serialized. That is why the bundler is renderer-side while parsing is not:
+ * deterministic fetch-time assembly is not an opinion about what a document says, and the two
+ * channels it assembles from (the engine's URL proxy and the main-process-gated `specFile:read`
+ * IPC) are the renderer's to reach.
  *
- * **Two intakes, because a spec arrives two ways.** A URL-sourced document
- * resolves its relative refs against that URL and fetches them through the
- * engine's `POST /import/fetch`, marked as a reference (`reference` plus the
- * discovering document's URL as `sourceUrl`, issue #2364) so the engine
- * refuses the local peers a document should not reach. A file-picked document
- * reads its siblings through the `specFile:read` IPC, which is gated in the
- * main process (see `app/electron/spec-file.ts`). An absolute
- * `http(s)` ref is fetchable either way. A pasted document has neither, so its
- * relative refs are unresolvable by construction - and are reported as such
- * rather than silently dropped.
+ * **Two intakes, because a spec arrives two ways.** A URL-sourced document resolves its relative
+ * refs against that URL and fetches them through the engine's `POST /import/fetch`, marked as a
+ * reference (`reference` plus the discovering document's URL as `sourceUrl`, #2364) so the engine
+ * refuses the local peers a document should not reach. A file-picked document reads its siblings
+ * through the `specFile:read` IPC, gated in the main process (see `app/electron/spec-file.ts`). An
+ * absolute `http(s)` ref is fetchable either way. A pasted document has neither, so its relative
+ * refs are unresolvable by construction, and are reported as such rather than silently dropped.
  *
- * **Where the resolved documents land.** Each one is inlined whole under a root
- * `x-vayu-bundled` map and every ref that pointed into it is rewritten to that
- * location. A root `x-` extension key is legal in Swagger 2.0 and OpenAPI 3.x
- * alike, so this is one rule for both parsers and does not have to choose
- * between `definitions` and `components/schemas` - and it survives the schema
- * validator a later phase brings in. A bundled document's *own* in-document refs
- * are rewritten too: `#/definitions/Pet` inside `pets.yaml` means Pet in
- * `pets.yaml`, not Pet in the root document.
+ * **Where the resolved documents land.** Each one is inlined whole under a root `x-vayu-bundled`
+ * map, and every ref that pointed into it is rewritten to that location. A root `x-` extension key
+ * is legal in Swagger 2.0 and OpenAPI 3.x alike, so this is one rule for both and does not have to
+ * choose between `definitions` and `components/schemas`, and it survives the schema validator a
+ * later phase brings in. A bundled document's *own* in-document refs are rewritten too:
+ * `#/definitions/Pet` inside `pets.yaml` means Pet in `pets.yaml`, not Pet in the root document.
  *
- * **Determinism is load-bearing**, not tidiness: the bundled text is what gets
- * stored as the spec document, and sync (#627) decides "unchanged" by comparing
- * hashes of exactly this output. Targets are therefore bundled in sorted order
- * with slugs derived only from the target itself.
+ * **Determinism is load-bearing**, not tidiness: the bundled text is stored as the spec document,
+ * and sync (#627) decides "unchanged" by comparing hashes of exactly this output. So targets are
+ * bundled in sorted order, with slugs derived only from the target itself.
  *
- * **A document that needed no bundling is returned byte for byte.** `SpecDraft`
- * promises the engine the document verbatim - a re-serialization would make
- * every YAML spec drift on its first sync - and that promise is kept for every
- * single-file spec, which is the common case. Only a document that genuinely is
- * several files is stored as the bundle, because there is no single verbatim
- * text for one of those to begin with.
+ * **A document that needed no bundling is returned byte for byte.** `SpecDraft` promises the engine
+ * the document verbatim (a re-serialization would make every YAML spec drift on its first sync),
+ * and that promise is kept for every single-file spec, the common case. Only a document that
+ * genuinely is several files is stored as the bundle, because there is no single verbatim text for
+ * one of those to begin with.
  */
 
 import { asRecord, asStr } from "@/lib/json-node";
@@ -97,10 +84,9 @@ export interface ExternalRefIntake {
 	readSibling?: (relativePath: string) => Promise<string>;
 	/**
 	 * Read a document's bytes into a DOM. Defaults to the engine's reader
-	 * (`POST /import/document`), which is the point (issue #877): finding and
-	 * rewriting refs needs a tree, and a YAML reader here would be the second
-	 * opinion about what a document is that #853 exists to end. Injected so a
-	 * test can drive the walk without a running engine.
+	 * (`POST /import/document`), which is the point (#877): finding and rewriting refs needs a
+	 * tree, and a YAML reader here would be the second opinion about what a document is that #853
+	 * exists to end. Injected so a test can drive the walk without a running engine.
 	 */
 	parseDocument?: (text: string) => Promise<unknown>;
 }
@@ -157,18 +143,15 @@ export const OUTSIDE_PICKED_FOLDER = "outside the folder that was picked";
 const EMPTY_REPORT = { fetched: [] as string[], refused: [] as RefusedRef[] };
 
 /**
- * A document that outgrew the engine's cap. Fatal rather than tallied: the
- * engine would refuse to store it, so continuing would import a collection
- * bound to nothing.
+ * A document that outgrew the engine's cap. Fatal rather than tallied: the engine would refuse to
+ * store it, so continuing would import a collection bound to nothing.
  *
- * Thrown for the document **on its own** as well as for a bundle (issue #719).
- * Only the bundle was checked before, so a single over-cap file - the common
- * shape, since the specs that reach this size are generated single files - was
- * fetched, parsed and previewed in full, and first refused by the engine at
- * apply, 400ing the whole transaction after the user had confirmed a preview
- * that looked healthy. The wording says which of the two happened, because the
- * remedy differs: a bundle can be imported pre-bundled, a single file can only
- * be met by raising the setting.
+ * Thrown for the document **on its own** as well as for a bundle (#719): the specs that reach this
+ * size are usually generated single files, and one left unchecked is fetched, parsed and previewed
+ * in full, then refused by the engine at apply, failing the whole transaction after the user
+ * confirmed a healthy-looking preview. The wording says which of the two happened, because the
+ * remedy differs: a bundle can be imported pre-bundled, a single file can only be met by raising
+ * the setting.
  */
 export class SpecBundleTooLargeError extends Error {
 	constructor(bytes: number, maxBytes: number, bundled = true) {
@@ -220,18 +203,14 @@ function splitRef(ref: string): { target: string; pointer: string } {
 }
 
 /**
- * Normalize a relative path against a directory, keeping `..` that cannot be
- * cancelled.
+ * Normalize a relative path against a directory, keeping `..` that cannot be cancelled. A spec laid
+ * out as `spec/openapi.yaml` referencing `../shared/error.yaml` is ordinary, so an escaping segment
+ * is preserved and handed to the main process, where the gate lives; collapsing it here would
+ * silently read a different file than the document named.
  *
- * A spec laid out as `spec/openapi.yaml` referencing `../shared/error.yaml` is
- * ordinary, so an escaping segment is preserved and handed to the main process,
- * which is where the gate lives. Collapsing it here would silently read a
- * different file than the document named.
- *
- * Exported for the batch layer (`batch.ts`), which resolves the same ref against
- * the same rules to find the file *inside the picked set* - a second normalizer
- * would be free to disagree with this one about `..`, and the two answers would
- * be two different files.
+ * Exported for the batch layer (`batch.ts`), which resolves the same ref by the same rules to find
+ * the file *inside the picked set*: a second normalizer would be free to disagree with this one
+ * about `..`, and the two answers would be two different files.
  */
 export function joinRelative(dir: string, target: string): string {
 	const out: string[] = [];
@@ -439,11 +418,10 @@ export async function bundleExternalRefs(
 	/** Targets seen but not yet loaded, with the base that named them. */
 	const pending: { key: string; base: DocumentBase }[] = [];
 	let bytes = byteLength(raw);
-	// The document by itself, before a single ref is followed. The loop below
-	// checks the running total, which never runs for a spec that references
-	// nothing - so an over-cap single file used to reach the engine's own refusal
-	// at apply instead (issue #719). Here it is refused before parse, in front of
-	// the preview, naming the setting that would allow it.
+	// The document by itself, before a single ref is followed: the loop below checks the running
+	// total and never runs for a spec that references nothing, so an over-cap single file would
+	// otherwise reach the engine's own refusal at apply (#719). Here it is refused before parse, in
+	// front of the preview, naming the setting that would allow it.
 	if (bytes > intake.maxBytes) throw new SpecBundleTooLargeError(bytes, intake.maxBytes, false);
 
 	const enqueue = (value: unknown, base: DocumentBase): void => {
@@ -511,16 +489,14 @@ export async function bundleExternalRefs(
 }
 
 /**
- * Whether a URL names this machine or its link-local range: `localhost` (with
- * or without a trailing dot), the unspecified `0.0.0.0` and `::`, the
- * `127.0.0.0/8` block, `::1`, `169.254.0.0/16` (cloud metadata lives there) and
- * `fe80::/10`, plus any IPv4-mapped IPv6 form of those (`::ffff:7f00:1`).
+ * Whether a URL names this machine or its link-local range: `localhost` (with or without a trailing
+ * dot), the unspecified `0.0.0.0` and `::`, the `127.0.0.0/8` block, `::1`, `169.254.0.0/16` (where
+ * cloud metadata lives) and `fe80::/10`, plus any IPv4-mapped IPv6 form of those (`::ffff:7f00:1`).
  *
- * Judged from the text only, as the early refusal that names the ref in the
- * preview. A DNS name that resolves to a local address, and a redirect that
- * lands on one, are caught by the engine, which checks the address it connects
- * to and follows no redirect for a reference (issue #2364); its answer is named
- * in the preview too (issue #2605).
+ * Judged from the text only, as the early refusal that names the ref in the preview. A DNS name
+ * that resolves to a local address, and a redirect that lands on one, are caught by the engine,
+ * which checks the address it connects to and follows no redirect for a reference (#2364); its
+ * answer is named in the preview too (#2605).
  */
 export function isLocalAddress(url: string): boolean {
 	let host: string;

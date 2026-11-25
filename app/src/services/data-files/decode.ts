@@ -6,21 +6,19 @@
  */
 
 /**
- * Bytes to text, before anything tries to read rows out of them (issue #594).
+ * Bytes to text, before anything tries to read rows out of them (#594).
  *
- * `FileReader.readAsText` decodes as UTF-8 and never says it failed: a
- * Windows-1252 CSV - what Excel writes on Windows unless told otherwise -
- * arrives with U+FFFD replacement characters where the accented names were, and
- * a "Unicode Text" export (UTF-16) arrives as either garbage or NUL-riddled
- * columns. Both parse. Both send the wrong strings to the target, which is the
- * silent-wrong-request failure this whole layer exists to remove.
+ * `FileReader.readAsText` decodes as UTF-8 and never says it failed: a Windows-1252 CSV (what Excel
+ * writes on Windows unless told otherwise) arrives with U+FFFD replacement characters where the
+ * accented names were, and a "Unicode Text" export (UTF-16) arrives as garbage or NUL-riddled
+ * columns. Both parse, and both send the wrong strings to the target, the silent wrong request this
+ * layer exists to remove.
  *
- * So the file is read as bytes and decoded here, where the BOM can be looked at
- * first. UTF-16 is decoded rather than refused - it is a legitimate export from
- * a program people actually use, and the label `readAsText` would have needed is
- * the one `TextDecoder` takes anyway. Anything else that is not UTF-8 is
- * refused: guessing a legacy code page is a second wrong answer, and the user
- * can re-save as UTF-8 in one step once told that is the problem.
+ * So the file is read as bytes and decoded here, where the BOM can be looked at first. UTF-16 is
+ * decoded, not refused: it is a legitimate export from a program people actually use, and the label
+ * `readAsText` would need is the one `TextDecoder` takes anyway. Anything else that is not UTF-8 is
+ * refused: guessing a legacy code page is a second wrong answer, and the user can re-save as UTF-8
+ * in one step once told that is the problem.
  */
 
 import { DataFileError } from "./errors";
@@ -36,11 +34,9 @@ export interface DecodedDataFile {
 const REPLACEMENT_CHARACTER = "�";
 
 /**
- * Decode a data file's bytes.
- *
- * Throws `DataFileError` when the bytes are neither UTF-8 nor UTF-16, naming
- * the encoding as the problem so "why are there question marks in my names"
- * does not become a parser bug report.
+ * Decode a data file's bytes. Throws `DataFileError` when the bytes are neither UTF-8 nor UTF-16,
+ * naming the encoding as the problem so "why are there question marks in my names" does not become
+ * a parser bug report.
  */
 export function decodeDataFile(bytes: ArrayBuffer): DecodedDataFile {
 	const head = new Uint8Array(bytes.slice(0, 2));

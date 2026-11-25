@@ -73,32 +73,28 @@ export interface SkippedItem {
 		 */
 		| "example_no_media_type"
 		/**
-		 * An OpenAPI response keyed `default` (issue #710). Dropped for exactly the
-		 * reason above - a catch-all has no status line to be served under - but
-		 * counted apart from it, because it is not a defect: `default` is
-		 * spec-conformant and near-universal (all 568 of Stripe's operations
-		 * declare one), so folded in with malformed keys it painted a valid
-		 * document as hundreds of losses and buried the warnings that could be
-		 * acted on. The preview ranks it as information, not damage.
+		 * An OpenAPI response keyed `default` (#710). Dropped for exactly the reason above (a
+		 * catch-all has no status line to be served under) but counted apart from it, because it is
+		 * not a defect: `default` is spec-conformant and near-universal (all 568 of Stripe's
+		 * operations declare one), so folded in with malformed keys it would paint a valid document
+		 * as hundreds of losses and bury the warnings that can be acted on. The preview ranks it as
+		 * information, not damage.
 		 */
 		| "default_response"
 		/**
-		 * A `$ref` naming a file the import could not reach - unfetchable,
-		 * unparseable, or relative in a pasted document that has no directory and
-		 * no URL to be relative to (issue #649). Counted per ref, because each one
-		 * is an operation that imported without the schema it declared. Not
-		 * produced by a parser: bundling runs before parse and hands its count to
-		 * the factory, which is also why it is the one kind that says nothing about
-		 * Vayu's own representability.
+		 * A `$ref` naming a file the import could not reach: unfetchable, unparseable, or relative
+		 * in a pasted document that has no directory and no URL to be relative to (#649). Counted
+		 * per ref, because each one is an operation that imported without the schema it declared.
+		 * Not produced by a parser: bundling runs before parse and hands its count to the factory,
+		 * which is also why it is the one kind that says nothing about Vayu's own representability.
 		 */
 		| "external_ref"
 		/**
-		 * An operation whose `operationId` another operation already declared
-		 * (issue #715). The operation itself imports whole - only the repeated id
-		 * is dropped from its recorded identity, which then rests on its method
-		 * and path alone. Counted because a sync follows the identity a request
-		 * records, so which request kept the id is not a detail the user should
-		 * have to discover from a diff.
+		 * An operation whose `operationId` another operation already declared (#715). The operation
+		 * imports whole; only the repeated id is dropped from its recorded identity, which then
+		 * rests on its method and path alone. Counted because a sync follows the identity a request
+		 * records, so which request kept the id is not a detail the user should have to discover
+		 * from a diff.
 		 */
 		| "duplicate_operation_id"
 		/**
@@ -115,30 +111,26 @@ export interface SkippedItem {
 		 */
 		| "deprecated_operation"
 		/**
-		 * A parameter declared `in: "cookie"` (issue #719). Vayu's request model
-		 * has no cookie-parameter row - cookies are the jar's, not a request
-		 * field - so the declaration is dropped. Counted rather than mapped onto a
-		 * `Cookie` header row: a spec declares one cookie per parameter and the
-		 * header is a single joined value, so building it would mean inventing a
-		 * merge the document never wrote. Naming the loss is the honest half.
+		 * A parameter declared `in: "cookie"` (#719). Vayu's request model has no cookie-parameter
+		 * row (cookies are the jar's, not a request field), so the declaration is dropped. Counted
+		 * rather than mapped onto a `Cookie` header row: a spec declares one cookie per parameter
+		 * and the header is a single joined value, so building it would mean inventing a merge the
+		 * document never wrote.
 		 */
 		| "cookie_param"
 		/**
-		 * A `requestBody` declaring only media types the importer has no mode for -
-		 * `application/octet-stream`, `application/xml`, `image/*` (issue #719).
-		 * The operation imports; what it loses is the body, which without this
-		 * counter left a bodyless request that looked complete. Only a body that
-		 * declared *something* counts: an operation with no `requestBody` at all
-		 * lost nothing.
+		 * A `requestBody` declaring only media types the importer has no mode for
+		 * (`application/octet-stream`, `application/xml`, `image/*`; #719). The operation imports
+		 * without its body, counted so a bodyless request does not look complete. Only a body that
+		 * declared *something* counts: an operation with no `requestBody` at all lost nothing.
 		 */
 		| "unmapped_body"
 		/**
-		 * A server URL that cannot be turned into one a request could reach
-		 * (issue #719) - a `{variable}` the document declares no default for, or a
-		 * relative URL in a document that arrived with no URL to resolve it
-		 * against. The URL imports exactly as written, because guessing a host is
-		 * worse than a base the user can see is unfinished, and is counted so the
-		 * preview says which of the two happened.
+		 * A server URL that cannot be turned into one a request could reach (#719): a `{variable}`
+		 * the document declares no default for, or a relative URL in a document that arrived with
+		 * no URL to resolve it against. The URL imports exactly as written, because guessing a host
+		 * is worse than a base the user can see is unfinished, and is counted so the preview says
+		 * which of the two happened.
 		 */
 		| "unresolved_base_url"
 		/**
@@ -255,32 +247,28 @@ export interface SkippedItem {
 		 */
 		| "variable_metadata"
 		/**
-		 * A Postman request body whose own `disabled` flag was `true` ("prevent
-		 * request body from being sent"). Vayu has no disabled-body toggle to
-		 * preserve the switch itself, so the body imports as `{ mode: "none" }`
-		 * rather than active - sending it anyway is the one outcome the user's
-		 * own setting can never be worth keeping.
+		 * A Postman request body whose own `disabled` flag was `true` ("prevent request body from
+		 * being sent"). Vayu has no disabled-body toggle to keep the switch itself, so the body
+		 * imports as `{ mode: "none" }` rather than active: sending it anyway is the one outcome
+		 * the user's own setting ruled out.
 		 */
 		| "disabled_body"
 		/**
-		 * A Postman request's own `certificate` (a client certificate scoped to
-		 * that one request) the engine could not resolve into a
-		 * `client_certificates` registry entry (issue #1656): no `cert.src`, an
-		 * unreadable file, a host the request's URL still carries as an
-		 * unresolved `{{var}}`, or a second, different certificate for a (host,
-		 * port) an earlier request in this import already claimed. A resolvable
-		 * one no longer reaches this kind - it lands in
-		 * {@link ImportResult.clientCertificates} instead, since Vayu's client
-		 * certificates belong to a host, not a request (`engine/CLAUDE.md`).
+		 * A Postman request's own `certificate` (a client certificate scoped to that one request)
+		 * the engine could not resolve into a `client_certificates` registry entry (#1656): no
+		 * `cert.src`, an unreadable file, a host the request's URL still carries as an unresolved
+		 * `{{var}}`, or a second, different certificate for a (host, port) an earlier request in
+		 * this import already claimed. A resolvable one lands in
+		 * {@link ImportResult.clientCertificates} instead, since Vayu's client certificates belong
+		 * to a host, not a request (`engine/CLAUDE.md`).
 		 */
 		| "certificate"
 		/**
-		 * A Postman request's own `proxy` override. Vayu has no per-request
-		 * proxy override to import it into, and no per-host or per-target
-		 * mechanism it could become instead - `TransportPolicy` is
-		 * workspace/run-scoped (`engine/CLAUDE.md`) - so unlike `certificate`
-		 * this stays a permanent tally rather than a deferred mapping (issue
-		 * #1656's own recorded decision).
+		 * A Postman request's own `proxy` override. Vayu has no per-request proxy override to
+		 * import it into, and no per-host or per-target mechanism it could become instead
+		 * (`TransportPolicy` is workspace/run-scoped, `engine/CLAUDE.md`), so unlike `certificate`
+		 * this stays a permanent tally rather than a deferred mapping, the decision recorded on
+		 * #1656.
 		 */
 		| "proxy_config"
 		/**
@@ -354,12 +342,11 @@ export interface SkippedItem {
 		 */
 		| "nesting_too_deep"
 		/**
-		 * A `.jmx` test plan's own class name, for one this parser has no mapping
-		 * for at all (issue #1518) - JMeter's own class list is open-ended (every
-		 * third-party plugin adds more), so this is not a closed set the way every
-		 * kind above is. `import-notices.ts` falls back to the class name itself
-		 * for any string here with no entry of its own - "here is the class
-		 * JMeter used" is the whole label for one of these.
+		 * A `.jmx` test plan's own class name, for one this parser has no mapping for at all
+		 * (#1518). JMeter's class list is open-ended (every third-party plugin adds more), so this
+		 * is not a closed set the way every kind above is. `import-notices.ts` falls back to the
+		 * class name itself for any string here with no entry of its own: "here is the class JMeter
+		 * used" is the whole label for one of these.
 		 */
 		| (string & Record<never, never>);
 	count: number;
@@ -392,38 +379,34 @@ export interface ImportMeta {
 	requestCount: number;
 	folderCount: number;
 	/**
-	 * How the folders above came to exist (issue #710), disclosed in the preview.
-	 * Path grouping builds a tree the document never spelled out, so a user
-	 * looking at ~150 folders for a spec with no tags in it has to be able to see
-	 * why they are there.
+	 * How the folders above came to exist (#710), disclosed in the preview: path grouping builds a
+	 * tree the document never spelled out, so a user looking at ~150 folders for a spec with no
+	 * tags in it has to be able to see why they are there.
 	 *
-	 * Optional, and only the two OpenAPI parsers set it: a format that carries its
-	 * own folders (Postman, Insomnia) makes no such choice, and one that says
-	 * nothing must not look like one that said "tags". Absent too when a document
-	 * produced no folders at all - there is no rule to explain.
+	 * Optional, and set only by the two OpenAPI parsers: a format that carries its own folders
+	 * (Postman, Insomnia) makes no such choice, and one that says nothing must not look like one
+	 * that said "tags". Absent too when a document produced no folders at all: there is no rule to
+	 * explain.
 	 */
 	folderStrategy?: FolderStrategy;
 	environmentCount: number;
 	/** Variables destined for Vayu's globals scope. Only a Postman globals export produces any. */
 	globalCount: number;
 	/**
-	 * Saved example responses found across every request (issue #481). Required
-	 * rather than optional so each parser states its answer - a format with no
-	 * examples reports 0, which is different from a parser that forgot to look.
-	 * Shown in the import preview beside the request and folder counts.
+	 * Saved example responses found across every request (#481), shown in the import preview beside
+	 * the request and folder counts. Required, not optional, so each parser states its answer: a
+	 * format with no examples reports 0, which is different from a parser that forgot to look.
 	 */
 	exampleCount: number;
 	/**
-	 * What the import dropped, so the preview can warn about a lossy import
-	 * rather than letting items silently vanish. Vayu is HTTP-only, so
-	 * WebSocket and gRPC items are dropped outright.
+	 * What the import dropped, so the preview can warn about a lossy import rather than let items
+	 * silently vanish. Vayu is HTTP-only, so WebSocket and gRPC items are dropped outright.
 	 *
-	 * Every entry is stamped by the engine's parse (issue #877), including
-	 * `external_ref` - that count reaches it as `ImportSource.unresolvedRefs`,
-	 * because bundling runs before detection and no parser can know it. Read by
-	 * `importNotices` (`modules/collections/import-notices.ts`), which gives
-	 * each kind a tier: amber for what the user must finish, muted for what the
-	 * import decided, and nothing for what changes nothing they send.
+	 * Every entry is stamped by the engine's parse (#877), `external_ref` included: that count
+	 * reaches it as `ImportSource.unresolvedRefs`, because bundling runs before detection and no
+	 * parser can know it. Read by `importNotices` (`modules/collections/import-notices.ts`), which
+	 * gives each kind a tier: amber for what the user must finish, muted for what the import
+	 * decided, and nothing for what changes nothing they send.
 	 */
 	skipped: SkippedItem[];
 	/**
@@ -472,13 +455,12 @@ export interface ImportMeta {
 	 */
 	unsupportedScriptApis?: UnsupportedScriptApis[];
 	/**
-	 * Form-data file parts that arrived without a file to send. An OpenAPI spec
-	 * documents that a field is an upload and never which file it uploads, so the
-	 * row imports complete-but-empty and the user attaches the file. Surfaced in
-	 * the preview beside the skip counters: a row the user must finish is honest,
-	 * a field that looks filled in and sends nothing is the defect (#425).
-	 * Required rather than optional so every parser states its answer - all of
-	 * them get it from `unattachedFileParts`, which reads the drafts.
+	 * Form-data file parts that arrived without a file to send. An OpenAPI spec documents that a
+	 * field is an upload and never which file it uploads, so the row imports complete-but-empty and
+	 * the user attaches the file. Surfaced beside the skip counters: a row the user must finish is
+	 * honest, a field that looks filled in and sends nothing is the defect (#425). Required, not
+	 * optional, so every parser states its answer; all of them get it from `unattachedFileParts`,
+	 * which reads the drafts.
 	 */
 	unattachedFileParts: number;
 }
@@ -490,12 +472,9 @@ export interface UnsupportedScriptApis {
 }
 
 /**
- * A saved example response found next to a request in the source file (issue
- * #481) - Postman's `item.response[]`, an OpenAPI operation's `responses`.
- *
- * Until the engine had somewhere to keep these, every parser dropped them
- * without even counting the loss. They carry no id: the engine assigns one when
- * the import is applied, and nothing in the payload references an example.
+ * A saved example response found next to a request in the source file (#481): Postman's
+ * `item.response[]`, an OpenAPI operation's `responses`. It carries no id: the engine assigns one
+ * when the import is applied, and nothing in the payload references an example.
  */
 export interface ExampleDraft {
 	name: string;
@@ -531,20 +510,17 @@ export interface RequestDraft {
 	body: RequestBody;
 	auth: RequestAuth; // "inherit" allowed; resolved at execution
 	/**
-	 * Typed behaviours (issue #1512) - a `script.pre` / `script.post` entry is
-	 * how a source's scripts arrive now that `preRequestScript` /
-	 * `postRequestScript` are refused (issue #1514). The app does not parse or
-	 * edit these (issue #1516); they ride through to the apply payload
-	 * unchanged.
+	 * Typed behaviours (#1512): a `script.pre` / `script.post` entry is how a source's scripts
+	 * arrive, since `preRequestScript` / `postRequestScript` are refused (#1514). The app does not
+	 * parse or edit these (#1516); they ride through to the apply payload unchanged.
 	 */
 	elements: unknown[];
 	/**
-	 * Per-request redirect settings, when the source states them (Postman's
-	 * item-level `protocolProfileBehavior`; Insomnia's `settingFollowRedirects`,
-	 * which has no limit to go with it). Absent means "engine default" -
-	 * `followRedirects: true`, `maxRedirects: 10` - which is why they are optional
-	 * rather than defaulted here: a parser that says nothing must not look like a
-	 * parser that said `true`.
+	 * Per-request redirect settings, when the source states them (Postman's item-level
+	 * `protocolProfileBehavior`; Insomnia's `settingFollowRedirects`, which has no limit to go with
+	 * it). Absent means "engine default" (`followRedirects: true`, `maxRedirects: 10`), which is
+	 * why they are optional rather than defaulted here: a parser that says nothing must not look
+	 * like a parser that said `true`.
 	 */
 	followRedirects?: boolean;
 	maxRedirects?: number;
@@ -602,20 +578,17 @@ export interface RequestDraft {
 }
 
 /**
- * The spec document an import was parsed from, carried on the root collection so
- * it can be stored and bound in the same `POST /import/apply` (issue #637).
+ * The spec document an import was parsed from, carried on the root collection so it can be stored
+ * and bound in the same `POST /import/apply` (#637).
  *
- * The **document**, verbatim, not a re-serialization of the parse: the engine
- * hashes what it stores and a re-fetch is diffed against those bytes, so a
- * round-trip through `JSON.parse` would make every YAML spec drift on its first
- * sync.
+ * The **document**, verbatim, not a re-serialization of the parse: the engine hashes what it stores
+ * and a re-fetch is diffed against those bytes, so a round-trip through `JSON.parse` would make
+ * every YAML spec drift on its first sync.
  *
- * One exception, and only one: a document that referenced other files carries
- * the **bundle** those were inlined into (issue #649). There is no verbatim text
- * for a spec that is several files, and storing the entry file alone would store
- * a document naming files nothing downstream can reach. Bundling is
- * deterministic, so the hash is still stable across re-fetches; a single-file
- * spec is untouched.
+ * One exception: a document that referenced other files carries the **bundle** they were inlined
+ * into (#649). There is no verbatim text for a spec that is several files, and storing the entry
+ * file alone would store a document naming files nothing downstream can reach. Bundling is
+ * deterministic, so the hash stays stable across re-fetches; a single-file spec is untouched.
  */
 export interface SpecDraft {
 	tempId?: string; // assigned by assign-ids pre-pass; opaque, never stored
@@ -664,43 +637,37 @@ export interface ImportResult {
 	collections: CollectionDraft[]; // roots (parentId = null)
 	environments: EnvironmentDraft[];
 	/**
-	 * Variables for Vayu's globals scope, keyed by name. Not a draft list like the
-	 * two above: globals are a singleton on the engine (`POST /globals` replaces the
-	 * whole set), so there is nothing to name and no id to assign. Required rather
-	 * than optional so every parser states its answer - `{}` for all but the Postman
-	 * globals export.
+	 * Variables for Vayu's globals scope, keyed by name. Not a draft list like the two above:
+	 * globals are an engine singleton (`POST /globals` replaces the whole set), so there is nothing
+	 * to name and no id to assign. Required, not optional, so every parser states its answer: `{}`
+	 * for all but the Postman globals export.
 	 */
 	globals: Record<string, VariableValue>;
 	meta: ImportMeta;
 	/**
-	 * `client_certificates` registry candidates the engine resolved (issue
-	 * #1656) - present only from a Postman parse; every other format's parser
-	 * sets no such key, so this is optional here rather than "always sent,
-	 * `[]` included" the way {@link ImportApplyRequest.specs} is. This is the
-	 * full candidate list the preview shows; the apply payload carries only the
-	 * ones the user ticked ({@link ImportApplyOptions.selectedClientCertificates}).
+	 * `client_certificates` registry candidates the engine resolved (#1656), present only from a
+	 * Postman parse; no other format's parser sets the key, so it is optional here rather than
+	 * "always sent, `[]` included" the way {@link ImportApplyRequest.specs} is. This is the full
+	 * candidate list the preview shows; the apply payload carries only the ones the user ticked
+	 * ({@link ImportApplyOptions.selectedClientCertificates}).
 	 */
 	clientCertificates?: ImportApplyClientCertificate[];
 }
 
 /**
- * Where the raw text came from, for the two facts a parser cannot know.
- *
- * `fileName` is display only (the preview names the file). `sourceUrl` is
- * persisted: it becomes `spec_documents.source_url`, which is what makes a
- * re-fetch possible at all - before this it lived in the import dialog's local
- * state and was discarded when the dialog closed (issue #638). It is also what
- * a relative `servers[0].url` resolves against, which is why it reaches `parse`
- * rather than only being stamped onto the result afterwards (issue #719).
+ * Where the raw text came from, for the facts a parser cannot know. `fileName` is display only (the
+ * preview names the file). `sourceUrl` is persisted: it becomes `spec_documents.source_url`, which
+ * is what makes a re-fetch possible at all (#638). It is also what a relative `servers[0].url`
+ * resolves against, which is why it reaches `parse` rather than only being stamped onto the result
+ * afterwards (#719).
  */
 export interface ImportSource {
 	fileName?: string;
 	sourceUrl?: string;
 	/**
-	 * External `$ref`s the bundling pass could not reach (issue #649). Stamped
-	 * into `meta.skipped` by the factory for the same reason the two above are
-	 * stamped there: bundling happens before parse, so no parser can know the
-	 * count, and a loss the preview never names is the defect bundling exists to
+	 * External `$ref`s the bundling pass could not reach (#649), sent with the parse, which stamps
+	 * them into `meta.skipped` as `external_ref`: bundling happens before the parse, so the parse
+	 * cannot count them itself, and a loss the preview never names is the defect bundling exists to
 	 * fix.
 	 */
 	unresolvedRefs?: number;
