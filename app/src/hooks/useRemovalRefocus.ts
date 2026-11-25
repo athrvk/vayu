@@ -22,30 +22,26 @@ export interface RemovalRefocusTargets {
 }
 
 /**
- * Where focus goes after a row is deleted from a list, decided by the outcome
- * rather than by the intent.
+ * Where focus goes after a row is deleted from a list, decided by the outcome rather than by the
+ * intent.
  *
- * A delete dialog is rendered controlled with no trigger, and a trigger is what
- * Radix aims its close-focus at - so without this, both outcomes drop the user
- * on `<body>` (#1218). The row is the obvious answer and it is the one thing
- * that may not survive the dialog, so the successor is chosen while it is still
- * on screen: afterwards the DOM cannot say what followed it.
+ * A delete dialog is rendered controlled with no trigger, and a trigger is what Radix aims its
+ * close-focus at, so without this both outcomes drop the user on `<body>` (#1218). The row is the
+ * obvious answer and the one thing that may not survive the dialog, so the successor is chosen
+ * while the row is still on screen: afterwards the DOM cannot say what followed it.
  *
- * Which of the two to use is the part that cannot be answered at close time.
- * `confirmDelete` returns `void`, the dialog closes on failure as much as on
- * success, and by the time an awaited result came back Radix would already have
- * moved focus - so reading the confirm click as the answer sent a *failed*
- * delete's focus to the successor, beside a row that is still sitting there
- * (#1234). The decision is deferred instead of guessed: focus goes back to the
- * row at close, and moves on only once that row actually leaves the DOM. That
- * is the same answer for both outcomes, and it needs no signal out of the
+ * Which of the two to use cannot be answered at close time. `confirmDelete` returns `void`, the
+ * dialog closes on failure as much as on success, and by the time an awaited result came back Radix
+ * would already have moved focus; reading the confirm click as the answer would send a *failed*
+ * delete's focus to the successor, beside a row still sitting there (#1234). So the decision is
+ * deferred, not guessed: focus goes back to the row at close, and moves on only once that row
+ * actually leaves the DOM, the same answer for both outcomes with no signal needed out of the
  * mutation.
  *
- * "The row has left" is not a dependency anything can name - the refetch that
- * removes it lands whenever the engine answers, which is usually *after* the
- * dialog has closed - so the wait is a trailing effect that re-checks on every
- * render, the shape `useRevealActiveSelection` uses to wait for a moved row to
- * appear.
+ * "The row has left" is not a dependency anything can name (the refetch that removes it lands
+ * whenever the engine answers, usually *after* the dialog has closed), so the wait is a trailing
+ * effect that re-checks on every render, the shape `useRevealActiveSelection` uses to wait for a
+ * moved row to appear.
  */
 export function useRemovalRefocus() {
 	const targets = useRef<RemovalRefocusTargets | null>(null);

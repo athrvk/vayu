@@ -6,12 +6,10 @@
  */
 
 /**
- * Feeds the Dock/taskbar icon what only the renderer knows (issue #1364):
- * which collections the user has been in, and when the Inbox is on screen.
- *
- * Mounted once, in `App`, for the reason `useNotificationActivation` is: a
- * second mount would publish the same recents twice and double the focus
- * listener below.
+ * Feeds the Dock/taskbar icon what only the renderer knows (#1364): which collections the user has
+ * been in, and when the Inbox is on screen. Mounted once, in `App`, for
+ * `useNotificationActivation`'s reason: a second mount would publish the same recents twice and
+ * double the focus listener below.
  */
 
 import { useEffect } from "react";
@@ -22,23 +20,19 @@ import type { Collection } from "@/types";
 import type { OsIconCollection } from "@/types/electron";
 
 /**
- * How many recent collections this side offers.
- *
- * Main applies the real cap (`OS_ICON_MAX_RECENTS`, three) when it builds the
- * menu; this only bounds the payload that crosses the IPC boundary, generously
- * enough that main's own cap is never starved by a run of duplicates or
- * deleted collections in the walk below.
+ * How many recent collections this side offers. Main applies the real cap (`OS_ICON_MAX_RECENTS`,
+ * three) when it builds the menu; this only bounds the payload that crosses the IPC boundary,
+ * generously enough that main's own cap is never starved by a run of duplicates or deleted
+ * collections in the walk below.
  */
 const OS_ICON_RECENTS_PUBLISHED = 8;
 
 /**
- * The collections to offer the icon's menu, most recent first.
- *
- * Walks `history` from the end - the most recently visited location is last -
- * keeping collection tabs, deduped by id and resolved against the live
- * `collections` list. An id no longer in that list is a deleted collection,
- * and it is skipped rather than shown under its last-known name: a Dock menu
- * entry that opens nothing is worse than a shorter menu.
+ * The collections to offer the icon's menu, most recent first. Walks `history` from the end (the
+ * most recent location is last), keeping collection tabs, deduped by id and resolved against the
+ * live `collections` list. An id no longer in that list is a deleted collection, skipped rather
+ * than shown under its last-known name: a Dock menu entry that opens nothing is worse than a
+ * shorter menu.
  */
 export function recentCollections(
 	history: readonly TabLocation[],

@@ -6,20 +6,17 @@
  */
 
 /**
- * The write half of variable scope, extracted from `RequestBuilderProvider`
- * (issue #1651) so a tree with no request builder above it can still edit a
- * variable a token's popover opens - the collection Elements tab's script
- * editors, first. `useVariableResolver` already takes the same shape
- * (`collectionId` optional, everything else read off the global queries and
- * session store) for exactly this reason; this is its write-side twin.
+ * The write half of variable scope, out of `RequestBuilderProvider` (#1651) so a tree with no
+ * request builder above it can still edit a variable a token's popover opens (the collection
+ * Elements tab's script editors). The write-side twin of `useVariableResolver`, which takes the
+ * same shape (`collectionId` optional, everything else read off the global queries and session
+ * store) for this reason.
  *
- * Parameterised by `collectionId` rather than reading one off context, the
- * same call convention `useVariableResolver`/`useDataContract` already use -
- * the request builder passes the request's own collection id, the Elements
- * tab passes the collection it is editing directly. That id is only where a
- * *new* collection variable is created: an edit writes to the definition the
- * resolver named (`sourceId`), which in a collection chain is often an
- * ancestor of this one (#3683).
+ * Parameterised by `collectionId` rather than reading one off context, the convention
+ * `useVariableResolver`/`useDataContract` use: the request builder passes the request's own
+ * collection id, the Elements tab the collection it is editing. That id is only where a *new*
+ * collection variable is created: an edit writes to the definition the resolver named (`sourceId`),
+ * which in a collection chain is often an ancestor of this one (#3683).
  */
 
 import { useCallback, useMemo } from "react";
@@ -58,20 +55,16 @@ interface UseVariableWriterReturn {
 }
 
 /*
- * Merge one variable into a scope's map.
+ * Merge one variable into a scope's map. A write here always enables the entry (see
+ * `updateVariable` below for why a value written to a disabled variable must not leave it
+ * disabled). An existing entry is spread first so its `createdAt` (the variables editor's
+ * row-ordering key) survives untouched; only a variable created here is stamped, so it lands at the
+ * bottom of its scope's list rather than above every row that already existed (#135).
  *
- * A write here always enables the entry - see the caller-facing doc on
- * `updateVariable` below for why a value written to a disabled variable must
- * not leave it disabled. An existing entry is spread first so its
- * `createdAt` (the variables editor's row-ordering key) survives untouched;
- * only a variable created here is stamped, so it lands at the bottom of its
- * scope's list rather than above every row that already existed (#135).
- *
- * `options` only ever arrives from a create, and a create can land on an entry
- * that exists: the popover offers one while the name's only definition is
- * switched off. So the mark applies to both branches. It only ever sets the
- * flag: an edit passes no options and keeps the mark the entry has, and no path
- * here un-secrets one.
+ * `options` only ever arrives from a create, and a create can land on an entry that exists: the
+ * popover offers one while the name's only definition is switched off. So the mark applies to both
+ * branches. It only ever sets the flag: an edit passes no options and keeps the mark the entry has,
+ * and no path here un-secrets one.
  */
 function mergeVariable(
 	existing: Record<string, VariableValue> | undefined,
@@ -111,18 +104,16 @@ export function useVariableWriter(options?: UseVariableWriterOptions): UseVariab
 	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
 
 	/*
-	 * Setting a value here always enables the variable - see `mergeVariable`.
-	 * A name disabled at the scope that would otherwise win resolves to
-	 * nothing, so its token is red and the popover offers to write it; a write
-	 * that preserved `enabled: false` would appear to work and change nothing
-	 * visible, which is the dead end this rule exists to remove. Enabling and
-	 * disabling on purpose still belongs to the variables editor.
+	 * Setting a value here always enables the variable (see `mergeVariable`). A name disabled at
+	 * the scope that would otherwise win resolves to nothing, so its token is red and the popover
+	 * offers to write it; a write that kept `enabled: false` would appear to work and change
+	 * nothing visible, the dead end this rule exists to remove. Enabling and disabling on purpose
+	 * stays the variables editor's.
 	 *
-	 * An edit carries the `sourceId` of the definition the popover displayed and
-	 * writes there. A create carries none and lands in this hook's own
-	 * collection or the active environment. A `sourceId` naming a collection or
-	 * environment that is gone is a no-op, never a fallback to the create
-	 * target: that is the copy-into-the-wrong-collection defect (#3683).
+	 * An edit carries the `sourceId` of the definition the popover displayed and writes there; a
+	 * create carries none and lands in this hook's own collection or the active environment. A
+	 * `sourceId` naming a collection or environment that is gone is a no-op, never a fallback to
+	 * the create target: that is the copy-into-the-wrong-collection defect (#3683).
 	 */
 	const updateVariable = useCallback(
 		(
@@ -177,11 +168,10 @@ export function useVariableWriter(options?: UseVariableWriterOptions): UseVariab
 	);
 
 	/*
-	 * Which scopes `updateVariable` would actually write to, derived from the
-	 * same targets a create resolves in `updateVariable` - kept beside it so a
-	 * target changing above is the next thing in this file to change, per this
-	 * codebase's own "written in one branch, re-derived in another" defect
-	 * shape. A caller that offers a scope not in here gets a silent no-op.
+	 * Which scopes `updateVariable` would actually write to, derived from the same targets a create
+	 * resolves there and kept beside it, so a target changing above is the next thing in this file
+	 * to change (this codebase's "written in one branch, re-derived in another" defect shape). A
+	 * caller that offers a scope not in here gets a silent no-op.
 	 */
 	const writableScopes = useMemo((): VariableScope[] => {
 		const scopes: VariableScope[] = [];

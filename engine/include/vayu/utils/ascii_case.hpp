@@ -8,20 +8,13 @@
  */
 
 /**
- * @file utils/ascii_case.hpp
- * @brief The engine's one ASCII lower-case fold (issue #1060).
+ * @brief The engine's one ASCII lower-case fold (#1060).
  *
- * Twenty-nine sites across nineteen files each wrote the fold themselves, in
- * four spellings: a `std::transform` with a `std::tolower` lambda, the same
- * with an uncast `::tolower`, a hand-written loop over the string, and a
- * per-character equality predicate that never builds a lowered string at all.
- * Nothing about any of them was wrong on the ASCII input every caller has,
- * which is why they accumulated rather than being noticed - but one of them
- * was wrong on any other input, and that is the shape this repo names: a
- * hand-rolled copy of a primitive does not receive the primitive's fixes. The
- * uncast pair passed a plain `char` to `::tolower`, and a `char` holding a
- * byte above 127 is negative where `char` is signed, which is undefined
- * behaviour the other twenty-seven sites cast for.
+ * One primitive rather than a fold written at each site, because a hand-rolled
+ * copy of a primitive does not receive the primitive's fixes: a fold that
+ * passes a plain `char` to `::tolower` is undefined behaviour on a byte above
+ * 127 wherever `char` is signed, which a cast at every other site does not
+ * repair.
  *
  * ASCII is in the name because it is the contract, not an omission. Every
  * caller folds a header name, a URL scheme, a MIME type, a hostname or a
@@ -29,17 +22,16 @@
  * fold would be the wrong answer for each: `std::tolower` reads the global C
  * locale, so what it does to a byte above 127 is whatever the last caller of
  * `std::setlocale` in the process decided. Folding the twenty-six letters and
- * leaving every other byte exactly as it was is the rule all twenty-nine sites
- * were written to have, and it is a rule that needs no `unsigned char` cast to
+ * leaving every other byte exactly as it was needs no `unsigned char` cast to
  * state, because it never reaches a function that has one as a precondition.
  *
- * Three entry points, because the call sites ask three questions: a character
- * (a comparator, and the two loops that build a string a byte at a time), a
- * whole string (the majority), and whether two strings match with neither
- * lowered copy built (`vayu::CaseInsensitiveLess`, and the four sites that
- * compared header names by hand). They agree by construction - the string and
- * the comparison are both written in terms of the character fold.
- * `ascii_upper` is the same fold the other way, for an HTTP method name.
+ * Three entry points, because callers ask three questions: a character (a
+ * comparator, a loop that builds a string a byte at a time), a whole string
+ * (most callers), and whether two strings match with neither lowered copy built
+ * (`vayu::CaseInsensitiveLess`, a header-name comparison). They agree by
+ * construction - the string and the comparison are both written in terms of the
+ * character fold. `ascii_upper` is the same fold the other way, for an HTTP
+ * method name.
  */
 
 #include <algorithm>
@@ -64,10 +56,9 @@ constexpr char ascii_lower (char c) {
 /**
  * @brief @p text with every ASCII upper-case letter lowered.
  *
- * One allocation, which is the one the callers already made: each of them
- * built the string it was about to fold. A caller that only wants to know
- * whether two strings match wants `ascii_lower_equal` instead, which builds
- * nothing.
+ * One allocation, the string a caller would build to fold anyway. A caller that
+ * only wants to know whether two strings match wants `ascii_lower_equal`
+ * instead, which builds nothing.
  */
 inline std::string ascii_lower (std::string_view text) {
     std::string lowered (text);
@@ -95,9 +86,8 @@ inline std::string ascii_upper (std::string_view text) {
 /**
  * @brief Whether @p a and @p b are the same string under the ASCII fold.
  *
- * The comparison neither lowers nor allocates: it is the answer the four
- * header-name comparisons here were reaching for when they wrote a
- * per-character predicate, and the answer `vayu::CaseInsensitiveLess::equal`
+ * The comparison neither lowers nor allocates: it is the answer a per-character
+ * header-name comparison needs, and the one `vayu::CaseInsensitiveLess::equal`
  * gives the callers that compare a name outside the `Headers` map.
  */
 inline bool ascii_lower_equal (std::string_view a, std::string_view b) {
