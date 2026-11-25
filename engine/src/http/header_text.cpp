@@ -24,7 +24,7 @@ constexpr std::string_view kCutsTheLine =
 
 /// Why @p text cannot be written into a header line, or nullopt when it can.
 /// Both faults are asked about together everywhere except the bind-time cell
-/// check, which predates the NUL rule and owns its own message (#732).
+/// check (#732), which asks only about a line break and owns its own message.
 std::optional<std::string_view> line_fault (std::string_view text) {
     if (ends_a_header_line (text)) {
         return kEndsTheLine;
