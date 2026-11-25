@@ -61,7 +61,6 @@
     "app/src/services/openapi/bound-spec-match.ts": 1,
     "app/src/services/openapi/spec-apply.ts": 2,
     "app/src/services/scenario-run-service.ts": 1,
-    "app/src/stores/execution-events-store.ts": 1,
     "app/src/stores/layout-store.ts": 1,
     "app/src/stores/save-store.ts": 1,
     "app/src/stores/toast-store.ts": 1,

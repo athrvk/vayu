@@ -6,19 +6,15 @@
  */
 
 /**
- * The session Console's rows (#3634): everything this window sent, newest
- * last - each Send, the scripts' console lines and `pm.sendRequest` calls
- * around it, and each collection-run step.
+ * The session Console's rows (#3634): everything this window sent, newest last (each Send, the
+ * scripts' console lines and `pm.sendRequest` calls around it, and each collection-run step).
  *
- * In memory only, like `response-store`: a reload or a quit empties it, and
- * History is what persists. The ring is bounded twice, by
- * {@link CONSOLE_MAX_ROWS} and by {@link CONSOLE_MAX_BYTES} of retained text,
- * and evicts oldest first; the newest row is never the victim. A body kept on
- * a row is cut at {@link CONSOLE_BODY_MAX_CHARS} here, on the way in, so no
- * writer can store more.
- *
- * Rows arrive masked: `modules/console/console-rows.ts` builds them, and this
- * store holds whatever it is handed.
+ * In memory only, like `response-store`: a reload or a quit empties it, and History is what
+ * persists. The ring is bounded twice, by {@link CONSOLE_MAX_ROWS} and by {@link CONSOLE_MAX_BYTES}
+ * of retained text, and evicts oldest first; the newest row is never the victim. A body kept on a
+ * row is cut at {@link CONSOLE_BODY_MAX_CHARS} here, on the way in, so no writer can store more.
+ * Rows arrive masked: `modules/console/console-rows.ts` builds them, and this store holds what it
+ * is handed.
  */
 
 import { create } from "zustand";
@@ -33,16 +29,12 @@ import type {
 /** The most rows the ring holds. */
 export const CONSOLE_MAX_ROWS = 5_000;
 
-/**
- * The most retained text the ring holds, as {@link estimateConsoleRowBytes}
- * counts it.
- */
+/** The most retained text the ring holds, as {@link estimateConsoleRowBytes} counts it. */
 export const CONSOLE_MAX_BYTES = 32 * 1024 * 1024;
 
 /**
- * Where a body kept on a row is cut, in UTF-16 code units: 256 KiB of ASCII
- * text. A row with a `runId` can point at the stored trace, which holds the
- * body up to `maxTraceBodyBytes`.
+ * Where a body kept on a row is cut, in UTF-16 code units (256 KiB of ASCII text). A row with a
+ * `runId` can point at the stored trace, which holds the body up to `maxTraceBodyBytes`.
  */
 export const CONSOLE_BODY_MAX_CHARS = 256 * 1024;
 
@@ -113,10 +105,9 @@ export interface ConsoleLineRow {
 }
 
 /**
- * One collection-run step, from its `step` frame. A frame is constant-size by
- * rule, so the exchange, the step's console lines and its script requests are
- * read from the stored row (`GET /runs/:id/results`) by `runId`, `iteration`
- * and `stepIndex` when the row is expanded.
+ * One collection-run step, from its `step` frame. A frame is constant-size by rule, so the
+ * exchange, the step's console lines and its script requests are read from the stored row
+ * (`GET /runs/:id/results`) by `runId`, `iteration` and `stepIndex` on expand.
  */
 export interface ConsoleStepRow {
 	kind: "step";
@@ -145,10 +136,9 @@ export type ConsoleRowInput = (
 ) & { at?: number };
 
 /**
- * A row in the ring: `id` is unique for the session, `at` is when it happened
- * (epoch ms). Display only: rows stay in append order, so `at` is not
- * monotonic, since a script request began before the Send that is listed after
- * it was appended.
+ * A row in the ring: `id` is unique for the session, `at` is when it happened (epoch ms). Display
+ * only: rows stay in append order, so `at` is not monotonic (a script request began before the Send
+ * listed after it).
  */
 export type ConsoleRow = ConsoleRowInput & { id: number; at: number };
 
@@ -162,9 +152,8 @@ interface ConsoleStoreState {
 	/** How many rows the bounds have dropped since the last clear. */
 	evictedCount: number;
 	/**
-	 * The run identity of each row that has one (a step's run, iteration and
-	 * position; a Send's run), so a replayed frame or a second
-	 * finalisation of one run appends nothing.
+	 * The run identity of each row that has one (a step's run, iteration and position; a Send's
+	 * run), so a replayed frame or a second finalisation of one run appends nothing.
 	 */
 	runKeys: ReadonlySet<string>;
 	nextId: number;
@@ -196,9 +185,8 @@ function exchangeBytes(exchange: ConsoleExchange): number {
 }
 
 /**
- * What a row's text costs, as a documented estimate in the response store's
- * measure (`estimateResponseBytes`): every string it holds at two bytes per
- * UTF-16 code unit. Numbers and flags are not counted.
+ * What a row's text costs, in the response store's measure (`estimateResponseBytes`): every string
+ * it holds at two bytes per UTF-16 code unit. Numbers and flags are not counted.
  */
 export function estimateConsoleRowBytes(row: ConsoleRowInput): number {
 	switch (row.kind) {

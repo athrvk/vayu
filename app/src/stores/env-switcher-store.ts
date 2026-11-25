@@ -8,12 +8,10 @@
 import { create } from "zustand";
 
 /**
- * Whether the title bar's environment menu is open (#2115).
- *
- * The menu is a Radix DropdownMenu, which owns its own open state unless it is
- * handed one. A toast action raised from outside the title bar (the import's
- * "Choose environment") has no other way to open it, so `TitleBar` binds the
- * menu to this flag, and the menu's own open and close writes land here too.
+ * Whether the title bar's environment menu is open (#2115). The Radix DropdownMenu owns its open
+ * state unless handed one, and a toast action from outside the title bar (the import's "Choose
+ * environment") has no other way to open it, so `TitleBar` binds the menu to this flag and the
+ * menu's own open and close writes land here too.
  */
 interface EnvSwitcherState {
 	isOpen: boolean;
