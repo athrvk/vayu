@@ -6,29 +6,24 @@
  */
 
 /**
- * Restarting the engine, from wherever the user is standing.
+ * Restarting the engine, from wherever the user is standing. Two places offer it (the Settings
+ * banner beside the setting that asked for it, and the Dock, on screen when Settings is not), and
+ * the sequence is the same either way: open a start window so the health poll reads the coming
+ * silence as a cold start, restart, wait for the daemon to come back, refetch everything the old
+ * instance answered, then lower the pending flag. A second copy would be a second place to forget
+ * the invalidate, the window or the flag.
  *
- * Two places offer the action - the Settings banner beside the setting that
- * asked for it, and the Dock, which is on screen when Settings is not - and the
- * sequence is the same either way: open a start window so the health poll reads
- * the coming silence as a cold start, restart, wait for the daemon to come back,
- * refetch everything the old instance answered, then lower the pending flag.
- * A second copy of that would be a second place for the invalidate, the window
- * or the flag to be forgotten.
+ * One restart at a time, across both places: whether one is in flight is the engine store's
+ * `engineRestarting`, not a hook instance's state, so a second click, or the other surface's
+ * button, finds it running and does nothing rather than asking the main process again (#3336).
  *
- * One restart at a time, across both places: whether one is in flight is the
- * engine store's `engineRestarting`, not state of a hook instance, so a second
- * click, or the other surface's button, finds it running and does nothing
- * rather than asking the main process again (#3336).
+ * A restart with a run live asks first, before any of the preparation below, and Cancel leaves
+ * everything as it was (#3604). Services alone do not ask: a toast names what stopped once the
+ * engine is back.
  *
- * A restart with a run live asks first, before any of the preparation below,
- * and Cancel leaves everything as it was (#3604). Services alone do not ask: a
- * toast names what stopped once the engine is back.
- *
- * Failure is a toast, not a `window.alert`. The alert this replaced blocked the
- * whole renderer on a modal the user could only dismiss, and from the Dock it
- * would interrupt whatever they were doing elsewhere; every other failure in
- * the app already reports this way.
+ * Failure is a toast, not a `window.alert`: an alert blocks the whole renderer on a modal the user
+ * can only dismiss, and from the Dock it would interrupt whatever they were doing elsewhere; every
+ * other failure in the app reports this way.
  */
 
 import { useCallback } from "react";
@@ -82,23 +77,21 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 		if (useEngineStore.getState().engineRestarting) return;
 		useEngineStore.getState().setEngineRestarting(true);
 		try {
-			// The engine the health poll is watching is about to be killed and replaced
-			// by one that repeats the whole cold start - orphan reconciliation, inbox
-			// cleanup, the page-reclaim rewrite - with the port down for all of it. Say
-			// so before it happens: without a start window the poll reads that silence
-			// as an engine that answered and stopped, and paints "Disconnected" with a
-			// transport error beside this very button's "Restarting…" (#1227).
+			// The engine the health poll is watching is about to be killed and replaced by one that
+			// repeats the whole cold start (orphan reconciliation, inbox cleanup, the page-reclaim
+			// rewrite), with the port down throughout. Say so first: without a start window the
+			// poll reads that silence as an engine that answered and stopped, and paints
+			// "Disconnected" with a transport error beside this button's "Restarting…" (#1227).
 			//
-			// Evidence, not a status. `useHealthQuery` remains the only thing that
-			// classifies, so a restart whose engine never comes back still spends the
-			// window and reaches `unreachable` with its reason, on a cold launch's
-			// budget.
+			// Evidence, not a status. `useHealthQuery` stays the only thing that classifies, so a
+			// restart whose engine never comes back still spends the window and reaches
+			// `unreachable` with its reason, on a cold launch's budget.
 			//
-			// The poll may already have a question out to the engine about to be
-			// killed, and an answer it sent while alive would report a process that no
-			// longer exists. Since a success closes the window, that straggler would
-			// close this one and hand the failures that follow back to the dead-engine
-			// path. Drop it rather than let it speak for the engine replacing it.
+			// The poll may already have a question out to the engine about to be killed, and an
+			// answer it sent while alive would report a process that no longer exists. A success
+			// closes the window, so that straggler would close this one and hand the failures that
+			// follow back to the dead-engine path: drop it rather than let it speak for the engine
+			// replacing it.
 			await queryClient.cancelQueries({ queryKey: queryKeys.health.status() });
 			// The engine about to be killed holds every service the drawer lists.
 			// A restart can come and go between two polls, so the health poll's

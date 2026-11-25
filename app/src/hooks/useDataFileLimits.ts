@@ -6,19 +6,14 @@
  */
 
 /**
- * The two engine caps a collection run's data set has to fit inside:
- * `maxScenarioDataRows` and `maxScenarioDataBytes`.
+ * The two engine caps a collection run's data set has to fit inside: `maxScenarioDataRows` and
+ * `maxScenarioDataBytes`. They live **engine-side** and are read here, not restated, for
+ * `useMonitorSettings`'s reason: the engine applies them at `POST /runs`, and a renderer copy could
+ * only drift, in the direction that hurts (refusing a file the user just raised the setting to
+ * allow, leaving no way to tell which side said no).
  *
- * They live **engine-side**, and are read here rather than restated, for the
- * same reason `useMonitorSettings` reads its pair: the engine applies them at
- * `POST /runs` and a renderer copy could only drift. It would drift in the
- * direction that hurts - refusing a file the user had just raised the setting
- * to allow - and a user who raises a limit and still cannot pick the file has
- * no way to tell which side said no.
- *
- * Read-only: both are edited from the engine settings list. Until the config
- * query resolves the module seeds stand, which are the numbers the engine
- * itself seeds.
+ * Read-only: both are edited from the engine settings list. Until the config query resolves the
+ * module seeds stand, which are the numbers the engine itself seeds.
  */
 
 import { useConfigQuery } from "@/queries";

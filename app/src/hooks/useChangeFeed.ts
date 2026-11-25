@@ -11,17 +11,15 @@ import { changeFeedService } from "@/services/change-feed-service";
 import { selectKnownEngineStatus, useEngineStore } from "@/stores";
 
 /**
- * Keep the cache in step with every write to the engine's stored rows, whoever
- * made it (issue #3420). Mounted once in `App.tsx`, beside
- * `useMcpDataInvalidation`, which stays a second producer for the in-app MCP
- * server's writes: both invalidate through the same families, and an
- * invalidation twice over is a refetch, never a wrong answer.
+ * Keep the cache in step with every write to the engine's stored rows, whoever made it (#3420).
+ * Mounted once in `App.tsx` beside `useMcpDataInvalidation`, which stays a second producer for the
+ * in-app MCP server's writes: both invalidate through the same families, and an invalidation twice
+ * over is a refetch, never a wrong answer.
  *
- * Open only while the engine is connected, as `selectKnownEngineStatus` reads
- * it: a crash the sidecar reported closes the feed before the poll confirms it
- * (#3506). The stream reconnects on its own across a dropped connection, but
- * an engine that is gone is the health poll's to notice, and a stream retrying
- * into it would only add to the noise.
+ * Open only while the engine is connected, as `selectKnownEngineStatus` reads it: a crash the
+ * sidecar reported closes the feed before the poll confirms it (#3506). The stream reconnects on
+ * its own across a dropped connection, but an engine that is gone is the health poll's to notice,
+ * and a stream retrying into it would only add noise.
  */
 export function useChangeFeed(): void {
 	const queryClient = useQueryClient();

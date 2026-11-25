@@ -6,17 +6,14 @@
  */
 
 /**
- * The command context, for a surface that renders.
+ * The command context, for a surface that renders: what the registry cannot read from a store
+ * (which tab is active and what the strip calls it, which collection that tab shows, and the dialog
+ * host the caller offers). `baseCommandContext` is the React-free version for the native-menu
+ * bridge.
  *
- * What the registry cannot read from a store: which tab is active and what the
- * strip calls it, which collection that tab shows, and the dialog host the
- * caller is offering. `baseCommandContext` is the React-free version for the
- * native-menu bridge.
- *
- * The label comes from `useTabDescriptors` - the hook the tab strip itself uses
- * - so "Close 'GET /v1/orders'" in the palette and the tab it closes cannot read
- * differently. Only the active tab is passed, so this costs one descriptor, not
- * a strip's worth.
+ * The label comes from `useTabDescriptors`, the hook the tab strip itself uses, so
+ * `"Close 'GET /v1/orders'"` in the palette and the tab it closes cannot read differently. Only the
+ * active tab is passed, so this costs one descriptor, not a strip's worth.
  */
 
 import { useMemo } from "react";

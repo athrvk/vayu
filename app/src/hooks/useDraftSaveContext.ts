@@ -6,36 +6,25 @@
  */
 
 /**
- * useDraftSaveContext - registration for the manual save-button model.
+ * Registration with the save store for the manual save-button model: the `useEntityDraft` editors'
+ * counterpart to `useSaveManager`. Without it `triggerSave` (Ctrl/Cmd+S) and `flushAll` (the quit
+ * flush, tab eviction) cannot see them, and a collection's dirty auth, description and elements
+ * would be invisible and gone on quit.
  *
- * `useSaveManager` registers the autosave editors with the save store. The
- * `useEntityDraft` editors had no counterpart: they never called
- * `registerContext`, so `triggerSave` (Ctrl/Cmd+S) and `flushAll` (the quit
- * flush, tab eviction) could not see them at all. A collection's auth, its
- * description, its scripts - all dirty, all invisible, all gone on quit.
+ * Registration only; it schedules nothing. Each editor decides when to call its own `save`:
+ * `AuthTab` and `ElementsTab` on their Save buttons, `InfoTab` when focus leaves the field (see
+ * `useEntityDraft` for why). This hook is what lets the *other* ways to save reach any of them.
  *
- * This is registration only. It does not schedule anything: each editor decides
- * when to call its own `save` - `AuthTab` on its Save button, `InfoTab` and
- * `ScriptTab` when focus leaves the field (see `useEntityDraft` for why auth is
- * the one that waits). The defect this fixes is orthogonal to that choice: the
- * *other* ways to save could not reach any of them.
+ * A failure on this path is reported through `reportFailed`, not resolved quietly. The editors
+ * render their own inline `SaveFailed` callout for a button press, but a Cmd+S from another pane,
+ * or a quit flush with nothing on screen, has no callout to read, and a resolved promise reads as a
+ * success. The registered save also resolves with its verdict (`SaveOutcome`), which is what the
+ * store counts.
  *
- * A failure on this path is reported through `reportFailed` rather than
- * resolving quietly. The editors render their own inline `SaveFailed` callout
- * for a button press, but a Cmd+S from another pane - or a quit flush with
- * nothing on screen at all - has no callout to read, and a resolved promise
- * reads as a success. Swallowing here would report "Saved" for a write that
- * failed.
- *
- * The registered save also resolves with its verdict (`SaveOutcome`), which is
- * what the store counts.
- *
- * **A stored draft keeps its context after the editor goes (#3459).** Given
- * `stored`, an editor that unmounts or switches id while dirty leaves its
- * context registered (`detach`): the Dock keeps "Unsaved changes", the tab
- * stays dirty (`isTabDirty`), and the quit flush still saves the draft. Without
- * it (the inbox reply, whose draft is component state) the edit goes with the
- * editor, as it always has.
+ * **A stored draft keeps its context after the editor goes (#3459).** Given `stored`, an editor
+ * that unmounts or switches id while dirty leaves its context registered (`detach`): the Dock keeps
+ * "Unsaved changes", the tab stays dirty (`isTabDirty`), and the quit flush still saves the draft.
+ * Without it (the inbox reply, whose draft is component state) the edit goes with the editor.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -281,16 +270,13 @@ export function useDraftSaveContext({
 		[id, discard]
 	);
 
-	// Reports the registry entry's dirty flag under this id, which is what the
-	// Dock's "Unsaved changes" is derived from (`hasPendingChanges` on a context
-	// is not consulted there - see save-store.ts). Edge-triggered on `isDirty`,
-	// and guarded on `id` staying the same: a context switching entities
-	// (collection.id changing) never reports the *previous* entity's
-	// dirty-to-clean transition as this one's save completing.
-	// Seeded `isDirty: false` regardless of the actual first render, so an
-	// editor that mounts already dirty - over a stored draft (#3459) - still
-	// reports the rising edge instead of agreeing with itself that nothing
-	// changed.
+	// Reports the registry entry's dirty flag under this id, from which the Dock's "Unsaved
+	// changes" is derived (a context's `hasPendingChanges` is not consulted there; see
+	// save-store.ts). Edge-triggered on `isDirty` and guarded on `id` staying the same, so a
+	// context switching entities (collection.id changing) never reports the *previous* entity's
+	// dirty-to-clean transition as this one's save completing. Seeded `isDirty: false` whatever the
+	// first render holds, so an editor that mounts already dirty, over a stored draft (#3459),
+	// still reports the rising edge instead of agreeing with itself that nothing changed.
 	const prevRef = useRef({ id, isDirty: false });
 	useEffect(() => {
 		updateContext(id, { hasPendingChanges: isDirty });

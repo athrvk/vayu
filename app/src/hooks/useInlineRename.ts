@@ -6,42 +6,30 @@
  */
 
 /**
- * One inline rename editor for every tree that has one.
- *
- * Four call sites (the collection and request rows, the variables tree's
- * environment rows, `ElementList`) once had three commit models: the
- * collections tree committed on a bare `e.key === "Enter"`, `ElementList` used
- * `isCommitEnter` and trimmed in its own commit, and the variables tree kept a
- * third branch. Three copies of one keyboard contract is three chances to miss
- * a case, and each had missed a different one (issue #1684).
+ * One inline rename editor for every tree that has one: the collection and request rows, the
+ * variables tree's environment rows, and `ElementList`. Separate copies of one keyboard contract
+ * each miss a different case (#1684).
  *
  * The contract this owns:
  *
- * - **Enter commits only through `isCommitEnter`** (#939, #935). An IME commits
- *   its composition buffer with Enter and that arrives as an ordinary keydown,
- *   so a bare check renames a row to a half-composed buffer; and `mod+Enter` is
- *   the app's Send chord, so a field acting on it renamed the request *and*
- *   sent it from one press.
- * - **Escape never commits.** Both tree renames called cancel on Escape and
- *   commit on blur, and cancelling unmounts the field - so the blur Escape
- *   itself causes raced the cancel and could save the name the user had just
- *   abandoned. `closedRef` closes the editor once: the blur that follows a
- *   keyboard close is the one that close caused, and it does nothing.
- * - **An empty name cancels, it never commits.** A blank rename is an
- *   abandoned one, not a request to erase the name - except where the name is
- *   itself optional and blanking it restores a default label, which is
- *   `commitEmpty` and `ElementList`'s one caller.
- * - **Focus returns to the row on a keyboard close, never on a blur.** The
- *   trees are one tab stop each and the field replaces the row's only focusable
- *   control, so F2 then Escape used to drop the user out of the tree onto
- *   `<body>`. A blur means focus has already gone where the user put it.
- *   The refocus waits for the row to stop renaming rather than running inline:
- *   focusing the row while the field is still mounted *blurs* the field, and
- *   that blur commits.
- * - **The field opens with the whole name selected** (#3450), as Finder,
- *   Explorer and VS Code do, so typing replaces the name rather than appending
- *   to it. The caller's `autoFocus` focuses the field on mount, which is what
- *   fires `onFocus`.
+ * - **Enter commits only through `isCommitEnter`** (#939, #935). An IME commits its composition
+ *   buffer with Enter, which arrives as an ordinary keydown, so a bare check renames a row to a
+ *   half-composed buffer; and `mod+Enter` is the app's Send chord, so a field acting on it would
+ *   rename the request *and* send it from one press.
+ * - **Escape never commits.** Cancelling unmounts the field, so the blur Escape itself causes races
+ *   the cancel and could save the name the user just abandoned. `closedRef` closes the editor once:
+ *   the blur that follows a keyboard close is the one that close caused, and it does nothing.
+ * - **An empty name cancels, it never commits.** A blank rename is an abandoned one, not a request
+ *   to erase the name, except where the name is itself optional and blanking it restores a default
+ *   label: `commitEmpty`, `ElementList`'s one caller.
+ * - **Focus returns to the row on a keyboard close, never on a blur.** The trees are one tab stop
+ *   each and the field replaces the row's only focusable control, so F2 then Escape would otherwise
+ *   drop the user out of the tree onto `<body>`; a blur means focus has already gone where the user
+ *   put it. The refocus waits for the row to stop renaming rather than running inline: focusing the
+ *   row while the field is still mounted *blurs* the field, and that blur commits.
+ * - **The field opens with the whole name selected** (#3450), as Finder, Explorer and VS Code do,
+ *   so typing replaces the name rather than appending to it. The caller's `autoFocus` focuses the
+ *   field on mount, which is what fires `onFocus`.
  */
 
 import { useEffect, useRef, useState } from "react";

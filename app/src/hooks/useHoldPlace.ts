@@ -6,26 +6,22 @@
  */
 
 /**
- * Keep the reader's place when a window grows above the rows they are looking
- * at (#3675).
+ * Keep the reader's place when a window grows above the rows they are looking at (#3675). An
+ * upward-growing window mounts rows ahead of the first one, pushing everything the reader sees down
+ * the scroller. Chromium's scroll anchoring does not hold the view at `scrollTop` 0, so the
+ * sentinel that asked for the growth stays in view, its observer has nothing new to report, and the
+ * window stops at one step however much is held. Calling the returned function just before the
+ * growth records where the list's first row sits; the commit that follows moves the scroller by
+ * however far that row went, so the sentinel leaves the viewport and the next scroll up reaches it
+ * again.
  *
- * A window that grows upward mounts rows ahead of the first one, which pushes
- * everything the reader sees down the scroller. Chromium's scroll anchoring does
- * not hold the view at `scrollTop` 0, so the sentinel that asked for the growth
- * stays in view after it, its observer has nothing new to report, and the window
- * stops at one step however much is held. Calling the returned function just
- * before the growth records where the list's first row sits; the commit that
- * follows moves the scroller by however far that row went, so the sentinel
- * leaves the viewport and the next scroll up reaches it again.
+ * The first row is measured by where it *is*, not by how much the scroll height grew: a window at
+ * its cap gives rows up at the far end as it grows, so the height added above is not the height
+ * gained, and where the browser did anchor the view the row has not moved and nothing is added
+ * twice.
  *
- * The first row is measured by where it *is* rather than by how much the scroll
- * height grew: a window at its cap gives rows up at the far end as it grows, so
- * the height added above is not the height gained, and where the browser did
- * anchor the view the row has not moved and nothing is added twice.
- *
- * Call it before the component's own scroll effects: an effect that pins the
- * list to its end runs after this one and wins. The first row is the first
- * child of the first `ul` in @p scroller.
+ * Call it before the component's own scroll effects: an effect that pins the list to its end runs
+ * after this one and wins. The first row is the first child of the first `ul` in @p scroller.
  */
 
 import { type RefObject, useCallback, useLayoutEffect, useRef } from "react";

@@ -6,53 +6,38 @@
  */
 
 /**
- * useEntityDraft - the manual save-button model, in one place.
+ * The manual save-button model, in one place. Two save models exist in this app: `useSaveManager`
+ * is the autosave one the request builder uses; this is the other, an editable draft, a Save button
+ * gated on `isDirty`, and a Reset that throws the draft away. `AuthTab` and `ElementsTab` are its
+ * button users. `InfoTab` takes the draft, the resync and the mutation reset from here and renders
+ * no Save button: it commits when focus leaves the field, like the request builder, and reaches the
+ * discard path through `adopt`, so `reset` has fewer callers than `draft`.
  *
- * Two save models exist in this app. `useSaveManager` is the autosave one the
- * request builder uses. This is the other one: an editable draft, a Save button
- * gated on `isDirty`, and a Reset that throws the draft away. `AuthTab` and
- * `ElementsTab` are its button users.
+ * **The draft lives in `entity-draft-store`, not in the component (#3459).** `Shell.tsx` mounts
+ * only the tab on screen, so a draft in component state would be thrown away by a look at a
+ * request. The store holds it by `entityKey`, so a remount, or a switch back to an entity shown
+ * earlier, picks up where the edit was; `useDraftSaveContext` keeps the save reachable meanwhile.
  *
- * `InfoTab` takes the draft, the resync and the mutation reset from here and
- * renders no Save button at all - it commits when focus leaves the field, like
- * the request builder. `reset` therefore has fewer callers than `draft`;
- * `InfoTab` reaches the discard path through `adopt`.
+ * **Why auth keeps a button (#446).** Not because a credential is grander than a description (the
+ * request builder autosaves its own auth), but because a blur inside `AuthFields` is not a
+ * completion signal: an OAuth 2.0 config with Advanced open renders 20 focus stops, 9 of them
+ * non-value controls (pickers, switches, the reveal toggle, Get Token), and clicking reveal to
+ * check a half-typed password fires `focusout` while the draft is dirty. The fields only make sense
+ * written together. `ElementsTab` keeps one on the same basis (see its header). If collection auth
+ * is ever to persist by itself, the mechanism is `useSaveManager`'s debounce, not a blur.
  *
- * **The draft lives in `entity-draft-store`, not in the component (#3459).**
- * `Shell.tsx` mounts only the tab on screen, so a draft in component state was
- * thrown away by a look at a request. The store holds it by `entityKey`, so a
- * remount, or a switch back to an entity shown earlier, picks up where the
- * edit was; `useDraftSaveContext` keeps the save reachable meanwhile.
- *
- * **Why auth alone kept the button (#446).** Not because a credential is
- * grander than a script - the request builder autosaves its own auth. Because a
- * blur inside `AuthFields` is not a completion signal: an OAuth 2.0 config with
- * Advanced open renders 20 focus stops, 9 of them non-value controls (pickers,
- * switches, the reveal toggle, Get Token), and clicking reveal to check a
- * half-typed password fires `focusout` while the draft is dirty. The fields
- * only make sense written together. A script tab has exactly one focus stop, so
- * leaving it means the same thing leaving a description does. If collection
- * auth is ever to persist by itself, the mechanism is `useSaveManager`'s
- * debounce, not a blur - a different change from this one.
- *
- * The mechanism was hand-rolled once per tab (`AuthTab`, `InfoTab`,
- * `ScriptTab`) with the same five moving parts each time, and the copies had
- * already drifted: two cleared the save mutation on a collection switch and one
- * did not, so a failure on one collection kept claiming to have failed on the
- * next. Folding the mutation reset into the hook is the point - it makes that
+ * Folding the save mutation's reset into the hook is the point: hand-rolled copies of this
+ * mechanism drift (one cleared the mutation on a collection switch and another did not, so a
+ * failure on one collection kept claiming to have failed on the next), and the hook makes that
  * omission unrepresentable rather than merely absent.
  *
- * **A dirty draft is never silently overwritten (#1437).** The resync used to
- * fire on every change to `value` regardless of `isDirty`, so an MCP
- * `update_collection` landing while a tab was mid-edit replaced the user's
- * unsaved text with whatever the agent wrote. Now a resync only adopts the new
- * value while the draft is clean; while it is dirty, the incoming value is
- * held in `externalValue` instead of overwriting `draft`, and the caller
- * decides what to show. `baseline` - the value the draft last agreed with the
- * server on - is exposed alongside it so a caller with more than one field
- * (`InfoTab`'s `{name, description}`) can diff `draft` and `externalValue`
- * against it and merge per key, rather than treating the whole draft as one
- * conflict.
+ * **A dirty draft is never silently overwritten (#1437).** A resync adopts the new value only while
+ * the draft is clean; while it is dirty the incoming value is held in `externalValue` instead of
+ * overwriting `draft` (an MCP `update_collection` landing mid-edit would otherwise replace the
+ * user's unsaved text), and the caller decides what to show. `baseline`, the value the draft last
+ * agreed with the server on, is exposed beside it so a caller with more than one field (`InfoTab`'s
+ * `{name, description}`) can diff `draft` and `externalValue` against it and merge per key, rather
+ * than treat the whole draft as one conflict.
  *
  * ```ts
  * const { draft, setDraft, isDirty, reset } = useEntityDraft({
