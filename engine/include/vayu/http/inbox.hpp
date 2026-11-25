@@ -140,17 +140,18 @@ using LocalAddressSource = std::function<std::vector<std::string> ()>;
  * silently answered as 200, or a `bind` typo silently answered on loopback, is
  * a listener doing something other than what its caller asked for, and the
  * caller has no way to see it. The one deliberate exception is absence - every
- * field is optional, and an empty body starts a loopback inbox that answers
- * 200 with no body.
+ * field is optional, and an empty body starts a loopback inbox that answers 200
+ * with no body.
  *
  * A non-loopback `bind` additionally requires `confirmNonLoopback: true`: the
- * engine's management API has no route auth and sends no CORS header, so binding wide is a
- * trust decision the caller states rather than one a default makes.
+ * engine's management API has no route auth and sends no CORS header, so
+ * binding wide is a trust decision the caller states rather than one a default
+ * makes.
  *
  * The parsed request is the *value*, not an out-parameter, for the reason
  * `parse_mock_start` gives: an empty return meaning success reads backwards,
  * and a half-filled `InboxStartRequest` is unreachable once the request only
- * exists when the payload was accepted (issue #954).
+ * exists when the payload was accepted (#954).
  */
 std::expected<InboxStartRequest, InboxParseError> parse_inbox_start (
 const nlohmann::json& json);
@@ -199,7 +200,7 @@ nlohmann::json inbox_info_json (const InboxInfo& info);
 nlohmann::json inbox_capture_json (const vayu::db::InboxRequest& capture);
 
 /**
- * Owns the engine's webhook inbox listeners (issue #480).
+ * Owns the engine's webhook inbox listeners (#480).
  *
  * Each inbox is an independent `httplib::Server` on its own thread that accepts
  * any method on any path, records what arrived, and answers the configured
@@ -244,11 +245,10 @@ class InboxManager {
     /**
      * Stop the listener, drop the record, and delete its captures.
      *
-     * The counterpart `stop()` deliberately is not: a stopped inbox stays
-     * readable, and before this existed that made every stopped inbox a
-     * permanent row (issue #553). The captures die *with* the record here, by
-     * explicit user intent, which is the honest resolution of the objection
-     * that kept delete out of `stop()`.
+     * What `stop()` deliberately is not: a stopped inbox stays readable, so
+     * without this every stopped inbox would be a permanent row (#553). The
+     * captures go *with* the record, by explicit user intent; `stop()` keeps
+     * them.
      *
      * A running inbox is stopped rather than refused - one call, because the
      * caller's intent is "make it gone". That is safe rather than racy because
@@ -293,16 +293,16 @@ class InboxManager {
     };
 
     /**
-     * Read the current response, run @p merge against it, and write the
-     * result back, all under one acquisition of the manager's locks - the
-     * same read-merge-write-in-one-lock-scope `Database::with_lock` gives the
-     * database-backed resources (issue #1440), closed here for the one
-     * canned response that lives in memory rather than a row (issue #1454).
+     * Read the current response, run @p merge against it, and write the result
+     * back, all under one acquisition of the manager's locks - the same
+     * read-merge-write-in-one-lock-scope `Database::with_lock` gives the
+     * database-backed resources (#1440), closed here for the one canned
+     * response that lives in memory rather than a row (#1454).
      *
      * @param before_write Test seam, invoked with the merged response staged
-     *        and immediately before it is written, still inside the lock
-     *        scope; see `update_collection_response` in collections.cpp for
-     *        why it exists.
+     *        and immediately before it is written, still inside the lock scope;
+     *        see `update_collection_response` in collections.cpp for why it
+     *        exists.
      */
     UpdateResponseResult update_response (const std::string& inbox_id,
     const ResponseMergeFn& merge,
