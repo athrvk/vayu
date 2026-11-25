@@ -6,21 +6,17 @@
  */
 
 /**
- * @brief MCP resources - read-only Vayu data an agent can read and attach as
- *        context. Static resources expose the current lists (runs, collections,
- *        environments, engine config); a templated resource
- *        `vayu://run/{runId}/report` exposes any run's full report, with a list
- *        callback (enumerate recent runs) and a completion callback (autocomplete
- *        run IDs). `vayu://scripting/completions` re-serves the engine's own
- *        script-sandbox surface so an agent discovers it the way the editor does,
- *        instead of from a prose copy that drifts (issue #233), and
- *        `vayu://scripting/types` serves that same surface's TypeScript
- *        declarations - the signatures the names alone do not carry.
- *        `vayu://elements/kinds` re-serves the engine's element registry
- *        catalogue the same way (issue #1517), so an agent building an
- *        `elements` list reads the current kinds and config schemas rather
- *        than guessing them.
- *        All read-only; no allowlist/caps apply. See docs/engine/mcp/resources-and-prompts.md.
+ * @brief MCP resources: read-only Vayu data an agent can read and attach as context. Static
+ *        resources expose the current lists (runs, collections, environments, engine config); a
+ *        templated resource `vayu://run/{runId}/report` exposes any run's full report, with a list
+ *        callback (enumerate recent runs) and a completion callback (autocomplete run IDs).
+ *        `vayu://scripting/completions` re-serves the engine's own script-sandbox surface so an
+ *        agent discovers it the way the editor does, instead of from a prose copy that drifts
+ *        (#233), and `vayu://scripting/types` serves that same surface's TypeScript declarations:
+ *        the signatures the names alone do not carry. `vayu://elements/kinds` re-serves the
+ *        engine's element registry catalogue the same way (#1517), so an agent building an
+ *        `elements` list reads the current kinds and config schemas rather than guessing them. All
+ *        read-only; no allowlist/caps apply. See docs/engine/mcp/resources-and-prompts.md.
  */
 
 import {
@@ -63,13 +59,12 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		name: "runs",
 		uri: "vayu://runs",
 		title: "Runs",
-		// Says "100" because that is what the reader asks for
-		// (`EngineClient.listRuns`'s default page). The content's
-		// `pagination.total` / `hasMore` carry the real count, but an agent reads
-		// the description first: a workspace with more than 100 runs must not have
-		// last week's baseline presented as absent. A resource takes no arguments,
-		// so the filters and paging `list_runs` accepts are named here as the way
-		// to reach a run this page does not carry.
+		// Says "100" because that is what the reader asks for (`EngineClient.listRuns`'s default
+		// page). The content's `pagination.total` / `hasMore` carry the real count, but an agent
+		// reads the description first: a workspace with more than 100 runs must not have last
+		// week's baseline presented as absent. A resource takes no arguments, so the filters and
+		// paging `list_runs` accepts are named here as the way to reach a run this page does not
+		// carry.
 		description:
 			"The most recent 100 runs (single requests and load tests), newest first. " +
 			"Read `pagination.total` / `pagination.hasMore` in the content for the full count, " +
@@ -162,12 +157,11 @@ export const STATIC_RESOURCES: StaticResourceDef[] = [
 		name: "scripting-types",
 		uri: "vayu://scripting/types",
 		title: "Script sandbox type declarations",
-		// Beside the completion list rather than instead of it: the completions
-		// answer "what is there", these answer "what does it take and what does
-		// it return". An agent writing `pm.expect(...)` chains or reading
-		// `pm.response.to.have` needs the signature, and the alternative to
-		// serving the engine's own `.d.ts` is prose that drifts - the drift
-		// issue #233 recorded for the completion list.
+		// Beside the completion list rather than instead of it: the completions answer "what is
+		// there", these answer "what does it take and what does it return". An agent writing
+		// `pm.expect(...)` chains or reading `pm.response.to.have` needs the signature, and the
+		// alternative to serving the engine's own `.d.ts` is prose that drifts (#233 recorded the
+		// drift for the completion list).
 		description:
 			"The engine's TypeScript declarations (.d.ts) for the pre-request / test script " +
 			"sandbox - the same text the app's editor feeds to its TypeScript worker, so every " +
@@ -208,17 +202,16 @@ export interface ScriptingSurface {
 }
 
 /**
- * Reduce `GET /scripting/completions` to the three fields that mean something
- * outside an editor. `insertText`, `insertTextRules`, `sortText`, `filterText`
- * and `kind` are Monaco's - snippet placeholders (`${1:secret}`) and a
- * `CompletionItemKind` enum an agent has no use for.
+ * Reduce `GET /scripting/completions` to the three fields that mean something outside an editor.
+ * `insertText`, `insertTextRules`, `sortText`, `filterText` and `kind` are Monaco's: snippet
+ * placeholders (`${1:secret}`) and a `CompletionItemKind` enum an agent has no use for.
  *
- * Every entry survives, snippets included: dropping them would mean testing
- * `kind === 28`, which is exactly the copied-constant drift this resource exists
- * to avoid, and a snippet's label plus documentation still names a capability.
+ * Every entry survives, snippets included: dropping them would mean testing `kind === 28`, which is
+ * exactly the copied-constant drift this resource exists to avoid, and a snippet's label plus
+ * documentation still names a capability.
  *
- * Throws rather than returning a partial surface - an agent that reads a
- * silently-truncated API list concludes the sandbox cannot do what it can.
+ * Throws rather than returning a partial surface: an agent that reads a silently-truncated API list
+ * concludes the sandbox cannot do what it can.
  */
 export function projectScriptingSurface(payload: unknown): ScriptingSurface {
 	const root =
@@ -253,16 +246,14 @@ export interface ScriptingTypes {
 }
 
 /**
- * Reduce `GET /scripting/types` to the declarations and the version stamps
- * around them.
+ * Reduce `GET /scripting/types` to the declarations and the version stamps around them.
  *
  * Throws on anything but a non-empty `typeDefinitions` string, for the reason
- * {@link projectScriptingSurface} throws: half a type surface is worse than
- * none, because an agent reads a missing declaration as "the sandbox has no
- * such call" and writes around a capability that is there. An empty string is
- * one of those failures rather than an empty sandbox - the engine generates
- * these from the same table the completions come from, so it never legitimately
- * produces nothing.
+ * {@link projectScriptingSurface} throws: half a type surface is worse than none, because an agent
+ * reads a missing declaration as "the sandbox has no such call" and writes around a capability that
+ * is there. An empty string is one of those failures rather than an empty sandbox: the engine
+ * generates these from the same table the completions come from, so it never legitimately produces
+ * nothing.
  */
 export function projectScriptingTypes(payload: unknown): ScriptingTypes {
 	const root =
@@ -324,15 +315,14 @@ export function projectElementKinds(payload: unknown): ElementKindEntry[] {
 }
 
 /**
- * What a run recorded, through the projection the run tools apply (#1809):
- * the resources and the prompts are a second read path to the same records.
- * The engine read and the secret lookups go out together.
+ * What a run recorded, through the projection the run tools apply (#1809): the resources and the
+ * prompts are a second read path to the same records. The engine read and the secret lookups go out
+ * together.
  *
- * Both are settled before either failure is thrown: with the engine down the
- * read usually rejects first, and the outage-led wording of a failed lookup
- * (#2854) would otherwise lose to a bare `fetch failed`. A lookup failure that
- * is not an outage yields to the read's own failure, which is the more telling
- * of the two.
+ * Both are settled before either failure is thrown: with the engine down the read usually rejects
+ * first, and the outage-led wording of a failed lookup (#2854) would otherwise lose to a bare
+ * `fetch failed`. A lookup failure that is not an outage yields to the read's own failure, which is
+ * the more telling of the two.
  */
 export async function withheldRunOutput(
 	ctx: ToolContext,

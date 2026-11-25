@@ -49,22 +49,20 @@ function parseHostname(candidate: string): string | null {
 }
 
 /**
- * Whether `url` still carries a `{{template}}` in the part that decides the
- * host - the authority: everything between the scheme and the first `/`, `?`
- * or `#`, which is where a userinfo, a hostname and a port live.
+ * Whether `url` still carries a `{{template}}` in the part that decides the host: the authority,
+ * everything between the scheme and the first `/`, `?` or `#`, which is where a userinfo, a
+ * hostname and a port live.
  *
- * The distinction is load-bearing since `run_request` gained a data row (issue
- * #601). A `{{data.id}}` in the *path* is not an unresolved variable waiting on
- * a client - it survives `POST /compose` deliberately, so the engine can bind
- * the row against it - and refusing the whole URL for one would make the row
- * unusable in the position it is most often written. What the allowlist decides
- * is the **host**, and a template after the authority cannot change it: no value
- * substituted into a path, query or fragment moves the request to another
- * server.
+ * The distinction is load-bearing for `run_request`'s data row (#601). A `{{data.id}}` in the
+ * *path* is not an unresolved variable waiting on a client: it survives `POST /compose`
+ * deliberately, so the engine can bind the row against it, and refusing the whole URL for one would
+ * make the row unusable in the position it is most often written. What the allowlist decides is the
+ * **host**, and a template after the authority cannot change it: no value substituted into a path,
+ * query or fragment moves the request to another server.
  *
- * A template *inside* the authority is refused exactly as before, which is the
- * case that matters: `https://{{host}}/x` names a target nothing here can know,
- * and a gate that guessed would be a gate.
+ * A template *inside* the authority is refused exactly as before, which is the case that matters:
+ * `https://{{host}}/x` names a target nothing here can know, and a gate that guessed would be a
+ * gate.
  */
 function authorityHasTemplate(url: string): boolean {
 	const authority = authorityOf(url);
@@ -89,12 +87,11 @@ function authorityOf(url: string): string {
 const TEMPLATE = /\{\{([^{}]+)\}\}/g;
 
 /**
- * Whether @p url's authority holds templates and every one of them is a name
- * composition deferred past a pre-request script (`deferredVariables`, #2521).
- * Such a host is the script's to choose, so nothing here can know it: the
- * engine judges it, once resolved, against the `targetPolicy` every send
- * carries (`asMcpSend`). A template composition could not answer is still
- * unknown to everyone, and refused here as before.
+ * Whether @p url's authority holds templates and every one of them is a name composition deferred
+ * past a pre-request script (`deferredVariables`, #2521). Such a host is the script's to choose, so
+ * nothing here can know it: the engine judges it, once resolved, against the `targetPolicy` every
+ * send carries (`asMcpSend`). A template composition could not answer is still unknown to everyone,
+ * and refused here as before.
  */
 function authorityAwaitsScript(url: string, deferred: ReadonlySet<string>): boolean {
 	const authority = authorityOf(url);
@@ -128,16 +125,15 @@ export function extractHost(url: string): string | null {
 	if (authorityHasTemplate(url)) return null;
 	const parsed = parseHostname(url);
 	if (parsed) return parsed;
-	// A scheme-less "localhost:3000/api" does not throw: "localhost" is a legal
-	// scheme, so it parses with an empty hostname. An empty hostname is therefore
-	// as unparsed as a throw, and the scheme-less retry has to cover both cases
-	// or every host:port URL is refused as "unresolvable" - the shape the user
-	// reads as a variable-resolution bug.
+	// A scheme-less "localhost:3000/api" does not throw: "localhost" is a legal scheme, so it
+	// parses with an empty hostname. An empty hostname is therefore as unparsed as a throw, and the
+	// scheme-less retry has to cover both cases or every host:port URL is refused as
+	// "unresolvable", the shape the user reads as a variable-resolution bug.
 	//
-	// Not for input carrying an explicit "://" though: there the empty hostname
-	// is the URL's own answer ("file:///etc/passwd" is host-less), and prefixing
-	// a scheme would turn it into the host "file" - a target the allowlist could
-	// then be talked into permitting. Unknown hosts stay refused.
+	// Not for input carrying an explicit "://" though: there the empty hostname is the URL's own
+	// answer ("file:///etc/passwd" is host-less), and prefixing a scheme would turn it into the
+	// host "file", a target the allowlist could then be talked into permitting. Unknown hosts stay
+	// refused.
 	if (url.includes("://")) return null;
 	return parseHostname(`http://${url}`);
 }
@@ -317,16 +313,14 @@ function isPrivateIpv4(address: string): boolean {
 const IPV6_METADATA_ADDRESS = "fd00:ec2::254";
 
 /**
- * Whether `host` is a link-local address, or the one IPv6 cloud-metadata
- * address that sits outside link-local space. Same canonical-form input as
- * `isPrivateHost`; this is deliberately a separate predicate so that one stays
- * the mirror `host-locality.conformance.test.ts` pins.
+ * Whether `host` is a link-local address, or the one IPv6 cloud-metadata address that sits outside
+ * link-local space. Same canonical-form input as `isPrivateHost`; this is deliberately a separate
+ * predicate so that one stays the mirror `host-locality.conformance.test.ts` pins.
  *
- * These hosts count as private for "is this the user's own network" (the
- * dialog's label) but are the ones an agent could aim a scrape at to read
- * credentials: 169.254.169.254 is the metadata service on AWS, GCP and Azure,
- * and `fd00:ec2::254` is AWS's IPv6 spelling of it. Only that one address is
- * named from fc00::/7; the rest of the block is ordinary LAN space.
+ * These hosts count as private for "is this the user's own network" (the dialog's label) but are
+ * the ones an agent could aim a scrape at to read credentials: 169.254.169.254 is the metadata
+ * service on AWS, GCP and Azure, and `fd00:ec2::254` is AWS's IPv6 spelling of it. Only that one
+ * address is named from fc00::/7; the rest of the block is ordinary LAN space.
  */
 export function isLinkLocalHost(host: string): boolean {
 	if (!host.startsWith("[") || !host.endsWith("]")) {
@@ -338,30 +332,27 @@ export function isLinkLocalHost(host: string): boolean {
 }
 
 /**
- * Enforce the allowlist against a run's **monitor** endpoint - the second host
- * a monitored run contacts, which is not the target's and is not covered by the
- * check on it.
+ * Enforce the allowlist against a run's **monitor** endpoint: the second host a monitored run
+ * contacts, which is not the target's and is not covered by the check on it.
  *
- * **The decision, stated rather than implied:** a loopback or private-network
- * monitor URL is exempt from the allowlist; a public one is not. The allowlist
- * exists to stop an agent generating traffic against third parties it was never
- * pointed at, and a private address, link-local aside, is the user's own network -
- * which is also the whole feature, since the endpoint a load run wants beside it
- * is the target's own `localhost:9100`. Requiring that host to be allowlisted
- * would make the capability unreachable in the case it was built for.
+ * **The decision, stated rather than implied:** a loopback or private-network monitor URL is exempt
+ * from the allowlist; a public one is not. The allowlist exists to stop an agent generating traffic
+ * against third parties it was never pointed at, and a private address, link-local aside, is the
+ * user's own network, which is also the whole feature, since the endpoint a load run wants beside
+ * it is the target's own `localhost:9100`. Requiring that host to be allowlisted would make the
+ * capability unreachable in the case it was built for.
  *
- * **The exception (#2370):** link-local addresses (169.254.0.0/16, fe80::/10)
- * and `fd00:ec2::254` are not exempt. They are where cloud metadata services
- * answer, so a scrape of one is a credential read, not the user's exporter.
- * They go through the allowlist like a public host.
+ * **The exception (#2370):** link-local addresses (169.254.0.0/16, fe80::/10) and `fd00:ec2::254`
+ * are not exempt. They are where cloud metadata services answer, so a scrape of one is a credential
+ * read, not the user's exporter. They go through the allowlist like a public host.
  *
- * A public monitor host is a request to some third party at one GET per scrape
- * for the life of the run, which is exactly what the allowlist is for, so it
- * goes through the same check the target URL does.
+ * A public monitor host is a request to some third party at one GET per scrape for the life of the
+ * run, which is exactly what the allowlist is for, so it goes through the same check the target URL
+ * does.
  *
- * The engine holds `monitor.url` to the run's `targetPolicy` as well (#3121)
- * and knows no exemption, so `asMcpSend` lists an exempt host there
- * ({@link exemptMonitorHost}); a host this gate refuses is never added.
+ * The engine holds `monitor.url` to the run's `targetPolicy` as well (#3121) and knows no
+ * exemption, so `asMcpSend` lists an exempt host there ({@link exemptMonitorHost}); a host this
+ * gate refuses is never added.
  */
 export function checkMonitorHost(url: string, config: McpSafetyConfig, host: McpHost): GuardResult {
 	const monitorHost = extractHost(url);
@@ -398,15 +389,14 @@ export function exemptMonitorHost(monitor: unknown): string | undefined {
 }
 
 /**
- * The duration *grammar* only: "60s", "5m", "1h", "500ms", or a bare number of
- * seconds, into seconds. Null when the text is not a duration at all.
+ * The duration *grammar* only: "60s", "5m", "1h", "500ms", or a bare number of seconds, into
+ * seconds. Null when the text is not a duration at all.
  *
- * Mirrors the engine's `parse_duration_ms`
- * (`engine/include/vayu/core/load_pacing.hpp`): the same units, the same
- * bare-number-is-seconds rule, and the same acceptance of zero. They must
- * agree, or a duration this cap reads as 5 minutes runs for some other length.
- * Zero belongs here because `rampUpDuration: "0"` is a legal instant ramp - the
- * range rule that rejects a zero *run* is `parseDurationSeconds` below.
+ * Mirrors the engine's `parse_duration_ms` (`engine/include/vayu/core/load_pacing.hpp`): the same
+ * units, the same bare-number-is-seconds rule, and the same acceptance of zero. They must agree, or
+ * a duration this cap reads as 5 minutes runs for some other length. Zero belongs here because
+ * `rampUpDuration: "0"` is a legal instant ramp; the range rule that rejects a zero *run* is
+ * `parseDurationSeconds` below.
  */
 function parseDurationGrammar(value: string | number | undefined): number | null {
 	if (value === undefined || value === null) return null;
@@ -525,13 +515,12 @@ export const ENGINE_LOAD_DEFAULTS = {
 export type LoadDefaultsTable = Readonly<Partial<Record<LoadMode, EngineLoadDefaults>>>;
 
 /**
- * The mode whose strategy the engine runs for these params, mirroring
- * `LoadStrategy::create` (`load_strategy.cpp`): an absent `mode` is the
- * engine's own `constant_rps` (`start_load_run` always sends one, resolving a
- * mode-less run with a rate to `constant_rps` as the engine would, so only a
- * direct caller of these guards meets that case), and an unrecognised mode is a
- * constant run, or an iterations run when it carries `iterations`. Keying on
- * the mode string alone would leave that last case a way past the cap.
+ * The mode whose strategy the engine runs for these params, mirroring `LoadStrategy::create`
+ * (`load_strategy.cpp`): an absent `mode` is the engine's own `constant_rps` (`start_load_run`
+ * always sends one, resolving a mode-less run with a rate to `constant_rps` as the engine would, so
+ * only a direct caller of these guards meets that case), and an unrecognised mode is a constant
+ * run, or an iterations run when it carries `iterations`. Keying on the mode string alone would
+ * leave that last case a way past the cap.
  */
 export function engineLoadMode(params: LoadRunParams): LoadMode {
 	const mode = params.mode ?? "constant_rps";
