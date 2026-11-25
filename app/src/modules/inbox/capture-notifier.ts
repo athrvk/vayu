@@ -6,31 +6,26 @@
  */
 
 /**
- * Telling the user a webhook arrived while they were elsewhere (issue #1388).
+ * Telling the user a webhook arrived while they were elsewhere (#1388).
  *
- * Every other system notification the app posts is terminal and rare: a run
- * ends once, an update lands once, a sign-in completes once. A capture is
- * neither. The source sets the rate, and a source that retries can deliver
+ * Every other system notification is terminal and rare (a run ends once, an update lands once, a
+ * sign-in completes once). A capture's rate is the source's, and a retrying source can deliver
  * hundreds a minute, so this is the one event with two gates and a window:
  *
  * - The global opt-in, which `systemNotify.post` reads for every kind.
- * - This inbox's own toggle, read here, off by default even when the global
- *   one is on. A busy inbox cannot be made loud by the setting the user turned
- *   on for run results.
- * - A coalescing window, so a burst is one notification that says how many
- *   arrived rather than one notification each.
+ * - This inbox's own toggle, read here, off by default even when the global one is on, so the
+ *   setting turned on for run results cannot make a busy inbox loud.
+ * - A coalescing window, so a burst is one notification saying how many arrived.
  *
- * The window is trailing rather than leading, which is the whole reason
- * `createThrottledBatcher` grew the option: committing the first capture at
- * once and the rest on the timer would post twice for one burst, and the issue
- * allows one. The cost is that a lone capture is announced a window late -
- * immaterial for a notification whose reader is by definition in another
- * application, and the price of "twenty captures produce one notification
+ * The window is trailing, not leading, which is why `createThrottledBatcher` has the option:
+ * posting the first capture at once and the rest on the timer would post twice for one burst, and
+ * the issue allows one. A lone capture is announced a window late, immaterial for a reader who is
+ * by definition in another application, and the price of "twenty captures produce one notification
  * saying twenty".
  *
- * The window is not a setting. It is a property of what an OS notification is
- * for, not of how fast this user's webhook source is, and #1358's rule was that
- * the shared notification settings say nothing about the inbox at all.
+ * The window is not a setting: it is a property of what an OS notification is for, not of this
+ * user's webhook source, and #1358's rule is that the shared notification settings say nothing
+ * about the inbox.
  */
 
 import { createThrottledBatcher, type ThrottledBatcher } from "@/services/throttled-batcher";
@@ -40,12 +35,10 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 import type { InboxCapture } from "@/types";
 
 /**
- * How long one inbox's captures are gathered before a notification is posted.
- *
- * Ten seconds because the reader is in another window: the delay costs them
- * nothing, and a shorter window would split an ordinary retry storm across
- * several notifications, which is the noise the per-inbox toggle exists to
- * prevent in the first place.
+ * How long one inbox's captures are gathered before a notification posts. Ten seconds because the
+ * reader is in another window, so the delay costs nothing, and a shorter window would split an
+ * ordinary retry storm across several notifications, the noise the per-inbox toggle exists to
+ * prevent.
  */
 export const INBOX_CAPTURE_NOTIFY_WINDOW_MS = 10_000;
 
@@ -76,11 +69,8 @@ export function captureNotification(batch: readonly InboxCapture[]): {
 }
 
 /**
- * Watch one inbox.
- *
- * Per inbox rather than one notifier for all of them: the window is a rate
- * limit on how often *this* inbox may interrupt, and a shared one would let a
- * chatty inbox spend the quiet one's turn.
+ * Watch one inbox. Per inbox, not one notifier for all: the window limits how often *this* inbox
+ * may interrupt, and a shared one would let a chatty inbox spend the quiet one's turn.
  */
 export function createCaptureNotifier(inboxId: string): CaptureNotifier {
 	const batcher: ThrottledBatcher<InboxCapture> = createThrottledBatcher<InboxCapture>(
@@ -110,12 +100,10 @@ export function createCaptureNotifier(inboxId: string): CaptureNotifier {
 			batcher.push(capture);
 		},
 		dispose(): void {
-			// Discarded rather than flushed. A stream ends because the user
-			// switched inbox, closed the tab or quit - all of which happen in a
-			// focused window, where a notification is suppressed anyway - or
-			// because the toggle went off, the engine stopped the inbox, or the
-			// stream cap evicted it, and none of those three is an inbox to
-			// announce a capture for either.
+			// Discarded, not flushed. A stream ends because the user switched inbox, closed the tab
+			// or quit (all in a focused window, where a notification is suppressed anyway), or
+			// because the toggle went off, the engine stopped the inbox or the stream cap evicted
+			// it, none of which leaves an inbox to announce a capture for.
 			batcher.discard();
 		},
 	};

@@ -6,45 +6,38 @@
  */
 
 /**
- * The Logs tab's list (#3635): the held lines, oldest first, in the tab's own
- * scroller.
+ * The Logs tab's list (#3635): the held lines, oldest first, in the tab's own scroller.
  *
- * **Follow is the scroll position.** Scrolling off the end turns it off, and
- * reaching the end turns it on again - unless the list is detached from the tail
- * (`logs-store.ts`), where reaching the end of what was paged in must not throw
- * the reader to the newest lines; only the Follow control does that. After a
- * jump, "Search newer" below the last row pages towards them, and the page that
+ * **Follow is the scroll position.** Scrolling off the end turns it off and reaching the end turns
+ * it on again, unless the list is detached from the tail (`logs-store.ts`), where reaching the end
+ * of what was paged in must not throw the reader to the newest lines; only the Follow control does
+ * that. After a jump, "Search newer" below the last row pages towards them, and the page that
  * reaches them attaches the tail, so reaching the end follows again.
  *
- * **The window is bounded and has two ends** (`useLogWindow`, #3670): at most a
- * few hundred rows are mounted, whatever the store holds. While following they
- * are the newest; otherwise the window stays on the reader's rows, a sentinel
- * above the first and below the last mounts the next step as either end scrolls
- * into view, and lines added below (a tail batch, a page newer) wait past the
- * lower end until the reader reaches them. Reaching the end of the window with
- * rows still below it is not reaching the end, so it does not follow.
+ * **The window is bounded and has two ends** (`useLogWindow`, #3670): at most a few hundred rows
+ * are mounted, whatever the store holds. While following they are the newest; otherwise the window
+ * stays on the reader's rows, a sentinel above the first and below the last mounts the next step as
+ * either end scrolls into view, and lines added below (a tail batch, a page newer) wait past the
+ * lower end until the reader reaches them. Reaching the end of the window with rows still below it
+ * is not reaching the end, so it does not follow.
  *
- * **The older bar sits above the oldest line held, not above the window**
- * (#3675): while rows are held above the window it says nothing, because "Search
- * older" and "Reached the start" both speak of the lines above everything held.
- * Growing the window upward keeps the reader's place (`useHoldPlace`), so a
- * steady scroll up reaches it.
+ * **The older bar sits above the oldest line held, not above the window** (#3675): while rows are
+ * held above the window it says nothing, since "Search older" and "Reached the start" speak of the
+ * lines above everything held. Growing the window upward keeps the reader's place (`useHoldPlace`),
+ * so a steady scroll up reaches it.
  *
- * **A jump is marked and scrolled to** (#3674): the window opens on the time
- * (`useLogWindow`), a rule naming it sits between the last line before it and
- * the first at or after it, and once the first page newer has landed
- * (`jumpPaging`) the list scrolls that rule to the middle of its own scroller,
- * once per jump (the browser clamps it where too few rows sit below the rule to
- * fill half the scroller: the end of the logs). Not sooner: the lines that page adds change which rows are mounted, and a scroll
- * before it would be to a place that then moves. That scroll is the list's own,
- * so it goes through `scrollOwn` and never reads as the reader reaching the
- * end: Follow stays off however near the end the time lies. Resetting the
- * scroller to its end instead would show the newest lines, which is what the
- * jump is not for.
+ * **A jump is marked and scrolled to** (#3674): the window opens on the time (`useLogWindow`), a
+ * rule naming it sits between the last line before it and the first at or after it, and once the
+ * first page newer has landed (`jumpPaging`) the list scrolls that rule to the middle of its own
+ * scroller, once per jump (clamped by the browser where too few rows sit below the rule to fill
+ * half the scroller: the end of the logs). Not sooner: that page's lines change which rows are
+ * mounted, so an earlier scroll would be to a place that then moves. The scroll is the list's own,
+ * through `scrollOwn`, so it never reads as the reader reaching the end: Follow stays off however
+ * near the end the time lies. Resetting the scroller to its end instead would show the newest
+ * lines, which a jump is not for.
  *
- * **The pin is `useStickToEnd`** (#3671): it pins again when the rows settle to
- * their real height, and ignores the scroll event its own pin causes, so only
- * the reader's scrolls turn Follow off.
+ * **The pin is `useStickToEnd`** (#3671): it pins again when the rows settle to their real height
+ * and ignores the scroll event its own pin causes, so only the reader's scrolls turn Follow off.
  */
 
 import {

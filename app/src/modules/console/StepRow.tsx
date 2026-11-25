@@ -6,17 +6,15 @@
  */
 
 /**
- * A collection-run step in the session Console (#3634): drawn live from its
- * `step` frame, which is constant-size and carries no exchange, and expanded
- * from the step's stored row - the run's report, read through the query
- * History's run view reads, matched on iteration and position.
+ * A collection-run step in the session Console (#3634): drawn live from its `step` frame, which is
+ * constant-size and carries no exchange, and expanded from the step's stored row (the run's report,
+ * read through the query History's run view reads, matched on iteration and position).
  *
- * The expansion is in the order the step ran: the pre-request script's lines
- * and requests (`details`), the timing and the exchange, then the post-request
- * script's. The report is asked for only while the row is open, and a run that
- * is still streaming has stored nothing yet, which the row says rather than
- * opening onto an empty box; the run service invalidates the report when the
- * run ends, so an open row fills in then.
+ * The expansion is in the order the step ran: the pre-request script's lines and requests
+ * (`details`), the timing and the exchange, then the post-request script's. The report is asked for
+ * only while the row is open; a run still streaming has stored nothing, which the row says rather
+ * than opening onto an empty box, and the run service invalidates the report when the run ends, so
+ * an open row fills in then.
  */
 
 import { memo, useMemo, type ReactNode } from "react";
