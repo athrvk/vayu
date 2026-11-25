@@ -6,40 +6,32 @@
  */
 
 /**
- * Indent a JSON document for reading, without ever reading its values.
+ * Indent a JSON document for reading, without ever reading its values. A `JSON.parse` /
+ * `JSON.stringify` round trip rewrites the document (#2459): integer-like keys jump ahead of the
+ * others, a repeated key keeps only its last value, and an integer past 2^53 loses digits. This is
+ * one pass over the text that copies every token through and decides only where the line breaks go,
+ * as `lib/xml-format.ts` does for XML. Output matches `JSON.stringify(v, null, 2)` for a document
+ * that survives the round trip: two-space indent, `"k": v`, and `{}` / `[]` for an empty container.
  *
- * A `JSON.parse` / `JSON.stringify` round trip rewrites the document (issue
- * #2459): integer-like keys jump ahead of the others, a repeated key keeps only
- * its last value, and an integer past 2^53 loses digits. This is a single pass
- * over the text that copies every token through and decides only where the line
- * breaks go, the same job `lib/xml-format.ts` does for XML.
+ * **Malformed input comes back unchanged**, the XML and GraphQL formatters' contract: a truncated
+ * or non-JSON body renders as what arrived. The grammar is RFC 8259's, checked as strictly as
+ * `JSON.parse` checks it: a leading `+` or zero, a trailing comma, a raw control character in a
+ * string and trailing text all leave the input as received. Only the four JSON whitespace
+ * characters are skipped between tokens, and they are dropped, so the result has no leading or
+ * trailing whitespace.
  *
- * Output matches `JSON.stringify(v, null, 2)` for a document that survives the
- * round trip: two-space indent, `"k": v`, and `{}` / `[]` for an empty
- * container.
- *
- * **Malformed input comes back unchanged**, by the same contract as the XML and
- * GraphQL formatters: a truncated or non-JSON body renders as what arrived. The
- * grammar is RFC 8259's and is checked as strictly as `JSON.parse` checks it -
- * a leading `+` or zero, a trailing comma, a raw control character in a string
- * and trailing text all leave the input as received. Only the four JSON
- * whitespace characters are skipped between tokens, and they are dropped rather
- * than kept, so the result has no leading or trailing whitespace.
- *
- * One leading U+FEFF is the exception (#3140): RFC 8259 section 8.1 lets a
- * parser ignore a BOM, and servers that emit one are common, so it is skipped
- * for scanning and left out of the result. A document that then fails to scan
- * still comes back whole, BOM included.
+ * One leading U+FEFF is the exception (#3140): RFC 8259 section 8.1 lets a parser ignore a BOM, and
+ * servers that emit one are common, so it is skipped for scanning and left out of the result. A
+ * document that then fails to scan still comes back whole, BOM included.
  */
 
 /** Two spaces, matching the `JSON.stringify(value, null, 2)` beside it. */
 const INDENT = "  ";
 
 /**
- * Deeper than any real document. Output grows with depth times token count, so
- * the limit bounds the work a hostile body can ask for; what `JSON.stringify`
- * did with such a body was to throw and leave it unformatted, which this does
- * too.
+ * Deeper than any real document. Output grows with depth times token count, so the limit bounds the
+ * work a hostile body can ask for; past it the body is left unformatted, as `JSON.stringify` (which
+ * throws) leaves it.
  */
 const MAX_DEPTH = 1024;
 
