@@ -6,17 +6,12 @@
  */
 
 /**
- * What the welcome screen shows while its two queries are in flight.
+ * What the welcome screen shows while its two queries are in flight. Both start as `[]`, so
+ * rendering normally would flash the first-run state ("get started, import a collection") at users
+ * who already have a workspace, and a `null` leaves the app looking broken for the load.
  *
- * It used to render `null`. That was a deliberate fix for a worse bug - both
- * queries start as `[]`, so rendering normally flashed the first-run empty
- * state ("get started, import a collection") at users who already had a
- * workspace. But trading a wrong screen for a blank one still leaves the app
- * looking broken for the length of the load.
- *
- * This mirrors the Launcher's own structure - section label, four action
- * tiles, a few recent-run rows, a count line - so the real content lands in
- * place instead of pushing a blank page around.
+ * It mirrors the Launcher's structure (the section label, the six action tiles, a few recent-run
+ * rows, a count line) so the real content lands in place instead of pushing a blank page around.
  */
 
 import { Skeleton } from "@/components/ui";

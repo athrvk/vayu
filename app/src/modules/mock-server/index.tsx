@@ -6,18 +6,13 @@
  */
 
 /**
- * Mock Server (issue #481 phase 3)
+ * The mock server tab (#481 phase 3): a mock's route table and its live activity log, which needs
+ * the width the inbox tab claimed for the same reason; a list that grows while you watch it does
+ * not fit a drawer.
  *
- * The Services drawer's Mock servers row used to expand in place to show the
- * route table - fine while a route table was the only thing there was to see.
- * Once a mock also keeps a live activity log, it needs the width the inbox
- * tab already claimed for the same reason: a list that grows while you watch
- * it does not fit a drawer.
- *
- * One tab, not one per mock, on the same precedent `inbox`'s module doc
- * gives: a mock is engine-process state with no id worth restoring across a
- * restart, and the tab's own `entityId` is the address a drawer row or this
- * view's own switcher writes - never mirrored into local state.
+ * One tab, not one per mock, on `inbox`'s precedent: a mock is engine-process state with no id
+ * worth restoring across a restart, and the tab's own `entityId` is the address a drawer row or
+ * this view's switcher writes, never mirrored into local state.
  */
 
 import { Check, Copy, ExternalLink, Radio as MockIcon, Square } from "lucide-react";

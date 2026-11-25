@@ -29,10 +29,9 @@ export function firstAtOrAfter(records: readonly LogEntry[], ts: string): number
 }
 
 /**
- * Where a record carries the line it was read from (`RAW_LINE_KEY` in
- * `electron/log-reader.ts`, which this file cannot import;
- * `electron/log-raw-line.conformance.test.ts` holds the spellings equal). It is
- * not a field of the record: nothing draws it as one.
+ * Where a record carries the line it was read from (`RAW_LINE_KEY` in `electron/log-reader.ts`,
+ * which this file cannot import; `electron/log-raw-line.conformance.test.ts` holds the spellings
+ * equal). Not a field of the record: nothing draws it as one.
  */
 export const RAW_LINE_KEY = "$raw";
 
@@ -86,11 +85,10 @@ export function entryLine(entry: LogEntry): string {
 }
 
 /**
- * The line Export writes: `entryLine`, unless that is a record's raw line the
- * reader cut at its 256 KiB bound, which is not JSON. That record is written
- * re-serialised, with its cut fields, so each line of a `.jsonl` export stays
- * one JSON value. A raw line is cut exactly when it no longer parses:
- * the reader attaches one only to a line that did.
+ * The line Export writes: `entryLine`, unless that is a record's raw line the reader cut at its 256
+ * KiB bound, which is not JSON; that record is written re-serialised with its cut fields, so each
+ * line of a `.jsonl` export stays one JSON value. A raw line is cut exactly when it no longer
+ * parses: the reader attaches one only to a line that did.
  */
 export function exportLine(entry: LogEntry): string {
 	const line = entryLine(entry);
@@ -106,13 +104,11 @@ export function exportLine(entry: LogEntry): string {
 const sizes = new WeakMap<LogEntry, number>();
 
 /**
- * What a held line costs, as a documented estimate and not a measurement: two
- * bytes per UTF-16 code unit, the count `estimateResponseBytes`
- * (`stores/response-store.ts`) uses for a body. A record counts as itself
- * serialised, which takes in its parsed fields, the raw line and the position
- * it carries; an unparsed line counts as its raw text and its position
- * serialised. Cached per object, so a bound that is re-checked on every batch
- * stringifies a line once.
+ * What a held line costs, a documented estimate and not a measurement: two bytes per UTF-16 code
+ * unit, the count `estimateResponseBytes` (`stores/response-store.ts`) uses for a body. A record
+ * counts as itself serialised (its parsed fields, the raw line and its position); an unparsed line
+ * as its raw text and its position serialised. Cached per object, so a bound re-checked on every
+ * batch stringifies a line once.
  */
 export function entryBytes(entry: LogEntry): number {
 	let bytes = sizes.get(entry);

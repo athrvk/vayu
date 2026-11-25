@@ -6,27 +6,22 @@
  */
 
 /**
- * Which inboxes may interrupt the user on a capture (issue #1388).
+ * Which inboxes may interrupt the user on a capture (#1388).
  *
- * #1358 classified every event the app raises into the ones worth an OS
- * notification and the ones the toast answers on its own. A capture is the one
- * relevant event with no natural rate: a run ends once, an update lands once, a
- * webhook source delivers hundreds a minute. So it is not another entry in the
- * shared list - it is off even when system notifications are on, and turned on
- * for one inbox at a time, by that inbox's own control.
+ * #1358 split the app's events into those worth an OS notification and those the toast answers
+ * alone. A capture is the one relevant event with no natural rate (a run ends once, a webhook
+ * source delivers hundreds a minute), so it is not in that shared list: it is off even when system
+ * notifications are on, and turned on per inbox, by that inbox's own control.
  *
- * The preference lives beside the engine's record rather than inside it, as
- * `host-sleep-store` keeps a run's annotation beside a report that has no field
- * for it. The engine's inbox is in-memory state that never outlives the process
- * that opened it (`db/database.cpp`: captures are cleared at startup because
- * "no inbox survives the process that opened it"), and it does not act on this
- * flag - only the desktop app does. Storing it there would put a client
- * preference in an API MCP clients and the CLI also read.
+ * The preference lives beside the engine's record, not in it, as `host-sleep-store` keeps a run's
+ * annotation beside a report with no field for it. The engine's inbox is in-memory state that never
+ * outlives the process that opened it (`db/database.cpp` clears captures at startup), and it does
+ * not act on this flag; storing it there would put a client preference in an API that MCP clients
+ * and the CLI also read.
  *
- * An id is therefore dead once the engine that minted it exits, which is why
- * {@link retainInboxes} prunes against a list read the engine answered: without
- * it a persisted map would grow one entry per inbox ever started and never
- * shrink.
+ * So an id is dead once the engine that minted it exits, which is why {@link retainInboxes} prunes
+ * against a list the engine answered: without it a persisted map would grow one entry per inbox
+ * ever started and never shrink.
  */
 
 import { create } from "zustand";
@@ -35,9 +30,8 @@ import { STORAGE_KEYS } from "@/constants/storage-keys";
 
 interface InboxNotifyState {
 	/**
-	 * The inboxes whose captures may notify. Off is absence rather than
-	 * `false`: the default is off, and a map that only holds the exceptions
-	 * cannot disagree with itself about what an unknown inbox does.
+	 * The inboxes whose captures may notify. Off is absence, not `false`: the default is off, and a
+	 * map that holds only the exceptions cannot disagree with itself about an unknown inbox.
 	 */
 	enabled: Record<string, true>;
 	setEnabled: (inboxId: string, on: boolean) => void;
@@ -101,11 +95,8 @@ export const useInboxNotifyStore = create<InboxNotifyState>()(
 );
 
 /**
- * May @p inboxId's captures notify? The gate the call site reads.
- *
- * Read rather than subscribed at the capture site - `systemNotify.post` reads
- * the global opt-in the same way, and for the same reason: it only has to be
- * right at the moment the capture arrives.
+ * May @p inboxId's captures notify? The gate the call site reads, read rather than subscribed, as
+ * `systemNotify.post` reads the global opt-in: it only has to be right when the capture arrives.
  */
 export function inboxNotifiesOnCapture(inboxId: string | null | undefined): boolean {
 	if (!inboxId) return false;

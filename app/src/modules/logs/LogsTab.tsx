@@ -6,23 +6,17 @@
  */
 
 /**
- * The bottom panel's Logs tab (#3635).
+ * The bottom panel's Logs tab (#3635). `BottomPanel` mounts it in the tab's content box, a flex
+ * child that fills the panel below the tab strip and clips (`min-h-0 overflow-hidden`), so the tab
+ * scrolls its own list; it takes no props and reads stores and the preload bridge.
  *
- * `BottomPanel` mounts it inside the tab's content box, which is a flex child
- * that fills the panel below the tab strip and clips (`min-h-0 overflow-hidden`),
- * so the tab scrolls its own list. It takes no props and reads what it needs
- * from stores and the preload bridge.
+ * Mounted only while the panel is open on this tab (a closed panel renders nothing, and Radix drops
+ * an inactive tab's content), so mount and unmount are exactly when a tail (`logs:tail`) must start
+ * and stop. The store's `start` and `stop` are bound to them here and nowhere else.
  *
- * Mounted only while the panel is open on this tab: the panel renders nothing
- * when it is closed and Radix drops an inactive tab's content, so this
- * component's mount and unmount are exactly "the tab is showing" and "the tab
- * is hidden or the panel closed", which is when a tail (`logs:tail`) must
- * start and stop. The store's `start` and `stop` are bound to them here and
- * nowhere else.
- *
- * The files are read by the main process, so outside Electron (the renderer
- * under plain vite, `app/CLAUDE.md`) there is nothing to read and the tab says
- * so: no stub bridge, which would answer as if it were one.
+ * The files are read by the main process, so outside Electron (the renderer under plain vite,
+ * `app/CLAUDE.md`) there is nothing to read and the tab says so: no stub bridge, which would answer
+ * as if it were one.
  */
 
 import { useEffect } from "react";

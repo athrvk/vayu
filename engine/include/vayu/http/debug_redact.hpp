@@ -60,17 +60,16 @@ const std::vector<std::string>& extra_secret_headers = {}) {
 
 /**
  * @brief One `TransferDebug` collector, shared by `client.cpp`'s synchronous
- *        driver and the event-loop's `curl_callbacks.cpp` (issue #1557).
+ *        driver and the event-loop's `curl_callbacks.cpp` (#1557).
  *
  * A curl `CURLOPT_DEBUGFUNCTION` frame is not one physical line: the outgoing
- * header block, in particular, arrives as the request line and every header
- * in a single call, `\r\n`-joined. `collect_debug_frame` splits it so each
- * element of the eventual `cat=client` record's `lines[]` is one physical
- * line, and redacts each: the first line of a header frame is the request or
- * status line, which never carries a header name to match against
- * `redact_header_line` but can carry a secret in its query string
- * (`vayu::utils::strip_url_secrets`); every line after it is a header, through
- * `redact_header_line` as today.
+ * header block, in particular, arrives as the request line and every header in
+ * a single call, `\r\n`-joined. `collect_debug_frame` splits it so each element
+ * of the eventual `cat=client` record's `lines[]` is one physical line, and
+ * redacts each: the first line of a header frame is the request or status line,
+ * which never carries a header name to match against `redact_header_line` but
+ * can carry a secret in its query string (`vayu::utils::strip_url_secrets`);
+ * every line after it is a header, through `redact_header_line`.
  */
 inline void collect_debug_frame (std::vector<std::string>& lines,
 curl_infotype type,

@@ -8,18 +8,17 @@
  */
 
 /**
- * @file http/send_log.hpp
  * @brief The log record for the end of one send a person or a script made
- *        (issue #3677): a design Send (`cat: "http"`) and a `pm.sendRequest`
- *        call (`cat: "script"`).
+ *        (#3677): a design Send (`cat: "http"`) and a `pm.sendRequest` call
+ *        (`cat: "script"`).
  *
  * The request line (`request_log.hpp`) records the call into the engine, and
- * the Console records what the app sent, but a send the engine made on its own
- * behalf that fails - a token endpoint refusing the connection, a Send whose
- * host does not resolve - left nothing in the log files. This is the one place
- * the record's shape and level are decided; each caller supplies the category
- * as a literal, as `tests/log_category_scan_test.cpp` requires, and logs what
- * this builds.
+ * the Console records what the app sent; without this record, a send the engine
+ * made on its own behalf that fails - a token endpoint refusing the connection,
+ * a Send whose host does not resolve - would leave nothing in the log files.
+ * This is the one place the record's shape and level are decided; each caller
+ * supplies the category as a literal, as `tests/log_category_scan_test.cpp`
+ * requires, and logs what this builds.
  */
 
 #include <cmath>

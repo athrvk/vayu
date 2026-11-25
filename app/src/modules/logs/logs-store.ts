@@ -6,43 +6,36 @@
  */
 
 /**
- * The Logs tab's lines (#3635): what the tail pushed, what a read paged in, and
- * the bound that keeps both from growing for as long as the tab is open.
+ * The Logs tab's lines (#3635): what the tail pushed, what a read paged in, and the bound that
+ * keeps both from growing for as long as the tab is open.
  *
- * A store rather than component state because the work outlives a render and
- * has races of its own: a filter change replaces the list while a page is in
- * flight, and the tail pushes while a read is still answering. Every async step
- * checks `loadId` before it writes, and `stop()` bumps it, so nothing lands after
- * the tab is gone.
+ * A store rather than component state because the work outlives a render and has races of its own:
+ * a filter change replaces the list while a page is in flight, and the tail pushes while a read is
+ * still answering. Every async step checks `loadId` before it writes, and `stop()` bumps it, so
+ * nothing lands after the tab is gone.
  *
- * **Filters are evaluated in main.** Changing one re-issues the read and
- * restarts the tail with the new filter (`logs:tail-start` replaces the running
- * one), and the lines already held are replaced by the fresh read. This store
- * never filters a line itself.
+ * **Filters are evaluated in main.** Changing one re-issues the read and restarts the tail on the
+ * new filter (`logs:tail-start` replaces the running one), and the fresh read replaces the held
+ * lines. This store never filters a line itself.
  *
- * **The bound** is `LOG_MAX_RECORDS` lines or `LOG_MAX_BYTES`, whichever comes
- * first. Following drops the oldest; paging older drops the newest, and having
- * dropped them the list is `detached` from the tail, since a batch appended
- * after a hole would be a lie about what happened between. Following again then
- * means reading afresh, never appending. Dropping the oldest moves the older
- * cursor up to the lines still held (`cursorAfterTrim`), so paging older reads
- * the dropped lines again; a page older a trim overtakes is read again from
- * there.
+ * **The bound** is `LOG_MAX_RECORDS` lines or `LOG_MAX_BYTES`, whichever comes first. Following
+ * drops the oldest; paging older drops the newest, and the list is then `detached` from the tail,
+ * since a batch appended after a hole would be a lie about what happened between; following again
+ * means reading afresh, never appending. Dropping the oldest moves the older cursor up to the lines
+ * still held (`cursorAfterTrim`), so paging older reads the dropped lines again; a page older a
+ * trim overtakes is read again from there.
  *
- * **Jump to time** is detached too, and pages newer from the time it landed
- * on: one page at once, then one per "Search newer". It records the time as
- * `jumpTarget`, which every other replacement of the list clears, so the list
- * can open on it, and holds `jumpPaging` until that first page newer has
- * landed, so the list does not settle on rows the page is about to change.
- * Paging newer drops the oldest, as following does; the page that reaches the
- * end of the logs attaches the tail again, which it restarted before reading so
- * that nothing written in between is lost.
+ * **Jump to time** is detached too, and pages newer from the time it landed on: one page at once,
+ * then one per "Search newer". It records the time as `jumpTarget`, which every other replacement
+ * of the list clears, so the list can open on it, and holds `jumpPaging` until that first page
+ * newer has landed, so the list does not settle on rows the page is about to change. Paging newer
+ * drops the oldest, as following does; the page that reaches the end of the logs attaches the tail
+ * again, which it restarted before reading so that nothing written in between is lost.
  *
- * **A tail started before a read can repeat it.** The tail delivers what is
- * appended after it started and the read runs to the files' ends after that, so
- * the read's newest lines can arrive again in the tail's first batches. Lines
- * delivered while the read answers are checked against it in `buffered`; the
- * batches after it, against `overlapping`.
+ * **A tail started before a read can repeat it.** The tail delivers what is appended after it
+ * started and the read runs to the files' ends after that, so the read's newest lines can arrive
+ * again in the tail's first batches. Lines delivered while the read answers are checked against it
+ * in `buffered`; the batches after it, against `overlapping`.
  */
 
 import { create } from "zustand";
@@ -208,10 +201,7 @@ function cursorAfterTrim(
 	return { files: [...files.values()].filter((file) => file.offset > 0) };
 }
 
-/**
- * A line's place in its file, as `fileKey` and its start; null for a line that
- * carries none.
- */
+/** A line's place in its file, as `fileKey` and its start; null for a line that carries none. */
 function placeOf(entry: LogEntry): string | null {
 	const position = entry[POSITION_KEY];
 	return position ? `${fileKey(position)}@${position.start}` : null;

@@ -6,18 +6,14 @@
  */
 
 /**
- * The inbox view's half of the live capture stream (issues #480, #1400).
+ * The inbox view's half of the live capture stream (#480, #1400). `GET /inbox/:id/live` emits one
+ * SSE event per capture, so the list does not poll. The socket, its reconnect and the merge into
+ * the query cache belong to `services/inbox-watch-service.ts`; this hook holds a reference to that
+ * inbox's stream while the view is mounted, and renders what the service reports.
  *
- * `GET /inbox/:id/live` emits one SSE event per capture, so the list does not
- * poll: a webhook arrives and the row appears. The socket, its reconnect and the
- * merge into the query cache all belong to `services/inbox-watch-service.ts` -
- * this hook holds a reference to that inbox's stream for as long as the view is
- * mounted, and renders what the service reports.
- *
- * The stream outliving this hook is the whole point: the view is mounted only
- * while the inbox tab is the active one, and a capture that arrives while the
- * user is in another tab still has to be able to notify. Releasing the reference
- * does not close the socket unless nothing else wants it.
+ * The stream outliving this hook is the point: the view mounts only while the inbox tab is active,
+ * and a capture arriving while the user is in another tab must still be able to notify. Releasing
+ * the reference closes the socket only when nothing else wants it.
  */
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
@@ -51,12 +47,10 @@ export function useInboxLive(inboxId: string | null, enabled: boolean): InboxLiv
 		return () => inboxWatchService.release(watched);
 	}, [watched]);
 
-	// `useSyncExternalStore` rather than state-plus-effect, for the reason
-	// `usePrefersReducedMotion` gives: the service is the source of truth, and
-	// the effect version renders one frame of `IDLE` before it catches up. On a
-	// tab reopened over a stream the service is already holding - the case this
-	// issue is about - that frame is the badge reading `Running` and then
-	// flicking to `Live`.
+	// `useSyncExternalStore`, not state plus an effect, for the reason `usePrefersReducedMotion`
+	// gives: the service is the source of truth, and the effect version renders one frame of `IDLE`
+	// first. On a tab reopened over a stream the service already holds, that frame is the badge
+	// reading `Running`, then flicking to `Live`.
 	const subscribe = useCallback(
 		(onChange: () => void) =>
 			watched ? inboxWatchService.subscribe(watched, onChange) : () => {},

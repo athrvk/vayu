@@ -17,16 +17,12 @@
 
 namespace vayu::http::detail {
 
-// Forward declarations
 struct TransferData;
 class EventLoopWorker;
 
 /**
- * @brief EventLoop implementation managing a pool of workers
- *
- * Coordinates multiple EventLoopWorker instances, distributing
- * requests across them using round-robin scheduling and aggregating
- * statistics from all workers.
+ * @brief The pool of `EventLoopWorker`s behind `EventLoop`: requests are spread
+ *        across them round-robin, and their statistics summed.
  */
 class EventLoopImpl {
     public:
@@ -56,16 +52,15 @@ class EventLoopImpl {
     private:
     void submit (std::unique_ptr<TransferData> data);
 
-    /// Windows' 1 ms timer resolution, held for exactly as long as this loop
-    /// exists (issue #1161). The loop is the consumer that needs it - each
-    /// worker asks `curl_multi_poll` for a `POLL_TIMEOUT_MS = 1` wait, which
-    /// the OS default rounds to ~15.6ms - and the rate-limited pacing loop
-    /// that sleeps beside it below ~500 RPS is coextensive with it. A loop
-    /// exists only while a run is sending, so an idle sidecar - which it is
-    /// for nearly all of an app session - asks for nothing, and a design-mode
-    /// scenario run, which builds no loop, asks for nothing either. First
-    /// member so it is taken before a worker can poll and given back after
-    /// the last one has stopped. A no-op off Windows.
+    /// Windows' 1 ms timer resolution, held exactly as long as this loop exists
+    /// (#1161). Each worker asks `curl_multi_poll` for a `POLL_TIMEOUT_MS = 1`
+    /// wait, which the OS default rounds to ~15.6ms, and the rate-limited
+    /// pacing loop that sleeps beside it below ~500 RPS lives as long as the
+    /// loop. A loop exists only while a run is sending, so an idle sidecar
+    /// (nearly all of an app session) and a design-mode scenario run, which
+    /// builds no loop, ask for nothing. First member, so it is taken before a
+    /// worker can poll and given back after the last one has stopped. A no-op
+    /// off Windows.
     vayu::platform::HighResolutionTimerScope timer_resolution;
     EventLoopConfig config;
     std::vector<std::unique_ptr<EventLoopWorker>> workers;

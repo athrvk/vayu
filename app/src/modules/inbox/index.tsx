@@ -6,23 +6,16 @@
  */
 
 /**
- * Webhook Inbox (issue #480)
+ * The webhook inbox tab (#480): starts an engine-hosted listener, hands over its URL and shows what
+ * arrives, live, so testing the receiving half of a webhook needs no webhook.site or ngrok tunnel.
  *
- * Vayu can send in every direction and, until this, receive in none - so
- * testing the receiving half of a webhook meant routing payloads through
- * webhook.site or an ngrok tunnel. This surface starts an engine-hosted
- * listener, hands over its URL, and shows what arrives, live.
+ * One tab, not one per inbox: an inbox is engine-process state with no id worth restoring into a
+ * tab, and the engine allows one live stream per inbox (each holds a pool thread), so watching
+ * several at once would spend threads on lists nobody reads.
  *
- * One tab, not one per inbox: an inbox is engine-process state with no id worth
- * restoring into a tab, and the engine allows a single live stream per inbox
- * (each holds a pool thread), so a surface that watched several at once would
- * be spending threads on lists nobody is reading.
- *
- * One tab still has to be able to name *which* inbox it shows (issue #554).
- * That address is the tab's own `entityId`, written by whoever opens the tab -
- * a drawer row, or the switcher in this header - and never mirrored into local
- * state: two records of one selection is how the drawer came to open a tab
- * showing a different inbox than the row it was clicked on.
+ * The tab names *which* inbox it shows (#554) by its own `entityId`, written by whoever opens it (a
+ * drawer row, or the switcher in this header) and never mirrored into local state: two records of
+ * one selection is how the drawer came to open a tab on a different inbox than the row clicked.
  */
 
 import { useId, useState } from "react";
@@ -95,14 +88,11 @@ import { useInboxLive } from "./useInboxLive";
 import { cannedResponseKey } from "./utils";
 
 /**
- * The per-inbox half of capture notifications (issue #1388).
- *
- * Here rather than in the Notifications settings panel because it is a property
- * of one inbox, the way its canned response is: the panel's opt-in governs the
- * events that happen once, and this governs whether *this* listener may speak
- * for them. Both have to be on, which is why the hint names the other one - a
- * toggle that does nothing because of a setting on another screen is worse than
- * no toggle at all.
+ * The per-inbox half of capture notifications (#1388). Here, not in the Notifications settings
+ * panel, because it is a property of one inbox, like its canned response: the panel's opt-in
+ * governs the events that happen once, and this whether *this* listener may speak for them. Both
+ * must be on, so the hint names the other: a toggle that does nothing because of a setting on
+ * another screen is worse than no toggle.
  */
 function NotifyOnCaptureToggle({ inboxId }: { inboxId: string }) {
 	const switchId = useId();
@@ -113,16 +103,15 @@ function NotifyOnCaptureToggle({ inboxId }: { inboxId: string }) {
 			<Label htmlFor={switchId} className="text-xs text-muted-foreground">
 				Notify
 			</Label>
-			{/* `Switch` and `Label` composed directly, as `OAuth2Form` and
-			    `RunCollectionDialog` do for a control that sits in a line of
-			    other controls. `ToggleRow` is the settings *row* - a full-width
-			    `justify-between` box with a description slot and the settings
-			    search's `data-setting-row` marker - and none of that belongs in
-			    a header strip.
-
-			    Radix renders a button, which the visible label associates with
-			    but does not name, so the switch carries its own name - the same
-			    reason `ToggleRow` carries both. */}
+			{/*
+			 * `Switch` and `Label` composed directly, as `OAuth2Form` and `RunCollectionDialog` do
+			 * for a control in a line of other controls: `ToggleRow` is the settings *row* (a
+			 * full-width `justify-between` box with a description slot and the settings search's
+			 * `data-setting-row` marker), none of which belongs in a header strip.
+			 *
+			 * Radix renders a button, which the visible label associates with but does not name, so
+			 * the switch carries its own name, the reason `ToggleRow` carries both.
+			 */}
 			<Switch
 				id={switchId}
 				checked={enabled}
@@ -209,12 +198,9 @@ function clearDescription(total: number, listed: number): string {
 }
 
 /**
- * The tab's half of inbox deletion (issue #553).
- *
- * Its own component so the hook is never called for an inbox that does not
- * exist - `InboxView` returns its empty state before there is one to delete.
- * It passes the capture total it already has, which the record's polled count
- * can lag behind by up to a services poll.
+ * The tab's half of inbox deletion (#553), its own component so the hook is never called for an
+ * inbox that does not exist (`InboxView` returns its empty state first). It passes the capture
+ * total it already has, which the record's polled count can lag by up to a services poll.
  */
 function DeleteInboxButton({ inbox, listedTotal }: { inbox: Inbox; listedTotal: number }) {
 	const deletion = useInboxDeletion(inbox, listedTotal);
@@ -268,16 +254,14 @@ export default function InboxView() {
 	const addressedInboxId = activeTab?.type === "inbox" ? activeTab.entityId : null;
 	const show = (inboxId: string) => openTab({ type: "inbox", entityId: inboxId });
 
-	// The engine lists inboxes in map order, which is not stable across polls -
-	// so both the switcher's entries and the fallback below order by port. An
-	// inbox record carries no creation stamp and does not gain one - #555
-	// answered that - and port is the stable key the record has.
+	// The engine lists inboxes in map order, unstable across polls, so the switcher and the
+	// fallback below order by port: a record carries no creation stamp and does not gain one
+	// (#555), and port is its stable key.
 	const ordered = [...inboxes].sort((a, b) => a.port - b.port);
 
-	// Derived, not synced into state: the engine is the list of inboxes, and an
-	// address it no longer has falls back to the first one it does. An effect
-	// writing that fallback back into the tab would say the same thing one
-	// render later, and be wrong for that render.
+	// Derived, not synced into state: the engine is the list of inboxes, and an address it no
+	// longer has falls back to its first. An effect writing the fallback into the tab would say the
+	// same a render later, and be wrong for that render.
 	const inbox: Inbox | null = shownService(inboxes, (i) => i.inboxId === addressedInboxId);
 
 	const capturesQuery = useInboxCapturesQuery(inbox?.inboxId ?? null);
@@ -311,13 +295,9 @@ export default function InboxView() {
 	}
 
 	/**
-	 * One error discipline for the whole inbox lifecycle (issue #555, item 7).
-	 *
-	 * Start, update, delete and the drawer's own stop all toasted their failure;
-	 * this tab's Stop and Clear passed no `onError` at all, so a refused stop
-	 * left a button that had visibly done nothing and no reason anywhere. Taken
-	 * here rather than in #556's tab pass, which both issues name as the shared
-	 * brush - whichever landed second was to skip it.
+	 * One error discipline for the whole inbox lifecycle (#555, item 7): start, update, delete and
+	 * both stops and Clear toast their failure, so a refused stop never leaves a button that
+	 * visibly did nothing and no reason anywhere.
 	 */
 	const reportFailure = (fallback: string) => (mutationError: unknown) =>
 		showToast(
@@ -554,10 +534,9 @@ export default function InboxView() {
 			/>
 
 			{/*
-			 * The stream stopped, not the listener - the inbox is still
-			 * recording, this list has only stopped hearing about it. Saying so
-			 * is the whole point: the badge alone would read "Running" forever
-			 * and look like an inbox nothing is sending to (issue #506).
+			 * The stream stopped, not the listener: the inbox still records, this list has only
+			 * stopped hearing about it. The badge alone would read "Running" forever, like an inbox
+			 * nothing sends to (#506).
 			 */}
 			{live.stopped && (
 				<div className="px-3 pt-2">

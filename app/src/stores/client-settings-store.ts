@@ -6,14 +6,11 @@
  */
 
 /**
- * Client settings store
- *
- * Central home for renderer-only preferences that aren't part of the
- * pre-paint appearance set (theme/color/UI-font/scale/radius live in their own
- * localStorage keys so index.html can apply them before React mounts). Holds
- * editor behavior, the monospace/code font, chart granularity, the capacity SLO
- * threshold, the live refresh rate, and auto-save. Persisted to localStorage;
- * non-React consumers (services, the dashboard store) read via `getState()`.
+ * Renderer-only preferences outside the pre-paint appearance set (theme, colour, UI font, scale and
+ * radius have their own localStorage keys so index.html can apply them before React mounts): editor
+ * behaviour, the code font, chart granularity, the capacity SLO threshold, the live refresh rate
+ * and auto-save. Persisted to localStorage; non-React consumers (services, the dashboard store)
+ * read via `getState()`.
  */
 
 import { create } from "zustand";
@@ -76,24 +73,19 @@ interface ClientSettingsState {
 	autoSave: AutoSavePrefs;
 	reducedMotion: boolean;
 	/**
-	 * Standing answer to "should a run keep this machine awake" (issue #1357).
-	 *
-	 * Off by default: overriding the user's power settings is theirs to opt into,
-	 * and a run shorter than any sleep timer never needed it. With it off, a run
-	 * long enough to be walked away from asks once - see `KeepAwakePrompt`, which
-	 * is also what turns this on when the user answers "always". Read when a run
-	 * starts, so flipping it does not reach a run already streaming.
+	 * Standing answer to "should a run keep this machine awake" (#1357). Off by default: overriding
+	 * the user's power settings is theirs to opt into, and a run shorter than any sleep timer never
+	 * needed it. Off, a run long enough to be walked away from asks once (`KeepAwakePrompt`, which
+	 * also turns this on when the user answers "always"). Read when a run starts, so flipping it
+	 * does not reach a run already streaming.
 	 */
 	keepAwakeDuringRuns: boolean;
 	/**
-	 * Standing answer to "should Vayu interrupt me in another application"
-	 * (issue #1358).
-	 *
-	 * Off by default: an app that posts to the OS without being asked is one the
-	 * user turns off entirely. With it on, only the events that are terminal and
-	 * asynchronous notify, and only while the window is not the one in front -
-	 * `services/notify.ts` holds that list, `electron/notify.ts` the focus check.
-	 * Read when an event happens, not watched: it only has to be right then.
+	 * Standing answer to "should Vayu interrupt me in another application" (#1358). Off by default:
+	 * an app that posts to the OS without being asked is one the user turns off entirely. On, only
+	 * terminal and asynchronous events notify, and only while the window is not the one in front
+	 * (`services/notify.ts` holds that list, `electron/notify.ts` the focus check). Read when an
+	 * event happens, not watched: it only has to be right then.
 	 */
 	systemNotifications: boolean;
 	/** Toast position, duration scale, stack cap and severity floor. */
@@ -101,10 +93,9 @@ interface ClientSettingsState {
 	/** Upper bounds the load-test dialog offers. Read via `resolveLoadTestLimits`. */
 	loadTestCeilings: LoadTestCeilings;
 	/**
-	 * Origins (scheme, host, port) the user has already chosen to contact:
-	 * pressed Send or Load test on a request to one, or loaded a GraphQL schema
-	 * from it by hand. The schema is introspected on its own only for an origin
-	 * in this list (`lib/graphql/approved-endpoints.ts`), so a request that
+	 * Origins (scheme, host, port) the user has chosen to contact: pressed Send or Load test on a
+	 * request to one, or loaded a GraphQL schema from it by hand. A schema is introspected on its
+	 * own only for an origin in this list (`lib/graphql/approved-endpoints.ts`), so a request that
 	 * arrived in an imported file contacts nothing until its user does.
 	 */
 	approvedEndpoints: string[];
@@ -153,18 +144,14 @@ function completeNested<T extends object>(defaults: T, stored: unknown): T {
 }
 
 /**
- * Zustand's shallow merge, plus one level of defaults under each nested object.
+ * Zustand's shallow merge, plus one level of defaults under each nested object. The default merge
+ * is a top-level spread, so a payload written before a key was added to one of these objects
+ * replaces the whole object and ships `undefined` for the new key: `notifications.maxVisible` feeds
+ * `slice(-maxVisible)` in `toast-store`, and `slice(-undefined)` is `slice(NaN)`, so the toast cap
+ * silently stops capping.
  *
- * The default merge is a top-level spread, so a payload written before a key
- * was added to one of these objects replaces the whole object and ships
- * `undefined` for the new key: `notifications.maxVisible` feeds
- * `slice(-maxVisible)` in `toast-store`, and `slice(-undefined)` is
- * `slice(NaN)` - the toast cap silently stops capping. `loadTestCeilings`
- * already carried that defense written out by hand.
- *
- * Every object-valued preference needs a line here, and the store's own test
- * enumerates them rather than trusting this list - a fifth nested pref that is
- * not completed fails there.
+ * Every object-valued preference needs a line here; the store's own test enumerates them rather
+ * than trusting this list, so a fifth nested pref that is not completed fails there.
  */
 function mergeWithNestedDefaults(
 	persisted: unknown,
@@ -188,17 +175,13 @@ function mergeWithNestedDefaults(
 }
 
 /**
- * Version translation for the stored preferences.
+ * Version translation for the stored preferences. There is one shape so far, so this hands the
+ * payload back (`mergeWithNestedDefaults` fills in anything missing). It exists for the next bump:
+ * with no `migrate`, zustand *discards* a payload whose stamped version does not match (it logs and
+ * hands the store its defaults), so a bump without a branch here resets every preference.
  *
- * There is one shape so far, so this only has to hand the payload back -
- * `mergeWithNestedDefaults` fills in anything missing. It exists for the next
- * bump: zustand *discards* a payload whose stamped version does not match when
- * no `migrate` is given (it logs and hands the store its defaults), so a bump
- * without one resets every preference. Add a branch here instead.
- *
- * The payloads already in users' localStorage carry no version at all, and
- * zustand only compares when one was stamped - which is why declaring
- * `version: 1` here does not reset anyone.
+ * The payloads already in users' localStorage carry no version, and zustand compares only a stamped
+ * one, so declaring `version: 1` here resets no one.
  */
 function migrateClientSettings(persisted: unknown) {
 	return (persisted ?? {}) as Partial<ClientSettingsState>;
@@ -249,9 +232,8 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 			},
 			setKeepAwakeDuringRuns: (on) => set({ keepAwakeDuringRuns: on }),
 			setSystemNotifications: (on) => set({ systemNotifications: on }),
-			// Clamped on the way in, not only on the way out: the dialog reads
-			// this to build its own ranges, so an out-of-range ceiling stored
-			// here would present the user a value the engine rejects.
+			// Clamped on the way in too: the dialog builds its ranges from this, so an out-of-range
+			// ceiling stored here would offer the user a value the engine rejects.
 			setLoadTestCeilings: (patch) =>
 				set((s) => ({
 					loadTestCeilings: clampCeilings({ ...s.loadTestCeilings, ...patch }),
@@ -264,10 +246,9 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 				),
 
 			resetAll: () => {
-				// The login item lives in the OS, not in a stored key, so clearing
-				// storage alone would leave Vayu starting at login after a "reset".
-				// Fire-and-forget: a rejection must not stop the reset it is part of,
-				// and the reload below does not wait on it.
+				// The login item lives in the OS, not in a stored key, so clearing storage alone
+				// would leave Vayu starting at login after a "reset". Fire-and-forget: a rejection
+				// must not stop the reset it is part of, and the reload below does not wait on it.
 				void window.electronAPI?.setLoginItem(false).catch(() => {});
 				for (const key of SETTINGS_STORAGE_KEYS) localStorage.removeItem(key);
 				// Reload so the pre-paint script and every store re-seed from defaults.
@@ -301,19 +282,17 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 					applyMonoStack(resolveMonoStack(state.monoFont, state.monoFontCustom));
 					applyReducedMotion(state.reducedMotion);
 
-					// The auto-save options changed from 1s/3s/5s to 5s/30s/1m, so a
-					// stored 1s or 3s is no longer offered. Snap it to the nearest
-					// one that is, otherwise the picker shows nothing selected while
+					// The auto-save options are 5s/30s/1m, so a stored 1s or 3s (an older option)
+					// snaps to the nearest offered one, or the picker shows nothing selected while
 					// auto-save keeps running on the old interval.
 					const snapped = nearestAutoSaveDelay(state.autoSave.delayMs);
 					if (snapped !== state.autoSave.delayMs) {
 						state.autoSave = { ...state.autoSave, delayMs: snapped };
 					}
 
-					// The same for the two pickers whose options are a closed list
-					// (chart granularity, live refresh): a value outside it - a
-					// retired option, a hand-edited payload - would leave the picker
-					// blank while the old figure kept driving the charts.
+					// Likewise for the closed-list pickers (chart granularity, live refresh): a
+					// retired or hand-edited value would leave the picker blank while the old
+					// figure kept driving the charts.
 					if (!isChartBucketSeconds(state.chartBucketSeconds)) {
 						state.chartBucketSeconds = DEFAULT_CHART_BUCKET_SECONDS;
 					}
@@ -321,12 +300,10 @@ export const useClientSettingsStore = create<ClientSettingsState>()(
 						state.liveRefreshMs = DEFAULT_LIVE_REFRESH_MS;
 					}
 
-					// Re-clamp on the way out of storage. The bounds are the
-					// engine's crash guards, and a build that tightens one
-					// would otherwise keep offering the stored ceiling above
-					// it. Filling in a key added after the payload was written
-					// is `mergeWithNestedDefaults`'s job now, for every nested
-					// object rather than this one.
+					// Re-clamped on the way out of storage: the bounds are the engine's crash
+					// guards, and a build that tightens one would otherwise keep offering the
+					// stored ceiling above it. A key added after the payload was written is
+					// `mergeWithNestedDefaults`'s job.
 					state.loadTestCeilings = clampCeilings(state.loadTestCeilings);
 				}
 			},
