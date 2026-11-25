@@ -8,18 +8,18 @@
  */
 
 /**
- * @file core/metrics_collector.hpp
  * @brief High-performance in-memory metrics collection for load testing
  *
- * This class provides lock-free and low-contention storage for request results
- * during high-throughput load tests (targeting 60k+ RPS). Individual results are
- * stored in memory during the test and batch-written to the database after completion.
+ * Lock-free counters and low-contention stores for request results during
+ * high-throughput load tests (targeting 60k+ RPS). Individual results are held
+ * in memory during the test and batch-written to the database after completion.
  *
  * Key design decisions:
- * - Pre-allocated vectors to avoid reallocation during test
- * - Thread-local accumulators merged post-test for zero-contention writes
- * - Atomic counters for real-time aggregate stats
- * - All errors preserved, success results sampled if memory constrained
+ * - Stores reserved up front, to avoid reallocation during the test
+ * - Atomic counters and atomically recorded histograms for real-time aggregate
+ *   stats
+ * - Every store bounded: errors kept up to `max_errors` and counted past it,
+ *   success results sampled
  */
 
 #include <algorithm>
@@ -98,15 +98,15 @@ struct ResponseSample {
      * The virtual user and the iteration this response was sent in, and the
      * data row the submission was bound to.
      *
-     * `iteration` and `vu` are carried by **either** shape since issue #994: a
-     * scenario step reports the virtual user's own index and iteration, and a
+     * `iteration` and `vu` are carried by **either** shape (#994): a scenario
+     * step reports the virtual user's own index and iteration, and a
      * single-request run reports user 1 and the submission this response was -
      * the index the submission claimed before it was sent, which is also the
-     * row it bound. What issue #300's ruling refuses is reporting a *reservoir
+     * row it bound. What #300's ruling refuses is reporting a *reservoir
      * position* as an iteration number, and neither of these is one: both are
      * claimed by the executor before the send and travel with the response.
      *
-     * `data_row_index` is carried by **either** shape now (issue #993): a
+     * `data_row_index` is carried by **either** shape too (#993): a
      * single-request run started with `data` claims a row per submission, and
      * the row it claimed is a fact about this response the same way it is for a
      * step. Absent for every run sent without rows, which is what leaves
@@ -204,9 +204,6 @@ struct ResultRecord {
     }
 };
 
-/**
- * @brief Configuration for MetricsCollector
- */
 struct MetricsCollectorConfig {
     /// Expected number of requests (for pre-allocation)
     size_t expected_requests = constants::metrics_collector::DEFAULT_EXPECTED_REQUESTS;
@@ -249,9 +246,8 @@ struct MetricsCollectorConfig {
     /// Sample rate for response storage (1 = all, 100 = 1%, etc.)
     size_t response_sample_rate = constants::metrics_collector::DEFAULT_RESPONSE_SAMPLE_RATE;
 
-    /// Whether retained samples carry the response headers and body. Off makes
-    /// the collector byte-for-byte what it was before capture existed: no gate
-    /// is consulted, no exemplar is claimed, nothing is copied.
+    /// Whether retained samples carry the response headers and body. Off
+    /// consults no gate, claims no exemplar and copies nothing.
     bool capture_response_bodies = constants::metrics_collector::DEFAULT_CAPTURE_RESPONSE_BODIES;
 
     /// Largest captured body per sample; the copy is truncated to it.
@@ -264,9 +260,8 @@ struct MetricsCollectorConfig {
     /// Ceiling on the per-status exemplar store, 0 = unlimited.
     size_t max_exemplar_results = constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS;
 
-    /// Whether the five per-phase histograms are allocated and fed. Off makes
-    /// the collector byte-for-byte what it was before them: no bank is
-    /// allocated, nothing is recorded, and `phase_percentiles()` answers
+    /// Whether the five per-phase histograms are allocated and fed. Off
+    /// allocates no bank, records nothing, and `phase_percentiles()` answers
     /// nullopt - which is what keeps the report's `phases` section absent
     /// rather than showing five zeroed distributions, and the gate frame's
     /// `cumulativePhases` key out.
@@ -352,15 +347,14 @@ const std::map<std::string, CustomMetricSummary>& metrics);
  * budget leaves the 1-in-N budget for ordinary traffic.
  *
  * `Exemplar` ranks **last** - it names the store for a completion no other
- * budget wanted. Ranking it first was tried and was wrong: the first few
- * completions of a status code are often exactly where a run's outliers are,
- * so it quietly emptied the slow store, which exists to hold what the user
- * asked for.
+ * budget wanted. Ranked first it would be wrong: the first few completions of a
+ * status code are often exactly where a run's outliers are, so it would quietly
+ * empty the slow store, which exists to hold what the user asked for.
  *
  * This enum therefore says only *which budget pays*. Whether the record also
- * carries a captured body is a separate decision, made by the caller and
- * passed to record_success - a record can sit in the sampled budget and still
- * deserve a body, which no ordering of these three could express.
+ * carries a captured body is a separate decision, made by the caller and passed
+ * to record_success - a record can sit in the sampled budget and still deserve
+ * a body, which no ordering of these three could express.
  */
 enum class SuccessTraceReason : std::uint8_t {
     None,    ///< no trace was built for this completion
@@ -532,9 +526,9 @@ class MetricsCollector {
      * Called once the run is retained: the deferred passes that read these
      * stores have already run (they are what the samples exist for), and the
      * retention window keeps the tick topic and the summary counters, not the
-     * bodies behind them (issue #1154's deferred half). Without this a run
-     * against a 1 MiB endpoint held its whole sample budget resident for
-     * `liveRetentionMs` after it stopped sending.
+     * bodies behind them (#1154). Without this a run against a 1 MiB endpoint
+     * would hold its whole sample budget resident for `liveRetentionMs` after
+     * it stopped sending.
      *
      * Each store gives back exactly the bytes it held, under its own lock,
      * rather than the budget being zeroed - that is what keeps the figure from
@@ -1050,8 +1044,7 @@ class MetricsCollector {
     // ========================================================================
 
     /**
-     * @brief Calculate latency percentiles
-     * @note Call after test completion - sorts the latencies vector
+     * @brief Latency percentiles read from a histogram
      */
     struct Percentiles {
         /**
@@ -1313,9 +1306,6 @@ class MetricsCollector {
     [[nodiscard]] LevelLatency level_latency (
     const std::map<int, size_t>& status_snapshot) const;
 
-    /**
-     * @brief Get status code distribution
-     */
     [[nodiscard]] std::map<int, size_t> status_code_distribution () const;
 
     /**
@@ -1374,7 +1364,8 @@ class MetricsCollector {
 
     /**
      * @brief Get latency count from histogram
-     * @note Raw latencies are no longer stored; use calculate_percentiles() for analysis
+     * @note No raw latencies are stored; use calculate_percentiles() for
+     *       analysis
      */
     [[nodiscard]] int64_t latency_count () const;
 
@@ -1385,9 +1376,6 @@ class MetricsCollector {
         return response_samples_;
     }
 
-    /**
-     * @brief Get count of stored response samples
-     */
     [[nodiscard]] size_t response_sample_count () const {
         return response_samples_.size ();
     }
@@ -1813,16 +1801,16 @@ std::string_view prefix,
 const MetricsCollector::Percentiles& interval);
 
 /**
- * @brief `summary["stream"]`'s value (issue #576), in the shape both run modes
- *        store - a load run's and, since #3235, a sequential collection run's -
- *        so `GET /runs/:id/report` passes one shape through either way.
+ * @brief `summary["stream"]`'s value (#576), in the shape both run modes store
+ *        - a load run's and a sequential collection run's (#3235) - so
+ *        `GET /runs/:id/report` passes one shape through either way.
  *
  * `eventsPerSecond` is derived over @p duration_s, the run's `test_duration`
  * that the report's `rps` is read off: two rates a reader compares must come
- * off one clock. `timeToFirstEvent` (#3234) is omitted when no stream
- * delivered a timed event, `timeToFirstMatch` (#3774) when no stream's first
- * content marker arrived, and `maxEventGap` and `eventRate` (#3776) when no
- * stream measured one, on the section's own absent-not-zeros rule.
+ * off one clock. `timeToFirstEvent` (#3234) is omitted when no stream delivered
+ * a timed event, `timeToFirstMatch` (#3774) when no stream's first content
+ * marker arrived, and `maxEventGap` and `eventRate` (#3776) when no stream
+ * measured one, on the section's own absent-not-zeros rule.
  */
 [[nodiscard]] nlohmann::json
 build_stream_summary_payload (const MetricsCollector::StreamTotals& stream, double duration_s);
