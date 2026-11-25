@@ -7,11 +7,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file version.hpp
- * @brief Vayu Engine version information
- */
-
 // Macros, not an enum: build.py's version bump rewrites these exact
 // `#define` lines by regex, and VAYU_VERSION_STRING must stay a macro for
 // the string literal pasting in user_agent.cpp - the parts stay in the same
