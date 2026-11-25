@@ -6,19 +6,17 @@
  */
 
 /**
- * The collection whose variables are in scope for whatever the user is looking
- * at - a request tab's own collection, or a collection tab itself.
+ * The collection whose variables are in scope for what the user is looking at: a request tab's own
+ * collection, or a collection tab itself.
  *
- * This exists for the Monaco completion providers. They are registered once per
- * *language* in `App`, so unlike `VariableInput` they have no request builder
- * context to take a `collectionId` from - and `useVariableResolver` includes
- * collection-scope variables only when it is given one (collection scope is
- * explicit only; see the note in that hook). Without this they offered globals,
- * the active environment and the dynamic table, and left the collection's own
- * names out of every editor.
+ * For the Monaco completion providers. Registered once per *language* in `App`, they have no
+ * request builder context to take a `collectionId` from (unlike `VariableInput`), and
+ * `useVariableResolver` includes collection-scope variables only when given one (collection scope
+ * is explicit only; see that hook). Without this every editor would leave the collection's own
+ * names out.
  *
- * The active tab is the right source: it is what the frontmost editor belongs
- * to, and it is what `ContextBar` already reads for the same question.
+ * The active tab is the right source: the frontmost editor belongs to it, and `ContextBar` reads it
+ * for the same question.
  */
 
 import { useTabsStore } from "@/stores";

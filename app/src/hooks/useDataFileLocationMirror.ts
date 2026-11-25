@@ -9,14 +9,12 @@ import { useEffect } from "react";
 import { useDataFileStore } from "@/stores/data-file-store";
 
 /**
- * Keep the main process's copy of the bound data-file paths current, so an
- * MCP client can be told where a collection's data file is (issue #1742).
- *
- * Mounted once at the root, after `useFileBindingMirror`: the engine row is
- * the record, the store mirrors the collections list, and this mirrors the
- * store onward, on mount (a launch or a reload, when main's copy is empty or
- * stale) and on every change to `locations`. Absent outside Electron, where
- * there is no MCP server to tell.
+ * Keep the main process's copy of the bound data-file paths current, so an MCP client can be told
+ * where a collection's data file is (#1742). Mounted once at the root, after
+ * `useFileBindingMirror`: the engine row is the record, the store mirrors the collections list, and
+ * this mirrors the store onward, on mount (a launch or a reload, when main's copy is empty or
+ * stale) and on every change to `locations`. Absent outside Electron, where there is no MCP server
+ * to tell.
  */
 export function useDataFileLocationMirror(): void {
 	useEffect(() => {

@@ -6,23 +6,17 @@
  */
 
 /**
- * Keep a live stream on every inbox that may notify (issue #1400).
+ * Keep a live stream on every inbox that may notify (#1400). Mounted in `App.tsx`, not in the inbox
+ * view, for `useHostSleepRecorder`'s reason: the event this exists for arrives while the user is
+ * somewhere else. An inbox tab is mounted only while it is the active tab, so a stream it owned
+ * would go the moment the user clicked a request tab on the way out of the window, precisely when
+ * the `Notify` toggle is meant to speak. `inbox-watch-service` owns the sockets; this is the
+ * standing answer to which inboxes it should hold, recomputed as the list and the toggles change.
  *
- * Mounted in `App.tsx` rather than in the inbox view, for the reason
- * `useHostSleepRecorder` is: the event this exists for arrives while the user is
- * somewhere else. An inbox tab is mounted only while it is the active tab, so a
- * stream it owned went away the moment the user clicked a request tab on their
- * way out of the window - which is precisely when the `Notify` toggle was meant
- * to speak. `inbox-watch-service` owns the sockets; this is the standing answer
- * to which inboxes it should hold, recomputed as the list and the toggles
- * change.
- *
- * The inbox list is observed here only while at least one inbox may notify. It
- * polls every `SERVICES_POLL_INTERVAL_MS` and a root observer that nobody reads
- * is waste (#1150), so the app pays for this list when the feature is on
- * and not otherwise. The pruning of dead ids is bound to the same read: an id
- * belongs to the engine process that minted it, and this is where the answer the
- * engine gave arrives.
+ * The inbox list is observed here only while at least one inbox may notify: it polls every
+ * `SERVICES_POLL_INTERVAL_MS`, and a root observer that nobody reads is waste (#1150). The pruning
+ * of dead ids is bound to the same read: an id belongs to the engine process that minted it, and
+ * this is where the engine's answer arrives.
  */
 
 import { useEffect, useMemo } from "react";
@@ -36,10 +30,9 @@ export function useInboxWatchers(): void {
 	const anyEnabled = Object.keys(enabled).length > 0;
 	const { data: inboxes, isSuccess } = useInboxesQuery({ enabled: anyEnabled });
 
-	// Pruned against an answer the engine actually gave: a failed or unsettled
-	// read leaves the map alone, because "no inboxes" and "could not ask" are
-	// not the same list (#1388). Moved here from the inbox view, which pruned
-	// only while its tab was open (#1400).
+	// Pruned against an answer the engine actually gave: a failed or unsettled read leaves the map
+	// alone, because "no inboxes" and "could not ask" are not the same list (#1388). Here rather
+	// than in the inbox view, so it prunes while that tab is closed too (#1400).
 	useEffect(() => {
 		if (!isSuccess || !inboxes) return;
 		retainInboxes(inboxes.map((i) => i.inboxId));
