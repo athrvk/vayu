@@ -24,13 +24,11 @@ import { formatNumber } from "@/lib/format-number";
 import { dataFileDisplayName } from "@/lib/run-data-file";
 import RunExportMenu from "@/modules/history/main/components/RunExportMenu";
 
-// memo'd (#1714): LoadTestDashboard re-renders on every metrics tick during a
-// run (up to 10 Hz), and this header's own props barely ever change. The
-// caller passes a stable onStop (useCallback) and a memoised configuration,
-// so the memo actually holds rather than just decorating the export.
-// `elapsedDuration` is the engine's fractional elapsed and changes on every
-// tick, but the header draws only MM:SS, so the comparator below ignores
-// sub-second movement.
+// memo'd (#1714): LoadTestDashboard re-renders on every metrics tick during a run (up to 10 Hz) and
+// these props barely change; the caller passes a stable onStop (useCallback) and a memoised
+// configuration, so the memo holds. `elapsedDuration` is the engine's fractional elapsed and
+// changes every tick, but the header draws only MM:SS, so the comparator below ignores sub-second
+// movement.
 function DashboardHeader({
 	live,
 	endedAs,
@@ -87,9 +85,8 @@ function DashboardHeader({
 				? `up to ${formatConcurrency(configuration.concurrency)}`
 				: formatConcurrency(configuration.concurrency)
 		);
-	// Was matching on "rps" / "concurrency", which `LoadTestMode` cannot hold -
-	// so every real run fell through and printed a raw `constant_rps` here.
-	// A collection run is the one the header names by its collection, not a URL.
+	// The mode's label from the `LoadTestMode` value itself (a raw `constant_rps` is never
+	// printed); a collection run is the one the header names by its collection, not a URL.
 	if (configuration?.mode)
 		configParts.push(
 			loadTestModeLabel(configuration.mode, collectionName ? "collection" : undefined)

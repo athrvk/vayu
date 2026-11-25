@@ -11,15 +11,12 @@ import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
 /**
- * constant_concurrency hero card #2 - how many of the configured N virtual
- * users had a request on the wire. Below 100% means idle virtual users, which
- * describes the run's shape rather than a failure, so the number and the bar
- * carry no tier colour (#2245).
- *
- * `meanInFlight` is the mean on the wire (the trailing window live, the whole
- * run once finished). Without it the card draws `currentConcurrency` as a count
- * of "active" users: capacity discovery, and a run stored before the mean
- * existed. The instant alone reads 0-and-N for users that wait in step (#2821).
+ * constant_concurrency hero card #2: how many of the configured N virtual users had a request on
+ * the wire. Below 100% means idle virtual users, which describes the run's shape rather than a
+ * failure, so the number and the bar carry no tier colour (#2245). `meanInFlight` is the mean on
+ * the wire (the trailing window live, the whole run once finished); without it (capacity discovery,
+ * a run stored before the mean existed) the card draws `currentConcurrency` as a count of "active"
+ * users. The instant alone reads 0-and-N for users that wait in step (#2821).
  */
 export function ConcurrencyUtilCard({
 	currentConcurrency,

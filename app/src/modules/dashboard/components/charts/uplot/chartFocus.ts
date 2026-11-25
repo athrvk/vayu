@@ -6,15 +6,12 @@
  */
 
 /**
- * Cross-chart focus channel - a tiny pub/sub keyed by chart group, carrying the
- * hovered **timestamp** (elapsed seconds).
- *
- * uPlot's native cursor sync matches on the x-scale VALUE, which only links
- * charts that share an x axis (time). The concurrency scatter plots against
- * concurrency, so it can't join that group - but every scatter dot still
- * corresponds to a moment in time. This channel carries that moment, so hovering
- * a time chart can highlight the scatter's dot for the same tick (and vice
- * versa), keyed by timestamp rather than pixel or x-value.
+ * Cross-chart focus channel: a tiny pub/sub keyed by chart group, carrying the hovered
+ * **timestamp** (elapsed seconds). uPlot's cursor sync matches on the x-scale VALUE, which links
+ * only charts sharing a time axis. The concurrency scatter plots against concurrency, but each of
+ * its dots is still a moment, so this channel carries that moment: hovering a time chart highlights
+ * the scatter's dot for the same tick, and vice versa, keyed by timestamp rather than pixel or x
+ * value.
  */
 
 export type FocusValue = number | null;
