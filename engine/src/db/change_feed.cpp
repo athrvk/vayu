@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief The change feed's ring and wire spellings (issue #3420).
- */
+/// The change feed's ring and wire spellings (#3420).
 
 #include "vayu/db/change_feed.hpp"
 
