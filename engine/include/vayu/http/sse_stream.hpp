@@ -8,17 +8,16 @@
  */
 
 /**
- * @file http/sse_stream.hpp
- * @brief The streaming execution core (issue #573): a managed consumer of one
+ * @brief The streaming execution core (#573): a managed consumer of one
  *        `text/event-stream` response, the bounded ring its events land in, and
  *        the manager that owns both.
  *
- * Why this exists at all: `POST /execute` is synchronous end to end on one
- * cpp-httplib pool thread and returns one JSON body, so a stream pointed at it
- * buffered without a byte cap until `CURLOPT_TIMEOUT_MS` killed the transfer
- * and reported a status-0 timeout. A live stream needs a different delivery
- * path - a worker that owns the transfer, a bounded in-memory ring, and an SSE
- * endpoint that relays it.
+ * Why it exists: `POST /execute` is synchronous end to end on one cpp-httplib
+ * pool thread and returns one JSON body, so a stream sent through it is
+ * buffered rather than delivered, and ends only at a byte bound or the
+ * whole-transfer timeout. A live stream needs a different delivery path - a
+ * worker that owns the transfer, a bounded in-memory ring, and an SSE endpoint
+ * that relays it.
  *
  * Two disciplines this file exists to hold:
  *
@@ -368,7 +367,7 @@ const std::vector<vayu::core::detail::JsonPathStep>* text_path = nullptr);
 
 /**
  * @brief The `events` node for a stream whose bytes were *buffered* rather than
- *        consumed live - the load path (issue #657).
+ *        consumed live - the load path (#657).
  *
  * The design path records events as they arrive; a load transfer buffers the
  * whole `text/event-stream` body and counts frames with `SseFrameCounter`. The
@@ -451,8 +450,8 @@ void expand_stored_stream_events (nlohmann::json& trace);
 
 /**
  * @brief Binds `pm.response.events` for a post-request script that reads a
- *        stream's *buffered* bytes (issue #3769): a collection run's streaming
- *        step, a load run's inline `script.post` and the deferred replay.
+ *        stream's *buffered* bytes (#3769): a collection run's streaming step,
+ *        a load run's inline `script.post` and the deferred replay.
  *
  * When @p response was a bounded stream (`Response::stream_events` set), fills
  * @p slot with `buffered_stream_events_node` over its body, reading each
@@ -500,12 +499,12 @@ struct SseStreamRequest {
     /// happen exactly once and in the order the send decides - the same route
     /// the non-streaming client's `ClientConfig::cookie_writes` takes.
     std::vector<CookieWrite> cookie_writes;
-    /// How this stream reaches the network (issue #705). Resolved by the route
+    /// How this stream reaches the network (#705). Resolved by the route
     /// alongside `limits`, for the same reason: read once when the stream
-    /// starts, so a settings change applies to the next stream and one
-    /// transfer is never reconfigured underneath itself.
+    /// starts, so a settings change applies to the next stream and one transfer
+    /// is never reconfigured underneath itself.
     TransportPolicy transport;
-    /// What this stream adds to a request that names none of it (issue #1229),
+    /// What this stream adds to a request that names none of it (#1229),
     /// resolved by the route alongside `transport` and for the same reason.
     DefaultHeaderPolicy default_headers;
     /**
