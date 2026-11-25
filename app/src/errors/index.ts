@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Errors Index
- *
- * Central export for error handling utilities.
- */
+/** Central export for the error-handling utilities. */
 
 export { ErrorBoundary } from "./ErrorBoundary";
 export { logError, logApiError, type ErrorContext, type ErrorSeverity } from "./error-logger";

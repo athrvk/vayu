@@ -6,17 +6,15 @@
  */
 
 /**
- * How a bound row's cell is written into the field it lands in (issue #2639):
- * the engine's `FieldSplitter` / `TemplateJoiner` (`engine/src/core/
- * scenario_data.cpp`) and its leaf escapers (`vayu/utils/text_escape.hpp`),
- * restated for the Send-with-row preview and pinned to them by
+ * How a bound row's cell is written into the field it lands in (#2639): the engine's
+ * `FieldSplitter` / `TemplateJoiner` (`engine/src/core/scenario_data.cpp`) and its leaf escapers
+ * (`vayu/utils/text_escape.hpp`), restated for the Send-with-row preview and pinned to them by
  * `engine/tests/fixtures/data-bind-escaping-conformance.json`.
  *
- * A token's encoding is decided by the *literal* text before it, never by a
- * bound value: a value escaped for its placement cannot move the scan, so the
- * state after a token is the state before it. The JSON scan's escape flag
- * resets at each chunk while the XML scan's half-read delimiter carries across
- * one; both are the engine's exact chunk-wise behaviour.
+ * A token's encoding is decided by the *literal* text before it, never by a bound value: a value
+ * escaped for its placement cannot move the scan, so the state after a token is the state before
+ * it. The JSON scan's escape flag resets at each chunk while the XML scan's half-read delimiter
+ * carries across one; both are the engine's exact chunk-wise behaviour.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -55,15 +53,12 @@ export function graphqlBodyIsEnveloped(content: string): boolean {
 }
 
 /**
- * The context a body binds under: the engine's `body_context`
- * (`core/scenario_data.cpp`). `json`, `jsonrpc` and `mcp` are JSON documents and `xml`
- * an XML one; a `graphql` body is JSON only as an envelope, because a bare
- * document is escaped wholesale when the engine wraps it and escaping it first
- * would double every quote. Every other mode is plain text to a bind.
- *
- * The engine asks the body composition left; a preview passes the body as
- * typed, which differs only for a `graphql` body whose envelope a variable
- * supplies.
+ * The context a body binds under: the engine's `body_context` (`core/scenario_data.cpp`). `json`,
+ * `jsonrpc` and `mcp` are JSON documents and `xml` an XML one; a `graphql` body is JSON only as an
+ * envelope, because a bare document is escaped wholesale when the engine wraps it, and escaping it
+ * first would double every quote. Every other mode is plain text to a bind. The engine asks the
+ * body composition left; a preview passes the body as typed, which differs only for a `graphql`
+ * body whose envelope a variable supplies.
  */
 export function bodyFieldContext(mode: BodyMode, content: string): DataFieldContext {
 	switch (mode) {

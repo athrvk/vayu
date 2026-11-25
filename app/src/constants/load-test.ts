@@ -6,41 +6,32 @@
  */
 
 /**
- * Load test configuration defaults and input limits.
+ * Load test configuration defaults and input limits. Two different things live here, and they are
+ * easy to confuse:
  *
- * Two different things live here and they are easy to confuse:
+ * - **`LOAD_TEST_LIMITS`**: the range each control in the load dialog offers. The ceilings are this
+ *   app's policy, not the engine's, and four of them are user-adjustable (Settings -> Load
+ *   testing). They sit inside what the engine accepts, deliberately: the engine's own bounds are
+ *   crash guards, so hitting one should be impossible from the UI, not merely unlikely.
+ *   `MAX_IN_FLIGHT` is the one that sits on the engine's bound rather than under it: a backpressure
+ *   ceiling is not a crash guard, and the engine's own default reaches 500,000 at the RPS maximum
+ *   offered here, so a lower dialog ceiling would hide ceilings the engine picks for itself.
+ * - **`LOAD_TEST_CEILING_BOUNDS`**: how far the user may move those ceilings. The upper end of each
+ *   is the engine's guard, so no Settings value can produce a request the engine rejects.
  *
- *   - **`LOAD_TEST_LIMITS`** - the range each control in the load dialog
- *     offers. The ceilings are *this app's* policy, not the engine's, and four
- *     of them are user-adjustable (Settings -> Load testing). They sit inside
- *     what the engine accepts, which is deliberate: the engine's own bounds are
- *     crash guards, so hitting one should be impossible from the UI rather than
- *     merely unlikely. `MAX_IN_FLIGHT` is the one that sits *on* the engine's
- *     bound rather than under it - a backpressure ceiling is not a crash guard,
- *     and the engine's own default reaches 500,000 at the RPS maximum offered
- *     here, so a lower dialog ceiling would hide ceilings the engine picks for
- *     itself.
- *   - **`LOAD_TEST_CEILING_BOUNDS`** - how far the user may move those
- *     ceilings. The upper end of each is the engine's guard, so no Settings
- *     value can produce a request the engine rejects.
- *
- * Both invariants are pinned against the engine's own header by
- * `load-test.engine-parity.test.ts`, because stating them here is what was
- * already being done when `maxInFlight` drifted.
+ * Both invariants are pinned against the engine's own header by `load-test.engine-parity.test.ts`,
+ * because stating them here is what was already being done when `maxInFlight` drifted.
  */
 
 /**
- * Starting values, deliberately fixed - the Settings panel offers ceilings, not
- * defaults, and that asymmetry is the policy (recorded for #521).
- *
- * A ceiling is a standing rule about what this machine may be asked to do, so it
- * belongs in Settings. A starting value is only ever seen once per request: the
- * load dialog memoes each request's draft and reopens on it
- * (`restore(saved.rps, LOAD_TEST_DEFAULTS.RPS, "RPS")` and its siblings in
- * `LoadTestConfigDialog`), so a user-set default would apply to a request's
- * first run and never again. The
- * one number that genuinely spans runs - the p99 SLO - is already a setting
- * (`sloThresholdMs`) and seeds the dialog from there.
+ * Starting values, deliberately fixed: the Settings panel offers ceilings, not defaults, and that
+ * asymmetry is the policy (#521). A ceiling is a standing rule about what this machine may be asked
+ * to do, so it belongs in Settings. A starting value is only ever seen once per request: the load
+ * dialog memoes each request's draft and reopens on it
+ * (`restore(saved.rps, LOAD_TEST_DEFAULTS.RPS, "RPS")` and its siblings in `LoadTestConfigDialog`),
+ * so a user-set default would apply to a request's first run and never again. The one number that
+ * genuinely spans runs, the p99 SLO, is already a setting (`sloThresholdMs`) and seeds the dialog
+ * from there.
  */
 export const LOAD_TEST_DEFAULTS = {
 	MODE: "constant_rps",
@@ -66,11 +57,10 @@ export const LOAD_TEST_DEFAULTS = {
 	/** Matches the engine's `DEFAULT_RETRY_AFTER_MAX_MS`. */
 	RETRY_AFTER_MAX_MS: 30_000,
 	/**
-	 * Streaming runs (issue #576): how long one stream may run, and how many
-	 * events it may deliver, before the engine ends it as a **completed**
-	 * stream. Both match the engine's `sseMaxStreamDurationMs` /
-	 * `sseMaxStreamEvents` seeds, so the dialog opens showing the bounds a run
-	 * would get if it sent nothing at all.
+	 * Streaming runs (#576): how long one stream may run, and how many events it may deliver,
+	 * before the engine ends it as a **completed** stream. Both match the engine's
+	 * `sseMaxStreamDurationMs` / `sseMaxStreamEvents` seeds, so the dialog opens showing the bounds
+	 * a run would get if it sent nothing at all.
 	 */
 	STREAM_DURATION_S: 600,
 	STREAM_MAX_EVENTS: 100_000,
@@ -100,9 +90,8 @@ export type LoadTestLimitKey =
 export type LoadTestLimits = Record<LoadTestLimitKey, LimitRange>;
 
 /**
- * The dialog's ranges with no user overrides applied. Read through
- * `resolveLoadTestLimits` rather than directly, unless you specifically want
- * the shipped defaults.
+ * The dialog's ranges with no user overrides applied. Read through `resolveLoadTestLimits`, not
+ * directly, unless you want the shipped defaults.
  */
 export const LOAD_TEST_LIMITS: LoadTestLimits = {
 	DURATION_S: { MIN: 1, MAX: 3600 },
@@ -113,21 +102,18 @@ export const LOAD_TEST_LIMITS: LoadTestLimits = {
 	RAMP_DURATION_S: { MIN: 1, MAX: 3600 },
 	START_CONCURRENCY: { MIN: 1, MAX: 1000 },
 	/**
-	 * MIN is 1, not 0. The value is a *percentage of successful responses to
-	 * keep*, converted to the engine's sampling period by
-	 * `successSamplePeriod`. 0% has no period that expresses it (the period
-	 * would be infinite, and a literal 0 on the wire is a division by zero
-	 * engine-side, which the engine now rejects with a 400), so "keep no
-	 * success traces" is the Save timing breakdown toggle instead - that gates
-	 * storage entirely.
+	 * MIN is 1, not 0: the value is a percentage of successful responses to keep, converted to the
+	 * engine's sampling period by `successSamplePeriod`. 0% has no period that expresses it (the
+	 * period would be infinite, and a literal 0 on the wire is a division by zero engine-side,
+	 * which the engine rejects with a 400), so "keep no success traces" is the Save timing
+	 * breakdown toggle instead, which gates storage entirely.
 	 */
 	SAMPLE_RATE_PCT: { MIN: 1, MAX: 100 },
 	SLOW_THRESHOLD_MS: { MIN: 0, MAX: 60_000 },
 	/**
-	 * The latency budget a Capacity Discovery run searches for the edge of. The
-	 * ceiling is the engine's own guard on `sloMs`, and the same one the client
-	 * SLO setting clamps to - the two are the same number wearing two hats, so
-	 * they must accept the same range.
+	 * The latency budget a Capacity Discovery run searches for the edge of. The ceiling is the
+	 * engine's own guard on `sloMs`, the same one the client SLO setting clamps to: the same number
+	 * wearing two hats, so they must accept the same range.
 	 */
 	SLO_MS: { MIN: 1, MAX: 60_000 },
 	/**
@@ -139,12 +125,11 @@ export const LOAD_TEST_LIMITS: LoadTestLimits = {
 	/** The engine's own range for `retryAfterMaxMs` (`MAX_RETRY_AFTER_MAX_MS`), exact. */
 	RETRY_AFTER_MAX_MS: { MIN: 1, MAX: 3_600_000 },
 	/**
-	 * The two stream caps, in the dialog's units. Both ranges are the engine's
-	 * own `constants::sse` bounds - `MIN_STREAM_DURATION_MS` /
-	 * `STREAM_DURATION_MS_CEILING` in seconds, and `MIN_STREAM_EVENTS` /
-	 * `STREAM_EVENTS_CEILING` - because the engine rejects anything outside
-	 * them with a 400, and a control that can reach a value the engine refuses
-	 * is a dialog that starts no run.
+	 * The two stream caps, in the dialog's units. Both ranges are the engine's own `constants::sse`
+	 * bounds (`MIN_STREAM_DURATION_MS` / `STREAM_DURATION_MS_CEILING` in seconds, and
+	 * `MIN_STREAM_EVENTS` / `STREAM_EVENTS_CEILING`), because the engine rejects anything outside
+	 * them with a 400, and a control that can reach a value the engine refuses is a dialog that
+	 * starts no run.
 	 */
 	STREAM_DURATION_S: { MIN: 1, MAX: 86_400 },
 	STREAM_MAX_EVENTS: { MIN: 1, MAX: 10_000_000 },

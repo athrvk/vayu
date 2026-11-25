@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/client.hpp
  * @brief HTTP client using libcurl
  */
 
@@ -29,7 +28,7 @@ namespace vayu::http {
 
 /**
  * @brief Called as a response body arrives, for a caller that reports it
- *        (issue #882).
+ *        (#882).
  *
  * `received` is the body buffered so far and `declared_total` is the upstream's
  * `Content-Length`, absent when it declared none - a chunked response has no
@@ -44,36 +43,28 @@ namespace vayu::http {
 using BodyProgressCallback =
 std::function<bool (uint64_t received, std::optional<uint64_t> declared_total)>;
 
-/**
- * @brief HTTP Client configuration
- */
 struct ClientConfig {
-    /// What this send adds to a request that names none of it (issue #1229).
-    /// Resolved from config by the route; the built-in default is the
-    /// `User-Agent` alone, which is what a `Client` added before the policy
-    /// existed.
+    /// What this send adds to a request that names none of it (#1229). Resolved
+    /// from config by the route; the built-in default is the `User-Agent`
+    /// alone.
     DefaultHeaderPolicy default_headers;
 
     /**
-     * @brief How this transfer reaches the network (issue #705).
+     * @brief How this transfer reaches the network (#705).
      *
-     * Defaults to the environment pickup, which is what every `Client` did
-     * before the policy existed. It replaced a `proxy_url` and a
-     * `ca_bundle_path` that no code in the repo's history ever assigned - the
-     * "written but never read" defect inverted - so a caller that wants a
-     * proxy now has one field to set and `resolve_transport_policy(db)` to
-     * fill it.
+     * Defaults to the environment pickup; a caller that wants the configured
+     * proxy sets this one field, filled by `resolve_transport_policy(db)`.
      */
     TransportPolicy transport;
 
     /**
-     * @brief The jar this client reads cookies from and writes them back to,
-     *        or null to send no stored cookie and keep none (issue #301).
+     * @brief The jar this client reads cookies from and writes them back to, or
+     *        null to send no stored cookie and keep none (#301).
      *
-     * Null is the default because most `Client` users are not a user's
-     * request: the OAuth token call, the import fetch and the update check are
-     * the engine talking on its own behalf, and a session cookie picked up
-     * there belongs to nobody's environment. Only `POST /execute` and the
+     * Null is the default because most `Client` users are not a user's request:
+     * the OAuth token call, the import fetch and the update check are the
+     * engine talking on its own behalf, and a session cookie picked up there
+     * belongs to nobody's environment. Only `POST /execute` and the
      * `pm.sendRequest` inside it opt in - see `cookie_scope`.
      */
     CookieJar* cookie_jar = nullptr;
@@ -86,7 +77,7 @@ struct ClientConfig {
     std::string cookie_scope{ NO_ENVIRONMENT_SCOPE };
 
     /**
-     * @brief Script jar writes this transfer carries (issue #337).
+     * @brief Script jar writes this transfer carries (#337).
      *
      * Applied on top of the scope's stored lines when the handle is seeded, so
      * a `pm.cookies.jar().set` made just before the send rides the request it
@@ -98,16 +89,14 @@ struct ClientConfig {
 
     /**
      * @brief Largest response body this client will buffer, 0 = unbounded
-     *        (issue #784).
+     *        (#784).
      *
-     * Zero, and therefore unbounded, for every caller that does not set it -
-     * which is what "Design-mode sends are not affected" by
-     * `maxResponseBodyBytes` still means: that setting is the load path's, and
-     * nothing here reads it. The `/import/fetch` proxy sets it, because that
-     * route buffers a response from a URL a user typed with nothing behind it
-     * at all, and since #1157 the design-mode send sets it too - from
-     * `maxDesignResponseBodyBytes`, its own setting, and with
-     * @ref truncate_over_limit, which is what makes that bound survivable for a
+     * Zero, so unbounded, for every caller that does not set it:
+     * `maxResponseBodyBytes` is the load path's setting, and nothing here reads
+     * it. The `/import/fetch` proxy sets it, because that route buffers a
+     * response from a URL a user typed, and the design-mode send sets it too
+     * (#1157), from its own `maxDesignResponseBodyBytes` and with
+     * @ref truncate_over_limit, which makes that bound survivable for a
      * response someone is watching for.
      *
      * Enforced by the write callback, which cuts the transfer short as soon as
@@ -120,16 +109,16 @@ struct ClientConfig {
 
     /**
      * @brief What reaching @ref max_response_bytes means: keep the prefix and
-     *        report a truncated response (true), or refuse the transfer
-     *        (false, the default) - issue #1157.
+     *        report a truncated response (true), or refuse the transfer (false,
+     *        the default; #1157).
      *
      * The bound is enforced identically either way; this decides only what the
      * caller is handed afterwards. False is the right answer for a machine
      * reader - `/import/fetch` cannot import half a document and answers a
      * `413` - and true is the right answer for the design-mode send, where a
-     * person asked to see this response: the prefix, its status and its
-     * headers are worth more than an empty pane, and `Response::body_truncated`
-     * is what stops that prefix being read as the whole body.
+     * person asked to see this response: the prefix, its status and its headers
+     * are worth more than an empty pane, and `Response::body_truncated` is what
+     * stops that prefix being read as the whole body.
      *
      * Ignored when @ref max_response_bytes is 0, which nothing can exceed.
      */
@@ -137,35 +126,33 @@ struct ClientConfig {
 
     /**
      * @brief Report the body's arrival to this callback, or null to report
-     *        nothing (issue #882).
+     *        nothing (#882).
      *
      * Null for every caller but the streaming half of `/import/fetch`, which is
      * the only one with somewhere to send a report. Called from the write
      * callback, so it is called on the thread that ran `send` and once per curl
      * write - roughly every 16 KiB - which means a caller that emits something
-     * per call has to throttle for itself. Deliberately unthrottled here: the
-     * client reports what arrived, and how often that is worth relaying is a
-     * decision only the caller can make.
+     * per call has to throttle for itself. Unthrottled on purpose: how often a
+     * report is worth relaying is the caller's decision.
      */
     BodyProgressCallback on_body_progress;
 
     /**
      * @brief Abort only after this long below a trickle, instead of after a
-     *        fixed total (issue #882). 0 keeps the total bound.
+     *        fixed total (#882). 0 keeps the total bound.
      *
-     * A total timeout on a download is a bound on its *size*, not on its health:
-     * `Request::timeout_ms` defaults to 30s, so a 10 MB spec needed better than
-     * 340 KB/s merely to arrive. `/import/fetch` reported that as
-     * "Operation timed out ... with 4177920 out of 6296254 bytes received" - a
-     * transfer that had never once stopped, killed for being large.
+     * A total timeout on a download is a bound on its *size*, not on its
+     * health: at `Request::timeout_ms`'s 30s default a 10 MB spec needs better
+     * than 340 KB/s merely to arrive, and a transfer that never stopped is
+     * killed for being large (`/import/fetch`: "Operation timed out ... with
+     * 4177920 out of 6296254 bytes received").
      *
-     * Set instead of the total, not beside it: libcurl's low-speed options abort
-     * when throughput stays under `STALL_FLOOR_BYTES_PER_SEC` for this long, and
-     * a transfer with both bounds would still die at whichever fired first. What
-     * still bounds the total is `max_response_bytes`, which every caller that
-     * sets this also sets - so a hostile URL is bounded by the bytes it may send
-     * rather than by the seconds it may take, which is the bound that was always
-     * meant.
+     * Set instead of the total, not beside it: libcurl's low-speed options
+     * abort when throughput stays under `STALL_FLOOR_BYTES_PER_SEC` for this
+     * long, and a transfer with both bounds would still die at whichever fired
+     * first. What still bounds the total is `max_response_bytes`, which every
+     * caller that sets this also sets, so a hostile URL is bounded by the bytes
+     * it may send rather than by the seconds it may take.
      *
      * Only the import fetch sets it. A design send's timeout is a number the
      * user typed against an endpoint they are testing, and it must stay exactly
@@ -175,24 +162,23 @@ struct ClientConfig {
 
     /**
      * @brief The connect-time rule for a fetch a document asked for, or none
-     *        (issue #2364).
+     *        (#2364).
      *
      * Set by `/import/fetch` for a `$ref` (`"reference": true`), which also
      * sends that request with redirects off, and by every request an OAuth
      * discovery of a server not on this machine makes: its fetches, its client
-     * registration and each token request of its config (`discovered_peer_rule`,
-     * #3766, #3800).
-     * Judged on the URL before
-     * anything is dialled (`is_refused_reference_url`), then on the address
-     * each connection reached, beside the reserved-port check every transfer
-     * runs; with a proxy in force that address is the proxy's, which the rule
-     * passes when it is the one `transport` names (#2605).
+     * registration and each token request of its config
+     * (`discovered_peer_rule`, #3766, #3800). Judged on the URL before anything
+     * is dialled (`is_refused_reference_url`), then on the address each
+     * connection reached, beside the reserved-port check every transfer runs;
+     * with a proxy in force that address is the proxy's, which the rule passes
+     * when it is the one `transport` names (#2605).
      */
     std::optional<LocalPeerRule> local_peer_rule;
 
     /**
      * @brief Abort the transfer once this reads true, or null when nothing
-     *        outside the transfer ends it (issue #2683).
+     *        outside the transfer ends it (#2683).
      *
      * Set by every send a management-API handler makes, from
      * `RouteContext::server_stopping` (a buffered `POST /execute` through its
@@ -200,8 +186,8 @@ struct ClientConfig {
      * `Server::stop()` can end those transfers before it joins the handler
      * threads rather than waiting out whatever timeout a request typed. Set
      * from `RunContext::should_stop` for every step of a sequential collection
-     * run and its scripts' `pm.sendRequest` (#3397), which a Stop and an
-     * engine shutdown both raise. The flag must outlive the transfer.
+     * run and its scripts' `pm.sendRequest` (#3397), which a Stop and an engine
+     * shutdown both raise. The flag must outlive the transfer.
      *
      * Read from libcurl's progress callback, which runs about once a second
      * while a transfer waits on a silent peer, so a cancel lands within about
@@ -214,28 +200,19 @@ struct ClientConfig {
 };
 
 /**
- * @brief HTTP Client for making requests
+ * @brief The synchronous client, on curl_easy.
  *
- * This is the simple synchronous client using curl_easy.
- * For high-concurrency scenarios, see EventLoop which uses curl_multi.
+ * For high concurrency, `EventLoop` runs on curl_multi.
  */
 class Client {
     public:
-    /**
-     * @brief Construct a new Client
-     */
     explicit Client (ClientConfig config = {});
 
-    /**
-     * @brief Destructor
-     */
     ~Client ();
 
-    // Non-copyable
     Client (const Client&)            = delete;
     Client& operator= (const Client&) = delete;
 
-    // Movable
     Client (Client&&) noexcept;
     Client& operator= (Client&&) noexcept;
 
@@ -257,9 +234,6 @@ class Client {
      */
     [[nodiscard]] Result<Response> send (const Request& request);
 
-    /**
-     * @brief Convenience method for GET requests
-     */
     [[nodiscard]] Result<Response>
     get (const std::string& url, const Headers& headers = {});
 
@@ -293,7 +267,7 @@ class Client {
 /// `min`/`max` macros break `std::min`/`std::max` in every translation unit
 /// that includes this one. `NOMINMAX` is deliberately PRIVATE to `vayu_core`
 /// (`CMakeLists.txt`), so `vayu-engine` does not get it and `daemon.cpp` is
-/// where that lands - which is exactly how this was found.
+/// where that would land.
 enum class TlsBackendSelection : std::uint8_t {
     /// OpenSSL is the backend every transfer will use, because we said so.
     Selected,
@@ -307,7 +281,7 @@ enum class TlsBackendSelection : std::uint8_t {
 
 /**
  * @brief Select OpenSSL as this process's TLS backend, before curl is
- *        initialized (issue #851).
+ *        initialized (#851).
  *
  * **Why this exists rather than the manifest alone.** `engine/vcpkg.json` asks
  * for `curl` with `default-features: false` and an explicit `openssl`, which

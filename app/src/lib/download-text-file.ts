@@ -6,21 +6,19 @@
  */
 
 /**
- * The app's one file-to-disk path (#2127), which answers what became of the
- * file (#3246). In Electron it is `electronAPI.saveFile`: main opens the system
- * save dialog and writes the bytes, so a caller learns whether the user saved,
- * cancelled or hit a write error, and says "Exported" only for the first.
- * Without the bridge (the renderer under plain vite) it is a click on an
+ * The app's one file-to-disk path (#2127), which answers what became of the file (#3246). In
+ * Electron it is `electronAPI.saveFile`: main opens the system save dialog and writes the bytes, so
+ * a caller learns whether the user saved, cancelled or hit a write error, and says "Exported" only
+ * for the first. Without the bridge (the renderer under plain vite) it is a click on an
  * `<a download>`, which cannot report back and resolves `saved`.
  */
 
 /**
- * What a save came to: written, declined at the dialog, or failed with a
- * sentence to show. `fileName` is the file the user chose in the dialog, which
- * may differ from the name suggested (#3607); a `failed` has none when it came
- * before a path was chosen (main refused the call, the bytes could not be read).
- * The `<a download>` fallback never learns the chosen name and answers the
- * suggested one.
+ * What a save came to: written, declined at the dialog, or failed with a sentence to show.
+ * `fileName` is the file the user chose in the dialog, which may differ from the name suggested
+ * (#3607); a `failed` has none when it came before a path was chosen (main refused the call, the
+ * bytes could not be read). The `<a download>` fallback never learns the chosen name and answers
+ * the suggested one.
  */
 export type FileSaveOutcome =
 	| { outcome: "saved"; fileName: string }

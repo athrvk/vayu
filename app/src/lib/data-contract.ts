@@ -6,33 +6,26 @@
  */
 
 /**
- * Which data contract answers for a request, and what a `{{data.*}}` token
- * should say about itself (issue #600, phase 2 of #598).
+ * Which data contract answers for a request, and what a `{{data.*}}` token says about itself (#600,
+ * phase 2 of #598). The rule: **the nearest declared ancestor, leaf to root**, the shape of the
+ * variable chain (`useVariableResolver`: environment > collection chain leaf->root > global), so a
+ * sub-collection run recursively under a parent binds the parent's data and finds the parent's
+ * contract when it declares none of its own. Documented for users in
+ * `docs/app/variable-resolution.md`.
  *
- * Phase 1 put the columns on a collection. This is the rule that decides which
- * collection's columns a given request is checked against: **the nearest
- * declared ancestor, leaf to root** - the same shape as the variable chain
- * (`useVariableResolver`: environment > collection chain leaf->root > global),
- * so a sub-collection run recursively under a parent binds the parent's data
- * and finds the parent's contract when it declares none of its own. The rule is
- * documented for users in `docs/app/variable-resolution.md`.
- *
- * Nearest *declared*, not nearest declaring-or-not: a sub-collection that
- * declares nothing is transparent rather than a contract of zero columns.
- * Declaring `{}` is how a collection says "no contract" (see
- * `hasDataContract`), and treating that as an override would make an empty
+ * Nearest *declared*, not nearest declaring-or-not: a sub-collection that declares nothing is
+ * transparent rather than a contract of zero columns. Declaring `{}` is how a collection says "no
+ * contract" (see `hasDataContract`), and treating that as an override would let an empty
  * declaration silently shadow a working one above it.
  *
- * Pure, and separate from the hook that feeds it, because three surfaces read
- * the same answer - the token painter, the completion providers and the Data
- * tab's audit - and a second copy of the walk is the defect this repo keeps
- * finding.
+ * Pure, and separate from the hook that feeds it, because three surfaces read the same answer (the
+ * token painter, the completion providers and the Data tab's audit), and a second copy of the walk
+ * is the defect this repo keeps finding.
  *
- * **A bare `{{column}}` gets the same "bound column" description** as
- * `{{data.column}}` (issue #1007), through `describeBareColumnToken` - but
- * only once the caller has confirmed the name is undefined in every scope,
- * because a scope that does define it keeps painting as that variable. See
- * the function's own comment for exactly where that line sits.
+ * **A bare `{{column}}` gets the same "bound column" description** as `{{data.column}}` (#1007),
+ * through `describeBareColumnToken`, but only once the caller has confirmed the name is undefined
+ * in every scope, because a scope that does define it keeps painting as that variable. See that
+ * function's own comment for exactly where the line sits.
  */
 
 import { collectSubtreeIds, walkAncestors, type TreeNode } from "@/modules/collections/tree-utils";
@@ -71,15 +64,12 @@ export function resolveDataContract(
 }
 
 /**
- * The collections whose requests `rootId`'s contract answers for: itself, plus
- * every descendant down to - but not including - one that declares a contract
- * of its own.
- *
- * The audit needs this rather than the collection's own requests, because the
- * chain rule is what makes a `{{data.email}}` in a sub-collection *this*
- * contract's business. Auditing the leaf alone would report a column as
- * unreferenced while a request one level down references it, which is the
- * reading that gets a working column deleted.
+ * The collections whose requests `rootId`'s contract answers for: itself, plus every descendant
+ * down to, but not including, one that declares a contract of its own. The audit needs this rather
+ * than the collection's own requests because the chain rule makes a `{{data.email}}` in a
+ * sub-collection *this* contract's business; auditing the leaf alone would report a column
+ * unreferenced while a request one level down references it, the reading that gets a working column
+ * deleted.
  */
 export function collectionsUnderContract(
 	rootId: string,
@@ -93,13 +83,10 @@ export function collectionsUnderContract(
 }
 
 /**
- * The three states a `{{data.*}}` token can be in, which is the whole of what
- * phase 2 adds to the painting phase 1 left neutral.
- *
- * `muted` for both readable states and `warning` for the one that needs
- * attention - never `destructive`, which is reserved for a name nothing can
- * ever bind. An undeclared column is not broken: the contract may simply be out
- * of date, and the run is still the user's to start.
+ * The tones a `{{data.*}}` token's states paint in: `muted` for both readable states and `warning`
+ * for the one that needs attention, never `destructive`, which is reserved for a name nothing can
+ * ever bind. An undeclared column is not broken: the contract may simply be out of date, and the
+ * run is still the user's to start.
  */
 export type DataTokenTone = "muted" | "warning";
 
@@ -126,11 +113,9 @@ function describeDeclaredColumn(note: string): DataTokenDescription {
 }
 
 /**
- * Phase 1's neutral wording, for a column there is nothing to validate against.
- *
- * One object rather than a literal in each caller: "no contract declared" is a
- * single state, and two copies of its wording is how the surfaces start to
- * disagree about what they are saying.
+ * The neutral wording, for a column there is nothing to validate against. One object rather than a
+ * literal in each caller: "no contract declared" is one state, and two copies of its wording is how
+ * the surfaces start to disagree about what they say.
  */
 const UNVALIDATED_COLUMN: DataTokenDescription = {
 	tone: "muted",
@@ -139,22 +124,20 @@ const UNVALIDATED_COLUMN: DataTokenDescription = {
 };
 
 /**
- * What a **column name** says about itself, given the contract in scope - the
- * three states below, decided without reference to how the name was spelled.
+ * What a **column name** says about itself, given the contract in scope: the three states below,
+ * decided without reference to how the name was spelled. Split out of `describeDataToken` because
+ * the `data.` prefix is a spelling, not a rule (#1063): `pm.iterationData.get("email")` names the
+ * column `{{data.email}}` names and reads the same row, so the two spellings must not each own a
+ * copy of "declared, undeclared, or no contract at all".
  *
- * Split out of `describeDataToken` because the `data.` prefix is a spelling and
- * not a rule (issue #1063): `pm.iterationData.get("email")` names the column
- * `{{data.email}}` names and reads the same row, so the two spellings must not
- * each own a copy of "declared, undeclared, or no contract at all".
- *
- * - **No contract anywhere in the chain** - phase 1's neutral wording, kept
- *   exactly: nothing has been declared, so nothing can be validated, and a
- *   token painted amber for lacking a contract nobody wrote would be noise.
- * - **A declared column** - informational, and the tooltip names the declaring
- *   collection so the reader knows which Data tab owns it.
- * - **A column no contract in scope declares** - warning. The run will send the
- *   token literally unless the file happens to carry the column anyway, and the
- *   declared list is printed because the fix is nearly always a typo.
+ * - **No contract anywhere in the chain**: the neutral wording. Nothing has been declared, so
+ *   nothing can be validated, and a token painted amber for lacking a contract nobody wrote would
+ *   be noise.
+ * - **A declared column**: informational, and the tooltip names the declaring collection so the
+ *   reader knows which Data tab owns it.
+ * - **A column no contract in scope declares**: warning. The run sends the token literally unless
+ *   the file happens to carry the column anyway, and the declared list is printed because the fix
+ *   is nearly always a typo.
  */
 export function describeColumnToken(
 	column: string,
@@ -188,17 +171,13 @@ export function describeDataToken(
 }
 
 /**
- * What a **bare** `{{column}}` says about itself, once the caller has already
- * established both things this function cannot check on its own: `column` is
- * a declared column of `contract`, and nothing in the scopes defines a
- * variable of that name (issue #1007). A bare name a scope *does* define is
- * not this function's business - the caller keeps painting it as that
- * variable, unchanged; a bare name that is not a declared column is an
- * ordinary undefined variable, not a column reference at all.
- *
- * Deliberately narrower than `describeDataToken`: there is no "undeclared"
- * warning state here; a bare name that failed the declared-column check never
- * reaches this function, so it has nothing to warn about.
+ * What a **bare** `{{column}}` says about itself, once the caller has established both things this
+ * function cannot check: `column` is a declared column of `contract`, and nothing in the scopes
+ * defines a variable of that name (#1007). A bare name a scope *does* define is not this function's
+ * business (the caller keeps painting it as that variable), and one that is not a declared column
+ * is an ordinary undefined variable, not a column reference at all. Narrower than
+ * `describeDataToken` on purpose: no "undeclared" warning state, since a bare name that failed the
+ * declared-column check never reaches here.
  */
 export function describeBareColumnToken(contract: DataContractScope): DataTokenDescription {
 	return describeDeclaredColumn(

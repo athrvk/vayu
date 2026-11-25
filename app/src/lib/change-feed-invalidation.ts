@@ -6,19 +6,16 @@
  */
 
 /**
- * The engine's change feed (`GET /changes`, issue #3420), mapped onto the cache.
+ * The engine's change feed (`GET /changes`, #3420), mapped onto the cache. Each event becomes the
+ * MCP data families of `lib/mcp-invalidation.ts`, so the feed and the in-app MCP channel invalidate
+ * through one key table; this module adds only what the families cannot say. A feed event carries
+ * the operation, which an MCP event does not, and that splits a collection's row write from its
+ * cascade. A client certificate's trash write is the one event no family covers on its own (the MCP
+ * tools that touch one declare `collection` beside it), so its trash refetch is named here.
  *
- * Each event becomes the MCP data families of `lib/mcp-invalidation.ts`, so the
- * feed and the in-app MCP channel invalidate through one key table; this module
- * adds only what the families cannot say. A feed event carries the operation,
- * which an MCP event does not, and that is what splits a collection's row write
- * from its cascade. A client certificate's trash write is the one event no
- * family covers on its own (the MCP tools that touch one declare `collection`
- * beside it), so its trash refetch is named here.
- *
- * `FeedInvalidationBatch` is the coalescing in front of that: the feed reports
- * every write, the app's own autosave included, so a burst becomes one
- * invalidation per key, applied once no mutation of this window is in flight.
+ * `FeedInvalidationBatch` is the coalescing in front of that: the feed reports every write, the
+ * app's own autosave included, so a burst becomes one invalidation per key, applied once no
+ * mutation of this window is in flight.
  */
 
 import type { QueryClient } from "@tanstack/react-query";
@@ -172,19 +169,15 @@ export function invalidateFeedDomain(queryClient: QueryClient): void {
 }
 
 /**
- * Re-read what the open tabs show of the feed's rows, and nothing wider: what a
- * fresh subscription's `ready` asks for.
- *
- * The app's first reads go out as the window paints and the stream opens once
- * the engine answers, so a write another client commits between the two is
- * never reported. The request detail and the compositions are `staleTime:
- * Infinity`, so a restored tab would keep the version it read and Send would
- * send it; the collections, environments and globals lists are what an open
- * collection or environment tab reads, and nothing refetches a mounted one.
- * Each is one call, and only a read some surface is observing is refetched -
- * the rest are marked stale for their next mount. Not the request lists: the
- * workspace-wide `GET /requests` is the launch's heaviest call, and the tree
- * reads a name and a method from it, never what Send sends.
+ * Re-read what the open tabs show of the feed's rows, and nothing wider: what a fresh
+ * subscription's `ready` asks for. The app's first reads go out as the window paints and the stream
+ * opens once the engine answers, so a write another client commits between the two is never
+ * reported. The request detail and the compositions are `staleTime: Infinity`, so a restored tab
+ * would keep the version it read and Send would send it; the collections, environments and globals
+ * lists are what an open collection or environment tab reads, and nothing refetches a mounted one.
+ * Each is one call, and only a read some surface is observing is refetched; the rest are marked
+ * stale for their next mount. Not the request lists: the workspace-wide `GET /requests` is the
+ * launch's heaviest call, and the tree reads a name and a method from it, never what Send sends.
  */
 export function invalidateOpenRows(queryClient: QueryClient): void {
 	void queryClient.invalidateQueries({ queryKey: queryKeys.requests.details() });
@@ -195,25 +188,21 @@ export function invalidateOpenRows(queryClient: QueryClient): void {
 }
 
 /**
- * How long the first event of a burst waits for the rest.
- *
- * Four of the engine's 50ms relay polls (`RELAY_POLL_INTERVAL_MS`): a bulk
- * write publishes its rows together after one commit, so they reach the
- * stream within a poll or two and land in one flush, while an edit made
- * elsewhere still reaches the open app within a fifth of a second. The window
- * is fixed from the first event rather than restarted by each one, so a client
- * that writes without pause still has its changes shown every 200ms.
+ * How long the first event of a burst waits for the rest: four of the engine's 50ms relay polls
+ * (`RELAY_POLL_INTERVAL_MS`). A bulk write publishes its rows together after one commit, so they
+ * reach the stream within a poll or two and land in one flush, while an edit made elsewhere still
+ * reaches the open app within a fifth of a second. The window is fixed from the first event rather
+ * than restarted by each, so a client that writes without pause still has its changes shown every
+ * 200ms.
  */
 export const CHANGE_FEED_COALESCE_MS = 200;
 
 /**
- * The longest a flush waits on in-flight mutations before it lands anyway.
- *
- * The writes the hold is for - an autosave PUT, a drop's `POST /reorder` - are
- * one local round trip, tens of milliseconds. A mutation that is still pending
- * after this long is not one of them but a hung or long write (an import, a
- * spec sync, an OAuth sign-in), and every change any other client made, a
- * `reset` included, would otherwise wait for it.
+ * The longest a flush waits on in-flight mutations before it lands anyway. The writes the hold is
+ * for (an autosave PUT, a drop's `POST /reorder`) are one local round trip, tens of milliseconds; a
+ * mutation still pending after this long is a hung or long write instead (an import, a spec sync,
+ * an OAuth sign-in), and every change any other client made, a `reset` included, would otherwise
+ * wait for it.
  */
 export const CHANGE_FEED_MUTATION_HOLD_MAX_MS = 5_000;
 
@@ -223,16 +212,13 @@ function familyKey(event: McpDataChangedEvent): string {
 }
 
 /**
- * Coalesces the feed's invalidations and applies them outside any mutation.
- *
- * A flush waits while a mutation is in flight because the feed reports the
- * app's own writes too, and protects two things by it. The autosave PUT's echo
- * refetches after the PUT's own answer has been stored, and reads the row it
- * wrote. A write by someone else arriving mid-reorder cannot refetch the lists
- * from under the drop's optimistic draw, which `useReorderMutation` cancelled
- * the in-flight reads to protect. The wait is bounded by
- * {@link CHANGE_FEED_MUTATION_HOLD_MAX_MS}, past which neither write is the
- * one in flight.
+ * Coalesces the feed's invalidations and applies them outside any mutation. A flush waits while a
+ * mutation is in flight because the feed reports the app's own writes too, which protects two
+ * things: the autosave PUT's echo refetches after the PUT's own answer has been stored, and reads
+ * the row it wrote; and a write by someone else arriving mid-reorder cannot refetch the lists from
+ * under the drop's optimistic draw, which `useReorderMutation` cancelled the in-flight reads to
+ * protect. The wait is bounded by {@link CHANGE_FEED_MUTATION_HOLD_MAX_MS}, past which neither
+ * write is the one in flight.
  */
 export class FeedInvalidationBatch {
 	private families = new Map<string, McpDataChangedEvent>();
