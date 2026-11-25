@@ -6,14 +6,12 @@
  */
 
 /**
- * @file http/cookie_jar.hpp
- * @brief The engine's cookie jar - the state that makes "log in once, reuse
- *        the session" possible (issue #301, step 2).
+ * @brief The engine's cookie jar - the state that makes "log in once, reuse the
+ *        session" possible (#301, step 2).
  *
- * Step 1 gave a script `pm.response.cookies`, which reads one response's
- * `Set-Cookie` (`set_cookie.hpp`). That is a view of a single exchange and
- * nothing more; nothing persisted a session across requests. This is that
- * missing state.
+ * A script's `pm.response.cookies` (step 1) reads one response's `Set-Cookie`
+ * (`set_cookie.hpp`), a view of a single exchange. This is the state that
+ * carries a session across requests.
  *
  * ## libcurl owns the cookie semantics, this owns the storage
  *
@@ -21,33 +19,32 @@
  * (`CURLINFO_COOKIELIST`, Netscape format) and hands them straight back
  * (`CURLOPT_COOKIELIST`) on the next request in the same scope. Domain
  * matching, path matching, `Secure`, `Max-Age` vs `Expires`, replacement of a
- * cookie already held - all of it stays inside libcurl's cookie engine, which
- * is a tested implementation of RFC 6265 that we would otherwise be
- * re-deriving. A hand-rolled copy of a primitive does not receive the
- * primitive's fixes.
+ * cookie already held - all of it stays inside libcurl's cookie engine, a
+ * tested RFC 6265 implementation: a hand-rolled copy of a primitive does not
+ * receive the primitive's fixes.
  *
  * `parse_cookie_line` / `cookie_matches` below exist only for the two *read*
- * views - `pm.cookies` and `GET /cookies` - which need to answer "what is in
- * here" without performing a transfer, something no libcurl call offers. They
- * never decide what goes on the wire.
+ * views - `pm.cookies` and `GET /cookies` - which answer "what is in here"
+ * without a transfer, which no libcurl call offers. They never decide what goes
+ * on the wire.
  *
  * ## A script's writes are staged, not applied where they are made
  *
- * `pm.cookies.jar().set/unset/clear` (issue #337) do not touch the map while
- * the script runs. They stage a `CookieWrite`, and the next transfer of that
+ * `pm.cookies.jar().set/unset/clear` (#337) do not touch the map while the
+ * script runs. They stage a `CookieWrite`, and the next transfer of that
  * execution seeds its handle with the scope's lines *plus* the staged writes
  * applied on top (`apply_cookie_writes`) - so the write rides the request it
  * was made for, and the transfer's own capture is what persists it. A write
- * that has no transfer left to ride (a post-request script's) is applied by
- * the route through `CookieJar::apply`.
+ * that has no transfer left to ride (a post-request script's) is applied by the
+ * route through `CookieJar::apply`.
  *
  * ## A transfer's capture is a delta, not a replacement
  *
  * Transfers in one scope overlap (a stream beside a send, `pm.sendRequest`
  * beside another execute), so `capture_jar_cookies` folds back only what *this*
- * transfer changed (`CookieJar::reconcile`, issue #1888): the handle's held
- * lines against the scope's lines it was seeded from. A cookie it neither saw
- * nor holds - another transfer's - is left alone.
+ * transfer changed (`CookieJar::reconcile`, #1888): the handle's held lines
+ * against the scope's lines it was seeded from. A cookie it neither saw nor
+ * holds - another transfer's - is left alone.
  *
  * ## Scope, lifetime, persistence, threading
  *
@@ -72,11 +69,10 @@
  *
  * ## Not on the load path
  *
- * Load runs neither read nor write the jar. Sharing one across the event
- * loop's workers is either a lock on the 60k-RPS hot path or per-worker jars
- * that do not actually share - and a load run repeats a single request, where
- * a session cookie is not what is under test. `event_loop_worker.cpp` is
- * therefore untouched by all of this.
+ * Load runs neither read nor write the jar. Sharing one across the event loop's
+ * workers is either a lock on the 60k-RPS hot path or per-worker jars that do
+ * not actually share - and a load run repeats a single request, where a session
+ * cookie is not what is under test. `event_loop_worker.cpp` has no jar code.
  */
 
 #pragma once
@@ -195,44 +191,44 @@ int64_t now_seconds);
  * `pm.cookies.jar().set(url, cookie)` carries the URL precisely so domain and
  * path have somewhere to come from: an empty @p cookie.domain becomes @p url's
  * host (host-only, as a `Set-Cookie` with no `Domain` attribute is), and an
- * empty `path` becomes RFC 6265 §5.1.4's default-path - the URL's path with
- * its last segment removed. Explicit fields are kept as given; a leading dot
- * on the domain is libcurl's spelling of "subdomains too" and sets the
- * tailmatch flag. A non-ASCII domain, given or derived, is stored in its
- * punycode form (`ascii_host`), the one libcurl matches cookies on.
+ * empty `path` becomes RFC 6265 §5.1.4's default-path - the URL's path with its
+ * last segment removed. Explicit fields are kept as given; a leading dot on the
+ * domain is libcurl's spelling of "subdomains too" and sets the tailmatch flag.
+ * A non-ASCII domain, given or derived, is stored in its punycode form
+ * (`ascii_host`), the one libcurl matches cookies on.
  *
- * `nullopt` when the result could not be stored honestly: an unparseable URL,
- * a non-ASCII domain with no ASCII name, an empty name, or a field carrying a
- * tab or newline - the separators of the
- * very format this is about to be written in, which would silently corrupt the
- * line and make the cookie vanish on the next read.
+ * `nullopt` when the result could not be stored honestly: an unparseable URL, a
+ * non-ASCII domain with no ASCII name, an empty name, or a field carrying a tab
+ * or newline - the separators of the very format this is about to be written
+ * in, which would silently corrupt the line and make the cookie vanish on the
+ * next read.
  *
- * It does not check an explicit domain against @p url's host, so a cookie
- * with a foreign `domain` comes back as given. Whether a script may store
- * that is the caller's rule (`pm.cookies.jar()` holds writes to the request's
- * site, #2631), not this builder's.
+ * It does not check an explicit domain against @p url's host, so a cookie with
+ * a foreign `domain` comes back as given. Whether a script may store that is
+ * the caller's rule (`pm.cookies.jar()` holds writes to the request's site,
+ * #2631), not this builder's.
  */
 [[nodiscard]] std::optional<JarCookie>
 cookie_for_url (const std::string& url, JarCookie cookie);
 
 /**
- * @brief Can @p url scope a jar operation - does libcurl read a host and a
- *        path out of it?
+ * @brief Can @p url scope a jar operation - does libcurl read a host and a path
+ *        out of it?
  *
  * The question `matching_in` cannot answer, because it returns an empty list
  * both for a URL that matched nothing and for one it could not parse. A
- * *destructive* call needs the two kept apart: `pm.cookies.jar().clear(url)`
- * on an unparseable URL would otherwise report success for a wipe that never
- * happened, which is the same false success `jar_write_context` refuses a jarless
- * execution over (issue #997).
+ * *destructive* call needs the two kept apart: `pm.cookies.jar().clear(url)` on
+ * an unparseable URL would otherwise report success for a wipe that never
+ * happened, which is the same false success `jar_write_context` refuses a
+ * jarless execution over (#997).
  */
 [[nodiscard]] bool url_can_scope_cookies (const std::string& url);
 
 /**
- * @brief One staged jar mutation from a script (issue #337).
+ * @brief One staged jar mutation from a script (#337).
  *
- * Staged rather than applied, so it rides the transfer it was made before -
- * see the file comment.
+ * Staged rather than applied, so it rides the transfer it was made before - see
+ * the file comment.
  */
 struct CookieWrite {
     enum class Kind : std::uint8_t {
@@ -243,7 +239,7 @@ struct CookieWrite {
         /// Empty the scope.
         Clear,
         /// Drop every cookie that would be sent to `url` - `Unset` without the
-        /// name filter, which is Postman's `jar.clear(url)` (issue #997).
+        /// name filter, which is Postman's `jar.clear(url)` (#997).
         ClearUrl,
     };
 

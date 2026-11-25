@@ -6,17 +6,14 @@
  */
 
 /**
- * Variable interpolation syntax: `{{variableName}}`.
+ * Variable interpolation syntax: `{{variableName}}`. **This is the app's only `{{name}}` matcher**:
+ * import it, do not re-declare it; `variable-pattern-single-source.test.ts` fails on a second copy
+ * (#227). The engine holds the one legitimate other copy (C++), and the cross-language conformance
+ * fixture is what keeps that one honest.
  *
- * **This is the app's only `{{name}}` matcher.** Import it; do not re-declare
- * it. The app carried four textually identical copies before issue #227, so
- * `variable-pattern-single-source.test.ts` now fails on a fifth. The engine
- * holds the one legitimate other copy (C++), and the cross-language
- * conformance fixture is what keeps that one honest.
- *
- * Shared regexes are global; only use them with APIs that reset lastIndex
- * (String.replace / split / matchAll). For boolean checks use
- * `isVariableToken` - `.test()` on a shared global regex is stateful.
+ * Shared regexes are global; only use them with APIs that reset lastIndex (String.replace / split /
+ * matchAll). For boolean checks use `isVariableToken`: `.test()` on a shared global regex is
+ * stateful.
  */
 
 import type { VariableScope } from "@/types";
@@ -33,13 +30,11 @@ export function isVariableToken(text: string): boolean {
 }
 
 /**
- * True when the string contains at least one `{{name}}` token anywhere.
- *
- * Unanchored, and its own non-global literal rather than `VARIABLE_PATTERN`,
- * because `.test()` on a `/g` regex advances `lastIndex` and would make the
- * shared object answer the next caller from the middle of a string. Callers
- * ask this to decide whether a value still needs resolving before it is
- * encoded (`ParamsPanel`) or shown (`BodyPanel`).
+ * True when the string contains at least one `{{name}}` token anywhere. Unanchored, and its own
+ * non-global literal rather than `VARIABLE_PATTERN`, because `.test()` on a `/g` regex advances
+ * `lastIndex` and would make the shared object answer the next caller from the middle of a string.
+ * Callers ask this to decide whether a value still needs resolving before it is encoded
+ * (`ParamsPanel`) or shown (`BodyPanel`).
  */
 const CONTAINS_VARIABLE_PATTERN = /\{\{[^{}]+\}\}/;
 
@@ -48,17 +43,12 @@ export function containsVariableToken(text: string | undefined | null): boolean 
 }
 
 /**
- * One label and one colour per scope, for every surface that names a scope.
- *
- * Read by `VariableScopeBadge` and by the variable popover, which needs the same
- * labels for its "create in" picker and the same colours for its list of
- * definitions that lost. It lived inside the badge component until the popover
- * needed it too - re-deriving it inline in a second branch is a mistake this
- * codebase has already made once (`SCOPE_CONFIG.global`), and the fix then was
- * to have one definition rather than two that agree by luck.
- *
- * Here rather than exported from the badge because a module that exports both a
- * component and a constant loses React Fast Refresh.
+ * One label and one colour per scope, for every surface that names a scope: `VariableScopeBadge`
+ * and the variable popover, which needs the same labels for its "create in" picker and the same
+ * colours for its list of definitions that lost. One definition, not two that agree by luck:
+ * re-deriving it inline in a second branch is a mistake this codebase has already made once
+ * (`SCOPE_CONFIG.global`). Here rather than exported from the badge, because a module that exports
+ * both a component and a constant loses React Fast Refresh.
  *
  * `--scope-*` are real tokens, green/orange/blue in both themes, and
  * `docs/design-system/categorical-colors.md` gives them the "icon/text solid, `/10` tint"

@@ -5,17 +5,11 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Error Logger
- *
- * Centralized error logging utility.
- */
+/** Renderer error logging: forwarded to the app's log file, or to the console outside Electron. */
 
 export type ErrorSeverity = "low" | "medium" | "high" | "critical";
 
-/**
- * Error context for logging
- */
+/** What a log call knows about where the error came from. */
 export interface ErrorContext {
 	component?: string;
 	action?: string;
@@ -48,14 +42,11 @@ function levelFor(severity: ErrorSeverity): "debug" | "info" | "warn" | "error" 
 }
 
 /**
- * Log an error, at the level its severity earns.
- *
- * Forwarded to the app's own log file through `electronAPI.log` (#1558) when
- * it is available - `main.ts` validates the shape, redacts and applies the
- * `logLevel` floor, so this side does neither. Outside Electron (`vite` in a
- * browser, the sweep/probe harnesses `app/CLAUDE.md` describes) there is no
- * main process to forward to, so this keeps today's console behaviour, which
- * is what those environments read.
+ * Log an error, at the level its severity earns. Forwarded to the app's own log file through
+ * `electronAPI.log` (#1558) when available; the main process (`electron/log-ipc.ts`) validates the
+ * shape, redacts and applies the `logLevel` floor, so this side does neither. Outside Electron
+ * (`vite` in a browser, the sweep/probe harnesses `app/CLAUDE.md` describes) there is no main
+ * process, so this logs to the console, which is what those environments read.
  */
 export function logError(
 	error: Error,
@@ -92,7 +83,6 @@ export function logError(
 		context,
 	};
 
-	// Log to console with appropriate level
 	switch (severity) {
 		case "critical":
 		case "high":
@@ -112,9 +102,7 @@ export function logError(
 	}
 }
 
-/**
- * Log API error with context
- */
+/** Log an API error with its context. */
 export function logApiError(error: unknown, context?: ErrorContext): void {
 	if (error instanceof Error) {
 		const severity = error.name === "ApiError" ? "medium" : "high";

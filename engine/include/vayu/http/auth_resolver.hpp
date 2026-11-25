@@ -61,8 +61,8 @@ std::variant<NoAuth, BearerAuth, BasicAuth, ApiKeyAuth, OAuth2Auth, UnsupportedA
 /**
  * @brief Parse a raw `auth` object into the typed Auth model.
  *
- * `none`/`inherit`/absent/malformed all collapse to NoAuth. `inherit` is
- * expected to be resolved app-side; if it reaches here it is treated as no-op.
+ * `none`/`inherit`/absent/malformed all collapse to NoAuth. `inherit` should be
+ * resolved app-side; one that reaches here is a no-op.
  */
 Auth parse_auth (const nlohmann::json& auth);
 
@@ -89,10 +89,10 @@ inline bool is_known_auth_mode (std::string_view mode) {
  * @brief Where a credential ends up once `apply_auth` has written it.
  *
  * A bind rule can depend on this - a value written into a header line must not
- * carry the CR or LF that would end the line (issue #732) - and this walk is
- * the only place that knows which credential is which, because the destination
- * is a property of the *mode* rather than of the string. Saying it here is what
- * stops each caller from re-deriving it from the variant and drifting.
+ * carry the CR or LF that would end the line (#732) - and this walk is the only
+ * place that knows which credential is which, because the destination is a
+ * property of the *mode* rather than of the string. Saying it here stops each
+ * caller re-deriving it from the variant and drifting.
  */
 enum class CredentialDestination : std::uint8_t {
     /// Written into a header line as it stands: a bearer token, and both halves
@@ -109,9 +109,9 @@ enum class CredentialDestination : std::uint8_t {
  *
  * The fields a user types a secret into, and so the fields a `{{data.column}}`
  * token may legitimately sit in: the bearer token, both halves of basic auth,
- * and an api key's name and value. Driving the same variant `apply_auth`
- * consumes is what keeps the two from drifting - a new mode is a compile error
- * here as well, through the same static_assert.
+ * and an api key's name and value. It drives the variant `apply_auth` consumes,
+ * so the two cannot drift: a new mode is a compile error here too, through the
+ * same static_assert.
  *
  * `@p auth` may be `const`; the visitor then receives `const std::string&`.
  * Each credential is visited with the @ref CredentialDestination it is headed
@@ -120,7 +120,7 @@ enum class CredentialDestination : std::uint8_t {
  * **OAuth 2.0 is deliberately absent.** Its config is not a credential the
  * request carries but the input to a token acquisition, which no row bind
  * reaches, so a data token in it is refused rather than walked
- * (`core::first_oauth2_deferrable_token`, issue #591).
+ * (`core::first_oauth2_deferrable_token`, #591).
  */
 template <typename AuthRef, typename Visit>
 void walk_auth_credentials (AuthRef& auth, Visit&& visit) {
@@ -187,17 +187,17 @@ struct AuthApplyResult {
  *
  * A user-supplied header always wins (injection is skipped when the target
  * header already exists - matched case-insensitively); a header it does write
- * is named in `Request::auth_header`. `db` is reserved for
- * oauth2 token lookup and may be null; `cancel` is the token request's
- * `ClientConfig::cancel` (issue #2683), set only inside a management-API
- * handler. The token request is bounded by `req.timeout_ms`, so set the
- * resolved request timeout on @p req before applying (#2833).
+ * is named in `Request::auth_header`. `db` is reserved for oauth2 token lookup
+ * and may be null; `cancel` is the token request's `ClientConfig::cancel`
+ * (#2683), set only inside a management-API handler. The token request is
+ * bounded by `req.timeout_ms`, so set the resolved request timeout on @p req
+ * before applying (#2833).
  *
  * `target_policy`, when the caller states one (#2521), judges an OAuth 2.0
- * config's token endpoints (`refuse_token_endpoints`) before the token cache
- * is read or anything is posted: a refused host is `ok == false`,
- * `InvalidUrl`, with `detail_code` `target_not_allowed` or
- * `target_host_unknown`. Every other mode contacts nothing and ignores it.
+ * config's token endpoints (`refuse_token_endpoints`) before the token cache is
+ * read or anything is posted: a refused host is `ok == false`, `InvalidUrl`,
+ * with `detail_code` `target_not_allowed` or `target_host_unknown`. Every other
+ * mode contacts nothing and ignores it.
  *
  * An OAuth 2.0 config that places its token in the `Authorization` header
  * yields to one the request already carries (#3202): nothing is fetched, the
@@ -207,7 +207,7 @@ struct AuthApplyResult {
  * in the query has no header to yield to and is fetched as usual.
  *
  * A bearer token and an API key's name and value are trimmed of the spaces and
- * tabs around them (issue #2467): a pasted credential's trailing blank would
+ * tabs around them (#2467): a pasted credential's trailing blank would
  * otherwise go out inside the header value, and a padded name as a line with a
  * space before its colon. An API key sent as a header whose name is not a token
  * once trimmed is refused (`ok == false`, `AuthFailed`, `invalid_header_name`)
@@ -226,7 +226,7 @@ const TargetPolicy* target_policy = nullptr,
 const std::atomic<bool>* cancel   = nullptr);
 
 /**
- * @brief Convenience overload: parse then apply. Used by direct callers/tests.
+ * @brief Parse, then apply: the overload for direct callers and tests.
  */
 AuthApplyResult apply_auth (vayu::Request& req,
 const nlohmann::json& auth,
@@ -307,11 +307,10 @@ plan_oauth2_refresh (const nlohmann::json& config, int timeout_ms, vayu::db::Dat
 /**
  * @brief Decide whether a built request's auth can be refreshed mid-run.
  *
- * Returns nothing - the run then behaves exactly as it did before mid-run
- * refresh existed - when the mode is not `oauth2`, when `plan_oauth2_refresh`
- * refuses its config, or when the request does not actually carry the cached
- * token (a user-supplied `Authorization` header won, so refreshing it would
- * change nothing).
+ * Returns nothing, and the run then never refreshes, when the mode is not
+ * `oauth2`, when `plan_oauth2_refresh` refuses its config, or when the request
+ * does not actually carry the cached token (a user-supplied `Authorization`
+ * header won, so refreshing it would change nothing).
  *
  * @param request The request `apply_auth` has already resolved; its timeout
  *                bounds each refresh.
