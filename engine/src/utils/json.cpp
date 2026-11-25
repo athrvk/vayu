@@ -5,10 +5,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief JSON utilities implementation
- */
-
 #include "vayu/utils/json.hpp"
 
 #include <algorithm>
@@ -73,9 +69,8 @@ std::optional<Json> try_parse_body (const std::string& body) {
 
 namespace {
 
-// A text field with no content type serializes exactly as it always did - the
-// file members are emitted only for a file part, `contentType` only when set
-// (a text part carries one too, #2539) - so a stored body that has neither
+// The file members are emitted only for a file part, `contentType` only when
+// set (a text part carries one too, #2539), so a stored text field with neither
 // round-trips byte-identically through this.
 Json serialize_form_fields (const std::vector<FormField>& fields) {
     Json out = Json::array ();
@@ -285,13 +280,13 @@ void cap_base64_node_body (nlohmann::json& node, size_t max_body_bytes) {
     mark_body_cut (node, decoded_bytes);
 }
 
-// Cap a single trace node's `body` string in place. Records bodyTruncated +
-// bodyBytes (the original length) when the body is cut so a reader can tell a
+// Cap a single trace node's `body` string in place, recording bodyTruncated +
+// bodyBytes (the original length) when the body is cut, so a reader can tell a
 // stored slice from the whole body.
 //
-// A text body is cut on a character boundary (#3423): a lead byte left
-// dangling at the cut would be dumped as U+FFFD, so a reopened body would end
-// in a character the server never sent.
+// A text body is cut on a character boundary (#3423): a lead byte left dangling
+// at the cut would be dumped as U+FFFD, so a reopened body would end in a
+// character the server never sent.
 void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
     if (!node.is_object () || !node.contains ("body") || !node["body"].is_string ()) {
         return;
@@ -315,19 +310,19 @@ void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
 // whole.
 //
 // The stored wire message ends with the same body the `body` field beside it
-// carries, so the cap has to reach it too - otherwise a 50 MB POST lands in
-// `trace_data` in full through the field that was added last, which is the
-// bloat `cap_node_body` exists to bound.
+// carries, so the cap has to reach it too: otherwise a 50 MB POST lands in
+// `trace_data` in full through this field, the bloat `cap_node_body` exists to
+// bound.
 //
-// The cut is body-side only, and deliberately so: the header block is the whole
-// reason the field is stored (it carries the `Cookie` line libcurl attached),
-// and a `maxTraceBodyBytes` smaller than the headers would eat exactly what a
-// reader opened the tab for. A message with no blank line has no body to cap
-// and is left alone.
+// Body-side only, deliberately: the header block is the reason the field is
+// stored (it carries the `Cookie` line libcurl attached), and a
+// `maxTraceBodyBytes` smaller than the headers would eat exactly what a reader
+// opened the tab for. A message with no blank line has no body to cap and is
+// left alone.
 //
-// No separate truncation marker: the cut lands at the same limit `cap_node_body`
+// No separate truncation marker: the cut lands at the limit `cap_node_body`
 // applies to the node's own `body`, so the `bodyTruncated`/`bodyBytes` pair it
-// records already tells a reader this trace's request body is a stored slice.
+// records already says this trace's request body is a stored slice.
 void cap_node_raw_request (nlohmann::json& node, size_t max_body_bytes) {
     if (!node.is_object () || !node.contains ("rawRequest") ||
     !node["rawRequest"].is_string ()) {
@@ -395,16 +390,15 @@ namespace {
 /**
  * The `specOperation` value every request serializer emits (issue #637).
  *
- * Shared rather than written twice on purpose: `serialize` backs
- * `GET /requests/:id`, `serialize_to_stream` backs `GET /requests` and the
- * `RequestSummary` overload its `fields=summary` form (#2546), and a
- * field added to one and forgotten in the other is this file's standing trap -
- * the two views of the same row would disagree about whether a request names an
- * operation at all. One reading, called from each.
+ * Shared on purpose: `serialize` backs `GET /requests/:id`,
+ * `serialize_to_stream` backs `GET /requests` and the `RequestSummary` overload
+ * its `fields=summary` form (#2546), and a field added to one and forgotten in
+ * the other is this file's standing trap: the two views of one row would
+ * disagree about whether a request names an operation at all.
  *
- * `null` for a column that is NULL and for a blob that no longer parses: the
- * two are the same answer to "which operation is this", and every block around
- * here degrades the same way rather than failing the read it sits in.
+ * `null` for a column that is NULL and for a blob that no longer parses: both
+ * are the same answer to "which operation is this", and every block around here
+ * degrades the same way rather than failing the read it sits in.
  */
 Json spec_operation_node (const std::optional<std::string>& stored) {
     if (!stored.has_value () || stored->empty ()) {
@@ -419,11 +413,11 @@ Json spec_operation_node (const std::optional<std::string>& stored) {
 }
 
 /**
- * The `methodSource` value both request serializers emit (issue #1505), on
- * the `spec_operation_node` precedent above: one reading, called from both,
- * so the single-request and list routes cannot come to disagree about
- * whether `method` still carries an app-written marker. A plain string
- * column, not JSON, so there is nothing here to fail to parse.
+ * The `methodSource` value both request serializers emit (issue #1505), one
+ * reading on the `spec_operation_node` precedent, so the single-request and
+ * list routes cannot come to disagree about whether `method` still carries an
+ * app-written marker. A plain string column, not JSON, so nothing here can fail
+ * to parse.
  */
 Json method_source_node (const std::optional<std::string>& stored) {
     return stored.has_value () ? Json (*stored) : Json (nullptr);
@@ -565,7 +559,6 @@ Json serialize (const vayu::db::Collection& c) {
     json["createdAt"]   = c.created_at;
     json["updatedAt"]   = c.updated_at;
 
-    // Parse collection variables JSON
     if (c.variables.empty ()) {
         json["variables"] = Json::object ();
     } else {
@@ -576,7 +569,6 @@ Json serialize (const vayu::db::Collection& c) {
         }
     }
 
-    // Parse auth JSON
     if (c.auth.empty ()) {
         json["auth"] = Json::object ({ { "mode", "none" } });
     } else {
@@ -587,10 +579,10 @@ Json serialize (const vayu::db::Collection& c) {
         }
     }
 
-    // Elements (issue #1513, run by issue #1514's pipeline) - the only
-    // script source since the cut-over; a migrated collection's scripts are
-    // `script.pre` / `script.post` entries here. Neither `preRequestScript`
-    // nor `postRequestScript` is emitted any more.
+    // Elements (issue #1513, run by issue #1514's pipeline) are the only script
+    // source; a migrated collection's scripts are `script.pre` / `script.post`
+    // entries here. No `preRequestScript` or `postRequestScript` key is
+    // emitted.
     if (c.elements.empty ()) {
         json["elements"] = Json::array ();
     } else {
@@ -693,9 +685,8 @@ Json serialize (const vayu::db::Request& r, const vayu::http::FileAccessPolicy& 
         }
     }
 
-    // Elements (issue #1513, run by issue #1514's pipeline) - the only
-    // script source since the cut-over. Neither `preRequestScript` nor
-    // `postRequestScript` is emitted any more.
+    // Elements (issue #1513, run by issue #1514's pipeline) are the only script
+    // source. No `preRequestScript` or `postRequestScript` key is emitted.
     if (r.elements.empty ()) {
         json["elements"] = Json::array ();
     } else {
@@ -790,7 +781,6 @@ Json serialize (const vayu::db::Environment& e) {
     json["name"]        = e.name;
     json["description"] = e.description;
 
-    // Safely parse variables JSON with exception handling
     if (e.variables.empty ()) {
         json["variables"] = Json::object ();
     } else {
@@ -841,9 +831,10 @@ namespace {
  *
  * Per-field tolerance is the D17 rule of issue #226, decided once here for
  * every reader: a non-boolean `enabled` counts as enabled (absent already
- * did), and a `value` reads through `variable_value_text` (issue #3245).
- * `Json::value()` would instead throw on the first malformed field, and the catch in `parse_variables` then discarded
- * the whole scope - one bad variable silently emptied every other one.
+ * does), and a `value` reads through `variable_value_text` (issue #3245).
+ * `Json::value()` would throw on the first malformed field, and the catch in
+ * `parse_variables` would then discard the whole scope: one bad variable would
+ * silently empty every other one.
  */
 vayu::Variable read_variable (const Json& value) {
     vayu::Variable var;
@@ -945,11 +936,9 @@ std::optional<Error> read_form_field_type (const Json& item, BodyMode mode, Form
 }
 
 /**
- * One `fields` entry.
- *
- * A malformed field is refused rather than skipped: this endpoint's whole
- * contract is "send exactly what was built", and a silently dropped field is the
- * failure mode the form modes already had.
+ * One `fields` entry. A malformed field is refused rather than skipped: this
+ * endpoint's whole contract is "send exactly what was built", and a silently
+ * dropped field breaks it.
  */
 Result<FormField> parse_form_field (const Json& item, BodyMode mode) {
     if (!item.is_object ()) {
@@ -997,16 +986,12 @@ Result<FormField> parse_form_field (const Json& item, BodyMode mode) {
     return field;
 }
 
-// The `fields` half of a body, for the two form modes.
-//
-// A malformed field is refused rather than skipped: this endpoint's whole
-// contract is "send exactly what was built", and a silently dropped field is
-// the failure mode the form modes already had. The leniency that does exist
-// mirrors the D17 rules `parse_variables` applies to the same client shape -
-// an absent or non-boolean `enabled` means enabled, a non-string `value` means
-// "" - because those are the values a client can produce without meaning
-// anything by them. A field with no usable `key` has no wire form at all, so
-// it is an error.
+// The `fields` half of a body, for the two form modes, each field refused or
+// read as `parse_form_field` says. The leniency that exists mirrors the D17
+// rules `parse_variables` applies to the same client shape (an absent or
+// non-boolean `enabled` means enabled, a non-string `value` means ""), because
+// those are values a client can produce without meaning anything by them. A
+// field with no usable `key` has no wire form at all, so it is an error.
 Result<std::vector<FormField>> parse_form_fields (const Json& body_json, BodyMode mode) {
     const bool is_form = vayu::http::is_form_mode (mode);
     const auto entry   = body_json.find ("fields");
@@ -1044,8 +1029,7 @@ Result<std::vector<FormField>> parse_form_fields (const Json& body_json, BodyMod
 
 /**
  * A `binary` body's `file` object. The mode's whole content is the reference,
- * so a binary body without one is refused rather than sent bodiless - the
- * silent outcome an engine older than this shape produces.
+ * so a binary body without one is refused rather than silently sent bodiless.
  */
 Result<FileRef> parse_file_ref (const Json& body_json) {
     const auto entry = body_json.find ("file");
@@ -1159,7 +1143,6 @@ std::optional<Error> read_request_body (const Json& json, Request& request) {
             if (body_json["content"].is_string ()) {
                 request.body.content = body_json["content"].get<std::string> ();
             } else {
-                // Serialize nested JSON
                 request.body.content = body_json["content"].dump ();
             }
         }
@@ -1300,9 +1283,9 @@ std::optional<Error> read_request_headers (const Json& json, Request& request) {
         return std::nullopt;
     }
     if (headers->is_object ()) {
-        // A JSON object names a header once, and the map this replaced folded
-        // two spellings of one name into one: `[]` keeps that (first spelling,
-        // last value), where `add` would send both.
+        // A JSON object names a header once, and two spellings of one name fold
+        // to one line here (first spelling, last value): `[]` does that, where
+        // `add` would send both.
         for (const auto& [written, value] : headers->items ()) {
             auto name = stored_header_name (written);
             if (name.is_error ()) {
@@ -1339,8 +1322,7 @@ void read_request_options (const Json& json, Request& request) {
     if (json.contains ("timeout") && !json["timeout"].is_null ()) {
         request.timeout_ms = json["timeout"].get<int> ();
     } else {
-        // Use default timeout constant if not specified
-        // Note: To use a custom default, specify timeout in the request JSON
+        // An absent or null `timeout` takes the compiled-in default.
         request.timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
     }
     if (json.contains ("followRedirects")) {
@@ -1361,25 +1343,24 @@ void read_request_options (const Json& json, Request& request) {
         request.disable_url_encoding = json["disableUrlEncoding"].get<bool> ();
     }
     if (json.contains ("httpVersion")) {
-        // A corrupted or downgraded stored row must not execute as
-        // something arbitrary, so an unrecognized *string* coerces to Auto
-        // rather than being rejected (rejecting user input is the route
-        // layer's job - see routes.hpp).
+        // A corrupted or downgraded stored row must not execute as something
+        // arbitrary, so an unrecognized *string* coerces to Auto rather than
+        // being rejected (rejecting user input is the route layer's job; see
+        // routes.hpp).
         //
-        // Note POST /execute is the one write path that relies on this
-        // coercion instead of validating: POST /runs
-        // (normalize_run_http_version) and the requests CRUD
-        // (apply_http_version_field) both reject an unrecognized value
-        // with a 400. Neither shipped client can send one - the renderer
-        // sends a typed union, MCP validates with z.enum - so this is a
-        // gap in consistency, not a live hole.
+        // POST /execute is the one write path that relies on this coercion
+        // instead of validating: POST /runs (normalize_run_http_version) and
+        // the requests CRUD (apply_http_version_field) both answer an
+        // unrecognized value with a 400. Neither shipped client can send one
+        // (the renderer sends a typed union, MCP validates with z.enum), so
+        // this is a gap in consistency, not a live hole.
         //
-        // A non-string value throws here and fails the whole parse, which
-        // is deliberate and matches every sibling field in this block. It
-        // is unreachable from storage - db::Request::http_version is a
-        // std::string and both serializers emit it as one - so it can only
-        // come from a hand-crafted payload, where failing closed with a 400
-        // is the right answer.
+        // A non-string value throws here and fails the whole parse,
+        // deliberately and as every sibling field in this block does. Storage
+        // cannot produce one (db::Request::http_version is a std::string and
+        // both serializers emit it as one), so it can only come from a
+        // hand-crafted payload, where failing closed with a 400 is the right
+        // answer.
         auto parsed_version =
         http_version_from_string (json["httpVersion"].get<std::string> ());
         request.http_version = parsed_version.value_or (HttpVersion::Auto);
@@ -1783,17 +1764,15 @@ namespace {
 /**
  * One stored JSON column, echoed as the value of @p wire_name.
  *
- * A column that will not parse - or one past the field cap - is written as
- * @p fallback rather than failing the row: the list route streams many rows, and
- * one unreadable column must not cost the caller every other one.
+ * A column that will not parse, or one past the field cap, is written as
+ * @p fallback rather than failing the row: the list route streams many rows,
+ * and one unreadable column must not cost the caller every other one.
  *
  * Returns true when @p fallback was written because the column was over
  * @p max_field_size, so the caller can name the field in `truncatedFields`
- * (issue #1485) - a column that is merely empty or unparseable is not
- * "truncated" and does not count.
- *
- * @p shape, when set, adjusts the parsed value before it is written; a
- * fallback is written as it stands.
+ * (issue #1485); a column that is merely empty or unparseable is not
+ * "truncated". @p shape, when set, adjusts the parsed value before it is
+ * written; a fallback is written as it stands.
  */
 bool write_json_column (std::ostream& out,
 const char* wire_name,
@@ -1870,8 +1849,8 @@ const vayu::http::FileAccessPolicy& files) {
     }
     out << ",";
 
-    // Elements (issue #1513, run by issue #1514's pipeline) - the only
-    // script source since the cut-over.
+    // Elements (issue #1513, run by issue #1514's pipeline) are the only script
+    // source.
     if (write_json_column (out, "elements", r.elements, "[]", max_field_size)) {
         truncated_fields.emplace_back ("elements");
     }
@@ -1949,10 +1928,10 @@ constexpr size_t kMinMaskedSecretLength = 4;
 // form (what composition writes, `encode_query_component`), Postman's path,
 // fragment and user info forms (what `encode_url_as_postman` writes there: a
 // space is `%20` while `/ @ & : + '` stay raw, so none of the query or strict
-// spellings match), the JSON string escape (a JSON body is stored as text, so `pa"ss` is `pa\"ss` inside it) and
-// the XML escapes of character data and of each attribute delimiter. Longest
-// first, so a secret that contains another is masked whole rather than around
-// the shorter one.
+// spellings match), the JSON string escape (a JSON body is stored as text, so
+// `pa"ss` is `pa\"ss` inside it) and the XML escapes of character data and of
+// each attribute delimiter. Longest first, so a secret that contains another is
+// masked whole rather than around the shorter one.
 std::vector<std::string> masked_secret_forms (const std::vector<std::string>& values) {
     std::vector<std::string> forms;
     for (const auto& value : values) {
