@@ -6,12 +6,10 @@
  */
 
 /**
- * Behavioral preferences for live test dashboards and charts, in two topics:
- * the live charts (retention window, time granularity, refresh rate) and
- * capacity (the p99 threshold that drives breakpoint/saturation of a ramp-up
- * run; a Capacity run uses the SLO it was started with). Client-side
- * only (localStorage-backed); consumed by the charts, the dashboard store, and
- * the live metrics service.
+ * Live dashboard and chart preferences, in two topics: the live charts (retention window, time
+ * granularity, refresh rate) and capacity (the p99 threshold driving a ramp-up run's breakpoint and
+ * saturation; a Capacity run uses the SLO it was started with). Client side only (localStorage);
+ * read by the charts, the dashboard store and the live metrics service.
  */
 
 import { History, Gauge } from "lucide-react";
@@ -54,8 +52,7 @@ export default function DashboardPanel() {
 
 	return (
 		<>
-			{/* One card per topic, settings as rows inside it. This was four cards,
-			    one per setting, which made a card mean nothing. */}
+			{/* One card per topic, settings as rows: a card per setting means nothing. */}
 			<Card>
 				<CardHeader className="pb-3">
 					<div className="flex items-center gap-2">

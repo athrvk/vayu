@@ -6,36 +6,26 @@
  */
 
 /**
- * App settings catalogue
+ * Every individual setting the client panels render, declared as data, plus the engine categories'
+ * `Cards` (blocks `GET /config` does not describe). `GET /config` sends one record per engine
+ * setting for search to index; the panels render their copy inline, so without this catalogue the
+ * index holds only panel titles and "theme", "color" or "font" find nothing on a screen where all
+ * three exist.
  *
- * Every individual setting the client panels render, declared as data - and
- * the engine categories' `Cards`, the blocks `GET /config` does not describe.
+ * **The catalogue owns the name; the panel owns the prose.** `label` *is* the heading: every panel
+ * renders `appSetting("<anchor>").label` rather than typing the string again, so a rename happens
+ * once and reaches the screen and the search result. That is why labels read as on screen ("Font",
+ * not "Interface font"): the result row already prints the owning panel underneath, so a qualified
+ * name would be a title the panel never shows.
  *
- * The engine half of Settings has always had this: `GET /config` sends one
- * record per setting, so search could index them. The app half had nothing
- * comparable - the panels render their copy inline - so the search index held
- * seven *panel* titles and a user typing "theme", "color" or "font" got no
- * results at all, on a screen where all three exist. This file is the app half
- * of that catalogue.
+ * The prose stays in the panel, because a panel's copy is not a string: it carries `<Kbd>` chips,
+ * live counts and conditional notices, and says different things in different blocks. So
+ * {@link AppSettingDescriptor.searchText} is *not* a copy of it (see the field's note).
  *
- * **The catalogue owns the name; the panel owns the prose.** `label` is not a
- * description of the heading, it *is* the heading: every panel renders
- * `appSetting("<anchor>").label` rather than typing the string a second time, so
- * a rename happens once and reaches both the screen and the search result. That
- * is why the labels read as they do on screen ("Font", not "Interface font") -
- * the result row already prints the owning panel underneath, so qualifying the
- * name here would only make search offer a title the panel never shows.
- *
- * The prose stays in the panel, because a panel's copy is not a string: it
- * carries `<Kbd>` chips, live counts and conditional notices, and it says
- * different things in different blocks. So {@link AppSettingDescriptor.searchText}
- * is *not* a copy of it - see the field's own note.
- *
- * `anchor` is the contract with the panel, not a label: the panel renders
- * `data-setting-anchor="<anchor>"` on the block that holds the setting, which
- * is what a search result scrolls to and outlines. `app-settings.drift.test.tsx`
- * renders every panel and fails if a declared anchor is not on screen, or if the
- * block does not print the label declared for it, so neither half can drift.
+ * `anchor` is the contract with the panel: the panel renders `data-setting-anchor="<anchor>"` on
+ * the block holding the setting, which a search result scrolls to and outlines.
+ * `app-settings.drift.test.tsx` renders every panel and fails if a declared anchor is not on screen
+ * or the block does not print its declared label, so neither half can drift.
  */
 
 import type { SettingsCategory } from "@/types";
@@ -55,11 +45,10 @@ export interface AppSettingDescriptor {
 	 */
 	label: string;
 	/**
-	 * Match text, not display text: nothing renders this. It exists so a setting
-	 * is findable by what it *does*, in one sentence, where the panel's own copy
-	 * is markup rather than a string. Write it as a summary of the block, and do
-	 * not treat it as the panel's caption - the search result shows the label and
-	 * the panel it lives in, never this.
+	 * Match text, not display text: nothing renders it. It makes a setting findable by what it
+	 * *does*, in one sentence, where the panel's copy is markup rather than a string. Write it as a
+	 * summary of the block, not a caption: a search result shows the label and its panel, never
+	 * this.
 	 */
 	searchText: string;
 	/**
@@ -212,9 +201,8 @@ export const APP_SETTINGS = [
 		searchText: "How many spaces a tab occupies in the editors.",
 		keywords: ["indent", "spaces"],
 	},
-	// Three switches, three entries: they were one descriptor labelled "Word
-	// wrap, line numbers and minimap", which named no heading on screen and so
-	// was the one label nothing could check.
+	// Three switches, three entries: each label must name a heading on screen, which a combined
+	// "Word wrap, line numbers and minimap" did not, so nothing could check it.
 	{
 		anchor: "word-wrap",
 		panel: "editor",

@@ -6,21 +6,18 @@
  */
 
 /**
- * The MCP port field of Settings › MCP, with what a change to it means (#3580).
+ * The MCP port field of Settings › MCP, with what a change means (#3580).
  *
- * The configured port is the main process's: it validates and stores it
- * (`validateMcpPort`) and reports it, with whether it is in force yet, in
- * `mcp:status`. This renders those answers and sends the user's number; it holds
- * no second copy of the verdict. The range and the reserved engine ports
- * (`mcp-port-copies.ts`) are help text and the input's native bounds only - a
- * number outside them is still sent, and the refusal that comes back is what
- * the field shows.
+ * The configured port is the main process's: it validates and stores it (`validateMcpPort`) and
+ * reports it, and whether it is in force yet, in `mcp:status`. This renders those answers and sends
+ * the user's number, with no second copy of the verdict. The range and the reserved engine ports
+ * (`mcp-port-copies.ts`) are help text and the input's native bounds only: a number outside them is
+ * still sent, and the refusal that comes back is what the field shows.
  *
- * The engine learns the port only when it is spawned, so a saved change takes
- * effect after an engine restart. `status.restartRequired` is derived in main
- * and survives a reload; the engine store's pending-restart flag does not, and
- * would put a second, label-less banner on the engine settings, so it is not
- * set from here.
+ * The engine learns the port only when spawned, so a saved change takes effect after an engine
+ * restart. `status.restartRequired` is derived in main and survives a reload; the engine store's
+ * pending-restart flag does not and would put a second, label-less banner on the engine settings,
+ * so it is not set from here.
  */
 
 import { useEffect, useRef } from "react";
