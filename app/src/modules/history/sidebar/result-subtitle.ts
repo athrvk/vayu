@@ -21,19 +21,16 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 import type { CollectionResultSummary, LoadResultCapacity, LoadResultSummary } from "@/types";
 
 /**
- * The line a finished load run's history row prints under its identity:
- * "485 req/s · p95 42ms · 0.0% errors". A figure the run did not record is left
- * out rather than zeroed, and a row that recorded none has no line at all. A
- * run with a failed check ends it with the words its verdict names them in
- * (#3537): "4,580 assertions failed", "4 assertions failed in the sampled
- * replay", "3 elements errored", what its HTTP-only error rate cannot say. A run
- * whose drain a Stop cut ends it with "15 requests unanswered" (#3538): the
- * row's glyph reads not judged and the verdict's sentence is not on the row.
+ * A finished load run's history-row line under its identity: "485 req/s · p95 42ms · 0.0% errors".
+ * A figure the run did not record is left out, not zeroed; a row that recorded none has no line. A
+ * failed check ends it in its verdict's words (#3537): "4,580 assertions failed", "4 assertions
+ * failed in the sampled replay", "3 elements errored", what an HTTP-only error rate cannot say. A
+ * drain cut by a Stop ends it with "15 requests unanswered" (#3538): the row's glyph reads not
+ * judged and the verdict's sentence is not on the row.
  *
- * A capacity run's row carries the search's levels (#2930) and prints those
- * instead: its run-average rate blends every level the search stepped through
- * and describes none of them. A capacity row from an engine that predates the
- * block has no `capacity` and keeps the line above.
+ * A capacity run's row prints the search's levels instead (#2930): its run-average rate blends
+ * every level stepped through and describes none. A capacity row from an engine predating the block
+ * has no `capacity` and keeps the line above.
  */
 export function resultSubtitle(summary: LoadResultSummary): string | null {
 	if (summary.capacity) return capacitySubtitle(summary.capacity);
@@ -50,11 +47,9 @@ export function resultSubtitle(summary: LoadResultSummary): string | null {
 }
 
 /**
- * The line a finished collection run's history row prints when a step did not
- * pass (#3458) or a budget was missed (#3539): "2 passed, 1 failed, 4 errored",
- * zero counts left out, with "budgets missed" ahead of the counts when both
- * apply. A clean run has no line - its row reads as it did before the engine
- * sent counts.
+ * A finished collection run's history-row line when a step did not pass (#3458) or a budget was
+ * missed (#3539): "2 passed, 1 failed, 4 errored", zero counts left out, "budgets missed" first
+ * when both apply. A clean run has no line, so its row reads as before the engine sent counts.
  */
 export function collectionSubtitle(summary: CollectionResultSummary): string | null {
 	const budgets = summary.verdict === "failed" ? "budgets missed" : null;
@@ -65,17 +60,15 @@ export function collectionSubtitle(summary: CollectionResultSummary): string | n
 }
 
 /**
- * What a capacity search found, as a History row's line: "held 41 · gave out
- * at 51". Bare numbers, as the row's other figures are; the unit is the mode's
- * and the row's mode label already names it.
+ * What a capacity search found, as a History row's line: "held 41 · gave out at 51". Bare numbers
+ * like the row's other figures; the unit is the mode's, which the row's mode label names.
  *
- * A knee only counts for a stop that watched the target degrade
- * (`StopReason.finding`), and a missing held level beside one means the first
- * level already breached, so it reads "gave out at M" and never "held 0". A
- * plateau's held level is the last one tried and overshoots the plateau point,
- * so the row names no level ("plateaued"); a stop on a bound the caller set (or
- * a reason this build has no words for) proves only a floor. A search with no level to report prints nothing: the average rate
- * would be the wrong answer, not a fallback.
+ * A knee only counts for a stop that watched the target degrade (`StopReason.finding`); a missing
+ * held level beside one means the first level already breached, so it reads "gave out at M", never
+ * "held 0". A plateau's held level is the last one tried and overshoots the plateau point, so the
+ * row names no level ("plateaued"); a stop on a caller's bound (or a reason this build has no words
+ * for) proves only a floor. A search with no level to report prints nothing: the average rate would
+ * be the wrong answer, not a fallback.
  */
 export function capacitySubtitle(capacity: LoadResultCapacity): string | null {
 	const { maxHealthyConcurrency: held, kneeConcurrency: knee } = capacity;
