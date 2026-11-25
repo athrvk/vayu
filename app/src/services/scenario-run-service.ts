@@ -6,26 +6,21 @@
  */
 
 /**
- * ScenarioRunService - keeps a collection run's live stream alive across
- * navigation, the way `LoadTestService` does for a load run.
+ * ScenarioRunService: keeps a collection run's live stream alive across navigation, the way
+ * `LoadTestService` does for a load run.
  *
- * The two share `sseClient`, which is a singleton holding one `EventSource`,
- * so they cannot stream at once - attaching stops whatever the client was
- * attached to. The app's own starts and an agent's run wait on `run-gate`
- * (#3351, #3381) so that does not happen in normal use; the hand-off stays as
- * the backstop, and it is a hand-off rather than a silent close (issue #1417):
- * the displaced service is told, and `handleSuperseded` gives up what that run
- * was holding.
+ * The two share `sseClient`, a singleton holding one `EventSource`, so they cannot stream at once:
+ * attaching stops whatever the client was attached to. The app's own starts and an agent's run wait
+ * on `run-gate` (#3351, #3381) so that does not happen in normal use; the hand-off stays as the
+ * backstop, and it is a hand-off rather than a silent close (#1417): the displaced service is told,
+ * and `handleSuperseded` gives up what that run was holding.
  *
- * Step events are buffered and committed on the live-refresh cadence, the same
- * throttle `LoadTestService` puts on its ticks (issue #1153). This file used to
- * say throttling was deliberately absent, on the premise that a scenario's step
- * rate is bounded by how fast the requests come back. The premise does not hold:
- * the engine's scenario loop is sequential with no pacing, so a local or fast
- * target returns hundreds of steps per second - well above the 10 Hz the load
- * path already considered worth throttling - and each one committed a store
- * write that copied the whole step list and re-rendered the run tab. The
- * mechanism itself lives in `throttled-batcher.ts`, which both services use.
+ * Step events are buffered and committed on the live-refresh cadence, the throttle
+ * `LoadTestService` puts on its ticks (#1153), through the `throttled-batcher.ts` both services
+ * use. A scenario's step rate is not bounded by how fast the requests come back: the engine's
+ * scenario loop is sequential with no pacing, so a local or fast target returns hundreds of steps
+ * per second, well above the 10 Hz the load path throttles, and committing each one would copy the
+ * whole step list and re-render the run tab.
  */
 
 import { sseClient, type SSETerminalStatus } from "./sse-client";
@@ -156,17 +151,15 @@ class ScenarioRunService {
 		this.stepsCompleted = 0;
 		useScenarioRunStore.getState().startRun(runId);
 
-		// Indeterminate until the engine says how long the run is (#1362,
-		// #1398). This client still computes no denominator of its own -
-		// `RunCollectionDialog` sends no step count precisely because the engine
-		// resolves it, and a second copy of that rule here would be a number
-		// only one side can be right about - so what the claim shows until the
-		// `plan` frame arrives, and for a run whose frame never does, is that a
-		// run is going.
+		// Indeterminate until the engine says how long the run is (#1362, #1398). This client
+		// computes no denominator of its own: `RunCollectionDialog` sends no step count precisely
+		// because the engine resolves it, and a second copy of that rule here would be a number
+		// only one side can be right about. So until the `plan` frame arrives, and for a run whose
+		// frame never does, the claim shows only that a run is going.
 		//
-		// Claimed for this run rather than for collection runs in general
-		// (#1405), so that a run this one supersedes - and one that supersedes
-		// this one - cannot paint over the bar of the run being watched.
+		// Claimed for this run rather than for collection runs in general (#1405), so that a run
+		// this one supersedes, and one that supersedes this one, cannot paint over the bar of the
+		// run being watched.
 		runProgress.claim(RUN_PROGRESS_KEYS.collectionRun, runId);
 
 		// Connect immediately: the engine retains a replayable topic per run, so
@@ -205,13 +198,11 @@ class ScenarioRunService {
 	}
 
 	/**
-	 * Where the OS indicator is, or `null` for a run with no denominator.
-	 *
-	 * Clamped, because `stepsExpected` is an upper bound in one direction only
-	 * on paper: `setNextRequest` can send an iteration back over steps it has
-	 * already run, up to the engine's `maxStepsPerIteration` cap, so a run can
-	 * execute more steps than its plan holds. A bar past full is worse than a
-	 * bar that sits at full for the last few steps.
+	 * Where the OS indicator is, or `null` for a run with no denominator. Clamped, because
+	 * `stepsExpected` is an upper bound only on paper: `setNextRequest` can send an iteration back
+	 * over steps it has already run, up to the engine's `maxStepsPerIteration` cap, so a run can
+	 * execute more steps than its plan holds. A bar past full is worse than a bar that sits at full
+	 * for the last few steps.
 	 */
 	private runFraction(): number | null {
 		if (this.stepsExpected === null || this.stepsExpected <= 0) return null;
@@ -219,13 +210,10 @@ class ScenarioRunService {
 	}
 
 	/**
-	 * Paint where this run is.
-	 *
-	 * The run it is for is named rather than assumed, and no guard is repeated
-	 * here: `runProgress` holds the claim (#1405), so a report from a run that
-	 * has been superseded, has already failed, or is over - `activeRunId` is
-	 * null by then - paints nothing on its own terms. A second copy of that
-	 * rule in this file could only disagree with it.
+	 * Paint where this run is. The run is named rather than assumed, and no guard is repeated here:
+	 * `runProgress` holds the claim (#1405), so a report from a run that has been superseded, has
+	 * already failed or is over (`activeRunId` is null by then) paints nothing on its own terms. A
+	 * second copy of that rule in this file could only disagree with it.
 	 */
 	private reportProgress(): void {
 		runProgress.report(RUN_PROGRESS_KEYS.collectionRun, this.activeRunId, this.runFraction());
@@ -243,15 +231,13 @@ class ScenarioRunService {
 	}
 
 	/**
-	 * Let go of everything this service holds on `runId`'s behalf.
-	 *
-	 * The one place that does it, because three paths need it - the stream
-	 * ending, a load run taking the shared client away (#1417), and the engine
-	 * stopping (#3605) - and a second copy is a release that drifts out of step
-	 * with the first. What it deliberately leaves to its callers is anything
-	 * that *speaks* for the run: a close has a notification and a stored record
-	 * to converge on, a superseded run has neither, because it has not ended,
-	 * and an engine stop leaves the telling to the engine-lost notification.
+	 * Let go of everything this service holds on `runId`'s behalf. The one place that does it,
+	 * because three paths need it (the stream ending, a load run taking the shared client away
+	 * #1417, and the engine stopping #3605), and a second copy is a release that drifts out of step
+	 * with the first. It deliberately leaves to its callers anything that *speaks* for the run: a
+	 * close has a notification and a stored record to converge on, a superseded run has neither
+	 * because it has not ended, and an engine stop leaves the telling to the engine-lost
+	 * notification.
 	 */
 	private releaseRun(runId: string | null): void {
 		this.activeRunId = null;
@@ -275,21 +261,18 @@ class ScenarioRunService {
 	}
 
 	/**
-	 * Another run took the shared stream client (issue #1417).
+	 * Another run took the shared stream client (#1417). `sseClient.connect` closes the socket and
+	 * no terminal path runs, so without this the wake lock would stay held for the rest of the
+	 * session and the taskbar keep a bar for a run nothing watches.
 	 *
-	 * Before this existed the takeover was silent: `sseClient.connect` closed
-	 * the socket and no terminal path ran, so the wake lock stayed held for the
-	 * rest of the session and the taskbar kept a bar for a run nothing watched.
+	 * The run is *not* over (the engine is still running it), so this tells no one: no notification
+	 * (#1358), no failed-icon mark (#1364), and none of the invalidations that flip the run tab
+	 * from the live list to the stored record. The run's row reaches its terminal status on the
+	 * next list read, which is where a run this app is not watching belongs.
 	 *
-	 * The run is *not* over - the engine is still running it - so this says so
-	 * to no one: no notification (#1358), no failed-icon mark (#1364), and none
-	 * of the invalidations that flip the run tab from the live list to the
-	 * stored record. The run's row reaches its terminal status on the next list
-	 * read, which is where a run this app is not watching belongs.
-	 *
-	 * The buffered steps go with it rather than being flushed, the same choice
-	 * `startMonitoring` already makes when one collection run supersedes
-	 * another: a superseded run is a superseded run whichever service took it.
+	 * The buffered steps go with it rather than being flushed, the choice `startMonitoring` makes
+	 * when one collection run supersedes another: a superseded run is a superseded run whichever
+	 * service took it.
 	 */
 	private handleSuperseded(): void {
 		const runId = this.activeRunId;
@@ -332,14 +315,12 @@ class ScenarioRunService {
 	 */
 
 	/**
-	 * Tell the user their run ended, once, and only if they are elsewhere.
-	 *
-	 * `options.title` overrides the default kind-derived wording - `handleError`
-	 * uses it because the *stream* dropped there, not the run, and the default
-	 * failed title would misreport what happened. The taskbar mark is
-	 * unchanged: a stream error still reddens it (#1364, pinned by the
-	 * Dock/taskbar test below), because the user has no live view into whether
-	 * the run itself is still healthy once its updates stop arriving.
+	 * Tell the user their run ended, once, and only if they are elsewhere. `options.title`
+	 * overrides the default kind-derived wording: `handleError` uses it because there the *stream*
+	 * dropped, not the run, and the default failed title would misreport what happened. The taskbar
+	 * mark is unchanged: a stream error still reddens it (#1364, pinned by the Dock/taskbar test
+	 * below), because the user has no live view into whether the run itself is still healthy once
+	 * its updates stop arriving.
 	 */
 	private notifyTerminal(
 		runId: string | null,
@@ -420,10 +401,9 @@ class ScenarioRunService {
 		// the one path that flushes rather than discards, which is why it is
 		// here and not in `releaseRun`.
 		this.stepBatcher?.flush();
-		// Before the release, whose clear would otherwise wipe the bar: until
-		// #1415 `runProgress.fail` was reachable only from `handleError`, which
-		// the engine's own failures never reach, so a real failure cleared the
-		// taskbar instead of reddening it.
+		// Before the release, whose clear would otherwise wipe the bar: `handleError`, the other
+		// caller of `runProgress.fail`, is never reached by the engine's own failures, so without
+		// this a real failure would clear the taskbar instead of reddening it (#1415).
 		if (status === "failed") this.failProgress(runId);
 		this.releaseRun(runId);
 		if (!runId) return;
@@ -444,19 +424,17 @@ class ScenarioRunService {
 					queryKey: queryKeys.runs.report(runId),
 					queryFn: () => apiService.getRunReport(runId),
 					/*
-					 * `staleTime: 0`, and the whole fix rides on it. The run tab
-					 * mounts the moment the run starts and fetches this key
-					 * immediately, when the engine has stored no step rows yet -
-					 * they are written in one batch at the end - so the cache
-					 * holds a report with an empty `results[]`, seconds old.
-					 * `fetchQuery` under the hook's own five-minute
-					 * `RUNS_STALE_TIME_MS` would find that entry fresh and resolve
-					 * from it without a request, leaving the step list on the live
-					 * rows forever: every step expanded into an empty panel,
-					 * because only a stored row carries the exchange.
+					 * `staleTime: 0`, and everything here depends on it. The run tab mounts the
+					 * moment the run starts and fetches this key at once, when the engine has
+					 * stored no step rows yet (they are written in one batch at the end), so the
+					 * cache holds a report with an empty `results[]`, seconds old. `fetchQuery`
+					 * under the hook's own five-minute `RUNS_STALE_TIME_MS` would find that entry
+					 * fresh and resolve from it without a request, leaving the step list on the
+					 * live rows forever: every step expanded into an empty panel, because only a
+					 * stored row carries the exchange.
 					 *
-					 * This is the one fetch in the app that knows the data just
-					 * changed, so it is the one that must not honour the cache.
+					 * This is the one fetch in the app that knows the data just changed, so it is
+					 * the one that must not honour the cache.
 					 */
 					staleTime: 0,
 				})
