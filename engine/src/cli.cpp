@@ -6,12 +6,8 @@
  */
 
 /**
- * @brief Vayu CLI entry point
- *
- * Usage:
- *   vayu-cli run <request.json>   - Execute a request from JSON file
- *   vayu-cli --version            - Show version
- *   vayu-cli --help               - Show help
+ * The vayu-cli entry point: a thin client of a running daemon, with the verbs
+ * `run <request.json>` and `backup`. `print_help` holds the usage.
  */
 
 // First, before anything that includes <httplib.h>: see the header.
@@ -102,7 +98,6 @@ std::string read_file (const std::string& path) {
 VAYU_DIAGNOSTIC_POP
 
 void print_response (const vayu::Response& response, bool color) {
-    // Status line
     const char* status_color = "";
     const char* reset        = "";
 
@@ -124,14 +119,12 @@ void print_response (const vayu::Response& response, bool color) {
     std::cout << "Size: " << response.body_size << " bytes\n";
     std::cout << "\n";
 
-    // Headers
     std::cout << "Headers:\n";
     for (const auto& [key, value] : response.headers) {
         std::cout << "  " << key << ": " << value << "\n";
     }
     std::cout << "\n";
 
-    // Body
     std::cout << "Body:\n";
     if (auto json = vayu::json::try_parse_body (response.body)) {
         std::cout << vayu::json::pretty_print (*json, color) << "\n";
@@ -187,7 +180,6 @@ vayu::Response parse_daemon_response (const std::string& json_str) {
 }
 
 int run_via_daemon (const std::string& daemon_url, const std::string& filepath, int verbosity, bool color) {
-    // Read request file
     std::string content;
     try {
         content = read_file (filepath);
@@ -230,10 +222,10 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
             std::string run_id = response_json["runId"];
             vayu::utils::log_info ("cli", "Load test started successfully.");
             std::cout << "Run ID: " << run_id << "\n";
-            // The live SSE stream (/runs/:id/live). Served
-            // from the in-memory collector; a finished run stays readable for
-            // liveRetentionMs (default 60s), then 404s (code live_expired)
-            // with a hint pointing at /runs/:id/report.
+            // The live SSE stream (/runs/:id/live), served from the in-memory
+            // collector; a finished run stays readable for liveRetentionMs
+            // (default 60s), then 404s (code live_expired) with a hint pointing
+            // at /runs/:id/report.
             vayu::utils::log_info ("cli",
             "Monitor status at: " + daemon_url + "/runs/" + run_id + "/live");
             return 0;
@@ -247,8 +239,8 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
             return 1;
         }
     } else {
-        // Single Request -> POST /execute
-        // Note: The daemon expects the raw JSON request definition
+        // Single request -> POST /execute, which takes the raw JSON request
+        // definition.
         auto res = cli.Post ("/execute", content, "application/json");
 
         if (!res) {
@@ -283,14 +275,14 @@ int run_via_daemon (const std::string& daemon_url, const std::string& filepath, 
 }
 
 /**
- * `vayu-cli backup` - one snapshot of the workspace, printed as the path it was
+ * `vayu-cli backup`: one snapshot of the workspace, printed as the path it was
  * written to (issue #987).
  *
  * Through the daemon rather than by opening the database directly, like every
- * other CLI verb: the engine holds the file open, and a second process taking a
- * copy of it is exactly the unsafe-under-WAL move this feature exists to
- * replace. The path goes to stdout on its own line so a shell can capture it;
- * everything else is a log line or stderr.
+ * other CLI verb: the engine holds the file open, and a second process copying
+ * it is the unsafe-under-WAL move this feature exists to replace. The path goes
+ * to stdout on its own line so a shell can capture it; everything else is a log
+ * line or stderr.
  */
 int backup_via_daemon (const std::string& daemon_url) {
     httplib::Client cli (daemon_url);
@@ -334,16 +326,14 @@ int backup_via_daemon (const std::string& daemon_url) {
 }
 
 /**
- * The whole of the CLI, so that `main` is a catch and nothing else.
- *
- * `main` must not let an exception escape: an uncaught one terminates the
- * process through `std::terminate`, which prints nothing a user can act on and
- * returns no status a script can read. It cannot both be that guard and hold
- * the body, so the body is here.
+ * The whole of the CLI, so that `main` is a catch and nothing else: an
+ * exception escaping `main` terminates the process through `std::terminate`,
+ * which prints nothing a user can act on and returns no status a script can
+ * read.
  *
  * @p args is the argument vector as a span rather than the `(count, pointer)`
- * pair - the same arguments, with the length attached, which is what lets the
- * parse below index them instead of walking a raw pointer.
+ * pair: the same arguments with the length attached, which lets the parse below
+ * index them instead of walking a raw pointer.
  */
 int run_cli (std::span<char* const> args) {
     // Initialize logger. The CLI has no `--data-dir` of its own (it is a thin
@@ -357,7 +347,6 @@ int run_cli (std::span<char* const> args) {
     vayu::platform::restrict_new_files_to_owner ();
     vayu::utils::Logger::instance ().init (log_dir, "cli");
 
-    // Parse arguments
     if (args.size () < 2) {
         print_help ();
         return 1;
@@ -368,7 +357,7 @@ int run_cli (std::span<char* const> args) {
     const auto request = vayu::core::read_cli_flags (args, options);
     if (!request) {
         // Refused where it was typed, in the shape every bad argument answers
-        // with (#1028, #1031) - not dropped, which is what left a mistyped
+        // with (#1028, #1031), not dropped: a dropped one leaves a mistyped
         // flag indistinguishable from no flag at all.
         std::cerr << "vayu-cli: " << request.error () << "\n";
         vayu::utils::log_error ("cli", "vayu-cli: " + request.error ());
@@ -412,9 +401,6 @@ int run_cli (std::span<char* const> args) {
         vayu::utils::log_error ("cli", msg);
         result = 1;
     }
-
-    // Cleanup
-    // vayu::http::global_cleanup();
 
     return result;
 }
