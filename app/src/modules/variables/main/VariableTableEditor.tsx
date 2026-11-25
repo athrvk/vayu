@@ -1166,10 +1166,10 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							<th className="pb-2 px-2 min-w-[10rem]">Value</th>
 							<th className="pb-2 px-2 w-[110px]">Type</th>
 							{/*
-							 * A word, like every other column, not a bare key icon whose meaning
-							 * lived in a native `title`: that needs a hover, never shows on a touch
-							 * device, and left the one unlabelled column in a table of labelled
-							 * ones.
+							 * A word, like every other column. This was a bare key icon
+							 * whose meaning lived in a native `title` - which needs a
+							 * hover to appear, never shows on a touch device, and is
+							 * the only unlabelled column in a table of labelled ones.
 							 */}
 							<th className="pb-2 w-14 px-2">Secret</th>
 							<th className="pb-2 w-18">

@@ -127,10 +127,10 @@ export function CommandPalette() {
 			 */
 			if (!useLayoutStore.getState().paletteOpen && isModalOpen()) {
 				/*
-				 * Say why nothing happened. `showToast` drops an identical open toast before
-				 * appending, so a held key leaves one toast with a fresh timer. The viewport's
-				 * z-[100] sits above the dialogs' z-50, and Radix announces it through its live
-				 * region.
+				 * Say why nothing happened. `showToast` drops an identical open toast
+				 * before appending, so a held key leaves one toast with a fresh timer
+				 * rather than a stack. The toast viewport sits at z-[100], above the
+				 * dialogs' z-50, and Radix announces it through its live region.
 				 */
 				useToastStore.getState().showToast(PALETTE_BLOCKED_MESSAGE, "info");
 				return;
@@ -207,9 +207,9 @@ export function CommandPalette() {
 					placeholder="Search tabs, requests, commands, settings…"
 				/>
 				{/*
-				 * Mounted only while open, so a shut palette holds no query observers on
-				 * collections, requests and run history (the context bar's rule for a collapsed
-				 * section).
+				 * Mounted only while open, so a shut palette holds no query observers
+				 * on collections, requests and run history - the same rule the
+				 * context bar applies to a collapsed section.
 				 */}
 				{paletteOpen && (
 					<PaletteResults

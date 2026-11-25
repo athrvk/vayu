@@ -89,9 +89,8 @@ function VariableRow({
 	 */
 	const showsTime = !variable.secret && parseTimeValue(variable.value) !== null;
 	/*
-	 * A secret row names nothing for an agent to look up, and an unsaved or unnamed row names
-	 * nothing at all. The line is built from `{ name }` alone, never the row, so the value cannot
-	 * ride along.
+	 * A secret, unsaved or unnamed row names nothing an agent can look up. The line is built from
+	 * `{ name }` alone, never the row, so the value cannot ride along.
 	 */
 	const name = trimVariableName(variable.key);
 	const referenceScope = !variable.secret && !variable.isNew && !nameError && name ? scope : null;

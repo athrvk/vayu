@@ -86,9 +86,9 @@ import { apiService } from "@/services/api";
 import { postmanEnvironmentExportMessage } from "./postman-environment-export";
 
 /**
- * The level-1 rows a screen reader counts ("2 of 3"): Globals, Environments, Collections. A
- * literal, because the JSX below writes the three out rather than mapping them: two of them differ
- * in shape.
+ * Globals, Environments, Collections - the level-1 rows a screen reader counts
+ * ("2 of 3"). A literal, because the three are written out in the JSX below
+ * rather than mapped: two of them differ in shape.
  */
 const SCOPE_SECTIONS = 3;
 
@@ -172,9 +172,9 @@ export default function VariablesCategoryTree() {
 	const collectionsGroupId = useId();
 	const treeId = useId();
 	/**
-	 * The element a row's `aria-labelledby` points at (#3450): the row's own name, so its
-	 * accessible name is not computed from the ⋯ menu's label and the variable-count badge inside
-	 * it.
+	 * The element a row's `aria-labelledby` points at (#3450): the row's own
+	 * name, so its accessible name is not computed from the ⋯ menu's label and
+	 * the variable-count badge inside it.
 	 */
 	const nameIdFor = (scope: string, id = "") => `${treeId}-${scope}-${id}-name`;
 
@@ -459,15 +459,15 @@ export default function VariablesCategoryTree() {
 						</div>
 					</div>
 
-					{/*
-					 * Environments section (order here is not precedence). The header is a level-1
-					 * row: Right expands it, Left collapses it, Enter does either;
-					 * `data-tree-toggle` and `data-tree-activate` are the same button because for a
-					 * section header the two verbs are one. The "+" is deliberately outside that
-					 * row: the tree has no "create" key, so it is the sidebar's own tab stop rather
-					 * than a control the keyboard cannot reach. DrawerSection owns the shape and
-					 * spreads both attribute sets through; see its own comment.
-					 */}
+					{/* Environments Section (order here is not precedence) */}
+					{/* The header is a level-1 row: Right expands it, Left collapses
+					    it, Enter does either. `data-tree-toggle` and
+					    `data-tree-activate` are the same button because for a section
+					    header those two verbs are one - and the "+" is deliberately
+					    outside that row: the tree has no "create" key, so it is the
+					    sidebar's own tab stop rather than a control the keyboard
+					    cannot reach. DrawerSection owns the shape and spreads both
+					    sets of attributes through; see its own comment. */}
 					<DrawerSection
 						title="Environments"
 						icon={Cloud}
@@ -698,14 +698,14 @@ export default function VariablesCategoryTree() {
 																	environmentId: environment.id,
 																})
 															}
-															// self-stretch: the row is
+															// self-stretch: the row above is
 															// `items-center`, which leaves this
-															// button (the only thing wired to
-															// selectCategory) as tall as its 18px
-															// label in a 32px row, so the band
-															// above and below would take the hover
-															// fill but not the click. Same fix as
-															// the collection and request rows.
+															// button - the only thing wired to
+															// selectCategory - as tall as its 18px
+															// label inside a 32px row. The band above
+															// and below it took the hover fill but
+															// not the click. Same fix as the
+															// collection and request rows.
 															className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch text-left"
 														>
 															<TruncatedText
