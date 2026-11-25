@@ -5,10 +5,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief Async HTTP event loop implementation using curl_multi
- */
-
 #include "vayu/http/event_loop.hpp"
 
 #include "vayu/http/event_loop/event_loop_impl.hpp"
