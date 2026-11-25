@@ -6,17 +6,12 @@
  */
 
 /**
- * What a collection load run is aimed at, for the header that has no URL to show
- * for it.
- *
- * A request-level run hands the dashboard its method and URL; a run over a
- * collection has neither, and nothing in the store says which collection it is.
- * The run's own row does: its snapshot's scenario manifest names the collection
- * and lists the steps, so this reads that row, and resolves the name from the
- * collections tree the way the history row does (the id stands in once the
- * collection is deleted, never a blank).
- *
- * Primitives out, not an object: the header is memo'd on `Object.is`.
+ * What a collection load run is aimed at, for the header that has no URL to show for it. A
+ * request-level run hands the dashboard its method and URL; a collection run has neither, and the
+ * store does not say which collection it is. The run's own row does: its snapshot's scenario
+ * manifest names the collection and lists the steps, so this reads that row and resolves the name
+ * from the collections tree as the history row does (the id stands in once the collection is
+ * deleted, never a blank). Primitives out, not an object: the header is memo'd on `Object.is`.
  */
 
 import { useQuery } from "@tanstack/react-query";

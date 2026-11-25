@@ -1,16 +1,14 @@
 /**
- * chartGeometry.ts - safe SVG y-scale helpers for dashboard charts.
- *
- * Guards against the NaN SVG coordinate bug that occurs when maxVal=0
- * (e.g. short runs with all-zero latency) causes division by zero in the
- * `1 - v/yMax` projection formula.
+ * Safe SVG y-scale helpers for the dashboard charts: they guard against the NaN coordinate a
+ * division by zero in the `1 - v/yMax` projection gives when maxVal is 0 (a short run with all-zero
+ * latency).
  */
 
 /**
- * Shared SVG geometry for the full-width time-series charts (Throughput,
- * Latency, Percentiles, and the ramp_up / capacity Response-time-vs-concurrency scatter).
- * All of these MUST stay dimensionally identical so the dashboard rows line up
- * Chart geometry constants belong here, never in a component file.
+ * Shared SVG geometry for the full-width time-series charts (Throughput, Latency, Percentiles, and
+ * the ramp_up / capacity Response-time-vs-concurrency scatter). They MUST stay dimensionally
+ * identical so the dashboard rows line up; chart geometry constants belong here, never in a
+ * component file.
  */
 export const TIME_SERIES_DIMS = { VW: 1080, VH: 240, PL: 56, PR: 12, PT: 16, PB: 28 } as const;
 

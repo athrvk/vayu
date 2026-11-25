@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * LoadTestDashboard Types
- *
- * Centralized type definitions for the load test dashboard
- */
+/** The load test dashboard's types. */
 
 import type { CapacityResult } from "@/components/shared/capacityStop";
 import type { RunOutcome } from "@/components/shared/run-outcome";
@@ -82,17 +78,15 @@ export interface DashboardHeaderProps {
 		targetRps?: number;
 		concurrency?: number;
 		/**
-		 * How many `data` rows the run bound (issue #993): off the stored
-		 * snapshot once the report loads - which keeps the count in the rows'
-		 * place, since the rows themselves are never persisted - and off the
-		 * launch config while live. Absent for a run without a data file.
+		 * How many `data` rows the run bound (issue #993): off the stored snapshot once the report
+		 * loads (the count stands in for the rows, which are never persisted) and off the launch
+		 * config while live. Absent for a run without a data file.
 		 */
 		dataRowCount?: number;
 		/**
-		 * The data file's display name and the SHA-256 of its bytes (issue
-		 * #2051), from the same two places as {@link dataRowCount}. The name
-		 * is printed beside the count; the hash is never shown, it only lets
-		 * a surface that can resolve a collection say the file has since
+		 * The data file's display name and the SHA-256 of its bytes (issue #2051), from the same
+		 * two places as {@link dataRowCount}. The name is printed beside the count; the hash is
+		 * never shown, and only lets a surface that can resolve a collection say the file has since
 		 * changed. Never a path.
 		 */
 		dataFileName?: string;
@@ -133,16 +127,14 @@ export interface StoppedAt {
 	plannedSeconds: number;
 }
 
-/**
- * Single derived-metrics bundle the orchestrator computes once (memoized) and
- * passes to the mode-adaptive HeroRow and ModeStatsRow. Centralizing derivation
- * here keeps the hero/stat card variants pure presentational components that
- * read what they need - no card re-derives from raw metrics. `MetricsView` is
- * the one producer; see "Code-quality gates" in this module's README.
- */
 /** `sending`: completions at the end of sending over the sending window (#2882). `wholeRun`: the drain-inclusive average. */
 export type ReceivedWindow = "sending" | "wholeRun";
 
+/**
+ * The derived-metrics bundle `MetricsView`, its one producer, computes once (memoised) for the
+ * mode-adaptive HeroRow and ModeStatsRow, so the hero and stat card variants stay presentational
+ * and none re-derives from raw metrics (see "Code-quality gates" in this module's README).
+ */
 export interface DashboardDerived {
 	mode: LoadMode;
 	isCompleted: boolean;
@@ -240,9 +232,9 @@ export interface DashboardDerived {
 	targetConcurrency?: number;
 	breakpoint: Breakpoint;
 	/**
-	 * The p99 line (ms) the stored run declared for itself, from `runSloMs`; the
-	 * only SLO its charts and latency tiles draw. Absent for a run with neither a
-	 * capacity budget nor a p99 budget, and absent live (the live view reads `runOwnSloMs` off the store). Distinct from
+	 * The p99 line (ms) the stored run declared for itself, from `runSloMs`: the only SLO its
+	 * charts and latency tiles draw. Absent for a run with neither a capacity budget nor a p99
+	 * budget, and absent live (the live view reads `runOwnSloMs` off the store). Not
 	 * `breakpoint.sloMs`, which a non-capacity run judges against the Settings SLO.
 	 */
 	runSloMs?: number;
