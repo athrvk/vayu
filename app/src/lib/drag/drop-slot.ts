@@ -6,17 +6,14 @@
  */
 
 /**
- * Where a drop lands in a one-dimensional list, as arithmetic over positions.
+ * Where a drop lands in a one-dimensional list, as arithmetic over positions. A "slot" is the gap a
+ * dragged item would be inserted into: slot 0 is before the first item, slot `n` after the last.
+ * `slotAt` reads one off a pointer coordinate, `landingIndex` turns it into the index the item ends
+ * up at once it has left its old place; a drop is a no-op when that equals where it started.
  *
- * A "slot" is the gap a dragged item would be inserted into: slot 0 is before
- * the first item, slot `n` after the last. `slotAt` reads one off a pointer
- * coordinate, `landingIndex` turns it into the index the item ends up at once it
- * has left its old place; a drop is a no-op when that equals where it started.
- *
- * Pure and node-tested, so a surface (a tab strip, a list) shares the maths
- * without sharing a DOM. The collection tree does not use it: its drops resolve
- * against a parent and an anchor row, and it keeps its own `indexAmongSiblings`
- * (`useTreeDnd.ts`) deliberately.
+ * Pure and node-tested, so a surface (a tab strip, a list) shares the maths without sharing a DOM.
+ * The collection tree does not use it: its drops resolve against a parent and an anchor row, and it
+ * keeps its own `indexAmongSiblings` (`useTreeDnd.ts`) on purpose.
  */
 
 /** The span one item occupies along the drag axis, in the pointer's coordinates. */
