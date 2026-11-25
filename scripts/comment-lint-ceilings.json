@@ -47,8 +47,6 @@
     "app/src/modules/dashboard/components/charts/uplot/buildData.ts": 1,
     "app/src/modules/dashboard/components/charts/uplot/uplotTheme.ts": 1,
     "app/src/modules/history/main/ScenarioRunView.tsx": 1,
-    "app/src/modules/history/main/components/SampleRequestCard.tsx": 1,
-    "app/src/modules/history/main/components/ScenarioStepCard.tsx": 1,
     "app/src/modules/history/main/useFilteredSteps.ts": 1,
     "app/src/modules/history/sidebar/HistoryList.tsx": 1,
     "app/src/modules/inbox/CannedResponseControls.tsx": 1,
