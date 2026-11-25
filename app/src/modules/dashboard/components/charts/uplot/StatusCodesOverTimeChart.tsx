@@ -64,16 +64,12 @@ export function StatusCodesOverTimeChart({
 			stroked: stroked[0],
 		},
 		/*
-		 * The five series resolve through `constants/http-status.ts` now, so a
-		 * colour means the same class here as on a response badge or a history
-		 * tile. 3xx used `categorical` and a failed connection used `muted`, which
-		 * were series slots rather than status colours: `categorical` is also p99,
-		 * HDR latency, the latency breakdown and the throughput area, so the violet
-		 * a user saw for 3xx taught them nothing, and `muted` made "nothing came
-		 * back" read as de-emphasised rather than as its own outcome.
-		 *
-		 * Colour is the whole encoding in a stacked area chart, so two classes
-		 * sharing one is a misread. These five are at least 0.144 apart in OKLab.
+		 * The five series resolve through `constants/http-status.ts`, so a colour means the same
+		 * class here as on a response badge or a history tile. A series slot would teach nothing:
+		 * `categorical` is also p99, HDR latency, the latency breakdown and the throughput area,
+		 * and `muted` makes "nothing came back" read as de-emphasised rather than as its own
+		 * outcome. Colour is the whole encoding in a stacked area chart, so two classes sharing one
+		 * is a misread; these five are at least 0.144 apart in OKLab.
 		 */
 		{
 			label: "3xx",
