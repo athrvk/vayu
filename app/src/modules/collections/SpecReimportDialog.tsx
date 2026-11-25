@@ -6,18 +6,13 @@
  */
 
 /**
- * The fork an import takes when the document is one a collection already binds
- * (issue #680).
+ * The fork an import takes when a collection already binds the document (issue #680). **A fork,
+ * never a block**: a second copy of a spec is a real want (a scratch collection, a
+ * before-and-after), so Import anyway imports as Import does. The other road is Sync, the
+ * documented path for a document that moved, which a plain re-import would silently walk past.
  *
- * **A fork, never a block.** Wanting a second copy of a spec is a real thing to
- * want - a scratch collection, a before-and-after - so Import anyway does
- * exactly what pressing Import did before this dialog existed. What was missing
- * was the other road: Sync, which is the documented path for a document that
- * moved, and which a re-import silently walked past.
- *
- * The Sync action is per row rather than in the footer because a batch can carry
- * more than one bound document, and one Sync button would have to guess which
- * collection it meant. One row, one collection, no rule to remember.
+ * Sync is per row, not in the footer: a batch can carry several bound documents, and one Sync
+ * button would have to guess which collection it meant.
  */
 
 import { useRef } from "react";
@@ -60,10 +55,9 @@ export default function SpecReimportDialog({
 		<Dialog open onOpenChange={(next) => !next && onCancel()}>
 			<DialogContent
 				className="sm:max-w-lg"
-				// Radix would land focus on the corner close button, which reads as
-				// nothing being focused. Cancel is the action that writes nothing,
-				// so a reflexive Enter goes back to the preview - the same rule
-				// DeleteConfirmDialog follows.
+				// Radix would focus the corner close button, which reads as nothing focused. Cancel
+				// is the action that writes nothing, so a reflexive Enter goes back to the preview,
+				// as in DeleteConfirmDialog.
 				onOpenAutoFocus={(e) => {
 					e.preventDefault();
 					cancelRef.current?.focus();

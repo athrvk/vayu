@@ -6,14 +6,11 @@
  */
 
 /**
- * The client certificates a Postman import offers to register (issue #2363).
- *
- * A registered certificate is host-wide: every later request to that host, from
- * any collection, presents it and signs the handshake with its key, and the
- * row stays after the collection is gone. The document chose the host and the
- * path, so each candidate is listed with both and registers only when ticked.
- * The passphrase is never shown, and the key is shown as a path and nothing
- * more.
+ * The client certificates a Postman import offers to register (issue #2363). A registered
+ * certificate is host-wide: every later request to that host, from any collection, presents it and
+ * signs the handshake with its key, and the row outlives the collection. The document chose the
+ * host and the path, so each candidate is listed with both and registers only when ticked. The
+ * passphrase is never shown, and the key only as a path.
  */
 
 import { Checkbox } from "@/components/ui";
