@@ -6,24 +6,19 @@
  */
 
 /**
- * What this run was asked to do: its mode, its target, and its caps.
+ * What this run was asked to do: its mode, its target and its caps, read from the run's stored
+ * `configSnapshot` (the sanitized copy of the body that started it), so it says what ran, not what
+ * the request holds now.
  *
- * Read from the run's stored `configSnapshot` - the sanitized copy of the body
- * that started it - so it says what ran, not what the request holds now.
+ * On a load run this restates part of the load-test pane's config strip, deliberately: a *design*
+ * run has no config view anywhere, and a bar that changed shape between the two kinds of run tab
+ * would be the worse answer. Names come from `loadTestModeLabel` / `formatConcurrency`, the strip's
+ * helpers, so the two cannot word one run differently.
  *
- * The load-test pane draws a config strip of its own, so on a load run this
- * section restates part of it. That is deliberate rather than overlooked: a
- * *design* run has no config view anywhere, and a bar that changed shape
- * between the two kinds of run tab would be the worse answer. Names come from
- * `loadTestModeLabel` / `formatConcurrency`, the same helpers that strip uses,
- * so the two cannot word the same run differently.
- *
- * A **collection run** states its work in a `scenario` block instead of a mode
- * and a target, and every load-test key above is absent from its snapshot - so
- * reading it the load way produced no rows at all and the section said "No
- * configuration was recorded", of a run that recorded plenty. Its rows come
- * from that block, and the step list itself stays in `ScenarioRunView`: this is
- * what was asked for, not what happened.
+ * A **collection run** states its work in a `scenario` block instead of a mode and a target, with
+ * every load-test key above absent from its snapshot: read the load way it shows no rows and says
+ * "No configuration was recorded" of a run that recorded plenty. Its rows come from that block, and
+ * the step list stays in `ScenarioRunView`: this is what was asked for, not what happened.
  */
 
 import { useRunQuery } from "@/queries";

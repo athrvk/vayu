@@ -6,18 +6,14 @@
  */
 
 /**
- * What this collection itself defines, editable in place.
+ * What this collection itself defines, editable in place. Not the request tab's list, which shows
+ * what *resolved* for a request across all three scopes, ancestors overriding each other: on a
+ * collection tab the question is "what does this collection contribute", not "what would win", so
+ * this shows the definitions on this collection, the rows the Variables tab beside it edits.
  *
- * Not the same list as the request tab's: that one shows what *resolved* for a
- * request, across all three scopes and with ancestors overriding each other.
- * This one shows the definitions that live on this collection - the rows the
- * Variables tab beside it edits - because on a collection tab the question is
- * "what does this collection contribute", not "what would win".
- *
- * A definition here is already the winner for its own scope, so the commit path
- * is handed a `ResolvedVariable` naming this collection as the source and lands
- * in the same place `useVariableCommit` sends a collection-scope edit from the
- * request tab.
+ * A definition here is already the winner for its own scope, so the commit path is handed a
+ * `ResolvedVariable` naming this collection as the source, and lands where `useVariableCommit`
+ * sends a collection-scope edit from the request tab.
  */
 
 import { useCollectionsQuery } from "@/queries";
@@ -37,10 +33,9 @@ export function CollectionVariablesSection({ tab }: ContextBarSectionProps) {
 	if (isLoading && !collection) return <SectionLoading />;
 	if (!collection) return <SectionEmpty>This collection is no longer available</SectionEmpty>;
 
-	// The engine keeps a variables object in name order, so the stored key order
-	// says nothing about how the user wrote the rows. The Variables tab lists
-	// them oldest-`createdAt` first; the same function here keeps the two lists
-	// in the same order (#3252).
+	// The engine keeps a variables object in name order, so the stored key order says nothing about
+	// how the user wrote the rows. The Variables tab lists them oldest-`createdAt` first, and the
+	// same function here keeps the two lists in one order (#3252).
 	const entries = sortVariableEntriesByCreatedAt(Object.entries(collection.variables ?? {}));
 
 	if (entries.length === 0) {
