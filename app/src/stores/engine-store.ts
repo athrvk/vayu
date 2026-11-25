@@ -6,31 +6,25 @@
  */
 
 /**
- * Engine Store
- *
- * Merged store managing:
- * - Engine connection status and errors
- * - Restart required tracking (pending restart + required config keys)
+ * The engine's connection status and errors, and the restart-required tracking (pending restart,
+ * the config keys that need it).
  */
 
 import { create } from "zustand";
 import type { EngineRecovery } from "@/types/domain";
 
 /**
- * Where the engine is, as the renderer's own health poll sees it.
+ * Where the engine is, as the renderer's own health poll sees it. Three values, not a boolean: the
+ * window paints alongside the engine, not after it (#1144), so "not answering" is an ordinary
+ * launch condition as well as a crash, and one flag gave every launch the crash's wording and error
+ * affordance from first paint.
  *
- * Three values rather than a boolean because the window paints alongside the
- * engine instead of after it (#1144), so "not answering" is an ordinary
- * launch condition as well as a crash. One flag made both wear the crash's
- * wording and its error affordance, from first paint, on every launch.
- *
- * - `starting` - no poll has succeeded since the engine now coming up began
- *   coming up, and it is still inside the budget the main process gives a cold
- *   one. Says nothing is wrong yet.
- * - `connected` - a poll answered `ok`.
- * - `unreachable` - a poll failed after that budget was spent, or an engine that
- *   had answered stopped answering with no start in flight. This is the state
- *   that owes the user a reason, and `engineError` carries it.
+ * - `starting`: no poll has succeeded since the engine now coming up began coming up, and it is
+ *   still inside the budget the main process gives a cold one. Nothing is wrong yet.
+ * - `connected`: a poll answered `ok`.
+ * - `unreachable`: a poll failed after that budget was spent, or an engine that had answered
+ *   stopped answering with no start in flight. This state owes the user a reason, and `engineError`
+ *   carries it.
  */
 export type EngineStatus = "starting" | "connected" | "unreachable";
 
@@ -54,64 +48,55 @@ interface EngineState {
 	engineStatus: EngineStatus;
 
 	/**
-	 * Why the engine is `unreachable`, as the transport reported it.
-	 *
-	 * `null` in every other state, `starting` included: a launch whose engine has
-	 * simply not answered yet has no failure to report, and a string written
-	 * there would be one the Dock deliberately does not render.
+	 * Why the engine is `unreachable`, as the transport reported it. `null` in every other state,
+	 * `starting` included: an engine that has not answered yet has no failure to report, and a
+	 * string there would be one the Dock deliberately does not render.
 	 */
 	engineError: string | null;
 
 	/**
-	 * Why the main process has no engine to start, when no crashed child
-	 * explains it - another program holding every port the engine may use
-	 * (#2118), or a start that failed before it had a child (#3610). `null`
-	 * otherwise.
+	 * Why the main process has no engine to start, when no crashed child explains it: another
+	 * program holding every port the engine may use (#2118), or a start that failed before it had a
+	 * child (#3610). `null` otherwise.
 	 *
-	 * Apart from `engineError` because it is not the transport's report but the
-	 * main process's own, it does not wait out the startup budget (the engine is
-	 * known not to be coming), and its presence is what makes the Dock offer
-	 * Retry. Written by the health poll, cleared by the poll an engine answers.
+	 * Apart from `engineError` because it is the main process's own report, not the transport's: it
+	 * does not wait out the startup budget (the engine is known not to be coming), and its presence
+	 * makes the Dock offer Retry. Written by the health poll, cleared by the poll an engine
+	 * answers.
 	 */
 	engineStartFailure: string | null;
 
 	/**
-	 * How the engine's process left, when the sidecar reports it left on its own
-	 * (#3336); `null` while it runs or once a start is under way again.
+	 * How the engine's process left, when the sidecar reports it left on its own (#3336); `null`
+	 * while it runs or once a start is under way again.
 	 *
-	 * A fact about the process, not a status: `engineStatus` stays the health
-	 * poll's verdict, and this explains it, offers the Dock's Restart, and keeps
-	 * a stale `connected`, and a `starting` no restart is behind, off screen
-	 * (`selectKnownEngineStatus`). Written by
-	 * `useEngineLifecycle` from each pushed transition, so it clears when the
-	 * sidecar moves on rather than when a restart is asked for.
+	 * A fact about the process, not a status: `engineStatus` stays the health poll's verdict, and
+	 * this explains it, offers the Dock's Restart, and keeps a stale `connected`, and a `starting`
+	 * no restart is behind, off screen (`selectKnownEngineStatus`). Written by `useEngineLifecycle`
+	 * from each pushed transition, so it clears when the sidecar moves on, not when a restart is
+	 * asked for.
 	 */
 	engineCrash: EngineCrash | null;
 
 	/**
-	 * The crash in `engineCrash` was pushed after the health poll's last verdict
-	 * (#3493), so a `connected` there describes the process that left.
-	 *
-	 * Set by `setEngineCrash` with a crash and cleared by every `setEngineStatus`,
-	 * which only the poll calls: a verdict that lands after the push, `connected`
-	 * from the restarted engine included, is the newer word. `engineCrash` itself
-	 * stays until the sidecar reports `ready`, which can trail that verdict, so it
-	 * cannot be what decides.
+	 * The crash in `engineCrash` was pushed after the health poll's last verdict (#3493), so a
+	 * `connected` there describes the process that left. Set by `setEngineCrash` with a crash,
+	 * cleared by every `setEngineStatus` (only the poll calls it): a verdict after the push, the
+	 * restarted engine's `connected` included, is the newer word. `engineCrash` itself stays until
+	 * the sidecar reports `ready`, which can trail that verdict, so it cannot decide.
 	 */
 	engineCrashAheadOfPoll: boolean;
 
 	/**
-	 * The runs the crash in `engineCrash` ended (#3605), for the one sentence of
-	 * the engine-lost notification that says so.
+	 * The runs the crash in `engineCrash` ended (#3605), for the engine-lost notification's one
+	 * sentence that says so.
 	 *
-	 * Written with the crash, in the one `setEngineCrash` call, because it is a
-	 * fact about that crash: the dashboard's `engineStopped` phase and the
-	 * scenario store's `endedByEngineStop` outlive it (they last until the run's
-	 * report lands or the next run starts, and the dashboard is not even mounted
-	 * to settle it from another tab), so a later engine loss would find them
-	 * still raised. Replaced by the next crash, emptied by `setEngineCrash(null)`
-	 * and by `consumeCrashEndedRuns`, which the notification calls so the same
-	 * crash is not narrated twice.
+	 * Written with the crash in the one `setEngineCrash` call, because it is a fact about that
+	 * crash: the dashboard's `engineStopped` phase and the scenario store's `endedByEngineStop`
+	 * outlive it (until the run's report lands or the next run starts, and the dashboard may not be
+	 * mounted to settle it from another tab), so a later engine loss would find them still raised.
+	 * Replaced by the next crash, emptied by `setEngineCrash(null)` and by `consumeCrashEndedRuns`,
+	 * which the notification calls so one crash is not narrated twice.
 	 */
 	crashEndedRuns: readonly CrashEndedRun[];
 
@@ -123,52 +108,42 @@ interface EngineState {
 	engineRestarting: boolean;
 
 	/**
-	 * What the engine's startup did about a database it could not open (issue
-	 * #922), as reported by `GET /health`.
-	 *
-	 * `null` is the ordinary case - a clean start sends no `recovery` node at
-	 * all. A value is read by `RecoveryBanner`, which is the only thing that
-	 * tells the user their data was restored or deleted; the engine log is
-	 * otherwise the whole record.
+	 * What the engine's startup did about a database it could not open (#922), as `GET /health`
+	 * reports it. `null` is the ordinary case: a clean start sends no `recovery` node. A value is
+	 * read by `RecoveryBanner`, the only thing that tells the user their data was restored or
+	 * deleted; otherwise the engine log is the whole record.
 	 */
 	recovery: EngineRecovery | null;
 
 	/**
-	 * The `workers` setting's effective value, as the last successful health
-	 * poll reported it (issue #1508) - the configured count, or the detected
-	 * core count when nothing overrides it. `null` before the first poll
-	 * answers, the same "nothing to render yet" rule `recovery` follows.
+	 * The `workers` setting's effective value, as the last successful health poll reported it
+	 * (#1508): the configured count, or the detected core count when nothing overrides it. `null`
+	 * before the first poll answers, as `recovery` is.
 	 */
 	workers: number | null;
 
 	/**
-	 * When the engine that is currently coming up began coming up, or `null` when
-	 * none is - the evidence a failed poll is classified against.
+	 * When the engine now coming up began coming up, or `null` when none is: the evidence a failed
+	 * poll is classified against.
 	 *
-	 * It is a window rather than a "has ever connected" flag because a cold start
-	 * is not only the app's first (issue #1227). `useEngineRestart` kills the
-	 * running engine and spawns a fresh one that repeats the whole startup
-	 * housekeeping the budget exists for, with the port down for all of it; a
-	 * flag would call that silence a failure, on the evidence of an engine that
-	 * no longer exists.
+	 * A window, not a "has ever connected" flag, because a cold start is not only the app's first
+	 * (#1227): `useEngineRestart` kills the running engine and spawns a fresh one that repeats the
+	 * whole startup housekeeping the budget exists for, with the port down for all of it, and a
+	 * flag would call that silence a failure on the evidence of an engine that no longer exists.
 	 *
-	 * Opened by whoever knows an engine is starting: the health poll on mount,
-	 * which is when the main process spawns the first one, and the restart path,
-	 * which spawns the next. Closed by the poll an engine answers, and by a
-	 * restart the main process reports as failed - after which nothing is coming
-	 * up and a silent port owes the user its reason again.
+	 * Opened by whoever knows an engine is starting: the health poll on mount (when the main
+	 * process spawns the first) and the restart path (which spawns the next). Closed by the poll an
+	 * engine answers, and by a restart the main process reports as failed, after which nothing is
+	 * coming up and a silent port owes the user its reason again.
 	 *
-	 * A window nobody closes is spent rather than cleared: an engine that simply
-	 * never arrives leaves its opening time here, expired. So this is not a "is
-	 * something starting" flag and must not be read as one - only
-	 * `engineStatusAfterFailedPoll` interprets it, and an expired timestamp and a
-	 * `null` mean the same thing to it. Clearing it on expiry would need a writer
-	 * watching a clock nothing else watches, to say what the timestamp already
-	 * says.
+	 * A window nobody closes is spent, not cleared: an engine that never arrives leaves its opening
+	 * time here, expired. So this is not an "is something starting" flag and must not be read as
+	 * one; only `engineStatusAfterFailedPoll` interprets it, and to it an expired timestamp and
+	 * `null` mean the same. Clearing it on expiry would need a writer watching a clock nothing else
+	 * watches.
 	 *
-	 * Kept here rather than in `useHealthQuery`'s refs, where it lived until
-	 * #1227, because the restart path has to reach it. Deliberately evidence and
-	 * not a status: the poll stays the only thing that classifies.
+	 * Kept here rather than in `useHealthQuery`'s refs because the restart path has to reach it.
+	 * Evidence, deliberately, not a status: the poll stays the only thing that classifies.
 	 */
 	engineStartWindow: number | null;
 
@@ -194,23 +169,20 @@ interface EngineState {
 }
 
 /**
- * The engine's status as the app shows it: the health poll's verdict, except
- * where a crash the sidecar reported says more.
+ * The engine's status as the app shows it: the health poll's verdict, except where a crash the
+ * sidecar reported says more.
  *
- * - A `connected` the poll gave before the crash was pushed (#3493). The
- *   override lasts until the poll's next verdict, whatever it says, but a strip
- *   reading "Engine connected" beside a Restart button, or a drawer of green
- *   services the dead process took with it, is wrong for all of it.
- * - A `starting` with no restart in flight (#3610). A failed poll inside the
- *   startup grace is `starting` for up to `ENGINE_STARTUP_GRACE_MS`, and an
- *   engine that exited at spawn is not coming. Keyed on the crash itself, not
- *   on `engineCrashAheadOfPoll`: every failed poll rewrites the status and
- *   clears that flag. With a restart in flight `starting` passes through: the
- *   restart is the crash's successor.
+ * - A `connected` the poll gave before the crash was pushed (#3493). The override lasts until the
+ *   poll's next verdict, whatever it says, but a strip reading "Engine connected" beside a Restart
+ *   button, or a drawer of green services the dead process took with it, is wrong for all of it.
+ * - A `starting` with no restart in flight (#3610). A failed poll inside the startup grace is
+ *   `starting` for up to `ENGINE_STARTUP_GRACE_MS`, and an engine that exited at spawn is not
+ *   coming. Keyed on the crash itself, not on `engineCrashAheadOfPoll`, because every failed poll
+ *   rewrites the status and clears that flag. With a restart in flight `starting` passes through:
+ *   the restart is the crash's successor.
  *
- * Derived on read, never written back: the poll stays the one writer of
- * `engineStatus`, and the crash push only asks it to look again
- * (`useEngineLifecycle`).
+ * Derived on read, never written back: the poll stays the one writer of `engineStatus`, and the
+ * crash push only asks it to look again (`useEngineLifecycle`).
  */
 export function selectKnownEngineStatus(
 	s: Pick<
@@ -225,9 +197,8 @@ export function selectKnownEngineStatus(
 }
 
 /**
- * Whether the Dock is showing a Restart (after a crash) or Retry (after a
- * start failure) button. Read by the Dock itself and by copy that points at it,
- * so a tip never names a button the Dock is not drawing (#3493).
+ * Whether the Dock shows Restart (after a crash) or Retry (after a start failure). Read by the Dock
+ * and by copy that points at it, so a tip never names a button the Dock is not drawing (#3493).
  */
 export function selectEngineRestartOffered(
 	s: Pick<EngineState, "engineStartFailure" | "engineCrash">
