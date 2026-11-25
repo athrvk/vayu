@@ -46,33 +46,32 @@ class Server {
      * @brief Bind the listener, then serve on it from a background thread.
      *
      * The bind happens on the caller's thread so its failure is *returned*
-     * rather than logged from a thread nobody is reading (#983): a taken port
-     * used to leave `is_running_` false a moment after `start()` had already
-     * printed the listening banner, and the daemon read that as a shutdown
-     * request and exited 0.
+     * rather than logged from a thread nobody is reading (#983): otherwise a
+     * taken port would leave `is_running_` false a moment after `start()` had
+     * printed the listening banner, and the daemon would read that as a
+     * shutdown request and exit 0.
      *
      * @return true once the accept loop owns the port; false when the bind
-     * failed, in which case `bind_error()` names the reason and nothing is
-     * listening.
+     *         failed, in which case `bind_error()` names the reason and nothing
+     *         is listening.
      */
     [[nodiscard]] bool start ();
 
     /**
-     * @brief Close the listener, end what its handlers are waiting on, and
-     *        join them.
+     * @brief Close the listener, end what its handlers are waiting on, and join
+     *        them.
      *
      * No handler outlives this call (#2683): the daemon tears down curl's
-     * global state and the database right after it. That covers the
-     * listeners the managers own as well as this one's: the OAuth
-     * authorization manager first, because an embedded completion's token
-     * exchange runs on one of its own handlers (#3347); after those handlers,
-     * every mock server, inbox and mock issuer is shut down, then every
-     * stream consumer (#3345). It is bounded because
-     * each handler's outbound transfer is cancelled and each SSE relay ends
-     * first (`RouteContext::server_stopping`), and a listener's handler waits
-     * on its entry's stop signal (a paced answer, a callback's token
-     * exchange); work that waits on nothing outside the engine, a database
-     * write, is finished rather than cut.
+     * global state and the database right after it. That covers the listeners
+     * the managers own as well as this one's: the OAuth authorization manager
+     * first, because an embedded completion's token exchange runs on one of its
+     * own handlers (#3347); after those handlers, every mock server, inbox and
+     * mock issuer is shut down, then every stream consumer (#3345). It is
+     * bounded because each handler's outbound transfer is cancelled and each
+     * SSE relay ends first (`RouteContext::server_stopping`), and a listener's
+     * handler waits on its entry's stop signal (a paced answer, a callback's
+     * token exchange); work that waits on nothing outside the engine, a
+     * database write, is finished rather than cut.
      */
     void stop ();
     bool is_running () const;
@@ -86,8 +85,8 @@ class Server {
     const std::string& bind_error () const;
 
     /**
-     * @brief Set a callback to be invoked when /shutdown endpoint is called
-     * This allows the daemon to perform platform-specific cleanup (lock file release, etc.)
+     * @brief Set the callback `/shutdown` invokes, for the daemon's
+     *        platform-specific cleanup (lock file release and the like).
      * @param callback Function to call during graceful shutdown
      */
     void set_shutdown_callback (routes::ShutdownCallback callback);
