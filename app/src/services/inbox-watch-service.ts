@@ -6,31 +6,24 @@
  */
 
 /**
- * Who holds an inbox's live capture stream (issues #480, #506, #1388, #1400).
+ * Who holds an inbox's live capture stream (#480, #506, #1388, #1400).
  *
- * The stream used to be the inbox view's: `useInboxLive` opened it on mount and
- * closed it on unmount. One tab's surface is mounted at a time, so the per-inbox
- * `Notify` toggle - whose whole purpose is to speak while the user is in another
- * application - was silenced by the click that precedes leaving: switching to a
- * request tab unmounted the view, and with it the socket and the notifier.
- *
- * So the socket lives here, beside `load-test-service.ts`, which owns a run's
- * stream for the same reason: "this service runs independently of React
- * components, ensuring the SSE connection stays alive regardless of navigation".
- * The view is now one holder among others, and a stream closes when nothing
- * wants it rather than when a tab changes.
+ * The socket lives here, not in the inbox view, because one tab's surface is mounted at a time: a
+ * view-owned stream closes on the click that leaves the tab, and with it the per-inbox `Notify`
+ * toggle whose whole purpose is to speak while the user is in another application.
+ * `load-test-service.ts` owns a run's stream for the same reason. The view is one holder among
+ * others, and a stream closes when nothing wants it rather than when a tab changes.
  *
  * Two kinds of holder, unioned:
  *
- * - {@link InboxWatchService.reconcile}, the standing want: every running inbox
- *   whose `Notify` toggle is on. `useInboxWatchers` computes it at the app level.
- * - {@link InboxWatchService.retain}, a view's reference: the inbox on screen is
- *   watched whether or not it notifies, because the list is what the stream
- *   fills.
+ * - {@link InboxWatchService.reconcile}, the standing want: every running inbox whose `Notify`
+ *   toggle is on. `useInboxWatchers` computes it at the app level.
+ * - {@link InboxWatchService.retain}, a view's reference: the inbox on screen is watched whether or
+ *   not it notifies, because the list is what the stream fills.
  *
- * The engine allows exactly one live stream per inbox (409 `inbox_live_in_use`)
- * and each parks a pool thread for its life, so a shared socket is not an
- * optimisation here - a second one would be refused.
+ * The engine allows exactly one live stream per inbox (409 `inbox_live_in_use`) and each parks a
+ * pool thread for its life, so a shared socket is not an optimisation here: a second one would be
+ * refused.
  */
 
 import { API_ENDPOINTS } from "@/config/api-endpoints";
@@ -78,56 +71,46 @@ export const INBOX_LIVE_RETRY_BASE_MS = 400;
 export const INBOX_LIVE_RETRY_MAX_MS = 5000;
 
 /**
- * How long a stream nothing is watching waits, once its retries are spent,
- * before it is given one fresh budget (issue #1403).
+ * How long a stream nothing is watching waits, once its retries are spent, before it is given one
+ * fresh budget (#1403).
  *
- * The bound above exists so a refused stream stops hammering the engine inside
- * a reconnect burst, and for a stream a surface is watching it is the whole
- * answer: the inbox view renders "Live updates stopped" with a Resume, so the
- * user is told and can act. Nothing renders a stream held only by the standing
- * want, so there the same give-up ends an opt-in feature for the rest of the
+ * The bound above stops a refused stream hammering the engine inside a reconnect burst, and for a
+ * stream a surface is watching it is the whole answer: the inbox view renders "Live updates
+ * stopped" with a Resume, so the user is told and can act. Nothing renders a stream held only by
+ * the standing want, so there the same give-up would end an opt-in feature for the rest of the
  * session without saying so anywhere.
  *
- * A minute, for two reasons that agree. It has to be a different rate rather
- * than a second copy of the ladder: the ladder spends its six attempts inside
- * about fifteen seconds, so one fresh budget a minute costs at most six attempts
- * a minute against an engine that keeps refusing - a quarter of the rate the
- * bound was added to stop, and far enough from a burst that the two cannot be
- * confused. And a minute is what the platform would give anyway: `backgroundThrottling`
- * is left on, so Chromium aligns a hidden window's timers to one-minute buckets
- * once it has been hidden a while, which is exactly the case this exists for. A
- * shorter cadence would not fire sooner there; it would only cost more while the
+ * A minute, for two reasons that agree. It has to be a different rate, not a second copy of the
+ * ladder: the ladder spends its six attempts inside about fifteen seconds, so one fresh budget a
+ * minute costs at most six attempts a minute against an engine that keeps refusing, a quarter of
+ * the rate the bound stops and far enough from a burst that the two cannot be confused. And a
+ * minute is what the platform gives anyway: `backgroundThrottling` is left on, so Chromium aligns a
+ * hidden window's timers to one-minute buckets once it has been hidden a while, the case this
+ * exists for. A shorter cadence would not fire sooner there; it would only cost more while the
  * window is visible.
  *
- * The timer is the service's own, and not the watcher's list read, because that
- * read stops happening in the case this is for: `refetchIntervalInBackground` is
- * unset, so the inbox poll pauses in a hidden window.
+ * The timer is the service's own, not the watcher's list read, because that read stops in the case
+ * this is for: `refetchIntervalInBackground` is unset, so the inbox poll pauses in a hidden window.
  */
 export const INBOX_LIVE_BACKGROUND_RESUME_MS = 60_000;
 
 /**
- * How many inboxes may be streamed at once.
- *
- * Each stream parks one thread of the engine's API pool, whose base is
- * `max(8, hardware_concurrency - 1)` and which is elastic to four times that,
- * so eight is spending at most the base pool's own width on watchers while the
- * elastic headroom answers ordinary requests. Nothing caps the number of
- * inboxes a user may start, and `managed_listener.cpp` assumes "a handful"; the
- * bound is here so a persisted toggle map from a busy session cannot open an
- * unbounded number of sockets at startup. The inbox on screen always gets a
- * slot - see {@link InboxWatchService.wantedInboxIds}.
+ * How many inboxes may be streamed at once. Each stream parks one thread of the engine's API pool,
+ * whose base is `max(8, hardware_concurrency - 1)` and which is elastic to four times that, so
+ * eight spends at most the base pool's own width on watchers while the elastic headroom answers
+ * ordinary requests. Nothing caps how many inboxes a user may start, and `managed_listener.cpp`
+ * assumes "a handful"; the bound keeps a persisted toggle map from a busy session from opening
+ * unbounded sockets at startup. The inbox on screen always gets a slot (see
+ * {@link InboxWatchService.wantedInboxIds}).
  */
 export const MAX_INBOX_WATCH_STREAMS = 8;
 
 /**
- * How long to wait before reconnect attempt @p attempt (1-based).
- *
- * The first step has to outlast the engine's dead-socket detection - the
- * previous stream's claim is held until its poll loop notices, one
- * `inboxLivePollIntervalMs` later - because a reconnect inside that window is
- * refused with a 409. The app cannot read that setting, so the backoff doubles
- * rather than guessing it: 400ms clears the 250ms default on the first attempt
- * and a raised cadence is covered within two or three.
+ * How long to wait before reconnect attempt @p attempt (1-based). The first step has to outlast the
+ * engine's dead-socket detection: the previous stream's claim is held until its poll loop notices,
+ * one `inboxLivePollIntervalMs` later, and a reconnect inside that window is refused with a 409.
+ * The app cannot read that setting, so the backoff doubles rather than guessing it: 400ms clears
+ * the 250ms default on the first attempt and a raised cadence is covered within two or three.
  */
 export function inboxLiveRetryDelayMs(attempt: number, random: () => number = Math.random): number {
 	return streamRetryDelayMs(
@@ -138,19 +121,17 @@ export function inboxLiveRetryDelayMs(attempt: number, random: () => number = Ma
 }
 
 /**
- * Ask the engine, now, whether @p inboxId still has a listener (issue #554).
+ * Ask the engine, now, whether @p inboxId still has a listener (#554).
  *
- * A stream ends the same way whether the connection dropped or somebody stopped
- * the inbox - from the drawer, an MCP tool or a bare curl - and only the engine
- * knows which. The list is polled at `SERVICES_POLL_INTERVAL_MS`, so left to the
- * poll a deliberate stop spends up to ten seconds looking like a live inbox
- * whose stream is flapping. Reading it here answers both halves: the surface
- * reflects the stop within the close, and the reconnect budget is kept for the
- * drops it was added for.
+ * A stream ends the same way whether the connection dropped or somebody stopped the inbox (from the
+ * drawer, an MCP tool or a bare curl), and only the engine knows which. The list is polled at
+ * `SERVICES_POLL_INTERVAL_MS`, so left to the poll a deliberate stop spends up to ten seconds
+ * looking like a live inbox whose stream is flapping. Reading it here answers both halves: the
+ * surface reflects the stop within the close, and the reconnect budget is kept for the drops it is
+ * for.
  *
- * Only a definite answer counts. A refetch that failed leaves the last good
- * list in the cache, which still says `running` - so a stream lost to a blip
- * retries, as it must.
+ * Only a definite answer counts. A refetch that failed leaves the last good list in the cache,
+ * which still says `running`, so a stream lost to a blip retries, as it must.
  */
 async function listenerIsGone(inboxId: string): Promise<boolean> {
 	// `refetchType: "all"`, not the default "active": whether some other surface
@@ -182,23 +163,17 @@ export interface InboxWatchState {
 const IDLE: InboxWatchState = { watching: false, stopped: false };
 
 /**
- * Which inboxes are not hearing their captures, for a surface that lists them
- * (issue #1412).
- *
- * {@link InboxWatchState} answers for one inbox and is what the inbox tab reads.
- * This answers for all of them at once, because the Services drawer draws a row
- * per inbox and is on screen from any tab - which is the property that makes it
- * the place to say a `Notify` toggle is not currently in effect. The two lists
- * are separate because their causes are: one is a stream that failed, the other
- * is an inbox that never got a stream.
+ * Which inboxes are not hearing their captures, for a surface that lists them (#1412).
+ * {@link InboxWatchState} answers for one inbox and is what the inbox tab reads. This answers for
+ * all of them at once, because the Services drawer draws a row per inbox and is on screen from any
+ * tab, which makes it the place to say a `Notify` toggle is not in effect. The two lists are
+ * separate because their causes are: a stream that failed, and an inbox that never got a stream.
  */
 export interface InboxWatchSummary {
 	/**
-	 * Inboxes whose stream gave up and has not opened since.
-	 *
-	 * Held until a connection actually succeeds rather than cleared when the
-	 * background resume fires, so a stream that keeps failing reads as one
-	 * standing state instead of blinking once a minute.
+	 * Inboxes whose stream gave up and has not opened since. Held until a connection actually
+	 * succeeds, not cleared when the background resume fires, so a stream that keeps failing reads
+	 * as one standing state instead of blinking once a minute.
 	 */
 	stalled: readonly string[];
 	/**
@@ -246,11 +221,9 @@ class InboxWatchService {
 	private listeners = new Map<string, Set<StateListener>>();
 
 	/**
-	 * The standing want: every running inbox whose `Notify` toggle is on.
-	 *
-	 * Called with the whole set rather than one id at a time, because that is
-	 * what the app-level hook knows: an inbox stopping, a toggle going off and a
-	 * list arriving are all the same event to a reconciler.
+	 * The standing want: every running inbox whose `Notify` toggle is on. The whole set rather than
+	 * one id at a time, because that is what the app-level hook knows: an inbox stopping, a toggle
+	 * going off and a list arriving are all the same event to a reconciler.
 	 */
 	reconcile(inboxIds: readonly string[]): void {
 		this.wanted = [...inboxIds];
@@ -288,11 +261,9 @@ class InboxWatchService {
 	}
 
 	/**
-	 * Which inboxes are not hearing their captures, for the drawer (issue #1412).
-	 *
-	 * The same object until the answer changes, because this is read through
-	 * `useSyncExternalStore`, which compares snapshots by identity and would
-	 * re-render forever on a fresh one per call.
+	 * Which inboxes are not hearing their captures, for the drawer (#1412). The same object until
+	 * the answer changes: this is read through `useSyncExternalStore`, which compares snapshots by
+	 * identity and would re-render forever on a fresh one per call.
 	 */
 	getSummary(): InboxWatchSummary {
 		return this.summary;
@@ -307,14 +278,11 @@ class InboxWatchService {
 	}
 
 	/**
-	 * Re-subscribe now, from the same resume point, with a fresh budget.
-	 *
-	 * Immediately, without the backoff a reconnect uses: this is a user asking,
-	 * and a Resume that waited would look like a control that did nothing. A
-	 * reconnect landing inside the engine's dead-socket window still meets the
-	 * previous claim's 409, which is what the ladder below is for - the same is
-	 * true of a `Notify` toggle flipped off and straight back on, which closes
-	 * and reopens through {@link apply}.
+	 * Re-subscribe now, from the same resume point, with a fresh budget. Immediately, without a
+	 * reconnect's backoff: this is a user asking, and a Resume that waited would look like a
+	 * control that did nothing. A reconnect landing inside the engine's dead-socket window still
+	 * meets the previous claim's 409, which the ladder below is for; the same is true of a `Notify`
+	 * toggle flipped off and straight back on, which closes and reopens through {@link apply}.
 	 */
 	resume(inboxId: string): void {
 		const stream = this.streams.get(inboxId);
@@ -343,22 +311,19 @@ class InboxWatchService {
 	}
 
 	/**
-	 * A stream has given up: come back for it in
-	 * `INBOX_LIVE_BACKGROUND_RESUME_MS` (issue #1403).
+	 * A stream has given up: come back for it in `INBOX_LIVE_BACKGROUND_RESUME_MS` (#1403).
 	 *
-	 * Armed for every stream that spends its budget, and answered only for one no
-	 * view is holding - a view renders the give-up and offers its own Resume, so
-	 * resuming underneath it would be a callout that cleared itself. A held
-	 * stream re-arms instead of being dropped, because the view is a tab the user
-	 * leaves: the stream that was watched a moment ago is the background stream
-	 * this exists for, and it must not need a give-up of its own to qualify.
+	 * Armed for every stream that spends its budget, and answered only for one no view is holding:
+	 * a view renders the give-up and offers its own Resume, so resuming underneath it would be a
+	 * callout that cleared itself. A held stream re-arms instead of being dropped, because the view
+	 * is a tab the user leaves: the stream watched a moment ago is the background stream this
+	 * exists for, and must not need a give-up of its own to qualify.
 	 *
-	 * The wanted set this checks against is the last one the engine gave, which
-	 * in a hidden window may be a minute or more old - the inbox poll pauses
-	 * there. Resuming an inbox that has since been stopped elsewhere costs one
-	 * refused connection: the reconnect behind it asks the engine directly
-	 * ({@link listenerIsGone}, a refetch rather than the paused poll), reads the
-	 * stop and ends the stream without spending the budget or arming this again.
+	 * The wanted set this checks is the last one the engine gave, which in a hidden window may be a
+	 * minute or more old (the inbox poll pauses there). Resuming an inbox since stopped elsewhere
+	 * costs one refused connection: the reconnect behind it asks the engine directly
+	 * ({@link listenerIsGone}, a refetch rather than the paused poll), reads the stop and ends the
+	 * stream without spending the budget or arming this again.
 	 */
 	private scheduleBackgroundResume(stream: Stream): void {
 		// One timer per stream, whatever asks: a second error reaching a source
@@ -502,15 +467,11 @@ class InboxWatchService {
 	}
 
 	/**
-	 * The stream dropped. Retry it, unless the budget is spent or the listener
-	 * is gone on purpose.
-	 *
-	 * The retry is ours rather than the browser's (issue #506). `EventSource`
-	 * treats any non-200 as fatal and never retries it, and a reconnect that
-	 * lands inside the engine's dead-socket detection window meets a
-	 * `409 inbox_live_in_use` from the claim the previous stream is still
-	 * holding - so a single unlucky disconnect used to end the stream for the
-	 * life of the tab, with nothing said.
+	 * The stream dropped. Retry it, unless the budget is spent or the listener is gone on purpose.
+	 * The retry is ours, not the browser's (#506): `EventSource` treats any non-200 as fatal and
+	 * never retries it, and a reconnect that lands inside the engine's dead-socket detection window
+	 * meets a `409 inbox_live_in_use` from the claim the previous stream still holds, so one
+	 * unlucky disconnect would otherwise end the stream for the life of the tab, with nothing said.
 	 */
 	private recover(stream: Stream): void {
 		const exhausted = stream.attempts >= INBOX_LIVE_MAX_RETRIES;

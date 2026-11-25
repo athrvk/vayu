@@ -33,12 +33,10 @@ export function singleReferenceName(text: string | undefined): string | null {
 }
 
 /**
- * @p resolved with `privateKey` as @p raw wrote it.
- *
- * Every host that variable-resolves a config for a token request resolves the
- * whole object, and a resolved reference would put the PEM into the request the
- * renderer sends; the engine resolves it from the scopes the request names
- * instead (`environmentId`, `collectionId`).
+ * @p resolved with `privateKey` as @p raw wrote it. Every host that variable-resolves a config for
+ * a token request resolves the whole object, and a resolved reference would put the PEM into the
+ * request the renderer sends; the engine resolves it from the scopes the request names instead
+ * (`environmentId`, `collectionId`).
  */
 export function keepSigningKeyReference(resolved: OAuth2Config, raw: OAuth2Config): OAuth2Config {
 	if (raw.privateKey === undefined) return resolved;

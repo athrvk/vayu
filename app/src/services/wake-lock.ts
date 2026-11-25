@@ -6,18 +6,16 @@
  */
 
 /**
- * One keyed wake-lock holder, shared by every run service (issue #1357).
+ * One keyed wake-lock holder, shared by every run service (#1357).
  *
- * `electron/power-save.ts` (main process) ref-counts holds by token; this is
- * the renderer side of that contract, kept in one place so a load run and a
- * collection run each hold under their own key instead of two services
- * copying the same token bookkeeping - the repo rule against a hand-rolled
- * copy of a primitive: it never receives the primitive's fixes.
+ * `electron/power-save.ts` (main process) ref-counts holds by token; this is the renderer side of
+ * that contract, kept in one place so a load run and a collection run each hold under their own key
+ * instead of two services copying the token bookkeeping: a hand-rolled copy of a primitive never
+ * receives the primitive's fixes.
  *
- * `hold`/`release` are fire-and-forget by design - neither returns a promise,
- * because a run's start and stop paths must not await IPC to do work of their
- * own. The round trip to the main process happens in the background and is
- * reconciled here, including the case where `release` runs before the
+ * `hold`/`release` are fire-and-forget by design: neither returns a promise, because a run's start
+ * and stop paths must not await IPC to do work of their own. The round trip to the main process
+ * happens in the background and is reconciled here, including a `release` that runs before the
  * matching `hold` has even heard back.
  */
 
@@ -30,14 +28,11 @@ export const WAKE_LOCK_KEYS = {
 export type WakeLockKey = (typeof WAKE_LOCK_KEYS)[keyof typeof WAKE_LOCK_KEYS];
 
 /**
- * One hold, tracked by the object rather than by its key.
- *
- * The distinction is load-bearing: `release()` frees the key immediately, so a
- * hold that is still in flight when its run ends is reconciled through the
- * object its own round trip closed over. Keeping the released hold under the
- * key instead would swallow the next `hold()` on that key as a duplicate - and
- * `LoadTestService.startMonitoring` releases and re-holds in the same tick when
- * one run replaces another, which is exactly that case.
+ * One hold, tracked by the object rather than by its key. Load-bearing: `release()` frees the key
+ * immediately, so a hold still in flight when its run ends is reconciled through the object its own
+ * round trip closed over. Keeping the released hold under the key instead would swallow the next
+ * `hold()` on that key as a duplicate, and `LoadTestService.startMonitoring` releases and re-holds
+ * in the same tick when one run replaces another, which is exactly that case.
  */
 interface HoldState {
 	/** What `holdWakeLock` resolved with, or `null` while that call is in flight. */

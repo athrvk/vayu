@@ -6,25 +6,17 @@
  */
 
 /**
- * Run Report Transformer
- *
- * Transforms backend run report format to frontend format.
- * Handles array-to-object transformations for statusCodes and errors.byStatusCode.
+ * Turns the engine's run report into the app's shape: `statusCodes` and `errors.byStatusCode` from
+ * arrays of pairs to objects.
  */
 
 import type { RunReport, GetRunReportResponse } from "@/types";
 
-/**
- * Run Report Transformer
- *
- * Handles transformation of run reports from backend format to frontend format.
- */
+/** Engine run reports to the app's shape; see the file comment. */
 export class RunReportTransformer {
 	/**
-	 * Transform backend run report to frontend format
-	 *
-	 * Backend returns statusCodes as array of tuples: [[200, 50], [404, 10]]
-	 * Frontend expects: { "200": 50, "404": 10 }
+	 * Transform a run report to the app's shape. The engine sends `statusCodes` as `[code, count]`
+	 * pairs (`[[200, 50], [404, 10]]`); the app reads `{ "200": 50, "404": 10 }`.
 	 */
 	static toFrontend(backendReport: GetRunReportResponse): RunReport {
 		const report = { ...backendReport };

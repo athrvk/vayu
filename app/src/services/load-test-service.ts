@@ -6,11 +6,9 @@
  */
 
 /**
- * LoadTestService - Global singleton for managing active load test connections
- *
- * This service runs independently of React components, ensuring the SSE connection
- * stays alive regardless of navigation. Metrics are pushed to the Zustand store
- * where any component can read them.
+ * LoadTestService: the global singleton for active load test connections. It runs independently of
+ * React components, so the SSE connection stays alive regardless of navigation. Metrics are pushed
+ * to the Zustand store, where any component can read them.
  */
 
 import { sseClient, type SSECloseInfo, type SSETerminalStatus } from "./sse-client";
@@ -49,15 +47,12 @@ const NOTIFY_TITLES: Record<LoadRunNotifyKind, string> = {
 };
 
 /**
- * "12,400 requests, p95 210ms, 0.3% errors", or `null` when the report cannot
- * supply all three. A flagged report (`summaryMissing`, `partial`) says what was
- * not recorded instead.
- *
- * The numbers, not an adjective: a notification that says only "finished"
- * makes the user open the app to learn what a glance should have told them.
- * Checked rather than trusted, because the report crosses a process boundary
- * and a partial one must not turn into "0 requests, p95 0ms" - a number the
- * user would read as the run's own.
+ * "12,400 requests, p95 210ms, 0.3% errors", or `null` when the report cannot supply all three; a
+ * flagged report (`summaryMissing`, `partial`) says what was not recorded instead. The numbers, not
+ * an adjective: a notification that says only "finished" makes the user open the app to learn what
+ * a glance should have told them. Checked rather than trusted, because the report crosses a process
+ * boundary and a partial one must not turn into "0 requests, p95 0ms", a number the user would read
+ * as the run's own.
  */
 function runSummaryLine(
 	report: RunReport,
@@ -90,22 +85,21 @@ function reasonStatesErrorRate(reason: string): boolean {
 }
 
 /**
- * The kind and body of the notification for a run that ended and was not
- * stopped by this window's Stop.
+ * The kind and body of the notification for a run that ended and was not stopped by this window's
+ * Stop.
  *
- * The body leads with the verdict the dashboard banner shows (`reportOutcome`),
- * so a missed budget or a failed check is in the notification and not behind a
- * click (#3546), and the numbers follow when the report has them. A report with
- * no verdict, or none that can be read, keeps the numbers or the plain line.
+ * The body leads with the verdict the dashboard banner shows (`reportOutcome`), so a missed budget
+ * or a failed check is in the notification, not behind a click (#3546); the numbers follow when the
+ * report has them. A report with no verdict, or none that can be read, keeps the numbers or the
+ * plain line.
  *
- * The kind is `failed` for a run the engine ended as failed and for a run that
- * completed and missed a budget; `stopped` for a run stopped from anywhere else
- * (MCP, History, another client; #3606); a run judged passed or not judged is
- * `finished`, its reason in the body. The frame's status is preferred over the
- * report's, which is the fallback for a stream that ended without one (#1415):
- * the fetch can fail, and a failure that could not be read must still report a
- * failure rather than quietly report success. A stopped run keeps its numbers
- * alone, as the spoken line does, since its verdict says nothing more.
+ * The kind is `failed` for a run the engine ended as failed and for a run that completed and missed
+ * a budget; `stopped` for a run stopped from anywhere else (MCP, History, another client; #3606);
+ * `finished` for a run judged passed or not judged, its reason in the body. The frame's status is
+ * preferred over the report's, the fallback for a stream that ended without one (#1415): the fetch
+ * can fail, and a failure that could not be read must still report a failure, not quietly report
+ * success. A stopped run keeps its numbers alone, as the spoken line does, since its verdict says
+ * nothing more.
  */
 function terminalNotification(
 	status: SSETerminalStatus,
@@ -165,21 +159,17 @@ class LoadTestService {
 	// which lists ride a flush together is a caller's decision.
 	private pendingMonitor: MonitorSample[] = [];
 	/**
-	 * The run this service has already told the user about (#1358).
-	 *
-	 * A failing run reports its error and *then* closes its stream, so both
-	 * terminal paths run for one run. The user gets the first of them - the one
-	 * that says what went wrong - and never a second notification saying the
-	 * same run finished.
+	 * The run this service has already told the user about (#1358). A failing run reports its error
+	 * and *then* closes its stream, so both terminal paths run for one run. The user gets the first
+	 * of them, the one that says what went wrong, and never a second notification saying the same
+	 * run finished.
 	 */
 	private notifiedRunId: string | null = null;
 	/**
-	 * The run whose failure the OS indicator has already been told about (#1362).
-	 *
-	 * A failing run reports its error and *then* closes its stream, and the
-	 * failed state is a two-second flash the main process clears on its own
-	 * timer. Clearing again as the stream closes would wipe it in the same tick
-	 * it was painted, which is the whole of what this remembers.
+	 * The run whose failure the OS indicator has already been told about (#1362). A failing run
+	 * reports its error and *then* closes its stream, and the failed state is a two-second flash
+	 * the main process clears on its own timer; clearing again as the stream closes would wipe it
+	 * in the tick it was painted, which is all this remembers.
 	 */
 	private progressFailedRunId: string | null = null;
 	/**
@@ -193,8 +183,7 @@ class LoadTestService {
 	private wakeSettleSleep: (() => void) | null = null;
 
 	/**
-	 * Start monitoring a load test run
-	 * This connects to the SSE stream and pushes metrics to the store
+	 * Start monitoring a load test run: connect to its SSE stream and push metrics to the store.
 	 */
 	startMonitoring(runId: string): void {
 		// If already monitoring this run, do nothing
@@ -260,10 +249,7 @@ class LoadTestService {
 		);
 	}
 
-	/**
-	 * Stop monitoring the current load test
-	 * Call this when the test is stopped by user or completes
-	 */
+	/** Stop monitoring the current load test, when the user stops it or it completes. */
 	stopMonitoring(): void {
 		const runId = this.activeRunId;
 		if (!runId) {
@@ -301,24 +287,22 @@ class LoadTestService {
 	}
 
 	/**
-	 * The engine's process ended (the sidecar's `crashed` push, #3605), and
-	 * every run it was executing ended with it. Called by `useEngineLifecycle`.
+	 * The engine's process ended (the sidecar's `crashed` push, #3605), and every run it was
+	 * executing ended with it. Called by `useEngineLifecycle`.
 	 *
-	 * The watched run is let go of the way a user's Stop lets go of it, plus
-	 * two things only a dead engine needs: the stream is closed, because the
-	 * `EventSource` would otherwise retry the dead port every few seconds for
-	 * the rest of the session, and the run is marked as notified, because the
-	 * engine-lost notification is the one the user gets. Without the latch, a
-	 * `handleClose` already awaiting the report would still post this run's
-	 * own ending when its fetch fails.
+	 * The watched run is let go of the way a user's Stop lets go of it, plus two things only a dead
+	 * engine needs: the stream is closed, because the `EventSource` would otherwise retry the dead
+	 * port every few seconds for the rest of the session, and the run is marked as notified,
+	 * because the engine-lost notification is the one the user gets; without that latch, a
+	 * `handleClose` already awaiting the report would still post this run's own ending when its
+	 * fetch fails.
 	 *
-	 * The dashboard's run is settled whether or not it is watched: a lost or
-	 * superseded stream left it live with nothing here attached, and its
-	 * engine is gone all the same. Its stored report, once an engine is back,
-	 * is what says how it ended (`setFinalReport`).
+	 * The dashboard's run is settled whether or not it is watched: a lost or superseded stream left
+	 * it live with nothing here attached, and its engine is gone all the same. Its stored report,
+	 * once an engine is back, says how it ended (`setFinalReport`).
 	 *
-	 * Returns whether the dashboard's run was live, so the engine-lost
-	 * notification can say a run ended with the engine.
+	 * Returns whether the dashboard's run was live, so the engine-lost notification can say a run
+	 * ended with the engine.
 	 */
 	handleEngineStopped(): boolean {
 		const runId = this.activeRunId;
@@ -336,26 +320,23 @@ class LoadTestService {
 	}
 
 	/**
-	 * Let go of everything this service holds on `runId`'s behalf, and say
-	 * nothing about how the run ended.
+	 * Let go of everything this service holds on `runId`'s behalf, and say nothing about how the
+	 * run ended.
 	 *
-	 * The one place that does it, because four paths need it - the user
-	 * stopping the run, another run taking the shared client away (#1417),
-	 * `startMonitoring` moving on to another load run, and the engine stopping
-	 * (#3605) - and a second copy is a release that drifts out of step with the
-	 * first. What ended the run is the caller's to say: `stopMonitoring` has a
-	 * notification for it, a superseded or displaced run has nothing to report,
-	 * because it has not ended at all, and an engine stop leaves the telling to
-	 * the engine-lost notification.
+	 * The one place that does it, because four paths need it (the user stopping the run, another
+	 * run taking the shared client away #1417, `startMonitoring` moving on to another load run, and
+	 * the engine stopping #3605), and a second copy is a release that drifts out of step with the
+	 * first. What ended the run is the caller's to say: `stopMonitoring` has a notification for it,
+	 * a superseded or displaced run has nothing to report because it has not ended at all, and an
+	 * engine stop leaves the telling to the engine-lost notification.
 	 *
-	 * `handleClose` keeps a sequence of its own rather than calling this, and
-	 * the differences are the reason: it flushes where this discards, and it
-	 * cannot null `activeRunId` until after its awaited report fetch. What it
-	 * does not differ on is the failed-run flash, which is why the guard below
-	 * is here too: a run that already reported a failure keeps that mark on
-	 * *every* path that lets go of it, so the two-second flash the main process
-	 * is timing out on its own is never wiped in the tick it was painted
-	 * (#1362, #1364). `ScenarioRunService.releaseRun` holds the same rule.
+	 * `handleClose` keeps a sequence of its own rather than calling this, and the differences are
+	 * the reason: it flushes where this discards, and it cannot null `activeRunId` until after its
+	 * awaited report fetch. What it does not differ on is the failed-run flash, which is why the
+	 * guard below is here too: a run that already reported a failure keeps that mark on *every*
+	 * path that lets go of it, so the two-second flash the main process is timing out on its own is
+	 * never wiped in the tick it was painted (#1362, #1364). `ScenarioRunService.releaseRun` holds
+	 * the same rule.
 	 */
 	private releaseRun(runId: string): void {
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
@@ -370,21 +351,18 @@ class LoadTestService {
 	}
 
 	/**
-	 * Another run took the shared stream client (issue #1417).
+	 * Another run took the shared stream client (#1417). `sseClient.connect` closes the socket and
+	 * no terminal path runs, so without this the wake lock would stay held for the rest of the
+	 * session and the taskbar keep a bar for a run nothing watches.
 	 *
-	 * Before this existed the takeover was silent: `sseClient.connect` closed
-	 * the socket and no terminal path ran, so the wake lock stayed held for the
-	 * rest of the session and the taskbar kept a bar for a run nothing watched.
+	 * The run is *not* over (the engine is still running it), so nothing announces an ending: no
+	 * notification (#1358), no failed-icon mark (#1364), and no report fetch. The history row
+	 * reaches its terminal status on the next list read, which is where a run this app is not
+	 * watching belongs.
 	 *
-	 * The run is *not* over - the engine is still running it - so nothing
-	 * announces an ending: no notification (#1358), no failed-icon mark
-	 * (#1364), and no report fetch. The history row reaches its terminal status
-	 * on the next list read, which is where a run this app is not watching
-	 * belongs.
-	 *
-	 * The buffered ticks go with it rather than being committed, the same
-	 * choice `stopMonitoring` makes: the dashboard is stale from this moment
-	 * either way, and one more partial window does not make it less so.
+	 * The buffered ticks go with it rather than being committed, the choice `stopMonitoring` makes:
+	 * the dashboard is stale from this moment either way, and one more partial window does not make
+	 * it less so.
 	 */
 	private handleSuperseded(): void {
 		const runId = this.activeRunId;
@@ -396,9 +374,7 @@ class LoadTestService {
 		useDashboardStore.getState().streamLost(runId, STREAM_SUPERSEDED_MESSAGE);
 	}
 
-	/**
-	 * Check if currently monitoring a specific run
-	 */
+	/** Check if currently monitoring a specific run */
 	isMonitoring(runId?: string): boolean {
 		if (runId) {
 			return this.activeRunId === runId && this.isConnected;
@@ -406,9 +382,7 @@ class LoadTestService {
 		return this.isConnected;
 	}
 
-	/**
-	 * Get the currently monitored run ID
-	 */
+	/** Get the currently monitored run ID */
 	getActiveRunId(): string | null {
 		return this.activeRunId;
 	}
@@ -416,18 +390,17 @@ class LoadTestService {
 	// --- Private handlers ---
 
 	/**
-	 * Tell the user their run ended, once, and only if they are elsewhere -
-	 * `electron/notify.ts` answers the "elsewhere" half.
+	 * Tell the user their run ended, once, and only if they are elsewhere (`electron/notify.ts`
+	 * answers the "elsewhere" half).
 	 *
-	 * `options.title` overrides `NOTIFY_TITLES` - `handleError` uses it because
-	 * the *stream* dropped there, not the load test, and the default failed
-	 * title would misreport what happened. `options.stoppedHere` says this
-	 * window's own Stop ended the run: the user was here and already knows, so
-	 * the end-of-run cue is skipped. A stop learned from the stream or the
-	 * stored report was somebody else's and raises it (#3606).
+	 * `options.title` overrides `NOTIFY_TITLES`: `handleError` uses it because there the *stream*
+	 * dropped, not the load test, and the default failed title would misreport what happened.
+	 * `options.stoppedHere` says this window's own Stop ended the run: the user was here and
+	 * already knows, so the end-of-run cue is skipped. A stop learned from the stream or the stored
+	 * report was somebody else's and raises it (#3606).
 	 *
-	 * The taskbar mark is unchanged: a stream error still reddens it (#1364, pinned by the Dock/taskbar test
-	 * below), because the user has no live view into whether the run itself is
+	 * The taskbar mark is unchanged: a stream error still reddens it (#1364, pinned by the
+	 * Dock/taskbar test below), because the user has no live view into whether the run itself is
 	 * still healthy once its updates stop arriving.
 	 */
 	private notifyTerminal(
@@ -491,12 +464,9 @@ class LoadTestService {
 	}
 
 	/**
-	 * Commit everything buffered, on either list.
-	 *
-	 * A scrape can outlive the last tick it would have ridden - the run ends
-	 * between ticks - and the batcher commits nothing for an empty buffer, so
-	 * that case commits the scrapes beside an empty tick batch, which is what
-	 * this did before the batcher was extracted.
+	 * Commit everything buffered, on either list. A scrape can outlive the last tick it would have
+	 * ridden (the run ends between ticks), and the batcher commits nothing for an empty buffer, so
+	 * that case commits the scrapes beside an empty tick batch.
 	 */
 	private flushPending(): void {
 		this.metricsBatcher.flush();
@@ -554,11 +524,10 @@ class LoadTestService {
 		// awake through a slow fetch. A run that turns out to be still going lost
 		// only its stream, and reconnecting takes the lock again.
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
-		// A run the engine says failed paints the error state here, before the
-		// clear below and before the awaited fetch (#1415): `handleError`, the other
-		// caller of `runProgress.fail`, is never reached by the engine's own failures,
-		// so a real failure would clear the bar instead of
-		// reddening it. Marking it also sets `progressFailedRunId`, which is
+		// A run the engine says failed paints the error state here, before the clear below and
+		// before the awaited fetch (#1415): `handleError`, the other caller of `runProgress.fail`,
+		// is never reached by the engine's own failures, so a real failure would otherwise clear
+		// the bar instead of reddening it. Marking it also sets `progressFailedRunId`, which is
 		// what makes the clear below leave the flash standing.
 		if (status === "failed") this.failProgress(runId);
 		// A run that completed reads 100% whatever its last tick said: a duration
@@ -675,13 +644,12 @@ class LoadTestService {
 	 * reconciled error rate, setup overhead) and tell the user how it ended.
 	 */
 	private finishRun(runId: string, status: SSETerminalStatus, report: RunReport | null): void {
-		// Re-read the store *after* the await. Finishing run A and immediately
-		// starting run B leaves this continuation holding A's report while the
-		// dashboard shows B; applying it flipped B to "completed" with A's
-		// percentiles. The window is one local round trip, which is exactly long
-		// enough; the store drops a report addressed to a run it is not holding.
-		// First, because the dashboard is the terminal surface that matters and
-		// nothing done for a notification may come before it.
+		// Re-read the store *after* the await. Finishing run A and immediately starting run B
+		// leaves this continuation holding A's report while the dashboard shows B, and applying it
+		// would flip B to "completed" with A's percentiles; the window is one local round trip,
+		// which is long enough. The store drops a report addressed to a run it is not holding.
+		// First, because the dashboard is the terminal surface that matters and nothing done for a
+		// notification may come before it.
 		if (report) useDashboardStore.getState().setFinalReport(runId, report);
 		// A run that already reported a failure has had its one notification.
 		const { kind, body } = terminalNotification(status, report);
@@ -728,5 +696,4 @@ class LoadTestService {
 	}
 }
 
-// Export singleton instance
 export const loadTestService = new LoadTestService();

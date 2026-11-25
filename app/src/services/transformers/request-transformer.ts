@@ -6,12 +6,9 @@
  */
 
 /**
- * Request Transformer
- *
- * Transforms backend request format to frontend domain Request type.
- * Handles timestamp conversion and provides safe defaults for new fields.
- * `toSummary` reads the tree's row (`RequestSummary`); `toFrontend` builds the
- * whole request on top of it, so the two cannot read a shared column apart.
+ * Turns the engine's request row into the domain `Request`: timestamps converted, safe defaults for
+ * newer fields. `toSummary` reads the tree's row (`RequestSummary`); `toFrontend` builds the whole
+ * request on top of it, so the two cannot read a shared column apart.
  */
 
 import type {
@@ -93,24 +90,21 @@ function toTimeout(raw: unknown): number | null {
 }
 
 /**
- * Coerce a raw `httpVersion` into a value the app knows how to render. A row
- * saved before this column existed comes back without it, and a row written
- * by a newer engine version (or a corrupted one) can carry a protocol this
- * build has never heard of - both must read as the engine default rather than
- * as `undefined`, which the Settings tab picker can't select.
+ * Coerce a raw `httpVersion` into a value the app knows how to render. A row saved before this
+ * column existed comes back without it, and a row written by a newer engine (or a corrupted one)
+ * can carry a protocol this build has never heard of; both read as the engine default rather than
+ * as `undefined`, which the Settings tab picker cannot select.
  */
 function coerceHttpVersion(raw: unknown): HttpVersion {
 	return isHttpVersion(raw) ? raw : DEFAULT_HTTP_VERSION;
 }
 
 /**
- * The spec operation this request names, or `undefined`.
- *
- * The engine serializes `null` for a request that names none, so the common
- * case arrives as a non-object and leaves here as absent. `method` and `path`
- * are required inside the object engine-side; a half-written one (a row from a
- * future column, a hand-edited database) is dropped rather than passed on as an
- * identity with no path - the mapping counter and every later diff key off both.
+ * The spec operation this request names, or `undefined`. The engine serializes `null` for a request
+ * that names none, so the common case arrives as a non-object and leaves here as absent. `method`
+ * and `path` are required inside the object engine-side; a half-written one (a row from a future
+ * column, a hand-edited database) is dropped rather than passed on as an identity with no path,
+ * because the mapping counter and every later diff key off both.
  */
 function toSpecOperation(raw: unknown): SpecOperation | undefined {
 	const record = asRecord(raw);
@@ -123,26 +117,22 @@ function toSpecOperation(raw: unknown): SpecOperation | undefined {
 }
 
 /**
- * Which app setting wrote `method`, or `undefined`.
- *
- * The engine serializes `null` for a request with no marker, so the common
- * case arrives as a non-string and leaves here as absent. The one recognized
- * value is `"graphql"` - anything else (a marker from a future app version,
- * a hand-edited database) reads as no marker at all, on the same "half-written
- * degrades to absent" rule `toSpecOperation` above follows, rather than being
- * passed on as a value nothing here knows how to act on.
+ * Which app setting wrote `method`, or `undefined`. The engine serializes `null` for a request with
+ * no marker, so the common case arrives as a non-string and leaves here as absent. The one
+ * recognized value is `"graphql"`; anything else (a marker from a future app version, a hand-edited
+ * database) reads as no marker at all, on the "half-written degrades to absent" rule
+ * `toSpecOperation` above follows, rather than being passed on as a value nothing here knows how to
+ * act on.
  */
 function toMethodSource(raw: unknown): MethodSource | undefined {
 	return raw === "graphql" ? "graphql" : undefined;
 }
 
 /**
- * The mock response mode a stored row names, or the engine default.
- *
- * Same "unrecognized reads as the default" rule as `coerceHttpVersion`: a row
- * stored before this column existed, or one written by a build that added a
- * mode this one has never heard of, reads as `"first"` - what every row
- * already behaved as.
+ * The mock response mode a stored row names, or the engine default. Same "unrecognized reads as the
+ * default" rule as `coerceHttpVersion`: a row stored before this column existed, or one written by
+ * a build that added a mode this one has never heard of, reads as `"first"`, what every row already
+ * behaved as.
  */
 function coerceMockResponseMode(raw: unknown): MockResponseMode {
 	return raw === "fixed" || raw === "random" ? raw : "first";
