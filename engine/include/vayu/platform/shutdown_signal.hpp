@@ -8,7 +8,6 @@
 #pragma once
 
 /**
- * @file shutdown_signal.hpp
  * @brief What the daemon's SIGINT / SIGTERM / Ctrl-C handler is allowed to do.
  *
  * A handler runs on whichever thread the signal lands on, and that thread may

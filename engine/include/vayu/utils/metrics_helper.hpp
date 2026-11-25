@@ -17,9 +17,7 @@
 namespace vayu::utils {
 
 /**
- * Helper class for calculating and formatting metrics from test runs.
- * Provides utility methods to compute summary statistics, format responses,
- * and handle metric aggregation logic.
+ * A run's summary statistics and the JSON answers of a stop.
  */
 class MetricsHelper {
     public:

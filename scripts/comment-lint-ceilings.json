@@ -49,12 +49,8 @@
     "app/src/services/scenario-run-service.ts": 1,
     "engine/include/vayu/core/openapi_document.hpp": 1,
     "engine/include/vayu/core/script_config.hpp": 1,
-    "engine/include/vayu/db/recovery.hpp": 1,
     "engine/include/vayu/http/default_headers.hpp": 1,
     "engine/include/vayu/http/request_exchange.hpp": 1,
-    "engine/include/vayu/utils/id.hpp": 1,
-    "engine/include/vayu/utils/reentrant.hpp": 1,
-    "engine/include/vayu/utils/stop_signal.hpp": 1,
     "engine/src/http/routes/script_types.cpp": 1
   }
 }
