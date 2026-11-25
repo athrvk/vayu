@@ -6,23 +6,20 @@
  */
 
 /**
- * An RFC 4180 tokenizer for CSV and TSV (issue #402).
+ * An RFC 4180 tokenizer for CSV and TSV (#402).
  *
- * Hand-rolled, and deliberately so: this is the codebase's first tabular
- * primitive, a dependency for it would be the only parser in `services/` that
- * is not ours, and the grammar it has to cover is small and fully specified -
- * quoted fields, doubled quotes inside them, embedded newlines and commas, and
- * CRLF. What a library would add here is surface, not correctness.
+ * Hand-rolled, and deliberately so: a dependency would be the only parser in `services/` that is
+ * not ours, and the grammar it has to cover is small and fully specified (quoted fields, doubled
+ * quotes inside them, embedded newlines and commas, and CRLF). What a library would add here is
+ * surface, not correctness.
  *
- * TSV is the same grammar with a tab delimiter, not a second parser. The two
- * differ in one character, and a separate split-on-tab implementation is
- * exactly the "hand-rolled copy of a primitive" this repo keeps finding: it
- * would silently lose quoting the first time a cell contained one.
+ * TSV is the same grammar with a tab delimiter, not a second parser. A separate split-on-tab
+ * implementation is exactly the "hand-rolled copy of a primitive" this repo keeps finding: it would
+ * silently lose quoting the first time a cell contained one.
  *
- * The tokenizer's only job is text to a grid. Header rules, blank rows and
- * typing all live in `index.ts`, where they are shared with the JSON paths.
- * The one exception is the unterminated quote, which is a *grammar* fault and
- * so has to be caught here - by the time the grid exists it looks like an
+ * The tokenizer's only job is text to a grid. Header rules, blank rows and typing live in
+ * `index.ts`, where they are shared with the JSON paths. The one exception is the unterminated
+ * quote, a *grammar* fault that has to be caught here: by the time the grid exists it looks like an
  * ordinary tall cell.
  */
 
@@ -47,32 +44,27 @@ export interface TabularGrid {
 }
 
 /**
- * Split @p text into rows of cells on @p delimiter.
- *
- * The text-only view of {@link tokenizeDelimited}, for callers that do not care
- * how a cell was written.
+ * Split @p text into rows of cells on @p delimiter: the text-only view of
+ * {@link tokenizeDelimited}, for callers that do not care how a cell was written.
  */
 export function parseDelimited(text: string, delimiter: string): TabularRow[] {
 	return tokenizeDelimited(text, delimiter).cells;
 }
 
 /**
- * Split @p text into rows of cells on @p delimiter, remembering which cells
- * were quoted.
+ * Split @p text into rows of cells on @p delimiter, remembering which cells were quoted.
  *
- * A quoted field may contain the delimiter, a newline, and a literal quote
- * written as `""`. A quote that opens a field is structural; one that appears
- * mid-field (`a"b`) is a literal character, which is what a spreadsheet export
- * of a value containing an inch mark produces.
+ * A quoted field may contain the delimiter, a newline, and a literal quote written as `""`. A quote
+ * that opens a field is structural; one mid-field (`a"b`) is a literal character, which is what a
+ * spreadsheet export of a value containing an inch mark produces.
  *
- * The final row is emitted even without a trailing newline, and a single
- * trailing newline does not produce a phantom empty row.
+ * The final row is emitted even without a trailing newline, and a single trailing newline does not
+ * produce a phantom empty row.
  *
- * Text that ends while a quoted field is still open throws: emitting the cell
- * anyway would fold every remaining line into it, and a one-column file makes
- * that invisible to the ragged-row check downstream. A stray unclosed quote is
- * the most ordinary way a CSV is corrupted, so it is named, with the line the
- * quote opened on.
+ * Text that ends while a quoted field is still open throws: emitting the cell anyway would fold
+ * every remaining line into it, and a one-column file hides that from the ragged-row check
+ * downstream. A stray unclosed quote is the most ordinary way a CSV is corrupted, so it is named,
+ * with the line the quote opened on.
  */
 export function tokenizeDelimited(text: string, delimiter: string): TabularGrid {
 	const rows: TabularRow[] = [];

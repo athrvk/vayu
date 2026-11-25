@@ -6,40 +6,34 @@
  */
 
 /**
- * Re-reading the file a collection declared its contract from (issue #727).
+ * Re-reading the file a collection declared its contract from (#727).
  *
- * `index.ts` is deliberately pure - text in, rows out - and stays that way: the
- * *first* read of a file is a `FileReader` in the picker, driven by a user who
- * just chose it. This module is the other read, the one no click asks for: the
- * path the collection's `dataFile` binding names, opened again through the
- * Electron bridge so a surface can show the file as it is on disk *now*.
+ * `index.ts` is deliberately pure, text in and rows out: the *first* read of a file is a
+ * `FileReader` in the picker, driven by a user who just chose it. This module is the other read,
+ * the one no click asks for: the path the collection's `dataFile` binding names, opened again
+ * through the Electron bridge so a surface can show the file as it is on disk *now*.
  *
- * It exists as one function because three surfaces do it - the Run dialog's
- * pre-fill, Send-with-row, and the Data tab's comparison - and each had (or was
- * about to have) its own copy of bridge-lookup, decode and parse. A copy is how
- * one of them ends up decoding differently from the file as it was declared.
+ * One function for the three surfaces that do it (the Run dialog's pre-fill, Send-with-row, and the
+ * Data tab's comparison), because a copy of bridge-lookup, decode and parse is how one of them ends
+ * up decoding differently from the file as it was declared.
  *
- * The bridge being absent is its own error rather than a failed read, because it
- * is a different answer: a browser has no path to re-read and never will, so the
- * caller shows its degraded state instead of a message inviting a retry that
- * cannot work.
+ * An absent bridge is its own error, not a failed read, because it is a different answer: a browser
+ * has no path to re-read and never will, so the caller shows its degraded state instead of a
+ * message inviting a retry that cannot work.
  *
- * The row cap is enforced **here**, against the live setting the caller passes
- * in (issue #751). The main-process gate this reads through already refuses the
- * byte cap on the way out (`electron/data-file.ts`), but it deliberately does
- * not parse - the app owns parsing - so it cannot count rows, and without this
- * the remembered path was the one way past a refusal the picker makes on every
- * hand-picked file. `maxRows` is required rather than optional so a fourth
- * surface cannot re-open the hole by omitting it.
+ * The row cap is enforced **here**, against the live setting the caller passes in (#751). The
+ * main-process gate this reads through refuses the byte cap on the way out
+ * (`electron/data-file.ts`) but deliberately does not parse (the app owns parsing), so it cannot
+ * count rows, and the remembered path would otherwise be the one way past a refusal the picker
+ * makes on every hand-picked file. `maxRows` is required, not optional, so a fourth surface cannot
+ * reopen the hole by omitting it.
  *
- * It is also where the binding learns the file's current content hash (issue
- * #2051): every byte read records it against the path (`recordDataFileHash`,
- * which writes the engine row only when the digest moved), so the binding - and
- * through it MCP's `list_collections` - carries the digest of the file as the
- * app last saw it rather than as it was first picked.
- * Recorded before decoding, since it describes the bytes on disk whether or not
- * they still parse; it changes no declaration, only what is known about the
- * file the declaration already names.
+ * It is also where the binding learns the file's current content hash (#2051): every byte read
+ * records it against the path (`recordDataFileHash`, which writes the engine row only when the
+ * digest moved), so the binding, and through it MCP's `list_collections`, carries the digest of the
+ * file as the app last saw it, not as it was first picked. Recorded before decoding, since it
+ * describes the bytes on disk whether or not they still parse; it changes no declaration, only what
+ * is known about the file the declaration already names.
  */
 
 import { decodeDataFile } from "./decode";
@@ -63,10 +57,9 @@ export interface DeclaredDataFile {
 }
 
 /**
- * No filesystem to re-read from - a browser, not the desktop app.
- *
- * Separate from a read failure so callers can tell "there is nothing to try"
- * from "this file has moved", which have different repairs.
+ * No filesystem to re-read from: a browser, not the desktop app. Separate from a read failure so
+ * callers can tell "there is nothing to try" from "this file has moved", which have different
+ * repairs.
  */
 export class NoDataFileBridgeError extends Error {
 	constructor(message = "Reading the declared data file needs the desktop app.") {
@@ -76,10 +69,9 @@ export class NoDataFileBridgeError extends Error {
 }
 
 /**
- * Whether a remembered path can be re-read at all on this build.
- *
- * Offered separately so a surface can decide *before* it renders a spinner: the
- * browser case is not a pending read, it is a state that will never resolve.
+ * Whether a remembered path can be re-read at all on this build. Offered separately so a surface
+ * can decide *before* it renders a spinner: the browser case is not a pending read but a state that
+ * will never resolve.
  */
 export function canReadDeclaredDataFile(): boolean {
 	return typeof window.electronAPI?.readDataFile === "function";
@@ -125,13 +117,10 @@ export interface DeclaredDataFileOptions {
 }
 
 /**
- * Read, decode and parse the file at `path` the way its binding reads it,
- * refusing a set over `maxRows`.
- *
- * Rejects with `NoDataFileBridgeError` outside Electron, and with
- * `DataFileError` (or whatever the bridge threw) when the file is gone, moved,
- * no longer parses, or now carries more rows than a run may - all of which name
- * the fault in a sentence a caller can show as-is.
+ * Read, decode and parse the file at `path` the way its binding reads it, refusing a set over
+ * `maxRows`. Rejects with `NoDataFileBridgeError` outside Electron, and with `DataFileError` (or
+ * whatever the bridge threw) when the file is gone, moved, no longer parses or now carries more
+ * rows than a run may, each naming the fault in a sentence a caller can show as-is.
  */
 export async function readDeclaredDataFile(
 	path: string,
@@ -147,10 +136,9 @@ export async function readDeclaredDataFile(
 	const { text } = decodeDataFile(bytes.buffer as ArrayBuffer);
 	const parsed = parseDataFile(text, fileName, { castNumbers });
 
-	// The picker's own refusal, thrown rather than returned: every caller here
-	// already shows a failed re-read as a note beside a usable picker, which is
-	// the right shape for this too - picking the file again, or raising the
-	// setting, is the fix.
+	// The picker's own refusal, thrown rather than returned: every caller here already shows a
+	// failed re-read as a note beside a usable picker, the right shape for this too, since picking
+	// the file again or raising the setting is the fix.
 	const refusal = describeRowCapRefusal(parsed.rows.length, maxRows);
 	if (refusal) throw new DataFileError(refusal);
 

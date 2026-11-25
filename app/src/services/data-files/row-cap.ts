@@ -8,25 +8,21 @@
 import { pluralize } from "@/modules/dashboard/utils/format";
 
 /**
- * `maxScenarioDataRows`, as every surface that reads a data file states it
- * (issue #751).
+ * `maxScenarioDataRows`, as every surface that reads a data file states it (#751).
  *
- * The comparison and the sentence live together because they were about to live
- * apart: the picker refused a hand-picked file over the cap, and the three
- * surfaces that re-read a *remembered* path refused nothing at all, so a file
- * that grew past the setting previewed cleanly and died at `POST /runs` with the
- * `400` the picker exists to move earlier. A second copy of the message is how
- * the two drift, and a second copy of the `>` is how one of them ends up
- * off-by-one, so neither is copied.
+ * The comparison and the sentence live together so the picker, which refuses a hand-picked file
+ * over the cap, and the three surfaces that re-read a *remembered* path refuse alike; otherwise a
+ * file that grew past the setting previews cleanly and dies at `POST /runs` with the `400` the
+ * picker exists to move earlier. A second copy of the message is how the two drift, and a second
+ * copy of the `>` is how one of them ends up off-by-one, so neither is copied.
  *
- * The number itself is **never** hardcoded by a caller: it is the engine setting
- * a user can raise, fetched through `useDataFileLimits`. See
- * `constants/data-files.ts` for why the seed there is not the rule.
+ * The number itself is **never** hardcoded by a caller: it is the engine setting a user can raise,
+ * fetched through `useDataFileLimits`. See `constants/data-files.ts` for why the seed there is not
+ * the rule.
  *
- * The byte cap has no equivalent here because its two checks read different
- * things - the picker stats the `File` before reading it, the main process stats
- * the path before opening it (`electron/data-file.ts`) - and neither has a
- * parsed file in hand.
+ * The byte cap has no equivalent here because its two checks read different things (the picker
+ * stats the `File` before reading it, the main process stats the path before opening it,
+ * `electron/data-file.ts`), and neither has a parsed file in hand.
  */
 
 /**

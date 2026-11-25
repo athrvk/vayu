@@ -6,16 +6,13 @@
  */
 
 /**
- * Which of an import's client-certificate candidates the user ticked (issue
- * #2363).
+ * Which of an import's client-certificate candidates the user ticked (#2363).
  *
- * A registered certificate is a host-wide registry row: every later request to
- * that host presents it, from any collection, and the row outlives the
- * collection that carried it. A Postman document can name a certificate path
- * on this machine, so a candidate is an offer from the document, not a choice
- * the user made. The selection is a list of indexes into
- * `ImportResult.clientCertificates`, so nothing can be sent that the preview
- * did not list.
+ * A registered certificate is a host-wide registry row: every later request to that host presents
+ * it, from any collection, and the row outlives the collection that carried it. A Postman document
+ * can name a certificate path on this machine, so a candidate is an offer from the document, not a
+ * choice the user made. The selection is a list of indexes into `ImportResult.clientCertificates`,
+ * so nothing can be sent that the preview did not list.
  */
 
 import type { ImportApplyClientCertificate } from "@/types";
@@ -27,11 +24,9 @@ export function certificateCandidates(result: ImportResult): ImportApplyClientCe
 }
 
 /**
- * The ticked candidates, in the order the preview listed them.
- *
- * An index outside the list is a caller bug, and it throws before anything is
- * sent: registering a different row than the one ticked is the failure this
- * selection exists to prevent.
+ * The ticked candidates, in the order the preview listed them. An index outside the list is a
+ * caller bug, and it throws before anything is sent: registering a different row than the one
+ * ticked is the failure this selection exists to prevent.
  */
 export function selectedCertificates(
 	result: ImportResult,
