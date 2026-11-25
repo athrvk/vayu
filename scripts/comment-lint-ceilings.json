@@ -52,8 +52,6 @@
     "engine/include/vayu/db/recovery.hpp": 1,
     "engine/include/vayu/http/default_headers.hpp": 1,
     "engine/include/vayu/http/request_exchange.hpp": 1,
-    "engine/include/vayu/platform/platform.hpp": 1,
-    "engine/include/vayu/types.hpp": 6,
     "engine/include/vayu/utils/id.hpp": 1,
     "engine/include/vayu/utils/reentrant.hpp": 1,
     "engine/include/vayu/utils/stop_signal.hpp": 1,
