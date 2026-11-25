@@ -8,19 +8,17 @@
  */
 
 /**
- * @file core/openapi_document.hpp
- * @brief Reading a stored OpenAPI document engine-side (issue #853).
+ * @brief Reading a stored OpenAPI document engine-side (#853).
  *
- * **This is where the engine's "we do not parse OpenAPI" rule moved to, not
- * where it was broken.** `core/spec_coverage.hpp` recorded the rule and its
+ * **This is the engine's one OpenAPI reader, which is what the "we do not parse
+ * OpenAPI" rule asks for.** `core/spec_coverage.hpp` records the rule and its
  * reason: two readers of one document are two opinions about what it declares,
  * and they disagree exactly where it matters - a `$ref`-ed path item, a
- * repeated `operationId`. The rule was never "the engine must stay ignorant";
- * it was "one reader". #761's phase B decided which side that reader lives on,
- * because everything an agent wants to do over MCP - bind a collection, ask
- * what a re-fetched document would change, export one back out - needs the
- * document read somewhere that is not the renderer. So the reader is here, and
- * what moves onto it stops being read there.
+ * repeated `operationId`. The rule is "one reader", never "the engine must stay
+ * ignorant". #761 put that reader engine-side, because everything an agent
+ * wants to do over MCP - bind a collection, ask what a re-fetched document
+ * would change, export one back out - needs the document read somewhere that is
+ * not the renderer; what reads through here is not read there.
  *
  * Two layers, deliberately separate:
  *
@@ -36,9 +34,9 @@
  *
  * - **Document order is preserved.** `paths` and a `responses` map come back in
  *   the order the document writes them, which is what `DeclaredOperation`
- *   already claims to store and what a coverage block prints. (The renderer
- *   could not keep that promise: a JavaScript object orders integer-like keys
- *   numerically ahead of the rest, so `responses: {404, 200}` reached the store
+ *   claims to store and what a coverage block prints. (A JavaScript object
+ *   cannot keep that promise: it orders integer-like keys numerically ahead of
+ *   the rest, so `responses: {404, 200}` would reach the store as `200, 404`.)
  *   as `200, 404`.)
  * - **Scalars are typed the way js-yaml's core schema types them**, because the
  *   importer reads the same bytes with js-yaml and the two must not disagree
@@ -49,8 +47,8 @@
  *   JSON has no date type and the document wrote text.
  * - **Anchors, aliases and merge keys (`<<`) are expanded** as js-yaml expands
  *   them: an explicit key always beats a merged one, an earlier entry of a
- *   merge sequence beats a later one, and an alias naming no anchor is an
- *   error rather than a hole.
+ *   merge sequence beats a later one, and an alias naming no anchor is an error
+ *   rather than a hole.
  * - **A duplicate mapping key is an error**, again as js-yaml has it. A
  *   document that declares one key twice declares nothing definite, and picking
  *   a winner here would pick a different one than the importer did.
@@ -123,9 +121,9 @@ struct DocumentRead {
  * document would export as `swagger: 2.0` and re-import as a number.
  *
  * Deliberately not rapidyaml's emitter: its tree holds no opinion about which
- * scalars need quoting, so it would write back whatever it was handed. What it
- * does share with js-yaml's `dump`, which this replaces on the export path, is
- * that comments and anchors do not survive - both expand aliases on the way in.
+ * scalars need quoting, so it would write back whatever it was handed. Like
+ * js-yaml's `dump`, it keeps no comments or anchors - both expand aliases on
+ * the way in.
  */
 [[nodiscard]] std::string emit_yaml (const nlohmann::ordered_json& document);
 
@@ -179,23 +177,22 @@ const nlohmann::ordered_json& document);
 [[nodiscard]] std::vector<std::string> base_paths_of (const nlohmann::ordered_json& document);
 
 /**
- * What a document is, for a caller deciding whether to bind it (issue #869).
+ * What a document is, for a caller deciding whether to bind it (#869).
  *
- * The three things the Spec tab's card said about a picked document while the
- * renderer still parsed it: which dialect claimed the bytes, what the document
- * calls itself, and the operations it declares - the identities a bind will
- * stamp - plus the base paths a bind matches under. `POST /specs/describe` is
- * this struct.
+ * The three things the Spec tab's card says about a picked document - which
+ * dialect claimed the bytes, what the document calls itself, and the operations
+ * it declares, the identities a bind will stamp - plus the base paths a bind
+ * matches under. `POST /specs/describe` is this struct.
  */
 struct DocumentDescription {
     /**
-     * The dialect that claimed it - `"OpenAPI 3.0"`, `"OpenAPI 2.0 (Swagger)"` -
-     * and `""` for a readable document that is neither.
+     * The dialect that claimed it - `"OpenAPI 3.0"`, `"OpenAPI 2.0 (Swagger)"`
+     * - and `""` for a readable document that is neither.
      *
      * The strings the renderer's import parsers name themselves with
-     * (`openapi-v3.ts` / `openapi-v2.ts`, `formatName`), because this replaces
-     * what the card printed from those parsers and a user who binds a document
-     * and then imports one should not be told two names for one dialect.
+     * (`openapi-v3.ts` / `openapi-v2.ts`, `formatName`), because a user who
+     * binds a document and then imports one should not be told two names for
+     * one dialect.
      */
     std::string format;
     /// `info.title`, and `""` for a document that states none - never a
@@ -217,13 +214,13 @@ struct DocumentDescription {
 
 /**
  * @brief What @p document is: its dialect, its title, and what it declares
- *        (issue #869).
+ *        (#869).
  *
  * The read behind a bind *preview*. It exists so that the identities a caller
- * previews a pairing with are the identities the write will derive from the same
- * bytes (`core::derive_spec_indexes`, through `POST /specs/bind`) - the renderer
- * extracted its own until this, so a document the two read differently previewed
- * one pairing and committed another.
+ * previews a pairing with are the identities the write will derive from the
+ * same bytes (`core::derive_spec_indexes`, through `POST /specs/bind`); a
+ * renderer-side extraction could read a document differently, preview one
+ * pairing and commit another.
  */
 [[nodiscard]] DocumentDescription describe_document (const nlohmann::ordered_json& document);
 
@@ -304,14 +301,14 @@ struct DraftField {
 };
 
 /**
- * One saved example response an import writes for a documented response (issue
- * #481), in the shape `request_examples` stores.
+ * One saved example response an import writes for a documented response (#481),
+ * in the shape `request_examples` stores.
  *
  * Carried on a draft although the sync diff does not compare examples (#654):
  * applying a change *writes* them - the document's responses replace the rows a
  * previous import or sync left - so a draft without them would make an engine
- * answer that an apply cannot be built from, which is what put the parse back
- * in the renderer.
+ * answer that an apply cannot be built from, and would push the parse back into
+ * the renderer.
  */
 struct DraftExample {
     /// `"200 - A user"` when the response is described, `"200"` when it is not.
@@ -393,18 +390,18 @@ struct DraftRequest {
 
 /**
  * A running count of what a parse had to drop, which is `ImportMeta.skipped`
- * (issue #877).
+ * (#877).
  *
  * The half of the import that describes the *file* to a user rather than the
- * document to the diff, which is why `spec_request_drafts_of` was allowed to
- * leave it behind in #865 and why the import cannot: a losing import that says
- * nothing about the loss is the defect the preview exists to prevent.
+ * document to the diff, which is why `spec_request_drafts_of` (#865) can leave
+ * it behind and the import cannot: a losing import that says nothing about the
+ * loss is the defect the preview exists to prevent.
  *
  * Kinds come back in the order `SKIP_KINDS` declares rather than in the order
- * the walk met them. The renderer's `SkipTally` emitted first-seen order, which
- * is an artifact of a `Map` and not something any reader depends on - a
- * counter list is a set of counters - and a fixed order is one fewer thing for
- * two implementations of the same walk to agree about.
+ * the walk met them. First-seen order (the renderer's `SkipTally`) is an
+ * artifact of a `Map` and not something any reader depends on - a counter list
+ * is a set of counters - and a fixed order is one fewer thing for two
+ * implementations of the same walk to agree about.
  */
 class ImportTally {
     public:
@@ -528,18 +525,17 @@ struct SpecRequestDraft {
 
 /**
  * @brief The requests an import of @p document would build, in document order
- *        (issue #865).
+ *        (#865).
  *
  * The third thing derived from the walk `declared_operations_of` and
  * `response_schemas_of` share, and derived from it for the same reason: a draft
  * whose identity disagreed with the index would describe a change to an
  * operation the document does not declare.
  *
- * **This is the import parsers' answer, not a second one.** Every rule the
- * renderer's `openapi-v3.ts` / `openapi-v2.ts` learned the hard way is here
- * because the sync diff compares a stored request against a draft, so a draft
- * this side builds differently is a field reported as changed when only the two
- * readers differ:
+ * **This is the import parsers' answer, not a second one.** Every rule of the
+ * renderer's `openapi-v3.ts` / `openapi-v2.ts` is here because the sync diff
+ * compares a stored request against a draft, so a draft this side builds
+ * differently is a field reported as changed when only the two readers differ:
  *
  * - **2.0 and 3.x told apart the way the parsers detect them**, and read the
  *   way each dialect writes: 2.0 states a parameter's value as `default` and
@@ -549,7 +545,7 @@ struct SpecRequestDraft {
  *   `in` and `name`, the operation's winning in the path item's position.
  * - **`in: "path"` is not a row** - it is already carried, as the `{{var}}` the
  *   URL was rewritten with - and `in: "cookie"` is dropped, since a request's
- *   cookies come from the jar (issue #719). `Authorization` and `Content-Type`
+ *   cookies come from the jar (#719). `Authorization` and `Content-Type`
  *   headers are dropped too: both are produced by the request's own auth and
  *   body rather than typed into a row.
  * - **The body is sampled from its schema** when the document documents no
@@ -559,9 +555,9 @@ struct SpecRequestDraft {
  *   unchanged document.
  * - **The folder is where an import would have put it**: first tag, else the
  *   first path segment that names a resource, else the root.
- * - **Each documented response becomes a saved example** (issue #481), by the
- *   same precedence the request body follows - the media type's `example`, else
- *   the first entry of its `examples` map, else a sample of its schema - and a
+ * - **Each documented response becomes a saved example** (#481), by the same
+ *   precedence the request body follows - the media type's `example`, else the
+ *   first entry of its `examples` map, else a sample of its schema - and a
  *   response documenting no payload still becomes one, because `204 No Content`
  *   is an answer a mock server has to be able to give.
  *
@@ -649,11 +645,11 @@ struct SpecIndexes {
  *
  * `derive_spec_indexes` above is this plus the read. Two names rather than an
  * overload because `const char*` converts to both a `std::string` and a
- * `nlohmann::json`, so the pair would be ambiguous at every literal call site. A write path that also wants
- * what the document *declares* - `POST /specs/sync`, which derives the example
- * rows it writes from the responses the stored document documents (issue #869)
- * - reads once and calls this, rather than parsing the same bytes twice and
- * risking two answers about them.
+ * `nlohmann::json`, so the pair would be ambiguous at every literal call site.
+ * A write path that also wants what the document *declares* -
+ * `POST /specs/sync`, which derives the example rows it writes from the
+ * responses the stored document documents (#869) - reads once and calls this,
+ * rather than parsing the same bytes twice and risking two answers about them.
  */
 [[nodiscard]] SpecIndexes
 spec_indexes_of (const nlohmann::ordered_json& document, size_t index_cap);
