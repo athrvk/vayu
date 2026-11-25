@@ -8,17 +8,16 @@
  */
 
 /**
- * @file custom_metric_type.hpp
  * @brief `CustomMetricType` alone, in its own header (issue #1500).
  *
- * `core/elements.hpp` (a `metric.record` element's `ElementContext::record_metric`
- * callback) and `runtime/script_engine.hpp` (`pm.metrics`'s `ScriptContext`
- * field) both need this enum but neither should pull in the rest of
- * `core/metrics_collector.hpp` - a `Database`-and-HdrHistogram header - just
- * to name three values. `metrics_collector.hpp` includes this one too, so
- * `MetricsCollector`'s own API is the single place the enum's *meaning* is
- * documented; this file only keeps three modules from disagreeing about its
- * values.
+ * `core/elements.hpp` (a `metric.record` element's
+ * `ElementContext::record_metric` callback) and `runtime/script_engine.hpp`
+ * (`pm.metrics`'s `ScriptContext` field) both need this enum, and neither
+ * should pull in the rest of `core/metrics_collector.hpp`, a
+ * `Database`-and-HdrHistogram header, to name three values.
+ * `metrics_collector.hpp` includes this one too, so `MetricsCollector`'s own
+ * API is the single place the enum's *meaning* is documented; this file only
+ * keeps three modules agreeing on its values.
  */
 
 #include <cstdint>

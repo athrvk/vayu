@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/postman_encode_sets.hpp
  * @brief The bytes `postman-url-encoder` 3.0.8 percent-encodes in each URL
  *        component (`encoder/encode-set.js`).
  *
