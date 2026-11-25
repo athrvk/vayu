@@ -6,15 +6,11 @@
  */
 
 /**
- * Over a design run's copy whose recorded url, params or body holds the
- * engine's `<redacted>` marker (#1803).
- *
- * A header the engine withheld is never seeded, but these are seeded as
- * recorded - the marker stands where the secret was - so sending the copy
- * sends that text literally. The notice is the replay's reader of
- * `DesignRunSeed.withheld`; the save path is the other one.
- *
- * Silent when nothing in the request line or body was withheld.
+ * Over a design run's copy whose recorded url, params or body holds the engine's `<redacted>`
+ * marker (#1803). A withheld header is never seeded, but these are seeded as recorded (the marker
+ * stands where the secret was), so sending the copy sends that text literally. The notice is the
+ * replay's reader of `DesignRunSeed.withheld`; the save path is the other. Silent when nothing in
+ * the request line or body was withheld.
  */
 
 import { Callout } from "@/components/shared";

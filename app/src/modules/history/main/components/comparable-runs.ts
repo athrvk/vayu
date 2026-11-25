@@ -8,10 +8,9 @@
 import type { Run } from "@/types";
 
 /**
- * Runs that have a final report to diff: a run still executing has only the
- * requests so far, and a failed one may never have produced a result. The
- * pinned baseline joins the list when it is older than the page, since a pin
- * outliving the loaded rows is the main use of one.
+ * Runs with a final report to diff: a run still executing has only the requests so far, and a
+ * failed one may have no result. The pinned baseline joins when it is older than the page, as a pin
+ * outliving the loaded rows is its main use.
  */
 export function comparableRuns(
 	runs: Run[],

@@ -6,27 +6,25 @@
  */
 
 /**
- * "Is this run slower than the one I pinned?" - the deltas between the open
- * load run and the baseline pinned for the same request, in the load report's
- * body, above the tabs.
+ * "Is this run slower than the one I pinned?": the deltas between the open load run and the
+ * baseline pinned for the same request, in the load report's body above the tabs.
  *
- * Absent, not empty, when there is nothing to say: no baseline pinned, the open
- * run *is* the baseline, or the baseline's report has not loaded. A strip that
- * rendered zeros would be a claim ("nothing changed") the app cannot support.
+ * Absent, not empty, with nothing to say: no baseline pinned, the open run *is* the baseline, or
+ * the baseline's report has not loaded. A strip of zeros would claim "nothing changed", which the
+ * app cannot support.
  *
- * A failed run the engine could not fully record (#2895) draws no delta for a
- * figure it did not measure: its zeros would read as an improvement on the
- * baseline's real numbers. When the flagged run is the baseline, the cell
- * keeps the open run's figure and reads "baseline not recorded" (#2904).
+ * A failed run the engine could not fully record (#2895) draws no delta for a figure it did not
+ * measure, as its zeros would read as an improvement on the baseline's real numbers. When the
+ * flagged run is the baseline, the cell keeps the open run's figure and reads "baseline not
+ * recorded" (#2904).
  *
- * Under the deltas, one warning row per `comparability` entry: the two runs
- * must be the same experiment (same mode, virtual users, duration, ...) for a
- * delta to mean "regressed", and a short stopped run never is (#2162).
+ * Under the deltas, one warning row per `comparability` entry: the two runs must be the same
+ * experiment (same mode, virtual users, duration, ...) for a delta to mean "regressed", and a short
+ * stopped run never is (#2162).
  *
- * Colour comes from `MetricDelta.direction`, never from the sign of the number:
- * latency falling is an improvement and throughput falling is not, and the one
- * place that distinction lives is `lib/run-compare.ts`, which the MCP
- * `compare_runs` tool mirrors.
+ * Colour comes from `MetricDelta.direction`, never the number's sign: falling latency is an
+ * improvement and falling throughput is not, and that distinction lives only in
+ * `lib/run-compare.ts`, which the MCP `compare_runs` tool mirrors.
  */
 
 import { useMemo } from "react";
@@ -51,13 +49,11 @@ interface BaselineComparisonProps {
 }
 
 /**
- * The metrics worth a strip: the p99 a run is judged on, and the two totals.
- *
- * Three, deliberately: this is a glance above the report's tabs, answering "is this
- * run worse than the one I pinned?" in one line. The rest of the diff (every
- * percentile, both throughput measures, the status-code merge) is the header's
- * Compare action, `RunComparisonView`, against the baseline or any other run of
- * the request (#2164).
+ * The metrics worth a strip: the p99 a run is judged on, and the two totals. Three on purpose: a
+ * glance above the tabs answering "is this run worse than the one I pinned?" in one line. The rest
+ * of the diff (every percentile, both throughput measures, the status-code merge) is the header's
+ * Compare action, `RunComparisonView`, against the baseline or any other run of the request
+ * (#2164).
  */
 const HEADLINE_METRICS = ["latency.p99", "summary.avgRps", "summary.errorRate"] as const;
 

@@ -45,8 +45,6 @@
     "app/src/lib/query-client.ts": 1,
     "app/src/lib/resize-gesture.ts": 1,
     "app/src/modules/history/main/ScenarioRunView.tsx": 1,
-    "app/src/modules/history/main/components/SampleRequestCard.tsx": 1,
-    "app/src/modules/history/main/components/ScenarioStepCard.tsx": 1,
     "app/src/modules/history/main/useFilteredSteps.ts": 1,
     "app/src/modules/inbox/CannedResponseControls.tsx": 1,
     "app/src/modules/mock-server/index.tsx": 1,

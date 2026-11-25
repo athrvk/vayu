@@ -6,14 +6,13 @@
  */
 
 /**
- * A run's failed MCP replies by class: transport, protocol and tool, and the
- * JSON-RPC codes behind the protocol ones (`summary.errorClasses`, #3828).
+ * A run's failed MCP replies by class (transport, protocol, tool) and the JSON-RPC codes behind the
+ * protocol ones (`summary.errorClasses`, #3828).
  *
- * Absent for a run with nothing to say, and that is two different runs: the key
- * missing is a run stored before the engine counted classes, `{}` is one that
- * counted and saw no failed reply. A card of zeros would read as a finding for
- * the second and as a measurement for the first, so both draw nothing. Every
- * class is drawn once any is counted, because a 0 beside a 12 is information.
+ * Absent for a run with nothing to say, which is two runs: a missing key is a run stored before the
+ * engine counted classes, `{}` one that counted and saw no failed reply. A card of zeros would read
+ * as a finding for the second and a measurement for the first, so both draw nothing. Every class is
+ * drawn once any is counted, as a 0 beside a 12 is information.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
