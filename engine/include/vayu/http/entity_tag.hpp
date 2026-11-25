@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/entity_tag.hpp
  * @brief The `ETag` a whole-record resource carries and the `If-Match` a PUT
  *        may send back (#2433).
  */
