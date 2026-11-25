@@ -8,33 +8,31 @@
  */
 
 /**
- * @file core/flag_value.hpp
  * @brief The two ways an argument can be unusable, said once (#1031).
  *
  * `core/numeric_flag.hpp` answers "is this value one of the numbers the flag
  * takes". This answers the questions that come before it and apply to every
- * flag, numeric or not - and that both argument loops used to answer by
- * carrying on regardless:
+ * flag, numeric or not, in both argument loops:
  *
- * - **There is nothing after the flag.** `vayu-engine --data-dir . --port` used
- *   to listen on the default 9876 and say nothing, so the flag that was typed
- *   had no effect and left no trace.
+ * - **There is nothing after the flag.** Unchecked,
+ *   `vayu-engine --data-dir . --port` listens on the default 9876 and says
+ *   nothing, so the flag that was typed has no effect and leaves no trace.
  * - **What follows is another flag.** This is the one that does damage, because
- *   it *succeeds*: `vayu-engine --data-dir --port 9999` took the string
- *   `--port` as the data directory and created it - database, log and lock file
- *   inside - then listened on 9876, because `9999` matched nothing afterwards
- *   and was dropped in turn.
+ *   it *succeeds*: taken as a value, `vayu-engine --data-dir --port 9999` makes
+ *   the string `--port` the data directory and creates it - database, log and
+ *   lock file inside - then listens on 9876, because `9999` matches nothing
+ *   afterwards and is dropped in turn.
  *
  * A value beginning with `-` is refused rather than taken, which is the
- * conventional reading and the one that turns that case into a sentence. It
- * costs the user who genuinely means a relative path starting with `-` the
- * `./` prefix, and it is worth that: a leading `-` is a mistyped command line
- * far more often than it is a filename.
+ * conventional reading and the one that turns that case into a sentence. A user
+ * who means a relative path starting with `-` pays a `./` prefix, and it is
+ * worth that: a leading `-` is a mistyped command line far more often than a
+ * filename.
  *
- * Numeric flags do not need the second rule - `parse_numeric_flag` refuses
- * `--port` as a number already, and with a better sentence, because it can name
- * the range. They do need the first, which is why `read_flag_value` reports the
- * two separately rather than as one "bad value".
+ * Numeric flags do not need the second rule - `parse_numeric_flag` already
+ * refuses `--port` as a number, with a better sentence, because it can name the
+ * range. They do need the first, which is why `read_flag_value` reports the two
+ * separately rather than as one "bad value".
  */
 
 #include <cctype>
@@ -114,9 +112,9 @@ std::optional<std::string_view> next) {
 /**
  * @brief The refusal for an argument that matches nothing.
  *
- * Both loops used to drop one silently, so a mistyped `--prot 9999` was
- * indistinguishable from passing no flag at all - the engine listened on the
- * default port and exited 0 whenever it was told to.
+ * Dropped silently, a mistyped `--prot 9999` is indistinguishable from passing
+ * no flag at all: the engine listens on the default port and, told to exit,
+ * exits 0.
  */
 inline std::string unknown_argument_error (std::string_view argument, std::string_view program) {
     return "unknown argument \"" + std::string (argument) + "\" - run " +
