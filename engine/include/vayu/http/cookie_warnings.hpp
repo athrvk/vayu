@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/cookie_warnings.hpp
  * @brief The warnings a design send carries about the cookies libcurl's
  *        cookie engine withheld or discarded without an error (#3307), one copy
  *        for both design drivers: `Client::send` and the stream consumer
