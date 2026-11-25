@@ -33,12 +33,11 @@ export const MOVE_TOOLS: McpTool[] = [
 		name: "move_item",
 		category: "write",
 		/*
-		 * Both families, and the pair is load-bearing rather than cautious. The
-		 * `request` event narrows on the `collectionId` the call named, which for
-		 * a move is the *destination* - the list the row left would stay stale on
-		 * its own. `collection` is the coarse one (`collections.all` +
-		 * `requests.all`), so it covers the source list, the two parents' orders,
-		 * and the subtree a moved collection took with it.
+		 * Both families, and the pair is load-bearing rather than cautious. The `request` event
+		 * narrows on the `collectionId` the call named, which for a move is the *destination*, so
+		 * the list the row left would stay stale on its own. `collection` is the coarse one
+		 * (`collections.all` + `requests.all`), so it covers the source list, the two parents'
+		 * orders, and the subtree a moved collection took with it.
 		 */
 		invalidates: ["collection", "request"],
 		description: (config) =>
