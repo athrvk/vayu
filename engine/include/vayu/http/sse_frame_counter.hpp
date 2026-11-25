@@ -8,8 +8,7 @@
  */
 
 /**
- * @file http/sse_frame_counter.hpp
- * @brief Counting `text/event-stream` events on the load hot path (issue #576).
+ * @brief Counting `text/event-stream` events on the load hot path (#576).
  *
  * `SseParser` is the design path's reader: it assembles every field, sanitizes
  * UTF-8 and hands back the events themselves. Under load none of that is wanted
