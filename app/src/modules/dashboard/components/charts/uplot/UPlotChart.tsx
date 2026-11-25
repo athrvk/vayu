@@ -6,22 +6,16 @@
  */
 
 /**
- * UPlotChart - the ONE charting primitive.
+ * The ONE charting primitive: every time-series surface (live dashboard and history) renders
+ * through it, so latency, throughput, connections, errors or the concurrency scatter look and
+ * behave identically everywhere. Canvas-rendered (uPlot), with no per-point DOM, so long, dense
+ * runs render without downsampling. Theme-driven from CSS tokens and interactive by default:
+ * crosshair and multi-series tooltip, drag-to-zoom on the time axis (double-click resets), optional
+ * cursor-sync across charts for cross-metric correlation, and reference markers (breakpoint,
+ * target, SLO).
  *
- * Every time-series surface in the app (live dashboard + history) renders through
- * this component, so "latency vs time" (or throughput, connections, errors, the
- * concurrency scatter…) looks and behaves identically everywhere. It replaces the
- * hand-rolled SVG `TimeSeriesChart` frame AND the recharts `HistoricalChartsSection`.
- *
- * Canvas-rendered (uPlot) → no per-point DOM, so long/dense runs render without
- * the downsampling the SVG/recharts stacks needed. Theme-driven from CSS tokens,
- * and interactive by default: crosshair + multi-series tooltip, drag-to-zoom on
- * the time axis (double-click resets), optional cursor-sync across charts for
- * cross-metric correlation, and reference markers (breakpoint, target, SLO).
- *
- * Semantic charts (LatencyPercentilesChart, RequestRateChart, …) are thin wrappers
- * that build aligned data + a series spec and hand it here; consumers use those,
- * never this directly.
+ * Consumers use the semantic charts (LatencyPercentilesChart, RequestRateChart, …), thin wrappers
+ * that build aligned data and a series spec and hand them here, never this directly.
  */
 
 import { useEffect, useMemo, useRef } from "react";
@@ -107,10 +101,9 @@ export interface UPlotChartProps {
 	 */
 	xTooltipFormat?: (v: number) => string;
 	/**
-	 * Mark the x axis as elapsed-seconds. Constrains tick increments to whole
-	 * seconds so ticks never land on 0.5 s (which the whole-second axis formatter
-	 * would round to a DUPLICATE/mislabeled tick - e.g. 3.5 s shown as "4s" under
-	 * the cursor), and defaults the tooltip to 0.5 s resolution.
+	 * Mark the x axis as elapsed seconds: tick increments are whole seconds, so no tick lands on
+	 * 0.5 s, which the whole-second formatter would round to a duplicate or mislabelled tick (3.5 s
+	 * shown as "4s" under the cursor), and the tooltip defaults to 0.5 s resolution.
 	 */
 	xTime?: boolean;
 	/** Gets every tick of the axis as well, so a label can pick its decimals from the spacing. */
@@ -410,11 +403,11 @@ export function UPlotChart({
 				cursor: {
 					drag: { x: true, y: false },
 					focus: { prox: 16 },
-					// Sync on the x scale by VALUE (not pixel): charts with a second
-					// axis have a different plot width, so pixel-based sync would land
-					// the cursor at the wrong time. Matching the "x" scale keeps every
-					// synced chart on the same instant. Non-time charts (scatter) opt
-					// out of value sync and cross-highlight via the focus channel below.
+					// Sync on the x scale by VALUE, not pixel: a chart with a second axis has a
+					// different plot width, so pixel sync would land the cursor at the wrong time;
+					// matching the "x" scale keeps every synced chart on one instant. Non-time
+					// charts (the scatter) opt out and cross-highlight through the focus channel
+					// below.
 					sync: syncKey && xValueSync ? { key: syncKey, scales: ["x", null] } : undefined,
 					points: { size: 6 },
 				},
@@ -475,13 +468,10 @@ export function UPlotChart({
 		}
 
 		const activePlot = plot;
-		// Deferred to the next frame, the same pattern as
-		// useResolvedResponsePosition (#1711): calling setSize synchronously
-		// inside the observer callback is the same shape as the loop #1713
-		// fixed - a delivery that resizes the element the observer itself
-		// watches - and triggers the browser's "ResizeObserver loop completed
-		// with undelivered notifications", which `main.tsx` logs as a
-		// high-severity window error.
+		// Deferred to the next frame, as in useResolvedResponsePosition (#1711): setSize inside the
+		// observer callback resizes the element the observer watches (the loop of #1713) and
+		// triggers the browser's "ResizeObserver loop completed with undelivered notifications",
+		// which `main.tsx` logs as a high-severity window error.
 		let resizeFrame: number | null = null;
 		const ro =
 			typeof ResizeObserver !== "undefined" && activePlot
@@ -543,12 +533,10 @@ export function UPlotChart({
 			activePlot?.destroy();
 			plotRef.current = null;
 		};
-		// `shapeSig` is the serialized form of everything this effect reads -
-		// series identity, theme, height, sync key, live/x-axis flags, tooltip
-		// caption, y base, y2 label and x splits - so the omitted deps are all
-		// inside it. Listing `series` or `data` instead would tear the plot down
-		// and rebuild it on every data tick, which the `setData` effect below
-		// exists to avoid.
+		// `shapeSig` serializes everything this effect reads (series identity, theme, height, sync
+		// key, live/x-axis flags, tooltip caption, y base, y2 label and x splits), so the omitted
+		// deps are all inside it; listing `series` or `data` would tear down and rebuild the plot
+		// on every data tick, which the `setData` effect below exists to avoid.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [shapeSig]);
 

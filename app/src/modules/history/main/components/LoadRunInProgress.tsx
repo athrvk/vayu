@@ -8,17 +8,15 @@
 /**
  * What a load run's History tab shows while the engine is still executing it.
  *
- * The report endpoint answers for a live run, but it describes a run that has
- * not finished: percentiles over the requests so far, no final error rate. A
- * pane that rendered it read as a result and then stayed that way, because the
- * tab had no way to learn the run ended (#1934). So the tab shows no numbers
- * until the run is over, says so, and keeps the two things that are useful in
- * the meantime: Stop, and the live dashboard when this window is the one
- * watching the run.
+ * The report endpoint answers for a live run but describes an unfinished one (percentiles over the
+ * requests so far, no final error rate), and a pane that rendered it read as a result and stayed
+ * that way, as the tab could not learn the run ended (#1934). So the tab shows no numbers until the
+ * run is over, says so, and keeps what is useful meanwhile: Stop, and the live dashboard when this
+ * window is watching the run.
  *
- * The phase comes off the run's own query, the one the tab already polls
- * (#1934), so this adds no request: while the engine reports the run draining,
- * the one thing left to stop is the wait (#3568).
+ * The phase comes off the run's own query, the one the tab already polls (#1934), so this adds no
+ * request; while the engine reports the run draining, the one thing left to stop is the wait
+ * (#3568).
  */
 
 import { Loader2 } from "lucide-react";

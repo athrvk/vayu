@@ -8,40 +8,37 @@
  */
 
 /**
- * @file core/spec_coverage.hpp
  * @brief Which operations of a bound contract a run exercised, and which of
- *        their declared responses it saw (issue #629).
+ *        their declared responses it saw (#629).
  *
- * **This file parses no OpenAPI, and there is exactly one reader that does.**
- * The rule #625 decided was never "the engine must stay ignorant" - it was that
- * one reader answers what a document declares, because two disagree exactly
- * where it matters (a `$ref`-ed path item, a response inherited from a
- * component) and this file's counts are matched against the identity that
- * reader stamped. #761's phase B moved that reader into the engine
- * (`core/openapi_document.hpp`, issue #853): the index in
- * `spec_documents.operations` is derived from the document as it is stored,
- * and this file counts against it.
+ * **This file parses no OpenAPI, and exactly one reader does**:
+ * `core/openapi_document.hpp` (#853, engine-owned per #761). The rule (#625) is
+ * that one reader answers what a document declares, because two disagree
+ * exactly where it matters (a `$ref`-ed path item, a response inherited from a
+ * component), and this file's counts are matched against the identity that
+ * reader stamped. Its index in `spec_documents.operations` is derived from the
+ * document as it is stored, and this file counts against it.
  *
  * What that index costs is one column (`spec_documents.operations`) and one
  * honest gap: a document stored before the index existed has none, and a run of
  * it reports **no coverage block at all** rather than a total of zero
  * operations. "Not measured" and "measured nothing" are different answers and
  * the report gives them different spellings, the rule every conditional section
- * of the report already follows.
+ * of the report follows.
  *
  * The index is read **once, when the plan resolves**, and carried on the
- * execution - never re-read at run end. That is the same rule the plan itself
- * follows, and it is what pins coverage to the document the run was planned
- * against: a sync that lands mid-run stores a *new* document and moves the
- * binding, and a run that re-read at the end would report itself against a
- * contract it never saw.
+ * execution - never re-read at run end. The plan itself follows the same rule,
+ * and it is what pins coverage to the document the run was planned against: a
+ * sync that lands mid-run stores a *new* document and moves the binding, and a
+ * run that re-read at the end would report itself against a contract it never
+ * saw.
  *
  * Every number here is **exact, never sampled.** Coverage counts what each step
  * sent and what came back, at the moment it happened, through a tally that is
- * not the bounded result store - so a load run whose `results[]` were thinned to
- * a reservoir still reports every operation it touched. That is why the tally
- * lives here rather than being derived from stored rows at report time, and it
- * is what `docs/app/openapi.md`'s total-vs-sampled table records.
+ * not the bounded result store - so a load run whose `results[]` were thinned
+ * to a reservoir still reports every operation it touched. That is why the
+ * tally lives here rather than being derived from stored rows at report time,
+ * and it is what `docs/app/openapi.md`'s total-vs-sampled table records.
  */
 
 #include <atomic>

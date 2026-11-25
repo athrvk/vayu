@@ -6,12 +6,10 @@
  */
 
 /**
- * A latency tile. Neutral unless the value exceeds the user's SLO, and then it
- * takes the tier its `severity` names: which percentile a tile is says nothing
- * about whether the run was slow, so the tier is never unconditional (#2245).
- * The tier's colour is not the only mark: a tile over the SLO also carries a
- * warning glyph and "Over SLO" for a reader who cannot tell the tints apart
- * (#3499).
+ * A latency tile. Neutral unless the value exceeds the user's SLO, then the tier its `severity`
+ * names: which percentile a tile shows says nothing about whether the run was slow, so the tier is
+ * never unconditional (#2245). The colour is not the only mark: a tile over the SLO also carries a
+ * warning glyph and "Over SLO" for a reader who cannot tell the tints apart (#3499).
  */
 
 import { AlertTriangle } from "lucide-react";

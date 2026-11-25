@@ -6,12 +6,11 @@
  */
 
 /**
- * The "Test config" box of a stored load run: one line with the settings that
- * define the experiment (mode, virtual users, passes or requests, duration, protocol) and a
- * "Details" disclosure for the rest (target rate, data set, timeout). The
- * second tier is closed by default because it is reference, not the answer; the
- * protocol's "not negotiated" correction is the one detail that stays on the
- * line, since hiding it would restore the mislabelling it exists to stop.
+ * The "Test config" box of a stored load run: one line with the settings that define the experiment
+ * (mode, virtual users, passes or requests, duration, protocol) and a "Details" disclosure for the
+ * rest (target rate, data set, timeout), closed by default as reference, not the answer. The
+ * protocol's "not negotiated" correction is the one detail that stays on the line: hiding it would
+ * restore the mislabelling it exists to stop.
  */
 
 import { useState, type ReactNode } from "react";
@@ -140,11 +139,10 @@ function requestedProtocolLabel(config: RunConfiguration): string | undefined {
 }
 
 /**
- * The label above is what the run *asked for*, and on its own it is the
- * mislabelling issue #215 describes: a run whose every request fell back to
- * HTTP/1.1 still reads "HTTP/2", over latency and throughput measured on
- * HTTP/1.1. This is the correction, drawn only when the engine counted a
- * downgrade - see summary.httpVersionDowngraded.
+ * The label above is what the run *asked for*, and alone it is the mislabelling #215 describes: a
+ * run whose every request fell back to HTTP/1.1 still reads "HTTP/2" over latency and throughput
+ * measured on HTTP/1.1. This is the correction, drawn only when the engine counted a downgrade
+ * (summary.httpVersionDowngraded).
  */
 export function NotNegotiated({
 	count,
@@ -177,11 +175,10 @@ export default function RunConfigSummary({
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	if (!config) return null;
 
-	// Gated on the protocol too, not just the mode: POST /runs accepts an
-	// iterations-only body with no `mode` key (execution.cpp only requires
-	// mode+duration OR iterations), so a run can legitimately have neither and
-	// still carry a protocol worth showing. The run's comment is not here: it is
-	// drawn under the run's title by the header above this pane.
+	// Gated on the protocol too, not just the mode: POST /runs accepts an iterations-only body with
+	// no `mode` (execution.cpp requires mode+duration OR iterations), so a run can have neither and
+	// still carry a protocol worth showing. The run's comment is not here: the header above this
+	// pane draws it under the run's title.
 	const protocolLabel = requestedProtocolLabel(config);
 	if (!config.mode && !protocolLabel) return null;
 

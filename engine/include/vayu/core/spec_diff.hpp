@@ -8,43 +8,40 @@
  */
 
 /**
- * @file core/spec_diff.hpp
  * @brief What a re-fetched OpenAPI document changed about the collection bound
- *        to it (issue #654, moved engine-side by #854).
+ *        to it (#654, engine-owned per #854).
  *
  * Binding recorded which operation each request is; this answers the question
  * that identity exists for - **has the contract moved, and where**. Three
  * buckets: operations no request claims (`added`), requests whose operation the
- * document no longer declares (`removed`), and requests whose operation is still
- * declared but no longer produces what the collection holds (`changed`). An
- * operation nobody claims because a person deleted its request is `declined`
+ * document no longer declares (`removed`), and requests whose operation is
+ * still declared but no longer produces what the collection holds (`changed`).
+ * An operation nobody claims because a person deleted its request is `declined`
  * instead of `added` (#3031).
  *
  * **Nothing here writes.** The comparison is a pure function of two documents
- * and the requests, so every judgement it makes - which operation is which, what
- * counts as changed, what the user has edited - is provable in a test that
- * cannot touch a row. Applying it is `POST /specs/sync` (issue #655).
+ * and the requests, so every judgement it makes - which operation is which,
+ * what counts as changed, what the user has edited - is provable in a test that
+ * cannot touch a row. Applying it is `POST /specs/sync` (#655).
  *
- * **Why the engine owns it** (#761's phase B): the Sync section was the last
- * part of the spec feature an agent could not reach, because the comparison
- * lived in the renderer. Moving it needed the engine to be able to say what
- * requests a document would build (#853's reader, #865's drafts), which is what
- * `SpecRequestDraft` is - and with those here, this is the ordinary port its
- * four rules describe.
+ * **Why the engine owns it** (#761): an agent reaches the Sync section only
+ * through an engine-side comparison, which needs the engine to say what
+ * requests a document would build (#853's reader, #865's drafts) - what
+ * `SpecRequestDraft` is.
  *
- * ### The four rules, each of which the renderer copy learned the hard way
+ * ### The four rules
  *
  * - **The user-touched flag is three-way.** A field is flagged when what the
- *   request holds is neither what the new document produces nor what the *bound*
- *   one did - the only evidence that a person put it there. A two-way comparison
- *   cannot tell an edit apart from a spec change, and the apply would then
- *   quietly revert one.
- * - **An `operationId` is only followed while it means one thing** (issue #715).
- *   An id two requests claim identifies neither; an id whose entry contradicts
- *   the endpoint the request records loses to an exact match on that endpoint.
- * - **`method` is a compared, tickable field** (issue #717), not something an
- *   apply writes unconditionally - it is what the request *sends*, and writing
- *   it for the user reverted a deliberate `GET` -> `HEAD` invisibly.
+ *   request holds is neither what the new document produces nor what the
+ *   *bound* one did - the only evidence that a person put it there. A two-way
+ *   comparison cannot tell an edit apart from a spec change, and the apply
+ *   would then quietly revert one.
+ * - **An `operationId` is only followed while it means one thing** (#715). An
+ *   id two requests claim identifies neither; an id whose entry contradicts the
+ *   endpoint the request records loses to an exact match on that endpoint.
+ * - **`method` is a compared, tickable field** (#717), not something an apply
+ *   writes unconditionally - it is what the request *sends*, and writing it for
+ *   the user would revert a deliberate `GET` -> `HEAD` invisibly.
  * - **Response examples are deliberately not compared.** The rule that governs
  *   them (`origin="import"` is replaced, `origin="user"` survives) only means
  *   anything at apply time, so comparing them here would cost a read for a
@@ -216,14 +213,14 @@ struct SafeChangedApply {
 /**
  * Which of a {@link SpecDiff} a sync writes when nobody has ticked anything -
  * the policy behind `POST /specs/sync`'s `"safe"` and the marks
- * `POST /specs/diff` reports (issue #871).
+ * `POST /specs/diff` reports (#871).
  *
  * Each member is **parallel to the bucket it names**, so a reader marks the
  * entry it is already holding and no reader has to decide anything a second
- * time. That is the whole point of the type: the rules below used to live in
- * the renderer alone (`spec-apply.ts`, `defaultSelection`), which put every
- * apply out of reach of anything that is not the Spec tab, and any copy of them
- * elsewhere would be a second opinion about which of a user's fields a sync may
+ * time. That is the whole point of the type: in the renderer alone
+ * (`spec-apply.ts`, `defaultSelection`) these rules would put every apply out
+ * of reach of anything that is not the Spec tab, and any copy of them elsewhere
+ * would be a second opinion about which of a user's fields a sync may
  * overwrite.
  */
 struct SafeSpecApply {

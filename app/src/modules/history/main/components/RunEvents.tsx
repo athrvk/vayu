@@ -6,15 +6,11 @@
  */
 
 /**
- * What went wrong and when - the run's detected anomaly windows, in words.
- *
- * The bands on the charts show where; this says what, because a shaded region a
- * reader has to hover is not a finding. It is deliberately the same list the
- * charts shade (one `detectAnomalies` call in `LoadTestDetail`, passed to both),
- * so the paint and the prose can never disagree.
- *
- * Silent for a clean run. An "Events (0)" card would put the reader's eye on the
- * one thing that has nothing to say.
+ * What went wrong and when: the run's detected anomaly windows, in words. The chart bands show
+ * where; this says what, as a shaded region a reader has to hover is not a finding. It is the same
+ * list the charts shade (one `detectAnomalies` call in `LoadTestDetail`, passed to both), so paint
+ * and prose cannot disagree. Silent for a clean run: an "Events (0)" card would draw the eye to the
+ * one thing with nothing to say.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
@@ -25,10 +21,9 @@ import { formatSleepDuration } from "@/modules/dashboard/utils/hostSleep";
 import type { HostSleep } from "@/stores/host-sleep-store";
 
 /**
- * How each kind reads on screen. The tone follows the finding: an error burst
- * and the first 5xx are failures, a latency spike or a throughput drop is
- * degradation - the same split the chart bands use, in the text vocabulary
- * (`-text` tokens, never the bare indicator colour as a foreground).
+ * How each kind reads on screen. The tone follows the finding: an error burst and the first 5xx are
+ * failures, a latency spike or a throughput drop degradation, the chart bands' split in the text
+ * vocabulary (`-text` tokens, never the bare indicator colour as a foreground).
  */
 const KIND_META: Record<AnomalyKind, { label: string; tone: string }> = {
 	latency_spike: { label: "Latency spike", tone: "text-warning-text" },
@@ -40,10 +35,9 @@ const KIND_META: Record<AnomalyKind, { label: string; tone: string }> = {
 export interface RunEventsProps {
 	anomalies?: Anomaly[] | null;
 	/**
-	 * Intervals the host spent asleep under the run (#1357). Listed beside the
-	 * detected windows because a reader looking at a flat stretch is asking the
-	 * same question of both - and this is the one answer the series cannot give,
-	 * since the engine was suspended too.
+	 * Intervals the host spent asleep under the run (#1357), listed beside the detected windows
+	 * because a reader looking at a flat stretch asks both the same question, and this is the one
+	 * answer the series cannot give (the engine was suspended too).
 	 */
 	sleeps?: readonly HostSleep[] | null;
 	className?: string;

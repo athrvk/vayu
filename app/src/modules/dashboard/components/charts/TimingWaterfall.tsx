@@ -16,32 +16,24 @@ import {
 } from "@/components/shared/response-viewer/timing-phases";
 
 /**
- * Timing waterfall - from report.timingBreakdown, which the live view fills from
- * the latest gate frame's phase means (`utils/liveDistributions.ts`). Always
- * renders 5 rows so the card height stays constant; with no report values show
- * "-" and bars are empty.
+ * Timing waterfall, from report.timingBreakdown, which the live view fills from the latest gate
+ * frame's phase means (`utils/liveDistributions.ts`). Always 5 rows so the card height stays
+ * constant; with no report the values show "-" and the bars are empty.
  *
- * The rows come from the shared `TIMING_PHASES` descriptor; a local list let
- * two defects sit here unseen:
+ * The rows come from the shared `TIMING_PHASES` descriptor: its fixed categorical hues, never
+ * `--primary` (which follows the user's accent, and under the green scheme lands on `--success`'s
+ * hue, making two of the five bars one colour), and `PHASE_TIPS`, the one copy of the tooltip
+ * sentences. A local list drifts from both. The guard that would catch the colour
+ * (`charts/uplot/status-code-series.test.ts`) reads only the chart specs in `uplot/`, a directory
+ * below this file.
  *
- *   - TTFB was painted `hsl(var(--primary))` and Download `hsl(var(--success))`.
- *     The request-builder's timing tab had the identical bug and fixed it -
- *     `--primary` follows the user's accent, so under the green scheme it lands
- *     on the same hue as `--success` and two of the five bars became one colour
- *     - but the fix could only reach the list it was written against. The guard
- *     that would have caught it (`charts/uplot/status-code-series.test.ts`)
- *     reads chart specs in `uplot/`, and this file is a directory above.
- *   - The five tooltip sentences were a private copy, longer than and drifting
- *     from `PHASE_TIPS`, whose whole purpose was to be the one copy.
+ * Values format through `formatPhaseDuration`, not `.toFixed(0)`, which renders any sub-millisecond
+ * average as a flat "0".
  *
- * Values format through `formatPhaseDuration` rather than `.toFixed(0)`, which
- * rendered any sub-millisecond average as a flat "0".
- *
- * `hasData` asks whether the *averages* are there, not whether
- * `timingBreakdown` is. The object now also carries `phases` (percentiles over
- * every completion, from the histogram bank), which is present for runs that
- * stored no traces at all - testing the object would paint five empty bars and
- * a confident "0 ms" total for exactly those runs.
+ * `hasData` asks whether the *averages* are there, not whether `timingBreakdown` is: the object
+ * also carries `phases` (percentiles over every completion, from the histogram bank), present for
+ * runs that stored no traces at all, so testing the object would paint five empty bars and a
+ * confident "0 ms" total for exactly those runs.
  */
 export function TimingWaterfall({ report }: { report: Pick<RunReport, "timingBreakdown"> | null }) {
 	const hasData = hasPhaseAverages(report?.timingBreakdown);

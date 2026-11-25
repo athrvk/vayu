@@ -23,12 +23,11 @@ function Figure({ children }: { children: ReactNode }) {
 }
 
 /**
- * capacity hero card #1 - where the search is, then what it found. A search
- * climbs toward the ceiling the user set, so the old "N of 100 active"
- * utilisation card read progress as load actually held (#2929). Live it names
- * the level being measured from the `capacity` frame block (#2928); once the
- * report is here it reads `capacity` from it and states the ceiling only as
- * a bound ("of up to 100").
+ * capacity hero card #1: where the search is, then what it found. A search climbs toward the
+ * ceiling the user set, so an "N of 100 active" utilisation card would read progress as load
+ * actually held (#2929). Live it names the level being measured, from the `capacity` frame block
+ * (#2928); once the report is here it reads `capacity` from it and states the ceiling only as a
+ * bound ("of up to 100").
  */
 export function CapacitySearchCard({
 	live,

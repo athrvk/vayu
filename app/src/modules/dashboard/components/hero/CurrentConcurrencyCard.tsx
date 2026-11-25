@@ -11,15 +11,14 @@ import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
- * ramp_up hero card #1 - in-flight concurrency at this instant. The configured
- * ramp climbs linearly toward the target; ramp lag is the share of the planned
- * curve the generator failed to deliver.
+ * ramp_up hero card #1: in-flight concurrency at this instant. The configured ramp climbs linearly
+ * toward the target; the "lag" printed is `rampDeviationPct`, the mean two-sided deviation from
+ * that planned curve, overshoot included (`metricsTransforms.ts`).
  *
- * Instantaneous concurrency is 0 once a run ends, so a finished run hands the
- * peak in as `currentConcurrency` and `isCompleted` renames the card to match:
- * "Peak virtual users", no "active" unit. A run stored without a per-tick series
- * has no lag to report, and the finished card then leaves the clause out rather
- * than print a dash for it; a live card always prints the clause, since its lag
+ * Instantaneous concurrency is 0 once a run ends, so a finished run hands the peak in as
+ * `currentConcurrency` and `isCompleted` renames the card to match: "Peak virtual users", no
+ * "active" unit. A run stored without a per-tick series has no lag to report, and the finished card
+ * then leaves the clause out rather than print a dash; a live card always prints it, as its lag
  * arrives with the first ticks.
  */
 export function CurrentConcurrencyCard({

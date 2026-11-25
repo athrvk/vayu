@@ -5,9 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Displays sampled request details for load tests.
- */
+/** The Samples tab: a load run's stored sampled requests. */
 
 import { useMemo, useState } from "react";
 import { Activity } from "lucide-react";
@@ -83,9 +81,8 @@ export default function SamplesTab({
 		expandedNumber !== null
 	);
 
-	// The synthetic test-validation row is not a captured request - it carries no
-	// response, so this tab would draw it as a status-0 card with nothing behind
-	// it. Its failures are named in the Overview instead (issue #726).
+	// The synthetic test-validation row carries no response, so this tab would draw it as a
+	// status-0 card with nothing behind it; the Overview names its failures instead (#726).
 	const rows = useMemo(
 		() => numberByTime(sampleResultsWithoutValidationRow(report.results)),
 		[report.results]

@@ -13,34 +13,27 @@ import { DurationValue } from "./PhasePercentiles";
 import { StreamStat } from "./StreamStat";
 
 /**
- * What a streaming load run's transfers delivered - from `report.stream`
- * (issue #576).
+ * What a streaming load run's transfers delivered, from `report.stream` (issue #576). Renders
+ * nothing when the section is absent, which is every run that did not stream: the engine omits it
+ * rather than writing zeros, as a card reading "0 events/sec" would claim it measured one and found
+ * none.
  *
- * Renders nothing at all when the section is absent, which is every run that
- * did not stream. That is the whole reason the engine omits the section rather
- * than writing zeros: an ordinary load run has no event rate, and a card
- * reading "0 events/sec" would claim it measured one and found none.
+ * Two rates on purpose: `eventsPerSecond` is the run's throughput and the per-completion
+ * distribution its shape, and one long stream and 250 short ones can share a rate while being
+ * completely different runs. The first-event row is its own figure, not Phase percentiles' First
+ * byte row, which ends at the response headers, where a gateway that answers 200 at once and then
+ * thinks reads fast (issue #3234). The row is absent when the report carries no `timeToFirstEvent`:
+ * streams that delivered no timed event, not a first event that took 0ms.
  *
- * Two rates, deliberately. `eventsPerSecond` is the run's throughput and the
- * per-completion distribution is its shape, and one long stream and 250 short
- * ones can share a rate while being completely different runs. The first-event
- * row is its own figure, not the First byte row of Phase percentiles: that ends
- * at the response headers, and a gateway that answers 200 at once and then
- * thinks reads fast there (issue #3234). The row is absent when the report
- * carries no `timeToFirstEvent`, which is a run whose streams delivered no timed
- * event, not a first event that took 0ms.
+ * The first-match row (issue #3774) is the same clock stopped at the request's first content
+ * marker, where a preamble API's first token shows; drawn only when the report carries
+ * `timeToFirstMatch`, so a request declaring no marker looks as it did. Report-only: a live frame
+ * carries no match.
  *
- * The first-match row (issue #3774) is the same clock stopped at the request's
- * first content marker, which is where a preamble API's first token shows. It is
- * drawn only when the report carries `timeToFirstMatch`, so a run whose request
- * declares no marker looks as it did. Report-only: the live panel stays on the
- * first event, since a live frame carries no match.
- *
- * The max-gap and events/s rows (issue #3776) are how each stream paced itself,
- * which the run's blended rate cannot show: the largest pause between two
- * events, and the stream's own rate. Each is drawn only when the report carries
- * it, independently of the others, since a stream whose events arrived in one
- * write measures neither. Report-only: the live panel has no such figure.
+ * The max-gap and events/s rows (issue #3776) are each stream's own pacing, which the run's blended
+ * rate cannot show: the largest pause between two events, and the stream's own rate. Each is drawn
+ * only when the report carries it, independently of the others, since a stream whose events arrived
+ * in one write measures neither. Report-only: the live panel has no such figure.
  */
 export function StreamMetrics({ report }: { report: RunReport | null }) {
 	const stream = report?.stream;
@@ -55,10 +48,9 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 		eventRate,
 	} = stream;
 
-	// Every completion the caps ended rather than the server. All of them is
-	// not a failure - it is the honest reading that this run measured its own
-	// bounds, and a user comparing two runs' event totals needs to know that
-	// before reading them as a property of the target.
+	// Every completion the caps ended rather than the server. All of them is not a failure: it is
+	// the honest reading that this run measured its own bounds, and a user comparing two runs'
+	// event totals needs to know that before reading them as a property of the target.
 	const allCapped = stream.completions > 0 && stream.capped === stream.completions;
 
 	return (

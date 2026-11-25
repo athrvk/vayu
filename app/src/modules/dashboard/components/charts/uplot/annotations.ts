@@ -33,16 +33,12 @@ export const ANOMALY_ROLE: Record<AnomalyKind, ColorRole> = {
 };
 
 /**
- * Everything shaded on the time axis: the detected anomaly windows, plus the
- * host sleeps the run could not prevent.
- *
- * A sleep is drawn as an instant, not a band. Whether the engine's elapsed
- * clock advanced through a suspend is a per-platform answer, so a band drawn
- * `durationMs` wide would be a claim about the series that may be fiction; the
- * mark says where the machine went down and the label says for how long.
- *
- * Its own module is also what makes it testable: every chart calls it and none
- * of them can be read for what it produced, since uPlot draws to a canvas.
+ * Everything shaded on the time axis: the detected anomaly windows, plus the host sleeps the run
+ * could not prevent. A sleep is drawn as an instant, not a band: whether the engine's elapsed clock
+ * advanced through a suspend is a per-platform answer, so a band `durationMs` wide could be
+ * fiction; the mark says where the machine went down and the label says for how long. Its own
+ * module is what makes it testable: uPlot draws to a canvas, so no chart can be read for what it
+ * produced.
  */
 export function runAnnotations(
 	anomalies?: Anomaly[] | null,

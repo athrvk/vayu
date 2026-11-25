@@ -6,28 +6,23 @@
  */
 
 /**
- * One button that asks the engine for a snapshot of the workspace, and the path
- * it wrote (issue #987).
+ * One button that asks the engine for a snapshot of the workspace, and the path it wrote (#987).
  *
- * What a person has built in Vayu - collections (with the spec and data files
- * they are bound to, #2765), environments, stored credentials, run history -
- * lives in one SQLite file, and until this there was no copy of it the user
- * controlled. Tabs, saved load-test values and the other app-side state are
- * outside that file, so outside the copy
- * (`docs/engine/architecture.md#what-a-backup-does-not-hold`). The `.bak` the
- * engine keeps is not one: it is overwritten once the engine listens and again
- * at a clean shutdown, and exists so a corrupt file has something to restore
- * from, not so someone can go back to last week.
+ * What a person builds in Vayu (collections with their bound spec and data files, #2765,
+ * environments, stored credentials, run history) lives in one SQLite file, and this is the copy of
+ * it the user controls. Tabs, saved load-test values and the other app-side state are outside that
+ * file, so outside the copy (`docs/engine/architecture.md#what-a-backup-does-not-hold`). The
+ * engine's `.bak` is not one: it is overwritten once the engine listens and again at a clean
+ * shutdown, so a corrupt file has something to restore from, not so someone can go back to last
+ * week.
  *
- * It sits in General beside Data management and Storage paths, because this is
- * engine-held state the user did not type - the same reason CookiesCard is
- * there - and because the path this prints only means something next to the
- * Data directory printed below it.
+ * In General beside Data management and Storage paths: engine-held state the user did not type
+ * (CookiesCard's reason), and the path it prints means something only next to the Data directory
+ * printed below.
  *
- * **The path is shown, not just toasted.** Restoring is a file copy the user
- * performs with the engine stopped (there is deliberately no restore button),
- * so the one thing they need afterwards is where the file went - and a toast
- * that has faded cannot tell them.
+ * **The path is shown, not just toasted.** Restoring is a file copy the user performs with the
+ * engine stopped (there is deliberately no restore button), so what they need afterwards is where
+ * the file went, which a faded toast cannot tell them.
  */
 
 import { useState } from "react";

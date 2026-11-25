@@ -6,30 +6,24 @@
  */
 
 /**
- * UpdatesCard - the current version, and a way to ask for a newer one.
- *
- * Vayu already checked for updates on a timer and announced the result through
- * a banner, but there was no way to *ask*. The only manual check lived in the
- * native menu, where it answers with a modal `dialog.showMessageBox` - fine for
- * a menu item that has no UI of its own, wrong for a settings panel that does.
- * So this renders the same outcome in place: the result appears under the
- * button and stays there.
+ * The current version, and a way to ask for a newer one. The timer check announces through a
+ * banner, and the native menu's manual check answers with a modal `dialog.showMessageBox` (fine for
+ * a menu item with no UI of its own); a settings panel has one, so this renders the outcome in
+ * place, under the button, where it stays.
  *
  * The four outcomes are all worth distinguishing:
  *
  *   - up to date  - the reassurance the user clicked for.
- *   - available   - with the release notes link, and (macOS) the ad-hoc-signed
- *                   installer command, because that platform updates
- *                   out-of-band.
- *   - unavailable - a development or unpackaged build has no release feed. Not
- *                   an error; saying "check failed" here would be a lie.
+ *   - available   - with the release notes link, and (macOS) the ad-hoc-signed installer command,
+ *     because that platform updates out-of-band.
+ *   - unavailable - a development or unpackaged build has no release feed. Not an error; saying
+ *     "check failed" here would be a lie.
  *   - error       - the network, or the feed. Shows the reason.
  *
- * Beside those, a downloaded installer whose build-provenance attestation did
- * not verify (issue #2372) is shown ahead of whatever the last check said: it
- * is the standing answer to "will this update install", and the event that
- * reports it arrives when the app is running, not when this panel is open, so
- * it is read from `useUpdateVerificationStore`.
+ * A downloaded installer whose build-provenance attestation did not verify (#2372) is shown ahead
+ * of whatever the last check said: it is the standing answer to "will this update install", and its
+ * event arrives while the app runs, not while this panel is open, so it is read from
+ * `useUpdateVerificationStore`.
  */
 
 import { useState } from "react";

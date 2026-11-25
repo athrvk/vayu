@@ -6,17 +6,14 @@
  */
 
 /**
- * The text alternative of a chart (#3498). A canvas has no DOM for a screen
- * reader to walk, so `UPlotChart` takes a label and this builds it from the
- * series the chart already holds: per series, the latest reading and the
- * lowest and highest the chart shows.
- *
- * The figures go through each series' own `format`, so the sentence spells a
- * value the way the hover tooltip does ("2.27ms"), and `spokenSymbols` turns a
- * "<0.01" the formatter writes for a value that rounds to nothing into words.
- * A series the tooltip leaves out (a band's lower edge, the marker twin of a
- * line) is left out here too, and a stacked series reads its own values
- * (`tipValues`), not the running total it plots.
+ * The text alternative of a chart (#3498): a canvas has no DOM for a screen reader to walk, so
+ * `UPlotChart` takes a label and this builds it from the series the chart holds: per series, the
+ * latest reading and the lowest and highest the chart shows. The figures go through each series'
+ * own `format`, so the sentence spells a value as the hover tooltip does ("2.27ms"), and
+ * `spokenSymbols` turns the "<0.01" the formatter writes for a value rounding to nothing into
+ * words. A series the tooltip leaves out (a band's lower edge, a line's marker twin) is left out
+ * here too, and a stacked series reads its own values (`tipValues`), not the running total it
+ * plots.
  */
 
 import type uPlot from "uplot";

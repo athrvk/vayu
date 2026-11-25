@@ -11,15 +11,11 @@ import type uPlot from "uplot";
 const HEADROOM = 0.1;
 
 /**
- * The y range of a chart whose scale starts at `yMin`.
- *
- * uPlot's own auto-range hugs the data, so a throughput series wandering between
- * 480 and 520 filled the whole height and read as a collapse. Pinning the floor
- * makes the plot's height mean the same thing on every chart.
- *
- * Data below `yMin` moves the floor down to it (with the same headroom) rather
- * than clipping the series. A flat or empty series would collapse the axis to a
- * point, so it gets a unit of span instead.
+ * The y range of a chart whose scale starts at `yMin`. uPlot's own auto-range hugs the data, so a
+ * throughput series wandering between 480 and 520 would fill the whole height and read as a
+ * collapse; pinning the floor makes the plot's height mean the same on every chart. Data below
+ * `yMin` moves the floor down to it (with the same headroom) rather than clipping the series, and a
+ * flat or empty series gets a unit of span instead of collapsing the axis to a point.
  */
 export function baseRange(
 	yMin: number,

@@ -6,13 +6,10 @@
  */
 
 /**
- * tooltips - centralized InfoChip wording for every dashboard metric card and
- * chart: components import strings by key, they do not write tooltip copy
- * inline. This file is the authority for the wording itself - nothing outside
- * it pins a string - so an edit here is the whole change.
- *
- * Most entries are plain strings; a few carry inline markup and are therefore
- * ReactNode. Consume as: <InfoChip tip={TOOLTIPS.rateFidelity} />.
+ * Centralized InfoChip wording for every dashboard metric card and chart: components import strings
+ * by key and write no tooltip copy inline. This file is the authority for the wording (nothing
+ * outside it pins a string), so an edit here is the whole change. Most entries are plain strings; a
+ * few carry inline markup and are ReactNode. Consume as: <InfoChip tip={TOOLTIPS.rateFidelity} />.
  */
 
 import { type ReactNode } from "react";
