@@ -8,10 +8,9 @@
  */
 
 /**
- * @file utils/log_redact.hpp
- * @brief Redaction by key for a `LogRecord`'s `fields` (issue #1556, #1557).
+ * @brief Redaction by key for a `LogRecord`'s `fields` (#1556, #1557).
  *
- * Text logging could not scrub a secret because nothing separated a secret's
+ * Text logging cannot scrub a secret, because nothing separates a secret's
  * value from the sentence around it. A `LogRecord`'s fields are structured, so
  * redaction can run once, by key, in `Logger::write`, before either renderer
  * sees the record - a caller never redacts its own fields.
@@ -37,11 +36,12 @@ inline constexpr std::string_view kRedactedMarker = "<redacted>";
 /**
  * @brief Whether @p name is a field name whose value must never reach a log.
  *
- * Matched case-insensitively, as a whole name - "auth_token" is not "token"
- * and is deliberately not caught, the same way `debug_redact.hpp`'s header
- * list only ever matched whole header names. The set is #1556's, shared by
- * the engine and the (not yet landed) app side so a record either side emits
- * redacts the same fields.
+ * Matched case-insensitively, as a whole name - "auth_token" is not "token" and
+ * is deliberately not caught, the same way `debug_redact.hpp`'s header list
+ * matches only whole header names. The set is #1556's, shared by the engine and
+ * the app's main-process logger (`app/electron/log.ts`), which
+ * `engine/tests/fixtures/log-redaction-conformance.json` pins together, so a
+ * record either side emits redacts the same fields.
  */
 inline bool is_secret_field_name (std::string_view name) {
     static constexpr std::array<std::string_view, 25> kSecretFieldNames = {
@@ -82,14 +82,14 @@ inline bool is_url_field_name (std::string_view name) {
 }
 
 /**
- * @brief Strip a URL (or a bare path-and-query) down to scheme, host and
- *        path, dropping `user:pass@`, the query string and the fragment.
+ * @brief Strip a URL (or a bare path-and-query) down to scheme, host and path,
+ *        dropping `user:pass@`, the query string and the fragment.
  *
- * A log line's job is to say *what* was called, not to carry the credentials
- * or tokens a query string, fragment or userinfo component can hold - the
- * same rule `request_log.cpp`'s line has always followed. `https://u:p@h/x?y=1`
- * becomes `https://h/x`; a path with no scheme (`/p?api_key=S`, a curl request
- * line) becomes `/p`.
+ * A log line's job is to say *what* was called, not to carry the credentials or
+ * tokens a query string, fragment or userinfo component can hold - the same
+ * rule `request_log.cpp`'s line follows. `https://u:p@h/x?y=1` becomes
+ * `https://h/x`; a path with no scheme (`/p?api_key=S`, a curl request line)
+ * becomes `/p`.
  *
  * Userinfo is everything before the *last* `@` of the authority, so a password
  * that itself contains `@` (`http://u:p@ss@h`) leaves nothing behind, and it is
