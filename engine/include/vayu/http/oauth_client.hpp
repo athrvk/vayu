@@ -27,9 +27,9 @@ namespace vayu::http::oauth {
 /**
  * The parameter names the token and authorization requests write themselves,
  * from the config's own fields or the flow's state. An extra parameter row
- * (`tokenParams`, `authorizationParams`, `refreshParams`, issue #2536) of one
- * of these names would contradict or repeat one of them, so an import does
- * not carry it and the engine does not send it.
+ * (`tokenParams`, `authorizationParams`, `refreshParams`, #2536) of one of
+ * these names would contradict or repeat one of them, so an import does not
+ * carry it and the engine does not send it.
  */
 constexpr auto RESERVED_PARAM_NAMES =
 std::to_array<std::string_view> ({ "grant_type", "client_id", "client_secret",
@@ -148,14 +148,14 @@ std::string url_field (const nlohmann::json& config, std::string_view name);
  * where the fourth segment is the raw `grantType` string, "" when absent or not
  * a string (#3689), so one client's grants never share a token.
  * then, for each of `EXTRA_PARAM_LISTS` in order with at least one
- * `extra_params` row (issue #2536):
+ * `extra_params` row (#2536):
  *   \x1f listName ":" key "=" value ( \x1e key "=" value )*
  * the rows' (key, value) pairs sorted by key, then value, comparing bytes, so
  * row order and `sendAs` do not change the key. A row whose key names a
  * credential (`core::vayu_ext::names_param_credential`: `client_assertion`,
  * `X-Api-Key`, ...) writes its key with an empty value, so the key, which
  * clients are handed, never carries the secret. A config with no eligible row
- * keys exactly as it did before the lists existed.
+ * keys on its five segments alone.
  */
 std::string cache_key (const nlohmann::json& config);
 
@@ -238,7 +238,7 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  *        the provider's token endpoint are added to it (a refresh, the fresh
  *        grant after a rejected refresh, and the wait for another call's
  *        refresh of the same token all count); a cache hit adds nothing.
- * @param cancel `ClientConfig::cancel` for the token request (issue #2683):
+ * @param cancel `ClientConfig::cancel` for the token request (#2683):
  *        a management-API handler's `RouteContext::server_stopping`, null
  *        everywhere else. A cancelled request is an `oauth2_network_error`.
  */
