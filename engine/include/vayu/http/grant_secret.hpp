@@ -8,7 +8,6 @@
  */
 
 /**
- * @file grant_secret.hpp
  * @brief The per-start secret that gates every write to file trust (#2356):
  * `POST`/`DELETE /file-grants` and `POST`/`DELETE /file-roots`.
  *
