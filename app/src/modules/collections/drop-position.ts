@@ -6,21 +6,16 @@
  */
 
 /**
- * Where a drop lands: pointer offset within a row, resolved to a destination
- * the reorder math can be handed.
- *
- * Pure, for the same reason `reorder-math.ts` is: the zone boundaries and the
- * landing rules are the part of a drag that is worth pinning, and a jsdom
- * gesture cannot reach them (jsdom has no layout, so every row measures 0px
+ * Where a drop lands: the pointer offset within a row, resolved to a destination the reorder math
+ * can take. Pure, like `reorder-math.ts`: the zone boundaries and landing rules are the part of a
+ * drag worth pinning, and a jsdom gesture cannot reach them (no layout, so every row measures 0px
  * tall).
  *
- * **One list per parent.** A collection's children are its sub-folders and its
- * requests in one `order` space (#2535), so a drop between two rows lands
- * between them whatever kind either is - a request between two folders, a
- * folder between two requests. The one place a kind still refuses is the top
- * level, which holds collections only: a request dropped on a root folder's
- * edge band has nowhere to sit, and the drop is refused rather than redirected
- * to a position the indicator did not show.
+ * **One list per parent.** A collection's sub-folders and requests share one `order` space (#2535),
+ * so a drop between two rows lands between them whatever their kinds. The one place a kind still
+ * refuses is the top level, which holds collections only: a request dropped on a root folder's edge
+ * band has nowhere to sit, and the drop is refused rather than redirected to a position the
+ * indicator did not show.
  */
 
 /** A row in the tree, as much of it as a drop decision needs. */
@@ -32,19 +27,16 @@ export type TreeEntity =
 export type DropZone = "before" | "inside" | "after";
 
 /**
- * How much of a folder row's height each edge band takes. The middle 50% is
- * "into the folder", which is the intent most drops on a folder have; the
- * quarters at top and bottom are what make reordering *between* folders
+ * How much of a folder row's height each edge band takes. The middle 50% is "into the folder", the
+ * intent of most drops on a folder; the top and bottom quarters make reordering *between* folders
  * reachable without hunting for a 2px seam.
  */
 export const FOLDER_EDGE_RATIO = 0.25;
 
 /**
- * Which band `offsetY` falls in for a row `height` tall.
- *
- * A request row has no inside: it is 50/50. A zero-height row (jsdom, or a row
- * measured mid-unmount) resolves to `before` rather than dividing by zero - the
- * least surprising of the three, and the caller still validates the result.
+ * Which band `offsetY` falls in for a row `height` tall. A request row has no inside: it is 50/50.
+ * A zero-height row (jsdom, or a row measured mid-unmount) resolves to `before` rather than
+ * dividing by zero, the least surprising of the three; the caller still validates the result.
  */
 export function zoneAt(offsetY: number, height: number, isFolder: boolean): DropZone {
 	if (height <= 0) return "before";
@@ -56,12 +48,10 @@ export function zoneAt(offsetY: number, height: number, isFolder: boolean): Drop
 }
 
 /**
- * Where a drop puts the row: a parent, and a position among its children.
- *
- * `anchorId` is a sibling to land beside, which is what a drop between two rows
- * means. `null` means an end of the list - the head for `before`, the tail for
- * `after` - which is what "into this folder" means, and it stays expressible
- * when the folder is empty.
+ * Where a drop puts the row: a parent, and a position among its children. `anchorId` is a sibling
+ * to land beside (a drop between two rows); `null` is an end of the list (the head for `before`,
+ * the tail for `after`), which is "into this folder" and stays expressible when the folder is
+ * empty.
  */
 export interface DropDestination {
 	/** The parent: a collection id, or `null` for the top level. */
@@ -71,11 +61,9 @@ export interface DropDestination {
 }
 
 /**
- * The destination a drop of `dragged` onto `target` in `zone` means, or `null`
- * when there is none - which is a refusal to drop, not a fallback.
- *
- * Identity ("onto itself") is refused here; descendant checks are not, because
- * they need the whole tree - the caller pairs this with `isDescendant`.
+ * The destination a drop of `dragged` onto `target` in `zone` means, or `null` for none, which is a
+ * refusal, not a fallback. Identity ("onto itself") is refused here; descendant checks need the
+ * whole tree, so the caller pairs this with `isDescendant`.
  */
 export function resolveDrop(params: {
 	dragged: TreeEntity;

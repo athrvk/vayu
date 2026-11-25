@@ -25,30 +25,23 @@ export interface RevealActiveSelectionOptions {
 
 export interface RevealActiveSelection {
 	/**
-	 * Put a row that just moved back where the user can see it and keep going
-	 * from: ancestors expanded, scrolled into view, and holding the tree's
-	 * single tab stop so a repeated Alt+Arrow lands on the same row.
-	 *
-	 * Separate from the selection reveal above and deliberately not routed
-	 * through it: a move does not change the selection, so nothing in that
-	 * effect's dependency list would fire, and forcing it to would re-expand
+	 * Put a row that just moved back where the user can see it and keep going from: ancestors
+	 * expanded, scrolled into view, and holding the tree's tab stop so a repeated Alt+Arrow lands
+	 * on the same row. Not routed through the selection reveal: a move does not change the
+	 * selection, so nothing in that effect's dependencies fires, and forcing it would re-expand
 	 * ancestors the user has since collapsed.
 	 */
 	revealEntity: (entity: TreeEntity) => void;
 }
 
 /**
- * Keep the row the active tab points at both rendered and on screen.
- *
- * Two effects, not one, and they cannot share a ref: the scroll can only run a
- * render *after* the reveal, once the expanded ancestors have put the row in
- * the list. Each records the selection it last acted on so it fires once per
- * selection rather than once per render.
- *
- * Both scrolls go through the tree's window (`rowWindow`), never the row
- * element: a row in a long list may not be mounted until the drawer has been
- * scrolled to it (#2543), and the window scrolls the drawer body alone, where
- * `scrollIntoView` would move every scrollable ancestor too (#1612).
+ * Keep the row the active tab points at both rendered and on screen. Two effects that cannot share
+ * a ref: the scroll can only run a render *after* the reveal, once the expanded ancestors have put
+ * the row in the list. Each records the selection it last acted on, so it fires once per selection,
+ * not per render. Both scrolls go through the tree's window (`rowWindow`), never the row element: a
+ * row in a long list may not be mounted until the drawer is scrolled to it (#2543), and the window
+ * scrolls the drawer body alone, where `scrollIntoView` would move every scrollable ancestor too
+ * (#1612).
  */
 export function useRevealActiveSelection(
 	treeRef: RefObject<HTMLDivElement | null>,
@@ -68,17 +61,12 @@ export function useRevealActiveSelection(
 	const movedRowRef = useRef<string | null>(null);
 
 	/*
-	 * Reveal whatever the active tab points at: expand its ancestor folders so
-	 * the row is rendered, then (in the effect below) scroll it into view.
-	 *
-	 * Guarded by a ref so it fires once per selection - the same discipline the
-	 * scroll effect below has always had. Unguarded, it re-ran after *every*
-	 * render of the tree (it lists `requestsByCollection` and `collections`, and
-	 * the tree re-renders on any expand-state change), so collapsing a
-	 * collection that held the selected request re-expanded it in the same
-	 * frame: the chevron looked dead and every ancestor of the active tab was
-	 * pinned open. Once per selection *change* means switching tabs away and
-	 * back reveals again, which is the behaviour that was wanted all along.
+	 * Reveal whatever the active tab points at: expand its ancestor folders so the row renders,
+	 * then (in the effect below) scroll it into view. Guarded by a ref so it fires once per
+	 * selection: it lists `requestsByCollection` and `collections` and the tree re-renders on any
+	 * expand-state change, so an unguarded run would re-expand a collapsed collection holding the
+	 * selected request in the same frame, a dead chevron with every ancestor of the active tab
+	 * pinned open. Once per selection *change*, so switching tabs away and back reveals again.
 	 */
 	useEffect(() => {
 		const selectionId = selectedCollectionId ?? selectedRequestId;
@@ -121,9 +109,8 @@ export function useRevealActiveSelection(
 	]);
 
 	/*
-	 * Once the selected row exists (after ancestors expand), scroll it into view.
-	 * Guarded by a ref so it only fires once per selection - otherwise every
-	 * expand/collapse elsewhere in the tree would yank the view back.
+	 * Once the selected row exists (after ancestors expand), scroll it into view, once per
+	 * selection: otherwise every expand or collapse elsewhere in the tree would yank the view back.
 	 */
 	useEffect(() => {
 		const id = selectedCollectionId ?? selectedRequestId;
@@ -150,19 +137,18 @@ export function useRevealActiveSelection(
 	);
 
 	/*
-	 * The other half of `revealEntity`, and it runs after *every* render on
-	 * purpose: the row it is waiting for may not exist yet (a move into a
-	 * collapsed folder renders it only once the expand lands), and there is no
-	 * dependency that names "the moved row is now in the list". Clearing a ref
-	 * rather than state keeps this out of the render loop it observes.
+	 * The other half of `revealEntity`, run after *every* render on purpose: the awaited row may
+	 * not exist yet (a move into a collapsed folder renders it only once the expand lands), and no
+	 * dependency names "the moved row is now in the list". Clearing a ref, not state, keeps this
+	 * out of the render loop it observes.
 	 */
 	useEffect(() => {
 		const pending = movedRowRef.current;
 		const tree = treeRef.current;
 		if (!pending || !tree) return;
-		// The roving tabindex has to follow: the moved row is where the user is
-		// working, and leaving the tab stop on the row it displaced means the
-		// next Alt+Arrow moves something else (see useRovingTreeFocus).
+		// The roving tabindex follows: the moved row is where the user is working, and a tab stop
+		// left on the row it displaced makes the next Alt+Arrow move something else (see
+		// useRovingTreeFocus).
 		if (rowWindow.current?.revealRow(pending, (row) => focusTreeRow(tree, row))) {
 			movedRowRef.current = null;
 		}

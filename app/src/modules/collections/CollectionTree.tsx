@@ -73,11 +73,8 @@ export default function CollectionTree() {
 	const selectedCollectionId = activeTab?.type === "collection" ? activeTab.entityId : null;
 	const selectedRequestId = activeTab?.type === "request" ? activeTab.entityId : null;
 
-	// TanStack Query hooks
-	// isError as well as isLoading. The query is destructured with `= []`, so a
-	// failed fetch is indistinguishable from an empty workspace unless it is
-	// asked about - and the empty state's "New collection" would invite a
-	// duplicate of collections that already exist.
+	// isError as well as isLoading: with `= []` a failed fetch looks like an empty workspace, and
+	// the empty state's "New collection" would invite duplicates of collections that exist.
 	const {
 		data: collections = [],
 		isLoading: isLoadingCollections,
@@ -86,8 +83,7 @@ export default function CollectionTree() {
 		refetch: refetchCollections,
 	} = useCollectionsQuery();
 
-	// Fetch requests for ALL collections (prefetched data is already in cache)
-	// This ensures the UI reflects the data immediately on load
+	// Every collection's requests; the prefetch already put them in the cache.
 	const allCollectionIds = collections.map((c) => c.id);
 	const { requestsByCollection } = useMultipleCollectionRequests(allCollectionIds);
 
@@ -149,10 +145,9 @@ export default function CollectionTree() {
 	const treeFocus = useRovingTreeFocus(treeRef, navigationModel);
 
 	/*
-	 * Where a dialog opened from a row's menu hands focus back (#3443). Radix
-	 * would restore it to the menu item that opened the dialog, which closed with
-	 * its menu, so focus lands on `<body>`. Through the window, because the row
-	 * may have been scrolled out of the mounted set while the dialog was up.
+	 * Where a dialog opened from a row's menu hands focus back (#3443): Radix would restore it to
+	 * the menu item that opened the dialog, gone with its menu, so focus lands on `<body>`. Through
+	 * the window, as the row may have scrolled out of the mounted set while the dialog was up.
 	 */
 	const returnFocusToRow = useCallback(
 		(key: string) => (event: Event) => {
@@ -177,11 +172,10 @@ export default function CollectionTree() {
 	);
 
 	/*
-	 * The toolbar's "+" asks the same question every other "New request" entry
-	 * point asks, so it cannot disagree with them about where the request lands.
-	 * One thing outranks that rule here: a collection's own tab being open says
-	 * which collection the user is in, and the button is on that collection's
-	 * screen. Only a collection that still exists counts - a tab can outlive it.
+	 * The toolbar's "+" asks the question every other "New request" entry point asks, so it cannot
+	 * disagree with them about where the request lands, with one exception: an open collection tab
+	 * says which collection the user is in, and the button is on its screen. Only a collection that
+	 * still exists counts; a tab can outlive it.
 	 */
 	const { newRequest, isCreating, pickerProps } = useNewRequest();
 	const lastCollectionId = useSessionStore((s) => s.lastCollectionId);
@@ -210,13 +204,11 @@ export default function CollectionTree() {
 		: null;
 
 	/*
-	 * A collection or request delete is a soft delete (issue #988) with an
-	 * undo toast already offered on completion (`useTreeCrud`'s `offerUndo`),
-	 * so a blocking dialog in front of it is friction with nothing to protect
-	 * against - the UX writing guide's own rule for a recoverable action. The
-	 * one exception is a collection with a running mock server: stopping that
-	 * mock is not undone by Undo (it is engine-process state, not a database
-	 * row), so that one case keeps asking first.
+	 * A collection or request delete is a soft delete (issue #988) with an undo toast on completion
+	 * (`useTreeCrud`'s `offerUndo`), so a blocking dialog is friction with nothing to protect
+	 * against, the UX writing guide's rule for a recoverable action. The exception is a collection
+	 * with a running mock server: Undo does not restart a stopped mock (engine-process state, not a
+	 * database row), so that case still asks first.
 	 */
 	const deleteNeedsConfirm =
 		panel.deleteConfirm?.type === "collection" &&
@@ -224,28 +216,24 @@ export default function CollectionTree() {
 		panel.deleteConfirm.runningMocks.length > 0;
 
 	/*
-	 * Where focus goes when the deleted row was the only one in the tree - the
-	 * one case the tree's own rule cannot answer, since a root otherwise falls
-	 * back to the root before it. "Add collection" is the nearest surviving
-	 * control, and the one thing left to do on an emptied tree.
+	 * Where focus goes when the deleted row was the tree's only one, which the tree's own rule
+	 * cannot answer (a root otherwise falls back to the root before it). "Add collection" is the
+	 * nearest surviving control, and the one thing left to do on an emptied tree.
 	 */
 	const addCollectionRef = useRef<HTMLButtonElement>(null);
 
 	const deleteRefocus = useDeleteRefocus(treeRef, doomedRowSelector, addCollectionRef);
 
 	/*
-	 * Skips the dialog for the common case by confirming on its own the instant
-	 * a delete that needs no confirmation is requested. `deleteConfirm` is still
-	 * set first so `doomedRowSelector` captures the row for focus restoration
-	 * while it is on screen, and this effect is declared after
-	 * `useDeleteRefocus` so that capture has run by the time `awaitRemoval`
-	 * reads it - with no dialog there is no close to arm the refocus from.
-	 * Re-runs while the delete is in flight are harmless: `confirmDelete` refuses
-	 * a second delete until the first settles, and once it does, `panel`'s own
-	 * memo picks up the cleared `deletingCollectionId`/`deletingRequestId` and
-	 * gives this effect a fresh reference to run again - which is what lets a
-	 * delete requested mid-flight (still sitting in `deleteConfirm`, per the
-	 * guarded clear in `useTreeCrud`) actually go through once its turn comes.
+	 * Confirms on its own the instant a delete that needs no confirmation is requested.
+	 * `deleteConfirm` is still set first so `doomedRowSelector` captures the row for focus
+	 * restoration while it is on screen, and this effect is declared after `useDeleteRefocus` so
+	 * that capture has run when `awaitRemoval` reads it (with no dialog, no close arms the
+	 * refocus). Re-runs while the delete is in flight are harmless: `confirmDelete` refuses a
+	 * second delete until the first settles, then `panel`'s memo picks up the cleared
+	 * `deletingCollectionId`/`deletingRequestId` and gives this effect a fresh reference, which
+	 * lets a delete requested mid-flight (kept in `deleteConfirm` by the guarded clear in
+	 * `useTreeCrud`) go through in its turn.
 	 */
 	useEffect(() => {
 		if (!panel.deleteConfirm || deleteNeedsConfirm) return;
@@ -254,10 +242,9 @@ export default function CollectionTree() {
 	}, [panel, deleteNeedsConfirm, deleteRefocus]);
 
 	/*
-	 * A row mid-rename or mid-delete is neither a drag source nor a drop target:
-	 * both states already own the row's input, and a move landing on a row that
-	 * is about to disappear is the two-writers problem in its clearest form.
-	 * Read from the CRUD slice rather than tracked again here - one source.
+	 * A row mid-rename or mid-delete is neither drag source nor drop target: both states own the
+	 * row's input, and a move landing on a row about to disappear is the two-writers problem. Read
+	 * from the CRUD slice, the one source.
 	 */
 	const isRowBusy = useCallback(
 		(entityId: string) =>
@@ -311,10 +298,9 @@ export default function CollectionTree() {
 	return (
 		<DrawerPanel
 			title="Collections"
-			// h-7, not h-8: the header is the drawer's half of the 32px chrome
-			// band now (it was a 40px header while the tab strip was up in the
-			// title bar), and a 32px control in it fills the band edge to edge -
-			// the hover fill lands on the rule underneath.
+			// h-7, not h-8: the header is the drawer's half of the 32px chrome band, and a 32px
+			// control would fill the band edge to edge, landing its hover fill on the rule
+			// underneath.
 			actions={
 				<>
 					{/* No TooltipProvider - a bare nested one would reset this
@@ -411,14 +397,11 @@ export default function CollectionTree() {
 			}
 		>
 			<div ref={treeRef} className="flex h-full flex-col">
-				{/* New Collection Form */}
 				{/*
-				 * px-3 pt-2 is not decorative. The DrawerPanel body scrolls
-				 * (overflow-y-auto overflow-x-hidden) and is flush so rows run edge
-				 * to edge, so it clips at its own edge - and this field's focus ring
-				 * is drawn *outside* its border box. Flush against the top-left, the
-				 * ring was clipped; the padding gives it room. Same fix the History
-				 * search field uses (see HistoryList).
+				 * px-3 pt-2 is not decorative: the DrawerPanel body scrolls (overflow-y-auto
+				 * overflow-x-hidden) and is flush so rows run edge to edge, so it clips at its own
+				 * edge, and this field's focus ring is drawn *outside* its border box. The padding
+				 * gives the ring room, as in the History search field (see HistoryList).
 				 */}
 				{panel.creatingCollection && (
 					<div className="flex gap-2 mb-2 px-3 pt-2">
@@ -539,24 +522,18 @@ export default function CollectionTree() {
 				)}
 
 				{/*
-				 * The tree's live region, and it ships empty on purpose.
-				 *
-				 * A live region has to already be in the DOM for a change to it to
-				 * be observed - mounting one alongside its first message is the
-				 * classic way to ship an announcer that never announces (see
-				 * ResponseAnnouncer, which carries the same constraint and the same
-				 * markup). Keyboard move announcements are the first thing that will
-				 * write here; until then the region exists and says nothing.
-				 *
-				 * Outside `role="tree"`: a tree's children are treeitems, and this is
-				 * not one.
+				 * The tree's live region, shipped empty on purpose: a live region must already be
+				 * in the DOM for a change to it to be observed, and one mounted with its first
+				 * message never announces (see ResponseAnnouncer, same constraint and markup).
+				 * Keyboard move announcements will be the first to write here. Outside
+				 * `role="tree"`: a tree's children are treeitems, and this is not one.
 				 */}
 				<div
 					role="status"
 					aria-live="polite"
-					// Explicit rather than left to role="status"'s implicit true -
-					// one utterance of the whole message is what a single-line region
-					// wants, and the Toaster shipped once assuming the wrong default.
+					// Explicit, not role="status"'s implicit true: a single-line region wants one
+					// utterance of the whole message, and the Toaster once shipped assuming the
+					// wrong default.
 					aria-atomic="true"
 					className="sr-only"
 					data-tree-live
@@ -575,16 +552,17 @@ export default function CollectionTree() {
 					confirmLabel="Delete collection"
 					description={
 						<>
-							{/* What the engine does is a soft delete (issue #988): the row
-							    is stamped and kept, and the Trash view (issue #989) is where
-							    it is restored from. So the copy says where it went rather
-							    than "cannot be undone", which stopped being true. */}
+							{/*
+							 * A soft delete (issue #988): the row is stamped and kept, and restored
+							 * from the Trash view (issue #989), so the copy says where it went
+							 * rather than "cannot be undone".
+							 */}
 							{`"${panel.deleteConfirm?.name}" and all its requests will be moved to the Trash, where they can be restored.`}
-							{/* A running mock is engine-process state, not a database row
-							    (unlike the delete itself), so it does not come back on
-							    Undo - stopping it here is the one irreversible part of an
-							    otherwise-reversible action, and the reason this dialog is
-							    asking at all. */}
+							{/*
+							 * A running mock is engine-process state, not a database row, so Undo
+							 * does not bring it back: stopping it is the one irreversible part of
+							 * this delete, and the reason this dialog asks at all.
+							 */}
 							{panel.deleteConfirm?.runningMocks &&
 								panel.deleteConfirm.runningMocks.length > 0 && (
 									<span className="mt-2 block">
@@ -609,12 +587,12 @@ export default function CollectionTree() {
 					isDeleting={panel.isDeleteInFlight}
 				/>
 
-				{/* Mounted only once a folder has been chosen, and unmounted when
-				    the dialog closes - so the tree costs nothing for a feature
-				    nobody has asked for, and each opening starts from the default
-				    options rather than the previous folder's (see the prop note).
-				    One dialog for the panel, never one per row: that would be a
-				    Radix portal for every folder in the tree. */}
+				{/*
+				 * Mounted once a folder is chosen and unmounted on close, so the tree pays nothing
+				 * for an unused feature and each opening starts from the default options (see the
+				 * prop note). One dialog per panel, never one per row, which would be a Radix
+				 * portal per folder.
+				 */}
 				{panel.runTarget && (
 					<RunCollectionDialog
 						collection={panel.runTarget}

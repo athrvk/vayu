@@ -6,20 +6,15 @@
  */
 
 /**
- * Tree walks over `parentId`, in one place.
+ * Tree walks over `parentId`, in one place, each with a visited-set termination guard, which is why
+ * the module exists. The engine rejects cycles on write but tolerates them in stored data
+ * (`collections.cpp`), so a `parentId` cycle is reachable, and an unguarded walk in the renderer is
+ * not a wrong answer but a synchronous hang of the window. A hand-rolled copy of these walks is the
+ * copy that lacks the guard.
  *
- * Every walk here carries a visited-set termination guard, and that is the
- * reason the module exists. The engine rejects cycles on write but explicitly
- * tolerates them in data that is already stored (`collections.cpp`), so a
- * `parentId` cycle is reachable - and an unguarded walk in the renderer is not a
- * wrong answer, it is a synchronous hang of the window. The resolver's own walk
- * had grown the guard with a comment saying exactly that; the three copies in
- * the tree and the query layer never received it, which is this repo's
- * hand-rolled-copy-of-a-primitive failure in its usual shape.
- *
- * Deliberately typed on `TreeNode` rather than `Collection`: the walks need an
- * id and a parent and nothing else, which keeps them testable without building
- * whole collections and lets a caller pass any narrowed row it already holds.
+ * Typed on `TreeNode`, not `Collection`: the walks need an id and a parent and nothing else, which
+ * keeps them testable without whole collections and lets a caller pass any narrowed row it already
+ * holds.
  */
 
 /** The minimum a walk needs from a row. `Collection` satisfies it structurally. */
@@ -29,12 +24,9 @@ export interface TreeNode {
 }
 
 /**
- * The ancestor chain of `startId`, root first and inclusive of the start node.
- *
- * Stops at the first id that resolves to no loaded node, so a walk from an
- * orphan yields just the orphan rather than pretending it has a parent, and
- * stops at the first id it has already visited, so a cycle terminates instead
- * of looping. Returns `[]` when `startId` itself is not loaded.
+ * The ancestor chain of `startId`, root first, the start node included. Stops at the first id that
+ * resolves to no loaded node (a walk from an orphan yields just the orphan) and at the first id
+ * already visited (a cycle terminates). `[]` when `startId` itself is not loaded.
  */
 export function walkAncestors<T extends TreeNode>(startId: string, nodes: readonly T[]): T[] {
 	const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -53,10 +45,9 @@ export function walkAncestors<T extends TreeNode>(startId: string, nodes: readon
 }
 
 /**
- * The names from the root down to `collectionId`, its own included: the parts
- * of a breadcrumb, for a caller that joins them itself or hands them on as a
- * list (the Copy path menu item, the agent reference lines). `[]` when the id is
- * not loaded. Built on `walkAncestors`, so it carries the cycle guard.
+ * The names from the root down to `collectionId`, its own included: a breadcrumb's parts, for a
+ * caller that joins them itself or passes them on as a list (the Copy path menu item, the agent
+ * reference lines). `[]` when the id is not loaded. Built on `walkAncestors`, with its cycle guard.
  */
 export function collectionNamePath(
 	collectionId: string,
@@ -66,12 +57,10 @@ export function collectionNamePath(
 }
 
 /**
- * "Payments / Auth" for a nested collection: the names from the root down, the
- * start node's own included. A root yields just its name, an unloaded id "".
- *
- * Takes an id-keyed map rather than the node list so a caller labelling many
- * rows builds the map once; `walkAncestors` rebuilds one per call. Same
- * termination guard as the other walks.
+ * "Payments / Auth" for a nested collection: the names from the root down, its own included; a root
+ * yields just its name, an unloaded id "". Takes an id-keyed map, not the node list, so a caller
+ * labelling many rows builds the map once (`walkAncestors` builds one per call). Same termination
+ * guard as the other walks.
  */
 export function collectionPath(
 	id: string,
@@ -89,11 +78,9 @@ export function collectionPath(
 }
 
 /**
- * Whether `candidateId` sits anywhere below `ancestorId`.
- *
- * Strict: a node is not its own descendant. Drop-target validation wants both
- * answers ("into itself" and "into its own subtree") but they are different
- * refusals, so the identity case stays the caller's to name.
+ * Whether `candidateId` sits anywhere below `ancestorId`. Strict: a node is not its own descendant.
+ * Drop-target validation wants both answers, but "into itself" and "into its own subtree" are
+ * different refusals, so the identity case stays the caller's to name.
  */
 export function isDescendant(
 	candidateId: string,
@@ -105,17 +92,11 @@ export function isDescendant(
 }
 
 /**
- * Every id in `rootId`'s subtree, the root first and included.
- *
- * `descend` is asked about each *child* before it is taken: a false answer
- * drops that child and everything under it, which is what "this subtree answers
- * for itself now" looks like from above (a sub-collection declaring its own
- * data contract - see `lib/data-contract.ts`). The root is never asked; it is
- * the subtree being described.
- *
- * Guarded like every walk in this module: a `parentId` cycle is reachable in
- * stored data, and an unguarded descent is a hung window rather than a wrong
- * answer.
+ * Every id in `rootId`'s subtree, the root first and included. `descend` is asked about each
+ * *child* before it is taken: false drops that child and everything under it, which is how a
+ * subtree that answers for itself looks from above (a sub-collection declaring its own data
+ * contract, see `lib/data-contract.ts`). The root is never asked. Guarded like every walk in this
+ * module.
  */
 export function collectSubtreeIds<T extends TreeNode>(
 	rootId: string,
@@ -160,12 +141,10 @@ export function countSubtreeRequests(
 }
 
 /**
- * Every entity id a cascade delete of `rootId` reaches: the collection itself,
- * its descendant folders, and the requests all of them hold.
- *
- * The engine performs the cascade; this is only the client's list of what has
- * gone stale (open tabs pointing at those rows), so it takes the request ids
- * from the caller's cache rather than re-deriving anything server-side.
+ * Every entity id a cascade delete of `rootId` reaches: the collection itself, its descendant
+ * folders, and the requests all of them hold. The engine performs the cascade; this is the client's
+ * list of what has gone stale (open tabs on those rows), so it takes the request ids from the
+ * caller's cache rather than re-deriving anything server-side.
  */
 export function collectDescendantEntityIds(
 	rootId: string,

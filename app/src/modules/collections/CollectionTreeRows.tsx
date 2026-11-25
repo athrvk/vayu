@@ -39,11 +39,10 @@ import { cn } from "@/lib/utils";
 import { rowInsetPx } from "@/constants/layout";
 
 /**
- * A row wrapper's classes by the gap above it (`rowSpacingAbove`) and the row's
- * height (`rowHeightUnits`), written out whole for Tailwind's scan. The gap is
- * top padding inside the wrapper, not a margin outside it, so the wrapper can
- * paint the indent guides across it and consecutive rows' guides join (#2773);
- * its height is the row's plus the gap, and the row fills what is below the
+ * A row wrapper's classes by the gap above it (`rowSpacingAbove`) and the row's height
+ * (`rowHeightUnits`), written out whole for Tailwind's scan. The gap is top padding inside the
+ * wrapper, not a margin, so the wrapper paints the indent guides across it and consecutive rows'
+ * guides join (#2773); its height is the row's plus the gap, and the row fills what is below the
  * padding.
  */
 const WRAPPER_CLASS = {
@@ -58,10 +57,9 @@ const ROW_KEY = "data-tree-row-key";
 const NO_ROWS = new Set<string>();
 
 /**
- * What the tree reaches the window through: the one way to act on a row that
- * may not be mounted (#2543). Keyboard focus, the selection reveal and the
- * moved-row reveal all go through `revealRow`, so none of them can act on a row
- * that is scrolled away.
+ * How the tree reaches the window: the one way to act on a row that may not be mounted (#2543).
+ * Keyboard focus, the selection reveal and the moved-row reveal all go through `revealRow`, so none
+ * acts on a scrolled-away row.
  */
 export interface TreeRowWindow {
 	/**
@@ -222,13 +220,10 @@ interface CollectionTreeRowsProps {
 }
 
 /**
- * The tree's rows, one flat list in the order `flattenVisibleRows` gives them,
- * mounted only where the drawer can show them (`useTreeWindow`).
- *
- * Each row sits in a wrapper that owns the gap above it, its height, and the
- * dimming of everything inside a folder being deleted. Memoised so a keystroke in the new-folder
- * field, which re-renders the tree, does not walk the list: `rows` changes only
- * when what is visible does.
+ * The tree's rows, one flat list in `flattenVisibleRows` order, mounted only where the drawer can
+ * show them (`useTreeWindow`). Each row sits in a wrapper owning the gap above it, its height, and
+ * the dimming inside a folder being deleted. Memoised so a keystroke in the new-folder field, which
+ * re-renders the tree, does not walk the list: `rows` changes only when what is visible does.
  */
 function CollectionTreeRowList({ rows, list = null, windowRef }: CollectionTreeRowsProps) {
 	const { deletingCollectionId } = useCollectionTreeState();

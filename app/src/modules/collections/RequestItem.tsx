@@ -23,13 +23,10 @@ import { cn } from "@/lib/utils";
 import { rowInsetPx } from "@/constants/layout";
 
 /**
- * What differs per row. The selection, the rename and delete state and every
- * handler come from the collection tree contexts - the same source
- * `CollectionItem` reads, so a row's behaviour cannot drift from its parent
- * folder's.
- *
- * Every prop is a primitive or an object from the query cache, so the `memo`
- * below skips a row whose request did not change (#2543).
+ * What differs per row. The selection, the rename and delete state and every handler come from the
+ * collection tree contexts, the source `CollectionItem` reads, so a row's behaviour cannot drift
+ * from its parent folder's. Every prop is a primitive or a query-cache object, so the `memo` below
+ * skips a row whose request did not change (#2543).
  */
 export interface RequestItemProps {
 	request: RequestSummary;
@@ -37,10 +34,9 @@ export interface RequestItemProps {
 	/** Tree depth, so the row can indent itself and still span full width. */
 	depth?: number;
 	/**
-	 * 1-based position among the rows this one shares a parent with, and how
-	 * many there are. Required rather than defaulted: only the renderer that
-	 * maps the siblings knows them, and a default would announce a plausible
-	 * lie ("1 of 1") to a screen reader rather than fail.
+	 * 1-based position among the rows sharing this one's parent, and their count. Required: only
+	 * the renderer mapping the siblings knows them, and a default would announce a plausible lie
+	 * ("1 of 1") to a screen reader rather than fail.
 	 */
 	posInSet: number;
 	setSize: number;
@@ -94,10 +90,9 @@ function RequestItemRow({
 
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
-		// The second click of a double-click also fires `click`; ignore it so the
-		// double-click starts a rename. The first click already opened the request
-		// (opening is idempotent), so there is nothing to defer - and none of the
-		// 80ms delay that made a single click to open feel laggy.
+		// The second click of a double-click also fires `click`; ignoring it lets the double-click
+		// start a rename. The first click already opened the request (opening is idempotent), so
+		// nothing is deferred and a single click opens without delay.
 		if (e.detail > 1) return;
 		onRequestClick(collectionId, request.id);
 	};
@@ -109,16 +104,15 @@ function RequestItemRow({
 	};
 
 	/**
-	 * The row's own box - the indent, the flex gap, `pr-3` - belongs to no child,
-	 * so a click there has nowhere to go. `self-stretch` on the label button
-	 * recovered the height; it cannot recover the indent, because the indent is
-	 * padding on the row (deliberately, so the fill reaches the panel edge) and on
-	 * a collection row the chevron sits between it and the button.
+	 * The row's own box (the indent, the flex gap, `pr-3`) belongs to no child, so a click there
+	 * has nowhere to go. `self-stretch` on the label button covers the height but not the indent,
+	 * which is padding on the row (so the fill reaches the panel edge) and, on a collection row,
+	 * has the chevron between it and the button.
 	 *
-	 * So the row delegates. `target === currentTarget` is exactly "the pointer
-	 * landed on the row itself, not on anything inside it", which excludes the
-	 * label button, the ⋯ menu and the chevron without naming any of them - and
-	 * without double-firing when a click on the button bubbles through here.
+	 * So the row delegates: `target === currentTarget` is exactly "the pointer landed on the row
+	 * itself, not on anything inside it", which excludes the label button, the ⋯ menu and the
+	 * chevron without naming them, and does not double-fire when a click on the button bubbles
+	 * through.
 	 */
 	const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
 
@@ -144,11 +138,10 @@ function RequestItemRow({
 		moveActions: dnd.moveActions,
 		isDeleting,
 	});
-	// A row mid-rename or mid-delete offers no right-click menu: the rename field
-	// wants the platform's own Cut/Copy/Paste rather than a menu of row actions
-	// over what is being typed. The ⋯ menu leaves only for the rename; through a
-	// delete it stays mounted, because it is what hands focus back to the row
-	// that the delete refocus then moves on from (#3443).
+	// No right-click menu mid-rename or mid-delete: the rename field wants the platform's own
+	// Cut/Copy/Paste, not row actions over what is being typed. The ⋯ menu leaves only for the
+	// rename; through a delete it stays mounted, as it hands focus back to the row the delete
+	// refocus then moves on from (#3443).
 	const hasMenu = !isRenaming && !isDeleting && menu.actions.length > 0;
 
 	return (
@@ -162,9 +155,8 @@ function RequestItemRow({
 			role="treeitem"
 			tabIndex={-1}
 			aria-selected={isSelected}
-			// The hierarchy a screen reader announces. Every row is a sibling in
-			// one flat list, so depth is invisible unless each row states it.
-			// Level is 1-based, so a root row is level 1.
+			// The hierarchy a screen reader announces: every row is a sibling in one flat list, so
+			// depth is invisible unless each row states it. Level is 1-based.
 			aria-level={depth + 1}
 			aria-posinset={posInSet}
 			aria-setsize={setSize}
@@ -179,11 +171,10 @@ function RequestItemRow({
 			// reaches both panel edges.
 			style={{ paddingLeft: rowInsetPx(depth), ...treeGuideStyle(depth, activeGuideLevel) }}
 			className={cn(
-				// focus-row: this row is the perceived target, not the narrower
-				// label button inside it - it paints the keyboard focus ring.
-				// The transition omits outline-color (see CollectionItem) so the
-				// focus ring appears instantly instead of fading between rows.
-				// h-8: shared drawer row height (see CollectionItem).
+				// focus-row: this row, not the narrower label button, is the perceived target and
+				// paints the focus ring. The transition omits outline-color (see CollectionItem),
+				// so the ring appears instantly. h-8: the shared drawer row height (see
+				// CollectionItem).
 				"focus-row flex h-8 items-center gap-2 pr-3 group cursor-pointer transition-[color,background-color,border-color]",
 				isDeleting && "opacity-50",
 				isSelected
@@ -200,25 +191,23 @@ function RequestItemRow({
 				onDoubleClick={handleDoubleClick}
 				tabIndex={-1}
 				data-tree-activate
-				// self-stretch: the row is `items-center`, which makes every child
-				// content-height - so this button, the only thing wired to the open
-				// handler, was ~22px tall inside a 32px row that paints a full-height
-				// hover fill and `cursor-pointer`. The top and bottom ~5px of the row
-				// looked clickable and were not. Stretching to the row's height
-				// costs nothing (the button's own `items-center` still centres the
-				// badge and label) and `focus-row` keeps painting the ring.
+				// self-stretch: the row is `items-center`, which makes every child content-height,
+				// so this button, the only thing wired to the open handler, would be ~22px in a
+				// 32px row that paints a full-height hover fill and `cursor-pointer`, its top and
+				// bottom ~5px clickable-looking but dead. Stretching costs nothing (the button's
+				// own `items-center` still centres the badge and label), and `focus-row` keeps
+				// painting the ring.
 				className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 				disabled={isDeleting || isRenaming}
 			>
 				{/*
-				 * A bordered chip on every row was a second shape competing with the
-				 * tree's own hover fill and selection ring, and paid `7ch` of width on
-				 * every row so the two verbs almost nobody has in a tree could fit.
-				 * The text variant in a fixed `5ch` column (the caller-set pattern the
-				 * import preview already uses) is colour alone, aligned with the same
-				 * column every sibling row uses. `MethodBadge` abbreviates the three
-				 * standard methods longer than five characters (`DEL`, `OPT`, `CONN`)
-				 * and reveals the full name on hover, so no method overflows the box.
+				 * The text variant in a fixed `5ch` column (the caller-set pattern the import
+				 * preview uses), not a bordered chip: a chip is a second shape competing with the
+				 * tree's hover fill and selection ring, and costs `7ch` on every row to fit verbs a
+				 * tree almost never holds. Colour alone, aligned with the column every sibling row
+				 * uses. `MethodBadge` abbreviates the three standard methods longer than five
+				 * characters (`DEL`, `OPT`, `CONN`) and shows the full name on hover, so no method
+				 * overflows the box.
 				 */}
 				<MethodBadge
 					id={methodId}

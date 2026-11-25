@@ -19,12 +19,9 @@ import { isCommitEnter } from "@/lib/keyboard";
 import { rowInsetPx } from "@/constants/layout";
 
 /**
- * The inline "new collection" form a folder row opens, as the first row under it.
- *
- * A component of its own, not markup in `CollectionItem`, because it is the one
- * reader of the draft name: that string changes on every keystroke, and a folder
- * row that read it would re-render with each one. Here the keystroke renders
- * this form and nothing else (#2543).
+ * The inline "new collection" form a folder row opens, as the first row under it. Its own
+ * component, not markup in `CollectionItem`, because it is the one reader of the draft name, which
+ * changes on every keystroke: a folder row reading it would re-render with each one (#2543).
  */
 export default function NewFolderForm({
 	parentId,

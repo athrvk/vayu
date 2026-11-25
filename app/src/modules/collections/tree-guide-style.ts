@@ -17,33 +17,29 @@ const ACTIVE_GUIDE_COLOR = "hsl(var(--primary) / 0.5)";
 const layer = (color: string) => `linear-gradient(${color}, ${color})`;
 
 /**
- * The left edge of level `level`'s guide: its 1px line is centred on the
- * centre of that level's chevron. A background layer is placed by its left
- * edge, so the line sits half a pixel back from the centre; without that
- * half pixel every guide ran 0.5px right of its chevron, measured at both
+ * The left edge of level `level`'s guide: its 1px line is centred on that level's chevron. A
+ * background layer is placed by its left edge, so the line starts half a pixel back from the
+ * centre; without that half pixel every guide sits 0.5px right of its chevron, measured at both
  * densities. Read off `--spacing-target`, so it follows the density setting.
  */
 const guideX = (level: number) =>
 	`calc(${rowInsetPx(level)}px + var(--spacing-target) / 2 - 0.5px)`;
 
 /**
- * The indent guides of a row at `depth` (#2773): one 1px vertical line for each
- * ancestor level, drawn as background layers on the row itself so a level costs
- * no DOM node. Each row's segment (and its wrapper's, across the gap above it)
- * joins its neighbours' into one line from below a folder to its last visible
- * descendant.
+ * The indent guides of a row at `depth` (#2773): one 1px vertical line per ancestor level, drawn as
+ * background layers on the row itself so a level costs no DOM node. Each row's segment (and its
+ * wrapper's, across the gap above it) joins its neighbours' into one line from below a folder to
+ * its last visible descendant. Spread beside `paddingLeft`; a depth-0 row has no ancestors and gets
+ * nothing.
  *
- * `activeGuideLevel` adds one accent layer over that level's line, the selected
- * request's folder. A background image paints over the row's fill and under its
- * content, so the guides stay visible on a selected or hovered row.
+ * `activeGuideLevel` adds one accent layer over that level's line, the selected request's folder. A
+ * background image paints over the row's fill and under its content, so the guides stay visible on
+ * a selected or hovered row.
  *
- * Spread beside `paddingLeft`; a depth-0 row has no ancestors and gets nothing.
- *
- * `gapUnits` is for the wrapper around a row: the space above a row is padding
- * on that wrapper (`CollectionTreeRows`), outside the row's own box, so the
- * wrapper paints the same lines across just that strip, in `--spacing` units.
- * Only the strip, never the wrapper's full height: the row paints its own
- * segment, and the translucent accent would show twice behind it.
+ * `gapUnits` is for the wrapper around a row: the space above a row is padding on that wrapper
+ * (`CollectionTreeRows`), outside the row's own box, so the wrapper paints the same lines across
+ * just that strip, in `--spacing` units. Only the strip, never the wrapper's full height: the row
+ * paints its own segment, and the translucent accent would show twice behind it.
  */
 export function treeGuideStyle(
 	depth: number,
