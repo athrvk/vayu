@@ -70,10 +70,8 @@ struct BodySource {
 };
 
 /**
- * @brief Data associated with each HTTP transfer
- *
- * This struct holds all state needed to track a single HTTP request
- * through its lifecycle in the event loop.
+ * @brief Everything the event loop tracks for one HTTP transfer, from
+ *        submission to completion.
  */
 struct TransferData {
     size_t request_id = 0;

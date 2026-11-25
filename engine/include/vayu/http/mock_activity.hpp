@@ -17,7 +17,7 @@
 
 namespace vayu::http {
 
-/** One request a mock server answered, or failed to match (issue #481 phase 3). */
+/** One request a mock server answered, or failed to match (#481 phase 3). */
 struct MockActivityEntry {
     std::int64_t at_ms = 0;
     std::string method;
@@ -34,13 +34,10 @@ struct MockActivityEntry {
 };
 
 /**
- * A bounded, mutex-guarded record of what one running mock has served (issue
- * #481 phase 3).
- *
- * Unlike the route table, which is an immutable start-time snapshot read
- * lock-free from every listener thread, this is written from every listener
- * thread on every single request - so it needs a lock the route table does
- * not.
+ * A bounded, mutex-guarded record of what one running mock has served (#481
+ * phase 3). It needs the lock the route table does not: every listener thread
+ * writes it on every request, while the route table is an immutable start-time
+ * snapshot read lock-free.
  */
 class MockActivityLog {
     public:

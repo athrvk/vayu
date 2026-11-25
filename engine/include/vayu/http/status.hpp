@@ -6,13 +6,11 @@
  */
 
 /**
- * @file status.hpp
  * @brief Canonical IANA HTTP reason phrases.
  *
- * Single source of truth for status-text rendering across the engine
- * (HTTP client header callbacks, CLI display, persisted results). The
- * frontend trusts whatever statusText the engine emits - it does not
- * have its own copy of this table.
+ * The engine's one table for status text (HTTP client header callbacks, CLI
+ * display, persisted results). The frontend has no copy: it shows whatever
+ * statusText the engine emits.
  *
  * Verified against the IANA HTTP Status Code Registry:
  *   https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
@@ -26,10 +24,10 @@
  * them. Code 418 is marked "(Unused)" in IANA - intentionally omitted;
  * the class-based fallback (Client Error) applies.
  *
- * For codes outside the registry the function returns the class label
- * ("Informational", "Success", "Redirect", "Client Error",
- * "Server Error"). Status 0 - vayu's synthetic value for client-side
- * failures - returns "Error".
+ * A code the table lacks returns its class label ("Informational",
+ * "Success", "Redirect", "Client Error", "Server Error") when it is in
+ * 100-599, and "Unknown" otherwise. Status 0 - vayu's synthetic value for
+ * client-side failures - returns "Error".
  */
 
 #pragma once

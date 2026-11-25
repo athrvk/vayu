@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/stream_content_marker.hpp
  * @brief A request's first content marker (#3774): a literal byte string a
  *        bounded stream's `StreamTally` watches the wire for, so a run can
  *        time the first content an API sends rather than its first event.
