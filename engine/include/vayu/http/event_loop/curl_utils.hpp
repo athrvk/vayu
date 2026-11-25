@@ -27,7 +27,6 @@
 
 namespace vayu::http::detail {
 
-// Forward declaration
 struct TransferData;
 class DnsCache;
 
@@ -55,7 +54,7 @@ class DnsCache;
  *             May be null where no handle is available; the mapping then
  *             falls back to the code alone.
  *
- * An undecodable body gets its own code (`BadContentEncoding`, issue #2462)
+ * An undecodable body gets its own code (`BadContentEncoding`, #2462)
  * and a message that opens with a plain statement of the cause, then libcurl's
  * text. The `Content-Encoding` is read off @p curl, so without a handle the
  * sentence names none. A redirect loop is not a libcurl code: no handle
@@ -66,7 +65,7 @@ class DnsCache;
  * libcurl's text unchanged) unless @p curl reached a peer and stopped at an
  * `http` or `https` URL: then the peer answered in something other than
  * HTTP/1.x, usually an h2c server's preface, and it is `ProtocolMismatch`
- * (issue #3306), with a hint about h2c when the request asked for `http2` and
+ * (#3306), with a hint about h2c when the request asked for `http2` and
  * the handle's `CURLINFO_EFFECTIVE_URL` is `http://`. Without a handle it
  * stays `InvalidUrl`.
  *
@@ -127,13 +126,13 @@ const ConnectedPeerCheck* peer_check = nullptr);
  *        which is what `Response::transfer_attempted` records (#2412).
  *
  * False only for a URL libcurl could not parse or a scheme the handle refuses,
- * and then only while @p curl never reached a peer: a reply libcurl cannot
- * read arrives as the same code after a real hop. A redirect the engine
- * refuses (`resolve_redirect_target`, the limit) is not a libcurl code: the
- * hop that asked for it finished with `CURLE_OK`, so it is an attempt. Every
- * other code, a resolve failure and an unreadable client
- * certificate included, is an attempt. Read before anything else reuses the
- * handle. A null handle reads as one that reached no peer.
+ * and then only while @p curl never reached a peer: a reply libcurl cannot read
+ * arrives as the same code after a real hop. A redirect the engine refuses
+ * (`resolve_redirect_target`, the limit) is not a libcurl code: the hop that
+ * asked for it finished with `CURLE_OK`, so it is an attempt. Every other code,
+ * a resolve failure and an unreadable client certificate included, is an
+ * attempt. Read before anything else reuses the handle. A null handle reads as
+ * one that reached no peer.
  */
 [[nodiscard]] bool curl_transfer_attempted (CURL* curl, CURLcode code);
 
@@ -141,11 +140,9 @@ const ConnectedPeerCheck* peer_check = nullptr);
  * @brief Put the transport policy on a handle: the protocols it may speak, TLS
  *        verification and the proxy.
  *
- * The one place any driver configures any of them. It exists because the three
- * drivers each grew their own copy of the SSL block and only two of them ever
- * grew a proxy block, so `POST /execute` and a load run honoured
- * `CURLOPT_PROXY` while an SSE stream silently did not (issue #705). A
- * transport option added here reaches all three by construction.
+ * The one place any driver configures any of them, so a transport option
+ * added here reaches all three by construction; a copy per driver lets one of
+ * them silently lack an option the others honour (#705).
  *
  * Every mode writes `CURLOPT_PROXY` rather than skipping it: handles are
  * reused (the single-request client keeps one for its lifetime, the event loop
@@ -173,10 +170,11 @@ const ConnectedPeerCheck* peer_check = nullptr);
  * a scheme other than `http` or `https` in `resolve_redirect_target`, as an
  * `InvalidUrl` worded `Protocol "ftp" is disabled (in redirect)`.
  *
- * @param verify_ssl The request's own `verifySSL`. Per-request today; phase 2
- *                   of #704 adds the policy-level CA fields beside it.
+ * @param verify_ssl The request's own `verifySSL`, per request; the policy's
+ *                   CA bundle (`TransportPolicy::ca_bundle_path`, phase 2 of
+ *                   #704) sits beside it.
  * @param url The URL the handle was given (`wire_url`), for the
- *            client-certificate lookup (issue #707); never `request.url`, whose
+ *            client-certificate lookup (#707); never `request.url`, whose
  *            typed text can name another scheme or host (#2465). Parsed only
  *            when the registry is non-empty, so the load path pays nothing for
  *            a feature it is not using.
@@ -185,9 +183,10 @@ const ConnectedPeerCheck* peer_check = nullptr);
  *                   callback its refusal and its count into it.
  * @return The registry entry whose certificate was put on the handle, or null
  *         when none matched or @p url is not `https` (a certificate is only
- *         presented in a TLS handshake, #3260). Points into @p policy and lives exactly as long -
- *         a caller that keeps it (both design funnels record the label on the
- *         response) must copy what it needs before the policy goes away.
+ *         presented in a TLS handshake, #3260). Points into @p policy and
+ *         lives exactly as long - a caller that keeps it (both design funnels
+ *         record the label on the response) must copy what it needs before the
+ *         policy goes away.
  */
 const ClientCertRule* apply_transport_policy (CURL* curl,
 const TransportPolicy& policy,
@@ -208,17 +207,14 @@ const char* status_text (int code);
  * `/`, either of which changes the scheme default port and the host read off
  * the typed text (#2465).
  *
- * Handles the two forms the DNS pre-resolution path used to mis-parse: an IPv6
- * literal (`http://[::1]:8080/`, whose colons are part of the address) and
- * userinfo (`http://user:pass@host/`, whose colon is not a port separator).
- * Never throws, for any input - this runs on the event loop worker thread,
- * which has no exception handler.
+ * Handles the two forms a naive split mis-parses: an IPv6 literal
+ * (`http://[::1]:8080/`, whose colons are part of the address) and userinfo
+ * (`http://user:pass@host/`, whose colon is not a port separator). Never
+ * throws, for any input - this runs on the event loop worker thread, which has
+ * no exception handler.
  */
 UrlAuthority parse_authority (const std::string& url);
 
-/**
- * @brief Extract hostname from URL
- */
 std::string extract_hostname (const std::string& url);
 
 /**
@@ -233,26 +229,26 @@ int extract_port (const std::string& url);
 /**
  * @brief Reject a request that cannot be put on the wire as written.
  *
- * Every driver calls this before configuring a handle. Six such requests:
- * a URL whose scheme is not `http` or `https` (`vayu::http::unsendable_scheme`;
- * libcurl is built with other protocols and would read a `file://` URL), a
- * HEAD with a body (`CURLOPT_NOBODY` resets curl's method back to HEAD and
- * drops the body, so honouring both is impossible), a binary body or file
- * part whose file no plan checked (`vayu::http::unplanned_file_ref` - the file
- * rule runs once per send or run, before this, and a body that skipped it is
- * refused rather than read),
- * header text carrying a byte no header line can hold - see
+ * Every driver calls this before configuring a handle. Six such requests: a URL
+ * whose scheme is not `http` or `https` (`vayu::http::unsendable_scheme`;
+ * libcurl is built with other protocols and would read a `file://` URL), a HEAD
+ * with a body (`CURLOPT_NOBODY` resets curl's method back to HEAD and drops the
+ * body, so honouring both is impossible), a binary body or file part whose file
+ * no plan checked (`vayu::http::unplanned_file_ref` - the file rule runs once
+ * per send or run, before this, and a body that skipped it is refused rather
+ * than read), header text carrying a byte no header line can hold - see
  * `vayu::http::unsendable_header_text` - and a non-ASCII host with no ASCII
  * name (`vayu::http::unsendable_host`), and a URL naming Vayu's own engine or
- * MCP port (`vayu::http::reserved_target_port`, #2355). In each case the
- * caller is told rather than having half its request silently discarded. The
- * URL rules read `wire_url (request)`, the URL the handle is given (#2465).
+ * MCP port (`vayu::http::reserved_target_port`, #2355). In each case the caller
+ * is told rather than having half its request silently discarded. The URL rules
+ * read `wire_url (request)`, the URL the handle is given (#2465).
  *
  * Being the one gate every driver passes through *before* configuring anything
  * is what makes it the home for a rule that has to hold for every origin -
  * `build_request_header_list` sees the same headers, but can only drop.
  *
- * @return The error to complete the request with, or nullopt when it is sendable.
+ * @return The error to complete the request with, or nullopt when it is
+ *         sendable.
  */
 [[nodiscard]] std::optional<Error> validate_transferable (const Request& request);
 
@@ -288,7 +284,7 @@ Response error_response (const Error& error);
  * Order matters: `CURLOPT_POSTFIELDS` switches curl's method to POST, so a
  * body-bearing GET has to re-assert its method afterwards with
  * `CURLOPT_CUSTOMREQUEST` - otherwise a GET with a body goes out as a POST.
- * Shared by both clients so the two cannot drift apart again.
+ * Shared by both clients so the two cannot drift apart.
  *
  * Requires `validate_transferable(request)` to have passed.
  *
@@ -301,16 +297,15 @@ Response error_response (const Error& error);
  * callback**, which libcurl needs to rewind the body for the second leg of
  * Digest/NTLM - without it that leg fails rather than resending. A redirect
  * that resends the body is rewound by the engine for a streamed upload
- * (`RedirectChain::apply_method` through `rewind_body_source`); a form part
- * is rewound by libcurl through this callback.
- * `UPLOAD` means PUT to libcurl, so the method is re-asserted with
- * `CURLOPT_CUSTOMREQUEST` afterwards.
+ * (`RedirectChain::apply_method` through `rewind_body_source`); a form part is
+ * rewound by libcurl through this callback. `UPLOAD` means PUT to libcurl, so
+ * the method is re-asserted with `CURLOPT_CUSTOMREQUEST` afterwards.
  *
  * A **form-data file part** is read through `curl_mime_data_cb` from the file
  * the plan opened (`FormField::approved`, #2416) with the same two callbacks;
  * its filename and Content-Type are set explicitly (`declared_file_name`,
  * `file_part_content_type`), because libcurl derives neither for a callback
- * part the way it did for a path.
+ * part, as it does for a path part.
  *
  * @param source Receives what the handle now points into (the multipart tree,
  *        the streamed body's reader), which must outlive the transfer: a local
@@ -362,18 +357,18 @@ void rewind_body_source (BodySource& source);
  * libcurl skips the whitespace after the colon before deciding, so a value of
  * spaces alone reads as a removal too. A value this answers false for is
  * therefore never spelled `key + ": " + value`: a request row goes out in
- * libcurl's empty-header form `Key;` instead (issue #3220).
+ * libcurl's empty-header form `Key;` instead (#3220).
  */
 [[nodiscard]] bool has_header_value (std::string_view value);
 
 /**
  * @brief The request's own `Cookie` rows as one value, for `CURLOPT_COOKIE`.
  *
- * Every row named `Cookie` that has a value (`has_header_value`), trimmed of its edge
- * whitespace and joined with `; ` in row order; empty when there is none.
- * libcurl writes this after the jar's matches on one `Cookie` line, so a
- * request never carries two (RFC 6265 section 5.4, issue #2788); a redirect
- * to another origin drops it, as it would a listed `Cookie` header.
+ * Every row named `Cookie` that has a value (`has_header_value`), trimmed of
+ * its edge whitespace and joined with `; ` in row order; empty when there is
+ * none. libcurl writes this after the jar's matches on one `Cookie` line, so a
+ * request never carries two (RFC 6265 section 5.4, #2788); a redirect to
+ * another origin drops it, as it would a listed `Cookie` header.
  */
 [[nodiscard]] std::string typed_cookie_value (const Request& request);
 
@@ -382,14 +377,14 @@ void rewind_body_source (BodySource& source);
  *        puts on the wire.
  *
  * The one place a driver's outbound header set is decided: the request's own
- * headers minus the suppressed, plus what the engine derives - the
- * body-implied Content-Type, an `mcp` body's mirrored headers
- * (`mcp_derived_headers`, #3762), and the declared defaults @p policy carries
- * for a name the request does not (see `http/default_headers.hpp`). A derived
- * header is added only under a name the request does not carry and does not
- * refuse (`suppresses_default_header`). All three
- * drivers - the single-request client, the load event loop and the SSE stream
- * consumer - call this, so none of them can disagree about what goes out.
+ * headers minus the suppressed, plus what the engine derives - the body-implied
+ * Content-Type, an `mcp` body's mirrored headers (`mcp_derived_headers`,
+ * #3762), and the declared defaults @p policy carries for a name the request
+ * does not (see `http/default_headers.hpp`). A derived header is added only
+ * under a name the request does not carry and does not refuse
+ * (`suppresses_default_header`). All three drivers - the single-request client,
+ * the load event loop and the SSE stream consumer - call this, so none of them
+ * can disagree about what goes out.
  *
  * It has no error channel, deliberately: a header it cannot append it drops.
  * Text that must be *refused* rather than dropped is caught one step earlier,
@@ -404,52 +399,51 @@ void rewind_body_source (BodySource& source);
  *
  * libcurl writes `application/x-www-form-urlencoded` into a POSTFIELDS body or
  * a bodyless POST whose list names no Content-Type. The engine never leaves it
- * that gap (issue #2464): where nothing declared a type, the list carries
- * libcurl's removal line `Content-Type:`, which is not a sent header and is not
- * recorded as one.
+ * that gap (#2464): where nothing declared a type, the list carries libcurl's
+ * removal line `Content-Type:`, which is not a sent header and is not recorded
+ * as one.
  *
- * The request's own lines go first, one list line per `HeaderList` line in
- * the order the request holds them (issue #2466): a repeated name is sent
- * repeated, and authored order is wire order.
+ * The request's own lines go first, one list line per `HeaderList` line in the
+ * order the request holds them (#2466): a repeated name is sent repeated, and
+ * authored order is wire order.
  *
  * A request line whose value is empty or only whitespace is sent empty, as
  * libcurl's `Name;` (see `has_header_value`), and recorded with the value `""`
- * (issue #3220). Removing a default is `suppressed_default_headers`' job, never
- * a blank row's. A blank `Content-Type` is the one line not sent: it means "no
+ * (#3220). Removing a default is `suppressed_default_headers`' job, never a
+ * blank row's. A blank `Content-Type` is the one line not sent: it means "no
  * Content-Type", so the body's implied type stays off (on a binary body, where
  * it is absent instead, the file's type applies) and so does libcurl's form
  * type.
  *
- * `Cookie` is the exception (issue #2788): its rows are recorded, one entry
- * per row as typed, but never appended. libcurl ignores `CURLOPT_COOKIE`
- * while the list names a Cookie and writes the jar's matches on a line of
- * their own, so a listed row would put two `Cookie` lines on the wire.
+ * `Cookie` is the exception (#2788): its rows are recorded, one entry per row
+ * as typed, but never appended. libcurl ignores `CURLOPT_COOKIE` while the list
+ * names a Cookie and writes the jar's matches on a line of their own, so a
+ * listed row would put two `Cookie` lines on the wire.
  * `apply_default_header_options` hands the rows to libcurl instead, as
  * `typed_cookie_value`, and libcurl merges them into the jar's line. A blank
  * `Cookie` row joins nothing into it and is not recorded.
  *
  * libcurl also adds `Expect: 100-continue` to an HTTP/1.1 body over 1 MiB and
- * waits a second for the interim reply (issue #2468). Unless
- * `policy.expect_continue` is on, the list carries the removal line `Expect:`,
- * unrecorded for the same reason. A request that types an Expect sends it as
- * typed, a blank one as `Expect;`, and gets no removal line: libcurl adds none
- * of its own beside a listed Expect. With the policy on, nothing is appended and
- * libcurl decides, unless the send refuses the `Expect` default
- * (`suppresses_default_header`), which removes it again.
+ * waits a second for the interim reply (#2468). Unless `policy.expect_continue`
+ * is on, the list carries the removal line `Expect:`, unrecorded for the same
+ * reason. A request that types an Expect sends it as typed, a blank one as
+ * `Expect;`, and gets no removal line: libcurl adds none of its own beside a
+ * listed Expect. With the policy on, nothing is appended and libcurl decides,
+ * unless the send refuses the `Expect` default (`suppresses_default_header`),
+ * which removes it again.
  *
- * @param sent When non-null, cleared and filled with exactly the lines
- *        appended to the returned list, in order. That is
- *        `Response::request_headers`,
+ * @param sent When non-null, cleared and filled with exactly the lines appended
+ *        to the returned list, in order. That is `Response::request_headers`,
  *        the "sent record" the response pane's Headers tab and a test script's
  *        `pm.request.headers` read - built from the same appends as the list
- *        rather than snapshotted beside it, because a snapshot taken
- *        separately reported headers libcurl had dropped. The load driver
- *        passes nullptr: it records no sent headers, and building the map per
- *        transfer would cost the hot path an allocation for nobody.
+ *        rather than snapshotted beside it, because a snapshot taken separately
+ *        would report headers libcurl dropped. The load driver passes nullptr:
+ *        it records no sent headers, and building the map per transfer would
+ *        cost the hot path an allocation for nobody.
  *
  * @return The header list, which the caller **must** free with
- *         `curl_slist_free_all` once the transfer has finished, or nullptr
- *         when the request sends no headers at all.
+ *         `curl_slist_free_all` once the transfer has finished, or nullptr when
+ *         the request sends no headers at all.
  */
 [[nodiscard]] curl_slist* build_request_header_list (const Request& request,
 const DefaultHeaderPolicy& policy,
@@ -475,16 +469,15 @@ const DefaultHeaderPolicy& policy);
  * value keeps everything past the first colon with its leading spaces trimmed.
  * A line carrying no colon is not a header field and is ignored.
  *
- * **A name that arrives twice keeps both values, folded with ", "** - the
- * RFC 7230 §3.2.2 equivalence for comma-list headers. Both callbacks used to
- * assign into the map, so the second `Set-Cookie` of a login response (the
- * normal way servers set two cookies, since `Set-Cookie` is the one header
- * §3.2.2 exempts from folding) silently replaced the first. Folding is what
- * both `Set-Cookie` parsers - the renderer's `parse-set-cookie.ts` and the
- * engine's - already recover cookie boundaries from, so it hands them the
- * shape they were written for instead of half the data.
+ * **A name that arrives twice keeps both values, folded with ", "** - the RFC
+ * 7230 §3.2.2 equivalence for comma-list headers. Assigning instead would let
+ * the second `Set-Cookie` of a login response (the normal way servers set two
+ * cookies, since `Set-Cookie` is the one header §3.2.2 exempts from folding)
+ * silently replace the first. Both `Set-Cookie` parsers - the renderer's
+ * `parse-set-cookie.ts` and the engine's - recover cookie boundaries from the
+ * folded value.
  *
- * Shared by both clients so the two cannot drift apart again.
+ * Shared by both clients so the two cannot drift apart.
  */
 void ingest_header_line (std::string_view line, Headers& headers);
 
@@ -492,9 +485,9 @@ void ingest_header_line (std::string_view line, Headers& headers);
  * @brief The same ingest, also appending the line as received to @p lines.
  *
  * `headers` is updated exactly as the two-argument form does. When @p lines is
- * not null the line is appended to it as well (issue #2460): name with its case
- * kept, value trimmed of leading and trailing space and tab, one entry per
- * received line in wire order, so a repeated `Set-Cookie` stays repeated. The
+ * not null the line is appended to it as well (#2460): name with its case kept,
+ * value trimmed of leading and trailing space and tab, one entry per received
+ * line in wire order, so a repeated `Set-Cookie` stays repeated. The
  * two-argument form is this one with `nullptr`; the load callback uses it and
  * pays nothing for the lossless list.
  */
@@ -531,13 +524,13 @@ const std::string& scope,
 const std::vector<CookieWrite>& writes);
 
 /**
- * @brief Fold what the transfer changed in the handle's jar back into the
- *        scope (`CookieJar::reconcile`), against the @p seeded_from lines
+ * @brief Fold what the transfer changed in the handle's jar back into the scope
+ *        (`CookieJar::reconcile`), against the @p seeded_from lines
  *        `apply_jar_cookies` returned.
  *
  * A delta rather than a replace, because transfers in one scope overlap and a
  * replace from the one finishing last would drop the other's `Set-Cookie`
- * (issue #1888).
+ * (#1888).
  *
  * Called even when the transfer failed, for the same reason the timing reads
  * are: a redirect chain that dies on its last hop still collected the cookies
@@ -578,8 +571,8 @@ CurlPhaseTimes read_phase_times (CURL* curl);
  * @brief Add one hop's timers to a chain's, field by field (#3300).
  *
  * Each timer summed over the requests of a chain: the engine follows one
- * transfer per hop, reads each hop's timers and sums them here, so its wire time covers every
- * hop and the queue wait does not absorb the earlier ones.
+ * transfer per hop, reads each hop's timers and sums them here, so its wire
+ * time covers every hop and the queue wait does not absorb the earlier ones.
  */
 void add_phase_times (CurlPhaseTimes& total, const CurlPhaseTimes& hop);
 
