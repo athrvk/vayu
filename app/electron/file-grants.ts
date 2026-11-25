@@ -8,27 +8,25 @@
 /**
  * The files a person picked, as the main process knows them (#2356).
  *
- * The engine sends a file a request body names only when it lies under an
- * allowed folder or a person picked it, and "picked" is a row of its
- * `file_grants` table that only this process can write (the grant secret, see
- * `file-trust-client.ts`). The rows come from exactly two doors, both of which
- * hand over a path the renderer did not compose:
+ * The engine sends a file a request body names only when it lies under an allowed folder or a
+ * person picked it, and "picked" is a row of its `file_grants` table that only this process can
+ * write (the grant secret, see `file-trust-client.ts`). The rows come from exactly two doors, both
+ * handing over a path the renderer did not compose:
  *
- * - **The preload**, after `webUtils.getPathForFile` answers a path for a
- *   `File` the user chose or dropped, reports it on {@link FILE_PICKED_CHANNEL}.
- *   The channel is the preload's own: no `electronAPI` method takes a string to
- *   it, which `preload-grant-channel.test.ts` holds.
- * - **The OS**, through `open-intent.ts`, for a document dropped on the app's
- *   icon or opened with it.
+ * - **The preload**, after `webUtils.getPathForFile` answers a path for a `File` the user chose or
+ *   dropped, reports it on {@link FILE_PICKED_CHANNEL}. The channel is the preload's own: no
+ *   `electronAPI` method takes a string to it, which `preload-grant-channel.test.ts` holds.
+ * - **The OS**, through `open-intent.ts`, for a document dropped on the app's icon or opened with
+ *   it.
  *
- * `isGranted` is the read for the main-process readers that act on a
- * renderer-named path (#2357); nothing else may add to the set. The engine's
- * table is the record, and this keeps a copy of `GET /file-grants`, re-read
- * after each engine start because only then can it have changed underneath.
+ * `isGranted` is the read for the main-process readers that act on a renderer-named path (#2357);
+ * nothing else may add to the set. The engine's table is the record; this keeps a copy of
+ * `GET /file-grants`, re-read after each engine start because only then can it have changed
+ * underneath.
  *
- * A path recorded while the engine cannot be reached - a document opened
- * with the app on a cold launch arrives before the engine listens - is held
- * and sent again by the next `sync`, so it is not lost to the timing.
+ * A path recorded while the engine cannot be reached (a document opened with the app on a cold
+ * launch arrives before the engine listens) is held and sent again by the next `sync`, so the
+ * timing does not lose it.
  */
 
 import { promises as fs } from "fs";
@@ -63,9 +61,8 @@ export class FileNotGrantedError extends Error {
 export type IsGranted = (filePath: string) => Promise<boolean>;
 
 /**
- * Refuse with {@link FileNotGrantedError} unless @p isGranted says yes. A
- * registry that itself fails (a rejection, not a "no") refuses too: a gate that
- * opens when it cannot answer is no gate.
+ * Refuse with {@link FileNotGrantedError} unless @p isGranted says yes. A registry that itself
+ * fails (a rejection, not a "no") refuses too: a gate that opens when it cannot answer is no gate.
  */
 export async function assertGranted(isGranted: IsGranted, filePath: string): Promise<void> {
 	let granted = false;

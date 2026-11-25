@@ -8,20 +8,17 @@
 /**
  * @brief The app-side half of the structured logger (#1556, #1557, #1558).
  *
- * Mirrors the engine's `LogRecord` (`docs/engine/logging.md`,
- * `docs/engine/log-record.schema.json`) and its redaction rule
- * (`engine/include/vayu/utils/log_redact.hpp`) so the app's log file and the
- * engine's are interchangeable: the same required keys, the same
- * `"<redacted>"` and URL-stripping behaviour, the same JSON-lines file shape,
- * the same text console rendering. `src` here is always `"app"`, `"mcp"` or
- * `"renderer"` - `"engine"` and `"cli"` are the engine's own binaries.
+ * Mirrors the engine's `LogRecord` (`docs/engine/logging.md`, `docs/engine/log-record.schema.json`)
+ * and its redaction rule (`engine/include/vayu/utils/log_redact.hpp`) so the app's log file and the
+ * engine's are interchangeable: the same required keys, the same `"<redacted>"` and URL-stripping
+ * behaviour, the same JSON-lines file shape and text console rendering. `src` here is always
+ * `"app"`, `"mcp"` or `"renderer"`; `"engine"` and `"cli"` are the engine's own binaries.
  *
- * `createLogger` is Electron-free and generic - `mcp/cli.ts` (a standalone
- * process with no `app` module) calls it directly. `appLogger()` and
- * `mcpLogger()` are the lazy, Electron-coupled singletons every main-process
- * module shares, so a category from `sidecar.ts` and one from the
- * Electron-hosted MCP transport land in the same `app_<stamp>.log` file
- * through the same buffered floor.
+ * `createLogger` is Electron-free and generic: `mcp/cli.ts` (a standalone process with no `app`
+ * module) calls it directly. `appLogger()` and `mcpLogger()` are the lazy, Electron-coupled
+ * singletons every main-process module shares, so a category from `sidecar.ts` and one from the
+ * Electron-hosted MCP transport land in the same `app_<stamp>.log` file through the same buffered
+ * floor.
  */
 
 import fs from "fs";
@@ -95,11 +92,10 @@ function isUrlFieldName(name: string): boolean {
 }
 
 /**
- * Strip a URL (or a bare path-and-query) to scheme, host and path, dropping
- * userinfo, the query string and the fragment. A line-for-line port of
- * `strip_url_secrets` in `log_redact.hpp`, pinned to it by
- * `engine/tests/fixtures/log-redaction-conformance.json`: userinfo is
- * everything before the last `@` of the authority, with or without a scheme.
+ * Strip a URL (or a bare path-and-query) to scheme, host and path, dropping userinfo, the query
+ * string and the fragment. A line-for-line port of `strip_url_secrets` in `log_redact.hpp`, pinned
+ * to it by `engine/tests/fixtures/log-redaction-conformance.json`: userinfo is everything before
+ * the last `@` of the authority, with or without a scheme.
  */
 export function stripUrlSecrets(url: string): string {
 	let rest = url;
@@ -138,11 +134,10 @@ export function stripUrlSecrets(url: string): string {
 const URL_IN_TEXT = /(?<![a-zA-Z0-9+.-])[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s"'<>)]+/g;
 
 /**
- * `stripUrlSecrets` on every URL inside @p text, the rest left intact. Not
- * part of `log()`: the engine never scans `msg` (`docs/engine/logging.md`),
- * so the shared conformance fixture does not cover it - it is applied where
- * text arrives from a source that does not choose what it puts in a sentence,
- * the renderer boundary in `log-ipc.ts`.
+ * `stripUrlSecrets` on every URL inside @p text, the rest left intact. Not part of `log()`: the
+ * engine never scans `msg` (`docs/engine/logging.md`), so the shared conformance fixture does not
+ * cover it; it is applied where text arrives from a source that does not choose what it puts in a
+ * sentence, the renderer boundary in `log-ipc.ts`.
  */
 export function stripUrlSecretsInText(text: string): string {
 	return text.replace(URL_IN_TEXT, (url) => stripUrlSecrets(url));
@@ -187,10 +182,9 @@ function pad(value: string, width: number): string {
 const RESERVED_KEYS = new Set(["ts", "level", "src", "cat", "msg", "pid", "tid"]);
 
 /**
- * `"HH:MM:SS.mmm LEVEL cat      msg k=v ..."` - the same shape on every
- * console, engine or app (`engine/src/utils/logger.cpp`'s
- * `write_to_console_locked`: level padded to 7, category to 9, both
- * left-justified).
+ * `"HH:MM:SS.mmm LEVEL cat      msg k=v ..."`, the same shape on every console, engine or app
+ * (`write_to_console_locked` in `engine/src/utils/logger.cpp`: level padded to 7, category to 9,
+ * both left-justified).
  */
 function renderConsoleLine(record: LogRecord): string {
 	let line = `${record.ts.slice(11, 23)} ${pad(levelConsoleName(record.level), 7)}${pad(record.cat, 9)}${record.msg}`;
@@ -261,11 +255,10 @@ interface ChannelOptions {
 }
 
 /**
- * The shared state behind every `Logger` that targets the same file: the
- * buffer-until-floor-known queue, the current file path, rotation and
- * retention. Keyed by `logsDir` + `filePrefix` so an "app" logger and an
- * "mcp" logger that both write `app_<stamp>.log` share one file, one buffer
- * and one floor rather than racing each other.
+ * The shared state behind every `Logger` that targets the same file: the buffer-until-floor-known
+ * queue, the current file path, rotation and retention. Keyed by `logsDir` + `filePrefix`, so an
+ * "app" logger and an "mcp" logger that both write `app_<stamp>.log` share one file, one buffer and
+ * one floor rather than racing each other.
  */
 class LogChannel {
 	private pending: LogRecord[] | null = [];
@@ -308,12 +301,10 @@ class LogChannel {
 	}
 
 	/**
-	 * Synchronous, deliberately: a main-process logger writes at most a few
-	 * lines a second, never a per-request hot path the way the engine's own
-	 * sink is, and a `WriteStream`'s asynchronous open leaves a window where a
-	 * line is accepted but not yet on disk - observable, and worth avoiding,
-	 * the moment anything (a crash handler flushing on the way out, a test)
-	 * reads the file right after a call returns.
+	 * Synchronous, deliberately: a main-process logger writes at most a few lines a second, never a
+	 * per-request hot path as the engine's own sink is, and a `WriteStream`'s asynchronous open
+	 * leaves a window where a line is accepted but not yet on disk, which anything reading the file
+	 * right after a call returns (a crash handler flushing on the way out, a test) would observe.
 	 */
 	private writeToFile(record: LogRecord): void {
 		if (!this.opts.logsDir) return;
@@ -368,10 +359,9 @@ class LogChannel {
 }
 
 /**
- * Owner-only, as the engine makes its own `logs/` (`SECURITY.md`, "Data at
- * rest"). `mode` is subject to the umask and applies only when the directory
- * or file is created; Windows ignores it and a new file inherits the
- * directory's ACL (the engine's protected ACL on the data directory).
+ * Owner-only, as the engine makes its own `logs/` (`SECURITY.md`, "Data at rest"). `mode` is
+ * subject to the umask and applies only when the directory or file is created; Windows ignores it,
+ * and a new file inherits the directory's ACL (the engine's protected ACL on the data directory).
  */
 const LOG_DIR_MODE = 0o700;
 const LOG_FILE_MODE = 0o600;
@@ -418,10 +408,9 @@ export interface CreateLoggerOptions {
 }
 
 /**
- * Build a logger for one `src`. Electron-free: `mcp/cli.ts` (a standalone
- * process with no `app` module) calls this directly with its own options.
- * Two loggers built with the same `logsDir` + `filePrefix` share one
- * `LogChannel` - see its doc comment.
+ * Build a logger for one `src`. Electron-free: `mcp/cli.ts` (a standalone process with no `app`
+ * module) calls this directly with its own options. Two loggers built with the same `logsDir` +
+ * `filePrefix` share one `LogChannel` (see its doc comment).
  */
 export function createLogger(src: LogSrc, options: CreateLoggerOptions): Logger {
 	const now = options.now ?? (() => new Date());
@@ -461,10 +450,9 @@ export function createLogger(src: LogSrc, options: CreateLoggerOptions): Logger 
 const KNOWN_LEVELS: ReadonlySet<string> = new Set(["debug", "info", "warn", "error"]);
 
 /**
- * Fetch the engine's `logLevel` from `GET <baseUrl>/config` and apply it as
- * this logger's floor, once. Falls back to `"debug"` on any failure - a
- * launch that could not reach the engine is exactly the one whose every
- * record is wanted.
+ * Fetch the engine's `logLevel` from `GET <baseUrl>/config` and apply it as this logger's floor,
+ * once. Falls back to `"debug"` on any failure: a launch that could not reach the engine is exactly
+ * the one whose every record is wanted.
  */
 export async function applyFloorFromEngine(logger: Logger, baseUrl: string): Promise<void> {
 	try {

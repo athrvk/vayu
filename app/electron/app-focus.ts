@@ -6,25 +6,21 @@
  */
 
 /**
- * What the user has open in the window, as the main process knows it, so the
- * MCP server can answer "the request I have open" (issue #2045).
+ * What the user has open in the window, as the main process knows it, so the MCP server can answer
+ * "the request I have open" (#2045).
  *
- * The renderer owns the record (the tabs and session stores) and pushes a
- * snapshot over `app:focus` on launch and on every change; this holds the
- * latest one. A tool call never waits on the renderer, so the copy is at most
- * one event stale - the trade `dataFile:locations` already made.
+ * The renderer owns the record (the tabs and session stores) and pushes a snapshot over `app:focus`
+ * on launch and on every change; this holds the latest. A tool call never waits on the renderer, so
+ * the copy is at most one event stale, the trade `dataFile:locations` already made.
  *
- * **Names and ids only.** The snapshot is renderer input, so it is rebuilt
- * field by field into strings and nothing else: whatever else the renderer
- * sends never reaches an agent. The renderer is responsible for what goes
- * *into* a label (`hooks/useAppFocusMirror.ts` keeps URL-derived text out of
- * it); this module bounds its shape and its length.
+ * **Names and ids only.** The snapshot is renderer input, so it is rebuilt field by field into
+ * strings, and nothing else the renderer sends reaches an agent. The renderer keeps URL-derived
+ * text out of a label (`hooks/useAppFocusMirror.ts`); this module bounds its shape and length.
  */
 
 /**
- * The tab kinds a snapshot may name. Mirrors `TabType` in
- * `src/stores/tabs-store.ts`, which the main process cannot import; the test
- * beside this file reads that union and fails if the two drift.
+ * The tab kinds a snapshot may name: `TabType` in `src/stores/tabs-store.ts`, which main cannot
+ * import; the test beside this file fails if the two drift.
  */
 export const FOCUS_TAB_TYPES = [
 	"welcome",
@@ -94,9 +90,8 @@ function normalizeEnvironment(value: unknown): AppFocusEnvironment | null {
 }
 
 /**
- * The snapshot a published payload amounts to, or undefined when it is not one.
- * Both halves must be present: an object naming neither would read as "nothing
- * is open", which is an answer the renderer never gave.
+ * The snapshot a payload amounts to, or undefined. Both halves must be present: an object naming
+ * neither would read as "nothing is open", an answer the renderer never gave.
  */
 export function normalizeAppFocus(payload: unknown): AppFocus | undefined {
 	const focus = asRecord(payload);

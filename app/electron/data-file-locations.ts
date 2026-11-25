@@ -6,26 +6,23 @@
  */
 
 /**
- * Where each collection's declared data file lives on this machine, as the
- * main process knows it, so the MCP server can name it (issue #1742, Part B).
+ * Where each collection's declared data file lives on this machine, as the main process knows it,
+ * so the MCP server can name it (#1742, Part B).
  *
- * The record is each collection's engine row (`dataFile`, #2765); the
- * renderer mirrors the collections list into `src/stores/data-file-store.ts`
- * and publishes that whole map here on launch and on every change, and this
- * holds the latest copy. The main process never persists it, so there is
- * still one record and this is a view of it.
+ * The record is each collection's engine row (`dataFile`, #2765); the renderer mirrors the
+ * collections list into `src/stores/data-file-store.ts` and publishes that whole map here on launch
+ * and on every change, and this holds the latest copy. The main process never persists it, so there
+ * is still one record and this is a view of it.
  *
- * **Why a path may reach MCP at all:** the Electron-hosted MCP server listens
- * on loopback only (`MCP_HOST`), so every client that can read this answer runs
- * on the machine the path is true of. The standalone stdio server (`mcp/cli.ts`)
- * runs without the app and has no copy, so it never answers a path. The rows are
- * still read by nobody but the app: a client that wants them opens the file
- * with its own filesystem access, the way a person would.
+ * **Why a path may reach MCP at all:** the Electron-hosted MCP server listens on loopback only
+ * (`MCP_HOST`), so every client that can read this answer runs on the machine the path is true of.
+ * The standalone stdio server (`mcp/cli.ts`) runs without the app and has no copy, so it never
+ * answers a path. The rows are still read by nobody but the app: a client that wants them opens the
+ * file with its own filesystem access, as a person would.
  *
- * An entry is kept only if `dataFile:read` would open it (an absolute path with
- * a data-file extension). A path the app itself refuses to read is not one to
- * hand an agent as "the file", and a published payload is renderer input, so it
- * is rebuilt rather than trusted.
+ * An entry is kept only if `dataFile:read` would open it (an absolute path with a data-file
+ * extension): a path the app itself refuses to read is not one to hand an agent as "the file". A
+ * published payload is renderer input, so it is rebuilt rather than trusted.
  */
 
 import path from "path";
