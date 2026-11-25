@@ -6,21 +6,17 @@
  */
 
 /**
- * Adding an allowed folder, the one way every surface does it.
+ * Adding an allowed folder, the one way every surface does it. Three surfaces offer it (Settings >
+ * Files, the binary body editor's "Allow folder…", the import preview's per-folder action), and
+ * each would otherwise copy the same outcomes: the folder is allowed now; it already was (the
+ * engine's 409, the result the user wanted, so not an error); or the engine refused it (400, a
+ * folder it will not allow, its message naming the path and the reason).
  *
- * Three surfaces offer it - Settings > Files, the binary body editor's
- * "Allow folder…", and the import preview's per-folder action - and each
- * would otherwise grow its own copy of the same outcomes: the folder is
- * allowed now; it already was (the engine's 409, which is the result the user
- * wanted, so it is not an error); or the engine refused it (400: a folder it
- * will not allow, which names the path and the reason in its own message).
- *
- * The folder is always one the user chose in the system picker, which the
- * main process opens and then allows itself: an allowed folder widens what
- * every request may read from disk, so the renderer cannot name one (#2356).
- * Nor can it say where the picker opens or what its title says (#2378): main
- * opens it where the last folder dialog ended. Outside Electron there is no
- * picker and nothing that may make the write, so `chooseAndAllow` is absent.
+ * The folder is always one the user chose in the system picker, which the main process opens and
+ * then allows itself: an allowed folder widens what every request may read from disk, so the
+ * renderer cannot name one (#2356), nor say where the picker opens or what its title says (#2378);
+ * main opens it where the last folder dialog ended. Outside Electron there is no picker and nothing
+ * that may make the write, so `chooseAndAllow` is absent.
  */
 
 import { useCallback } from "react";

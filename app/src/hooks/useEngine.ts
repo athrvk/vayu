@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-// useEngine Hook - Execute requests and manage load tests
+// Compose and execute requests, and stop a load test, through the engine.
 
 import { useState, useCallback } from "react";
 import { ApiError, apiService } from "@/services";
@@ -19,29 +19,25 @@ import type {
 
 interface UseEngineReturn {
 	/**
-	 * Compose a request engine-side (`POST /compose`, issue #226): the raw
-	 * editor state (plus scope ids) in, the execute-ready payload out -
-	 * `{{variables}}` and `inherit` auth resolved by the engine, exactly once.
-	 * Throws on failure; callers surface it the same way as an execute failure.
+	 * Compose a request engine-side (`POST /compose`, #226): the raw editor state (plus scope ids)
+	 * in, the execute-ready payload out, with `{{variables}}` and `inherit` auth resolved by the
+	 * engine, exactly once. Throws on failure; callers surface it as they do an execute failure.
 	 *
-	 * Without `deferredVariables` (#2521): that answer is for display, and these
-	 * callers spread the result into `/execute` and `/runs` bodies. The Code
-	 * section reads it from `apiService.composeRequest` directly. The answer's
-	 * `collectionId` stays (#3461): it is the scope the send's scripts read.
+	 * Without `deferredVariables` (#2521): that answer is for display, and these callers spread the
+	 * result into `/execute` and `/runs` bodies; the Code section reads it from
+	 * `apiService.composeRequest` directly. The answer's `collectionId` stays (#3461): it is the
+	 * scope the send's scripts read.
 	 *
-	 * Composing here is composing to send - Send, Load test and a History
-	 * re-run are its only callers - so the answer's origin becomes an endpoint
-	 * the GraphQL body may introspect on its own (`approved-endpoints.ts`).
-	 * Anything that composes to display must use `apiService.composeRequest`.
+	 * Composing here is composing to send (Send, Load test and a History re-run are its only
+	 * callers), so the answer's origin becomes an endpoint the GraphQL body may introspect on its
+	 * own (`approved-endpoints.ts`). Anything that composes to display must use
+	 * `apiService.composeRequest`.
 	 */
 	composeRequest: (params: ComposeRequestRequest) => Promise<ComposedRequest>;
 	/**
-	 * Execute a request against the engine.
-	 * Accepts a composed ExecuteRequestRequest (flat headers, resolved auth/body).
-	 *
-	 * Resolves null once `signal` has aborted the send (#3352): a cancelled send
-	 * has no answer, and a synthesised error response would show a failure
-	 * nobody had.
+	 * Execute a composed `ExecuteRequestRequest` (flat headers, resolved auth and body) against the
+	 * engine. Resolves null once `signal` has aborted the send (#3352): a cancelled send has no
+	 * answer, and a synthesised error response would show a failure nobody had.
 	 */
 	executeRequest: (
 		params: ExecuteRequestRequest,
