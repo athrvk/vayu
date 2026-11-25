@@ -14,7 +14,6 @@
 #include "vayu/types.hpp"
 
 /**
- * @file header_text.hpp
  * @brief What a header line can and cannot be made of - one rule, one place.
  *
  * A header is `Key: value` terminated by CRLF, and it has no escape for either
@@ -28,20 +27,19 @@
  * The bytes reach a header from several origins, and each origin knows
  * something the next one down has already lost:
  *
- * - **A bound data cell** (`core/scenario_data.cpp`, issue #732) refuses at
- *   bind time, naming the column and the row - the only place that knows them.
- * - **A composed `{{variable}}`** (`http/request_composer.cpp`, issue #738)
- *   refuses at composition, naming the variable - the only place that knows
- *   *which* variable carried the byte. That covers a header row and a
- *   credential written into a header line as it stands (#3203). A request a
- *   pre-request script runs before keeps its variables written through
- *   composition (#2521), so for it the residual pass and the late auth after
- *   that script refuse instead, in the same words and under the same code.
- *   `POST /compose` is otherwise a pure
- *   resolution step, and this is the one payload it rejects over a value:
- *   substituting the byte and answering 200 would hand the caller a payload
- *   whose only remaining fate is the refusal below, with the name that would
- *   have explained it already discarded.
+ * - **A bound data cell** (`core/scenario_data.cpp`, #732) refuses at bind
+ *   time, naming the column and the row - the only place that knows them.
+ * - **A composed `{{variable}}`** (`http/request_composer.cpp`, #738) refuses
+ *   at composition, naming the variable - the only place that knows *which*
+ *   variable carried the byte. That covers a header row and a credential
+ *   written into a header line as it stands (#3203). A request a pre-request
+ *   script runs before keeps its variables written through composition (#2521),
+ *   so for it the residual pass and the late auth after that script refuse
+ *   instead, in the same words and under the same code. `POST /compose` is
+ *   otherwise a pure resolution step, and this is the one payload it rejects
+ *   over a value: substituting the byte and answering 200 would hand the caller
+ *   a payload whose only remaining fate is the refusal below, with the name
+ *   that would have explained it already discarded.
  * - **Every origin at once** (`unsendable_header_text`, called by
  *   `validate_transferable`) refuses before any driver configures a handle.
  *   This is the backstop that cannot be bypassed: a script that assigned to
@@ -82,7 +80,7 @@ namespace vayu::http {
  * `curl_slist_append`, which reads to the first NUL - so a value carrying one
  * is *truncated* on the wire rather than refused. It forges nothing, but the
  * header that arrives is not the header that was asked for, which is the same
- * class of quiet wrong request (issue #738, item 3).
+ * class of quiet wrong request (#738, item 3).
  */
 [[nodiscard]] bool truncates_a_header_line (std::string_view text);
 
