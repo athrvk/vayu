@@ -8,9 +8,8 @@
  */
 
 /**
- * @file utils/diagnostics.hpp
  * @brief Scoped suppressions for the three GCC diagnostics that fire only on
- *        code we did not write (issue #897).
+ *        code we did not write (#897).
  *
  * The engine builds warning-clean, and every suppression here is a *proven*
  * false positive rather than a warning someone found inconvenient - each macro
@@ -78,7 +77,7 @@
  * `-Wstringop-overflow` or as `-Wstringop-overread` depending on which pass
  * reaches it first - and, for the last of the three, on whether the call
  * survives far enough inlined into a *caller's* caller to be blamed there
- * instead (issue #1514's `seed_bulky_run` / `grow_then_prune`) - so silencing
+ * instead (#1514's `seed_bulky_run` / `grow_then_prune`) - so silencing
  * fewer than all three just moves the warning to whichever spelling is left.
  */
 #define VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS                 \

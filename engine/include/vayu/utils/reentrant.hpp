@@ -8,25 +8,23 @@
  */
 
 /**
- * @file utils/reentrant.hpp
  * @brief The reentrant spelling of the two C library calls this engine makes
- *        whose classic spelling answers out of process-wide storage
- *        (issue #945, `concurrency-mt-unsafe`).
+ *        whose classic spelling answers out of process-wide storage (#945,
+ *        `concurrency-mt-unsafe`).
  *
  * `std::localtime` and `std::strerror` both hand back a pointer into memory the
  * whole process shares, filled on the call. The caller then reads it - through
  * `std::put_time`, or by constructing a `std::string` from it - and anything
  * that calls the same function in between has already overwritten it. The
  * engine is threaded end to end (event loop workers, the metrics collector,
- * every HTTP handler), so "in between" is an ordinary
- * interleaving rather than a rare one, and a lock of our own does not help: the
- * storage is shared with libcurl, QuickJS and the C runtime, none of which
- * takes it.
+ * every HTTP handler), so "in between" is an ordinary interleaving rather than
+ * a rare one, and a lock of our own does not help: the storage is shared with
+ * libcurl, QuickJS and the C runtime, none of which takes it.
  *
- * What comes out the other side is not a crash, which is why this is worth
- * stating: it is a timestamp or an error message describing a *different*
- * call's subject. A form part that could not be opened reports the errno of
- * whatever failed elsewhere, and the reader has no way to tell.
+ * What comes out is not a crash, which is why it goes unnoticed: it is a
+ * timestamp or an error message describing a *different* call's subject. A form
+ * part that could not be opened reports the errno of whatever failed elsewhere,
+ * and the reader has no way to tell.
  *
  * Both functions here write into storage the caller owns. Reach for them rather
  * than the classic spelling; `tests/reentrant_test.cpp` scans the tree for the
@@ -93,10 +91,8 @@ inline std::string format_local_time (std::time_t time, const char* format) {
  *         converted - the same contract as {@link format_local_time}, whose
  *         note on what a refused conversion leaves behind applies here too.
  *
- * The UTC sibling, which `request_composer.cpp` used to carry its own copy of -
- * the platform split written out inline, with the return dropped
- * (`cert-err33-c`). Sub-second precision is the caller's to append: no
- * `std::strftime` conversion specifier covers it.
+ * Sub-second precision is the caller's to append: no `std::strftime` conversion
+ * specifier covers it.
  */
 inline std::string format_utc_time (std::time_t time, const char* format) {
     std::tm utc{};

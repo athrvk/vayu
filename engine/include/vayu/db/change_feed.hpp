@@ -8,14 +8,13 @@
  */
 
 /**
- * @file db/change_feed.hpp
- * @brief What `GET /changes` relays (issue #3420): one event per committed
- *        write to the workspace rows a client caches, in a bounded ring.
+ * @brief What `GET /changes` relays (#3420): one event per committed write to
+ *        the workspace rows a client caches, in a bounded ring.
  *
  * `Database` owns the feed and is its only producer: every public write of a
  * collection, request, example, environment, the globals or a trash entry
- * publishes after its own transaction has committed, so an event never names
- * a write that rolled back. No write runs inside another's transaction, and
+ * publishes after its own transaction has committed, so an event never names a
+ * write that rolled back. No write runs inside another's transaction, and
  * `with_lock` opens none, so "after its own commit" is "committed".
  *
  * Publishing is an append under the feed's own mutex, a leaf lock: it is taken
