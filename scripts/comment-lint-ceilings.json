@@ -45,8 +45,6 @@
     "engine/include/vayu/core/script_config.hpp": 1,
     "engine/include/vayu/http/default_headers.hpp": 1,
     "engine/include/vayu/http/request_exchange.hpp": 1,
-    "engine/include/vayu/platform/platform.hpp": 1,
-    "engine/include/vayu/types.hpp": 6,
     "engine/src/http/routes/script_types.cpp": 1
   }
 }
