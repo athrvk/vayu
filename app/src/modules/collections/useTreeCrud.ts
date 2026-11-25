@@ -46,13 +46,12 @@ import { DEFAULT_COLLECTION_NAME, DEFAULT_FOLDER_NAME } from "@/constants/collec
 import { ICON_MOTION } from "@/components/ui";
 
 /**
- * Land an open editor's unsaved edit on the engine before a copy is read from
- * it (#3426). The editor autosaves after a delay, so a Duplicate inside that
- * window would otherwise copy the stored record without the edit. Read at click
- * time, not subscribed: the tree has no business re-rendering on a keystroke.
+ * Land an open editor's unsaved edit on the engine before a copy is read from it (#3426): the
+ * editor autosaves after a delay, so a Duplicate inside that window would copy the stored record
+ * without the edit. Read at click time, not subscribed: the tree must not re-render on a keystroke.
  *
- * Returns whether a save ran. Throws when the edit did not land: a copy that
- * silently lacks the latest edit is the defect this exists to prevent.
+ * Returns whether a save ran. Throws when the edit did not land: a copy silently lacking the latest
+ * edit is the defect this exists to prevent.
  */
 async function flushOpenEditor(requestId: string): Promise<boolean> {
 	const context = useSaveStore.getState().contexts.get(saveContextId(requestId));
@@ -65,18 +64,15 @@ async function flushOpenEditor(requestId: string): Promise<boolean> {
 }
 
 /**
- * Copy a request's saved examples onto its duplicate, in the source's order,
- * and point a fixed mock example at the copy's own twin (#3450).
- *
- * Examples are a nested resource, so the create of the request copies none of
- * them. The list is read fresh: the Examples tab may be holding a stale one.
- * The writes are sequential because the engine appends, so the order they
- * arrive in is the order the copy keeps. Each copy is the user's own, so it is
- * written with origin `user`: an `import` row is one the next spec sync may
+ * Copy a request's saved examples onto its duplicate, in the source's order, and point a fixed mock
+ * example at the copy's own twin (#3450). Examples are a nested resource, so the request's create
+ * copies none. The list is read fresh (the Examples tab may hold a stale one) and written in
+ * sequence because the engine appends, so arrival order is the copy's order. Each copy is written
+ * with origin `user`, as it is the user's own: an `import` row is one the next spec sync may
  * replace.
  *
- * Throws on the first failure, after doing as much as it could. The caller
- * keeps the copy - a request without all its examples is still a request.
+ * Throws on the first failure, after doing as much as it could; the caller keeps the copy, as a
+ * request without all its examples is still a request.
  */
 async function copyExamples(
 	queryClient: QueryClient,
@@ -117,10 +113,9 @@ export interface TreeCrudOptions {
 	requestsByCollection: Map<string, RequestSummary[]>;
 	getRequestsByCollection: (collectionId: string) => RequestSummary[];
 	/**
-	 * Expand to a row, scroll it into view and focus it
-	 * (`useRevealActiveSelection`). A folder is created wherever the sort puts
-	 * it, which in a long tree is off screen: without this the new row appears
-	 * out of sight and focus is left on `<body>` (#3443).
+	 * Expand to a row, scroll it into view and focus it (`useRevealActiveSelection`). A folder is
+	 * created wherever the sort puts it, off screen in a long tree: without this the new row is out
+	 * of sight and focus is left on `<body>` (#3443).
 	 */
 	revealEntity: (entity: TreeEntity) => void;
 }
@@ -148,10 +143,9 @@ export interface TreeCrudPanel {
 	runTarget: Collection | null;
 	dismissRunDialog: () => void;
 	/**
-	 * The collection an export dialog is pointed at and which of the two
-	 * formats it writes, or null when both are closed - the whole object for
-	 * the same reason `runTarget` is (issue #630). One field rather than one per
-	 * format: only one export dialog is ever open.
+	 * The collection an export dialog is pointed at and which of the two formats it writes, or null
+	 * when both are closed; the whole object for `runTarget`'s reason (issue #630). One field, not
+	 * one per format: only one export dialog is ever open.
 	 */
 	exportTarget: ExportTarget | null;
 	dismissExportDialog: () => void;
@@ -168,11 +162,10 @@ export interface DeleteConfirmTarget {
 	id: string;
 	name: string;
 	/**
-	 * Mocks running for this collection or any descendant sub-collection, only
-	 * ever populated for `type: "collection"`, so the dialog can say they will
-	 * be stopped. The engine stops them as part of the delete, whichever client
-	 * sent it (#3449), and Undo does not start them again (a running mock is
-	 * engine-process state, not a database row).
+	 * Mocks running for this collection or any descendant sub-collection, populated only for
+	 * `type: "collection"`, so the dialog can say they will be stopped. The engine stops them as
+	 * part of the delete, whichever client sent it (#3449), and Undo does not start them again (a
+	 * running mock is engine-process state, not a database row).
 	 */
 	runningMocks?: { collectionName: string; port: number }[];
 }
@@ -188,18 +181,15 @@ export interface TreeCrud {
 }
 
 /**
- * Create, rename, duplicate and delete for the collection tree, with the inline
- * form state each one drives. Lifted out of `CollectionTree` so that component
- * is layout: eleven `useState` atoms and their handlers were ~360 of its lines,
- * and the rows only ever saw the result.
+ * Create, rename, duplicate and delete for the collection tree, with the inline form state each one
+ * drives, so `CollectionTree` stays layout and the rows see only the result.
  *
- * **The handlers the rows call keep one identity** (#2543). Most of them close
- * over a mutation object (new on every render) or the loaded collections, so a
- * `useCallback` over them changed on every keystroke in the new-folder field and
- * took every row in the tree with it. They go through `useStableCallback`
- * instead: they run from events, after the render that holds the current values.
- * `getCollectionActions` is the exception - a row calls it while rendering - and
- * stays a `useCallback` that changes exactly when the collections it names do.
+ * **The handlers the rows call keep one identity** (#2543). Most close over a mutation object (new
+ * on every render) or the loaded collections, so a `useCallback` over them would change on every
+ * keystroke in the new-folder field and take every row in the tree with it. They go through
+ * `useStableCallback` instead: they run from events, after the render that holds the current
+ * values. `getCollectionActions` is the exception, as a row calls it while rendering, and stays a
+ * `useCallback` that changes exactly when the collections it names do.
  */
 export function useTreeCrud({
 	collections,
@@ -263,15 +253,12 @@ export function useTreeCrud({
 	);
 
 	/**
-	 * Report a failed create, duplicate, delete or rename as a plain error toast.
-	 *
-	 * Not `reportFailed`: that parks the Dock on "Not saved" until the id it
-	 * names saves. None of these leaves an unsaved edit - nothing is pending,
-	 * nothing will retry, and a failed rename puts the stored name back - so
-	 * "Not saved" would describe no edit at all.
-	 *
-	 * The fallback leads even when the engine sent a message: its message says
-	 * why ("database is locked"), never what was being attempted.
+	 * Report a failed create, duplicate, delete or rename as a plain error toast. Not
+	 * `reportFailed`, which parks the Dock on "Not saved" until the id it names saves: none of
+	 * these leaves an unsaved edit (nothing is pending, nothing will retry, a failed rename puts
+	 * the stored name back), so "Not saved" would describe no edit at all. The fallback leads even
+	 * when the engine sent a message: that says why ("database is locked"), never what was being
+	 * attempted.
 	 */
 	const reportFailure = useCallback(
 		(error: unknown, fallback: string) =>
@@ -443,8 +430,7 @@ export function useTreeCrud({
 	const handleRequestRenameSubmit = useStableCallback(async (requestId: string, name: string) => {
 		const trimmedValue = name.trim();
 
-		// Find the original request to check if name actually changed
-		// Search through all collections to find the request
+		// The request's current name, from whichever collection lists it.
 		let originalRequest: RequestSummary | undefined;
 		for (const requests of requestsByCollection.values()) {
 			const found = requests.find((r) => r.id === requestId);
@@ -471,27 +457,24 @@ export function useTreeCrud({
 	});
 
 	/**
-	 * Duplicate a request: the whole record, then its saved examples (#3450).
-	 * Collections deliberately have no equivalent: copying one means recursing
-	 * through nested folders and issuing a create per request, which is its own
-	 * feature. The previous collection "Duplicate" only created an empty folder
-	 * named "(Copy)", which read as a working clone and was not one, so it was
-	 * removed rather than left misleading.
+	 * Duplicate a request: the whole record, then its saved examples (#3450). Collections have no
+	 * equivalent on purpose: copying one means recursing through nested folders with a create per
+	 * request, its own feature, and a "Duplicate" that only made an empty "(Copy)" folder would
+	 * read as a working clone that is not one.
 	 *
-	 * The copy is made from `GET /requests/:id`, never from the tree's row: that
-	 * row is a summary (#2546), and the detail route answers every column whole
-	 * however large, where a full list row substitutes a default for a column
-	 * over the field cap (#1485) - so neither can be copied as the request.
+	 * The copy is made from `GET /requests/:id`, never from the tree's row: that row is a summary
+	 * (#2546), and the detail route answers every column whole however large, where a full list row
+	 * substitutes a default for a column over the field cap (#1485), so neither row can be copied
+	 * as the request.
 	 *
-	 * The open editor's pending save lands first (#3426), and the detail is then
-	 * read past its `staleTime: Infinity` cache: the copy is of what the engine
-	 * now holds, never of the record as it stood before the edit.
+	 * The open editor's pending save lands first (#3426), and the detail is then read past its
+	 * `staleTime: Infinity` cache, so the copy is of what the engine now holds, never the record as
+	 * it stood before the edit.
 	 *
-	 * The examples follow the create (`copyExamples`). A copy created in `fixed`
-	 * mode would name an example of the source, which the engine does not check,
-	 * so it is created in `first` mode and switched to `fixed` only once its own
-	 * twin of that example exists. A failure while copying the examples keeps the
-	 * copy and opens it, and says what is missing.
+	 * The examples follow the create (`copyExamples`). A copy created in `fixed` mode would name an
+	 * example of the source, which the engine does not check, so it is created in `first` mode and
+	 * switched to `fixed` only once its own twin of that example exists. A failure while copying
+	 * the examples keeps the copy, opens it, and says what is missing.
 	 */
 	const handleDuplicateRequest = useStableCallback(async (row: RequestSummary) => {
 		if (createRequestMutation.isPending) return;
@@ -501,15 +484,13 @@ export function useTreeCrud({
 				...requestDetailOptions(row.id),
 				...(flushed && { staleTime: 0 }),
 			});
-			// Spread the source record rather than a hand-written field list
-			// (#1519): a named list drops every field added after it was
-			// written, which is how the previous version silently reset
-			// verifySSL, httpVersion and specOperation on every copy. `id`,
-			// `createdAt` and `updatedAt` are the only fields a copy must not
-			// carry, and `mockExampleId` names the source's example, never the
-			// copy's; `order` is kept deliberately - it lands the copy directly
-			// *after* the source, the tie falling to `createdAt` (see
-			// `compareTreeOrder`, pinned to the engine's SQL).
+			// Spread the source record, not a hand-written field list (#1519): a named list drops
+			// every field added after it was written, silently resetting fields such as verifySSL,
+			// httpVersion and specOperation on a copy. `id`, `createdAt` and `updatedAt` are the
+			// only fields a copy must not carry, and `mockExampleId` names the source's example,
+			// never the copy's. `order` is kept on purpose: it lands the copy directly *after* the
+			// source, the tie falling to `createdAt` (see `compareTreeOrder`, pinned to the
+			// engine's SQL).
 			const {
 				id: _id,
 				createdAt: _createdAt,
@@ -542,13 +523,12 @@ export function useTreeCrud({
 		}
 	});
 
-	// Named, so the ⋯ menu's Delete and the row's hidden `data-tree-delete`
-	// control (the Delete key's target) open the very same dialog rather than
-	// being two copies of one object literal that can drift apart.
+	// Named, so the ⋯ menu's Delete and the row's hidden `data-tree-delete` control (the Delete
+	// key's target) open the very same dialog, not two copies of one object literal that can drift
+	// apart.
 	const handleCollectionDeleteClick = useStableCallback((id: string, name: string) => {
-		// Same walk `handleDeleteCollection` runs before the mutation - the
-		// affected set here is only used to filter the running mocks list,
-		// never to close tabs or touch the mutation itself.
+		// The walk `handleDeleteCollection` runs before the mutation; here the affected set only
+		// filters the running mocks list, and never closes tabs or touches the mutation.
 		const affected = collectDescendantEntityIds(id, collections, (cid) =>
 			getRequestsByCollection(cid).map((r) => r.id)
 		);
@@ -571,24 +551,20 @@ export function useTreeCrud({
 	}, []);
 
 	/**
-	 * What the delete threw away on the client, captured before it runs.
+	 * What the delete throws away on the client, captured before it runs. A restore brings the rows
+	 * back and nothing else: the tab the delete closed is discarded on the way out and cannot be
+	 * read back afterwards, so the closure this returns carries it. The collection's spec-file and
+	 * data-file bindings need no capture: they are columns of the trashed row (#2765), and the
+	 * restore returns them.
 	 *
-	 * A restore brings the rows back, and nothing else: the tab the delete
-	 * closed stays closed, because the delete discarded it on the way out and
-	 * it cannot be read back afterwards - so the closure this returns carries
-	 * it. The collection's spec-file and data-file bindings need no capture:
-	 * they are columns of the trashed row (#2765), and the restore returns them.
+	 * **Only the tab that was focused.** Restoring a collection whose cascade closed nine tabs must
+	 * not reopen nine; the complaint answered is the narrower one, that undoing the delete of the
+	 * request being edited leaves you looking at something else. Every other closed tab is one
+	 * click away in the tree the restore just repopulated.
 	 *
-	 * **Only the tab that was focused.** Restoring a collection whose cascade
-	 * closed nine tabs must not reopen nine tabs; the complaint this answers is
-	 * the narrower one, that undoing the delete of the request you were editing
-	 * leaves you looking at something else. Every other closed tab is one click
-	 * away in the tree the restore just repopulated.
-	 *
-	 * The response body is deliberately not captured. It is a session artifact
-	 * keyed by request id, re-fetched by sending again, and holding a body plus
-	 * its raw copy alive against a maybe-undo is the leak `closeTabsForEntities`
-	 * exists to prevent.
+	 * The response body is not captured: it is a session artifact keyed by request id, re-fetched
+	 * by sending again, and keeping a body plus its raw copy alive for a maybe-undo is the leak
+	 * `closeTabsForEntities` exists to prevent.
 	 */
 	const captureClientState = useCallback(
 		(entityIds: Iterable<string>) => {
@@ -631,13 +607,11 @@ export function useTreeCrud({
 				reportFailure(error, "Couldn't delete the collection");
 				return;
 			} finally {
-				// Only now: the dialog stays up, with its confirm button spinning,
-				// for as long as the delete is actually running. Guarded rather than
-				// unconditional: a second delete requested while this one was in
-				// flight is refused by `handleConfirmDelete` above and sits in
-				// `deleteConfirm` waiting its turn, so clearing unconditionally here
-				// would drop it on the floor with no dialog and no toast to show for
-				// it (the row simply stays, deleted-looking request gone silently).
+				// Only now, so the dialog stays up with its confirm button spinning for as long as
+				// the delete runs. Guarded: a second delete requested meanwhile is refused by
+				// `handleConfirmDelete` above and waits in `deleteConfirm`, and an unconditional
+				// clear would drop it with no dialog and no toast to show for it (the row simply
+				// stays).
 				setDeleteConfirm((current) =>
 					current?.type === "collection" && current.id === collectionId ? null : current
 				);
@@ -691,9 +665,8 @@ export function useTreeCrud({
 
 	const handleConfirmDelete = useCallback(() => {
 		if (!deleteConfirm) return;
-		// The dialog now stays open while the delete runs, so its confirm button
-		// survives long enough to be clicked twice. `isDeleting` disables it from
-		// the next render on; this covers the frame before that.
+		// The dialog stays open while the delete runs, so its confirm button can be clicked twice;
+		// `isDeleting` disables it from the next render on, and this covers the frame before that.
 		if (deletingCollectionId || deletingRequestId) return;
 		if (deleteConfirm.type === "collection") {
 			void handleDeleteCollection(deleteConfirm.id, deleteConfirm.name);
@@ -729,12 +702,9 @@ export function useTreeCrud({
 	);
 
 	/**
-	 * Actions for a collection's "⋯" menu. Defined here, where the handlers and
-	 * state live, and rendered by the shared RowActionsMenu - the same component
-	 * request and environment rows use, so every row menu looks and behaves
-	 * alike. This replaced a hand-rolled fixed-position popover that had to
-	 * compute its own coordinates and close itself on an outside click, and
-	 * which had no keyboard support.
+	 * Actions for a collection's "⋯" menu, defined where the handlers and state live and rendered
+	 * by the shared RowActionsMenu, the component request and environment rows use, so every row
+	 * menu looks and behaves alike.
 	 */
 	const getCollectionActions = useCallback(
 		(collection: Collection): RowAction[] => [
@@ -767,19 +737,17 @@ export function useTreeCrud({
 				},
 			},
 			{
-				// Below the edit actions and above Delete: it reads the folder
-				// rather than changing it, and it is offered for every collection
-				// - a bound one exports its own document, a free-form one a
-				// skeleton (issue #630).
+				// Below the edit actions and above Delete: it reads the folder rather than changing
+				// it. Offered for every collection: a bound one exports its own document, a
+				// free-form one a skeleton (issue #630).
 				label: "Export as OpenAPI",
 				icon: FileJson,
 				onSelect: () => setExportTarget({ collection, format: "openapi" }),
 			},
 			{
-				// Beside its sibling rather than in a submenu: `RowAction` is one
-				// flat list drawn by both the ⋯ menu and the right-click menu, and
-				// two entries do not earn a nesting level either would have to
-				// learn.
+				// Beside its sibling, not in a submenu: `RowAction` is one flat list drawn by both
+				// the ⋯ menu and the right-click menu, and two entries do not earn a nesting level
+				// either would have to learn.
 				label: "Export as Postman Collection",
 				icon: FileOutput,
 				onSelect: () => setExportTarget({ collection, format: "postman" }),

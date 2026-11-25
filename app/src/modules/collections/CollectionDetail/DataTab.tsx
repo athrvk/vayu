@@ -6,43 +6,32 @@
  */
 
 /**
- * DataTab - where a collection declares which columns its data files carry
- * (issue #599, phase 1 of #598).
- *
- * The problem it exists for: until a file is declared, nothing in the app knows
- * at *authoring* time - exactly when someone writes `{{data.email}}` - that the
- * column exists. Declaring the contract is what lets the builder validate and
- * complete those tokens, and what lets the engine's no-data refusal name the
- * columns a run needs. A pick in either run dialog declares too (issue #2050);
- * this tab is where it is done without starting a run.
+ * Where a collection declares which columns its data files carry (issue #599, phase 1 of #598).
+ * Until a file is declared, nothing in the app knows at *authoring* time (exactly when someone
+ * writes `{{data.email}}`) that the column exists; the contract is what lets the builder validate
+ * and complete those tokens, and the engine's no-data refusal name the columns a run needs. A pick
+ * in either run dialog declares too (issue #2050); this tab declares without starting a run.
  *
  * Two halves, stored in two places on purpose:
  *
- * - **The schema** (`dataSchema` on the collection) is the same on every
- *   machine, so it rides the engine row and travels through import.
- * - **The file's path** (`dataFile`) rides the row too (#2765), so a backup
- *   carries it, but it is true of one filesystem only: it never travels
- *   through an export or an import, and after a restore elsewhere it can name
- *   a file that is not there - shown, and struck through once the re-read
+ * - **The schema** (`dataSchema` on the collection) is the same on every machine, so it rides the
+ *   engine row and travels through import.
+ * - **The file's path** (`dataFile`) rides the row too (#2765), so a backup carries it, but it is
+ *   true of one filesystem only: it never travels through an export or an import, and after a
+ *   restore elsewhere it can name a file that is not there, shown struck through once the re-read
  *   fails.
  *
- * And the thing neither half holds: **rows**. The preview below is in memory
- * for as long as the tab is open, and nothing writes it anywhere.
+ * Neither half holds **rows**: the preview is in memory while the tab is open, and nothing writes
+ * it anywhere. So opening the tab re-reads the remembered file (issue #727) rather than waiting to
+ * be handed one: the comparison needs the file *as it is on disk now*, and only where it was is
+ * stored. The Run dialog and Send-with-row re-read the same path.
  *
- * Which is why opening the tab re-reads the remembered file (issue #727) rather
- * than waiting to be handed one: the comparison this tab exists for needs the
- * file *as it is on disk now*, and the only thing stored is where it was. The
- * Run dialog and Send-with-row already re-read the same path, so a tab that
- * asked for a manual re-pick was the one surface unable to answer its own
- * question.
- *
- * The saves are the two gestures that name a file: picking one declares its
- * columns and binds the file, and Remove clears the contract and the binding. Anything
- * subtler than a gesture is a button beside the picker - Re-declare when the
- * re-read file has drifted from the contract, or a save failed and the preview
- * is still there to retry from; Clear when the remembered file is gone and the
- * picker offers no Remove. There is no draft: every change is written when it
- * is made, which is why this tab is absent from `TABS_HOLDING_DRAFTS`.
+ * The saves are the two gestures that name a file: a pick declares its columns and binds the file,
+ * and Remove clears the contract and the binding. Anything subtler is a button beside the picker:
+ * Re-declare when the re-read file has drifted from the contract, or a save failed and the preview
+ * is still there to retry from; Clear when the remembered file is gone and the picker offers no
+ * Remove. There is no draft: every change is written when it is made, which is why this tab is
+ * absent from `TABS_HOLDING_DRAFTS`.
  */
 
 import { useEffect, useState } from "react";
@@ -65,12 +54,10 @@ interface DataTabProps {
 }
 
 /**
- * Whether opening this collection's tab will re-read its bound file.
- *
- * Asked *before* the first paint as well as inside the effect, which is the
- * point: the read starts one tick after mount, and a `reading` flag that only
- * became true then would flash "Nothing to compare yet" over a file that is
- * about to arrive - the same incoherence issue #727 is about, one frame long.
+ * Whether opening this collection's tab will re-read its bound file, asked *before* the first paint
+ * as well as inside the effect: the read starts a tick after mount, and a `reading` flag set only
+ * then would flash "Nothing to compare yet" over a file about to arrive, for one frame (issue
+ * #727).
  */
 function willReadRemembered(collection: Collection): boolean {
 	return (
@@ -88,17 +75,16 @@ export default function DataTab({ collection }: DataTabProps) {
 	/** The remembered file is being opened. Not the same as "no file yet". */
 	const [reading, setReading] = useState(() => willReadRemembered(collection));
 	/**
-	 * Why the bound file could not be re-read - moved, renamed, never granted on
-	 * this machine, or no longer parsing - and which path that was. Kept apart
-	 * from `fileError`, which is a refusal of a file the user just picked: this
-	 * one leaves the picker empty and usable, because picking the file again is
+	 * Why the bound file could not be re-read (moved, renamed, never granted on this machine, or no
+	 * longer parsing) and which path that was. Kept apart from `fileError`, a refusal of a file the
+	 * user just picked: this one leaves the picker empty and usable, as picking the file again is
 	 * the whole fix.
 	 */
 	const [failedRead, setFailedRead] = useState<{ path: string; message: string } | null>(null);
 	/*
-	 * The row cap the re-read is measured against, same as a hand-picked file
-	 * (issue #751). A file that has grown past the setting is refused here rather
-	 * than compared against the contract and then refused at Run.
+	 * The row cap the re-read is measured against, as for a hand-picked file (issue #751): a file
+	 * grown past the setting is refused here rather than compared against the contract and then
+	 * refused at Run.
 	 */
 	const { maxRows } = useDataFileLimits();
 	const writer = useDataContractWriter(collection.id);
@@ -112,25 +98,19 @@ export default function DataTab({ collection }: DataTabProps) {
 	const declaredContract = hasDataContract(collection.dataSchema);
 
 	/**
-	 * Open the remembered file when the tab appears.
+	 * Open the remembered file when the tab appears, on mount only: the `key` on this component in
+	 * `CollectionDetail` makes a different collection a different DataTab, so there is no stale
+	 * file, error or note to clear here.
 	 *
-	 * Part of mount, which is what the `key` on this component in
-	 * `CollectionDetail` makes sufficient: a different collection is a different
-	 * DataTab, so there is no stale file, error or note to clear here.
+	 * Not re-run when the binding changes: `remembered` is written by the declare and clear below,
+	 * and re-reading on it would re-read the file the user just declared *from*, or replace a file
+	 * they picked by hand since. The binding is read here as it was on mount; the reactive value
+	 * above is for what the render shows.
 	 *
-	 * Deliberately not re-run when the binding changes. `remembered` is written
-	 * by declaring and clearing below, and re-reading on it would re-read the
-	 * file the user just declared *from* - and would replace a file they had
-	 * picked by hand since. The binding is therefore read here as it was on
-	 * mount; the reactive value above is for what the render shows.
-	 *
-	 * Preview only: this read goes through `setFile` and never `writer.declare`, so
-	 * reopening the tab to compare a file that drifted writes nothing. Only a
-	 * pick the user made declares.
-	 *
-	 * Only with a contract: without one there is nothing to compare a file
-	 * against, and the row should hold no binding either (Clear takes it with
-	 * it), so a read would be work in service of no question.
+	 * Preview only: this read goes through `setFile`, never `writer.declare`, so reopening the tab
+	 * to compare a drifted file writes nothing; only a pick the user made declares. Only with a
+	 * contract: without one there is nothing to compare a file against, and the row holds no
+	 * binding either (Clear takes it along), so a read would answer no question.
 	 */
 	useEffect(() => {
 		const location = collection.dataFile;
@@ -299,9 +279,8 @@ export default function DataTab({ collection }: DataTabProps) {
 			{declaredContract && <ColumnAudit collection={collection} />}
 
 			{/*
-			 * Three states, and the point of separating them is that the third used
-			 * to swallow the first two: a remembered file being read is not
-			 * "nothing to compare", and neither is one this tab has already read.
+			 * Three states, kept apart: a remembered file being read is not "nothing to compare",
+			 * and neither is one this tab has already read.
 			 */}
 			{declaredContract && !file && reading && (
 				<p className="flex items-center gap-2 text-xs text-muted-foreground">

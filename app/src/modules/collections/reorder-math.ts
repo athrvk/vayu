@@ -6,34 +6,26 @@
  */
 
 /**
- * The arithmetic behind a drop: which rows a move actually has to rewrite.
+ * The arithmetic behind a drop: which rows a move has to rewrite. Pure (no React, query client or
+ * network), because this is the interesting part of a drag and the part a jsdom gesture cannot
+ * reach. The component wiring (issue #367) hands it the sibling lists on screen and sends the
+ * result to `POST /reorder`. Two rules shape it:
  *
- * A pure module with no React, no query client and no network, because the
- * interesting part of a drag interaction is this and nothing else - and it is
- * the part a jsdom test cannot reach through a gesture. The component wiring
- * (issue #367) hands it sibling lists it already has on screen and sends the
- * result straight to `POST /reorder`.
+ * 1. **Only rows whose position changes are written.** A drop in a dense list shifts a contiguous
+ *    run, so an adjacent swap writes two rows, not the whole folder. The engine's batch is atomic
+ *    either way; a minimal batch keeps a drag in a 200-request collection from being a 200-row
+ *    write.
+ * 2. **A list that is not dense is normalized first.** A row created before explicit orders existed
+ *    sits at `0`, its displayed position living only in the sort's tiebreaks (kind, `createdAt`,
+ *    `id`), with no slots to shift into. `normalize` writes that displayed order as `0..n-1` in the
+ *    same batch, before the moves land, so nothing visibly jumps on the first drop into a legacy
+ *    collection.
  *
- * Two rules shape everything below:
- *
- * 1. **Only rows whose position changes are written.** A drop inside a dense
- *    list shifts a contiguous run, so an adjacent swap writes two rows rather
- *    than renumbering the whole folder. The engine's batch is atomic either
- *    way; a minimal batch is what keeps a drag in a 200-request collection from
- *    being a 200-row write.
- * 2. **A list that is not already dense is normalized first.** Every row
- *    created before explicit orders existed sits at `0`, so its displayed
- *    position lives only in the sort's tiebreaks (kind, `createdAt`, `id`) -
- *    there are no slots to shift into. `normalize` materializes that displayed
- *    order as `0..n-1` in the same batch, before the moves land, which is why
- *    nothing visibly jumps on the first drop into a legacy collection.
- *
- * Callers pass **siblings in the order the tree displays them** (`childrenOf`,
- * already sorted with `compareTreeOrder`), which is the order the engine's
- * normalization produces - the two must agree or a normalized drop lands
- * somewhere the user did not point at. A parent's sub-folders and requests are
- * one list in one `order` space (#2535), so a caller passes both kinds together
- * and every displaced sibling is written as the kind it is.
+ * Callers pass **siblings in the order the tree displays them** (`childrenOf`, sorted with
+ * `compareTreeOrder`), the order the engine's normalization produces; if the two disagreed, a
+ * normalized drop would land where the user did not point. A parent's sub-folders and requests are
+ * one list in one `order` space (#2535), so both kinds come together and each displaced sibling is
+ * written as the kind it is.
  */
 
 import type { ReorderMove, ReorderRequest, TreeRowKind } from "@/types";
@@ -66,12 +58,9 @@ function indexOf(siblings: readonly OrderedRow[], id: string): number {
 }
 
 /**
- * `value` confined to `[0, max]`.
- *
- * A drop index comes from a pointer position, so it is bounded by geometry the
- * caller measured rather than by the list - past the last row is a legitimate
- * gesture meaning "put it at the end", not a bug worth throwing over. An id that
- * is not in the list it claims to be in *is* a bug, and throws.
+ * `value` confined to `[0, max]`. A drop index comes from a pointer position, bounded by measured
+ * geometry rather than by the list, so past the last row is a legitimate "put it at the end", not a
+ * bug. An id missing from the list it claims to be in *is* a bug, and throws.
  */
 function clamp(value: number, max: number): number {
 	if (!Number.isInteger(value)) {
@@ -103,15 +92,12 @@ function planWithinParent(
 	const { siblings } = scope;
 	const toIndex = clamp(rawToIndex, siblings.length - 1);
 	const normalize = isDense(siblings) ? [] : [{ parentId: scope.parentId }];
-	// A drop back onto the row's own slot moves nothing. It can still be worth a
-	// round trip: if the list was not dense, the normalization is the whole
-	// point, and it lands without a redundant move restating a position the
-	// renumber already assigns.
+	// A drop back onto the row's own slot moves nothing, but can still be worth a round trip: on a
+	// non-dense list the normalization is the point, and it lands without a redundant move.
 	if (toIndex === fromIndex) return { moves: [], normalize };
 
-	// After normalization every row sits at its displayed index, so the
-	// resulting arrangement is just the array with the row spliced across - and
-	// the rows that moved are exactly the ones between the two indices.
+	// After normalization every row sits at its displayed index, so the result is the array with
+	// the row spliced across, and the rows that moved are exactly those between the two indices.
 	const next = siblings.filter((_, i) => i !== fromIndex);
 	next.splice(toIndex, 0, siblings[fromIndex]);
 
@@ -152,13 +138,10 @@ function planAcrossParents(
 }
 
 /**
- * The batch that moves `movedId` to `toIndex` among the children of
- * `to.parentId`, whichever kind it is.
- *
- * `from` and `to` may name the same parent (a reorder) or different ones (a
- * move, including to and from the top level, which is `parentId: null` and
- * holds collections only). `toIndex` is an index in the destination list
- * *without* the moved row, so `to.siblings.length` appends.
+ * The batch that moves `movedId` to `toIndex` among the children of `to.parentId`, whichever kind
+ * it is. `from` and `to` may name the same parent (a reorder) or different ones (a move, to and
+ * from the top level included, which is `parentId: null` and holds collections only). `toIndex` is
+ * an index in the destination list *without* the moved row, so `to.siblings.length` appends.
  */
 export function planMove(params: {
 	movedId: string;

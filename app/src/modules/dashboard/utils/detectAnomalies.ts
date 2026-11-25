@@ -6,72 +6,55 @@
  */
 
 /**
- * Anomaly detection over a run's per-tick series - the windows a cumulative
- * summary hides.
+ * Anomaly detection over a run's per-tick series: the windows a cumulative summary hides. A p99
+ * that quadrupled for three seconds and recovered barely moves the run's mean, leaving only a bump
+ * on a chart the reader must notice unaided; this scans the series the charts plot and *names*
+ * those windows, so the finding is stated rather than left to be spotted.
  *
- * A run's averages answer "how did it go overall"; they cannot answer "when did
- * it go wrong". A p99 that quadrupled for three seconds and recovered moves the
- * run's mean by almost nothing, so the only trace of it is a bump on a chart the
- * reader has to notice unaided. This scans the same per-tick series the charts
- * plot and *names* those windows, so the finding is stated rather than left to
- * be spotted.
- *
- * Deliberately dumb: fixed factors over a trailing median, a minimum run length,
- * and nothing tunable. A detector with knobs is a detector nobody trusts the
- * defaults of, and one with a model is a detector that flags different windows
- * on the same data twice. Every constant below is exported so the tests pin the
+ * Deliberately dumb: fixed factors over a trailing median, a minimum run length, and nothing
+ * tunable. A detector with knobs is one nobody trusts the defaults of, and one with a model flags
+ * different windows on the same data twice. Every constant below is exported so the tests pin the
  * rule rather than restate it.
  *
- * Pure over `LoadTestMetrics[]`, like {@link computeBreakpoint} beside it: the
- * live dashboard and the history view both derive from their own series and pass
- * the result down, so no card re-derives from raw metrics.
+ * Pure over `LoadTestMetrics[]`, like {@link computeBreakpoint} beside it: the live dashboard and
+ * the history view each derive from their own series and pass the result down, so no card
+ * re-derives from raw metrics.
  *
- * Every rule counts ticks, so a tick has to mean one second in both views. A
- * stored series already does; the live dashboard passes its buffer through
- * {@link wholeSecondTicks} first, which keeps only the gate frames (#2589). The
- * one exception is a run long enough that History reads it downsampled
- * (#2547): a tick is then a bucket, p99 its worst second, the counters its
- * last, `current_rps` its mean, and every count below counts buckets.
- * `LoadTestDetail` states what that keeps and what it loses. The burst rule's
- * delta stays a share of the completions between two ticks, so it needs no
- * restating; a burst is diluted by the rest of its bucket rather than drawn
- * taller.
+ * Every rule counts ticks, so a tick has to mean one second in both views. A stored series does
+ * already; the live dashboard passes its buffer through {@link wholeSecondTicks} first, which keeps
+ * only the gate frames (#2589). The one exception is a run long enough that History reads it
+ * downsampled (#2547): a tick is then a bucket (p99 its worst second, the counters its last,
+ * `current_rps` its mean), and every count below counts buckets; `LoadTestDetail` states what that
+ * keeps and what it loses. The burst rule's delta stays a share of the completions between two
+ * ticks, so a burst is diluted by the rest of its bucket rather than drawn taller.
  *
  * ## One-shot, or incremental over a live buffer
  *
- * {@link detectAnomalies} is the one-shot: a whole series in, its windows out,
- * no state. That is what the history view wants, and it is the definition every
- * rule here is written against.
+ * {@link detectAnomalies} is the one-shot: a whole series in, its windows out, no state. The
+ * history view wants that, and every rule here is defined against it.
  *
- * The live dashboard cannot afford it. Its buffer is handed over again on every
- * store commit - twice a second by default, and the array reference changes each
- * time - so a from-scratch pass re-derived a trailing median *per tick, per
- * series* over the whole retained window: ~9,000 fifteen-element sorts twice a
- * second at the default 5-minute window, up to ~150,000 during a full-run soak,
- * on the renderer's main thread (#1151). So the live path holds a
- * {@link createAnomalyDetector} instead, which recognises the next buffer as the
- * last one with ticks appended and the oldest dropped, and derives only what
- * actually arrived.
+ * The live dashboard cannot afford it. Its buffer is handed over on every store commit (twice a
+ * second by default, a new array reference each time), and a from-scratch pass re-derives a
+ * trailing median *per tick, per series* over the whole retained window: ~9,000 fifteen-element
+ * sorts twice a second at the default 5-minute window, up to ~150,000 during a full-run soak, on
+ * the renderer's main thread (#1151). So the live path holds a {@link createAnomalyDetector}, which
+ * recognises the next buffer as the last one with ticks appended and the oldest dropped, and
+ * derives only what arrived.
  *
- * The two agree exactly, and the split that makes that true is worth stating,
- * because every future rule has to honour it:
+ * The two agree exactly, through a split every future rule has to honour:
  *
- * - What a tick's own value and its **predecessors** decide - a trailing median,
- *   a failure-rate delta, whether the rule is satisfied - is computed once, when
- *   the tick arrives, and cached under an absolute tick index that no later trim
- *   renumbers. None of it can change afterwards.
- * - What a tick's **position in the buffer** decides is the part a trim moves:
- *   there is no baseline for the first {@link BASELINE_TICKS} ticks and no delta
- *   for the first tick, so a window resting on history that has since rolled out
- *   has to go quiet, exactly as a from-scratch pass over the shortened buffer
- *   does. A position only ever *falls*, so that is a one-way door - hotness is
- *   monotone, and re-applying the rule is {@link clipRunsFront} moving the
- *   leading window's start to the oldest tick the rule can still speak for. A
- *   trim clips a window and can never split one.
+ * - What a tick's own value and its **predecessors** decide (a trailing median, a failure-rate
+ *   delta, whether the rule is satisfied) is computed once, when the tick arrives, and cached under
+ *   an absolute tick index no later trim renumbers. None of it can change afterwards.
+ * - What a tick's **position in the buffer** decides is the part a trim moves: there is no baseline
+ *   for the first {@link BASELINE_TICKS} ticks and no delta for the first tick, so a window resting
+ *   on history that has since rolled out must go quiet, exactly as a from-scratch pass over the
+ *   shortened buffer does. A position only ever *falls*, so this is a one-way door: hotness is
+ *   monotone, and re-applying the rule is {@link clipRunsFront} moving the leading window's start
+ *   to the oldest tick the rule can still speak for. A trim clips a window and can never split one.
  *
- * Which is why the front clip is load-bearing rather than defensive: it is the
- * only thing that re-applies a positional rule after ingest, and reverting it
- * makes the equivalence tests fail on the first trim.
+ * So the front clip is load-bearing, not defensive: it is the only thing that re-applies a
+ * positional rule after ingest, and reverting it fails the equivalence tests on the first trim.
  */
 
 import { formatPercent, formatSeconds } from "@/lib/format-number";
@@ -197,16 +180,12 @@ function medianInPlace(values: number[]): number | null {
 }
 
 /**
- * Trailing-median baselines for one series: the median of the readings among
- * the {@link BASELINE_TICKS} ticks *before* each tick, computed when that tick
- * arrives and never revisited - the values behind it cannot change.
- *
- * `null` for a tick that arrived without that much history in front of it, which
- * is what makes the opening seconds of a run (where every value is its own
- * outlier) produce nothing, and for one whose lead-in held no reading at all. A
- * tick that *loses* its lead-in to a later trim is not handled here - it keeps a
- * baseline no rule may use any more, and {@link clipRunsFront} is what stops any
- * of them using it.
+ * Trailing-median baselines for one series: the median of the readings among the
+ * {@link BASELINE_TICKS} ticks *before* each tick, computed when that tick arrives and never
+ * revisited, as the values behind it cannot change. `null` for a tick without that much history
+ * before it (so a run's opening seconds, where every value is its own outlier, produce nothing) and
+ * for one whose lead-in held no reading. A tick that *loses* its lead-in to a later trim keeps a
+ * baseline no rule may use; {@link clipRunsFront} is what stops them using it.
  */
 function createBaselines(read: Reader) {
 	const cache = new TickCache<number | null>();
@@ -293,12 +272,10 @@ function clipRunsFront(runs: Run[], minStartAbs: number): boolean {
 }
 
 /**
- * The windows a rule reports, one per run long enough to count, built once and
- * kept on the run until its bounds move.
- *
- * The spike rule does not use this: its windows extend past their own hot run
- * and swallow the ones behind them, which is a fold over the runs rather than a
- * map across them. Burst and drop are maps, and were the same eight lines twice.
+ * The windows a rule reports, one per run long enough to count, built once and kept on the run
+ * until its bounds move. Burst and drop use it; the spike rule does not, as its windows extend past
+ * their own hot run and swallow the ones behind them, a fold over the runs rather than a map across
+ * them.
  */
 function collectWindows<R extends Run & { window: Anomaly | null }>(
 	runs: R[],
@@ -314,11 +291,9 @@ function collectWindows<R extends Run & { window: Anomaly | null }>(
 }
 
 /**
- * One rule's incremental state. `trim` and `push` are the ingest half - called
- * once per commit and once per arriving tick - and `windows` is the read half,
- * which materialises what the rule currently says about the buffer it is given.
- *
- * A rule with nothing to derive per tick omits `push` and does its reading in
+ * One rule's incremental state: `trim` and `push` are the ingest half (called once per commit and
+ * once per arriving tick), and `windows` the read half, materialising what the rule says about the
+ * buffer it is given. A rule with nothing to derive per tick omits `push` and does its reading in
  * `windows`, from a cursor it carries itself.
  */
 interface RuleDetector {
@@ -364,15 +339,13 @@ function createSpikeDetector(): RuleDetector {
 	let clipped = false;
 
 	/**
-	 * Re-derive what a clipped start invalidates. The clip took hot ticks off the
-	 * front, one of which may have been the peak, and moved the baseline the whole
-	 * window is measured against - so the frozen base, the peak and the reach of
-	 * the recovery tail are all in question.
+	 * Re-derive what a clipped start invalidates: the clip took hot ticks off the front, perhaps
+	 * the peak, and moved the baseline the whole window is measured against, so the frozen base,
+	 * the peak and the reach of the recovery tail are all in question.
 	 *
-	 * Re-walking the tail is the expensive part, and it is avoidable whenever the
-	 * clip left the baseline where it was - which is the usual case, and the one
-	 * that matters, since a window aging out of the buffer is clipped on every
-	 * commit for as many commits as its hot span is long.
+	 * Re-walking the tail is the expensive part, avoidable whenever the clip left the baseline
+	 * where it was: the usual case, and the one that matters, since a window aging out of the
+	 * buffer is clipped on every commit for as many commits as its hot span is long.
 	 */
 	function reseat(run: SpikeRun, history: LoadTestMetrics[], firstAbs: number): void {
 		// The clipped start is the oldest tick this rule can speak for, so it
@@ -387,12 +360,11 @@ function createSpikeDetector(): RuleDetector {
 		}
 
 		if (base !== run.base) {
-			// The threshold the walk measured itself against has moved, so the walk
-			// has to happen again. Salvaging it would mean re-justifying every tick
-			// it accepted *and* the tick that ended it against the new threshold -
-			// more subtlety than the saving is worth, because a clip usually does not
-			// move the baseline at all: it advances the start by one tick through a
-			// window whose lead-in is mostly unchanged.
+			// The threshold the walk measured itself against has moved, so the walk happens again.
+			// Salvaging it would mean re-justifying every tick it accepted *and* the tick that
+			// ended it against the new threshold, more subtlety than the saving is worth, as a clip
+			// usually does not move the baseline at all (it advances the start one tick through a
+			// mostly unchanged lead-in).
 			run.tailAbs = run.endAbs;
 			run.tailClosed = false;
 			run.tailPeak = 0;
@@ -519,14 +491,12 @@ interface BurstRun extends Run {
 
 function createBurstDetector(): RuleDetector {
 	/*
-	 * `requests_failed` and `requests_completed` are cumulative counters, so what
-	 * matters is the per-tick delta. Reading them undiffed would report a run that
-	 * failed early and recovered as failing for the rest of its life. The delta is
-	 * a property of a tick and the one before it, so it is cached - as the pair
-	 * rather than the ratio, because a window's rate is its failures over its
-	 * completions, which no per-tick ratio can be averaged back into. That the
-	 * *first* tick in the buffer has no predecessor is a property of the buffer,
-	 * so it is applied on read.
+	 * `requests_failed` and `requests_completed` are cumulative counters, so the per-tick delta is
+	 * what matters; read undiffed, a run that failed early and recovered would report as failing
+	 * for the rest of its life. The delta belongs to a tick and the one before it, so it is cached,
+	 * as the pair rather than the ratio, because a window's rate is its failures over its
+	 * completions, which no per-tick ratio can be averaged back into. That the buffer's *first*
+	 * tick has no predecessor is a property of the buffer, so it is applied on read.
 	 */
 	const counts = new TickCache<TickCounts>();
 	const runs: BurstRun[] = [];
@@ -760,15 +730,14 @@ function createFirst5xxDetector(): RuleDetector {
 /* -------------------------------------------------------------------------- */
 
 /**
- * How the buffer just handed over relates to the last one: how many ticks fell
- * off the front, or `null` when it is not the same buffer at all (a new run, a
- * replay, a remount) and the detector has to start over.
+ * How the buffer just handed over relates to the last one: how many ticks fell off the front, or
+ * `null` when it is not the same buffer (a new run, a replay, a remount) and the detector has to
+ * start over.
  *
- * The store only ever drops from the front of a time-ordered buffer, so the new
- * head sits at the first tick with its elapsed time - found by search, then
- * confirmed by object identity at both ends. Anything that does not confirm is
- * refused rather than guessed at: a wrong alignment would silently report a
- * different run's windows.
+ * The store only drops from the front of a time-ordered buffer, so the new head is the first tick
+ * with its elapsed time, found by search and confirmed by object identity at both ends. Anything
+ * that does not confirm is refused rather than guessed at: a wrong alignment would silently report
+ * a different run's windows.
  */
 function droppedFromFront(prev: LoadTestMetrics[], next: LoadTestMetrics[]): number | null {
 	if (prev.length === 0 || next.length === 0) return null;
@@ -825,14 +794,11 @@ function makeRules(): RuleDetector[] {
 }
 
 /**
- * A detector that carries its derivation across calls, for a caller handing over
- * the same growing buffer again and again.
- *
- * `detect` answers exactly what {@link detectAnomalies} would answer for the
- * buffer it is given - including for a buffer that is not a continuation of the
- * last one, which it starts over on. It is safe to call twice with the same
- * array (React renders it twice under StrictMode): the second call is served
- * from the memo, not re-ingested.
+ * A detector that carries its derivation across calls, for a caller handing over the same growing
+ * buffer again and again. `detect` answers exactly what {@link detectAnomalies} would for the
+ * buffer it is given, including one that does not continue the last, which it starts over on. Safe
+ * to call twice with the same array (React renders twice under StrictMode): the second call is
+ * served from the memo, not re-ingested.
  */
 export interface AnomalyDetector {
 	detect(history: LoadTestMetrics[]): Anomaly[];
@@ -877,14 +843,10 @@ export function createAnomalyDetector(): AnomalyDetector {
 }
 
 /**
- * Every anomaly in a run's per-tick series, in time order.
- *
- * Returns `[]` for a clean run - and for a run too short to have a baseline,
- * which is the same answer for the same reason: nothing here is established
- * enough to be abnormal.
- *
- * This is the one-shot form, for a series that arrives whole. A caller handing
- * the same buffer over on a timer wants {@link createAnomalyDetector}.
+ * Every anomaly in a run's per-tick series, in time order. `[]` for a clean run and for one too
+ * short to have a baseline, the same answer for the same reason: nothing is established enough to
+ * be abnormal. The one-shot form, for a series that arrives whole; a caller handing the same buffer
+ * over on a timer wants {@link createAnomalyDetector}.
  */
 export function detectAnomalies(history: LoadTestMetrics[]): Anomaly[] {
 	return createAnomalyDetector().detect(history);
@@ -895,17 +857,15 @@ export function detectAnomalies(history: LoadTestMetrics[]): Anomaly[] {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The series the detector reads, one tick a second whatever its source: a
- * stored tick as it is, and of a live stream only the gate frames (the final
- * frame is one). A frame between gates is dropped, never read as 0: it is a
- * tenth of a second, and every rule here counts ticks.
+ * The series the detector reads, one tick a second whatever its source: a stored tick as it is, and
+ * of a live stream only the gate frames (the final frame is one). A frame between gates is dropped,
+ * never read as 0: it is a tenth of a second, and every rule counts ticks.
  *
- * Nothing is restated. A gate's `current_rps` is the trailing-window reading
- * its stored row holds (#2393), and `second_samples` gives it its whole-second
- * p99. The burst rule's counter deltas span gate to gate once the frames
- * between are gone, and concurrency and the status map are as of the tick in
- * both sources. A gate is therefore returned as the very object it came in as,
- * the identity {@link createAnomalyDetector} recognises the next buffer by.
+ * Nothing is restated: a gate's `current_rps` is the trailing-window reading its stored row holds
+ * (#2393), `second_samples` gives it its whole-second p99, the burst rule's counter deltas span
+ * gate to gate once the frames between are gone, and concurrency and the status map are as of the
+ * tick in both sources. So a gate is returned as the very object it came in as, the identity
+ * {@link createAnomalyDetector} recognises the next buffer by.
  */
 export function wholeSecondTicks(history: LoadTestMetrics[]): LoadTestMetrics[] {
 	return history.filter((m) => !m.live || m.second_samples !== undefined);

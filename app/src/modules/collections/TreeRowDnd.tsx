@@ -6,13 +6,10 @@
  */
 
 /**
- * The two pieces of drag chrome a tree row renders: the drop line, and the
- * hidden Alt+Arrow controls.
- *
- * Both are shared by `CollectionItem` and `RequestItem` - two components with
- * one drag contract - because a second copy of either is a copy that stops
- * receiving the first one's fixes. The state behind them lives in
- * `tree-row-dnd.ts`; this file is only what renders.
+ * The two pieces of drag chrome a tree row renders: the drop line and the hidden Alt+Arrow
+ * controls. Shared by `CollectionItem` and `RequestItem` (one drag contract), as a second copy of
+ * either stops receiving the first one's fixes. The state lives in `tree-row-dnd.ts`; this file
+ * only renders.
  */
 
 import { DropIndicator } from "@/components/shared";
@@ -21,18 +18,13 @@ import type { TreeEntity } from "./drop-position";
 import { useRowDropLine, type RowDropLine } from "./tree-row-dnd";
 
 /**
- * The 2px line between two rows.
+ * The 2px line between two rows, indented to the depth of the row the drop lands beside rather than
+ * drawn edge to edge: depth alone distinguishes "after this collapsed folder", "into it" and "after
+ * its parent", three otherwise pixel-identical lines. That is not always the drawing row's depth: a
+ * line after an open folder sits under its last visible row, at the folder's indent.
  *
- * Indented to the depth of the row the drop lands beside rather than drawn
- * edge to edge, because the depth is the only thing that distinguishes "after
- * this collapsed folder", "into it" and "after its parent" - three drops whose
- * lines would otherwise be pixel-identical. That is not always the depth of the
- * row drawing it: a line after an open folder sits under its last visible row,
- * at the folder's indent.
- *
- * A `span` positioned inside the row, not a node between rows: the roving-focus
- * walk reads the row order from the DOM, so an indicator element that sat
- * between treeitems would change the tree's shape mid-drag.
+ * A `span` inside the row, not a node between rows: the roving-focus walk reads the row order from
+ * the DOM, so an element between treeitems would change the tree's shape mid-drag.
  */
 export function RowDropIndicator({ line }: { line: RowDropLine | null }) {
 	if (!line) return null;
@@ -45,9 +37,8 @@ export function RowDropIndicatorFor({ rowKey }: { rowKey: string }) {
 }
 
 /**
- * The four hidden Alt+Arrow targets, the same pattern F2 and Delete already
- * use: the key handler lives in `useRovingTreeFocus` and finds the control by
- * attribute, so no handler has to be threaded through a row's prop list.
+ * The four hidden Alt+Arrow targets, F2's and Delete's pattern: `useRovingTreeFocus` finds the
+ * control by attribute, so no handler is threaded through a row's props.
  */
 export function RowMoveControls({ entity }: { entity: TreeEntity }) {
 	const { dnd } = useCollectionTreeHandlers();

@@ -6,14 +6,11 @@
  */
 
 /**
- * The sequence a scenario load run has run so far, for the live view's panel
- * (issue #2823).
- *
- * The engine sends the block on gate frames alone, about one frame a second, so
- * the newest tick usually lacks it: a reader of `currentMetrics` would flicker
- * between the panel and nothing. This takes the latest frame that carries it
- * (the rule `latestGateFrame` follows), and returns the block itself, so the
- * panel's prop keeps its identity across the frames between two gates.
+ * The sequence a scenario load run has run so far, for the live view's panel (issue #2823). The
+ * engine sends the block on gate frames alone, about one frame a second, so the newest tick usually
+ * lacks it and a reader of `currentMetrics` would flicker between the panel and nothing. This takes
+ * the latest frame carrying it (the rule `latestGateFrame` follows) and returns the block itself,
+ * so the panel's prop keeps its identity across the frames between two gates.
  */
 
 import type { LiveScenarioProgress, LoadTestMetrics } from "@/types";

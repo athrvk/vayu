@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/run_compare.hpp
  * @brief Two load-run reports diffed the way the app diffs them: the
  *        comparison block of the run-report export (#2127).
  *

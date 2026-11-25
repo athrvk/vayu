@@ -6,13 +6,8 @@
  */
 
 /**
- * Collections Module
- *
- * Components for managing collections and requests.
- *
- * Location: Sidebar only
- * - All components in this module are displayed in the sidebar
- * - CollectionTree is the main component shown in the Collections tab
+ * The collections module's barrel: the drawer's collection tree (`CollectionTree`), its rows, their
+ * contexts and the tree hooks.
  */
 
 export { default as CollectionTree } from "./CollectionTree";

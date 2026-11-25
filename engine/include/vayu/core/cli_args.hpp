@@ -8,14 +8,13 @@
  */
 
 /**
- * @file core/cli_args.hpp
  * @brief What `vayu-cli`'s argument vector says to do (#1031).
  *
- * Moved out of `cli.cpp` for the reason `daemon_args.hpp` was moved out of
- * `daemon.cpp`: the loop is where each rule is applied, so it is the loop a
- * test has to be able to call. `--help` and `--version` become a *request* the
- * caller answers rather than something the parse prints, which is what lets the
- * usage text stay in the binary that owns it.
+ * Out of `cli.cpp` for the reason `daemon_args.hpp` is out of `daemon.cpp`: the
+ * loop is where each rule is applied, so it is the loop a test has to be able
+ * to call. `--help` and `--version` become a *request* the caller answers
+ * rather than something the parse prints, which lets the usage text stay in the
+ * binary that owns it.
  */
 
 #include <cstdint>
@@ -89,10 +88,9 @@ read_daemon_flag (std::span<char* const> args, size_t& i, CliOptions& options) {
     return {};
 }
 
-/// `run <file>`. The command's own argument, read where the command is - not by
-/// the trailing catch-all this replaced, which claimed the *first* non-flag
-/// word and so answered `vayu-cli run` by reporting the word `run` as a file it
-/// could not open (#1031).
+/// `run <file>`. The command's own argument, read where the command is, so
+/// `vayu-cli run` reports a missing request file path rather than the word
+/// `run` as a file it could not open (#1031).
 inline std::expected<void, std::string>
 read_run_command (std::span<char* const> args, size_t& i, CliOptions& options) {
     const auto value =
@@ -137,8 +135,7 @@ read_cli_flags (std::span<char* const> args, CliOptions& options) {
         } else if (i == 1 && !looks_like_a_flag (arg)) {
             // The command sits at `args[1]` and is not this loop's to judge: an
             // unrecognised one is answered by the dispatch, which names it and
-            // points at `--help`. Anything else unrecognised is refused below,
-            // where it used to be dropped without a word.
+            // points at `--help`. Anything else unrecognised is refused below.
         } else {
             outcome = std::unexpected (unknown_argument_error (arg, "vayu-cli"));
         }

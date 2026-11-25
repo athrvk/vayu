@@ -6,23 +6,20 @@
  */
 
 /**
- * Mount the collection tree's rows in view, and stand in for the rest (#2543).
+ * Mount the collection tree's rows in view, and stand in for the rest (#2543). Rows are
+ * fixed-height by construction (each row's wrapper is given its height in spacing units,
+ * `rowHeightUnits`), so where any row sits is a prefix sum computed without mounting it. That is
+ * what makes a window cheap here, where `useGrowingWindow` records why one is not for lists whose
+ * rows wrap: there is no row to measure and no scroll map to keep. The skipped runs are spacers of
+ * the same units, so the scrollbar is the whole list's.
  *
- * The tree's rows are fixed-height by construction - each row's wrapper is
- * given its height in spacing units (`rowHeightUnits`) - so where any row sits
- * is a prefix sum the tree can compute without mounting it. That is what makes
- * a window cheap here, where `useGrowingWindow` records why one is not for
- * lists whose rows wrap: there is no row to measure and no scroll map to keep.
- * The skipped runs are spacers of the same units, so the scrollbar is the whole
- * list's.
+ * The scroller is the drawer body (`DrawerPanel`'s `[data-drawer-body]`), which the tree shares
+ * with the toolbar's new-collection form; the viewport is read relative to the list's own top, so
+ * whatever sits above it is subtracted.
  *
- * The scroller is the drawer body (`DrawerPanel`'s `[data-drawer-body]`), which
- * the tree shares with the toolbar's new-collection form; the viewport is read
- * relative to the list's own top, so whatever sits above it is subtracted.
- *
- * **Everything mounts where nothing can be measured**: no scroller, no
- * `ResizeObserver`, or a scroller with no height. jsdom is all three, so a test
- * that does not stub them renders the whole tree, as the tree always did.
+ * **Everything mounts where nothing can be measured**: no scroller, no `ResizeObserver`, or a
+ * scroller with no height. jsdom is all three, so a test that does not stub them renders the whole
+ * tree.
  */
 
 import { useCallback, useLayoutEffect, useMemo, useState } from "react";

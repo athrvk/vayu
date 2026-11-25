@@ -6,19 +6,17 @@
  */
 
 /**
- * Pure data transforms for the load-test dashboard. Kept side-effect-free and
- * component-free so they can be unit-tested in isolation; the SVG/card
- * components are dumb consumers of these results.
+ * Pure data transforms for the load-test dashboard, side-effect-free and component-free so they can
+ * be unit-tested in isolation; the SVG and card components only consume their results.
  */
 
 import type { LoadTestMetrics, StatusSecondEntry } from "@/types";
 import { coversSecond, secondPercentiles, worstReading } from "./tickPercentiles";
 
 /**
- * The bucket the per-tick series transforms here round a tick's elapsed time to
- * before plotting. Shared so the "is there anything to plot" predicates below
- * bucket exactly as the transforms do - a second copy of `* 2) / 2` is how the
- * two would drift apart.
+ * The bucket the per-tick series round a tick's elapsed time to before plotting, shared so the "is
+ * there anything to plot" predicates below bucket exactly as the transforms do; a second copy of
+ * `* 2) / 2` is how the two would drift apart.
  */
 function halfSecondBucket(elapsedSeconds: number): number {
 	return Math.round(elapsedSeconds * 2) / 2;
@@ -54,11 +52,10 @@ export function isRateLimitedRun(mode: string | undefined, targetRps: number | u
 }
 
 /**
- * Whether the hero swaps Rate Fidelity for the Dropped requests card: a
- * rate-limited run that lost requests, whether the in-flight cap dropped them
- * or a generator stall skipped them (#2911). The live bundle (`MetricsView`)
- * and the stored one (`reportToDerived`) both call this, so a run reads the
- * same while it runs and after it ends.
+ * Whether the hero swaps Rate Fidelity for the Dropped requests card: a rate-limited run that lost
+ * requests, whether the in-flight cap dropped them or a generator stall skipped them (#2911). The
+ * live bundle (`MetricsView`) and the stored one (`reportToDerived`) both call this, so a run reads
+ * the same while it runs and after it ends.
  */
 export function shouldShowDropped(
 	mode: string | undefined,
@@ -138,30 +135,25 @@ function* statusSecondEntries(history: LoadTestMetrics[]): Generator<StatusSecon
 }
 
 /**
- * Build per-second status-class rates for the status chart (#2866).
+ * Per-second status-class rates for the status chart (#2866). The engine counts each response in
+ * the second it completed in and sends the counts on every gate frame and stored row
+ * (`status_seconds`). When any tick of the series carries them they are drawn as counted: one point
+ * per entry, each class' `counts / span` (so a downsampled bucket's entry, which spans its whole
+ * bucket, is still responses per second, #2547), with no diff, no division by elapsed time and no
+ * orphan head, as nothing is derived from where the ticks happened to fall. A point sits at the end
+ * of its span in load-start seconds, the clock live frames and stored rows both count
+ * `elapsed_seconds` on (#2881), so it is where the other charts put that instant. The live buffer
+ * can repeat a gate frame, so entries are kept once per `second`.
  *
- * The engine counts each response in the second it completed in and sends the
- * counts on every gate frame and stored row (`status_seconds`). When any tick
- * of the series carries them, they are drawn as counted: one point per entry,
- * each class' `counts / span` (so a downsampled bucket's entry, which spans its
- * whole bucket, is still responses per second, #2547), with no diff, no
- * division by elapsed time and no orphan head, because nothing is derived from
- * where the ticks happened to fall. A point sits at the end of its span in
- * load-start seconds, the clock live frames and stored rows both count
- * `elapsed_seconds` on (#2881), so it is where the other charts put that
- * instant. The live buffer can repeat a gate frame, so entries are kept once
- * per `second`.
+ * A series with no such tick is a run stored before #2866, read by
+ * {@link buildStatusOverTimeFromCumulative}. The choice is per series, never per tick: a run
+ * carries the key on every gate from its first row, and diffing the ticks without it beside the
+ * entries of those with it would count the same responses twice.
  *
- * A series with no such tick is a run stored before #2866 and is read by
- * {@link buildStatusOverTimeFromCumulative}. The choice is per series, never
- * per tick: a run carries the key on every gate from its first row, and
- * diffing the ticks without it beside the entries of those with it would count
- * the same responses twice.
- *
- * The engine closes a second 250 ms after it ends and reports it at the next
- * gate, so a point arrives up to about 1.4 s after the instant it describes,
- * and the last partial second of a run is never closed, so it draws no point.
- * Seconds that close after the last stored row reach the live chart only.
+ * The engine closes a second 250 ms after it ends and reports it at the next gate, so a point
+ * arrives up to about 1.4 s after the instant it describes, and a run's last partial second never
+ * closes, so it draws no point. Seconds that close after the last stored row reach the live chart
+ * only.
  */
 export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 	if (!history.some(carriesStatusSeconds)) return buildStatusOverTimeFromCumulative(history);
@@ -180,24 +172,20 @@ export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 }
 
 /**
- * The fallback for a run stored before #2866: per-second status-class rates
- * diffed from the cumulative `status_codes` map each tick that closes a second
- * ({@link closesStatusSecond}) carries. Labels each on
- * its whole second (the last tick in a second standing for it), diffs
- * consecutive ones so a 5xx burst shows up as a band, not a slope change, and
- * divides each diff by the elapsed time between the two ticks. Diffs are
- * clamped >= 0 (the source is monotonic). Returns [] when no such tick exists.
- * A live second still open at the edge of the window has no gate yet, so it
+ * The fallback for a run stored before #2866: per-second status-class rates diffed from the
+ * cumulative `status_codes` map on each tick that closes a second ({@link closesStatusSecond}).
+ * Each is labelled on its whole second (the last tick in a second standing for it); consecutive
+ * ones are diffed, so a 5xx burst shows as a band rather than a slope change, and each diff is
+ * divided by the elapsed time between the two ticks and clamped >= 0 (the source is monotonic). []
+ * when no such tick exists; a live second still open at the window's edge has no gate yet, so it
  * draws no point until it closes.
  *
- * A live head past `LIVE_HEAD_MAX_SECONDS` has nothing to diff against, so it
- * seeds the baseline and draws no point of its own; the series starts at the
- * next bucket.
+ * A live head past `LIVE_HEAD_MAX_SECONDS` has nothing to diff against, so it seeds the baseline
+ * and draws no point of its own; the series starts at the next bucket.
  *
- * The division is what keeps one unit across sources (#2547): a live gate
- * and a stored tick close about a second each, and a downsampled point
- * `ticksPerBucket` seconds, which a raw count would draw that many times
- * taller.
+ * The division keeps one unit across sources (#2547): a live gate and a stored tick close about a
+ * second each and a downsampled point `ticksPerBucket` seconds, which a raw count would draw that
+ * many times taller.
  */
 function buildStatusOverTimeFromCumulative(history: LoadTestMetrics[]): StatusPoint[] {
 	const byBucket = new Map<number, ClassSums & { time: number; elapsed: number }>();
@@ -228,12 +216,11 @@ function buildStatusOverTimeFromCumulative(history: LoadTestMetrics[]): StatusPo
 	if (orphanHead) prev = orphanHead;
 	for (const c of cum) {
 		const seconds = c.elapsed - prev.elapsed;
-		// A head at elapsed 0 closes no time: a live frame stamped at load start,
-		// before anything completed, or the first row of a raw run stored before
-		// #2881. Either count stands as one second's rather than divide by 0.
-		// A pre-#2881 run served downsampled has no such head: its first folded
-		// bucket spans N-1 intervals, so that one point reads about 1/N high.
-		// Accepted, because old rows are not corrected.
+		// A head at elapsed 0 closes no time (a live frame stamped at load start before anything
+		// completed, or the first row of a raw run stored before #2881), so its count stands as one
+		// second's rather than divide by 0. A pre-#2881 run served downsampled has no such head:
+		// its first folded bucket spans N-1 intervals, so that one point reads about 1/N high,
+		// accepted because old rows are not corrected.
 		const rate = (now: number, before: number) =>
 			Math.max(0, now - before) / (seconds > 0 ? seconds : 1);
 		out.push({
@@ -310,11 +297,9 @@ export function hasWindowLatency(
 }
 
 /**
- * Bucket per-tick window means to 0.5s and split into wire + queue-wait.
- *
- * Only a tick that {@link hasWindowLatency} contributes a point: an idle window
- * adds nothing, and a run stored before the window existed yields no points
- * rather than a cumulative line under a per-tick label.
+ * Bucket per-tick window means to 0.5s and split them into wire + queue-wait. Only a tick that
+ * {@link hasWindowLatency} contributes a point: an idle window adds nothing, and a run stored
+ * before the window existed yields no points rather than a cumulative line under a per-tick label.
  */
 export function buildLatencyChartData(history: LoadTestMetrics[]): LatencyPoint[] {
 	const byBucket = new Map<number, LatencyPoint>();
@@ -341,13 +326,11 @@ export interface RampPoint {
 
 export interface RampOverlay {
 	points: RampPoint[];
-	// Two-sided ramp deviation: mean of |achieved - configured| / target across
-	// buckets, as a percentage. Computed app-side directly from the plotted
-	// `configured` and `achieved` (= measured current_concurrency) series, so it
-	// is consistent with the curves by construction. Unlike the retired
-	// deficit-only "ramp lag", overshoot (achieved >> configured) is counted -
-	// a 9x overshoot reads as a large deviation, not 0%. Denominator is `target`
-	// (always > 0 here), so it never divides by zero even when configured == 0.
+	// Two-sided ramp deviation: the mean of |achieved - configured| / target across buckets, as a
+	// percentage, from the plotted `configured` and `achieved` (= measured current_concurrency)
+	// series, so it matches the curves by construction. Overshoot counts (a 9x overshoot reads as a
+	// large deviation, not 0%), and the denominator `target` is always > 0 here, so it never
+	// divides by zero even when configured == 0.
 	rampDeviationPct: number;
 	peakAchieved: number;
 	target: number;
@@ -368,17 +351,14 @@ export interface PercentilePoint {
 }
 
 /**
- * Bucket per-second latency percentiles to 0.5s.
- *
- * Only a tick that stands for a whole second contributes a point
- * ({@link coversSecond}): a live frame between gates carries a ~100 ms window
- * and adds nothing, so the live series has one point a second like the stored
- * one. A second with no completion is a `null` point, which uPlot draws as a
- * break in the line (issue #2386); skipping it instead would join its
- * neighbours straight across the stall. Ticks sharing a bucket keep the worst
- * reading of each percentile ({@link worstReading}) - the final frame closing
- * a partial second can land beside the last gate - and never an average, which
- * would hide the stall the percentile exists to show.
+ * Bucket per-second latency percentiles to 0.5s. Only a tick standing for a whole second
+ * contributes a point ({@link coversSecond}): a live frame between gates carries a ~100 ms window
+ * and adds nothing, so the live series has one point a second like the stored one. A second with no
+ * completion is a `null` point, which uPlot draws as a break in the line (issue #2386); skipping it
+ * would join its neighbours straight across the stall. Ticks sharing a bucket keep the worst
+ * reading of each percentile ({@link worstReading}), as the final frame closing a partial second
+ * can land beside the last gate, never an average, which would hide the stall the percentile exists
+ * to show.
  */
 export function buildPercentileChartData(history: LoadTestMetrics[]): PercentilePoint[] {
 	const byBucket = new Map<number, PercentilePoint>();
@@ -445,14 +425,11 @@ export function buildRampOverlay(
 export const hasStatusCodes = (m: LoadTestMetrics): boolean => Boolean(m.status_codes);
 
 /**
- * Custom trends, counters and rates over time - `metric.record` / `pm.metrics`
- * names a run declared, plotted on the run's own timeline (issue #1579).
- *
- * Modeled on {@link JoinedMonitorSeries} (`monitorSeries.ts`): a shared x column
- * plus one column per declared name. Unlike server vitals, there is nothing to
- * join here - `custom_metrics` already rides the same tick each name is read
- * from, the same situation `buildStatusOverTime` is in for `status_codes` - so
- * this reads directly off `history`, no resampling.
+ * Custom trends, counters and rates over time: the `metric.record` / `pm.metrics` names a run
+ * declared, on the run's own timeline (issue #1579). Shaped like {@link JoinedMonitorSeries}
+ * (`monitorSeries.ts`), a shared x column plus one column per name, but with nothing to join:
+ * `custom_metrics` rides the tick each name is read from, as `status_codes` does for
+ * `buildStatusOverTime`, so this reads `history` directly, with no resampling.
  */
 export interface CustomMetricSeries {
 	/** Elapsed seconds, one entry per bucket - the shared x column. */
@@ -481,23 +458,18 @@ export const hasCustomMetrics = (m: LoadTestMetrics): boolean =>
 	Boolean(m.custom_metrics && Object.keys(m.custom_metrics).length > 0);
 
 /**
- * Build one representative value per declared custom-metric name per 0.5s
- * bucket, last tick in the bucket wins - the bucketing the other per-tick
- * (non-cumulative) series here use.
+ * One representative value per declared custom-metric name per 0.5s bucket, the last tick in the
+ * bucket winning, the bucketing the other per-tick (non-cumulative) series here use.
  *
- * One value per name per tick, not one line per stat: a `trend` metric carries
- * up to four numbers (p50/p95/p99/max) and charting all of them would multiply
- * unpredictably against the 32-name cap - a run with 8 trend metrics would need
- * 32 lines on one chart. The representative is **p95 for a `trend`** (this
- * dashboard's other percentile-focused charts, e.g. `LatencyPercentilesChart`,
- * already treat p95 as the headline number) and **`value` for a `counter` or
- * `rate`** (the only number either type has).
+ * One value per name, not one line per stat: a `trend` carries up to four numbers
+ * (p50/p95/p99/max), and charting all of them multiplies against the 32-name cap (8 trend metrics
+ * would be 32 lines on one chart). The representative is **p95 for a `trend`** (the headline number
+ * of this dashboard's other percentile charts, e.g. `LatencyPercentilesChart`) and **`value` for a
+ * `counter` or `rate`** (the only number either has).
  *
- * A tick whose `custom_metrics` map has no entry for a name yet is a gap
- * (`null`), not `0` - a run's other metrics may still be recording while this
- * one hasn't fired, and `0` would misrepresent "not recorded" as "recorded and
- * zero", the same distinction `joinMonitorToTimeline` draws for a stale
- * reading.
+ * A tick whose `custom_metrics` has no entry for a name yet is a gap (`null`), not `0`: the run's
+ * other metrics may be recording while this one has not fired, and `0` would read "not recorded" as
+ * "recorded and zero", the distinction `joinMonitorToTimeline` draws for a stale reading.
  */
 export function buildCustomMetricsOverTime(history: LoadTestMetrics[]): CustomMetricSeries {
 	const names = customMetricNames(history);
@@ -530,30 +502,24 @@ export function buildCustomMetricsOverTime(history: LoadTestMetrics[]): CustomMe
 }
 
 /**
- * The series label a chart shows for one declared custom-metric name.
- *
- * A trend's plotted line is not the metric itself but its p95 (see
- * {@link buildCustomMetricsOverTime}), so its label says so; a counter or rate
- * has only one number, so its name alone is unambiguous.
+ * The series label a chart shows for one declared custom-metric name: a trend's plotted line is its
+ * p95 (see {@link buildCustomMetricsOverTime}), so its label says so; a counter or rate has one
+ * number, so its name alone is unambiguous.
  */
 export function customMetricSeriesLabel(name: string, type: "trend" | "counter" | "rate"): string {
 	return type === "trend" ? `${name} (p95)` : name;
 }
 
 /**
- * True when `history` covers more than one 0.5s bucket - i.e. when the series
- * transforms above would return more than one point.
+ * True when `history` covers more than one 0.5s bucket, i.e. when the series transforms above would
+ * return more than one point. A chart card renders only when its series has something to draw, and
+ * that question is a count: building the whole series to read `.length` would run the transform
+ * twice per flush (the card's gate and the chart). This answers it directly, allocating nothing and
+ * stopping at the first tick in a second bucket, two ticks normally.
  *
- * The dashboard renders a chart card only when its series has something to
- * draw, and that question is a count, not a series: building the whole series
- * to read `.length` meant the transform ran twice per flush, once in the card's
- * gate and once inside the chart that actually plots it. This answers it
- * directly, allocating nothing and stopping at the first tick that lands in a
- * second bucket - two ticks, in the normal case.
- *
- * `include` narrows which ticks count, for a transform that skips some:
- * `buildLatencyChartData` ignores ticks with no window latency. The status
- * series buckets differently and has its own gate, {@link hasStatusSeries}.
+ * `include` narrows which ticks count, for a transform that skips some: `buildLatencyChartData`
+ * ignores ticks with no window latency. The status series buckets differently and has its own gate,
+ * {@link hasStatusSeries}.
  */
 export function spansMultipleBuckets(
 	history: LoadTestMetrics[],
@@ -599,14 +565,11 @@ function hasTwoStatusSeconds(history: LoadTestMetrics[]): boolean {
 }
 
 /**
- * True when any tick reports a whole-second p99 above zero - the "is there
- * latency to show" half of the percentile card's gate, read off the ticks
- * rather than off a built series.
- *
- * Exact against {@link buildPercentileChartData}: it plots the same ticks and a
- * bucket keeps the worst of its ticks, so a bucket reads above zero if and only
- * if one of its ticks does. The chart's own two-point guard still decides
- * whether anything is drawn.
+ * True when any tick reports a whole-second p99 above zero: the "is there latency to show" half of
+ * the percentile card's gate, read off the ticks rather than a built series. Exact against
+ * {@link buildPercentileChartData}: it plots the same ticks and a bucket keeps its worst tick, so a
+ * bucket reads above zero if and only if one of its ticks does. The chart's own two-point guard
+ * still decides whether anything is drawn.
  */
 export function hasPercentileSignal(history: LoadTestMetrics[]): boolean {
 	return history.some((m) => (secondPercentiles(m)?.p99 ?? 0) > 0);

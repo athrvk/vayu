@@ -4,27 +4,24 @@
  * This source code is licensed under the Apache 2.0 license found in the
  * LICENSE file in the "app" directory of this source tree.
  *
- * The start form for a mock server's two injection knobs (issue #570) and its
- * allowed origins (#2367), on the shape of `services/NewIssuerDialog` - the
- * precedent for "a service with options, started from a form".
+ * The start form for a mock server's two injection knobs (issue #570) and its allowed origins
+ * (#2367), shaped like `services/NewIssuerDialog`, the precedent for "a service with options,
+ * started from a form".
  *
- * It is the *secondary* affordance, not the way in: the common case is "serve
- * this collection with nothing set", and the header's button still does that in
- * one click. Latency and error rate matter to the run you point at the mock -
- * one is what makes a load-run baseline realistic rather than degenerate, the
- * other is how a run's error handling and threshold verdict get exercised
- * without breaking a real service - and neither is what you want on the way to
+ * The *secondary* affordance, not the way in: the common case is "serve this collection with
+ * nothing set", one click on the header's button. Latency and error rate matter to the run aimed at
+ * the mock (one makes a load-run baseline realistic rather than degenerate, the other exercises a
+ * run's error handling and threshold verdict without breaking a real service), not on the way to
  * poking a route by hand.
  *
- * All three are start-time only. The engine has no `PUT /mock/:id`, and this did
- * not add one: they are read per response, so they *could* be live, but a run
- * against a mock has to be able to say which configuration produced its
- * numbers, which is the same reason the route table is a start-time snapshot.
- * Stop and start to change one - and the stop tooltip says so.
+ * All three are start-time only; the engine has no `PUT /mock/:id`. They are read per response, so
+ * they *could* be live, but a run against a mock must be able to say which configuration produced
+ * its numbers, the reason the route table is a start-time snapshot too. Stop and start to change
+ * one; the stop tooltip says so.
  *
- * The mutation lives in `MockServerControl`, not here: it owns the success
- * toast and the started/running switch either way, and a second copy of the
- * start call is a second place for the two to drift.
+ * The mutation lives in `MockServerControl`, not here: it owns the success toast and the
+ * started/running switch either way, and a second copy of the start call would be a second place
+ * for the two to drift.
  */
 
 import { useState } from "react";
@@ -125,9 +122,8 @@ export function StartMockServerDialog({
 								step={50}
 								value={latency}
 								onChange={(e) => setLatency(e.target.value)}
-								// Fixed rem, not `w-28`: the field holds a number of
-								// milliseconds, a text measure that should not narrow at
-								// the Default density the way `w-28`'s `--spacing` unit does.
+								// Fixed rem, not `w-28`: milliseconds are a text measure, which
+								// `w-28`'s `--spacing` unit would narrow at the Default density.
 								className="w-[7rem] shrink-0"
 								aria-invalid={!!latencyError}
 								aria-describedby={latencyError ? "mock-latency-error" : undefined}

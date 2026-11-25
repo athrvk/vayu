@@ -6,19 +6,15 @@
  */
 
 /**
- * The knobs `POST /mock/start` takes beyond the collection (issue #570), less
- * the origin policy, whose rules are shared with the inbox and live in
- * `lib/allowed-origins.ts` (#2367).
+ * The knobs `POST /mock/start` takes beyond the collection (issue #570), less the origin policy,
+ * whose rules are shared with the inbox in `lib/allowed-origins.ts` (#2367). Its own file, like
+ * `mock-server-selection.ts` beside it, so the dialog exports only a component and fast refresh
+ * keeps working, and a test can read the bounds without rendering.
  *
- * Its own file, like `mock-server-selection.ts` beside it, so the dialog
- * exports nothing but a component and fast refresh keeps working - and so the
- * bounds live somewhere a test can read them without rendering.
- *
- * Bounds mirror the engine's own (`core/constants.hpp`, `mock_server::`, plus
- * the literal 0-100 `parse_mock_start` applies to the rate). Out of range is a
- * `400 bad_request` that names the field and not the bound, which is a poor
- * place to learn the range from - so the form refuses the value with the bound
- * spelled out instead.
+ * Bounds mirror the engine's own (`core/constants.hpp`, `mock_server::`, plus the literal 0-100
+ * `parse_mock_start` applies to the rate). Out of range is a `400 bad_request` that names the field
+ * but not the bound, a poor place to learn the range from, so the form refuses the value with the
+ * bound spelled out.
  */
 
 /** `constants::mock_server::MAX_LATENCY_MS`. */
@@ -38,12 +34,10 @@ export interface MockServerOptions {
 export const DEFAULT_MOCK_OPTIONS: MockServerOptions = { latencyMs: 0, errorRatePct: 0 };
 
 /**
- * The refusal for @p text as a field bounded `0..max`, or null when it is
- * sendable.
- *
- * An empty box is refused rather than read as 0: `Number("")` is 0 and a whole
- * number, so every other check here passes it, and a silently-zeroed field is
- * the one case where the form would send something the user did not type.
+ * The refusal for @p text as a field bounded `0..max`, or null when it is sendable. An empty box is
+ * refused, not read as 0: `Number("")` is 0 and a whole number, so every other check here passes
+ * it, and a silently zeroed field is the one case where the form would send something the user did
+ * not type.
  */
 export function outOfRange(text: string, max: number, noun: string): string | null {
 	const bound = `A whole number of ${noun}, 0 to ${max}.`;
