@@ -6,39 +6,34 @@
  */
 
 /**
- * Product names for the MCP client identifiers a run records (issue #1817).
+ * Product names for the MCP client identifiers a run records (#1817). A run an agent started
+ * carries the `clientInfo.name` its client sent in the `initialize` handshake, as sent; that string
+ * is whatever the client's author chose, so it is shown through this table (`claude-ai` is not a
+ * name anyone would call Claude Desktop).
  *
- * A run an agent started carries the `clientInfo.name` that client sent in its
- * `initialize` handshake, as sent. That string is whatever the client's author
- * chose, so it is shown through this table: `claude-ai` is not a name anyone
- * would call Claude Desktop.
- *
- * **Evidence per row** (checked 2026-10-06; every row is an identifier some
- * client was seen to send, none is a capture of a client talking to Vayu, and
- * a client may rename itself in any release):
+ * **Evidence per row** (checked 2026-10-06; every row is an identifier some client was seen to
+ * send, none is a capture of a client talking to Vayu, and a client may rename itself in any
+ * release):
  * - From the client's own source: `gemini-cli-mcp-client` (gemini-cli
- *   `packages/core/src/tools/mcp-client.ts`), `Zed` (zed `context_server`),
- *   `Visual Studio Code` and `Visual Studio Code - Insiders` (vscode
- *   `mcpServerRequestHandler.ts` sends `productService.nameLong`, and the
- *   Microsoft builds substitute their product name; a fork sends its own and
- *   falls through to the raw identifier).
- * - Observed in `initialize` requests real clients sent to Apify's MCP server,
- *   as recorded by the community registry apify/mcp-client-capabilities
- *   (`mcp-clients.json`, 43 entries, snapshot 2026-10-06; browsable at
- *   canimcp.dev): every other row. `claude-ai` is shared by Claude Desktop and
- *   Claude.ai, and the registry lists two spellings each for VS Code
- *   (`Visual-Studio-Code`), Codex and Windsurf.
- * - Deleted for having no evidence anywhere: `Claude Code`, `Claude Desktop`,
- *   `vscode`, `vscode-mcp-client`, `cursor`, `gemini-cli`.
+ *   `packages/core/src/tools/mcp-client.ts`), `Zed` (zed `context_server`), `Visual Studio Code`
+ *   and `Visual Studio Code - Insiders` (vscode `mcpServerRequestHandler.ts` sends
+ *   `productService.nameLong`, and the Microsoft builds substitute their product name; a fork sends
+ *   its own and falls through to the raw identifier).
+ * - Observed in `initialize` requests real clients sent to Apify's MCP server, as recorded by the
+ *   community registry apify/mcp-client-capabilities (`mcp-clients.json`, 43 entries, snapshot
+ *   2026-10-06; browsable at canimcp.dev): every other row. `claude-ai` is shared by Claude Desktop
+ *   and Claude.ai, and the registry lists two spellings each for VS Code (`Visual-Studio-Code`),
+ *   Codex and Windsurf.
+ * - Deleted for having no evidence anywhere: `Claude Code`, `Claude Desktop`, `vscode`,
+ *   `vscode-mcp-client`, `cursor`, `gemini-cli`.
  *
- * A row that is wrong or missing degrades to the raw identifier (below),
- * never to a wrong product name. #1819 stays open for what this does not
- * settle: a capture from each client against Vayu, with its version, and
- * whether it echoes `Mcp-Session-Id` over HTTP.
+ * A row that is wrong or missing degrades to the raw identifier (below), never to a wrong product
+ * name. #1819 stays open for what this does not settle: a capture from each client against Vayu,
+ * with its version, and whether it echoes `Mcp-Session-Id` over HTTP.
  *
- * Matching is case-insensitive on the trimmed identifier. An identifier this
- * table does not know is returned as sent: guessing a product from a
- * substring would be the one answer worse than the raw name.
+ * Matching is case-insensitive on the trimmed identifier. An identifier this table does not know is
+ * returned as sent: guessing a product from a substring would be the one answer worse than the raw
+ * name.
  */
 export const MCP_CLIENTS: readonly { label: string; identifiers: readonly string[] }[] = [
 	{ label: "Claude Code", identifiers: ["claude-code"] },

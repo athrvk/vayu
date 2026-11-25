@@ -6,13 +6,10 @@
  */
 
 /**
- * Something the OS asked Vayu to open, forwarded from `electron/open-intent.ts`
- * (issue #1364): a document dropped on the icon, a collection picked off the
- * Dock menu or a Jump List task, or New Request from either.
- *
- * Mounted once, in `App`, for the reason `useNotificationActivation` is: the
- * listener is on the preload bridge, and a second mount would act on one OS
- * request twice.
+ * Something the OS asked Vayu to open, forwarded from `electron/open-intent.ts` (#1364): a document
+ * dropped on the icon, a collection picked off the Dock menu or a Jump List task, or New Request
+ * from either. Mounted once, in `App`, for `useNotificationActivation`'s reason: the listener is on
+ * the preload bridge, and a second mount would act on one OS request twice.
  */
 
 import { useEffect } from "react";
@@ -30,24 +27,23 @@ export function useOpenIntent(): void {
 			// method, and `?.` on electronAPI alone would not guard that.
 			return window.electronAPI?.onOpenIntent?.((intent) => {
 				if (intent.kind === "newRequest") {
-					// Re-dispatched to the one window handler rather than called a
-					// second way, which is what `editor-chords.ts` exists for and the
-					// same reasoning `useNotificationActivation` gives for settings.
+					// Re-dispatched to the one window handler rather than called a second way,
+					// which is what `editor-chords.ts` exists for and the reasoning
+					// `useNotificationActivation` gives for settings.
 					//
-					// It cannot go through `commandById("new-request")` the way that
-					// hook goes through `open-settings`: the command is declared
-					// `available: (ctx) => ctx.surfaces !== undefined`, because the
-					// flow can need a collection picker and a picker needs a mounted
-					// host to render it. `baseCommandContext()` has no `surfaces` by
-					// design, so `perform` there is `ctx.surfaces?.newRequest()` - a
-					// silent no-op, and a Dock menu entry that opens nothing.
-					// `Shell` owns the chord, the picker and the no-collections case;
-					// this hands it the keypress and lets it keep all three.
+					// Not through `commandById("new-request")` as that hook goes through
+					// `open-settings`: the command is declared
+					// `available: (ctx) => ctx.surfaces !== undefined`, because the flow can need a
+					// collection picker and a picker needs a mounted host. `baseCommandContext()`
+					// has no `surfaces` by design, so `perform` there is
+					// `ctx.surfaces?.newRequest()`, a silent no-op and a Dock menu entry that opens
+					// nothing. `Shell` owns the chord, the picker and the no-collections case; this
+					// hands it the keypress and lets it keep all three.
 					//
-					// `Shell` refuses the chord while any dialog is up (#935), and an OS
-					// request has no one to press it again, so it waits for the dialog
-					// to go (#3404). The palette is the one dialog this may close for
-					// the user: it is opened by a keystroke and holds nothing to lose.
+					// `Shell` refuses the chord while any dialog is up (#935), and an OS request
+					// has no one to press it again, so it waits for the dialog to go (#3404). The
+					// palette is the one dialog this may close for the user: it is opened by a
+					// keystroke and holds nothing to lose.
 					useLayoutStore.getState().setPaletteOpen(false);
 					const entry = { cancel: () => {} };
 					waiting.add(entry);

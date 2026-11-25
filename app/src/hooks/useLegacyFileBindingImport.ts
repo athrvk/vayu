@@ -14,11 +14,10 @@ import { writeFileBinding } from "@/queries/file-bindings";
 import { importLegacyFileBindings } from "@/queries/legacy-file-bindings";
 
 /**
- * Move the spec-file and data-file bindings an older Vayu kept in
- * `localStorage` onto the engine's rows, once, after the first collections
- * list arrives (#2765) - the list is what says which collections still exist
- * and which already hold a binding. Mounted at the root; a launch whose writes
- * fail leaves the keys for the next one.
+ * Move the spec-file and data-file bindings an older Vayu kept in `localStorage` onto the engine's
+ * rows, once, after the first collections list arrives (#2765): the list says which collections
+ * still exist and which already hold a binding. Mounted at the root; a launch whose writes fail
+ * leaves the keys for the next one.
  */
 export function useLegacyFileBindingImport(): void {
 	const queryClient = useQueryClient();

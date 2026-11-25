@@ -8,8 +8,7 @@
  */
 
 /**
- * @file utils/variable_text.hpp
- * @brief The one reading of a stored variable's `value` (issue #3245).
+ * @brief The one reading of a stored variable's `value` (#3245).
  *
  * The app stores strings, but a raw API or MCP caller can store a number, a
  * boolean or a structure. The resolver (`parse_variables`) and the Postman

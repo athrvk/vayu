@@ -8,30 +8,24 @@
 import type { HeaderLine, RedirectHop } from "@/types/domain";
 
 /**
- * The lines the engine sent, or `undefined` when it sent none (issue #2460).
+ * The lines the engine sent, or `undefined` when it sent none (#2460). "Absent" and "empty" are one
+ * case on purpose, and this is the one place that says so: a live answer carries `headerLines: []`
+ * for a response with no headers, a stored trace omits the key, and an engine or row from before
+ * the key has neither, so treating only `undefined` as missing would let one exchange build a
+ * different `ResponseState` live and restored. Both funnels run their input through here.
  *
- * "Absent" and "empty" are one case on purpose, and this is the one place that
- * says so. A live answer carries `headerLines: []` for a response with no
- * headers, a stored trace omits the key, and an engine or row from before the
- * key has neither - so treating only `undefined` as missing would let the same
- * exchange build a different `ResponseState` live and restored. Both funnels
- * run their input through here.
- *
- * Absence is kept, not filled in from the folded map, because it is the only
- * signal that the Cookies tab is holding a folded `set-cookie` rather than one
- * received line: a derived line looks exactly like a real one, and parsing a
- * folded value as a single line shows several cookies as one.
+ * Absence is kept, not filled in from the folded map, because it is the only signal that the
+ * Cookies tab holds a folded `set-cookie` rather than one received line: a derived line looks
+ * exactly like a real one, and parsing a folded value as one line shows several cookies as one.
  */
 export function receivedHeaderLines(lines: HeaderLine[] | undefined): HeaderLine[] | undefined {
 	return lines && lines.length > 0 ? lines : undefined;
 }
 
 /**
- * The redirect hops the engine reported, or `undefined` when there were none
- * (issue #2461). Same rule as {@link receivedHeaderLines}: a live answer
- * always carries `redirects: []` while a stored trace writes the key only when
- * a hop was followed, so an empty list is an absent one or the same exchange
- * would build a different `ResponseState` live and restored.
+ * The redirect hops the engine reported, or `undefined` when there were none (#2461). Same rule as
+ * {@link receivedHeaderLines}: a live answer always carries `redirects: []` while a stored trace
+ * writes the key only when a hop was followed, so an empty list reads as an absent one.
  */
 export function receivedRedirects(hops: RedirectHop[] | undefined): RedirectHop[] | undefined {
 	return hops && hops.length > 0 ? hops : undefined;
@@ -53,13 +47,10 @@ export function resolveHeaderLines(
 }
 
 /**
- * The request's lines as the engine sent them, or `undefined` when it sent none
- * (issue #2466) - the request-side twin of {@link receivedHeaderLines}, with the
- * same reason for reading an empty list as an absent one. A live `/execute`
- * answer always carries `requestHeaderLines` (`[]` when nothing was recorded), a
- * stored trace omits the key, and an engine or row from before it has neither;
- * both funnels run their input through here so one exchange builds one
- * `ResponseState` live and restored.
+ * The request's lines as the engine sent them, or `undefined` when it sent none (#2466): the
+ * request-side twin of {@link receivedHeaderLines}, for the same reason. A live `/execute` answer
+ * always carries `requestHeaderLines` (`[]` when nothing was recorded), a stored trace omits the
+ * key, and an engine or row from before it has neither.
  */
 export function sentHeaderLines(lines: HeaderLine[] | undefined): HeaderLine[] | undefined {
 	return receivedHeaderLines(lines);
