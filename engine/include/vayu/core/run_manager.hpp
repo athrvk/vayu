@@ -114,19 +114,18 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
 
 /**
  * @brief How many results to reserve a run's metrics stores for: duration x
- * target RPS, plus a 20% buffer, floored so a short run still starts with a
- * usable store.
+ *        target RPS, plus a 20% buffer, floored so a short run still starts
+ *        with a usable store.
  *
  * A reservation, never a bound - nothing refuses a run that exceeds it. It only
- * decides what the collector allocates up front, and both of `MetricsCollector`'s
- * derived reserves scale with it.
+ * decides what the collector allocates up front, and both of
+ * `MetricsCollector`'s derived reserves scale with it.
  *
  * The duration goes through `parse_duration_ms`, which is why this is a named
- * function rather than four lines in RunContext's constructor: the constructor
- * stripped one character and multiplied by 1000, so "5m" reserved five seconds'
- * worth and "500ms" five hundred seconds' worth - the identical defect
- * `parse_duration_ms` exists to remove from the strategy path, left behind in a
- * hand-rolled copy (#944).
+ * function rather than four lines in RunContext's constructor: a hand-rolled
+ * copy there - strip one character, multiply by 1000 - reserves five seconds'
+ * worth for "5m" and five hundred seconds' worth for "500ms", the identical
+ * defect `parse_duration_ms` exists to remove from the strategy path (#944).
  *
  * A duration the parser refuses - or one stored as something other than a
  * string - reserves as if for the 60s the field itself defaults to. Refusing a
@@ -201,12 +200,12 @@ int timeout_ms) {
  *
  * RunContext is built from the run's JSON alone - it holds no Database - so
  * anything whose default lives in `config_entries` is resolved by the caller
- * and handed in, the way `maxStoredErrors` always has been. A run's own config
- * still overrides these; they are only what it falls back to.
+ * and handed in, the way `maxStoredErrors` is. A run's own config still
+ * overrides these; they are only what it falls back to.
  *
  * Named for that role rather than for capture, which is what the first two
- * fields happen to be about - `phase_histograms` reaches RunContext by the
- * same route for the same reason and is not a capture knob.
+ * fields happen to be about - `phase_histograms` reaches RunContext by the same
+ * route for the same reason and is not a capture knob.
  */
 struct EngineDefaults {
     size_t max_sample_body_bytes = constants::metrics_collector::DEFAULT_MAX_SAMPLE_BODY_BYTES;
@@ -294,17 +293,16 @@ struct RunContext {
     /// The loop also carries Windows' 1 ms timer resolution for its lifetime
     /// (issue #1161), so releasing it below gives that back too.
     std::unique_ptr<vayu::http::EventLoop> event_loop;
-    // Orders the metrics thread's reads of `event_loop` against its
-    // publication (#956). start_run spawns the metrics thread before the
-    // runner thread has even built the loop, so the pointer is written by
-    // one thread while the other is already ticking - and the null check
-    // the reader used to carry tests a value, it orders nothing. Every
-    // metrics-thread read goes through active_transfer_count() below. The
-    // strategy thread and the event-loop workers' completion callbacks
-    // deliberately read the pointer WITHOUT this lock, because their reads
-    // are already ordered - by program order on the publishing thread, and
-    // by the submit queue's release/acquire hand-off on the workers - and a
-    // lock there would sit on the 60k-RPS submit path.
+    // Orders the metrics thread's reads of `event_loop` against its publication
+    // (#956). start_run spawns the metrics thread before the runner thread has
+    // even built the loop, so the pointer is written by one thread while the
+    // other is already ticking - and a null check on the reader's side tests a
+    // value, it orders nothing. Every metrics-thread read goes through
+    // active_transfer_count() below. The strategy thread and the event-loop
+    // workers' completion callbacks deliberately read the pointer WITHOUT this
+    // lock, because their reads are already ordered - by program order on the
+    // publishing thread, and by the submit queue's release/acquire hand-off on
+    // the workers - and a lock there would sit on the 60k-RPS submit path.
     mutable std::mutex event_loop_mtx;
 
     /// The single publication path for the run's event loop, pairing with
@@ -535,17 +533,16 @@ struct RunContext {
     std::vector<std::string> test_scripts;
 
     /**
-     * A single-request run's own step-level elements (issue #1594), compiled
-     * once here from the payload's `requestElements` array - kept apart from
+     * A single-request run's own step-level elements (#1594), compiled once
+     * here from the payload's `requestElements` array - kept apart from
      * `elements` (the run-level `timers`/`scripts`/`seed`/`includeScriptTime`
-     * override object @ref scripts_override etc. resolve from) because one
-     * flat run payload cannot use one key for both an object and an array.
-     * Null for a run sent with none, which is what keeps
-     * `submit_one_request`'s token-free fast path exactly as cheap as before
-     * this existed (#992). A `script.post` element found here that is not
-     * running inline (@ref script_element_runs_inline) has its `config.script`
-     * text appended to @ref test_scripts instead, for the deferred replay
-     * (`validate_scripts`) to read.
+     * override object @ref scripts_override etc. resolve from) because one flat
+     * run payload cannot use one key for both an object and an array. Null for
+     * a run sent with none, which keeps `submit_one_request`'s token-free fast
+     * path paying nothing for elements (#992). A `script.post` element found
+     * here that is not running inline (@ref script_element_runs_inline) has
+     * its `config.script` text appended to @ref test_scripts instead, for the
+     * deferred replay (`validate_scripts`) to read.
      */
     std::shared_ptr<const std::vector<vayu::core::CompiledElement>> step_elements;
 
@@ -717,17 +714,17 @@ struct RunContext {
 
     /**
      * Skip a compiled element under a load run's inline-vs-deferred rule
-     * (#1495): a declarative kind always runs; a `script.*` kind runs only
-     * when its own `config.inline` is set or the run's `elements.scripts`
-     * override forces it. Read through `HotPathClass`, never a `kind ==`
-     * comparison, so #1512's extensibility contract (rule 1) holds outside
-     * `core/elements`. Shared by the scenario load producer's pipeline hooks
-     * and, since issue #1594, a single-request run's own.
+     * (#1495): a declarative kind always runs; a `script.*` kind runs only when
+     * its own `config.inline` is set or the run's `elements.scripts` override
+     * forces it. Read through `HotPathClass`, never a `kind ==` comparison, so
+     * #1512's extensibility contract (rule 1) holds outside `core/elements`.
+     * Shared by the scenario load producer's pipeline hooks and a
+     * single-request run's own (#1594).
      *
      * Only a `step.after` script is *deferred* (#2144): the post-run replay
      * runs the post-request script (`find_step_post_scripts`,
-     * `compile_step_elements`) and nothing else, so an un-inlined
-     * `step.before` script is a plain skip - it never runs at all.
+     * `compile_step_elements`) and nothing else, so an un-inlined `step.before`
+     * script is a plain skip - it never runs at all.
      */
     [[nodiscard]] static std::optional<vayu::core::ElementSkip>
     load_pipeline_skip_reason (const vayu::core::CompiledElement& element,
@@ -883,12 +880,12 @@ struct RunContext {
      *
      * **Empty for every run whose request carries none of them**, which is the
      * throughput guard made structural: the strategies test `empty()` and
-     * otherwise submit the shared request they always did.
+     * otherwise submit the one shared request.
      *
-     * Beside @ref load_data rather than inside it, because the identity needs no
-     * data set: a run sent without rows still knows which iteration it is on.
-     * Written once by `build_load_request` before the first submission, read on
-     * the run's worker thread afterwards.
+     * Beside @ref load_data rather than inside it, because the identity needs
+     * no data set: a run sent without rows still knows which iteration it is
+     * on. Written once by `build_load_request` before the first submission,
+     * read on the run's worker thread afterwards.
      */
     StepDataTemplate load_template;
 
@@ -919,13 +916,13 @@ struct RunContext {
     size_t effective_max_per_host  = 0;
 
     /**
-     * How a *single-request* load run's credentials resolve (issue #1055) - the
+     * How a *single-request* load run's credentials resolve (#1055) - the
      * parsed auth and its split, read once off the payload before the run
      * starts.
      *
      * **Empty credentials for every run whose auth the build resolved**, which
      * is the same structural guard @ref load_template is: the strategies test
-     * `empty()` and otherwise submit the shared request they always did.
+     * `empty()` and otherwise submit the one shared request.
      *
      * Beside @ref load_data rather than inside it, because a credential
      * carrying the identity defers on a run that has no rows at all - the set
@@ -1404,9 +1401,9 @@ struct MetricTickSample {
     // The trailing window of the live frame of the same tick (TrailingWindow,
     // #2393): completions and dispatches per second over at least the last
     // second, the window's mean requests in flight (#2821; its time in flight
-    // over its span since #3567, so a request open across the window counts
-    // whether or not anything completed), and its mean latency and queue
-    // wait, absent (stored as null) when it completed nothing.
+    // over its span, #3567, so a request open across the window counts whether
+    // or not anything completed), and its mean latency and queue wait, absent
+    // (stored as null) when it completed nothing.
     double current_rps          = 0.0;
     double current_send_rate    = 0.0;
     double window_avg_in_flight = 0.0;
@@ -1455,10 +1452,10 @@ struct MetricTickSample {
  *
  * Key set and value types are the contract `GET /runs/:id/metrics` returns:
  * `http/routes/metrics.cpp` serves each stored row as one `data[]` entry, so
- * whatever this writes is what the app reads. Since issue #177 there is no
- * second implementation of the object to cross-check against, so
- * stats_route_test.cpp pins this payload directly against the shape the app's
- * `LoadTestMetrics` expects - see its comment above the pinning test.
+ * whatever this writes is what the app reads. There is no second implementation
+ * of the object to cross-check against (#177), so stats_route_test.cpp pins
+ * this payload directly against the shape the app's `LoadTestMetrics` expects -
+ * see its comment above the pinning test.
  */
 [[nodiscard]] nlohmann::json build_metric_tick_payload (const MetricTickSample& sample);
 
@@ -1480,11 +1477,11 @@ struct ScriptValidationTotals {
 /**
  * @brief What the deferred validation pass found, for the run and per step.
  *
- * `run` is the whole-run headline the report's `testValidation` section has
- * always shown; `steps` is a scenario load run's per-step breakdown, which is
- * the only reading that says *which* step's assertion failed. Both, rather than
- * one: a sequence's aggregate answers "did anything fail" and the breakdown
- * answers "where", and neither is derivable from the other.
+ * `run` is the whole-run headline the report's `testValidation` section shows;
+ * `steps` is a scenario load run's per-step breakdown, which is the only
+ * reading that says *which* step's assertion failed. Both, rather than one: a
+ * sequence's aggregate answers "did anything fail" and the breakdown answers
+ * "where", and neither is derivable from the other.
  */
 struct ScriptValidation {
     /// Absent when validation did not run at all - no script, or no samples.
@@ -1646,9 +1643,9 @@ struct SamplingRetention {
 /**
  * @brief Whole-run results, the inputs to the stored `runs.summary` object.
  *
- * Everything `GET /runs/:id/report` used to re-derive by scanning the run's
- * metric rows, known once at completion. `latency` holds the cumulative
- * (whole-run) percentiles, never a window.
+ * Known once at completion, so `GET /runs/:id/report` does not re-derive them
+ * by scanning the run's metric rows. `latency` holds the cumulative (whole-run)
+ * percentiles, never a window.
  */
 struct RunSummaryInputs {
     size_t total_requests  = 0;
@@ -1712,7 +1709,7 @@ struct RunSummaryInputs {
     // dropped or refused (#2799) - see MetricsCollector::record_connection_replays.
     size_t connection_replays = 0;
     // Absent when the run had no test script or no sampled responses - the
-    // report then omits its testValidation section, as it always has.
+    // report then omits its testValidation section.
     std::optional<ScriptValidationTotals> tests;
     // What `maxAssertionFailureRatePct` judges (#1497, #2892): the exact
     // population (`exact_assertion_totals`) beside the sampled one (`tests`
@@ -1813,13 +1810,13 @@ struct RunSummaryInputs {
 [[nodiscard]] nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs);
 
 /**
- * @brief The summary's `warnings` array for a finished run (issue #1503): an
+ * @brief The summary's `warnings` array for a finished run (#1503): an
  *        unresolved `{{token}}` that was sent anyway, and, for a scenario run,
  *        the steps whose `script.pre` did not run inline (#1938), and a
  *        per-host connection limit raised for the `concurrency` the run
- *        declared (#2394, #2801), and requests
- *        re-sent on a new connection (#2799). Declared here
- *        so a test reaches the rule without driving a whole run.
+ *        declared (#2394, #2801), and requests re-sent on a new connection
+ *        (#2799). Declared here so a test reaches the rule without driving a
+ *        whole run.
  */
 [[nodiscard]] nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context);
 
@@ -1978,18 +1975,18 @@ class RunManager {
      *                 the same, and only the executor differs. The design-mode
      *                 sequential runner is `start_scenario_run` instead.
      * @param data The validated `data` rows a single-request run binds, or null
-     *             for a run sent without them (issue #993). Passed rather than
+     *             for a run sent without them (#993). Passed rather than
      *             read back out of @p config, because what makes a row set
      *             usable is the route's validation and its credential plan -
      *             a run started with the raw payload alone would be trusting a
      *             check nobody ran. Null for a scenario run, whose rows travel
      *             on @p scenario.
-     * @param auth_plan How this run's credentials resolve (issue #1055), read
+     * @param auth_plan How this run's credentials resolve (#1055), read
      *             off the same payload by the same route. Passed beside @p data
      *             rather than inside it because a credential carrying the
      *             identity defers on a run that has no rows at all; default for
-     *             a run whose credentials carry no token, which is the build
-     *             resolving its auth once exactly as it always did.
+     *             a run whose credentials carry no token, whose auth the build
+     *             resolves once.
      * @param files The route's plan-time check of a single-request run's files
      *             (`plan_load_files`), so the run reads each one once. Null
      *             makes the build check them itself.
