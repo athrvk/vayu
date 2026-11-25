@@ -10,17 +10,17 @@ import { pluralize } from "../../utils/format";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
- * Replaces the Rate Fidelity hero card when a constant_rps run lost requests,
- * in one of two ways that name different culprits:
+ * Replaces the Rate Fidelity hero card when a constant_rps run lost requests, in one of two ways
+ * that name different culprits:
  *
- * - dropped: the generator could not submit because its in-flight pool filled
- *   up, so the server is the bottleneck;
- * - skipped (#2911): the generator stalled and the pacer let go of the backlog
- *   older than its catch-up window instead of bursting. That is the generator
- *   or its host, so a run with skips alone draws no "Server saturating" advice.
+ * - dropped: the generator could not submit because its in-flight pool filled, so the server is the
+ *   bottleneck;
+ * - skipped (#2911): the generator stalled and the pacer let go of the backlog older than its
+ *   catch-up window instead of bursting, which is the generator or its host, so a run with skips
+ *   alone draws no "Server saturating" advice.
  *
- * `skipped` and `stalledMs` are optional so a caller with neither (an older
- * report) draws exactly the dropped-only card.
+ * `skipped` and `stalledMs` are optional, so a caller with neither (an older report) draws exactly
+ * the dropped-only card.
  */
 export function DroppedRequestsCard({
 	dropped,

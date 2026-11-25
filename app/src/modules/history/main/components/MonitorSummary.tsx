@@ -6,13 +6,11 @@
  */
 
 /**
- * The per-series min/max/avg the engine recorded for a run's server-vitals
- * scrape. The chart above it answers "when"; this answers "how high did it get".
- *
- * It also states the two kinds of missed scrape a chart cannot draw, because
- * both look like an empty panel and need different fixes (#3120): a failure (no
- * 2xx answer, so the URL or the endpoint is at fault, with the engine's cause)
- * and a no-match (answered, but none of the requested names matched).
+ * The per-series min/max/avg the engine recorded for a run's server-vitals scrape: the chart above
+ * answers "when", this "how high did it get". It also states the two kinds of missed scrape a chart
+ * cannot draw, as both look like an empty panel and need different fixes (#3120): a failure (no 2xx
+ * answer, so the URL or the endpoint is at fault, with the engine's cause) and a no-match
+ * (answered, but none of the requested names matched).
  */
 
 import type { ReactNode } from "react";
@@ -83,10 +81,9 @@ function scrapeCount(monitor: MonitorSection): number {
 }
 
 /**
- * The scrapes that got no 2xx answer, with the engine's cause for the last.
- *
- * A run recorded before the engine counted no-matches apart (`noMatchScrapes`
- * absent) folded them into `failures`, so its advice names both causes.
+ * The scrapes that got no 2xx answer, with the engine's cause for the last. A run recorded before
+ * the engine counted no-matches apart (`noMatchScrapes` absent) folded them into `failures`, so its
+ * advice names both causes.
  */
 function FailureCallout({ monitor }: { monitor: MonitorSection }): ReactNode {
 	if (monitor.failures === 0) return null;
@@ -117,9 +114,8 @@ function FailureCallout({ monitor }: { monitor: MonitorSection }): ReactNode {
 }
 
 /**
- * The 2xx answers that carried none of the requested names: the endpoint is
- * healthy and the names are wrong, which a failure's "check the URL" would send
- * the user away from.
+ * The 2xx answers that carried none of the requested names: the endpoint is healthy and the names
+ * are wrong, which a failure's "check the URL" would send the user away from.
  */
 function NoMatchCallout({
 	monitor,

@@ -6,27 +6,23 @@
  */
 
 /**
- * ScenarioStepsTab - the per-step breakdown of a scenario load run (issue #357).
+ * The per-step breakdown of a scenario load run (#357).
  *
- * A scenario load run stores no per-step `results` rows, and deliberately so:
- * one row per step per iteration per virtual user is the shape a load run
- * exists not to keep. The engine keeps one latency histogram per plan step
- * instead, and this table *is* how the run says what each step did - there is
- * no `results[]` to fall back to, which is why a design-mode collection run
- * renders `ScenarioRunView` and this one renders here.
+ * A scenario load run stores no per-step `results` rows, on purpose: one row per step per iteration
+ * per virtual user is the shape a load run exists not to keep. The engine keeps one latency
+ * histogram per plan step instead, and this table *is* how the run says what each step did. With no
+ * `results[]` to fall back to, a design-mode collection run renders `ScenarioRunView` and this one
+ * renders here.
  *
- * `executed` per step is the number worth reading first: a step that got no
- * response ends its iteration, so a sequence whose counts fall away after step 3
- * is telling you step 3 got nothing back. `errors` is wider than that - it also
- * counts 4xx/5xx responses, which do not end the iteration - so its tooltip
- * splits the two.
+ * `executed` per step is the number to read first: a step that got no response ends its iteration,
+ * so counts falling away after step 3 say step 3 got nothing back. `errors` is wider (it also
+ * counts 4xx/5xx responses, which do not end the iteration), so its tooltip splits the two.
  *
- * The Tests column is the deferred per-step validation (issue #450): each
- * step's own post-request script replayed after the run against that step's
- * sampled responses. A step that asserted nothing shows a dash rather than a
- * zero - "no assertions" and "no failures" are different answers, and the
- * engine keeps them apart by omitting the object. The console lines that replay
- * logged sit in a row of their own under the step's elements (issue #3127).
+ * The Tests column is the deferred per-step validation (#450): each step's post-request script
+ * replayed after the run against that step's sampled responses. A step that asserted nothing shows
+ * a dash, not a zero: "no assertions" and "no failures" are different answers, and the engine keeps
+ * them apart by omitting the object. The replay's console lines sit in a row of their own under the
+ * step's elements (#3127).
  */
 
 import { Fragment } from "react";
@@ -72,11 +68,10 @@ export interface ScenarioStepsTabProps {
 }
 
 /**
- * The Tests tally. With the step's replay population known (`deferred` on its
- * script elements, #2824) the cell leads with the scope, "23 of 2,270", and
- * keeps the assertion split in the title; the failed count stays in the cell,
- * since a failure should not need a hover. A report stored before the engine
- * counted `deferred` has no population, so it keeps the passed / failed form.
+ * The Tests tally. With the step's replay population known (`deferred` on its script elements,
+ * #2824) the cell leads with the scope, "23 of 2,270", the assertion split in the title and the
+ * failed count in the cell, as a failure should not need a hover. A report stored before the engine
+ * counted `deferred` has no population and keeps the passed / failed form.
  */
 function TestsCell({ step }: { step: RunScenarioStepStat }) {
 	const { tests } = step;

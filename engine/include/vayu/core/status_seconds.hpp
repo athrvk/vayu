@@ -8,14 +8,12 @@
  */
 
 /**
- * @file core/status_seconds.hpp
  * @brief Status-class counts keyed by the second each response completed in
- *        (#2866).
+ *        (#2866), never by the tick that read it.
  *
- * Entries are keyed by the second a response completed in, never by the tick
- * that read it. `MetricsCollector` stamps the second on the completion path;
- * the metrics thread drains the closed seconds once per gate and hands the
- * same entries to the gate frame and the stored row.
+ * `MetricsCollector` stamps the second on the completion path; the metrics
+ * thread drains the closed seconds once per gate and hands the same entries to
+ * the gate frame and the stored row.
  */
 
 #include <algorithm>

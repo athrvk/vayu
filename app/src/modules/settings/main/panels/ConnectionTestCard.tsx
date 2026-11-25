@@ -6,20 +6,16 @@
  */
 
 /**
- * One send through the settings on this screen, reported as which hop answered
- * (issue #708). It exists because every other way of finding out that a proxy
- * URL is wrong, or that a corporate CA is missing, is a failed request in the
- * middle of doing something else - and the message there names the endpoint,
- * not the setting.
+ * One send through the settings on this screen, reported as which hop answered (#708). Every other
+ * way of learning that a proxy URL is wrong or a corporate CA is missing is a failed request in the
+ * middle of something else, whose message names the endpoint, not the setting.
  *
- * A card in "Network & connectivity" rather than a button beside the proxy row:
- * the answer is about the whole transport policy - proxy, trust anchors and the
- * client certificate together - and pinning it to one row would suggest it only
- * tests that row.
+ * A card in "Network & connectivity", not a button beside the proxy row: the answer covers the
+ * whole transport policy (proxy, trust anchors and the client certificate together), and pinning it
+ * to one row would suggest it tests only that row.
  *
- * It also holds this screen's half of system-proxy resolution
- * (`useSystemProxyRefresh`), so the resolved row above it is true for someone
- * who is reading it right now.
+ * It also holds this screen's half of system-proxy resolution (`useSystemProxyRefresh`), so the
+ * resolved row above is true for whoever is reading it now.
  */
 
 import { useState } from "react";
@@ -86,11 +82,9 @@ const OUTCOME: Record<ConnectionTestOutcome, { label: string; chip: string; hint
 const DEFAULT_TEST_URL = "https://api.github.com/";
 
 /**
- * What the engine's `proxy` node means on screen.
- *
- * A proxy the app did not configure is named by `source: "environment"`, and
- * only when libcurl really sent the probe through it - so a missing `url`
- * without a `source` is a direct send, and `no_proxy` exemptions read as one.
+ * What the engine's `proxy` node means on screen. A proxy the app did not configure is named by
+ * `source: "environment"`, and only when libcurl really sent the probe through it, so a missing
+ * `url` without a `source` is a direct send, and a `no_proxy` exemption reads as one.
  */
 function proxyLine(proxy: ConnectionTestResult["proxy"]): string {
 	if (proxy.source === "environment") return environmentProxyLine(proxy);
@@ -171,10 +165,9 @@ export function ConnectionTestCard() {
 							onClick={() => void run()}
 						>
 							{/*
-							 * A glyph that is always there, not a spinner that mounts:
-							 * mounting one widened the button by an icon and a gap for
-							 * the length of every test, shrinking the URL field beside
-							 * it and handing the width back when the result landed.
+							 * A glyph that is always there, not a spinner that mounts: a mounted
+							 * one widens the button by an icon and a gap for the length of every
+							 * test, shrinking the URL field beside it.
 							 */}
 							<IconSwap
 								state={testing ? "testing" : "idle"}

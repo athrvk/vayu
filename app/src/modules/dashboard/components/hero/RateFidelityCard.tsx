@@ -11,13 +11,11 @@ import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
 /**
- * Rate-fidelity tier coloring: ≥95% success, ≥80% warning, else destructive.
- *
- * Two variants, because the same tier drives both the number and the MiniBar.
- * The number is text - the fill tokens measured 2.13:1 on the light card, under
- * even the 3:1 large-text bar - while the bar is a fill on `--card`, which is
- * what the `--series-*` tier is tuned for (the bare `--destructive` measures
- * 1.73:1 there in dark).
+ * Rate-fidelity tier colouring: ≥95% success, ≥80% warning, else destructive. Two variants, as one
+ * tier drives both the number and the MiniBar: the number is text, where the fill tokens measure
+ * 2.13:1 on the light card (under even the 3:1 large-text bar), while the bar is a fill on
+ * `--card`, what the `--series-*` tier is tuned for (bare `--destructive` measures 1.73:1 there in
+ * dark).
  */
 function fidelityTextColor(achievement: number | undefined): string {
 	if (achievement === undefined) return "hsl(var(--muted-foreground))";
@@ -34,12 +32,10 @@ function fidelityFillColor(achievement: number | undefined): string {
 }
 
 /**
- * constant_rps hero card #1 - how closely the requests sent tracked the target
- * RPS over the sending window. The percentage arrives derived (live from
- * `liveRateFidelity`, finished from the report), so a run's drain never reads
- * as a missed rate.
- * A stopped run's figure is its pace, so `stoppedAt` states the share of the
- * plan it reached (#2805).
+ * constant_rps hero card #1: how closely the requests sent tracked the target RPS over the sending
+ * window. The percentage arrives derived (live from `liveRateFidelity`, finished from the report),
+ * so a run's drain never reads as a missed rate. A stopped run's figure is its pace, so `stoppedAt`
+ * states the share of the plan it reached (#2805).
  */
 export function RateFidelityCard({
 	targetRps,

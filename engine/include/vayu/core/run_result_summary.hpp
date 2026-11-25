@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/run_result_summary.hpp
  * @brief What a terminal run's stored `summary` says on its `GET /runs` row:
  *        the `resultSummary` (#2130, #2954), and the verdict the renderer
  *        draws from it, which `runs.outcome` stores (#3547).

@@ -60,22 +60,16 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 
 /**
- * The origin Select carries one value for two store fields: a kind, or one
- * agent client under it. A client's value is this prefix plus its display name,
- * which no kind spelling can collide with.
+ * The origin Select's one value for two store fields: a kind, or one agent client under it. A
+ * client's value is this prefix plus its display name, which no kind spelling can collide with.
  */
 const CLIENT_VALUE_PREFIX = "client:";
 
 /**
- * A run that is still executing is stopped by the engine before it is deleted,
- * and the delete is refused with a 409 if the run's worker has not finished
- * writing within the engine's wait - deleting rows out from under a live writer
- * is what used to orphan metrics against a deleted run id. Nothing is removed in
- * that case, so the right thing to tell the user is to try again shortly.
- *
- * The wording lives here, rather than being echoed from the response, so it
- * reads as an instruction ("try again in a moment") instead of the engine's
- * own wait-timed-out phrasing.
+ * The engine stops a live run before deleting it, and refuses the delete with a 409 if the run's
+ * worker has not finished writing within its wait (deleting rows under a live writer orphans
+ * metrics against a deleted run id). Nothing is removed then, so the user is told to try again
+ * shortly, in words kept here as an instruction rather than the engine's wait-timed-out phrasing.
  */
 function deleteRunErrorMessage(error: unknown): string {
 	if (error instanceof ApiError && error.statusCode === 409) {
@@ -108,7 +102,6 @@ export default function HistoryList() {
 	const sortBy = useHistoryStore((s) => s.sortBy);
 	const setSortBy = useHistoryStore((s) => s.setSortBy);
 
-	// Get selectedRunId from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const selectedRunId = activeTab?.type === "run" ? activeTab.entityId : null;
 
@@ -159,9 +152,8 @@ export default function HistoryList() {
 	const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
 	const [pinningId, setPinningId] = useState<string | null>(null);
 
-	// Flatten (de-duped) the loaded pages, then re-apply the filters and the
-	// sort over them (see `filterRuns`). `total` is the server's count for the
-	// current search and filters.
+	// The loaded pages flattened (de-duplicated), then filtered and sorted again (see
+	// `filterRuns`). `total` is the server's count for the current search and filters.
 	const allRuns = flattenRunPages(data);
 	const total = runsTotal(data);
 	const runs = filterRuns(allRuns, {
@@ -195,14 +187,13 @@ export default function HistoryList() {
 		filterOutcome !== "all" ||
 		originNarrowing;
 	/*
-	 * Only the first `visible` rows are mounted; the rest arrive as the end is
-	 * reached (`useGrowingWindow` records why this is a growing window and not a
-	 * virtual one: rows vary in height). Slicing before grouping is the same as
-	 * slicing after, because groups are runs of adjacent same-day rows.
+	 * Only the first `visible` rows are mounted; the rest arrive as the end is reached
+	 * (`useGrowingWindow` says why a growing window, not a virtual one: rows vary in height).
+	 * Slicing before grouping equals slicing after, as a group is a run of adjacent same-day rows.
 	 *
-	 * The window's identity is the question being asked, not the row count: the
-	 * 5s poll and "Load older runs" both change the length of the same list and
-	 * must not shut a window the reader has scrolled into.
+	 * The window's identity is the question asked, not the row count: the 5s poll and "Load older
+	 * runs" both change the length of the same list and must not shut a window the reader has
+	 * scrolled into.
 	 */
 	const windowKey = JSON.stringify([
 		debouncedSearch,
@@ -224,9 +215,8 @@ export default function HistoryList() {
 	// whatever order `runs` is already in, not a second decision about it.
 	const runGroups = groupRunsByDay(runs.slice(0, visible));
 
-	// Roving tabindex over the row activators inside this container - see
-	// useHistoryListFocus's own doc comment for why arrow keys move focus
-	// without opening the row they land on.
+	// Roving tabindex over the row activators in this container; `useHistoryListFocus` says why
+	// arrow keys move focus without opening a row.
 	const listRef = useRef<HTMLDivElement>(null);
 	const { onKeyDown: onListKeyDown, onFocus: onListFocus } = useHistoryListFocus(
 		listRef,
@@ -234,14 +224,12 @@ export default function HistoryList() {
 	);
 
 	/*
-	 * A collection run's row carries the collection's id, not its name - the
-	 * engine's list row is built from the run's snapshot and never joins. The
-	 * name is here instead: the tree is already loaded and cached, so this costs
-	 * one shared query for the whole page rather than one per row.
+	 * A collection run's row carries the collection's id, not its name: the engine builds the list
+	 * row from the run's snapshot and never joins. The tree is already loaded and cached, so naming
+	 * it here costs one shared query per page, not one per row.
 	 *
-	 * A collection deleted since its run resolves to nothing, and the row falls
-	 * back to the id it does have. Guessing a name for a folder that is gone
-	 * would be the one answer worse than the id.
+	 * A collection deleted since its run resolves to nothing and the row falls back to the id; a
+	 * guessed name for a collection that is gone would be the one answer worse than the id.
 	 */
 	const { data: collections = [] } = useCollectionsQuery();
 	const collectionName = (run: Run): string | undefined => {
@@ -251,17 +239,14 @@ export default function HistoryList() {
 	};
 
 	/*
-	 * The drawer has three sibling views. The collections tree already tells the
-	 * user when its load failed; a history list that answers the same failure
-	 * with "No runs yet" is not just wrong on its own terms, it makes the
-	 * same event look like two different events depending on which view is open.
-	 * Nothing here offers a create CTA, so this is about that symmetry rather
-	 * than about preventing a duplicate.
+	 * The collections tree already says when its load failed; a history list answering the same
+	 * failure with "No runs yet" is wrong, and makes one event look like two depending on which of
+	 * the drawer's views is open. (This list offers no create CTA, so this is symmetry, not a guard
+	 * against a duplicate.)
 	 *
-	 * Gated on `allRuns`, not the filtered `runs`: TanStack keeps the last good
-	 * data through a failed background refetch, and a filter that happens to
-	 * match nothing is still a working list. Only a failure with nothing cached
-	 * earns the error pane.
+	 * Gated on `allRuns`, not the filtered `runs`: TanStack keeps the last good data through a
+	 * failed background refetch, and a filter matching nothing is still a working list. Only a
+	 * failure with nothing cached earns the error pane.
 	 */
 	const showError = isError && allRuns.length === 0;
 
@@ -271,9 +256,8 @@ export default function HistoryList() {
 	const deleteConfirmLabel =
 		runToDelete?.summary?.url ??
 		(deleteConfirmRunId ? `${deleteConfirmRunId.slice(0, 8)}…` : "");
-	// Deleting one of these stops it first, which is a second consequence the
-	// dialog has to name - "removed permanently" alone does not cover ending a
-	// test that is still generating load.
+	// Deleting a live run stops it first, a second consequence the dialog has to name: "removed
+	// permanently" does not cover ending a test still generating load.
 	const deleteConfirmStopsRun = useRunLiveness(runToDelete?.id, runToDelete?.status);
 
 	// Naming the run deletes it even pinned, unlike Clear run history, which
@@ -296,9 +280,8 @@ export default function HistoryList() {
 	}, []);
 
 	/**
-	 * Pin or unpin without a confirmation step: unlike a delete, both
-	 * directions are one click away from being undone, and the pin is visible
-	 * on the row either way.
+	 * No confirmation step: unlike a delete, both directions are one click from undone, and the pin
+	 * is visible on the row either way.
 	 */
 	const handleToggleBaseline = useCallback(
 		async (runId: string, baseline: boolean, event?: React.MouseEvent) => {
@@ -336,8 +319,8 @@ export default function HistoryList() {
 				navigateToHistory();
 			}
 		} catch (error) {
-			// Without this the rejection was unhandled: the row stayed in the
-			// list with no explanation, which reads as the click not registering.
+			// Otherwise the rejection is unhandled and the row stays with no explanation, which
+			// reads as the click not registering.
 			showToast(deleteRunErrorMessage(error), "error");
 		} finally {
 			setDeletingId(null);
@@ -356,10 +339,9 @@ export default function HistoryList() {
 			}
 		>
 			{/*
-			 * pt-2 is not decorative. The panel body scrolls, so it clips at its
-			 * own edge, and the search field's focus ring is drawn *outside* its
-			 * border box - flush against the top, the ring's upper edge was cut
-			 * off. Matches the 8px top inset the Variables view already uses.
+			 * pt-2 is not decorative: the panel body scrolls and clips at its edge, and the search
+			 * field's focus ring is drawn *outside* its border box, so flush against the top the
+			 * ring's upper edge is cut off. The Variables view uses the same 8px top inset.
 			 */}
 			<div className="flex h-full w-full flex-col space-y-4 px-3 pt-2 pb-3">
 				{/* Search & Filters */}
@@ -464,11 +446,10 @@ export default function HistoryList() {
 							</Button>
 						</div>
 						{/*
-						 * The pin is a toggle rather than a Select, so it sits
-						 * apart from them although it too is asked of the engine
-						 * (`baseline=true`). `aria-pressed` because it is a
-						 * toggle, not a navigation - the variant swap alone says
-						 * nothing to a screen reader.
+						 * The pin is a toggle, not a Select, so it sits apart from them although it
+						 * too is asked of the engine (`baseline=true`). `aria-pressed` because it
+						 * is a toggle, not a navigation; the variant swap alone says nothing to a
+						 * screen reader.
 						 */}
 						<Tooltip>
 							<TooltipTrigger asChild>
@@ -493,15 +474,8 @@ export default function HistoryList() {
 
 				{/* Runs List */}
 				<div className="flex-1 min-h-0 overflow-hidden">
-					{/*
-					 * No `-mr-2` here. That trick lets a scrollbar sit in the
-					 * parent's padding, but the parent clips (overflow-hidden), so
-					 * it pushed the scrollbar 8px past the clip edge and cut it off
-					 * lengthwise. Stay inside the parent and pad the content instead.
-					 *
-					 * Scrollbar styling is a global baseline (index.css) - nothing to
-					 * apply per container, which is what this element was missing.
-					 */}
+					{/* No `-mr-2`: the parent clips, so a scrollbar in its padding gets cut. */}
+					{/* Scrollbar styling is a global baseline (index.css), not per container. */}
 					{/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- roving tabindex for Up/Down/Home/End between the row activators inside (see useHistoryListFocus); `role="group"` names this as a set of buttons rather than claiming full `listbox`/`tree` semantics an occasionally-day-headered flat list does not have */}
 					<div
 						ref={listRef}
@@ -528,17 +502,15 @@ export default function HistoryList() {
 						)}
 
 						{/*
-						 * Not while older pages remain: the engine filters the list, so
-						 * an empty loaded set with `hasNextPage` set is a patched page
-						 * (an unpin drops the last pinned row in place) with more behind
-						 * it, and "no runs found" or "clear the filters" would be false.
-						 * "Load older runs" below is the way on.
+						 * Not while older pages remain: the engine filters, so an empty loaded set
+						 * with `hasNextPage` is a patched page (an unpin dropped the last pinned
+						 * row) with more behind it, and "no runs found" or "clear the filters"
+						 * would be false; "Load older runs" is the way on.
 						 */}
 						{!isLoading && !showError && runs.length === 0 && !hasNextPage && (
-							// `h-full` because this scroll container is not a flex
-							// column, so `flex-1` has nothing to grow against. Without
-							// it the block sits at the top while the collections
-							// drawer - whose container *is* a flex column - centres.
+							// `h-full`: this scroll container is not a flex column, so `flex-1` has
+							// nothing to grow against, and the block would sit at the top while the
+							// collections drawer (a flex column) centres.
 							<EmptyState
 								className="h-full"
 								icon={Clock}
@@ -590,10 +562,9 @@ export default function HistoryList() {
 								// group in either sort, so the label is unique.
 								<div key={group.label} className="space-y-1">
 									{/*
-									 * The day-group header replaces the per-row relative
-									 * timestamp ("8h ago" repeated down a page of same-day
-									 * runs said nothing after the first row) - see
-									 * `group-runs-by-day.ts`.
+									 * The day-group header replaces a per-row relative timestamp,
+									 * which repeated "8h ago" down a page of same-day runs (see
+									 * `group-runs-by-day.ts`).
 									 */}
 									<Eyebrow className="px-1 pt-1 first:pt-0">
 										{group.label}

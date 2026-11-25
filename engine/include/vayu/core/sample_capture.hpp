@@ -8,16 +8,15 @@
  */
 
 /**
- * @file core/sample_capture.hpp
  * @brief Pure decisions about a captured load-run response body.
  *
- * Everything here runs at flush time, never on the completion callback: the
- * hot path only gates and copies bytes it already owns (see
+ * Everything here runs at flush time, never on the completion callback: the hot
+ * path only gates and copies bytes it already owns (see
  * MetricsCollector::record_success). Binary detection, hashing and dedup are
- * deferred precisely because they are the expensive half.
+ * deferred because they are the expensive half.
  *
- * Extracted rather than left inline in the collector so each rule is testable
- * on its own - see engine/tests/sample_capture_test.cpp.
+ * Kept out of the collector so each rule is testable on its own
+ * (engine/tests/sample_capture_test.cpp).
  */
 
 #include <string>
@@ -29,15 +28,15 @@ namespace vayu::core {
  * @brief Whether a captured body should be stored as a binary descriptor
  *        instead of text.
  *
- * Since issue #1229 the engine negotiates compression by default and libcurl
- * decodes what it negotiated, so a gzip response arrives here as its decoded
- * bytes - but a request that carries its own `Accept-Encoding`, or a run with
- * `loadNegotiateCompression` off against a server that compresses anyway, still
- * puts compressed bytes in `Response::body`; images and protobuf arrive that way
- * regardless. Storing those as a string means `dump()` either throws
- * or - with `error_handler_t::replace` - silently rewrites them into a
- * mojibake that reads like a real body. Neither is honest, so a binary body is
- * recorded as its size and content type and nothing else.
+ * The engine negotiates compression by default (#1229) and libcurl decodes what
+ * it negotiated, so a gzip response arrives here decoded. But a request that
+ * carries its own `Accept-Encoding`, or a run with `loadNegotiateCompression`
+ * off against a server that compresses anyway, still puts compressed bytes in
+ * `Response::body`; images and protobuf arrive that way regardless. Stored as a
+ * string, those make `dump()` either throw or - with `error_handler_t::replace`
+ * - silently rewrite them into a mojibake that reads like a real body. Neither
+ * is honest, so a binary body is recorded as its size and content type and
+ * nothing else.
  *
  * Two independent signals, either sufficient:
  * - a content type that is not text-shaped (not a `text/` type, and not one of
@@ -47,8 +46,8 @@ namespace vayu::core {
  *
  * The byte scan is bounded (`SNIFF_BYTES`) so a 32 KiB body costs a fixed
  * prefix walk. A body whose first `SNIFF_BYTES` are clean text is treated as
- * text even if it turns binary later; the alternative is walking every
- * captured byte for a case that does not occur in practice.
+ * text even if it turns binary later; the alternative is walking every captured
+ * byte for a case that does not occur in practice.
  */
 [[nodiscard]] bool looks_binary (std::string_view body, std::string_view content_type);
 
@@ -69,10 +68,9 @@ inline constexpr size_t SNIFF_BYTES = 1024;
  *
  * Load-test responses are overwhelmingly identical, so the run's bodies are
  * deduplicated by this digest before insert: 1000 samples of one 2 KiB body
- * store 2 KiB. Hashing the *stored* (already truncated) bytes rather than the
- * original is deliberate - two bodies that differ only past the truncation
- * point are byte-identical as stored, and storing them twice would be storing
- * the same row twice.
+ * store 2 KiB. It hashes the *stored* (already truncated) bytes, not the
+ * original: two bodies that differ only past the truncation point are identical
+ * as stored, and storing both would store the same row twice.
  */
 [[nodiscard]] std::string body_digest (std::string_view stored_body);
 

@@ -6,24 +6,16 @@
  */
 
 /**
- * Roving tabindex for the history list.
+ * Roving tabindex for the history list. Up/Down/Home/End move focus between runs; nothing opens
+ * until Enter or Space. Moving focus and opening are two steps, as in Gmail's message list, Slack's
+ * channel list, Finder/Explorer's list view and VS Code's lists: opening on every arrow press would
+ * fire a run's navigation (a query, a tab) for each row skimmed past rather than once for the row
+ * landed on.
  *
- * Up/Down/Home/End move focus between runs; nothing opens until Enter or
- * Space. That split - moving focus and opening the focused item are two
- * separate steps - is the industry-standard shape for a list this size:
- * Gmail's message list, Slack's channel/DM list, Finder/Explorer's list
- * view and VS Code's own tree and quick-open lists all move a highlight on
- * arrow keys and act only on Enter (or a click). Auto-opening on every arrow
- * press would fire a run's worth of navigation - a query, a tab - once per
- * row skimmed past rather than once for the row landed on.
- *
- * Simpler than `useRovingTreeFocus`, the same pattern for the collection
- * tree: no Left/Right (no hierarchy to walk), no typeahead, and no Enter/
- * Space handling of its own, because a history row's activator is a real
- * `<button>` (`RunItem`'s stretched click target) - a focused button already
- * activates on either key with no listener here, unlike a tree row, which is
- * a `div` wrapping a separate `data-tree-activate` button and so has to
- * spell activation out itself.
+ * Simpler than `useRovingTreeFocus` (the collection tree's): no Left/Right (no hierarchy), no
+ * typeahead, and no Enter/Space handling, because a history row's activator is a real `<button>`
+ * (`RunItem`'s stretched click target) that activates on either key by itself, unlike a tree row, a
+ * `div` around a separate `data-tree-activate` button that has to spell activation out.
  */
 
 import { useCallback, useEffect, type RefObject } from "react";
@@ -31,10 +23,9 @@ import { isTextEntryTarget } from "@/lib/keyboard";
 import { HISTORY_ROW_ACTIVATE as ROW, focusHistoryRow, historyRows } from "./history-row-focus";
 
 /**
- * @param onReachEnd Called when focus lands on the last row the list has
- *   rendered. A windowed list (`HistoryList`) grows there, so the next ArrowDown
- *   has a row to move to: the sentinel that grows it on scroll can sit just past
- *   the scroller's edge when a keyboard moved the focus.
+ * @param onReachEnd Called when focus lands on the last row rendered. A windowed list
+ *        (`HistoryList`) grows there so the next ArrowDown has a row to move to: the sentinel that
+ *        grows it on scroll can sit just past the scroller's edge when a keyboard moved the focus.
  */
 export function useHistoryListFocus(
 	containerRef: RefObject<HTMLElement | null>,
@@ -42,10 +33,9 @@ export function useHistoryListFocus(
 ) {
 	const rows = useCallback(() => historyRows(containerRef.current), [containerRef]);
 
-	// Exactly one row must be tabbable. Seed the first on mount, and re-seed
-	// whenever the row holding it is no longer in the list - deleted, or
-	// dropped by a filter/sort/search change - the same effect
-	// `useRovingTreeFocus` runs for a collapsed-away tree row.
+	// Exactly one row must be tabbable: seed the first on mount, and re-seed whenever the row
+	// holding the stop leaves the list (deleted, or dropped by a filter/sort/search change), as
+	// `useRovingTreeFocus` does for a collapsed-away row.
 	useEffect(() => {
 		const list = rows();
 		if (list.length && !list.some((r) => r.tabIndex === 0)) list[0].tabIndex = 0;
@@ -91,8 +81,7 @@ export function useHistoryListFocus(
 		[rows, containerRef]
 	);
 
-	// Clicking a row makes it the tabbable one, so Tab returns where you left
-	// off - same as the tree.
+	// A clicked row becomes the tabbable one, so Tab returns where you left off, as in the tree.
 	const onFocus = useCallback(
 		(e: React.FocusEvent<HTMLElement>) => {
 			const item = e.target.closest<HTMLElement>(ROW);

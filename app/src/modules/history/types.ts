@@ -10,11 +10,10 @@ import type { DashboardDerived } from "@/modules/dashboard/types";
 import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
 
 /**
- * The sentence-case name a run type goes by wherever the app says it: a header,
- * a filter option, a tab title, an accessible name, the palette subtitle, the
- * History breadcrumb. The one table - `types.test.ts` fails on a second one.
- * `design` is the wire value for a single send and stays so; the user never sees
- * that word.
+ * The sentence-case name a run type goes by wherever the app says it: a header, a filter option, a
+ * tab title, an accessible name, the palette subtitle, the History breadcrumb. The one table
+ * (`types.test.ts` fails on a second). `design` is the wire value for a single send and stays so;
+ * the user never sees the word.
  */
 export const RUN_TYPE_NAME: Record<Run["type"], string> = {
 	design: "Send",
@@ -27,10 +26,9 @@ export interface TabProps {
 	runId?: string;
 	derived: DashboardDerived;
 	/**
-	 * Degradation windows detected in the run's per-tick series, derived once by
-	 * `LoadTestDetail`. Overview states them in words, Performance shades them on
-	 * the charts - one detection, two readings of it. Absent for a run whose
-	 * series never loaded or that had none.
+	 * Degradation windows in the run's per-tick series, detected once by `LoadTestDetail`: Overview
+	 * states them in words, Performance shades them on the charts. Absent for a run whose series
+	 * never loaded or that had none.
 	 */
 	anomalies?: Anomaly[];
 }
@@ -79,9 +77,7 @@ export interface LoadTestDetailProps {
  */
 export type SampleResult = NonNullable<RunReport["results"]>[number];
 
-/**
- * Time-series metrics response from GET /runs/:runId/metrics
- */
+/** Time-series metrics response from GET /runs/:runId/metrics. */
 export interface TimeSeriesResponse {
 	data: LoadTestMetrics[];
 	pagination: {

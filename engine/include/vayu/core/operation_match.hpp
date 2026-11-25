@@ -8,9 +8,8 @@
  */
 
 /**
- * @file core/operation_match.hpp
  * @brief Matching a collection's existing requests to a document's operations,
- *        by method and path template (issue #638, moved engine-side by #761).
+ *        by method and path template (#638, engine-owned per #761).
  *
  * This is what "bind an existing collection to a spec" needs and an import does
  * not: an import *creates* the requests, so it stamps each one's identity as it
@@ -20,45 +19,44 @@
  * `{{petId}}` variables; the document writes `/pets/{petId}` and folds the
  * server into `servers[]`.
  *
- * So both sides are reduced to a **path shape**: the origin dropped, the query
- * and fragment dropped, and every template placeholder - `{{petId}}`, `{petId}`
- * - flattened to a single `{}`. Flattening the name too is deliberate: a spec
- * that renames its path parameter describes the same endpoint, and a match that
- * turned on the parameter's spelling would report a rename as "removed and
- * added". Two operations that differ only in a parameter name are the same
- * position on the server and cannot both exist.
+ * So both sides are reduced to a **path shape**: the origin, the query and the
+ * fragment dropped, and every template placeholder - `{{petId}}`, `{petId}` -
+ * flattened to a single `{}`. Flattening the name too is deliberate: a spec
+ * that renames its path parameter describes the same endpoint, and a match on
+ * the parameter's spelling would report a rename as "removed and added". Two
+ * operations that differ only in a parameter name are the same position on the
+ * server and cannot both exist.
  *
- * A second pass then offers each remaining request to the templates it could be
- * an instance of, because a hand-built collection writes the id in
- * (`/pets/42`), and a matcher that only compared shapes would find nothing
- * outside collections that were already imported from a spec.
+ * A second pass offers each remaining request to the templates it could be an
+ * instance of, because a hand-built collection writes the id in (`/pets/42`),
+ * and a matcher that only compared shapes would find nothing outside
+ * collections imported from a spec.
  *
  * A third pass reads the server's base path (#3030). A request written as a
  * literal URL carries it (`https://h/v1/pets`) while the document writes
  * `/pets` under a server of `https://h/v1`, so whatever the first two passes
- * left open is offered again with each base path the caller names taken off
- * its front - whole segments only, so `/v1` never strips `/v10/pets` - and
- * goes through the same two comparisons. A request under two base paths is
- * offered under both, and the ambiguity rule below judges the candidates of
- * all of them together rather than letting the first base path win.
+ * left open is offered again with each base path the caller names taken off its
+ * front - whole segments only, so `/v1` never strips `/v10/pets` - and goes
+ * through the same two comparisons. A request under two base paths is offered
+ * under both, and the ambiguity rule below judges the candidates of all of them
+ * together rather than letting the first base path win.
  *
  * Ambiguity is refused rather than guessed at, in every pass: when two requests
  * reduce to the same shape, or one request could be two operations, neither is
  * matched and the count says so. A wrong identity is worse than none - the sync
  * (#627) applies changes *by* it.
  *
- * **Why the engine owns this** (#761's phase B decision): the same matching had
- * to be reachable from the main process for an agent to bind a collection over
- * MCP, and the repo's recorded answer to "MCP needs renderer logic" is engine
- * ownership rather than a second TypeScript copy - #226 deleted MCP's ported
- * composition pipeline in favour of `POST /compose`. So the rule lives here and
- * `POST /specs/match` is the one way to ask it, exactly as the renderer's Spec
- * tab now does.
+ * **Why the engine owns this** (#761): an agent binding a collection over MCP
+ * needs the same matching from the main process, and the repo's answer to "MCP
+ * needs renderer logic" is engine ownership rather than a second TypeScript
+ * copy (#226 deleted MCP's ported composition pipeline in favour of
+ * `POST /compose`). So the rule lives here, and `POST /specs/match` is the one
+ * way to ask it, the renderer's Spec tab included.
  *
  * It parses no OpenAPI, which is the division `core/spec_coverage.hpp` states:
  * the caller supplies the operation identities a document declares, the same
- * ones it stores as the `operations` index, and the base paths its servers
- * name (`core::base_paths_of`); nothing here reads a document.
+ * ones it stores as the `operations` index, and the base paths its servers name
+ * (`core::base_paths_of`); nothing here reads a document.
  */
 
 #include <cstddef>

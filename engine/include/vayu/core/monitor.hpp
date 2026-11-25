@@ -8,7 +8,6 @@
  */
 
 /**
- * @file monitor.hpp
  * @brief Pure core for a run's server-vitals monitor: what a `monitor` block
  *        may say, how a scraped body becomes numbers, and what the run reports
  *        about the whole scrape.
@@ -21,9 +20,9 @@
  * `validate_monitor_config` (the route's gate) and `monitor_config_from` (what
  * the run actually executes) read one description of the block, so a field the
  * route accepts cannot be one the run silently ignores. Both are total over
- * arbitrary JSON - the route's copy is handed a client body, and the run's is
- * handed a stored config snapshot which may have been written by an older
- * engine or hand-edited.
+ * arbitrary JSON - the route's copy is handed a client body, and the run's a
+ * stored config snapshot, which an older engine may have written or a person
+ * hand-edited.
  */
 
 #include <cstdint>
@@ -87,8 +86,8 @@ struct MonitorConfig {
     std::vector<std::string> series;
     /// The configured `monitorScrapeTimeoutMs`, carried unresolved so the loop
     /// resolves it against the interval this block actually runs at. `0` is the
-    /// derive sentinel, which is why a default-constructed config scrapes on
-    /// exactly the timeout the loop used before the setting existed.
+    /// derive sentinel, so a default-constructed config derives its timeout
+    /// from its interval.
     int scrape_timeout_ms = monitor_limits::DEFAULT_SCRAPE_TIMEOUT_MS;
 };
 
