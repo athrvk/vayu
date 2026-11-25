@@ -27,7 +27,6 @@
     "app/src/lib/graphql/introspect.ts": 2,
     "app/src/lib/graphql/language-providers.ts": 1,
     "app/src/lib/graphql/schema-status.ts": 1,
-    "app/src/lib/resize-gesture.ts": 1,
     "app/src/modules/request-builder/components/RequestTabs/panels/SettingsPanel.tsx": 1,
     "app/src/modules/request-builder/hooks/useSendWithRow.ts": 1,
     "app/src/queries/keys.ts": 1,

@@ -6,14 +6,12 @@
  */
 
 /**
- * The one place a piece of text becomes a time (issue #1786).
- *
- * `parseTimeValue` decides whether API data - a body string, a header, a
- * variable - is a time; `describeInstant` builds the rows the hover card shows;
- * `formatInstant` is the one formatter Vayu's own surfaces render a time with.
- * Everything is built on `Intl`, so the OS locale and zone decide and no setting
- * exists. Nothing else under `app/src` calls `toLocale*String` or hand-rolls a
- * relative phrase - `time-surfaces.test.ts` fails on it.
+ * The one place a piece of text becomes a time (#1786). `parseTimeValue` decides whether API data
+ * (a body string, a header, a variable) is a time; `describeInstant` builds the rows the hover card
+ * shows; `formatInstant` is the one formatter Vayu's own surfaces render a time with. Everything is
+ * built on `Intl`, so the OS locale and zone decide and no setting exists. Nothing else under
+ * `app/src` calls `toLocale*String` or hand-rolls a relative phrase; `time-surfaces.test.ts` fails
+ * on it.
  */
 
 export type TimeForm = "iso" | "http-date" | "epoch-seconds" | "epoch-milliseconds";

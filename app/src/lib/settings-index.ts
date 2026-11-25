@@ -6,27 +6,20 @@
  */
 
 /**
- * Settings search index
+ * The Settings search index: one searchable corpus over all of Settings, made of the client panels
+ * (the app-panels registry), the individual settings inside them and inside the engine categories'
+ * Cards (the app-settings catalogue), and the engine entries the `/config` API sends. Pure data in,
+ * pure data out (no React, no stores), so the sidebar's search and the command palette's settings
+ * source (#527) share one index rather than each growing its own matcher.
  *
- * One searchable corpus over all of Settings: the client panels (the app-panels
- * registry), the individual settings inside them and inside the engine
- * categories' Cards (the app-settings catalogue), and the engine entries the
- * `/config` API sends. Pure data in, pure data out -
- * no React, no stores - so the sidebar's search and the command palette's
- * settings source (#527) share one index rather than each growing its own
- * matcher.
+ * **A panel is not its settings.** An index of panel titles and engine entries alone matches
+ * nothing for "theme", "color" or "font", words printed on the Appearance panel three times over,
+ * because the panel is called "Appearance" and describes itself as "the look and feel of the
+ * application". Indexing what a screen is *called* is not indexing what it *contains*.
  *
- * **A panel is not its settings.** The first version of this index held panel
- * titles and engine entries only, so "theme", "color" and "font" - words
- * printed on the Appearance panel three times over - matched nothing, because
- * the panel is called "Appearance" and describes itself as "the look and feel
- * of the application". Indexing what a screen is *called* is not indexing what
- * it *contains*.
- *
- * Entries are matched on label, id, description and keywords. The id matters:
- * an engine setting is called `dbCacheSize` in every doc, log line and MCP tool
- * call, so typing that must find it even though the visible label reads
- * "Cache Size".
+ * Entries are matched on label, id, description and keywords. The id matters: an engine setting is
+ * called `dbCacheSize` in every doc, log line and MCP tool call, so typing that must find it even
+ * though the visible label reads "Cache Size".
  */
 
 import type { SettingsCategory } from "@/types";
@@ -128,16 +121,14 @@ interface BuildSettingsIndexInput {
 /**
  * Flatten the two catalogues into one list, in the order they are declared.
  *
- * An engine entry whose category is not in the registry is dropped rather than
- * shown under a made-up heading: it has no row in the sidebar to navigate to,
- * so a result for it would lead nowhere.
+ * An engine entry whose category is not in the registry is dropped rather than shown under a
+ * made-up heading: it has no row in the sidebar to navigate to, so a result for it would lead
+ * nowhere.
  *
- * An engine entry an app panel row edits (`engineEntriesEditedInApp`) is not a
- * result of its own either - it *becomes* a keyword on that row. One knob, one
- * result, one editor: indexing both would put two rows for one value back in
- * front of the user, which is the thing dropping the second editor fixed. Its
- * key still finds it, because that is the name the docs, the logs and the MCP
- * tool use.
+ * An engine entry an app panel row edits (`engineEntriesEditedInApp`) is not a result of its own
+ * either; it *becomes* a keyword on that row. One knob, one result, one editor: indexing both would
+ * put two rows for one value in front of the user. Its key still finds it, because that is the name
+ * the docs, the logs and the MCP tool use.
  */
 export function buildSettingsIndex({
 	panels,
@@ -230,11 +221,9 @@ function matchRank(entry: SettingsIndexEntry, query: string): number | null {
 }
 
 /**
- * Filter and rank the index for a query.
- *
- * An empty (or whitespace-only) query returns the index unchanged - the caller
- * uses that to mean "not searching" and renders its normal layout, so this must
- * never be a filtered-to-nothing list.
+ * Filter and rank the index for a query. An empty (or whitespace-only) query returns the index
+ * unchanged: the caller uses that to mean "not searching" and renders its normal layout, so this
+ * must never be a filtered-to-nothing list.
  */
 export function searchSettings(
 	index: readonly SettingsIndexEntry[],

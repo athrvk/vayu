@@ -6,14 +6,11 @@
  */
 
 /**
- * The one order a scope's variables are listed in.
- *
- * The engine stores a variables object in key order, which is not the order the
- * user wrote the rows in, so every surface that lists a scope's definitions
- * sorts by `createdAt` through this function: the Variables tab and the
- * collection tab's context bar show the same rows in the same order, and
- * `VariableTableEditor` writes its save payload in this order so the round trip
- * keeps it (#3252).
+ * The one order a scope's variables are listed in. The engine stores a variables object in key
+ * order, which is not the order the user wrote the rows in, so every surface that lists a scope's
+ * definitions sorts by `createdAt` through this function: the Variables tab and the collection
+ * tab's context bar show the same rows in the same order, and `VariableTableEditor` writes its save
+ * payload in this order so the round trip keeps it (#3252).
  */
 
 import type { VariableValue } from "@/types";

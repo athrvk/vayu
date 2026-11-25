@@ -6,14 +6,11 @@
  */
 
 /**
- * What the engine writes in place of a credential in a stored run's
- * `configSnapshot` (`kRedactedMarker` in `engine/include/vayu/utils/log_redact.hpp`;
- * keep the two spellings equal). A sensitive header's whole value becomes this,
- * and a secret variable's value inside the url, params, headers or body becomes
- * it as a substring (#1803).
- *
- * A snapshot value holding it is not a value the run sent, so nothing may
- * replay it or save it onto a request.
+ * What the engine writes in place of a credential in a stored run's `configSnapshot`
+ * (`kRedactedMarker` in `engine/include/vayu/utils/log_redact.hpp`; keep the two spellings equal).
+ * A sensitive header's whole value becomes this, and a secret variable's value inside the url,
+ * params, headers or body becomes it as a substring (#1803). A snapshot value holding it is not a
+ * value the run sent, so nothing may replay it or save it onto a request.
  */
 export const WITHHELD_MARKER = "<redacted>";
 

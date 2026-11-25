@@ -6,18 +6,16 @@
  */
 
 /**
- * Which data file drove a run (issue #2051), read back out of whichever stored
- * shape names it, how the run read it (issue #2540), and whether that file has
- * changed since.
+ * Which data file drove a run (#2051), read back out of whichever stored shape names it, how the
+ * run read it (#2540), and whether that file has changed since.
  *
- * The engine records the keys in four places that differ only in where they
- * sit: a collection run's snapshot keeps them inside its `scenario` block, a
- * load run's snapshot keeps them top level, and the `GET /runs` list row mirrors
- * both under `summary`. Narrowing them here keeps every surface that names the
- * file from writing its own cast over `RunConfigSnapshot`'s index signature.
+ * The engine records the keys in four places that differ only in where they sit: a collection run's
+ * snapshot keeps them inside its `scenario` block, a load run's snapshot keeps them top level, and
+ * the `GET /runs` list row mirrors both under `summary`. Narrowing them here keeps every surface
+ * that names the file from writing its own cast over `RunConfigSnapshot`'s index signature.
  *
- * Only a display name is ever stored, never a path, so nothing here can print
- * one. The hash is never printed either: it exists to be compared.
+ * Only a display name is ever stored, never a path, so nothing here can print one. The hash is
+ * never printed either: it exists to be compared.
  */
 
 import type { RunConfigSnapshot, RunSummary } from "@/types";
@@ -114,17 +112,15 @@ export function dataFileChanged(
 export type DataFileStatus = "changed" | "readingChanged" | "unchanged" | "missing" | "unknown";
 
 /**
- * Classify the remembered file against a run (#2057). `current` is the latest
- * answer about the file, or undefined when there is none: no remembered
- * location, a hash still in flight, or one that failed for a reason other than
- * the file being gone.
+ * Classify the remembered file against a run (#2057). `current` is the latest answer about the
+ * file, or undefined when there is none: no remembered location, a hash still in flight, or one
+ * that failed for a reason other than the file being gone.
  *
- * A missing file is missing whatever the run recorded - one recorded before
- * hashes still names a file that has moved. Every other verdict needs both
- * hashes, per {@link dataFileChanged}. Different bytes are `changed` whatever
- * the reading; the reading only speaks for bytes that match. Each cast flag is
- * absent when off: a run recorded before the flag, and a binding that never
- * set it, both read numbers as text.
+ * A missing file is missing whatever the run recorded (one recorded before hashes still names a
+ * file that has moved). Every other verdict needs both hashes, per {@link dataFileChanged}.
+ * Different bytes are `changed` whatever the reading; the reading only speaks for bytes that match.
+ * Each cast flag is absent when off: a run recorded before the flag, and a binding that never set
+ * it, both read numbers as text.
  */
 export function classifyDataFile(
 	runHash: string | undefined,

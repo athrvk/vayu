@@ -6,13 +6,10 @@
  */
 
 /**
- * The formats a finished load run can be exported in (#2139).
- *
- * The engine owns the bytes (`RUN_EXPORT_FORMATS` in
- * `engine/include/vayu/core/run_export.hpp`); this registry owns what the app
- * says and does about each one. A row is added here only once the engine writes
- * it, and `run-export-formats.test.ts` holds the two to
- * `engine/tests/fixtures/run-export-formats.json`.
+ * The formats a finished load run can be exported in (#2139). The engine owns the bytes
+ * (`RUN_EXPORT_FORMATS` in `engine/include/vayu/core/run_export.hpp`); this registry owns what the
+ * app says and does about each one. A row is added here only once the engine writes it, and
+ * `run-export-formats.test.ts` holds the two to `engine/tests/fixtures/run-export-formats.json`.
  */
 
 export interface RunExportFormat {

@@ -6,18 +6,16 @@
  */
 
 /**
- * A URL with its credentials masked for display (#3634), cut where the
- * engine's `redact_url_credentials` (`core/vayu_extensions.cpp`) cuts it, in
- * the form its `CredentialMark::Marker` writes for a script-request record and
- * the summary line (#3672): the password of `user:password@host` reads
- * `user:<redacted>@host`, and the value of a query or fragment pair named like
- * a credential (`isSensitiveParamName`, pinned to the engine's list by
- * `url-credentials.conformance.test.ts`) reads {@link WITHHELD_MARKER}. A
- * `{{variable}}` standing alone is kept, and every other byte is as written.
+ * A URL with its credentials masked for display (#3634), cut where the engine's
+ * `redact_url_credentials` (`core/vayu_extensions.cpp`) cuts it, in the form its
+ * `CredentialMark::Marker` writes for a script-request record and the summary line (#3672): the
+ * password of `user:password@host` reads `user:<redacted>@host`, and the value of a query or
+ * fragment pair named like a credential (`isSensitiveParamName`, pinned to the engine's list by
+ * `url-credentials.conformance.test.ts`) reads {@link WITHHELD_MARKER}. A `{{variable}}` standing
+ * alone is kept, and every other byte is as written.
  *
- * An export blanks the same values instead, so a re-import holds no
- * placeholder; a display that showed `access_token=` or `user@host` would say
- * nothing was sent.
+ * An export blanks the same values instead, so a re-import holds no placeholder; a display that
+ * showed `access_token=` or `user@host` would say nothing was sent.
  */
 
 import { isSensitiveParamName } from "@/services/oauth/credential-params";
