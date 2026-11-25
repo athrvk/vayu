@@ -8,9 +8,8 @@
  */
 
 /**
- * @file utils/invariant.hpp
  * @brief Reading an optional whose engagement a rule in *another* function
- *        guarantees (issue #943).
+ *        guarantees (#943).
  *
  * Three shapes of `std::optional` access exist in this engine. Two need
  * nothing: an optional a local guard has already tested, and one whose
