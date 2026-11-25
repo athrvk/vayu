@@ -35,13 +35,11 @@ export type DrawerView =
 	"collections" | "history" | "variables" | "services" | "trash" | "settings";
 
 /**
- * Where the response pane sits relative to the request (issue #1711).
- *
- * `beside` and `below` are the two arrangements the builder can draw; `auto`
- * is a rule that picks one of them from the builder's own width
- * (`useResolvedResponsePosition`). Never "horizontal" or "vertical": those
- * words name opposite things in Postman and in `react-resizable-panels`, so a
- * reader could not tell which side of the boundary a comment meant.
+ * Where the response pane sits relative to the request (#1711). `beside` and `below` are the two
+ * arrangements the builder draws; `auto` picks one from the builder's own width
+ * (`useResolvedResponsePosition`). Never "horizontal" or "vertical": Postman and
+ * `react-resizable-panels` use those words for opposite things, so a reader could not tell which
+ * side a comment meant.
  */
 export type ResponsePosition = "beside" | "below" | "auto";
 
@@ -59,143 +57,110 @@ interface LayoutState {
 	contextBarOpen: boolean;
 	contextBarWidth: number;
 	/**
-	 * Section ids the user has collapsed, by exception - a section not named
-	 * here is expanded.
+	 * Section ids the user collapsed, by exception: a section not named here is expanded. An array,
+	 * not a Set: `persist` serializes with JSON, which writes a Set as `{}`, so every collapse
+	 * would last only until the next launch. Storing the collapsed ones means a section added in a
+	 * later release ships expanded for existing users, not invisible.
 	 *
-	 * An array rather than a Set because `persist` serializes with JSON, which
-	 * writes a Set as `{}` and reads it back as one, so every collapse would
-	 * survive exactly until the next launch. Storing the collapsed ones rather
-	 * than the expanded ones also means a section added in a later release
-	 * ships expanded for existing users instead of invisible.
-	 *
-	 * `CONTEXT_BAR_DEFAULT_COLLAPSED` is the one exception to that, and it needs
-	 * both halves below to land: it seeds the initial state for a fresh install,
-	 * and the v4 migration writes it into an existing blob. Neither alone is
-	 * enough - `persist` merges a *missing key* onto the initial state, never a
-	 * missing element into an array that is already there, so a user who has ever
-	 * collapsed anything has an array that would silently outvote the default.
+	 * `CONTEXT_BAR_DEFAULT_COLLAPSED` is the one exception, and it needs both halves: it seeds the
+	 * initial state for a fresh install, and the v4 migration writes it into an existing blob.
+	 * `persist` merges a missing key onto the initial state, never a missing element into an array
+	 * already there, so a user who has ever collapsed anything has an array that would silently
+	 * outvote the default.
 	 */
 	contextBarCollapsedSections: string[];
 
 	/**
-	 * The response position setting. `beside` by default: it is what every
-	 * existing user has today and what the other tools default to, so `auto` is
-	 * an explicit third choice rather than the new normal.
+	 * `beside` by default: it is what every existing user has and what the other tools default to,
+	 * so `auto` is an explicit third choice, not the new normal.
 	 */
 	responsePosition: ResponsePosition;
 
 	/**
-	 * What `auto` currently resolves to, written by the builder's own
-	 * measurement (`useResolvedResponsePosition`) and read by the Dock button
-	 * and by `toggleResponsePosition`, which both need to know which
-	 * arrangement is on screen while the setting says `auto`. Deliberately
-	 * absent from `partialize`: it is derived from a width that does not
-	 * survive a relaunch, and a stale pick would flash the wrong arrangement
-	 * for the first frame.
+	 * What `auto` resolves to now, written by the builder's measurement
+	 * (`useResolvedResponsePosition`) and read by the Dock button and `toggleResponsePosition`,
+	 * which need the arrangement on screen while the setting says `auto`. Not in `partialize`: it
+	 * derives from a width that does not survive a relaunch, and a stale pick would flash the wrong
+	 * arrangement for the first frame.
 	 */
 	autoResponseArrangement: ResponseArrangement;
 
 	/**
-	 * Request / response split ratio (0-1, the request pane's share), one per
-	 * arrangement: the share of the width a request wants beside its response
-	 * is not the share of the height it wants above it, and one number for
-	 * both meant every flip undid the drag before it.
+	 * Request / response split ratio (0-1, the request pane's share), one per arrangement: the
+	 * width share a request wants beside its response is not the height share it wants above it,
+	 * and one number for both made every flip undo the drag before it.
 	 */
 	requestSplitRatioBeside: number;
 	requestSplitRatioBelow: number;
 
 	/**
-	 * Whether the GraphQL body's Variables pane is collapsed to its header, and
-	 * the height (percent of the editor stack) to give it back when it reopens.
-	 *
-	 * Here rather than in `explorer-store` for the reason that store states about
-	 * itself: an expansion set describes a schema that may not exist next launch,
-	 * so it is deliberately in memory only. How tall a user wants their variables
-	 * pane is a layout preference like every other one in this file, and it has
-	 * to survive both a relaunch and the Radix unmount the Body tab does on every
-	 * glance at Headers.
+	 * Whether the GraphQL body's Variables pane is collapsed to its header, and the height (percent
+	 * of the editor stack) it gets back on reopen. Here, not in `explorer-store`: that store is in
+	 * memory only because an expansion set describes a schema that may not exist next launch, while
+	 * this height is a layout preference that must survive a relaunch and the Radix unmount the
+	 * Body tab does on every glance at Headers.
 	 */
 	graphqlVariablesCollapsed: boolean;
 	graphqlVariablesSize: number;
 
 	/**
-	 * Whether the script editors' snippets list is collapsed to its header.
+	 * Whether the script editors' snippets list is collapsed to its header. One flag for both hosts
+	 * (the request Script panel and the collection Script tab), because it answers one question
+	 * about the person, not the surface: whether they want templates on screen while they write.
+	 * Here for the GraphQL Variables pane's reason: the panel's own memory dies with the Radix
+	 * unmount every tab switch does.
 	 *
-	 * One flag for both hosts - the request Script panel and the collection
-	 * Script tab - because it answers one question about the person, not about
-	 * the surface: whether they want templates on screen while they write. It is
-	 * here for the same reason the GraphQL Variables pane's collapse is: the
-	 * panel's own memory dies with the Radix unmount every tab switch does.
+	 * Collapsed by default: the editor is what the panel is for, and a list open under every script
+	 * editor would be the wall of prose it replaced.
 	 *
-	 * Collapsed by default. The editor is what the panel is for, and a list that
-	 * opened itself under every script editor would be the wall of prose it
-	 * replaced, with a chevron on it.
-	 *
-	 * This is a *default* the next script row a user opens starts from, not the
-	 * live state of every row on screen (issue #1605): the Elements tab can show
-	 * a `script.pre` and a `script.post` row on one screen, each with its own
-	 * `useState` seeded from this value, so expanding one no longer expands the
-	 * other. Each row writes its own toggle back here, which is what makes the
-	 * *next* row a user opens start the way they last left one.
+	 * A default the next script row a user opens starts from, not the live state of every row on
+	 * screen (#1605): the Elements tab can show a `script.pre` and a `script.post` row at once,
+	 * each with its own `useState` seeded from this, so expanding one does not expand the other.
+	 * Each row writes its toggle back here, so the next row starts the way the user last left one.
 	 */
 	scriptSnippetsCollapsed: boolean;
 
 	/**
-	 * Height (px) of a `script.pre` / `script.post` element's Monaco editor box,
-	 * keyed by the element's own id (issue #1643).
-	 *
-	 * A single shared value here (like `graphqlVariablesSize`, which really is
-	 * one pane) used to mean dragging *any* script row's handle silently
-	 * resized every other script row too - a request or collection can show a
-	 * `script.pre` and a `script.post` card on screen at once, each its own
-	 * element. Capped at `SCRIPT_EDITOR_HEIGHTS_MAX` entries, oldest *set*
-	 * evicted first (re-setting an id's own entry counts as setting it now, so
-	 * it moves to the end): a collection with years of script elements should
-	 * not grow this map without bound in localStorage.
+	 * Height (px) of a `script.pre` / `script.post` element's Monaco editor box, keyed by the
+	 * element's own id (#1643): a request or collection can show both cards at once, and one shared
+	 * value (like `graphqlVariablesSize`, which really is one pane) would make dragging any row's
+	 * handle resize every other row. Capped at `SCRIPT_EDITOR_HEIGHTS_MAX` entries, oldest set
+	 * evicted first (re-setting an id's entry moves it to the end), so years of script elements do
+	 * not grow this map in localStorage without bound.
 	 */
 	scriptEditorHeights: Record<string, number>;
 
 	/**
-	 * The height a script row with no entry of its own in `scriptEditorHeights`
-	 * starts at - the last height the user chose on *any* row. Every write to
-	 * the map above updates this too, the same "per-instance state, seeded from
-	 * a shared default" shape `scriptSnippetsCollapsed` uses for its own row's
-	 * disclosure.
+	 * Where a script row with no entry in `scriptEditorHeights` starts: the last height the user
+	 * chose on any row. Every write to that map updates this too, the same "per-instance state,
+	 * seeded from a shared default" shape `scriptSnippetsCollapsed` uses.
 	 */
 	scriptEditorHeightDefault: number;
 
 	/**
-	 * The last five element kinds added through the Add-element picker, most
-	 * recent first - the picker's own "Recently used" group (issue #1604).
-	 *
-	 * Kind ids, not kind schemas: the catalogue is served fresh from the engine
-	 * every session, so a kind the engine no longer registers just drops out
-	 * when the picker filters this list against the live catalogue at render
-	 * time, rather than this store needing its own migration for it.
+	 * The last five element kinds added through the Add-element picker, most recent first: the
+	 * picker's "Recently used" group (#1604). Kind ids, not kind schemas: the engine serves the
+	 * catalogue fresh each session, so a kind it no longer registers drops out when the picker
+	 * filters this list against the live catalogue at render time, with no migration here.
 	 */
 	recentElementKinds: string[];
 
 	/**
-	 * The bottom panel (#3635): whether it is open, how tall the user made it, and
-	 * which of its tabs is showing. Closed by default - the panel is something a
-	 * user reaches for, not a band every window should give up height to.
+	 * The bottom panel (#3635): whether it is open, how tall the user made it, and which tab shows.
+	 * Closed by default: a user reaches for it, and not every window should give up height to it.
 	 *
-	 * `bottomPanelHeight` is the user's choice, held to the absolute bounds here;
-	 * the half-the-window cap depends on a window the store does not know, so the
-	 * panel applies it when it draws (`clampBottomPanelHeight`) and the stored
-	 * value survives a window that is briefly small.
+	 * `bottomPanelHeight` is the user's choice, held to the absolute bounds here; the
+	 * half-the-window cap needs a window the store does not know, so the panel applies it when it
+	 * draws (`clampBottomPanelHeight`) and the stored value survives a briefly small window.
 	 */
 	bottomPanelOpen: boolean;
 	bottomPanelHeight: number;
 	bottomPanelTab: BottomPanelTab;
 
 	/**
-	 * Whether the ⌘K command palette is showing.
-	 *
-	 * Here rather than as local state in the palette because the two things that
-	 * open it are in different subtrees: the chord handler in `Shell`, and the
-	 * title bar's search bar. Deliberately absent from `partialize` - a dialog
-	 * that reopened itself on every launch is not a layout preference.
+	 * Whether the ⌘K command palette is showing. Here, not palette state, because its two openers
+	 * are in different subtrees (the chord handler in `Shell`, the title bar's search bar). Not in
+	 * `partialize`: a dialog that reopened on every launch is not a layout preference.
 	 */
 	paletteOpen: boolean;
 
@@ -206,13 +171,10 @@ interface LayoutState {
 	/** Open the drawer to a specific view, or toggle it closed if already on that view */
 	activateDrawerView: (view: DrawerView) => void;
 	/**
-	 * Show a view, never hide it - the non-toggling half of the pair above.
-	 *
-	 * `activateDrawerView` toggles when the drawer is already on that view,
-	 * which is right for a switcher pressed twice and wrong for anything that
-	 * *points at* a view: a palette result, a welcome tile, or an ambient status
-	 * chip that says something is running. Such a caller uses this, never
-	 * `activateDrawerView` and never a hand-written open-then-select pair.
+	 * Show a view, never hide it. `activateDrawerView` toggles when the drawer is already on that
+	 * view: right for a switcher pressed twice, wrong for anything that points at a view (a palette
+	 * result, a welcome tile, a status chip saying something is running). Such a caller uses this,
+	 * never `activateDrawerView` or a hand-written open-then-select pair.
 	 */
 	revealDrawerView: (view: DrawerView) => void;
 	setDrawerWidth: (width: number) => void;
@@ -224,9 +186,8 @@ interface LayoutState {
 
 	setResponsePosition: (position: ResponsePosition) => void;
 	/**
-	 * Beside <-> below. From `auto` it writes the opposite of the arrangement
-	 * currently resolved: the user chose, so Auto is over until they pick it
-	 * again in Settings.
+	 * Beside <-> below. From `auto` it writes the opposite of the resolved arrangement: the user
+	 * chose, so Auto is over until they pick it again in Settings.
 	 */
 	toggleResponsePosition: () => void;
 	/** Records what `auto` resolves to right now - see `autoResponseArrangement`. */
@@ -241,11 +202,9 @@ interface LayoutState {
 	/** Clamps, records `id`'s own height, and updates the shared default every never-dragged row starts from. */
 	setScriptEditorHeight: (id: string, height: number) => void;
 	/**
-	 * Copies `fromId`'s recorded height onto `toId` - a duplicated script row
-	 * (issue #1608) starts at its source's height rather than falling back to
-	 * the shared default. A no-op when the source has no entry of its own.
-	 * Deliberately leaves `scriptEditorHeightDefault` untouched: copying on
-	 * Duplicate is not the user setting a height anywhere.
+	 * Copies `fromId`'s recorded height onto `toId`, so a duplicated script row (#1608) starts at
+	 * its source's height, not the shared default. A no-op when the source has no entry. Leaves
+	 * `scriptEditorHeightDefault` alone: copying on Duplicate is not the user setting a height.
 	 */
 	copyScriptEditorHeight: (fromId: string, toId: string) => void;
 
@@ -269,9 +228,8 @@ function clampSplitRatio(ratio: number): number {
 }
 
 /**
- * The arrangement on screen for a given state: the setting itself, or what
- * `auto` currently resolves to. A selector rather than a stored field so the
- * two can never disagree.
+ * The arrangement on screen: the setting itself, or what `auto` resolves to now. A selector, not a
+ * stored field, so the two cannot disagree.
  */
 export function resolveResponseArrangement(
 	state: Pick<LayoutState, "responsePosition" | "autoResponseArrangement">
@@ -286,12 +244,10 @@ function clampScriptEditorHeight(height: number): number {
 }
 
 /**
- * Sets `id`'s entry to `height`, moving it to the end of insertion order (the
- * "least recently set" position an eviction should spare) and evicting the
- * oldest entry once the map would exceed `SCRIPT_EDITOR_HEIGHTS_MAX`. Object
- * key order is insertion order here only because element ids are `el_...`
- * strings, never integer-like - integer-like keys sort numerically first in
- * JS regardless of insertion order.
+ * Sets `id`'s entry to `height`, moving it to the end of insertion order (the most recently set,
+ * the last an eviction reaches) and evicting the oldest entry once the map would exceed
+ * `SCRIPT_EDITOR_HEIGHTS_MAX`. Key order is insertion order only because element ids are `el_...`
+ * strings: integer-like keys sort numerically first in JS whatever the insertion order.
  */
 function withScriptEditorHeight(
 	heights: Record<string, number>,
@@ -444,9 +400,8 @@ export const useLayoutStore = create<LayoutState>()(
 				// v1 could persist a skewed split ratio while panel sizes were
 				// misparsed as pixels - reset to an even split
 				if (version < 2) state.requestSplitRatio = 0.5;
-				// v2 stored a width per drawer view, which made the main content
-				// resize when switching views. Collapse to a single width, keeping
-				// whatever the user had set for collections (the default view).
+				// v2 stored a width per drawer view, so the main content resized on a view switch.
+				// One width now, kept from collections (the default view).
 				if (version < 3) {
 					state.drawerWidth =
 						state.drawerWidths?.collections ??
@@ -454,14 +409,12 @@ export const useLayoutStore = create<LayoutState>()(
 						DEFAULT_DRAWER_WIDTH;
 					delete state.drawerWidths;
 				}
-				// v3 opened every section on every request tab. `code` composes a
-				// snippet over the network as soon as it mounts, so the bar spent a
-				// round trip per tab on something nobody had asked to see; it now
-				// starts collapsed and composes when it is opened. Written into the
-				// array rather than left to the initial state because `persist`
-				// merges a missing key, not a missing element - see the field's own
-				// comment. `environment` goes at the same time: the section is gone,
-				// and an id for a section that does not exist should not outlive it.
+				// v3 opened every section on every request tab. `code` composes a snippet over the
+				// network on mount, a round trip per tab nobody asked for, so it starts collapsed
+				// and composes when opened. Written into the array, not left to the initial state,
+				// because `persist` merges a missing key, not a missing element (see the field).
+				// `environment` goes too: its section is gone, and an id for a section that does
+				// not exist should not outlive it.
 				if (version < 4) {
 					const collapsed = Array.isArray(state.contextBarCollapsedSections)
 						? state.contextBarCollapsedSections
@@ -471,13 +424,11 @@ export const useLayoutStore = create<LayoutState>()(
 						...CONTEXT_BAR_DEFAULT_COLLAPSED.filter((id) => !collapsed.includes(id)),
 					];
 				}
-				// v4 kept one scriptEditorHeight for every script row (issue #1643):
-				// dragging any one row's resize handle silently resized every other
-				// one too. Split into a per-id map plus the shared default a
-				// never-dragged row starts from; the one old value becomes that
-				// default (clamped - a stale blob could predate today's bounds), and
-				// the map starts empty since a single old number cannot say which of
-				// a user's script elements they had set it while looking at.
+				// v4 kept one scriptEditorHeight for every script row (#1643), so dragging one
+				// row's handle resized them all. Split into a per-id map plus the shared default a
+				// never-dragged row starts from: the old value becomes that default (clamped, as a
+				// stale blob can predate today's bounds), and the map starts empty, since one
+				// number cannot say which element it was set on.
 				if (version < 5) {
 					state.scriptEditorHeightDefault =
 						typeof state.scriptEditorHeight === "number"
@@ -486,11 +437,9 @@ export const useLayoutStore = create<LayoutState>()(
 					state.scriptEditorHeights = {};
 					delete state.scriptEditorHeight;
 				}
-				// v5 had one split ratio and one arrangement (issue #1711). The
-				// ratio the user had set was set with the response beside the
-				// request, so it becomes the Beside ratio; Below starts even, and
-				// the position stays Beside - an upgrade must not re-arrange the
-				// builder under anyone.
+				// v5 had one split ratio and one arrangement (#1711). The user's ratio was set
+				// beside, so it becomes the Beside ratio; Below starts even, and the position stays
+				// Beside: an upgrade must not re-arrange the builder under anyone.
 				if (version < 6) {
 					state.requestSplitRatioBeside =
 						typeof state.requestSplitRatio === "number"
@@ -500,9 +449,8 @@ export const useLayoutStore = create<LayoutState>()(
 					state.responsePosition = "beside";
 					delete state.requestSplitRatio;
 				}
-				// v6 had no bottom panel (#3635). `persist` would fill the missing
-				// keys from the initial state on its own; writing them here keeps
-				// every version step stating what it adds.
+				// v6 had no bottom panel (#3635). `persist` would fill the missing keys from the
+				// initial state; writing them here keeps every step stating what it adds.
 				if (version < 7) {
 					state.bottomPanelOpen = false;
 					state.bottomPanelHeight = DEFAULT_BOTTOM_PANEL_HEIGHT;
