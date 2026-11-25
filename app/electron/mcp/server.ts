@@ -402,9 +402,8 @@ interface EnvelopeView {
 /**
  * A `tools/call` or `tools/list` handler as the SDK's `Server` holds it.
  *
- * Deliberately loose in its request type: the wrappers below read one field and
- * forward the rest untouched, and restating the SDK's request shape here is a
- * second copy of it to drift.
+ * Deliberately loose in its request type: the wrappers below read one field and forward the rest
+ * untouched, and restating the SDK's request shape here is a second copy of it to drift.
  */
 type ToolHandler = (
 	request: { params: { name: string } },
@@ -418,20 +417,17 @@ interface ToolHandlers {
 }
 
 /**
- * Watch for the `tools/call` and `tools/list` handlers `registerTool` installs,
- * and return a getter for them.
+ * Watch for the `tools/call` and `tools/list` handlers `registerTool` installs, and return a getter
+ * for them.
  *
- * The SDK offers no pre-dispatch hook (2.3.1): its handler looks the name up in
- * its own registry and rejects before anything of Vayu's runs, and its
- * `fallbackRequestHandler` serves only methods with no handler at all. So a
- * wrapper can only be put in front of it by replacing it - which needs the
- * original to delegate to. `setRequestHandler` is public on both sides of
- * this, and the interception is removed again as soon as the registration loop
- * is done.
+ * The SDK offers no pre-dispatch hook (2.3.1): its handler looks the name up in its own registry
+ * and rejects before anything of Vayu's runs, and its `fallbackRequestHandler` serves only methods
+ * with no handler at all. So a wrapper can only be put in front of it by replacing it, which needs
+ * the original to delegate to. `setRequestHandler` is public on both sides of this, and the
+ * interception is removed again as soon as the registration loop is done.
  *
- * A capture that came back empty would leave the refusal unshipped, so what
- * holds this to the SDK across an upgrade is the protocol test that calls a
- * withheld name and reads the answer.
+ * A capture that came back empty would leave the refusal unshipped, so what holds this to the SDK
+ * across an upgrade is the protocol test that calls a withheld name and reads the answer.
  */
 function captureToolHandlers(mcp: McpServer): () => ToolHandlers {
 	const server = mcp.server as unknown as {
@@ -469,17 +465,15 @@ function withoutDefaultDialect(schema: unknown): unknown {
 }
 
 /**
- * Drop the redundant `$schema` from each tool's `inputSchema` and `outputSchema`
- * in a `tools/list` answer (57 B per schema, #3748).
+ * Drop the redundant `$schema` from each tool's `inputSchema` and `outputSchema` in a `tools/list`
+ * answer (57 B per schema, #3748).
  *
- * The MCP specification (revision 2026-07-28, "JSON Schema Usage" > "Schema
- * Dialect", rule 1) says "When a schema does not include a `$schema` field, it
- * defaults to JSON Schema 2020-12", and its Implementation Requirements make
- * clients and servers MUST support that dialect, so the key restates the
- * default. The server SDK (v2) writes it at list time
- * (`JSON_SCHEMA_CONVERSION_TARGET` is draft-2020-12), which is why registration
- * cannot remove it. Only the top-level key whose value is exactly the 2020-12
- * URI goes: a schema that declares another dialect keeps it, and a nested
+ * The MCP specification (revision 2026-07-28, "JSON Schema Usage" > "Schema Dialect", rule 1) says
+ * "When a schema does not include a `$schema` field, it defaults to JSON Schema 2020-12", and its
+ * Implementation Requirements make clients and servers MUST support that dialect, so the key
+ * restates the default. The server SDK (v2) writes it at list time (`JSON_SCHEMA_CONVERSION_TARGET`
+ * is draft-2020-12), which is why registration cannot remove it. Only the top-level key whose value
+ * is exactly the 2020-12 URI goes: a schema that declares another dialect keeps it, and a nested
  * `$schema` (a property named so) is untouched. The answer is not mutated.
  */
 export function stripDefaultSchemaDialect<T>(answer: T): T {
@@ -496,14 +490,13 @@ export function stripDefaultSchemaDialect<T>(answer: T): T {
 }
 
 /**
- * Finish the SDK's `tools/list` answer: fill every remedy token with the host's
- * wording and drop the redundant `$schema` from each tool's schemas.
+ * Finish the SDK's `tools/list` answer: fill every remedy token with the host's wording and drop
+ * the redundant `$schema` from each tool's schemas.
  *
- * The SDK converts each tool's Zod schema to JSON Schema only when it answers
- * the list, so a token in a parameter's description, and the `$schema` it
- * writes, are out of reach of anything done at registration. Rewriting the
- * answer covers a tool's description, its parameters' and its output schema in
- * one place.
+ * The SDK converts each tool's Zod schema to JSON Schema only when it answers the list, so a token
+ * in a parameter's description, and the `$schema` it writes, are out of reach of anything done at
+ * registration. Rewriting the answer covers a tool's description, its parameters' and its output
+ * schema in one place.
  */
 function finishToolList(
 	mcp: McpServer,
@@ -520,20 +513,18 @@ function finishToolList(
 }
 
 /**
- * Stand in front of the SDK's `tools/call` handler for the two answers it would
- * otherwise give alone.
+ * Stand in front of the SDK's `tools/call` handler for the two answers it would otherwise give
+ * alone.
  *
- * A call to a write tool this session withheld gets the refusal that names the
- * setting, in place of the SDK's "Tool <name> not found". The withholding
- * (#1429) is what makes this necessary: it took the handlers' refusal off the
- * wire along with the schemas, leaving an agent that guessed a write tool's
- * name - from its own memory, or from a list it fetched while writes were on -
- * with an unknown-tool error and nothing to ask the user for (#1431).
+ * A call to a write tool this session withheld gets the refusal that names the setting, in place of
+ * the SDK's "Tool <name> not found". The withholding (#1429) is what makes this necessary: it took
+ * the handlers' refusal off the wire along with the schemas, leaving an agent that guessed a write
+ * tool's name (from its own memory, or from a list it fetched while writes were on) with an
+ * unknown-tool error and nothing to ask the user for (#1431).
  *
- * An error the SDK answered itself (an argument its schema check refused) gets
- * the failure class every error carries (#2776), through the same mapping
- * dispatch uses. Every other answer, schema validation and structured output
- * included, is the SDK's unchanged.
+ * An error the SDK answered itself (an argument its schema check refused) gets the failure class
+ * every error carries (#2776), through the same mapping dispatch uses. Every other answer, schema
+ * validation and structured output included, is the SDK's unchanged.
  */
 function answerToolCalls(
 	mcp: McpServer,
@@ -552,12 +543,11 @@ function answerToolCalls(
 }
 
 /**
- * @p answer, with a rejection the engine caused worded as the tools word it
- * (#3577). A resource, a prompt and a completion answer a failed request, so
- * what reaches the client is the thrown message, and a bare `fetch failed`
- * names neither the engine nor what to do. An error that is not an engine
- * failure (a projection's own sentence, a prompt's "pin one baseline" fix)
- * and one already led by the outage (`withheldRunOutput`) keep their text.
+ * @p answer, with a rejection the engine caused worded as the tools word it (#3577). A resource, a
+ * prompt and a completion answer a failed request, so what reaches the client is the thrown
+ * message, and a bare `fetch failed` names neither the engine nor what to do. An error that is not
+ * an engine failure (a projection's own sentence, a prompt's "pin one baseline" fix) and one
+ * already led by the outage (`withheldRunOutput`) keep their text.
  */
 function worded<Args extends unknown[], Result>(
 	ctx: ToolContext,

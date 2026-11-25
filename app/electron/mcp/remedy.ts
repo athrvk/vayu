@@ -6,12 +6,11 @@
  */
 
 /**
- * @brief What a refusal tells the user to do about it, per host. The Electron
- *        app has Settings screens and a window; the stdio CLI has neither, only
- *        the `VAYU_MCP_*` variables and a `vayu-engine` process. A sentence that
- *        names one to a session served by the other sends the user to something
- *        that does not exist (#2439), so every guard, outage and gate sentence
- *        gets its remedy here and nowhere else.
+ * @brief What a refusal tells the user to do about it, per host. The Electron app has Settings
+ *        screens and a window; the stdio CLI has neither, only the `VAYU_MCP_*` variables and a
+ *        `vayu-engine` process. A sentence that names one to a session served by the other sends
+ *        the user to something that does not exist (#2439), so every guard, outage and gate
+ *        sentence gets its remedy here and nowhere else.
  */
 
 import { SAFETY_ENV_VARS, type McpSafetyConfig } from "./config.js";
@@ -72,11 +71,10 @@ export function settingRemedy(key: keyof McpSafetyConfig, host: McpHost): string
 }
 
 /**
- * The sentence that gets an unreachable engine reachable, without its closing
- * punctuation. One clause with no full stop in it: it opens a sentence in
- * `engineFailure` and is read inside parentheses in a `withhold.ts` sentence.
- * The app host only ever answers while the app is running, so it never says to
- * start it.
+ * The sentence that gets an unreachable engine reachable, without its closing punctuation. One
+ * clause with no full stop in it: it opens a sentence in `engineFailure` and is read inside
+ * parentheses in a `withhold.ts` sentence. The app host only ever answers while the app is running,
+ * so it never says to start it.
  */
 export function engineDownRemedy(host: McpHost): string {
 	return host === "cli"
@@ -150,11 +148,10 @@ function remedyFor(name: string, host: McpHost): string {
 }
 
 /**
- * What a gate tells the user to do depends on the host serving the session,
- * and a description is built before the host is known. A description
- * names its remedy with one of the tokens below and the server fills it in per
- * session (`server.ts`, `toolCatalog`), so neither host's wording is written
- * into a description and a new host cannot inherit the other's.
+ * What a gate tells the user to do depends on the host serving the session, and a description is
+ * built before the host is known. A description names its remedy with one of the tokens below and
+ * the server fills it in per session (`server.ts`, `toolCatalog`), so neither host's wording is
+ * written into a description and a new host cannot inherit the other's.
  */
 export const GUARDED_WRITE_SENTENCE = `GUARDED: requires write access (to enable it, ${remedyToken("allowWrites")})`;
 /** Completes "unless the user has chosen to ...". */
