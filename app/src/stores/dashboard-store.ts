@@ -30,12 +30,11 @@ import { durationSeconds } from "@/constants/load-test";
 import { isRunInProgress, type TerminalRunStatus } from "@/lib/run-status";
 
 /**
- * Retention seeded before the window is known. The real value is the engine's
- * `liveReplayWindowMs`, which `useLiveWindowSync` (mounted at the App root)
- * pushes in once the config query resolves - it cannot be read synchronously
- * here the way the old localStorage preference could. Seeding the module default rather than `null`
- * keeps retention bounded during that gap; a run started in the first moments
- * after launch trims to 5 minutes until the hook corrects it.
+ * Retention seeded before the window is known. The real value is the engine's `liveReplayWindowMs`,
+ * which `useLiveWindowSync` (mounted at the App root) pushes in once the config query resolves, so
+ * it cannot be read synchronously here. Seeding the module default rather than `null` keeps
+ * retention bounded in that gap; a run started in the first moments after launch trims to 5 minutes
+ * until the hook corrects it.
  */
 function initialLiveWindowSeconds(): number | null {
 	return windowSecondsFor(DEFAULT_LIVE_WINDOW);
@@ -70,11 +69,10 @@ function capacitySloMs(config: LoadTestRunConfig | null): number | undefined {
 }
 
 /**
- * The p99 line (ms) the live charts, latency tiles and HDR markers draw: the
- * run's own, which mirrors `runSloMs(report)` for a stored run (#2939). A
- * capacity run's `sloMs` (the line its search stopped on), else its
- * `latencyP99Ms` budget, else `undefined`. The Settings SLO is a client
- * preference, not a property of the run, so it is never the answer.
+ * The p99 line (ms) the live charts, latency tiles and HDR markers draw: the run's own, mirroring
+ * `runSloMs(report)` for a stored run (#2939). A capacity run's `sloMs` (its search's stop line),
+ * else its `latencyP99Ms` budget, else `undefined`. The Settings SLO is a client preference, not a
+ * property of the run, so it is never the answer.
  */
 export function runOwnSloMs(config: LoadTestRunConfig | null): number | undefined {
 	return capacitySloMs(config) ?? config?.latencyP99Ms;
@@ -86,13 +84,12 @@ interface SloJudge {
 }
 
 /**
- * The line a run's breakpoint is judged against, and whose it is: a capacity
- * run's own, which its search stopped on, else the Settings threshold. A
- * capacity run judged by the Settings line would draw one budget on the
- * Capacity summary and another on the Saturation card and the chart. A ramp
- * stays Settings-judged even when the run set a p99 budget, so `sloSource` is
- * "run" only where the two are the same number (#2939). This is the judge only;
- * what the charts draw is {@link runOwnSloMs}, as History's is.
+ * The line a run's breakpoint is judged against, and whose it is: a capacity run's own (its
+ * search's stop line), else the Settings threshold. A capacity run judged by the Settings line
+ * would draw one budget on the Capacity summary and another on the Saturation card and the chart. A
+ * ramp stays Settings-judged even when the run set a p99 budget, so `sloSource` is "run" only where
+ * the two are the same number (#2939). This is the judge only; what the charts draw is
+ * {@link runOwnSloMs}, as History's is.
  */
 function sloJudgeFor(config: LoadTestRunConfig | null): SloJudge {
 	const sloMs = capacitySloMs(config) ?? useClientSettingsStore.getState().sloThresholdMs;
@@ -108,26 +105,23 @@ function uncrossedBy(judge: SloJudge): Breakpoint {
 export type FinishedKind = TerminalRunStatus;
 
 /**
- * Where the run the dashboard holds stands (#3351). One field rather than the
- * `mode` / `isStreaming` / `error` / `finalReport` flags it replaced, which
- * could disagree: a stream error left `isStreaming` true beside its message,
- * and "awaiting the report" was only the absence of every other flag.
+ * Where the run the dashboard holds stands (#3351). One field, so the phases cannot disagree as
+ * separate `mode` / `isStreaming` / `error` / `finalReport` flags did (a stream error left
+ * `isStreaming` true beside its message).
  *
  * - `idle`: no run yet.
  * - `streaming`: the SSE stream is attached and ticks arrive.
- * - `streamLost`: the stream ended (an error, a drop, a collection run taking
- *   the client) while the engine still runs the load test; `message` is the
- *   dashboard's callout body, and Reconnect is the way back.
- * - `awaitingReport`: the stream closed, or the engine confirmed the user's
- *   Stop, and the stored report is on its way. `stopped` is that confirmation:
- *   it drops the Running pill and Stop at once, but the report's own status
- *   still decides how the run ends (a Stop that raced the run's own verdict
- *   leaves it failed or completed, as History shows it).
+ * - `streamLost`: the stream ended (an error, a drop, a collection run taking the client) while the
+ *   engine still runs the load test; `message` is the dashboard's callout body, and Reconnect is
+ *   the way back.
+ * - `awaitingReport`: the stream closed, or the engine confirmed the user's Stop, and the stored
+ *   report is on its way. `stopped` is that confirmation: it drops the Running pill and Stop at
+ *   once, but the report's own status still decides how the run ends (a Stop that raced the run's
+ *   own verdict leaves it failed or completed, as History shows it).
  * - `reportError`: the report fetch gave up; Retry returns to `awaitingReport`.
- * - `engineStopped`: the engine's process ended while the run was live
- *   (#3605), so the run ended with it. Nothing on this side can say how until
- *   an engine is back: its stored report, which `setFinalReport` settles as
- *   `finished` like any other.
+ * - `engineStopped`: the engine's process ended while the run was live (#3605), so the run ended
+ *   with it. Only its stored report can say how, once an engine is back, and `setFinalReport`
+ *   settles that as `finished` like any other.
  * - `finished`: the report landed, and `kind` is how the run ended.
  */
 export type DashboardPhase =
@@ -140,17 +134,15 @@ export type DashboardPhase =
 	| { phase: "finished"; kind: FinishedKind; report: RunReport };
 
 /**
- * Whether the run the dashboard holds may still be executing on the engine:
- * the one answer the header's pill and Stop button, the keep-awake prompt, the
- * URL bar and the builder's single-run guard read.
+ * Whether the run the dashboard holds may still be executing on the engine: the one answer the
+ * header's pill and Stop button, the keep-awake prompt, the URL bar and the builder's single-run
+ * guard read.
  *
- * A lost stream is live: the engine keeps running the load test, so the pill
- * still says Running beside the lost-stream callout. Awaiting the report is
- * live until the report says otherwise, unless the engine confirmed the
- * user's Stop. A failed report fetch is not: the stream had already closed, and
- * holding the builder on a read that cannot answer would lock out every new
- * run until the engine did. Nor is a run whose engine stopped: no process is
- * left to execute it, and a Stop has nobody to reach.
+ * A lost stream is live: the engine keeps running the load test, so the pill still says Running
+ * beside the callout. Awaiting the report is live until the report says otherwise, unless the
+ * engine confirmed the user's Stop. A failed report fetch is not: the stream had already closed,
+ * and holding the builder on a read that cannot answer would lock out every new run. Nor is a run
+ * whose engine stopped: no process is left to execute it, and a Stop has nobody to reach.
  */
 export function isDashboardRunLive(phase: DashboardPhase): boolean {
 	switch (phase.phase) {
@@ -165,11 +157,9 @@ export function isDashboardRunLive(phase: DashboardPhase): boolean {
 }
 
 /**
- * How the run ended as far as the dashboard knows: the report's kind once it
- * landed, "stopped" from the engine's confirmed Stop before it, and null while
- * neither has happened. Never set while {@link isDashboardRunLive} is true.
- * Null for `engineStopped` too: the run is over, but only its stored report
- * can say as what.
+ * How the run ended as far as the dashboard knows: the report's kind once it landed, "stopped" from
+ * the engine's confirmed Stop before it, else null. Never set while {@link isDashboardRunLive} is
+ * true. Null for `engineStopped` too: the run is over, but only its stored report can say as what.
  */
 export function dashboardRunEnding(phase: DashboardPhase): FinishedKind | null {
 	if (phase.phase === "finished") return phase.kind;
@@ -191,18 +181,17 @@ function finishedKindFor(reportStatus: string | undefined): FinishedKind {
 }
 
 /**
- * How far through a load run one tick is, as 0..1, or `null` when the run has
- * no denominator to be a fraction of (issue #1362).
+ * How far through a load run one tick is, as 0..1, or `null` when the run has no denominator
+ * (#1362).
  *
- * Two denominators, in this order, because they are not equally good. The
- * engine publishes `requestsExpected` for every mode that can know it - a rate
- * times a duration, or an iteration count (`load_strategy.cpp`) - and that is
- * the run's own arithmetic rather than the client's. A duration-bounded
- * `constant_concurrency` run publishes no such count, so elapsed-over-duration
- * is what is left; it is the same fraction the run's clock is counting down.
+ * Two denominators, in this order, because they are not equally good. The engine publishes
+ * `requestsExpected` for every mode that can know it (a rate times a duration, or an iteration
+ * count; `load_strategy.cpp`), the run's own arithmetic rather than the client's. A
+ * duration-bounded `constant_concurrency` run publishes no such count, so elapsed-over-duration is
+ * left, the same fraction the run's clock counts down.
  *
- * Not held as state: the one reader is the taskbar and Dock indicator, and a
- * field the store recorded for nobody is the defect the repo names most often.
+ * Not held as state: the one reader is the taskbar and Dock indicator, and a field the store
+ * records for nobody is the defect the repo names most often.
  */
 export function deriveRunProgress(
 	config: LoadTestRunConfig | null,
@@ -236,23 +225,19 @@ interface DashboardState {
 	currentMetrics: LoadTestMetrics | null;
 	historicalMetrics: LoadTestMetrics[];
 	/**
-	 * Server vitals scraped during this run, oldest first. Kept beside the ticks
-	 * rather than merged into them: the two are sampled by different clocks, and
-	 * the join onto the tick timeline happens at render time
-	 * ({@link joinMonitorToTimeline}) so a changing retention window cannot
-	 * strand a reading on a tick that has rolled out.
-	 *
-	 * Empty for a run that configured no monitor, which is what the chart row
-	 * reads to stay out of the way entirely.
+	 * Server vitals scraped during this run, oldest first. Beside the ticks, not merged into them:
+	 * the two are sampled by different clocks, and the join onto the tick timeline happens at
+	 * render time ({@link joinMonitorToTimeline}) so a changing retention window cannot strand a
+	 * reading on a tick that has rolled out. Empty for a run with no monitor, which is what keeps
+	 * the chart row out of the way.
 	 */
 	monitorSamples: MonitorSample[];
 	/** A Stop request for the held run is in flight. */
 	isStopping: boolean;
 	/**
-	 * The engine answered the user's Stop with a terminal status other than
-	 * `stopped`: the run had already finished when it arrived (#3367). The
-	 * finished view says so, because the Stop the user pressed did nothing,
-	 * unless the report's `summary.drainCut` shows the Stop cut the drain (#3538).
+	 * The engine answered the user's Stop with a terminal status other than `stopped`: the run had
+	 * already finished (#3367). The finished view says so, since the Stop did nothing, unless the
+	 * report's `summary.drainCut` shows the Stop cut the drain (#3538).
 	 */
 	stopArrivedLate: boolean;
 	// Config and request info (available during live streaming)
@@ -261,11 +246,10 @@ interface DashboardState {
 	/** Request that initiated the run, so the dashboard can navigate back to it. */
 	sourceRequestId: string | null;
 	/**
-	 * Running monotonic aggregates updated on each tick in {@link addMetricsBatch}.
-	 * Stored here instead of recomputed in MetricsView so that consumers see O(1)
-	 * updates per tick rather than a full scan of {@link historicalMetrics}. Both
-	 * are latched (peak only grows, breakpoint sticks on first crossing), so they
-	 * survive old ticks rolling out of the retention window. See PR #26 / #25.
+	 * Running monotonic aggregates updated on each tick in {@link addMetricsBatch}, so consumers
+	 * see O(1) updates per tick rather than a scan of {@link historicalMetrics}. Both are latched
+	 * (peak only grows, the breakpoint sticks on first crossing), so they survive old ticks rolling
+	 * out of the retention window. See PR #26 / #25.
 	 */
 	peakConcurrency: number;
 	breakpoint: Breakpoint;
@@ -283,25 +267,22 @@ interface DashboardState {
 	 */
 	dispatchLagSinceSeconds: number | null;
 	/**
-	 * Live retention window in seconds (null = full run, bounded by
-	 * {@link maxRetainedTicks}). Drives the time-based trim in
-	 * {@link addMetricsBatch}. Kept in sync by useLiveWindowSync.
+	 * Live retention window in seconds (null = full run, bounded by {@link maxRetainedTicks}), for
+	 * the time-based trim in {@link addMetricsBatch}; kept in sync by useLiveWindowSync.
 	 */
 	liveWindowSeconds: number | null;
 	/**
-	 * Ceiling on retained ticks whatever the window - the memory backstop, and
-	 * the same `liveMaxRetainedTicks` value the engine bounds its replay ring
-	 * with, so this side never discards what the engine went to the trouble of
-	 * retaining. Also synced by useLiveWindowSync.
+	 * Ceiling on retained ticks whatever the window: the memory backstop, and the same
+	 * `liveMaxRetainedTicks` the engine bounds its replay ring with, so this side never discards
+	 * what the engine retained. Also synced by useLiveWindowSync.
 	 */
 	maxRetainedTicks: number;
 
 	/*
-	 * Actions. `startRun` is the one that replaces the held run; every other
-	 * writer names the run it speaks for, and a write for a run the store is
-	 * not holding is dropped, as `execution-events-store` does. A continuation
-	 * that outlived its run (a report fetch, a close handler, a Stop request)
-	 * must not paint a newer run.
+	 * Actions. `startRun` is the one that replaces the held run; every other writer names the run
+	 * it speaks for, and a write for a run the store is not holding is dropped (as in
+	 * `execution-events-store`), so a continuation that outlived its run (a report fetch, a close
+	 * handler, a Stop request) cannot paint a newer run.
 	 */
 	startRun: (
 		runId: string,
@@ -357,10 +338,9 @@ const AWAITING_LIVE: DashboardPhase = { phase: "awaitingReport", stopped: false 
 const ENGINE_STOPPED: DashboardPhase = { phase: "engineStopped" };
 
 /**
- * Apply `next` to the state when it holds `runId`; otherwise return the state
- * itself, so zustand notifies nobody. The writers that fold data in
- * (`addMetricsBatch`, `addMonitorSamples`, `setFinalReport`) make the same
- * comparison inside their own early return.
+ * Apply `next` when the state holds `runId`; otherwise return the state itself, so zustand notifies
+ * nobody. The writers that fold data in (`addMetricsBatch`, `addMonitorSamples`, `setFinalReport`)
+ * make the same comparison in their own early return.
  */
 function forRun(
 	state: DashboardState,
@@ -502,10 +482,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			if (state.currentRunId !== runId || batch.length === 0) return state;
 			let newHistory = [...state.historicalMetrics, ...batch];
 
-			// Time-based retention: drop ticks older than the configured window,
-			// measured against the newest tick's elapsed time. History is
-			// time-ordered ascending and trimmed every batch, so this scans only
-			// the few newly-expired ticks at the front (not the whole array).
+			// Time-based retention: drop ticks older than the window, measured from the newest
+			// tick's elapsed time. History is ascending and trimmed every batch, so this scans only
+			// the few newly expired ticks at the front.
 			const winS = state.liveWindowSeconds;
 			if (winS != null) {
 				const cutoff = newHistory[newHistory.length - 1].elapsed_seconds - winS;
@@ -522,11 +501,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 				newHistory = newHistory.slice(-cap);
 			}
 
-			// Fold the new ticks into the running aggregates: peak only grows,
-			// breakpoint is latched on the first SLO crossing, the p99 at peak
-			// restarts whenever the peak rises, and the lag streak restarts whenever
-			// the windowed rates agree again - so we walk each batch entry exactly
-			// once, never the full history.
+			// Fold the new ticks into the running aggregates (peak only grows, the breakpoint
+			// latches on the first SLO crossing, the p99 at peak restarts when the peak rises, the
+			// lag streak restarts when the windowed rates agree), walking each batch entry once,
+			// never the full history.
 			const judge = sloJudgeFor(state.loadTestConfig);
 			let lagSince = state.dispatchLagSinceSeconds;
 			let peakReading = { peak: state.peakConcurrency, p99Ms: state.p99AtPeakMs };
@@ -560,12 +538,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 		}),
 
 	/**
-	 * Append scrapes, bounded by the same tick ceiling the series is.
-	 *
-	 * A scrape can be configured faster than the tick cadence, so the bound is
-	 * on this array's own length rather than derived from the ticks - otherwise
-	 * a 250ms scrape over an overnight soak would grow without limit beside a
-	 * series that is trimmed.
+	 * Append scrapes, bounded by the same tick ceiling the series is. A scrape can be faster than
+	 * the tick cadence, so the bound is on this array's own length rather than derived from the
+	 * ticks, or a 250ms scrape over an overnight soak would grow without limit beside a trimmed
+	 * series.
 	 */
 	addMonitorSamples: (runId, batch) =>
 		set((state) => {
