@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-// Remaining hooks (not replaced by TanStack Query)
+// The hooks that are not queries; server data is read through `@/queries`.
 export { useEngine } from "./useEngine";
 export { useSaveManager } from "./useSaveManager";
 export { useEntityDraft } from "./useEntityDraft";
@@ -28,6 +28,3 @@ export { useOverflowTitle } from "./useOverflowTitle";
 export { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 export { useCopy } from "./useCopy";
 export { useInlineRename, type UseInlineRenameOptions, type InlineRename } from "./useInlineRename";
-
-// Note: useCollections, useRuns, useHealthCheck have been replaced by TanStack Query hooks
-// Import from @/queries instead

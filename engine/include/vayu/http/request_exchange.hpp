@@ -8,12 +8,11 @@
  */
 
 /**
- * @file http/request_exchange.hpp
  * @brief One design-mode exchange - pre-request script, send, test script -
  *        extracted from the `POST /execute` handler so the scenario runner
  *        executes the same body rather than a copy of it.
  *
- * The route still owns everything that is the route's: parsing the payload,
+ * The route owns everything that is the route's: parsing the payload,
  * creating the run row, deciding what to persist and what to answer with. What
  * lives here is the part a scenario step and a single Send have to perform
  * identically - the script/send/script ordering, the write-back that lets a
@@ -81,7 +80,7 @@ struct ScriptVariableBaseline {
  * `collection` is the leaf of the send's chain - the only collection scope a
  * script may write, and the one `persist_script_variables` writes back.
  * `collection_ancestors` is the rest of that collection's chain, root first,
- * which scripts read through but cannot modify (issue #234).
+ * which scripts read through but cannot modify (#234).
  */
 struct ScriptVariableScopes {
     vayu::Environment environment;
@@ -271,9 +270,9 @@ void record_request_line (nlohmann::json& node, const vayu::Request& request);
  * (#1835), `authQueryParam` (the raw name of the query parameter) and
  * `authHeaders` (the header names), and `authNotice`, the sentence saying the
  * auth wrote nothing and why: a mode Vayu does not execute (#2474), an empty
- * bearer token or API key name (#3203). Each is
- * omitted when empty - unlike `serialize (Response)`'s always-present fields -
- * and a reader treats absent as "nothing written".
+ * bearer token or API key name (#3203). Each is omitted when empty - unlike
+ * `serialize (Response)`'s always-present fields - and a reader treats absent
+ * as "nothing written".
  *
  * One writer, two homes: `build_result_trace` calls it on the trace's `request`
  * node, and `POST /execute` calls it on the top level of its answer (#1845), so
@@ -296,16 +295,15 @@ std::optional<nlohmann::json> body_file_node (const vayu::Request& request);
  * What an execution's two scripts produced: `testResults`, `consoleLogs`,
  * `preScriptError`, `postScriptError` and `scriptRequests` (#3633).
  *
- * One object, several homes - and every design send uses both of its (issue
- * #725). A buffered send merges it into the `/execute` response body *and*
- * hands the same object to `record_design_result`; a streaming send has already
- * answered `202`, so the trace is the only route it takes; a collection run's
- * step has only the trace either way (issue #724), the run being viewed
- * entirely through its stored rows. Building it twice, or storing it on one
- * transport only, is how the live pane and the restored one come to disagree
- * about what a failed assertion looks like - the buffered half disagreed by
- * omission until #725, and a restored Tests tab could not tell "passed" from
- * "never ran".
+ * One object, several homes - and every design send uses both of its (#725). A
+ * buffered send merges it into the `/execute` response body *and* hands the
+ * same object to `record_design_result`; a streaming send has already answered
+ * `202`, so the trace is the only route it takes; a collection run's step has
+ * only the trace either way (#724), the run being viewed entirely through its
+ * stored rows. Building it twice, or storing it on one transport only, lets the
+ * live pane and the restored one disagree about what a failed assertion looks
+ * like, and leaves a restored Tests tab unable to tell "passed" from "never
+ * ran".
  *
  * Declared here beside `build_result_trace` rather than in `routes.hpp`,
  * because the scenario runner writes the same node onto its step traces and is
@@ -313,18 +311,18 @@ std::optional<nlohmann::json> body_file_node (const vayu::Request& request);
  * design path it was written for.
  *
  * **Both** scripts' assertions, each entry naming the script that made it in
- * `source` (`"pre"` / `"test"`, the spellings `consoleLogs` uses). The
- * post-request script's alone until issue #810: `pm.test` is bound in both
- * phases, so a pre-request assertion - typically about a `pm.sendRequest` the
- * script made - failed its scenario step through `describe_failed_tests` while
- * appearing in no list any surface could render.
+ * `source` (`"pre"` / `"test"`, the spellings `consoleLogs` uses). `pm.test` is
+ * bound in both phases (#810), so a post-request-only list would leave a
+ * pre-request assertion - typically about a `pm.sendRequest` the script made -
+ * failing its scenario step through `describe_failed_tests` while appearing in
+ * no list any surface renders.
  *
  * Each key is present only when it has something to say, so a request with no
  * scripts contributes an empty object and stores nothing. An entry's `scope`
  * names the level that produced it (#2522) and is absent where none was
  * stamped; `preScriptError` / `postScriptError` are the bare message when the
- * request's own script threw and `script_failure_text` when an inherited
- * level did, so the level is named wherever the error is read.
+ * request's own script threw and `script_failure_text` when an inherited level
+ * did, so the level is named wherever the error is read.
  *
  * `scriptRequests` is both phases' `pm.sendRequest` records, pre before test,
  * each with its `source`; a console line's `scriptRequest` is its record's
@@ -357,32 +355,32 @@ const std::string& script_type);
 
 /**
  * The `ScriptEngine` this OS thread uses for a load run's inline scripts
- * (issue #1495), constructed once per thread on first use rather than shared
- * behind one pool mutex - each event-loop worker and the strategy thread run
- * their own inline scripts locally.
+ * (#1495), constructed once per thread on first use rather than shared behind
+ * one pool mutex - each event-loop worker and the strategy thread run their own
+ * inline scripts locally.
  *
- * Safe as a thread-local: a load run's worker threads - the strategy thread
- * and every event-loop worker - are spawned fresh for that run and joined
- * before it retains (`RunContext::release_execution_resources`), the same
- * lifetime `docs/engine/architecture.md` already documents for the event loop
- * itself, so the first call on a thread this run, this config, and no other
- * run's config is ever observed here.
+ * Safe as a thread-local: a load run's worker threads - the strategy thread and
+ * every event-loop worker - are spawned fresh for that run and joined before it
+ * retains (`RunContext::release_execution_resources`), the same lifetime
+ * `docs/engine/architecture.md` documents for the event loop itself, so the
+ * first call on a thread this run, this config, and no other run's config is
+ * ever observed here.
  */
 [[nodiscard]] vayu::runtime::ScriptEngine& script_engine_for_this_thread (
 const vayu::runtime::ScriptConfig& config);
 
 /**
- * Point @p ctx's variable scopes at @p scopes, the run-local one included,
- * and nothing else.
+ * Point @p ctx's variable scopes at @p scopes, the run-local one included, and
+ * nothing else.
  *
  * The leaf collection scope is handed over writable while its ancestors are
- * read-only (issue #234); that rule is the reason this is a function rather
- * than five assignments at each call site.
+ * read-only (#234); that rule is the reason this is a function rather than five
+ * assignments at each call site.
  *
  * Separate from `bind_script_scopes` because a **deferred** replay - a load
  * run's `tests` script, a scenario load run's per-step script - has scopes to
- * read but no transfer and therefore no cookie jar to bind (issue #728). It
- * must not be the call site that re-derives which scope is writable.
+ * read but no transfer and therefore no cookie jar to bind (#728). It must not
+ * be the call site that re-derives which scope is writable.
  */
 void bind_variable_scopes (vayu::runtime::ScriptContext& ctx, ScriptVariableScopes& scopes);
 
@@ -390,9 +388,9 @@ void bind_variable_scopes (vayu::runtime::ScriptContext& ctx, ScriptVariableScop
  * Point @p ctx's variable scopes and cookie surfaces at this run's.
  *
  * The rules here are not obvious and each one is load-bearing: the leaf
- * collection scope is writable while its ancestors are not (issue #234), and
+ * collection scope is writable while its ancestors are not (#234), and
  * every script of a run shares one jar so `pm.cookies` and the transfer cannot
- * disagree about which session they are looking at (issue #301). A second copy
+ * disagree about which session they are looking at (#301). A second copy
  * of the block would be a copy that stops receiving those fixes, so the
  * streaming path (execution.cpp), which brackets a transfer this function's
  * usual caller does not own, binds through here too.
@@ -413,14 +411,14 @@ std::vector<vayu::http::CookieWrite>* writes);
 
 /**
  * A per-virtual-user write layer over a run's shared @ref ScriptVariableScopes
- * (issue #1495).
+ * (#1495).
  *
  * A load run's `script.*` and `extract.*` elements write through
  * `ElementContext::set_variable` exactly as a design send's do, but the target
  * they must land in cannot be the run-wide scopes a design send and the
  * sequential runner mutate directly: a scenario load run's virtual users share
  * one event loop, and two users writing the same variable name into one
- * `ScriptVariableScopes` is the cross-contamination this issue exists to stop
+ * `ScriptVariableScopes` is the cross-contamination the overlay exists to stop
  * (`docs/engine/architecture.md`'s "a VU is a small value" note - cookies are
  * per-VU for the identical reason). Each VU instead holds one of these: a
  * handful of overridden names, not a copy of the run's whole variable set -
@@ -431,30 +429,29 @@ std::vector<vayu::http::CookieWrite>* writes);
  * once per run by @ref flatten_variable_scopes, never per submission) in the
  * same precedence `values_from_scopes` gives the run's own scopes - local over
  * environment over the collection chain over globals - so a name this VU wrote
- * reads back exactly as `pm.variables.get` would report it, and a name it
- * never touched still falls through to the run's shared value.
+ * reads back exactly as `pm.variables.get` would report it, and a name it never
+ * touched still falls through to the run's shared value.
  *
- * The collection entries are kept per collection id (#3248), because a
- * scenario load run's steps read different folders: every method takes the
- * base of the step at hand, a write lands on that base's leaf
- * (`baseline.collection_id`), and a read takes the entries of every collection
- * on its chain (`collection_ancestor_ids`). So what a step writes into its
- * folder answers that folder's later steps and its sub-folders', never a
- * sibling folder's, as in a sequential collection run.
+ * The collection entries are kept per collection id (#3248), because a scenario
+ * load run's steps read different folders: every method takes the base of the
+ * step at hand, a write lands on that base's leaf (`baseline.collection_id`),
+ * and a read takes the entries of every collection on its chain
+ * (`collection_ancestor_ids`). So what a step writes into its folder answers
+ * that folder's later steps and its sub-folders', never a sibling folder's, as
+ * in a sequential collection run.
  *
- * The run-local scope (#2564) rides here too, which is what makes it per-VU:
- * it starts each iteration empty (a load run's base scopes hold no local,
+ * The run-local scope (#2564) rides here too, which is what makes it per-VU: it
+ * starts each iteration empty (a load run's base scopes hold no local,
  * `run_scenario_load_setup` discards what `script.setup` set) and is the one
  * part `clear_local` drops at the iteration boundary. The environment,
- * collection and globals entries live as long as the VU (#3044), so a token
- * a `control.once` login extracted still answers every later iteration.
+ * collection and globals entries live as long as the VU (#3044), so a token a
+ * `control.once` login extracted still answers every later iteration.
  *
  * An unset in one of those three (`unset`, an extractor's miss, #3053; a
- * script's `pm.*.unset` or `clear`, through `replace_from`, #3088) cannot
- * erase the shared base, so it is kept as a tombstone: the base value of that
- * name in that scope reads as absent for this VU until it sets the name
- * again, in every iteration, through `apply_onto`, `materialize` and
- * `replace_from` alike.
+ * script's `pm.*.unset` or `clear`, through `replace_from`, #3088) cannot erase
+ * the shared base, so it is kept as a tombstone: the base value of that name in
+ * that scope reads as absent for this VU until it sets the name again, in every
+ * iteration, through `apply_onto`, `materialize` and `replace_from` alike.
  */
 class ScopeOverlay {
     public:
@@ -513,10 +510,10 @@ class ScopeOverlay {
     [[nodiscard]] vayu::http::VariableValues local_values () const;
 
     /**
-     * A full `ScriptVariableScopes` an inline script can run against: @p
-     * base's scopes, its read-only ancestors included, with this VU's overlay
-     * layered on top - the one place this issue pays a real copy, and only
-     * for a step whose `script.*` element actually opted into running inline.
+     * A full `ScriptVariableScopes` an inline script can run against: @p base's
+     * scopes, its read-only ancestors included, with this VU's overlay layered
+     * on top - the one place the overlay pays a real copy, and only for a step
+     * whose `script.*` element actually opted into running inline.
      */
     [[nodiscard]] ScriptVariableScopes materialize (const ScriptVariableScopes& base) const;
 
@@ -554,12 +551,12 @@ class ScopeOverlay {
 /**
  * The scopes as one map, with composition's precedence - environment over the
  * collection chain over globals - and the run-local scope above all three
- * (#2564), so a name resolves in a script exactly as `pm.variables.get`
- * answers it.
+ * (#2564), so a name resolves in a script exactly as `pm.variables.get` answers
+ * it.
  *
- * Exposed for a load run (issue #1495): computed once per run from the base
- * scopes (never per submission - the ancestor chain walk this performs is not
- * a cost every virtual user should pay), then merged per-VU with a small
+ * Exposed for a load run (#1495): computed once per run from the base scopes
+ * (never per submission - the ancestor chain walk this performs is not a cost
+ * every virtual user should pay), then merged per-VU with a small
  * @ref ScopeOverlay by the residual-token overload below.
  */
 [[nodiscard]] vayu::http::VariableValues flatten_variable_scopes (
@@ -578,13 +575,13 @@ const ScriptVariableScopes& scopes,
 const nlohmann::json* row);
 
 /**
- * `extract.*`'s write target (issue #1514), addressed by the schema's
- * `scope` value (`"env"` | `"collection"` | `"globals"`). Unrecognised or
- * absent falls back to `"collection"`, the leaf scope a script's own
- * `pm.environment.set` already writes. Non-static: both `execute_exchange`
- * and the streaming send (`execution.cpp`, which runs its own pipeline calls
- * around the transfer rather than through `execute_exchange`) bind
- * `ElementContext::set_variable` to this.
+ * `extract.*`'s write target (#1514), addressed by the schema's `scope` value
+ * (`"env"` | `"collection"` | `"globals"`). Unrecognised or absent falls back
+ * to `"collection"`, the leaf scope a script's own `pm.collectionVariables.set`
+ * writes. Non-static: both `execute_exchange` and the streaming send
+ * (`execution.cpp`, which runs its own pipeline calls around the transfer
+ * rather than through `execute_exchange`) bind `ElementContext::set_variable`
+ * to this.
  */
 void set_scope_variable (ScriptVariableScopes& scopes,
 std::string_view scope,
@@ -606,15 +603,14 @@ const std::string& name);
  * waits in @ref late_auth, and the scripts that bracket it.
  *
  * `iteration` / `vu` / `iteration_count` / `iteration_data` belong to a caller
- * that binds a row: the scenario runner, per iteration, and `POST /execute` when
- * the payload names a `data` row (issue #601, where the send is row 0 of 1).
+ * that binds a row: the scenario runner, per iteration, and `POST /execute`
+ * when the payload names a `data` row (#601, where the send is row 0 of 1).
  * Every other caller leaves them unset so `pm.info.iteration` and
- * `pm.iterationData` read `undefined` (issues #300 and #356, and see
- * ScriptContext).
+ * `pm.iterationData` read `undefined` (#300, #356; see ScriptContext).
  */
 struct ExchangeInputs {
     vayu::Request request;
-    /// This exchange's resolved, compiled element list (issue #1514) - what
+    /// This exchange's resolved, compiled element list (#1514) - what
     /// `request_composer.cpp`'s `compose_elements` resolved, compiled once by
     /// the caller. Null or empty runs nothing; a design send compiles its own
     /// (one exchange, nothing to reuse), the sequential runner reuses
@@ -623,41 +619,41 @@ struct ExchangeInputs {
     std::optional<std::string> request_id;
     std::optional<std::string> request_name;
     std::optional<size_t> iteration;
-    /// Which virtual user this exchange runs as, 1-based (issue #994). Set
-    /// wherever @ref iteration is and never on its own: an iteration always
-    /// belongs to a user, and neither of these paths has more than one - a
-    /// collection run in design mode walks its sequence once, and a send with a
-    /// row is that one user's row 0.
+    /// Which virtual user this exchange runs as, 1-based (#994). Set wherever
+    /// @ref iteration is and never on its own: an iteration always belongs to a
+    /// user, and neither of these paths has more than one - a collection run in
+    /// design mode walks its sequence once, and a send with a row is that one
+    /// user's row 0.
     std::optional<size_t> vu;
     std::optional<size_t> iteration_count;
-    /// This step's position in the plan (issue #1515's `control.loop` /
-    /// `control.transaction`), null for a design send, which resolves no
-    /// plan. Forwarded verbatim into `ElementContext::step_position`.
+    /// This step's position in the plan (#1515's `control.loop` /
+    /// `control.transaction`), null for a design send, which resolves no plan.
+    /// Forwarded verbatim into `ElementContext::step_position`.
     std::optional<size_t> step_position;
     /// The plan-wide element spans a scope-spanning kind reads against
-    /// @ref step_position (issue #1515), and the run-scoped (sequential) or
-    /// per-VU (load - not this path) map its controller kinds keep their
-    /// own count in. Both null for a design send, which has neither a plan
-    /// nor a run to keep state across exchanges - see the element-pipeline
-    /// bullet in `engine/CLAUDE.md` for why a controller degrades safely
+    /// @ref step_position (#1515), and the run-scoped (sequential) or per-VU
+    /// (load - not this path) map its controller kinds keep their own count in.
+    /// Both null for a design send, which has neither a plan nor a run to keep
+    /// state across exchanges - the controller kinds' null-state branches
+    /// (`core/elements/controller_kinds.cpp` and its siblings) degrade safely
     /// with nothing to remember.
     const std::unordered_map<std::string, vayu::core::ElementSpan>* element_spans = nullptr;
     std::unordered_map<std::string, int64_t>* controller_state = nullptr;
-    /// Whether the scripts may redirect the sequence around this exchange -
-    /// the scenario runner's alone, exactly as `iteration` is (issue #355).
+    /// Whether the scripts may redirect the sequence around this exchange - the
+    /// scenario runner's alone, exactly as `iteration` is (#355).
     bool in_scenario = false;
-    /// Polled by a `step.before` kind's blocking wait (`timer.pacing`, issue
-    /// #1498) to abort it early - the same role `scenario_runner.cpp`'s own
-    /// `step.between` dispatch already gives `timer.think` via a lambda over
-    /// `RunContext::should_stop`. Null for a design send (a single exchange
-    /// has nothing to interrupt) and for anything that predates this field,
-    /// which is exactly the old, uninterruptible behaviour.
+    /// Polled by a `step.before` kind's blocking wait (`timer.pacing`, #1498)
+    /// to abort it early - the same role `scenario_runner.cpp`'s own
+    /// `step.between` dispatch gives `timer.think` via a lambda over
+    /// `RunContext::should_stop`. Null for a design send (a single exchange has
+    /// nothing to interrupt) and for a caller that sets none, which leaves the
+    /// wait uninterruptible.
     std::function<bool ()> should_stop;
-    /// `ClientConfig::cancel` for this exchange's send, every
-    /// `pm.sendRequest` its scripts make and the OAuth 2.0 token @ref late_auth
-    /// acquires (issue #2683): `POST /execute` passes its `DisconnectWatch`'s
-    /// flag, which `Server::stop()` and the caller hanging up both raise
-    /// (#3383), so neither waits on the transfer. The scenario runner passes
+    /// `ClientConfig::cancel` for this exchange's send, every `pm.sendRequest`
+    /// its scripts make and the OAuth 2.0 token @ref late_auth acquires
+    /// (#2683): `POST /execute` passes its `DisconnectWatch`'s flag, which
+    /// `Server::stop()` and the caller hanging up both raise (#3383), so
+    /// neither waits on the transfer. The scenario runner passes
     /// `RunContext::should_stop` for every step (#3397), which a Stop and an
     /// engine shutdown both raise; null leaves all three uncancellable.
     const std::atomic<bool>* cancel = nullptr;
@@ -668,31 +664,31 @@ struct ExchangeInputs {
     const std::atomic<bool>* stop = nullptr;
     /// The data row this iteration binds to `pm.iterationData`, or null when
     /// the run has none. Borrowed for the length of the call and outlived by
-    /// the run's `ScenarioExecution` (issue #356).
+    /// the run's `ScenarioExecution` (#356).
     const nlohmann::json* iteration_data = nullptr;
     /// How this exchange's send - and any `pm.sendRequest` its scripts make -
-    /// reaches the network (issue #705). Carried on the inputs rather than
-    /// resolved here because `execute_exchange` reads no setting (its one
-    /// `Database` is @ref token_cache); the two callers that do (the design
-    /// route and the scenario runner) resolve it once and hand it down.
+    /// reaches the network (#705). Carried on the inputs rather than resolved
+    /// here because `execute_exchange` reads no setting (its one `Database` is
+    /// @ref token_cache); the two callers that do (the design route and the
+    /// scenario runner) resolve it once and hand it down.
     vayu::http::TransportPolicy transport;
     /// What the engine adds to this exchange's send that the request itself
-    /// does not name (issue #1229). Carried here for the reason @ref transport
-    /// is: `execute_exchange` reads no setting, and the two callers that do
-    /// resolve the policy once and hand it down, so a design send and a
-    /// collection run cannot add different sets.
+    /// does not name (#1229). Carried here for the reason @ref transport is:
+    /// `execute_exchange` reads no setting, and the two callers that do resolve
+    /// the policy once and hand it down, so a design send and a collection run
+    /// cannot add different sets.
     vayu::http::DefaultHeaderPolicy default_headers;
     /**
-     * @brief Largest response body this exchange's send reads into memory,
-     *        0 = unbounded (issue #1157).
+     * @brief Largest response body this exchange's send reads into memory, 0 =
+     *        unbounded (#1157).
      *
      * Carried here for the reason @ref transport is: the bound is
      * `maxDesignResponseBodyBytes`, `execute_exchange` reads no setting, and
-     * both callers that do - `POST /execute` and the
-     * scenario runner, whose steps are design-mode sends too - resolve it once
-     * per run and hand it down. The default is the constant rather than 0 so
-     * that a caller which resolves nothing is still bounded; a test that wants
-     * the old unbounded read sets it to 0 deliberately.
+     * both callers that do - `POST /execute` and the scenario runner, whose
+     * steps are design-mode sends too - resolve it once per run and hand it
+     * down. The default is the constant rather than 0 so that a caller which
+     * resolves nothing is still bounded; a test that wants an unbounded read
+     * sets it to 0.
      *
      * Reaching it keeps the prefix rather than failing the send
      * (`ClientConfig::truncate_over_limit`).
@@ -700,36 +696,36 @@ struct ExchangeInputs {
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
 
     /**
-     * @brief `ElementContext::max_body_bytes` (issue #1514's reopen): the
-     *        `maxElementBodyBytes` config entry, resolved once per run for
-     *        the same reason @ref max_response_bytes is - `execute_exchange`
-     *        reads no setting itself.
+     * @brief `ElementContext::max_body_bytes` (#1514's reopen): the
+     *        `maxElementBodyBytes` config entry, resolved once per run for the
+     *        same reason @ref max_response_bytes is - `execute_exchange` reads
+     *        no setting itself.
      */
     size_t max_element_body_bytes = vayu::core::constants::elements::MAX_BODY_BYTES;
 
     /// What bounds `pm.response.events` and a `metric.record` `eventJsonpath`
     /// (#3780) when this exchange's send was a bounded stream
-    /// (`Request::stream_bounds`, issue #3769): the run's `sse*` settings,
-    /// which the scenario runner reads once. A design send leaves the
-    /// default; its buffered send is never a stream, so nothing reads it.
+    /// (`Request::stream_bounds`, #3769): the run's `sse*` settings, which the
+    /// scenario runner reads once. A design send leaves the default; its
+    /// buffered send is never a stream, so nothing reads it.
     vayu::http::SseLimits sse_limits;
 
     /// Bound onto `ElementContext::pacing_state` / `rng` / `timers_override`
-    /// (issue #1498), for a `timer.pacing` or gaussian `timer.think` element
-    /// this exchange's `step.before` / `step.between` dispatch runs. Null for
-    /// a design send (a one-off exchange has no run to be reproducible
-    /// against and no previous pass to measure a cadence from) - only the
-    /// scenario runner's `run_step_exchange` sets these, from the run's own
+    /// (#1498), for a `timer.pacing` or gaussian `timer.think` element this
+    /// exchange's `step.before` / `step.between` dispatch runs. Null for a
+    /// design send (a one-off exchange has no run to be reproducible against
+    /// and no previous pass to measure a cadence from) - only the scenario
+    /// runner's `run_step_exchange` sets these, from the run's own
     /// `RunContext`.
     std::unordered_map<std::string, int64_t>* pacing_state = nullptr;
     std::mt19937_64* rng                                   = nullptr;
     const vayu::core::TimersOverride* timers_override      = nullptr;
 
-    /// `metric.record`'s and `pm.metrics`'s write destination (issue #1500).
-    /// Null for a context with no run behind it - a bare design send - which
-    /// is what makes both report "not available here" rather than silently
-    /// recording nowhere; the scenario runner is the one caller that binds
-    /// this, to its run's `MetricsCollector`.
+    /// `metric.record`'s and `pm.metrics`'s write destination (#1500). Null for
+    /// a context with no run behind it - a bare design send - which is what
+    /// makes both report "not available here" rather than silently recording
+    /// nowhere; the scenario runner is the one caller that binds this, to its
+    /// run's `MetricsCollector`.
     std::function<void (const std::string& name, vayu::core::CustomMetricType type, double value)> record_metric;
 
     /// The file rule for this exchange (`file_ref.hpp`): the design send's own
@@ -741,11 +737,11 @@ struct ExchangeInputs {
     vayu::http::FilePlan* files = nullptr;
 
     /// Auth whose credentials still hold a name only the scopes answer
-    /// (`core::credentials_await_scripts`, issue #2473), with any row already
-    /// joined in; the build left @ref request without it, and this exchange
-    /// applies it through @ref apply_late_auth after the pre-request script
-    /// and the residual pass. Empty when the build or the bind applied the
-    /// auth, which is every request whose credentials hold no such name.
+    /// (`core::credentials_await_scripts`, #2473), with any row already joined
+    /// in; the build left @ref request without it, and this exchange applies it
+    /// through @ref apply_late_auth after the pre-request script and the
+    /// residual pass. Empty when the build or the bind applied the auth, which
+    /// is every request whose credentials hold no such name.
     std::optional<vayu::http::Auth> late_auth;
 
     /// The OAuth 2.0 token cache a @ref late_auth config acquires through
@@ -773,12 +769,12 @@ struct ExchangeOutcome {
     vayu::ScriptResult post_script_result;
     /// One entry per compiled element the pipeline ran on this exchange - in
     /// `step.before` then `step.after` order, `script.pre` / `script.post`
-    /// included beside `extract.*` / `assert.*` (issue #1514). Empty for an
-    /// exchange with no elements at all, and for one the pre-request script
-    /// skipped before `step.after` ran.
+    /// included beside `extract.*` / `assert.*` (#1514). Empty for an exchange
+    /// with no elements at all, and for one the pre-request script skipped
+    /// before `step.after` ran.
     std::vector<vayu::core::ElementOutcome> element_outcomes;
     /// Wall time spent inside the pre- and post-request script runs together
-    /// (issue #2132), `pm.sendRequest` included. Read by `POST /execute`, which
+    /// (#2132), `pm.sendRequest` included. Read by `POST /execute`, which
     /// subtracts it from the handler's elapsed time to report `timing.engineMs`
     /// as Vayu's own cost and reports it as `timing.scriptMs` (#3676), and by a
     /// collection run's step trace (`scriptMs`).
@@ -804,8 +800,8 @@ struct ExchangeOutcome {
      * `pm.execution.skipRequest()`: `response` is then default-constructed,
      * which reports neither an error nor a status, so a caller that classified
      * the outcome from the response alone would call a skipped step a pass -
-     * the false-pass class issue #180 exists to eliminate. The test script does
-     * not run on that path either; there is no response for it to assert on.
+     * the false-pass class #180 exists to eliminate. The test script does not
+     * run on that path either; there is no response for it to assert on.
      */
     bool sent = true;
 };
@@ -819,8 +815,8 @@ struct ExchangeOutcome {
  * rather than making either caller derive the other's half from a message.
  */
 struct ResidualRefusal {
-    /// The pre-send gate's shape, which every buffered driver already renders:
-    /// an `InternalError` carrying the reason, answered as a status-0 response
+    /// The pre-send gate's shape, which every buffered driver renders: an
+    /// `InternalError` carrying the reason, answered as a status-0 response
     /// rather than a transfer.
     vayu::Error error;
     /// The `POST /compose` code for the same rule, for the streaming send's
@@ -850,9 +846,9 @@ struct LateTokenAcquisition {
 
 /**
  * Resolve the `{{tokens}}` composition left behind, against the variable state
- * a pre-request script has just written (issue #1008).
+ * a pre-request script has just written (#1008).
  *
- * Composition still happens first, and still exactly once: this pass only ever
+ * Composition happens first, and exactly once: this pass only ever
  * sees the names composition left written - one it could not answer (#1009),
  * and every name a scope answers in a request a pre-request script runs
  * before (#2521). A value composition *did* substitute is finished text here -
@@ -861,8 +857,9 @@ struct LateTokenAcquisition {
  *
  * It exists because the canonical imported auth pattern is a pre-request script
  * that fetches a token, `pm.environment.set("token", …)`, and a request that
- * sends `Bearer {{token}}`. Resolved before the script, the send carried the
- * *previous* run's token - silently, and against a lenient API successfully.
+ * sends `Bearer {{token}}`. Resolved before the script, the send would carry
+ * the *previous* run's token - silently, and against a lenient API
+ * successfully.
  * Postman resolves after the script, and so does a scripted request here.
  *
  * The same rules composition resolves by, because it is the same resolver: a
@@ -880,7 +877,7 @@ struct LateTokenAcquisition {
  * @return why this request must not be sent: a header variable whose value
  *         ends or cuts the line (`UNSENDABLE_HEADER_CODE`, refused before
  *         anything is rewritten), or a resolved header name that lands on one
- *         the request already carries (`http/header_names.hpp`, issue #1051),
+ *         the request already carries (`http/header_names.hpp`, #1051),
  *         is nothing (#1084) or is not a token (#2467) - each refused in the
  *         words and under the code `POST /compose` uses for it.
  *         `std::nullopt` is the ordinary answer, the request resolved in
@@ -891,15 +888,15 @@ resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& sco
 
 /**
  * The same pass, over an already-flattened variable map rather than a
- * @ref ScriptVariableScopes (issue #1495).
+ * @ref ScriptVariableScopes (#1495).
  *
  * A load run's per-VU resolution reads this overload directly: the run's base
  * map is flattened once (@ref flatten_variable_scopes) and a VU's small
  * @ref ScopeOverlay is merged onto a copy of it per submission, which costs
  * proportional to what that VU actually wrote rather than to the run's whole
  * variable set or its collection-ancestor chain. The @p scopes overload above
- * is now a thin wrapper over this one, so the two can never disagree about
- * what "resolve" means.
+ * is a thin wrapper over this one, so the two can never disagree about what
+ * "resolve" means.
  */
 [[nodiscard]] std::optional<ResidualRefusal>
 resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValues& vars);
@@ -937,7 +934,7 @@ const vayu::http::BoundColumnNames& bound_columns);
 
 /**
  * Apply auth the build deferred because a credential holds a name only the
- * variable scopes answer (`core::credentials_await_scripts`, issue #2473) -
+ * variable scopes answer (`core::credentials_await_scripts`, #2473) -
  * one nothing answered at composition, or any name of a request a pre-request
  * script runs before (#2521): each credential resolved against @p vars by the
  * resolver the residual pass uses, then `apply_auth`.
@@ -948,7 +945,7 @@ const vayu::http::BoundColumnNames& bound_columns);
  * It is Postman's order, with what follows from it: the script's
  * `pm.request.headers` does not hold the engine-applied header, and a header
  * the script set still wins, by `apply_auth`'s own rule (#2475). A name
- * nothing answers is encoded as written, as it was before. A script that
+ * nothing answers is encoded as written. A script that
  * assigned `pm.request.auth` (`Request::auth_from_script`, #3131) replaced
  * the block outright, so nothing of it is applied and no token is fetched.
  *
@@ -962,7 +959,7 @@ const vayu::http::BoundColumnNames& bound_columns);
  *         variable in a bearer token or a header-placed api key whose value
  *         ends or cuts the header line (`UNSENDABLE_HEADER_CODE`, named as the
  *         residual pass names a header row's, though the auth is applied
- *         first so a load run sends what it always did); or, when
+ *         first, so a load run, which never refuses, still sends it); or, when
  *         `apply_auth` fails, an api key name that is not a header name, an
  *         OAuth 2.0 token endpoint the target policy refuses (`InvalidUrl`,
  *         `target_not_allowed` or `target_host_unknown`), or an OAuth 2.0
@@ -991,33 +988,31 @@ LateTokenAcquisition* acquisition = nullptr);
 
 /**
  * Every `{{name}}` still on @p request, without attempting to resolve any of
- * them (issue #1503).
+ * them (#1503).
  *
- * The load path's cheaper question: not "what do these resolve to" (which
- * needs the scopes `resolve_residual_tokens` reads) but "were any left" -
- * asked over the same fields that pass walks, so a load run that never
- * spends the residual pass can still say what it did not fix. A request
- * holding no `{{` at all pays one search per field and nothing else, exactly
- * as the residual pass does; @p request is taken by reference only because
- * @ref resolvable_strings is, not because this reads anything mutable.
+ * The load path's cheaper question: not "what do these resolve to" (which needs
+ * the scopes `resolve_residual_tokens` reads) but "were any left" - asked over
+ * the same fields that pass walks, so a load run that never spends the residual
+ * pass can still say what it did not fix. A request holding no `{{` at all pays
+ * one search per field and nothing else, exactly as the residual pass does;
+ * @p request is taken by reference only because @ref resolvable_strings is, not
+ * because this reads anything mutable.
  */
 [[nodiscard]] std::vector<std::string> unresolved_token_names (vayu::Request& request);
 
 /**
  * The residual pass as the load paths run it before a submission: resolve
- * against @p vars, then apply @p late_auth (@ref apply_late_auth, issue #2473)
+ * against @p vars, then apply @p late_auth (@ref apply_late_auth, #2473)
  * against the same map, then report.
  *
- * Never refused, only counted (issue #1503): the request is sent whatever this
+ * Never refused, only counted (#1503): the request is sent whatever this
  * answers, so the late auth is applied even after a refusal, and a credential
- * name nothing answers is encoded as written - what the build did with it
- * before #2473.
+ * name nothing answers is encoded as written.
  *
  * @return what the run counts as unresolved, empty when nothing: the
  *         refusal's sentence when the pass refused, otherwise every `{{name}}`
  *         still on the request. A late bearer token or api key still holding
- *         one is among them; a name inside a basic pair's base64 is not, as it
- *         never was.
+ *         one is among them; a name inside a basic pair's base64 is not.
  */
 [[nodiscard]] std::vector<std::string> resolve_load_residuals (vayu::Request& request,
 const vayu::http::VariableValues& vars,
@@ -1051,7 +1046,7 @@ ExchangeInputs inputs);
 
 /**
  * What this database is configured to let a design-mode send read
- * (`maxDesignResponseBodyBytes`, issue #1157).
+ * (`maxDesignResponseBodyBytes`, #1157).
  *
  * One function rather than the same `get_config_int` at each of the two call
  * sites - `POST /execute` and the scenario runner - because a key spelled twice
@@ -1123,20 +1118,20 @@ const nlohmann::json& holder);
 int configured_default);
 
 /**
- * The same, with the default read from this database's `defaultTimeout`
- * setting (compiled-in `DEFAULT_TIMEOUT_MS` when unset). The one place the key
- * is spelled, for `POST /execute`, a scenario plan and a load run alike: a load
- * run that read its own literal instead ignored the setting (#2798).
+ * The same, with the default read from this database's `defaultTimeout` setting
+ * (compiled-in `DEFAULT_TIMEOUT_MS` when unset). The one place the key is
+ * spelled, for `POST /execute`, a scenario plan and a load run alike: a load
+ * run reading its own literal would ignore the setting (#2798).
  */
 [[nodiscard]] int resolve_request_timeout_ms (const nlohmann::json& payload,
 vayu::db::Database& db);
 
 /**
  * What this database is configured to let an `extract.json` / `assert.jsonpath`
- * element parse as JSON (`maxElementBodyBytes`, issue #1514's reopen), for the
- * same reason its `maxDesignResponseBodyBytes` sibling above is one function:
- * every call site that resolves `ElementContext::max_body_bytes` shares one
- * spelling of the key.
+ * element parse as JSON (`maxElementBodyBytes`, #1514's reopen), for the same
+ * reason its `maxDesignResponseBodyBytes` sibling above is one function: every
+ * call site that resolves `ElementContext::max_body_bytes` shares one spelling
+ * of the key.
  */
 [[nodiscard]] size_t element_body_bound (vayu::db::Database& db);
 
@@ -1148,13 +1143,12 @@ vayu::db::Database& db);
  * It reads a *load* bound from a header about the design exchange because the
  * two callers are the two halves of one run - the event loop reads it for the
  * transfers, and the deferred `tests` pass reads it for the `pm.sendRequest`
- * those scripts may make (issue #1188) - and a script that runs once per
- * sampled response belongs to the load path's memory budget.
+ * those scripts may make (#1188) - and a script that runs once per sampled
+ * response belongs to the load path's memory budget.
  *
- * It keeps the `std::max (0, ...)` its inline predecessor in
- * `configure_event_loop` carried, which the design-mode sibling has never had:
- * the config route holds both keys at 1024 or more, so the clamp guards a row
- * written before that validation existed rather than anything a caller can do.
+ * It clamps with `std::max (0, ...)`, which the design-mode sibling does not:
+ * the config route holds both keys at 1024 or more, so the clamp guards only a
+ * row written before that validation existed, nothing a caller can do.
  */
 [[nodiscard]] size_t load_response_body_bound (vayu::db::Database& db);
 
