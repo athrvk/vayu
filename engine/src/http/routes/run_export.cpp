@@ -6,8 +6,8 @@
  */
 
 /**
- * @brief `POST /export/run-report` (#2127) - a finished load run as a
- *        shareable document.
+ * `POST /export/run-report` (#2127): a finished load run as a shareable
+ * document.
  *
  * The document is `core/run_export.hpp`; this route owns the reads: the run
  * row, its report (`run_report_response`), every tick of its time series and,
@@ -254,12 +254,10 @@ export_run_report_response (vayu::db::Database& db, const nlohmann::json& json) 
 
 void register_run_export_routes (RouteContext& ctx) {
     /**
-     * POST /export/run-report
-     * A finished load run as a shareable document (schema
-     * docs/engine/run-export.schema.json).
-     * Body params: runId (required), format (default "json"), series
-     * ("full" | "none", default "full"), baseRunId (optional).
-     * Returns: {text, fileName, mimeType, notes}. Reads only.
+     * POST /export/run-report Body params: runId (required), format (default
+     * "json"), series ("full" | "none", default "full"), baseRunId (optional).
+     * Returns {text, fileName, mimeType, notes}; the document's schema is
+     * docs/engine/run-export.schema.json. Reads only.
      */
     ctx.server.Post ("/export/run-report",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
