@@ -36,16 +36,13 @@ export interface UserInput {
 // --- Data-change notification ------------------------------------------------
 
 /**
- * The data families an MCP call can change, named as the renderer's query cache
- * groups them. An MCP call mutates the engine from the main process, so the
- * renderer learns about it only if it is told: `refetchOnWindowFocus` is off
- * app-wide, and nothing else crosses the process boundary.
- *
- * Mirrored as `McpDataEntity` in `app/src/types/domain.ts`, because production
- * code under `electron/` cannot import from `app/src` (see the rationale in
- * `tsconfig.node.json`). `data-changed.conformance.test.ts` keeps the two
- * copies honest, and the renderer's mapping is exhaustive over this union, so
- * a new entity fails to compile until it has a reader.
+ * The data families an MCP call can change, named as the renderer's query cache groups them. A call
+ * mutates the engine from the main process, so the renderer learns of it only if told:
+ * `refetchOnWindowFocus` is off app-wide and nothing else crosses the process boundary. Mirrored as
+ * `McpDataEntity` in `app/src/types/domain.ts` because `electron/` cannot import from `app/src`
+ * (`tsconfig.node.json`); `data-changed.conformance.test.ts` keeps the copies honest, and the
+ * renderer's mapping is exhaustive over this union, so a new entity fails to compile until it has a
+ * reader.
  */
 export const MCP_DATA_ENTITIES = [
 	// A write that can reach any collection's requests or the trash: a cascade
@@ -60,50 +57,43 @@ export const MCP_DATA_ENTITIES = [
 	"run",
 	"cookie",
 	"config",
-	// The local services the engine hosts for as long as its process lives -
-	// webhook inboxes today, mock servers and issuers as #757 reaches them. One
-	// family rather than one per service: the renderer reads them through the
-	// Services drawer and the Dock's running-services count, which ask "what is
-	// listening" and not "which kind".
+	// The local services the engine hosts while its process lives (webhook inboxes today, mock
+	// servers and issuers as #757 reaches them). One family, not one per service: the renderer
+	// reads them through the Services drawer and the Dock's running-services count, which ask "what
+	// is listening", not "which kind".
 	"service",
-	// The engine's OAuth 2.0 token cache (issue #760). Its own family rather
-	// than a fold into `config`: it has one reader of its own
-	// (`queryKeys.oauth`), and the auth tab's token-status row polls at 30s -
-	// long enough for an agent to clear a token, say so, and leave the window
-	// showing the entry it just destroyed.
+	// The engine's OAuth 2.0 token cache (issue #760). Its own family, not a fold into `config`: it
+	// has its own reader (`queryKeys.oauth`), and the auth tab's token-status row polls at 30s,
+	// long enough for an agent to clear a token, say so, and leave the window showing the entry it
+	// just destroyed.
 	"oauth",
-	// The client-certificate registry (#2973). No tool writes it directly (the
-	// user adds and removes entries), but a trash restore puts one back, so it
-	// has a reader to refresh: the Settings card. Its own family rather than a
-	// fold into `config`, whose invalidator would also refetch every config and
-	// request-default read for a registry those do not serve, or into
-	// `environment`, whose readers a certificate does not touch.
+	// The client-certificate registry (#2973). No tool writes it directly (the user adds and
+	// removes entries), but a trash restore puts one back, so its reader, the Settings card, needs
+	// a refresh. Its own family: folding into `config` would refetch every config and
+	// request-default read for a registry those do not serve, and `environment`'s readers are not
+	// touched by a certificate.
 	"clientCertificate",
-	// Variables a script or extractor wrote back while a send ran (#1916), with
-	// no `update_*` call behind them. Its own family rather than `environment`/`collection` because
-	// the run tools that cause it cannot name which scope changed, and borrowing
-	// `collection` would drop every request and trash cache for a variable write.
+	// Variables a script or extractor wrote back while a send ran (#1916), with no `update_*` call
+	// behind them. Its own family: the run tools that cause it cannot name which scope changed, and
+	// borrowing `collection` would drop every request and trash cache for a variable write.
 	"variables",
 ] as const;
 
 export type McpDataEntity = (typeof MCP_DATA_ENTITIES)[number];
 
 /**
- * One thing changed. Invalidation only - no data rides across, the renderer
- * refetches through its normal query layer.
+ * One thing changed. Invalidation only: no data rides across, the renderer refetches through its
+ * normal query layer.
  *
- * The five scope hints are read from the call's own arguments and narrow the
- * invalidation to the caches that can have gone stale; each is absent when the
- * call did not name it. They are hints, not identity: `requestId` on a
- * `run` event is the saved request a design run was linked to, not the run's
- * own id - `runId` is that. The renderer narrows on `collectionId` (the
- * `request` family's list key), on `runId` (the per-run caches it removes), on
- * `inboxId` (the capture list it removes) and on `mockId` (the route table it
- * removes); a run event's `requestId` is
- * emitted because every hint is read off the same
- * arguments, and the run families it could narrow are invalidated at their
- * prefixes instead - a `delete_run` names no request, so a per-request key
- * could not reach the caches a delete moves (see `lib/mcp-invalidation.ts`).
+ * The five scope hints are read from the call's own arguments and narrow the invalidation to the
+ * caches that can have gone stale; each is absent when the call did not name it. They are hints,
+ * not identity: `requestId` on a `run` event is the saved request a design run was linked to, not
+ * the run's own id (`runId` is that). The renderer narrows on `collectionId` (the `request`
+ * family's list key), `runId` (the per-run caches it removes), `inboxId` (the capture list it
+ * removes) and `mockId` (the route table it removes). A run event's `requestId` is emitted because
+ * every hint is read off the same arguments; the run families it could narrow are invalidated at
+ * their prefixes instead, since a `delete_run` names no request and a per-request key could not
+ * reach the caches a delete moves (see `lib/mcp-invalidation.ts`).
  */
 export interface McpDataChangedEvent {
 	entity: McpDataEntity;
@@ -119,55 +109,43 @@ export interface McpDataChangedEvent {
 	 */
 	runId?: string;
 	/**
-	 * The webhook inbox the call named, when it named one. Only the tools that
-	 * act on an *existing* inbox spell it (`stop_webhook_inbox`,
-	 * `delete_webhook_inbox`, `clear_inbox_captures`, `update_inbox_response`);
-	 * `start_webhook_inbox` has no id to name until the engine has answered.
-	 *
-	 * The renderer needs it because a capture list is not merely stale after a
-	 * clear or a delete - it is *wrong*, and its cache entry has to be dropped
-	 * rather than refetched into (see `lib/mcp-invalidation.ts`).
+	 * The webhook inbox the call named, when it named one. Only tools acting on an *existing* inbox
+	 * spell it (`stop_webhook_inbox`, `delete_webhook_inbox`, `clear_inbox_captures`,
+	 * `update_inbox_response`); `start_webhook_inbox` has no id until the engine answers. The
+	 * renderer needs it because a capture list is not merely stale after a clear or delete but
+	 * *wrong*: its cache entry must be dropped, not refetched into (see `lib/mcp-invalidation.ts`).
 	 */
 	inboxId?: string;
 	/**
-	 * The collection mock server the call named, when it named one. Among the
-	 * tools that emit at all that is only `stop_mock_server`;
-	 * `start_mock_server` has no id to name until the engine has answered.
-	 *
-	 * Read for the same reason `inboxId` is - a cache that has to be *dropped*
-	 * rather than refetched - though the reason it cannot be refetched is the
-	 * mirror one: a stopped mock's record dies with its listener, so refetching
-	 * its route table would 404 and leave an error state describing a table that
-	 * no longer exists. `useStopMockServerMutation` already drops it app-side.
+	 * The collection mock server the call named, when it named one. Among the tools that emit at
+	 * all that is only `stop_mock_server`; `start_mock_server` has no id until the engine answers.
+	 * Read for the reason `inboxId` is (a cache that must be *dropped*, not refetched), though the
+	 * cause is the mirror one: a stopped mock's record dies with its listener, so refetching its
+	 * route table would 404 and leave an error state describing a table that no longer exists.
+	 * `useStopMockServerMutation` already drops it app-side.
 	 */
 	mockId?: string;
 	/**
-	 * The run this call just started, and which run service watches it (#1419).
-	 *
-	 * The one field on this event that is not a scope hint: it says the run is
-	 * *live*, which is what lets the renderer attach its stream to a run no
-	 * surface of its own started - and with it the OS progress indicator (#1362),
-	 * the keep-awake hold (#1357) and the finished notification (#1358), all of
+	 * The run this call just started, and which run service watches it (#1419). The one field on
+	 * this event that is not a scope hint: it says the run is *live*, which lets the renderer
+	 * attach its stream to a run no surface of its own started, and with it the OS progress
+	 * indicator (#1362), the keep-awake hold (#1357) and the finished notification (#1358), all of
 	 * which live inside the run services.
 	 *
-	 * Present on the `run` event of the two tools that create a run
-	 * (`start_load_run`, `run_collection`) and on no other: `run_collection_smoke`
-	 * sends its requests one at a time and has no run to watch, and the tools that
-	 * stop, re-baseline or delete a run are naming one that already exists. Read
-	 * from the engine's answer rather than from the call's arguments, because a
-	 * run has no id until the engine has given it one - which is also why it
-	 * cannot be spelled the way the hints above are.
+	 * Present on the `run` event of the two tools that create a run (`start_load_run`,
+	 * `run_collection`) and on no other: `run_collection_smoke` sends its requests one at a time
+	 * and has no run to watch, and the tools that stop, re-baseline or delete a run name one that
+	 * already exists. Read from the engine's answer, not the call's arguments, because a run has no
+	 * id until the engine gives it one.
 	 */
 	startedRun?: StartedRun;
 }
 
 /**
- * A run an agent's call put in flight, named for the renderer that watches it.
- *
- * `kind` is which service owns the stream rather than what the user would call
- * the run: a load run and a collection run publish different frames, so
- * attaching the wrong service is a permanently empty view and not a degraded
- * one - the fork `RunCollectionDialog` already records for the app's own runs.
+ * A run an agent's call put in flight, named for the renderer that watches it. `kind` is which
+ * service owns the stream, not what the user would call the run: a load run and a collection run
+ * publish different frames, so attaching the wrong service is a permanently empty view, not a
+ * degraded one (the fork `RunCollectionDialog` already records for the app's own runs).
  */
 export interface StartedRun {
 	runId: string;
@@ -246,12 +224,11 @@ export interface ToolResult {
 }
 
 /**
- * Capability class surfaced in Settings for per-tool control; each maps to a
- * gate profile: `read` (inspection, ungated), `execute` (has an effect outside
- * this process without touching saved data - allowlist when it sends to a
- * target host, none when the effect is a loopback service the engine hosts, as
- * for the mock issuer), `write` (mutates saved data/config - write toggle),
- * `load` (starts/stops load tests - allowlist + caps + confirm).
+ * Capability class surfaced in Settings for per-tool control, each mapped to a gate profile: `read`
+ * (inspection, ungated), `execute` (an effect outside this process without touching saved data:
+ * allowlist when it sends to a target host, none for a loopback service the engine hosts, as for
+ * the mock issuer), `write` (mutates saved data/config: write toggle), `load` (starts/stops load
+ * tests: allowlist + caps + confirm).
  */
 export type ToolCategory = "read" | "execute" | "write" | "load";
 
@@ -264,17 +241,15 @@ export type ToolCategory = "read" | "execute" | "write" | "load";
 export type ToolDescription = string | ((config: McpSafetyConfig) => string);
 
 /**
- * What an agent should do when a call to a tool timed out or was cancelled
- * before the engine answered, which is a call that may have taken effect
- * (#2777). Per tool, because what a repeat does is a fact about the tool:
+ * What an agent should do when a call to a tool timed out or was cancelled before the engine
+ * answered, so it may have taken effect (#2777). Per tool, because what a repeat does is a fact
+ * about the tool:
  *
- * - `"safe"`: repeating the call changes nothing a second time (a read, an
- *   idempotent update or delete).
- * - `{ check, noun }`: a create or import, where a blind retry makes a second
- *   one. @p check is the list tool that shows whether the first landed and
- *   @p noun what to look for in it.
- * - `"never-blind"`: a send or a load start, which leaves a row in run history;
- *   `list_runs` shows whether the first went out.
+ * - `"safe"`: repeating changes nothing a second time (a read, an idempotent update or delete).
+ * - `{ check, noun }`: a create or import, where a blind retry makes a second one. @p check is the
+ *   list tool that shows whether the first landed and @p noun what to look for in it.
+ * - `"never-blind"`: a send or a load start, which leaves a row in run history; `list_runs` shows
+ *   whether the first went out.
  */
 export type RetryAdvice = "safe" | "never-blind" | { check: string; noun: string };
 
@@ -314,37 +289,31 @@ export interface McpTool {
 	/** MCP tool annotations (title + read-only/destructive/idempotent/open-world hints). */
 	annotations: ToolAnnotations;
 	/**
-	 * Feature group for the Settings tool list. Also says whether the tool only
-	 * reads: `category === "read"` and nothing else does. A separate `readOnly`
-	 * boolean lived here restating exactly that for all 21 tools, read by no one
-	 * but its own test - the client-facing hint is `annotations.readOnlyHint`.
+	 * Feature group for the Settings tool list. Also says whether the tool only reads:
+	 * `category === "read"` and nothing else does (there is no separate `readOnly` boolean; the
+	 * client-facing hint is `annotations.readOnlyHint`).
 	 */
 	category: ToolCategory;
 	/**
-	 * The data families a successful call changes. Required rather than
-	 * defaulted, and deliberately not derived from `category`: an `execute` tool
-	 * writes a history row and refills the cookie jar without being a "write",
-	 * and a `load` tool writes run rows. A default would let a new tool ship
-	 * silently invisible to the renderer, which is the bug this field exists to
-	 * close; `[]` is a statement that the tool only reads.
+	 * The data families a successful call changes. Required, not defaulted, and not derived from
+	 * `category`: an `execute` tool writes a history row and refills the cookie jar without being a
+	 * "write", and a `load` tool writes run rows. A default would let a new tool ship invisible to
+	 * the renderer, the bug this field exists to close; `[]` states the tool only reads.
 	 */
 	invalidates: readonly McpDataEntity[];
 	/**
-	 * What to tell an agent when this tool's call timed out or was cancelled.
-	 * Declared on every tool without `idempotentHint: true` (a tool that omits
-	 * the hint is not idempotent), which `tools.failure-classes.test.ts` holds. A tool with
-	 * `idempotentHint: true` may leave it out and is told `"safe"`; any other
-	 * tool that declares none gets the generic "check run history" wording.
+	 * What to tell an agent when this tool's call timed out or was cancelled. Declared on every
+	 * tool without `idempotentHint: true`, which `tools.failure-classes.test.ts` holds. A tool with
+	 * `idempotentHint: true` may leave it out and is told `"safe"`; any other tool that declares
+	 * none gets the generic "check run history" wording.
 	 */
 	retry?: RetryAdvice;
 	/**
-	 * The objects an id argument of this tool names, so an engine 404 reads
-	 * `No run with id "..."` and the list tool instead of the engine's JSON
-	 * (#2778). Declared on every tool with a `<kind>Id` argument; one entry per
-	 * kind when the tool takes several, the entry chosen being the one whose
-	 * `noun` the engine's sentence contains. A tool that does not declare it
-	 * answers `Engine error (404): <body>` on one line. `tools.dispatch.test.ts` scans
-	 * the registry.
+	 * The objects an id argument of this tool names, so an engine 404 reads `No run with id "..."`
+	 * and the list tool instead of the engine's JSON (#2778). Declared on every tool with a
+	 * `<kind>Id` argument (`tools.dispatch.test.ts` scans the registry); one entry per kind when
+	 * the tool takes several, the one chosen being whose `noun` the engine's sentence contains. A
+	 * tool that does not declare it answers `Engine error (404): <body>` on one line.
 	 */
 	notFound?: NotFoundDeclaration | readonly NotFoundDeclaration[];
 	/**
