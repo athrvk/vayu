@@ -6,36 +6,31 @@
  */
 
 /**
- * The system wake lock a run holds, and the report of a sleep it could not
- * prevent (issue #1357).
+ * The system wake lock a run holds, and the report of a sleep it could not prevent (#1357).
  *
- * A load test is a long-running foreground task the user stops watching: they
- * start a thirty-minute run and switch to something else. The OS then suspends
- * the machine on its own timer, the engine stops with it, and the report comes
- * back with a flat stretch or a cluster of timeouts that reads as the server's
- * fault. So while a run streams, the app asks the OS not to sleep.
+ * A load test is a long-running foreground task the user stops watching: they start a thirty-minute
+ * run and switch to something else. The OS then suspends the machine on its own timer, the engine
+ * stops with it, and the report comes back with a flat stretch or a cluster of timeouts that reads
+ * as the server's fault. So while a run streams, the app asks the OS not to sleep.
  *
- * `prevent-app-suspension`, never `prevent-display-sleep`: the screen may dim
- * and lock, the machine may not suspend. A run is not a reason to keep a laptop
- * lit on someone's desk.
+ * `prevent-app-suspension`, never `prevent-display-sleep`: the screen may dim and lock, the machine
+ * may not suspend. A run is not a reason to keep a laptop lit on someone's desk.
  *
- * The lock is ref-counted because two runs can overlap in the renderer's model
- * (a load run and a collection run each hold), and because a hold that outlived
- * its holder would pin the machine awake for the rest of the session. Every
- * holder gets a token back and hands it in; the blocker starts on the first and
- * stops on the last.
+ * Ref-counted because two runs can overlap in the renderer's model (a load run and a collection run
+ * each hold), and because a hold that outlived its holder would pin the machine awake for the rest
+ * of the session. Every holder gets a token back and hands it in; the blocker starts on the first
+ * and stops on the last.
  *
- * Kept out of main.ts so it can be tested - main.ts creates windows and starts
- * the engine at import time, which no unit test can do. The Electron surfaces it
- * needs arrive as arguments for the same reason.
+ * Kept out of main.ts so it can be tested: main.ts creates windows and starts the engine at import
+ * time, which no unit test can do. The Electron surfaces it needs arrive as arguments for the same
+ * reason.
  */
 
 import { randomUUID } from "node:crypto";
 import { createRendererWatch, type IpcEventLike, type RendererLike } from "./renderer-watch.js";
 
-// Re-exported because this module's IPC surface is written in terms of them,
-// and a caller typing a fake renderer should not have to know which file the
-// two lifecycle events moved to.
+// Re-exported because this module's IPC surface is written in them, so a caller typing a fake
+// renderer need not know which file holds the two lifecycle events.
 export type { IpcEventLike, RendererLike };
 
 /** What a run asks the OS for. See the header: never `prevent-display-sleep`. */
@@ -105,10 +100,9 @@ export function createWakeLock(deps: WakeLockDeps): WakeLock {
 	function startBlocker(reason: string): void {
 		if (blockerId !== null) return;
 		blockerId = deps.blocker.start(WAKE_LOCK_BLOCKER_TYPE);
-		// "Why is this machine refusing to sleep" is a question a user does ask -
-		// `pmset -g assertions` and `powercfg /requests` name Vayu but not what it
-		// is doing. This is the only place that can answer, so the reason a
-		// holder gives is stated here.
+		// "Why is this machine refusing to sleep" is a question a user does ask, and
+		// `pmset -g assertions` and `powercfg /requests` name Vayu but not what it is doing, so the
+		// reason a holder gives is logged here, the only place that can answer.
 		log("Holding the system wake lock", { reason });
 	}
 
@@ -189,12 +183,10 @@ export interface IpcLike {
 }
 
 /**
- * Wire the two channels, and make a renderer's holds die with it.
- *
- * The owner cleanup is not a nicety: a renderer that crashes or reloads mid-run
- * never gets to release, and without this the machine stays pinned awake until
- * the app quits. `renderer-watch.ts` holds the two lifecycle events, which the
- * taskbar's progress bar (#1362) needs in exactly the same way.
+ * Wire the two channels, and make a renderer's holds die with it. The owner cleanup is not a
+ * nicety: a renderer that crashes or reloads mid-run never gets to release, and without this the
+ * machine stays pinned awake until the app quits. `renderer-watch.ts` holds the two lifecycle
+ * events, which the taskbar's progress bar (#1362) needs the same way.
  */
 export function registerPowerIpc(ipc: IpcLike, lock: WakeLock): void {
 	const watchOwner = createRendererWatch((rendererId) => {
