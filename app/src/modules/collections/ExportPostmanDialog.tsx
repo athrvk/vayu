@@ -6,32 +6,26 @@
  */
 
 /**
- * ExportPostmanDialog - a collection out as a Postman Collection v2.1 document.
- *
- * `ExportSpecDialog`'s sibling, and built the same way on purpose: the engine
- * assembles the document (`POST /export/postman`), the dialog states what it
- * is about to write and what it could not carry, and delivery is the repo's
- * one file-to-disk path (`downloadTextFile`): the dialog closes once the file
- * is written, stays open on a cancelled save dialog, and says why a write
- * failed (#3246). Mounted only while open, so the mount is the reset and the
+ * A collection out as a Postman Collection v2.1 document, built like its sibling `ExportSpecDialog`
+ * on purpose: the engine assembles the document (`POST /export/postman`), the dialog states what it
+ * is about to write and what it could not carry, and delivery is the repo's one file-to-disk path,
+ * `downloadTextFile` (it closes once the file is written, stays open on a cancelled save dialog,
+ * and says why a write failed, #3246). Mounted only while open, so the mount is the reset and the
  * credentials choice starts off on every opening.
  *
- * **The one choice is whether credentials travel.** A Postman export is
- * usually headed for somebody else, so the default writes credentials empty
- * (auth, secret variables, and by name the headers, parameters, URLs and
- * cookies) and says how many it left out; switching it on writes them as
- * stored, which is what Postman's own export does. Bodies and scripts are
- * never judged, and the dialog says so while credentials are off.
+ * **The one choice is whether credentials travel.** A Postman export is usually headed for somebody
+ * else, so the default writes credentials empty (auth, secret variables, and by name the headers,
+ * parameters, URLs and cookies) and says how many it left out; switched on, it writes them as
+ * stored, as Postman's own export does. Bodies and scripts are never judged, and the dialog says so
+ * while credentials are off.
  *
- * **Nothing Postman has no place for is dropped silently.** The engine names
- * each kind in `notes.notCarried` with a count and its own sentence, and every
- * one of them is listed here as written.
+ * **Nothing Postman has no place for is dropped silently**: the engine names each kind in
+ * `notes.notCarried` with a count and its own sentence, all listed here as written.
  *
- * The previous answer stays on screen while the toggle re-reads (issue #1311),
- * for the reason the OpenAPI dialog gives: the counts are the collection's, and
- * a dialog that centres on itself moves both edges for every block that comes
- * and goes. The one count that does depend on the switch, `secretsOmitted`, is
- * read against its current position.
+ * The previous answer stays on screen while the toggle re-reads (issue #1311), for the OpenAPI
+ * dialog's reason: the counts are the collection's, and a dialog centred on itself moves both edges
+ * for every block that comes and goes. `secretsOmitted`, the one count that depends on the switch,
+ * is read against its current position.
  */
 
 import { useState } from "react";
@@ -69,10 +63,9 @@ export interface ExportPostmanDialogProps {
 	collection: Collection;
 	onOpenChange: (open: boolean) => void;
 	/**
-	 * Where focus goes when the dialog closes. Radix restores it to whatever held
-	 * it before the dialog opened, which for a dialog opened from a row's menu is
-	 * a menu item that is gone: focus lands on `<body>` (#3443). A caller that
-	 * knows the row calls `preventDefault` and focuses it.
+	 * Where focus goes on close. Radix restores it to whatever held it before the dialog opened,
+	 * which for a dialog opened from a row's menu is a menu item that is gone, so focus lands on
+	 * `<body>` (#3443). A caller that knows the row calls `preventDefault` and focuses it.
 	 */
 	onCloseAutoFocus?: (event: Event) => void;
 }
@@ -167,10 +160,9 @@ export default function ExportPostmanDialog({
 				<DialogFooter>
 					<DialogCancelButton onClick={() => onOpenChange(false)} />
 					{/*
-					 * Disabled while the toggle re-reads, not only while there is
-					 * nothing: what is held is the *previous* answer, and a click in
-					 * that window would copy the credentials the switch just took
-					 * out, or leave out the ones it just put in.
+					 * Disabled while the toggle re-reads, not only while empty: the held answer is
+					 * the *previous* one, so a click then would copy credentials the switch just
+					 * took out, or omit ones it just put in.
 					 */}
 					<Button
 						variant="outline"
@@ -225,15 +217,11 @@ function SummarySkeleton() {
 }
 
 /**
- * What the export is about to write, and what it could not carry.
- *
- * The two headline counts are always shown - "0 requests exported" is news -
- * and everything else only when it is not zero. `secretsOmitted` belongs to the
- * switch rather than to the collection, so it is read against the switch's
- * current position: a previous answer held while credentials are switched on
- * does not go on saying they were left out. The note that bodies and scripts
- * are not judged follows the same position, and is a paragraph rather than a
- * list item so it never reads as a count.
+ * What the export is about to write, and what it could not carry. The two headline counts always
+ * show ("0 requests exported" is news), the rest only when non-zero. `secretsOmitted` belongs to
+ * the switch, not the collection, so it is read against the switch's current position: an answer
+ * held while credentials are switched on does not go on saying they were left out. The
+ * bodies-and-scripts note follows the same position, as a paragraph so it never reads as a count.
  */
 function ExportSummary({
 	notes,

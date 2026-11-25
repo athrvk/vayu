@@ -11,11 +11,10 @@ import { Button } from "@/components/ui";
 import type { ImportNotice, NoticeTier } from "./import-notices";
 
 /**
- * What a file lost or changed, one line each (see `import-notices.ts`): amber
- * for what the user has to finish by hand, muted for what the import decided.
- * Neither is an error - the file imported - so neither is announced as an
- * alert. `as="span"` for a host that is itself phrasing content (a ledger
- * row's `<label>`).
+ * What a file lost or changed, one line each (see `import-notices.ts`): amber for what the user
+ * must finish by hand, muted for what the import decided. Neither is an error (the file imported),
+ * so neither is announced as an alert. `as="span"` for a host that is itself phrasing content (a
+ * ledger row's `<label>`).
  */
 export function NoticeList({
 	notices,

@@ -6,21 +6,18 @@
  */
 
 /**
- * What an import preview tells the user about a file, one line per thing.
+ * What an import preview tells the user about a file, one line per thing. Every line answers "what
+ * do I have to do, or what will look different", never "which construct did the parser meet": the
+ * reader is deciding whether to import and what to finish by hand. Three tiers:
  *
- * Every line answers "what do I have to do, or what will look different",
- * never "which construct did the parser meet": the reader is deciding whether
- * to import and what to finish by hand afterwards. Three tiers:
+ * - `action` (amber): a request will not work as imported, or something the user would send is
+ *   missing.
+ * - `note` (muted): the import made a choice or changed a shape; the request works.
+ * - hidden: nothing the user sends or edits differs. Still counted in `meta.skipped` (the engine's
+ *   answer, and MCP's), just not shown.
  *
- * - `action` (amber): a request will not work as imported, or something the user
- *   would send is missing.
- * - `note` (muted): the import made a choice or changed a shape; the request
- *   works.
- * - hidden: nothing the user sends or edits differs. Still counted in
- *   `meta.skipped` (the engine's answer, and MCP's), just not shown.
- *
- * Where the engine names the requests a count applies to (`requests`), the
- * line names them too, so "1 request body..." becomes the request to open.
+ * Where the engine names the requests a count applies to (`requests`), the line names them too, so
+ * "1 request body..." becomes the request to open.
  */
 
 import type {
@@ -111,9 +108,8 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 Insomnia unit test not imported",
 		many: "{n} Insomnia unit tests not imported",
 	},
-	// A whole-file body imports as a `binary` body now, with the path the
-	// source named; the folder lines below are where the user acts on one the
-	// engine would refuse, so this line only says what arrived.
+	// A whole-file body imports as a `binary` body with the source's path; the folder lines below
+	// are where the user acts on one the engine would refuse, so this line only says what arrived.
 	file_body: {
 		tier: "note",
 		named: "file body imported - choose the file or allow its folder to send it",
@@ -341,10 +337,10 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: '1 "any of" assertion not imported',
 		many: '{n} "any of" assertions not imported',
 	},
-	// A note: every request imports and a Send or collection run is unaffected;
-	// only a load test would run with other load than the plan asked for, and the
-	// user sets that when starting one. The engine names one line per group under
-	// `names`, parts joined by ";" because the clause below is comma-separated.
+	// A note: every request imports and a Send or collection run is unaffected; only a load test
+	// would run other load than the plan asked for, and the user sets that when starting one. The
+	// engine names one line per group under `names`, parts joined by ";" as the clause below is
+	// comma-separated.
 	ThreadGroup_profile: {
 		tier: "note",
 		one: "1 thread group run profile not imported{names} - set the load, ramp-up and duration when you start the load test",
@@ -358,9 +354,9 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 request has both a connect and a response timeout{names} - Vayu has one total timeout, so they were added",
 		many: "{n} requests have both a connect and a response timeout{names} - Vayu has one total timeout, so they were added",
 	},
-	// A note: the request imports and sends; the part that was not a number (a
-	// `${var}`) is left out of its timeout, so it falls back to the default
-	// timeout until the user sets one. The engine names none of these requests.
+	// A note: the request imports and sends; the non-number part (a `${var}`) is left out of its
+	// timeout, so it uses the default timeout until the user sets one. The engine names none of
+	// these requests.
 	HTTPSampler_timeout_unrecognised: {
 		tier: "note",
 		one: "1 request has a timeout that is not a number (such as ${t}) and was left out - set the timeout on the request",
@@ -402,9 +398,8 @@ const JMETER_FOLDER_CONTROLLERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * A kind with no entry - a JMeter class name, open-ended by nature (issue
- * #1518) - still says something: the class is what a JMeter user sees in
- * their own tree.
+ * A kind with no entry (a JMeter class name, open-ended by nature, issue #1518) still says
+ * something: the class is what a JMeter user sees in their own tree.
  */
 function copyOf(kind: SkippedItem["kind"]): Copy {
 	const known = COPY[kind];
@@ -476,10 +471,9 @@ function skippedNotice(item: SkippedItem): ImportNotice | null {
 }
 
 /**
- * The `$ref`s the bundling did not follow (refused, or answered for by the
- * engine), each by name, and the remote documents it pulled in - a spec from
- * the internet decides what gets inlined, so the user sees both before applying
- * (#1782).
+ * The `$ref`s the bundling did not follow (refused, or answered for by the engine), each by name,
+ * and the remote documents it pulled in: a spec from the internet decides what is inlined, so the
+ * user sees both before applying (#1782).
  */
 function refReportNotices(report: ImportMeta["refReport"]): ImportNotice[] {
 	if (!report) return [];
@@ -509,10 +503,9 @@ function authDeclaredOn(meta: ImportMeta): string {
 }
 
 /**
- * The line for requests whose auth imports but is never sent: the requests
- * that lose it, then where it was declared. The count is of requests, so a
- * collection that only declares it on a nested collection nothing inherits from shows
- * no line at all.
+ * The line for requests whose auth imports but is never sent: the requests that lose it, then where
+ * it was declared. The count is of requests, so auth declared only on a nested collection nothing
+ * inherits from shows no line.
  */
 function nonExecutableAuthNotice(meta: ImportMeta): ImportNotice {
 	const phrase =
@@ -526,10 +519,9 @@ function nonExecutableAuthNotice(meta: ImportMeta): ImportNotice {
 }
 
 /**
- * The scripts that import but throw at first run (#2576): one amber line naming
- * the requests and, as a union, the APIs. The import is not blocked, and the
- * engine names only scripts it imported, so the import-scripts option needs no
- * handling here.
+ * The scripts that import but throw at first run (#2576): one amber line naming the requests and,
+ * as a union, the APIs. The import is not blocked, and the engine names only scripts it imported,
+ * so the import-scripts option needs no handling here.
  */
 function unsupportedScriptApiNotice(
 	entries: readonly UnsupportedScriptApis[] | undefined
@@ -548,14 +540,11 @@ function unsupportedScriptApiNotice(
 }
 
 /**
- * The count line under a parsed file, shared by the single-file preview and
- * every batch row.
- *
- * `ImportMeta` names no format family, so the shape is read off the counts: a
- * file with no requests and no folders that carries environments or globals is
- * an environment export, and "0 requests" would be noise there. Anything else
- * is a collection or spec, where "0 examples" is an answer (#481) and an
- * environment segment appears only when there is one to report.
+ * The count line under a parsed file, shared by the single-file preview and every batch row.
+ * `ImportMeta` names no format family, so the shape is read off the counts: no requests, no folders
+ * and some environments or globals is an environment export, where "0 requests" is noise. Anything
+ * else is a collection or spec, where "0 examples" is an answer (#481) and an environment segment
+ * appears only when there is one.
  */
 export function describeCounts(meta: ImportMeta): string {
 	const count = (n: number, noun: string) => `${formatNumber(n)} ${pluralize(n, noun)}`;
@@ -575,10 +564,9 @@ export function describeCounts(meta: ImportMeta): string {
 }
 
 /**
- * The engine's `certificate` tally plus the resolved candidates the user left
- * unticked (#2363): both are certificates the import did not register, and the
- * fix is the same - add it in Settings. The request names the engine attached
- * are dropped once there are unticked ones, since they would name fewer
+ * The engine's `certificate` tally plus the resolved candidates the user left unticked (#2363):
+ * both are certificates the import did not register, fixed the same way (add it in Settings). The
+ * engine's request names are dropped once there are unticked ones, as they would name fewer
  * requests than the line counts.
  */
 function withUnticked(skipped: readonly SkippedItem[], unticked: number): readonly SkippedItem[] {
@@ -592,12 +580,11 @@ function withUnticked(skipped: readonly SkippedItem[], unticked: number): readon
 }
 
 /**
- * The lines a preview shows for one parsed file, actions first. Shared by the
- * single-file preview and every batch ledger row, so one file is described in
- * the same words wherever it appears.
+ * The lines a preview shows for one parsed file, actions first; shared by the single-file preview
+ * and every batch ledger row, so one file is described alike wherever it appears.
  *
- * @param unticked client-certificate candidates in this file the apply will not
- * register (`unselectedCertificateCount`), tallied beside the engine's own.
+ * @param unticked client-certificate candidates in this file the apply will not register
+ *        (`unselectedCertificateCount`), tallied beside the engine's own.
  */
 export function importNotices(meta: ImportMeta, unticked = 0): ImportNotice[] {
 	const notices: ImportNotice[] = [];
@@ -643,19 +630,16 @@ export interface FileReferenceNeeds {
 }
 
 /**
- * What an import's file references need before they can be sent, read off the
- * drafts themselves rather than a counter, so every format answers alike.
+ * What an import's file references need before they can be sent, read off the drafts rather than a
+ * counter, so every format answers alike.
  *
- * - `folders`: the paths `POST /import/parse` answered `unresolved` - the
- *   engine's derived answer that it would refuse them on this machine, being
- *   neither picked here nor under an allowed folder (#2356). One entry per
- *   distinct parent folder, so a collection exported on this same machine is
- *   one "Allow folder" choice rather than a relink per request. A path with a
- *   `{{variable}}` in its folder names no folder yet and is left out.
- * - `bodiesWithoutFile`: `binary` bodies that arrived with no path at all (an
- *   OpenAPI upload documents the type, never the file). Form-data parts in the
- *   same state are the engine's `unattachedFileParts`, already a line of its
- *   own; this is the whole-body counterpart.
+ * - `folders`: the paths `POST /import/parse` answered `unresolved`, the engine's verdict that it
+ *   would refuse them on this machine (neither picked here nor under an allowed folder, #2356). One
+ *   entry per distinct parent folder, so a collection exported on this machine is one "Allow
+ *   folder" choice, not a relink per request. A path with a `{{variable}}` in its folder names no
+ *   folder yet and is left out.
+ * - `bodiesWithoutFile`: `binary` bodies with no path at all (an OpenAPI upload documents the type,
+ *   never the file); the whole-body counterpart of the engine's `unattachedFileParts` line.
  */
 export function fileReferenceNeeds(results: readonly ImportResult[]): FileReferenceNeeds {
 	const counts = new Map<string, number>();
@@ -737,16 +721,15 @@ function tallyCarriedOver(results: readonly ImportResult[]): CarriedOver {
 }
 
 /**
- * What survived the import beyond names and URLs, read off the drafts like
- * `fileReferenceNeeds` so every format answers alike: collection variables,
- * and the requests that carry their own auth or a script that will run.
+ * What survived the import beyond names and URLs, read off the drafts like `fileReferenceNeeds` so
+ * every format answers alike: collection variables, and the requests carrying their own auth or a
+ * script that will run.
  *
- * - auth: a request with a mode other than none, noauth or inherit; a request
- *   that inherits is not counted, its collection's auth is not a request's.
+ * - auth: a mode other than none, noauth or inherit; an inheriting request is not counted, as its
+ *   collection's auth is not the request's.
  * - scripts: an enabled, non-blank `script.pre` / `script.post` element.
  *
- * An empty string when none of the three is present, so the caller renders
- * nothing rather than an empty line.
+ * "" when none of the three is present, so the caller renders nothing, not an empty line.
  */
 export function describeCarriedOver(results: readonly ImportResult[]): string {
 	const { variables, requestsWithAuth, requestsWithScripts } = tallyCarriedOver(results);
