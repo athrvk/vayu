@@ -8,23 +8,21 @@
 /**
  * Is a modal dialog up?
  *
- * Window-level chords are bound on `window`, so they fire wherever focus is -
- * including inside an open dialog, whose fields are ordinary inputs the send
- * handler's editor exclusions do not cover. That is how `mod+Enter` in the
- * "Save response as example" name field sent the request behind the dialog and
- * `mod+W` closed the tab the dialog belonged to, unmounting its owner
- * mid-interaction (#935).
+ * Window-level chords are bound on `window`, so they fire wherever focus is, including inside an
+ * open dialog, whose fields are ordinary inputs the send handler's editor exclusions do not cover.
+ * Unguarded, `mod+Enter` in the "Save response as example" name field sends the request behind the
+ * dialog, and `mod+W` closes the tab the dialog belongs to, unmounting its owner mid-interaction
+ * (#935).
  *
- * The DOM is the answer rather than a store counter because it is the same
- * answer for every dialog in the app - including ones a future feature adds -
- * with nothing to register, nothing to unregister, and no way for a crashed
- * unmount to leave the count stuck above zero. Every modal here is one
- * `DialogContent`, which stamps `data-slot="dialog-content"`, and Radix mounts
- * it only while open; `data-state` is read too so a dialog still playing its
- * exit animation does not keep the chords inert after it has closed.
+ * The DOM is the answer rather than a store counter because it is the same answer for every dialog
+ * in the app, future ones included, with nothing to register or unregister and no way for a crashed
+ * unmount to leave the count stuck above zero. Every modal here is one `DialogContent`, which
+ * stamps `data-slot="dialog-content"`, and Radix mounts it only while open; `data-state` is read
+ * too, so a dialog still playing its exit animation does not keep the chords inert after it has
+ * closed.
  *
- * Non-modal surfaces are deliberately not included: a popover or a dropdown
- * does not take the window, and a chord pressed over one should still act.
+ * Non-modal surfaces are deliberately not included: a popover or a dropdown does not take the
+ * window, and a chord pressed over one should still act.
  */
 export function isModalOpen(): boolean {
 	const dialogs = document.querySelectorAll<HTMLElement>('[data-slot="dialog-content"]');
@@ -35,16 +33,14 @@ export function isModalOpen(): boolean {
 }
 
 /**
- * Run `callback` once no modal is up, immediately if none is now. Returns a
- * cancel function that drops a callback still waiting.
+ * Run `callback` once no modal is up, immediately if none is now. Returns a cancel function that
+ * drops a callback still waiting.
  *
- * There is no close event to subscribe to for the reason `isModalOpen` reads
- * the DOM, so this watches the same DOM: a dialog leaves by unmounting or by
- * flipping `data-state` to `closed` for its exit animation, and the observer
- * sees both. It is for work the OS or a timer started that a dialog must not
- * eat - an OS New request intent arrives as a chord `Shell` refuses under a
- * dialog (#3404) - and not for chords a person pressed over one, which stay
- * dropped (#935).
+ * There is no close event to subscribe to (the reason `isModalOpen` reads the DOM), so this watches
+ * the same DOM: a dialog leaves by unmounting or by flipping `data-state` to `closed` for its exit
+ * animation, and the observer sees both. It is for work the OS or a timer started that a dialog
+ * must not eat (an OS New request intent arrives as a chord `Shell` refuses under a dialog, #3404),
+ * not for chords a person pressed over one, which stay dropped (#935).
  */
 export function whenNoModal(callback: () => void): () => void {
 	if (!isModalOpen()) {
