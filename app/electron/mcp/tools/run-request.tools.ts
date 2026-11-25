@@ -99,13 +99,12 @@ function requestFields(args: Record<string, unknown>, ctx: ToolContext): Record<
 }
 
 /**
- * What `/compose` is asked to compose, or undefined when the call names no
- * target. A `url` is an ad-hoc request: `requestId` does not reach `/compose`,
- * which would compose the *stored* row instead of the arguments the agent gave.
- * Without one, `requestId` is the target and the call's inline fields lay over
- * the stored request. The ad-hoc `elements` are kept out of that overlay
- * because the engine replaces the whole stored list with an inline one; they
- * join the stored list in a second composition ({@link composeWithAdHocElements}).
+ * What `/compose` is asked to compose, or undefined when the call names no target. A `url` is an
+ * ad-hoc request: `requestId` does not reach `/compose`, which would compose the *stored* row
+ * instead of the arguments the agent gave. Without one, `requestId` is the target and the call's
+ * inline fields lay over the stored request. The ad-hoc `elements` stay out of that overlay because
+ * the engine replaces the whole stored list with an inline one; they join the stored list in a
+ * second composition ({@link composeWithAdHocElements}).
  */
 function composeTarget(
 	args: Record<string, unknown>,

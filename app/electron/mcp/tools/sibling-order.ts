@@ -6,18 +6,15 @@
  */
 
 /**
- * @brief A collection's children as one list: its sub-collections and its
- *        requests, in the order the sidebar shows them and a recursive run
- *        walks them (#2535).
+ * @brief A collection's children as one list: its sub-collections and its requests, in the order
+ *        the sidebar shows them and a recursive run walks them (#2535).
  *
- * The third copy of the rule, beside the engine's
- * (`engine/include/vayu/db/sibling_order.hpp`) and the renderer's
- * (`compareTreeOrder`, `app/src/types/domain.ts`). The main process cannot
- * import the renderer's source (`rootDir: "electron"`), so this one is pinned
- * to the other two by the fixtures they already share:
- * `sibling-order.conformance.test.ts` replays
- * `engine/tests/fixtures/tree-order-conformance.json` and
- * `recursive-run-order-conformance.json` against it.
+ * The third copy of the rule, beside the engine's (`engine/include/vayu/db/sibling_order.hpp`) and
+ * the renderer's (`compareTreeOrder`, `app/src/types/domain.ts`). The main process cannot import
+ * the renderer's source (`rootDir: "electron"`), so this one is pinned to the other two by the
+ * fixtures they share: `sibling-order.conformance.test.ts` replays
+ * `engine/tests/fixtures/tree-order-conformance.json` and `recursive-run-order-conformance.json`
+ * against it.
  */
 
 /** Which table a sibling is a row of - and the `type` a `POST /reorder` move names it by. */
