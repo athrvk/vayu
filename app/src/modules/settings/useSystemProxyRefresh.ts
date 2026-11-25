@@ -6,24 +6,20 @@
  */
 
 /**
- * Keep the resolved system proxy current while the network settings are open
- * (issue #708).
+ * Keep the resolved system proxy current while the network settings are open (#708).
  *
- * The resolution itself happens in the Electron main process - it is the only
- * part of Vayu that can ask the operating system - and it already runs at
- * startup and when the machine wakes. This is the renderer's half of "on
- * network change": the browser's own `online` event, which fires for exactly
- * the transitions (a laptop rejoining a network, a VPN coming up) that change
- * the answer while the app is running and never reach `powerMonitor`.
+ * The resolution happens in the Electron main process, the only part of Vayu that can ask the OS,
+ * at startup and on wake. This is the renderer's half of "on network change": the browser's
+ * `online` event, which fires for the transitions (a laptop rejoining a network, a VPN coming up)
+ * that change the answer while the app runs and never reach `powerMonitor`.
  *
- * It also refreshes on mount, because someone reading the network settings is
- * about to *believe* the resolved row - a stale one there is worse than no row
- * at all. The main process writes nothing when the answer has not moved, so the
- * eagerness costs one comparison.
+ * It also refreshes on mount, because someone reading the network settings is about to *believe*
+ * the resolved row, and a stale one is worse than none. Main writes nothing when the answer has not
+ * moved, so the eagerness costs one comparison.
  *
- * Outside Electron (the vitest and browser-preview builds) `electronAPI` is
- * absent and this does nothing at all, which is correct rather than degraded:
- * there is no OS proxy to resolve without a Chromium session to ask.
+ * Outside Electron (vitest, the browser preview) `electronAPI` is absent and this does nothing,
+ * which is correct, not degraded: there is no OS proxy to resolve without a Chromium session to
+ * ask.
  */
 
 import { useEffect } from "react";

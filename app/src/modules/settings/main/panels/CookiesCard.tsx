@@ -6,17 +6,14 @@
  */
 
 /**
- * What the engine's cookie jar is holding, and the button that empties it
- * (issue #301). The jar is what makes "log in once, reuse the session" work
- * for design-mode requests, and it is kept per environment - so this is also
- * where a user confirms that a staging session is not about to ride along on a
- * production call.
+ * What the engine's cookie jar holds, and the button that empties it (#301). The jar is what makes
+ * "log in once, reuse the session" work for design-mode requests, kept per environment, so this is
+ * also where a user confirms a staging session will not ride along on a production call.
  *
- * A session the user cannot see or reset is a support problem: "why is this
- * request already authenticated" has no answer without a list, and a stale
- * session that breaks a call has no fix without a clear button. Both live
- * here, beside the run-history data controls in General for the same reason -
- * this is engine-held state the user did not type.
+ * A session the user cannot see or reset is a support problem: "why is this request already
+ * authenticated" has no answer without a list, and a stale session that breaks a call has no fix
+ * without a clear button. Both live here, beside the run-history data controls in General for the
+ * same reason: engine-held state the user did not type.
  */
 
 import { useState } from "react";
@@ -71,9 +68,8 @@ export function CookiesCard() {
 	const { data: environments = [] } = useEnvironmentsQuery();
 	const clearCookies = useClearCookiesMutation();
 	const showToast = useToastStore((s) => s.showToast);
-	// The scope awaiting confirmation, or "all"; null when no dialog is open.
-	// `undefined` cannot be the idle value here - it is a legitimate scope
-	// (clear everything), which is exactly the distinction the engine draws.
+	// The scope awaiting confirmation, or "all"; null when no dialog is open. Not `undefined`: that
+	// is a legitimate scope (clear everything), the distinction the engine draws.
 	const [confirming, setConfirming] = useState<CookieScope | "all" | null>(null);
 
 	const scopes = data?.scopes ?? [];
