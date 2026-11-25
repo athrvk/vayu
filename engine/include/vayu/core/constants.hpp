@@ -303,8 +303,8 @@ constexpr double ERROR_RATE_PCT = 1.0;
  * @brief How a `constant_rps` tick waits out its remainder.
  *
  * All three platforms sleep the coarse leg and spin the last
- * `spin_tail_us (remaining)` of every tick (#1370 on Windows; #1667 on Linux
- * and macOS, through `platform::sleep_until_precise`). Only the *shape* of the
+ * `spin_tail_us (remaining)` of every tick (#1370; Linux and macOS use the
+ * same shape through `platform::sleep_until_precise`). Only the *shape* of the
  * tail is platform-specific, because the sleep primitive each platform's leg
  * actually uses overshoots by a different amount and, on macOS, in a different
  * way (see below).
