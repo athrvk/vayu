@@ -6,15 +6,13 @@
  */
 
 /**
- * Tell the main process which run the app shows live, so the close that would
- * stop it can name it beside the services (#3604).
+ * Tells the main process which run the app shows live, so the close that would stop it can name it
+ * beside the services (#3604). The run is the one the run gate holds (`stores/run-gate.ts`), the
+ * answer that refuses a second run while it streams; only its kind and label cross, since main
+ * names the run and never addresses it.
  *
- * The run is the one the run gate holds (`stores/run-gate.ts`), the same
- * answer that refuses a second run while it streams. Only its kind and label
- * cross: main names the run, it never addresses it.
- *
- * Gated on `useEngineServing` as the services list is: a run whose engine is
- * down is already over, and a close would stop nothing of it.
+ * Gated on `useEngineServing`, like the services list: a run whose engine is down is already over,
+ * and a close would stop nothing of it.
  */
 
 import { useEffect } from "react";

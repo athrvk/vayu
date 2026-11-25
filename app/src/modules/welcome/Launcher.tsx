@@ -6,16 +6,13 @@
  */
 
 /**
- * Launcher - the populated welcome state.
- *
- * Reached by pressing "+", which means "start something new" - so actions lead
- * and nothing here repeats what the sidebar already shows. No branding: the app
- * is open and the logo is in the title bar.
+ * The populated welcome state, reached by "+" ("start something new"): actions lead, nothing
+ * repeats what the sidebar shows, and no branding, since the app is open and the logo is in the
+ * title bar.
  */
 
-// `Braces` is the app-wide mark for variables - see the note in
-// `components/layout/Dock.tsx`. It was `Database` here, which reads as stored
-// records rather than `{{name}}` substitutions.
+// `Braces` is the app-wide mark for variables: the note in `constants/drawer-views.ts` says why,
+// and why not `Database`.
 import { Download, Plus, Braces, History, Radio, Search } from "lucide-react";
 import { Eyebrow } from "@/components/ui";
 import type { Run } from "@/types";
@@ -50,9 +47,8 @@ export function Launcher({
 	onServices,
 }: LauncherProps) {
 	return (
-		// A centred column, not the full width of the tab - see WELCOME_COLUMN.
-		// `enter-fade`: this replaces `LauncherSkeleton` on mount, the same plain
-		// conditional-swap shape `FirstRunWelcome` fades in for (see its comment).
+		// A centred column (WELCOME_COLUMN), not the tab's full width. `enter-fade`: this replaces
+		// `LauncherSkeleton` on mount, the same swap `FirstRunWelcome` fades in for.
 		<div className={`enter-fade flex flex-col gap-8 ${WELCOME_COLUMN}`}>
 			{/* The tab's `h1`, named as the tab is (#3498). Hidden, because the
 			    populated screen is a launcher with no title of its own to draw;
@@ -66,10 +62,8 @@ export function Launcher({
 				<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
 					<ActionTile icon={Plus} label="New request" onClick={onNewRequest} />
 					{/*
-					 * The command palette's visible half. The chord alone is
-					 * undiscoverable - nobody presses ⌘K in an app they have not
-					 * been told has a palette - and this grid is where the app
-					 * teaches its own surfaces.
+					 * The command palette's visible half: the chord alone is undiscoverable, and
+					 * this grid is where the app teaches its own surfaces.
 					 */}
 					<ActionTile icon={Search} label="Search" onClick={onSearch} />
 					<ActionTile icon={Download} label="Import" onClick={onImport} />
@@ -83,11 +77,9 @@ export function Launcher({
 					<ActionTile icon={Radio} label="Services" onClick={onServices} />
 				</div>
 				{/*
-				 * Its own row, not a seventh grid cell (issue #1694): the grid's
-				 * six tiles are icon-and-label only, with no room for "press this
-				 * chord to send it". Gone the moment a run exists - once one
-				 * does, the app has already answered the question this row asks,
-				 * so it needs no dismiss of its own.
+				 * Its own row, not a seventh grid cell (#1694): the six tiles are icon-and-label
+				 * only, with no room for "press this chord to send it". Gone once a run exists,
+				 * which answers the question this row asks, so it needs no dismiss of its own.
 				 */}
 				{runs.length === 0 && <DemoApiTile onClick={onOpenDemo} />}
 			</section>
