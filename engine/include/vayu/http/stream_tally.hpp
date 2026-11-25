@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/stream_tally.hpp
  * @brief One bounded stream's progress against its `StreamBounds` (#576).
  *
  * Both curl drivers that send a `Request::stream_bounds` keep one: the event
