@@ -8,15 +8,13 @@
 /**
  * HTTPie, POSIX shells.
  *
- * Shares curl's quoting - same shell, same rule - but not its argument grammar:
- * HTTPie takes headers as bare `Name:value` words rather than `-H` pairs, and
- * a body as `--raw`.
+ * Shares curl's quoting (same shell, same rule) but not its argument grammar: HTTPie takes headers
+ * as bare `Name:value` words, not `-H` pairs, and a body as `--raw`.
  *
- * The form modes are where HTTPie differs from every other target here.
- * `--form` alone sends `application/x-www-form-urlencoded`; it only becomes
- * multipart when a field carries a file, which a pasted snippet never does. So
- * a multipart body needs `--multipart` explicitly, or HTTPie would quietly send
- * a urlencoded body for a request Vayu sends as multipart.
+ * The form modes are where HTTPie differs from every other target here. `--form` alone sends
+ * `application/x-www-form-urlencoded` and turns multipart only when a field carries a file, which a
+ * pasted snippet never does. So a multipart body needs `--multipart` explicitly, or HTTPie would
+ * quietly send a urlencoded body for a request Vayu sends as multipart.
  */
 
 import { shellQuote } from "./curl";
@@ -31,27 +29,23 @@ import {
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /**
- * Build a request item HTTPie will read back as the field it was built from.
+ * Build a request item HTTPie reads back as the field it was built from.
  *
- * HTTPie splits an item at the *earliest* separator it finds, taking the
- * longest one at that position, and the separators are not just `=`: `=@` reads
- * a local file into the field, `==` makes it a query parameter, `@` uploads a
- * file and `:` writes a header. So an unescaped leading `@` or `=` on the value
- * side silently changes what the item means - the same file-reference hazard
- * curl's `-F` has - and a `:`, `=` or `@` anywhere in the key is read as the
- * separator instead of the one we emit.
+ * HTTPie splits an item at the *earliest* separator it finds, taking the longest one at that
+ * position, and the separators are not just `=`: `=@` reads a local file into the field, `==` makes
+ * it a query parameter, `@` uploads a file and `:` writes a header. So an unescaped leading `@` or
+ * `=` on the value side silently changes what the item means (the file-reference hazard curl's `-F`
+ * has), and a `:`, `=` or `@` anywhere in the key is read as the separator instead of the one we
+ * emit.
  *
- * The fix is HTTPie's documented escape, a backslash before the character that
- * must not be read as a separator. Only `:`, `=` and `@` are special to HTTPie's
- * tokenizer; a backslash is not, and one followed by anything else (another
- * backslash included) is kept as the two characters it is. So a backslash is
- * sent as written and is never doubled: `C:\temp` stays one backslash. Only a
- * *leading* separator matters on the value side - past the `=` we emit, nothing
- * later is the earliest match - so a JSON value keeps its colons and stays
- * readable.
+ * The fix is HTTPie's documented escape, a backslash before the character that must not be read as
+ * a separator. Only `:`, `=` and `@` are special to HTTPie's tokenizer; a backslash followed by
+ * anything else (another backslash included) is kept as the two characters it is. So a backslash is
+ * sent as written, never doubled: `C:\temp` stays one backslash. Only a *leading* separator matters
+ * on the value side (past the `=` we emit, nothing later is the earliest match), so a JSON value
+ * keeps its colons and stays readable.
  *
- * The one thing that cannot be said is a literal backslash directly before a
- * special (see `hasInexpressibleBackslash`).
+ * A literal backslash directly before a special cannot be said (see `hasInexpressibleBackslash`).
  */
 function httpieItem(key: string, value: string): string {
 	return `${escapeHttpieKey(key)}=${value.replace(/^[:=@]/, "\\$&")}`;

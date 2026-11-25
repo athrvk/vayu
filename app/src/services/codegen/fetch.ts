@@ -8,12 +8,10 @@
 /**
  * JavaScript `fetch`.
  *
- * Every value the request carries becomes a JS string literal, and every one of
- * them goes through `JSON.stringify` - which is exactly the JS string-literal
- * grammar, so quotes, backslashes, newlines and control characters come out
- * escaped and unicode comes out as itself. Hand-rolling the escape table is how
- * generators end up emitting a literal newline inside a `"` and producing a
- * syntax error.
+ * Every value the request carries becomes a JS string literal through `JSON.stringify`, which is
+ * exactly the JS string-literal grammar: quotes, backslashes, newlines and control characters come
+ * out escaped and unicode as itself. A hand-rolled escape table is how generators emit a literal
+ * newline inside a `"`, a syntax error.
  */
 
 import {
@@ -32,10 +30,9 @@ export function jsString(value: string): string {
 }
 
 /**
- * What fetch has no per-request option for. Redirects are the one setting with
- * a spelling (`redirect: "manual"`, emitted below); a certificate check, a
- * deadline and a hop cap are the client's or the process's, so they are said
- * rather than dropped.
+ * What fetch has no per-request option for. Redirects are the one setting with a spelling
+ * (`redirect: "manual"`, emitted below); a certificate check, a deadline and a hop cap belong to
+ * the client or the process, so they are said rather than dropped.
  */
 function transferNotes(prepared: PreparedRequest): string[] {
 	const notes: string[] = [];
@@ -58,10 +55,9 @@ function transferNotes(prepared: PreparedRequest): string[] {
 }
 
 /**
- * One `FormData` part. A file part cannot be attached: a path is not something
- * `fetch` can open - the browser has no filesystem, and Node needs
- * `openAsBlob`. So it is a commented placeholder naming the file, never a
- * silently absent one, and the note says the snippet is incomplete without it.
+ * One `FormData` part. A file part cannot be attached: `fetch` cannot open a path (the browser has
+ * no filesystem, and Node needs `openAsBlob`). So it is a commented placeholder naming the file,
+ * never a silently absent one, and the note says the snippet is incomplete without it.
  */
 function formDataLines(part: PreparedPart): string[] {
 	if (part.kind === "text")
@@ -82,19 +78,17 @@ export function generateFetch(
 		...headerEncodingNotes(prepared, "fetch"),
 		...transferNotes(prepared),
 	];
-	// Said rather than emitted: this target's stock idiom buffers the whole
-	// body, so a snippet that looked like the request would simply hang on an
-	// endless stream. A stated limit is better than a command that stalls.
+	// Said rather than emitted: this target's stock idiom buffers the whole body, so a snippet that
+	// looked like the request would hang on an endless stream.
 	if (prepared.stream) {
 		notes.push(
 			"The response is an event stream. This snippet reads it with res.text(), which does not return until the stream ends - read res.body with a reader, or use EventSource, to consume events as they arrive."
 		);
 	}
 
-	// Name plus the *expression* to emit for it, not the raw value: the basic-auth
-	// entry is a `btoa(...)` call rather than a literal, and a sentinel prefix on
-	// a plain string would misfire on a header value that happened to start with
-	// it.
+	// Name plus the *expression* to emit, not the raw value: the basic-auth entry is a `btoa(...)`
+	// call, and a sentinel prefix on a plain string would misfire on a header value that started
+	// with it.
 	const headers: Array<{ name: string; expression: string }> = [];
 	const isFormData = prepared.body?.kind === "form-data";
 	const folded = foldRepeatedHeaders(prepared.headers, "fetch");

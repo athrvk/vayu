@@ -6,26 +6,23 @@
  */
 
 /**
- * Who holds the engine's change feed (`GET /changes`, issue #3420).
+ * Who holds the engine's change feed (`GET /changes`, #3420).
  *
- * The open request, the tree, the environments and the Trash list are cached
- * with nothing polling them, and the request detail is `staleTime: Infinity`.
- * A write the renderer did not make itself - the stdio MCP server, `vayu-cli`,
- * a script against the engine API, a second window - used to reach none of
- * them until a reload, so Send sent a version the user had not seen. The feed
- * reports every committed write, whoever made it, and this service turns each
- * event into an invalidation (`lib/change-feed-invalidation.ts`).
+ * The open request, the tree, the environments and the Trash list are cached with nothing polling
+ * them, and the request detail is `staleTime: Infinity`. A write the renderer did not make itself
+ * (the stdio MCP server, `vayu-cli`, a script against the engine API, a second window) would reach
+ * none of them until a reload, and Send would send a version the user had not seen. The feed
+ * reports every committed write, whoever made it, and this service turns each event into an
+ * invalidation (`lib/change-feed-invalidation.ts`).
  *
- * One stream for the app's life, beside `inbox-watch-service.ts` and on its
- * terms: an `EventSource` treats any non-200 as fatal and never retries it, so
- * every drop is closed here and reconnected on a backoff of our own, resuming
- * from the last id by query parameter because no API sets `Last-Event-ID` on a
- * fresh connection. A stream opens on a single-use subscription id that only a
- * `POST` hands out, so every connect, reconnects included, asks for a new one
- * first: a page cannot hold the engine's stream slots, and the app's stream is
- * never the one refused. Unlike an inbox stream there is no surface to say it gave
- * up, so it never does: `useChangeFeed` stops it while the engine is not
- * connected, and that is what keeps a downed engine from being asked forever.
+ * One stream for the app's life, beside `inbox-watch-service.ts` and on its terms: an `EventSource`
+ * treats any non-200 as fatal and never retries it, so every drop is closed here and reconnected on
+ * a backoff of our own, resuming from the last id by query parameter because no API sets
+ * `Last-Event-ID` on a fresh connection. A stream opens on a single-use subscription id only a
+ * `POST` hands out, so every connect, reconnects included, asks for a new one first: a page cannot
+ * hold the engine's stream slots, and the app's stream is never the one refused. With no surface to
+ * say it gave up (unlike an inbox stream), it never does: `useChangeFeed` stops it while the engine
+ * is not connected, which keeps a downed engine from being asked forever.
  */
 
 import type { QueryClient } from "@tanstack/react-query";
