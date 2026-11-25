@@ -6,16 +6,12 @@
  */
 
 /**
- * What the live view's stream card reads off the frames of a streaming load run
- * (issue #3236).
- *
- * `stream_events` rides every frame of such a run and no frame of any other, so
- * its presence is the card's gate: not a run-config field, and not
- * `isStreaming` in the store, which only says the SSE connection is attached.
- * The time to first event rides gate frames alone, about one a second, and only
- * once a stream with a timed first event has completed; the newest frame
- * therefore usually lacks it, and a reader takes the latest frame that carries
- * it (the rule `latestScenarioProgress` follows).
+ * What the live view's stream card reads off a streaming load run's frames (issue #3236).
+ * `stream_events` rides every frame of such a run and no frame of any other, so its presence is the
+ * card's gate: not a run-config field, and not the store's `isStreaming`, which only says the SSE
+ * connection is attached. The time to first event rides gate frames alone (about one a second), and
+ * only once a stream with a timed first event has completed, so a reader takes the latest frame
+ * carrying it (the rule `latestScenarioProgress` follows).
  */
 
 import type { LoadTestMetrics, StreamDistribution } from "@/types";
