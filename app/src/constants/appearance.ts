@@ -6,16 +6,13 @@
  */
 
 /**
- * Interface preferences - UI font and interface scale.
- *
- * Both are pure renderer preferences (no OS/Electron theme involvement),
- * persisted to localStorage and applied to the document. This file is the
- * single source of truth: types, the settings controls, and the runtime guards
- * all derive from the arrays (font, radius) and the scale range below. Font
- * stacks reference faces bundled by src/fonts.css (Space Grotesk, Inter and the
- * four mono faces) or system fonts, so switching never triggers a network
- * fetch - and that is true offline too (#1149), the faces being files in
- * the app rather than a Google Fonts stylesheet.
+ * Interface preferences: UI font and interface scale. Both are pure renderer preferences (no
+ * OS/Electron theme involvement), persisted to localStorage and applied to the document. This file
+ * is the single source of truth: the types, the settings controls and the runtime guards all derive
+ * from the arrays (font, radius) and the scale range below. Font stacks reference faces bundled by
+ * src/fonts.css (Space Grotesk, Inter and the four mono faces) or system fonts, so switching never
+ * triggers a network fetch, offline too (#1149): the faces are files in the app, not a Google Fonts
+ * stylesheet.
  */
 
 export interface FontOption {
@@ -56,13 +53,12 @@ export const UI_FONTS = [
 export type UiFont = (typeof UI_FONTS)[number]["value"];
 
 /**
- * The default UI face, and it must stay the one `index.css` already assigns to
- * `--font-sans`: the pre-paint script in index.html deliberately carries no
- * entry for it, so a fresh install paints the stylesheet's face and the store's
- * mount-time `applyFont` re-asserts the same stack. When this constant named a
- * different face than the stylesheet, a fresh install painted Space Grotesk and
- * then swapped to Inter once React mounted. `appearance.default-font.test.ts`
- * holds the three - constant, stylesheet, pre-paint map - together.
+ * The default UI face, which must stay the one `index.css` already assigns to `--font-sans`: the
+ * pre-paint script in index.html deliberately carries no entry for it, so a fresh install paints
+ * the stylesheet's face and the store's mount-time `applyFont` re-asserts the same stack. A
+ * different face here would make a fresh install paint Space Grotesk and then swap once React
+ * mounted. `appearance.default-font.test.ts` holds the three (constant, stylesheet, pre-paint map)
+ * together.
  */
 export const DEFAULT_UI_FONT: UiFont = "grotesk";
 
@@ -70,11 +66,10 @@ export const DEFAULT_UI_FONT: UiFont = "grotesk";
 export type UiFontChoice = UiFont | "custom";
 
 /**
- * Monospace (code) font - applied by overriding the `--font-mono` custom
- * property (Tailwind's `font-mono` utilities read it) and passed to the Monaco
- * editor's `fontFamily`. Stacks reference faces bundled by src/fonts.css
- * (JetBrains Mono, Fira Code, IBM Plex Mono, Space Mono) or system fonts, so
- * switching never triggers a fetch.
+ * Monospace (code) font, applied by overriding the `--font-mono` custom property (Tailwind's
+ * `font-mono` utilities read it) and passed to the Monaco editor's `fontFamily`. Stacks reference
+ * faces bundled by src/fonts.css (JetBrains Mono, Fira Code, IBM Plex Mono, Space Mono) or system
+ * fonts, so switching never triggers a fetch.
  */
 export const MONO_FONTS = [
 	{
@@ -117,15 +112,14 @@ export const DEFAULT_MONO_FONT: MonoFont = "jetbrains";
 export type MonoFontChoice = MonoFont | "custom";
 
 /**
- * Interface scale - a page-zoom factor (webFrame in Electron), stored as the
- * number itself rather than a preset name. It replaced three fixed steps
- * (Compact 0.9 / Default 1 / Comfortable 1.1), which topped out below the
- * 125-150% accessibility band and left the View menu's Ctrl+/- compounding on
- * top of a setting that then disagreed with the window.
+ * Interface scale: a page-zoom factor (webFrame in Electron), stored as the number itself, not a
+ * preset name. The three fixed steps it replaced (Compact 0.9 / Default 1 / Comfortable 1.1) topped
+ * out below the 125-150% accessibility band and left the View menu's Ctrl+/- compounding on top of
+ * a setting that then disagreed with the window.
  *
- * The range is stepped, not free: every path that changes it (the settings
- * slider, the menu nudge, a stored value being read back) goes through
- * {@link clampScale}, so the value is always on the grid and inside the bounds.
+ * The range is stepped, not free: every path that changes it (the settings slider, the menu nudge,
+ * a stored value being read back) goes through {@link clampScale}, so the value is always on the
+ * grid and inside the bounds.
  */
 export const UI_SCALE_MIN = 0.8;
 export const UI_SCALE_MAX = 2;
@@ -133,10 +127,9 @@ export const UI_SCALE_STEP = 0.1;
 export const DEFAULT_UI_SCALE = 1;
 
 /**
- * The three preset names this setting used to store, mapped to the factors they
- * applied. A stored preset migrates to its factor on read and is rewritten as a
- * number by the next change - a Map, not an object, so a stored `"constructor"`
- * cannot reach `Object.prototype`.
+ * The three preset names this setting once stored, mapped to the factors they applied. A stored
+ * preset migrates to its factor on read and is rewritten as a number by the next change; a Map, not
+ * an object, so a stored `"constructor"` cannot reach `Object.prototype`.
  */
 const LEGACY_UI_SCALES = new Map<string, number>([
 	["compact", 0.9],
@@ -199,18 +192,15 @@ export interface DensityOption {
 }
 
 /**
- * Interface density (issue #1670), applied by toggling a `data-density`
- * attribute on `documentElement` rather than by computing a value here: the
- * two densities are whole `--spacing` values declared in `index.css`
- * (`:root` and `[data-density="comfortable"]`), so there is nothing for a
- * `densityValue()`-style resolver to compute - unlike {@link radiusValue},
- * which picks a numeric `--radius` a JS caller must supply.
+ * Interface density (#1670), applied by toggling a `data-density` attribute on `documentElement`,
+ * not by computing a value here: the two densities are whole `--spacing` values declared in
+ * `index.css` (`:root` and `[data-density="comfortable"]`), so there is nothing for a
+ * `densityValue()`-style resolver to compute, unlike {@link radiusValue}, which picks a numeric
+ * `--radius` a JS caller must supply.
  *
- * The label "Comfortable" is also the name a discontinued interface-scale
- * preset used for a 1.1x zoom factor (`LEGACY_UI_SCALES` above) - a
- * different setting, a different storage key, and the scale preset itself
- * has not been offered since the continuous slider replaced it. Kept
- * anyway: it is the term this issue's owner named, and Postman and Gmail
+ * "Comfortable" is also the name a discontinued interface-scale preset used for a 1.1x zoom
+ * (`LEGACY_UI_SCALES` above): a different setting and storage key, not offered since the continuous
+ * slider replaced it. Kept anyway: it is the term the issue's owner named, and Postman and Gmail
  * use it for exactly this choice.
  */
 export const UI_DENSITIES = [
