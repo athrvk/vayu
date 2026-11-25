@@ -6,28 +6,21 @@
  */
 
 /**
- * Individual settings, as palette results.
- *
- * The registry already offers one command per settings *section*, which reaches
- * the twelve screens. This reaches the ~65 entries on them: a user who knows
- * the app has a request timeout should not have to guess which of five engine
- * categories owns it, and `dbCacheSize` - the name every doc, log line and MCP
- * call uses - should find its row even though the screen labels it "Cache Size".
+ * Individual settings, as palette results. The registry offers one command per settings section
+ * (the twelve screens); this reaches the ~65 entries on them, so a user need not guess which of
+ * five engine categories owns the request timeout, and `dbCacheSize` (the name every doc, log line
+ * and MCP call uses) finds its row though the screen labels it "Cache Size".
  *
  * Two things it deliberately does not do:
  *
- * - **It does not index panels.** `SettingsIndexEntry` has a `panel` kind, and
- *   the command registry already generates a command per panel from the same
- *   registry; indexing them here would put every settings screen in the group
- *   twice, under two rows that do the same thing.
- * - **It does not own a matcher.** `searchSettings` is the sidebar's ranking,
- *   and a palette that matched settings differently from the settings sidebar
- *   would be two answers to one question. One index, one matcher, two UIs -
- *   which rows are settings results is decided once, here. Their order on
- *   screen is not: `ranking.ts` re-sorts every section by the score it gave the
- *   row, so the palette can list what it kept in an order the sidebar would
- *   not, deliberately, since the palette scores these rows by the one measure
- *   it scores every other kind by and the sidebar ranks them among themselves.
+ * - **Index panels.** `SettingsIndexEntry` has a `panel` kind, and the command registry already
+ *   makes a command per panel from the same registry; indexing them here would list every settings
+ *   screen twice, as two rows doing one thing.
+ * - **Own a matcher.** `searchSettings` is the sidebar's ranking, and matching settings differently
+ *   from the sidebar would be two answers to one question, so which rows are settings results is
+ *   decided once, here. Their order is not: `ranking.ts` re-sorts every section by its own score,
+ *   so the palette may order them unlike the sidebar, deliberately, since it scores every kind by
+ *   one measure while the sidebar ranks settings among themselves.
  */
 
 import { useMemo } from "react";
@@ -40,9 +33,8 @@ import { searchSettings, type SettingsIndexEntry } from "@/lib/settings-index";
 import { DEEP_GROUP_LIMIT, type PaletteItem } from "../types";
 
 /**
- * Reveal one settings entry, through the shared `revealSetting` - the same call
- * the sidebar's own result rows, the registry's section commands and the
- * curl-paste ledger's pointers make.
+ * Reveal one settings entry through the shared `revealSetting`, the call the sidebar's own result
+ * rows, the registry's section commands and the curl-paste ledger's pointers make.
  */
 function reveal(entry: SettingsIndexEntry): void {
 	revealSetting(entry.category, entry.anchor);
@@ -67,24 +59,21 @@ export function useSettingsItems(query: string): PaletteItem[] {
 			// description included - see `PaletteItem.preMatched`.
 			preMatched: true,
 			title: entry.label,
-			// The engine key is part of what the row says, because that is what
-			// docs, logs and MCP calls name the setting; an app setting has no
-			// such name, so its subtitle is just the panel that holds it.
+			// The engine key is in the row because docs, logs and MCP calls name the setting by it;
+			// an app setting has no such name, so its subtitle is just its panel.
 			subtitle:
 				entry.kind === "engine"
 					? `${entry.categoryLabel} · ${entry.id}`
 					: entry.categoryLabel,
-			// The terms someone types to reach this row: the engine key every
-			// doc and log line names it by, and its aliases. Not the description:
-			// nothing filters these rows twice (`ranking.ts`), so what belongs here is
-			// search terms.
+			// What someone types to reach this row: the engine key docs and logs use, and its
+			// aliases. Not the description: nothing filters these rows twice (`ranking.ts`), so
+			// only search terms belong here.
 			keywords: [entry.id, ...entry.keywords],
 			perform: () => reveal(entry),
 		}));
 
-		// Only when there is more, and never as a consolation prize: an escape
-		// row over an exhausted result set would send the user to a surface that
-		// shows them the same rows again.
+		// Only when there is more: an escape row over an exhausted result set sends the user to a
+		// surface showing them the same rows again.
 		if (matches.length > shown.length) {
 			items.push({
 				id: "setting:search-more",

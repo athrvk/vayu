@@ -6,31 +6,24 @@
  */
 
 /**
- * Variables Editor
- *
- * Displays the CRUD UI for the selected variable category.
- * The category selection is handled by VariablesCategoryTree in the sidebar.
- * Uses a unified VariableEditor component configured by category type.
+ * The CRUD UI for the variable category selected in the sidebar's `VariablesCategoryTree`, through
+ * the one `VariableTableEditor` configured by category type.
  */
 
 import { useVariablesStore } from "@/modules/variables/variables-store";
 import { useCollectionsQuery, useEnvironmentsQuery, useGlobalsQuery } from "@/queries";
 import VariableTableEditor from "./VariableTableEditor";
-// `Braces` is the app-wide mark for variables - see the note in
-// `components/layout/Dock.tsx`. It was `Variable` here, `Database` on the
-// welcome Launcher and `Zap` in the Dock: three glyphs for one concept.
+// `Braces` is the app-wide mark for variables: see the note in `constants/drawer-views.ts`.
 import { Braces } from "lucide-react";
 import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 
 export default function VariablesMain() {
 	const selectedCategory = useVariablesStore((s) => s.selectedCategory);
-	// isLoading matters here, not just the data. Both queries default to `[]`,
-	// so a category selected from a previous session resolved to `undefined`
-	// while its query was still in flight and the screen announced "not found"
-	// - an error, for something that simply had not arrived yet.
-	// isError too, and each branch below reads its own query's: the two are
-	// fetched independently, and a collections failure says nothing about
-	// whether the environments arrived.
+	// isLoading matters, not just the data: both queries default to `[]`, so a category selected in
+	// a previous session resolves to `undefined` while its query is in flight, and "not found"
+	// would announce an error for something that has not arrived. isError too, each branch below
+	// reading its own query's: the two are fetched independently, and a collections failure says
+	// nothing about the environments.
 	const {
 		data: collections = [],
 		isLoading: collectionsLoading,
@@ -57,7 +50,6 @@ export default function VariablesMain() {
 		);
 	}
 
-	// Configure the unified editor based on category type
 	if (selectedCategory.type === "globals") {
 		return (
 			<VariableTableEditor

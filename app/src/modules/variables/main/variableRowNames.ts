@@ -6,12 +6,10 @@
  */
 
 /**
- * Which variable-table rows cannot be written under the name they carry, and why (#3251).
- *
- * The engine refuses a variable name that is blank or differs from its trim
- * (`is_addressable_variable_name`), and the payload is a map keyed by name, so a
- * second row with the same name would silently replace the first. Both are
- * decided here, on trimmed names, so the editor never builds a payload the
+ * Which variable-table rows cannot be written under the name they carry, and why (#3251). The
+ * engine refuses a name that is blank or differs from its trim (`is_addressable_variable_name`),
+ * and the payload is a map keyed by name, so a second row with the same name would silently replace
+ * the first. Both are decided here, on trimmed names, so the editor never builds a payload the
  * engine would refuse or fold.
  */
 
@@ -38,15 +36,11 @@ export function isAddressableName(name: string): boolean {
 }
 
 /**
- * The rows that cannot be saved as they stand, by row id; a row absent from the
- * map is fine.
- *
- * The trailing blank row is never a problem: it is a placeholder. A row that
- * has been promoted (something was typed into it) or that came from the server
- * and now has no name is `unnamed`. Of the rows spelling one name, the one the
- * server already stores under it (`baseKey`) keeps it, so renaming `token` to
- * an existing `host` flags the renamed row rather than the untouched one; with
- * no such row the first in table order keeps it.
+ * The rows that cannot be saved as they stand, by row id; a row absent from the map is fine. The
+ * trailing blank row never is a problem: it is a placeholder. A promoted row (something was typed
+ * into it) or a server row with no name now is `unnamed`. Of the rows spelling one name, the one
+ * the server stores under it (`baseKey`) keeps it, so renaming `token` to an existing `host` flags
+ * the renamed row, not the untouched one; with no such row the first in table order keeps it.
  */
 export function nameProblems(rows: readonly VariableRowData[]): Map<string, NameProblem> {
 	const problems = new Map<string, NameProblem>();

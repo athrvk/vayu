@@ -14,9 +14,8 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 import type { PostmanEnvironmentExportNotes } from "@/types";
 
 /**
- * The `notCarried` code for a type Postman's one `type` slot cannot hold: a
- * `json` type, written as `default`, and a typed secret's type, written as
- * `secret` (#3252).
+ * The `notCarried` code for a type Postman's one `type` slot cannot hold: `json` (written as
+ * `default`) and a typed secret's type (written as `secret`) (#3252).
  */
 const VARIABLE_TYPES_NOT_CARRIED = "variable_types";
 

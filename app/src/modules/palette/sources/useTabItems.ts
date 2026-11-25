@@ -6,14 +6,9 @@
  */
 
 /**
- * Open tabs, as palette results.
- *
- * The cheapest win in the palette: with a dozen tabs open the strip has already
- * pushed half of them into the overflow menu, and this reaches any of them by
- * name.
- *
- * Labels come from `tab-descriptors`, the same hook the strip itself uses - a
- * tab must not read "GET /v1/orders" in one place and "Request" in the other.
+ * Open tabs, as palette results: with a dozen open the strip has pushed half into the overflow
+ * menu, and this reaches any of them by name. Labels come from `tab-descriptors`, the strip's own
+ * hook, so a tab never reads "GET /v1/orders" in one place and "Request" in the other.
  */
 
 import { useTabsStore } from "@/stores";
