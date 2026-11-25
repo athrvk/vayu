@@ -108,6 +108,7 @@ async function maxSpecFileBytes(system: SpecFileSystem): Promise<number> {
 		const value = Number(entry?.value);
 		if (Number.isFinite(value) && value > 0) return value;
 	} catch {
+		// Fall through to the seed.
 	}
 	return SPEC_DOCUMENT_MAX_BYTES_SEED;
 }
