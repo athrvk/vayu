@@ -13,16 +13,14 @@ import { navigateHistory } from "@/lib/navigate-history";
 import { installContextMenuBridge } from "@/lib/context-menu";
 
 /**
- * Bridges native menu items (Settings…, View → zoom) to in-app
- * state. No-op outside Electron.
+ * Bridges native menu items (Settings…, View → zoom, Back / Forward) and the right-click menu to
+ * in-app state. No-op outside Electron.
  *
- * Settings… points at the `open-settings` command rather than repeating its
- * two lines, so the menu and the palette cannot drift into opening settings
- * differently - the whole reason `lib/commands` exists.
- *
- * Zoom lives here rather than in `useAppearance` because this hook is mounted
- * exactly once, in `App`: `useAppearance` runs in the Appearance panel too, and
- * a second subscription would move the scale two steps per keypress.
+ * Settings… points at the `open-settings` command rather than repeating its two lines, so the menu
+ * and the palette cannot drift into opening settings differently: the whole reason `lib/commands`
+ * exists. Zoom lives here rather than in `useAppearance` because this hook is mounted exactly once,
+ * in `App`; `useAppearance` runs in the Appearance panel too, and a second subscription would move
+ * the scale two steps per keypress.
  */
 export function useMenuActions(): void {
 	useEffect(() => {
@@ -35,13 +33,10 @@ export function useMenuActions(): void {
 
 	useEffect(() => {
 		/*
-		 * View → Back / Forward, and the OS gestures the main process forwards
-		 * over the same channel (#1245).
-		 *
-		 * `isModalOpen` for the reason the Shell's chord map asks it: a menu
-		 * accelerator fires wherever focus is, including under a dialog, and
-		 * navigating there unmounts the surface the dialog belongs to
-		 * mid-interaction.
+		 * View → Back / Forward, and the OS gestures the main process forwards over the same
+		 * channel (#1245). `isModalOpen` for the reason the Shell's chord map asks it: a menu
+		 * accelerator fires wherever focus is, including under a dialog, and navigating there
+		 * unmounts the surface the dialog belongs to mid-interaction.
 		 */
 		return window.electronAPI?.onNavigateHistory?.((direction) => {
 			if (isModalOpen()) return;
@@ -51,21 +46,18 @@ export function useMenuActions(): void {
 
 	useEffect(() => {
 		/*
-		 * The right-click menu's renderer half (#1359): what is under the pointer
-		 * on the way out, the token popover on the way back.
-		 *
-		 * Here rather than in a component of its own for the same reason zoom is:
-		 * the listener is on `window`, and a second mount would announce the same
-		 * click twice. Mounted once, in `App`.
+		 * The right-click menu's renderer half (#1359): what is under the pointer on the way out,
+		 * the token popover on the way back. Here rather than in a component of its own for zoom's
+		 * reason: the listener is on `window`, and a second mount would announce the same click
+		 * twice.
 		 */
 		return installContextMenuBridge(window.electronAPI, window);
 	}, []);
 
 	useEffect(() => {
-		// The menu no longer zooms Chromium itself - it nudges the persisted
-		// interface-scale setting, which then applies the zoom. That is what
-		// keeps a keyboard zoom across a restart and stops the Appearance panel
-		// from describing a size the window is not drawn at.
+		// The menu nudges the persisted interface-scale setting, which then applies the zoom,
+		// rather than zooming Chromium itself: that keeps a keyboard zoom across a restart and
+		// stops the Appearance panel from describing a size the window is not drawn at.
 		return window.electronAPI?.onZoomCommand?.((command) => {
 			const { nudgeScale, resetScale } = useAppearanceStore.getState();
 			if (command === "reset") resetScale();

@@ -29,9 +29,9 @@ namespace vayu::utils {
  *
  * `sha256` and `hmac_sha256` answer with a `std::array<uint8_t, 32>`, and every
  * encoder here - plus `hmac_sha256` itself, when a digest is the key - reads a
- * `std::string_view`. Six call sites spelled that conversion themselves before
- * this existed, which is the shape the repo's "a hand-rolled copy of a
- * primitive does not receive the primitive's fixes" rule is about.
+ * `std::string_view`. One function spells the conversion for all of them, by
+ * the repo's "a hand-rolled copy of a primitive does not receive the
+ * primitive's fixes" rule.
  *
  * The cast is the one reinterpretation the standard blesses outright:
  * [basic.lval] lets any object be read through a `char`, `unsigned char` or
@@ -160,7 +160,7 @@ inline std::size_t utf8_sequence_length (std::string_view text, std::size_t at) 
  *
  * Whole, unlike `core::looks_binary`'s sniff of the first `SNIFF_BYTES`: the
  * answer decides whether a response body can travel as a JSON string at all
- * (issue #2458), and one bad byte past the sniff window is enough to make the
+ * (#2458), and one bad byte past the sniff window is enough to make the
  * serializer throw. NUL is valid UTF-8 but never appears in text, so a body
  * carrying one is treated as the binary it almost certainly is. Empty is text.
  */
@@ -181,14 +181,14 @@ inline bool is_valid_utf8_text (std::string_view bytes) {
 
 /**
  * @brief @p bytes without the incomplete UTF-8 sequence a cut at a byte count
- *        can leave at their end, or @p bytes whole when they end on a
- *        character boundary.
+ *        can leave at their end, or @p bytes whole when they end on a character
+ *        boundary.
  *
- * A body the read cap stopped (issue #2458) ends wherever the cap fell, which
- * can be inside a character: at most three bytes of a sequence whose lead
- * announces more. Those are dropped only when some continuation could still
- * make them valid, so a lead no character starts with, or a stray continuation
- * byte, stays where `is_valid_utf8_text` refuses it.
+ * A body the read cap stopped (#2458) ends wherever the cap fell, which can be
+ * inside a character: at most three bytes of a sequence whose lead announces
+ * more. Those are dropped only when some continuation could still make them
+ * valid, so a lead no character starts with, or a stray continuation byte,
+ * stays where `is_valid_utf8_text` refuses it.
  */
 inline std::string_view without_incomplete_utf8_tail (std::string_view bytes) {
     const std::size_t reach = std::min<std::size_t> (bytes.size (), 3);
@@ -209,8 +209,8 @@ inline std::string_view without_incomplete_utf8_tail (std::string_view bytes) {
 /**
  * @brief Base64-encode arbitrary bytes (RFC 4648, standard alphabet, padded).
  *
- * Used for HTTP Basic credentials, OAuth 2.0 client authentication
- * (RFC 6749 §2.3.1), and a response body that is not text (issue #2458).
+ * Used for HTTP Basic credentials, OAuth 2.0 client authentication (RFC 6749
+ * §2.3.1), and a response body that is not text (#2458).
  */
 inline std::string base64_encode (std::string_view in) {
     return detail::sodium_base64_encode (in, sodium_base64_VARIANT_ORIGINAL);

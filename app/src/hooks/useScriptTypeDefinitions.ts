@@ -6,14 +6,11 @@
  */
 
 /**
- * Hands Monaco's TypeScript worker the engine-generated declarations for the
- * `pm.*` surface, which is what the completion provider beside it cannot give:
- * hover documentation over an existing call, signature help while typing
- * arguments, and go-to-definition within the surface.
- *
- * Call once (in App). Monaco's language defaults are global, so one
- * registration covers every script editor instance - the same reason
- * `useScriptCompletionProvider` is called once.
+ * Hands Monaco's TypeScript worker the engine-generated declarations for the `pm.*` surface: what
+ * the completion provider beside it cannot give (hover documentation over an existing call,
+ * signature help while typing arguments, go-to-definition within the surface). Call once (in App):
+ * Monaco's language defaults are global, so one registration covers every script editor, as with
+ * `useScriptCompletionProvider`.
  */
 
 import { useEffect } from "react";
@@ -21,19 +18,17 @@ import { useLoadedMonaco } from "@/lib/monaco-loader";
 import { useScriptTypeDefinitionsQuery } from "@/queries";
 
 /**
- * The sandbox is QuickJS plus `pm`, `console`, the two base64 globals and the
- * timers - no DOM, no Node. So the lib list is deliberately `esnext` alone:
- * including `dom` would have the editor offer `fetch` and `URL`, neither of which
- * exists at runtime, and the script would fail only once it ran. The timers are
- * declared by the engine's own file, with the sandbox's semantics.
+ * The sandbox is QuickJS plus `pm`, `console`, the two base64 globals and the timers; no DOM, no
+ * Node. So the lib list is `esnext` alone on purpose: `dom` would have the editor offer `fetch` and
+ * `URL`, neither of which exists at runtime, and the script would fail only once it ran. The
+ * engine's own file declares the timers, with the sandbox's semantics.
  *
- * ESNext rather than a dated edition because the runtime is quickjs-ng, which
- * tracks the language closely: `Object.hasOwn`, `Array.prototype.at`,
- * `toSorted`, `findLast`, `Object.groupBy` and `Promise.withResolvers` all run,
- * and a lib that stops short of one marks it as an error while it works (#3128,
- * see docs/engine/scripting/limitations.md). The price is the opposite error: a method
- * TypeScript adds to ESNext before quickjs-ng has it is offered and fails only
- * when the script runs.
+ * ESNext rather than a dated edition because the runtime is quickjs-ng, which tracks the language
+ * closely: `Object.hasOwn`, `Array.prototype.at`, `toSorted`, `findLast`, `Object.groupBy` and
+ * `Promise.withResolvers` all run, and a lib that stops short of one marks it as an error while it
+ * works (#3128, see docs/engine/scripting/limitations.md). The price is the opposite error: a
+ * method TypeScript adds to ESNext before quickjs-ng has it is offered, and fails only when the
+ * script runs.
  */
 export const SCRIPT_LIB = ["esnext"];
 
@@ -68,14 +63,11 @@ export const SCRIPT_LIB = ["esnext"];
 export const SUPPRESSED_DIAGNOSTICS = [1108, 2304];
 
 /**
- * Everything below `strict` that decides whether a given line of a script is an
- * error. Exported as one object because a second reader exists:
- * `script-typedefs.docs-compile.test.ts` compiles the documented `pm.*` examples
- * against the engine's declarations, and it is only a guard on what the editor
- * shows if it checks them the way the editor does. Two copies of this list
- * would let the docs pass here and squiggle in the app.
- *
- * `target` is not in it - the hook takes it from Monaco's own enum; see below.
+ * Everything below `strict` that decides whether a line of a script is an error. One exported
+ * object because a second reader exists: `script-typedefs.docs-compile.test.ts` compiles the
+ * documented `pm.*` examples against the engine's declarations, and guards what the editor shows
+ * only if it checks them the way the editor does; two copies would let the docs pass there and
+ * squiggle in the app. `target` is not in it: the hook takes it from Monaco's own enum (see below).
  */
 export const SCRIPT_COMPILER_OPTIONS = {
 	lib: SCRIPT_LIB,
@@ -86,21 +78,19 @@ export const SCRIPT_COMPILER_OPTIONS = {
 	checkJs: true,
 	noEmit: true,
 	/*
-	 * 3 is `ModuleDetectionKind.Force`, which Monaco's bundled enum does not
-	 * export: every script is a module, not a script file in the global scope.
+	 * 3 is `ModuleDetectionKind.Force`, which Monaco's bundled enum does not export: every script
+	 * is a module, not a script file in the global scope.
 	 *
-	 * The engine runs a script inside a function, so a top-level
-	 * `const data = pm.response.json()` is local to it and shadows any global of
-	 * that name. As a script file, the editor saw the same line as a second
-	 * declaration of the legacy global `data` that the engine declares and
-	 * reported "Cannot redeclare block-scoped variable" (2451) on correct code -
-	 * and would have for `const URL` or `function fetch` (`ABSENT_GLOBALS`)
-	 * already. The declarations the engine registers are a `.d.ts`, which stays
-	 * a global script whatever this says.
+	 * The engine runs a script inside a function, so a top-level `const data = pm.response.json()`
+	 * is local to it and shadows any global of that name. As a script file, the editor would read
+	 * the same line as a second declaration of the legacy global `data` the engine declares and
+	 * report "Cannot redeclare block-scoped variable" (2451) on correct code, as it would for
+	 * `const URL` or `function fetch` (`ABSENT_GLOBALS`). The declarations the engine registers are
+	 * a `.d.ts`, which stays a global script whatever this says.
 	 *
-	 * The price is TypeScript's strict-mode diagnostics on a script that runs
-	 * sloppy: `with`, `delete name`, an octal literal, `yield` or `let` as a
-	 * name, and a top-level `this`, which a module types as `undefined`.
+	 * The price is TypeScript's strict-mode diagnostics on a script that runs sloppy: `with`,
+	 * `delete name`, an octal literal, `yield` or `let` as a name, and a top-level `this`, which a
+	 * module types as `undefined`.
 	 */
 	moduleDetection: 3,
 	/*
@@ -112,32 +102,28 @@ export const SCRIPT_COMPILER_OPTIONS = {
 	 */
 	module: 99,
 	/*
-	 * Off deliberately, and *set* rather than left to Monaco's default: the
-	 * default is what it is today, and a `getCompilerOptions()` that ever
-	 * carried `strict: true` would turn this on as a side effect.
+	 * Off on purpose, and *set* rather than left to Monaco's default: the default is what it is
+	 * today, and a `getCompilerOptions()` that ever carried `strict: true` would turn this on as a
+	 * side effect.
 	 *
-	 * The engine declares the surface's optionality truthfully
-	 * (`iterationData?: { ... }`, `get(name): string | undefined`), and with
-	 * this flag on the worker would report every one of those at once. Measured
-	 * against the real declarations over 57 scripts - the 54 `pm.*` examples in
-	 * `docs/engine/scripting/` and `docs/app/pm-api-compatibility.md`, plus
-	 * three realistic ones: 13 new diagnostics, of which **8 land on the docs'
-	 * own recommended lines** (`pm.iterationData.get('username')`, correct
-	 * inside the data-driven run those examples are about). Two more are on
-	 * code that works: `pm.info.iteration > 0` is simply `false` outside a run,
-	 * and `pm.response.errorMessage` cannot be narrowed by a truthy check on
-	 * its sibling `pm.response.errorCode`.
+	 * The engine declares the surface's optionality truthfully (`iterationData?: { ... }`,
+	 * `get(name): string | undefined`), and with this flag on the worker would report every one of
+	 * those at once. Measured against the real declarations over 57 scripts (the 54 `pm.*` examples
+	 * in `docs/engine/scripting/` and `docs/app/pm-api-compatibility.md`, plus three realistic
+	 * ones): 13 new diagnostics, **8 of them on the docs' own recommended lines**
+	 * (`pm.iterationData.get('username')`, correct inside the data-driven run those examples are
+	 * about). Two more are on code that works: `pm.info.iteration > 0` is simply `false` outside a
+	 * run, and `pm.response.errorMessage` cannot be narrowed by a truthy check on its sibling
+	 * `pm.response.errorCode`.
 	 *
-	 * Suppressing the noise is not on offer, because the noise and the catch
-	 * share a code: `18048` fires for `pm.iterationData.get(...)` - the case
-	 * this was wanted for - and for `token.trim()` alike, and the remaining
-	 * code is `2345`, which is the argument checking this whole feature exists
-	 * to provide.
+	 * Suppressing the noise is not on offer, because the noise and the catch share a code: `18048`
+	 * fires for `pm.iterationData.get(...)`, the case this was wanted for, and for `token.trim()`
+	 * alike, and the remaining code is `2345`, the argument checking this whole feature exists to
+	 * provide.
 	 *
-	 * So the guard the docs recommend stays advice rather than a rule. This is
-	 * the same trade SUPPRESSED_DIAGNOSTICS makes above, one level up: a real
-	 * mistake goes unreported in exchange for not crying wolf on correct code.
-	 * See issue #443.
+	 * So the guard the docs recommend stays advice rather than a rule: the trade
+	 * `SUPPRESSED_DIAGNOSTICS` makes above, one level up, a real mistake unreported in exchange for
+	 * not crying wolf on correct code (#443).
 	 */
 	strictNullChecks: false,
 };
@@ -172,11 +158,10 @@ export function useScriptTypeDefinitions() {
 		});
 
 		/*
-		 * Semantic validation is on, minus exactly the two diagnostics that a
-		 * *correct* script in this editor produces - see SUPPRESSED_DIAGNOSTICS
-		 * for which and why. Everything else the worker reports is a real
-		 * mistake, including the whole `pm.*` surface, so `pm.response.staus`
-		 * squiggles with a did-you-mean.
+		 * Semantic validation is on, minus exactly the two diagnostics a *correct* script in this
+		 * editor produces (see `SUPPRESSED_DIAGNOSTICS`). Everything else the worker reports is a
+		 * real mistake, the whole `pm.*` surface included, so `pm.response.staus` squiggles with a
+		 * did-you-mean.
 		 */
 		defaults.setDiagnosticsOptions({
 			noSemanticValidation: false,
@@ -186,11 +171,10 @@ export function useScriptTypeDefinitions() {
 		});
 
 		/*
-		 * Every one of these defaults to true in Monaco today, so this call
-		 * changes nothing right now - it pins the intent. Diagnostics are what
-		 * make the rest useful (a quick fix is offered against an error, and
-		 * rename/references need the same analysis), and they arrived together;
-		 * a future default flipping off would remove them silently.
+		 * Every one of these defaults to true in Monaco today, so this call changes nothing now: it
+		 * pins the intent. Diagnostics are what make the rest useful (a quick fix is offered
+		 * against an error, and rename/references need the same analysis), and they arrived
+		 * together; a future default flipping off would remove them silently.
 		 */
 		defaults.setModeConfiguration({
 			...defaults.modeConfiguration,
