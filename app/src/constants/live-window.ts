@@ -6,28 +6,25 @@
  */
 
 /**
- * Live dashboard chart window - how much recent live history the dashboard
- * charts retain, as a **time** window (not a point count). This array is the
- * single source of truth for the type, the settings picker, and the runtime
- * guard.
+ * Live dashboard chart window: how much recent live history the dashboard charts retain, as a
+ * **time** window, not a point count. This array is the single source of truth for the type, the
+ * settings picker and the runtime guard.
  *
- * The window is **not** a renderer-only preference. It is stored engine-side as
- * the `liveReplayWindowMs` config entry, because the engine needs the same
- * number: it sizes the in-memory SSE tick ring that `/runs/:id/live` replays,
- * from offset 0 on a first attach, which is what rebuilds these charts when the
- * dashboard attaches mid-run. Two settings would let the retained span and
- * the displayed span disagree - the engine replaying less than the chart is set
- * to show - so there is one value and both sides read it.
+ * The window is **not** a renderer-only preference. It is stored engine-side as the
+ * `liveReplayWindowMs` config entry, because the engine needs the same number: it sizes the
+ * in-memory SSE tick ring that `/runs/:id/live` replays from offset 0 on a first attach, which is
+ * what rebuilds these charts when the dashboard attaches mid-run. Two settings would let the
+ * retained span and the displayed span disagree (the engine replaying less than the chart is set to
+ * show), so there is one value and both sides read it.
  *
- * The dashboard store trims retained ticks to this window on each batch; because
- * uPlot renders on Canvas there's no per-point-DOM cost, so the window is a UX +
- * memory choice, not a rendering constraint.
+ * The dashboard store trims retained ticks to this window on each batch; uPlot renders on Canvas
+ * with no per-point DOM cost, so the window is a UX and memory choice, not a rendering constraint.
  */
 
 export interface LiveWindowOption {
 	readonly value: string;
 	readonly label: string;
-	/** Retention in seconds; null = full run (bounded only by MAX_RETAINED_TICKS). */
+	/** Retention in seconds; null = full run (bounded only by the tick cap, `maxRetainedTicks`). */
 	readonly seconds: number | null;
 }
 
@@ -66,12 +63,11 @@ export function liveWindowToMs(value: LiveWindow): number {
 }
 
 /**
- * Engine milliseconds → the picker option to show. A value that matches no
- * option - the key is a free integer field in the engine's settings list, so a
- * user can save 90000 there - resolves to the nearest option that does not
- * exceed it, so the chart never claims more history than is retained. Anything
- * below the shortest option, and any unparseable value, falls back to the
- * default rather than showing a window nothing is set to.
+ * Engine milliseconds → the picker option to show. A value that matches no option (the key is a
+ * free integer field in the engine's settings list, so a user can save 90000 there) resolves to the
+ * nearest option that does not exceed it, so the chart never claims more history than is retained.
+ * Anything below the shortest option, and any unparseable value, falls back to the default rather
+ * than showing a window nothing is set to.
  */
 export function liveWindowFromMs(ms: number | null | undefined): LiveWindow {
 	if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) {
@@ -93,24 +89,22 @@ export function liveWindowFromMs(ms: number | null | undefined): LiveWindow {
 }
 
 /**
- * Default ceiling on retained live ticks regardless of the chosen window - a
- * backstop so a very long "full run" (or a misbehaving high tick rate) can't
- * grow memory without bound. ~83 min at the default 10 Hz tick.
+ * Default ceiling on retained live ticks whatever the chosen window: a backstop so a very long
+ * "full run" (or a misbehaving high tick rate) cannot grow memory without bound. ~83 min at the
+ * default 10 Hz tick.
  *
- * It is a **memory** bound, not a rendering one. `bucketColumns` collapses ticks
- * into `chartBucketSeconds` buckets (0.5s by default) before uPlot sees them, so
- * a full window reaches the canvas as a few thousand points however many ticks
- * back it - and uPlot draws to canvas, so there is no per-point DOM cost either
- * way. What this bounds is the array of tick objects in the dashboard store.
+ * A **memory** bound, not a rendering one: `bucketColumns` collapses ticks into
+ * `chartBucketSeconds` buckets (0.5s by default) before uPlot sees them, so a full window reaches
+ * the canvas as a few thousand points however many ticks back it, and uPlot draws to canvas with no
+ * per-point DOM cost either way. What this bounds is the array of tick objects in the dashboard
+ * store. Raising it is close to free at stock settings, because the window sizes the retained
+ * history (5 minutes at a 10 Hz tick is 3000 ticks whatever this is); it binds only when window /
+ * tick interval exceeds it.
  *
- * Raising it is close to free at stock settings, because the *window* is what
- * sizes the retained history: 5 minutes at a 10 Hz tick is 3000 ticks whatever
- * this is. It only binds when window / tick-interval exceeds it.
- *
- * Like the window, the live value is the engine's - `liveMaxRetainedTicks`,
- * synced in by useLiveWindowSync - because the engine's replay ring must not
- * retain ticks this side would discard. This constant is the value used until
- * the config query resolves, and must match the engine's DEFAULT_MAX_LIVE_TICKS.
+ * Like the window, the live value is the engine's (`liveMaxRetainedTicks`, synced in by
+ * useLiveWindowSync), because the engine's replay ring must not retain ticks this side would
+ * discard. This constant is the value until the config query resolves, and must match the engine's
+ * DEFAULT_MAX_LIVE_TICKS.
  */
 export const DEFAULT_MAX_RETAINED_TICKS = 50000;
 

@@ -6,26 +6,19 @@
  */
 
 /**
- * Toast queue limits.
- *
- * The timings live in `config/timing.ts` (`TOAST_DURATION_MS`, `TOAST_EXIT_MS`),
- * which is where every UI-facing delay in the app is kept. This file holds what
- * is not a delay.
+ * The notification preferences' options (position, duration scale, stack size, severity floor) and
+ * their persisted shape. The timings are in `config/timing.ts` (`TOAST_DURATION_MS`,
+ * `TOAST_EXIT_MS`) with every UI-facing delay; this file holds what is not a delay.
  */
 
 import type { ToastVariant } from "@/stores/toast-store";
 import type { LabeledOption } from "./client-settings";
 
 /**
- * How many toasts may stack at once. Four is what fits above the fold at the
- * viewport's width without the oldest sliding off the top of the screen.
- *
- * Past that the oldest is dropped. A burst of failures used to stack unbounded,
- * and the ones pushed off-screen were both unreachable and undismissable.
- *
- * This is now the *default* rather than the limit - see `TOAST_STACK_OPTIONS`.
- * The reasoning still sets the default, and still explains why the larger
- * options carry a warning.
+ * The default stack size; `TOAST_STACK_OPTIONS` offers others. Four is what fits above the fold at
+ * the viewport's width without the oldest sliding off the top of the screen; past the size the
+ * oldest is dropped, because a toast pushed off-screen is unreachable and undismissable. The same
+ * reasoning is why the Notifications panel warns about the larger sizes.
  */
 export const MAX_TOASTS = 4;
 
@@ -35,22 +28,18 @@ export type ToastPosition =
 	"bottom-right" | "bottom-left" | "bottom-center" | "top-right" | "top-left" | "top-center";
 
 /**
- * Where the stack anchors, and everything that follows from that choice.
+ * Where the stack anchors, and everything that follows from it.
  *
- * `className` is the whole fixed-position rule rather than a set of fragments,
- * because the offsets are not interchangeable: the viewport is `position:
- * fixed`, so it anchors to the window and not to the layout, and both the top
- * and bottom edges of the window are occupied by app chrome. A bottom position
- * has to clear the Dock and a top position has to clear the title row *and* the
- * tab strip under it, so each edge carries its own tokens - never a round
- * number. See
- * `toast-position.test.tsx`, which exists because a plain `bottom-4` once put
+ * `className` is the whole fixed-position rule, not fragments, because the offsets are not
+ * interchangeable: the viewport is `position: fixed`, so it anchors to the window, not the layout,
+ * and app chrome occupies both the top and bottom edges of the window. A bottom position clears the
+ * Dock and a top one the title row *and* the tab strip under it, so each edge carries its own
+ * tokens, never a round number. `toast-position.test.tsx` holds this; a plain `bottom-4` once put
  * the stack on top of the Dock.
  *
- * `swipe` keeps the dismiss gesture pointing at the nearest window edge. A
- * stack on the left that only dismissed rightwards would be swiped *across* the
- * app to get rid of it. Centre positions have no near side, so they keep the
- * default.
+ * `swipe` points the dismiss gesture at the nearest window edge: a stack on the left that only
+ * dismissed rightwards would be swiped *across* the app. Centre positions swipe toward their own
+ * edge, up or down.
  */
 export interface ToastPositionOption extends LabeledOption<ToastPosition> {
 	readonly swipe: "right" | "left" | "up" | "down";
@@ -59,19 +48,17 @@ export interface ToastPositionOption extends LabeledOption<ToastPosition> {
 
 const BOTTOM = "bottom-[calc(var(--dock-height)+1rem)]";
 /*
- * Both chrome rows, not just the title bar. The top of the window is two bands
- * now - the title row, and the tab strip beside the drawer's header - and a
- * stack that cleared only the first landed on whichever of the two was under
- * it. Every top position crosses at least one of them: left over the drawer
- * band, centre and right over the tabs.
+ * Both chrome rows, not just the title bar: the top of the window is the title row and, beside the
+ * drawer's header, the tab strip, and a stack that cleared only the first landed on whichever was
+ * under it. Every top position crosses at least one: left over the drawer band, centre and right
+ * over the tabs.
  */
 const TOP = "top-[calc(var(--titlebar-height)+var(--tabstrip-height)+1rem)]";
 
 /*
- * Order matters: this array is rendered straight into a 3-column grid, so the
- * picker reads as a map of the window - top row on top, bottom row underneath,
- * left/centre/right across. Sorting it any other way (by name, or default
- * first) puts "Bottom right" in the top-left cell, which is what it used to do.
+ * Order matters: this array is rendered straight into a 3-column grid, so the picker reads as a map
+ * of the window (top row on top, bottom row underneath, left/centre/right across). Any other order
+ * (by name, or default first) puts "Bottom right" in the top-left cell.
  */
 export const TOAST_POSITIONS: readonly ToastPositionOption[] = [
 	{ value: "top-left", label: "Top left", swipe: "left", className: `${TOP} left-4` },
@@ -112,12 +99,10 @@ export function toastPositionOption(value: ToastPosition): ToastPositionOption {
 export type ToastDurationScale = "short" | "default" | "long" | "never";
 
 /**
- * A multiplier over `TIMING.TOAST_DURATION_MS`, not a replacement for it.
- *
- * Those durations are per variant on purpose - a confirmation is read at a
- * glance while a failure often names a cause that takes longer to take in - and
- * a flat "5 seconds for everything" setting would throw that away. Scaling
- * keeps the ratio and still lets someone who reads quickly halve the lot.
+ * A multiplier over `TIMING.TOAST_DURATION_MS`, not a replacement: those durations are per variant
+ * on purpose (a confirmation is read at a glance, a failure often names a cause that takes longer),
+ * and a flat "5 seconds for everything" would throw that away. Scaling keeps the ratio and still
+ * lets a quick reader halve the lot.
  */
 export interface ToastDurationOption extends LabeledOption<ToastDurationScale> {
 	/** Multiplier applied to the variant's tuned duration. */
@@ -139,11 +124,9 @@ export const TOAST_DURATION_SCALES: readonly ToastDurationOption[] = [
 export const DEFAULT_TOAST_DURATION_SCALE: ToastDurationScale = "default";
 
 /**
- * Stand-in for "does not auto-dismiss".
- *
- * Not `Infinity`: the primitive arms a real `setTimeout`, and a non-finite
- * delay there is coerced to 1 - the opposite of what was asked for. A day is
- * longer than any session and still a number.
+ * Stand-in for "does not auto-dismiss". Not `Infinity`: the primitive arms a real `setTimeout`,
+ * which coerces a non-finite delay to 1, the opposite of what was asked. A day is longer than any
+ * session and still a number.
  */
 export const NEVER_DISMISS_MS = 24 * 60 * 60 * 1000;
 
@@ -163,10 +146,9 @@ export const TOAST_STACK_OPTIONS: readonly LabeledOption<number>[] = [
 export type ToastSeverityFloor = "all" | "warning" | "error" | "none";
 
 /**
- * Rank per variant, so the floor is one comparison rather than four branches.
- *
- * `info` and `success` share a rank deliberately: they differ in tone, not in
- * how much the user needs them. Someone silencing chatter wants both gone.
+ * Rank per variant, so the floor is one comparison, not four branches. `info` and `success` share a
+ * rank on purpose: they differ in tone, not in how much the user needs them, and someone silencing
+ * chatter wants both gone.
  */
 export const TOAST_SEVERITY_RANK: Record<ToastVariant, number> = {
 	info: 0,
