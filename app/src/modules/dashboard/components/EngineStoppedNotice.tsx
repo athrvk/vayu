@@ -6,15 +6,12 @@
  */
 
 /**
- * The dashboard's notice for a load test the engine's process ended under
- * (#3605), with the Restart that brings an engine back to serve its report.
- *
- * Its own component, so that the hook's query client is needed only where
- * this phase is drawn. Restart shares `useEngineRestart` with the Dock and the
- * Settings banner, and so shares their one-at-a-time flag: pressed while
- * either is running it reads Restarting and does nothing more. It is offered
- * only while no engine is serving, because restarting a running engine to load
- * a report would kill the thing it is waiting on.
+ * The dashboard's notice for a load test whose engine process ended under it (#3605), with the
+ * Restart that brings an engine back to serve its report. Its own component, so the hook's query
+ * client is needed only where this phase is drawn. Restart shares `useEngineRestart`, and so its
+ * one-at-a-time flag, with the Dock and the Settings banner: pressed while either runs, it reads
+ * Restarting and does nothing more. Offered only while no engine is serving, as restarting a
+ * running engine to load a report would kill the thing it waits on.
  */
 
 import { Callout } from "@/components/shared";

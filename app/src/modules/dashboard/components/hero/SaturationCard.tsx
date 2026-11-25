@@ -15,13 +15,9 @@ import { pluralize } from "../../utils/format";
 import { HeroCardShell } from "./HeroCardShell";
 
 /**
- * The `-text` variants, not the bare fill tokens.
- *
- * This was an inline `style={{ color: "hsl(var(--warning))" }}`. Measured on
- * `--card`, `--warning` is 2.14 and `--destructive` 1.73 - this is the same
- * "fill token used as a foreground" bug swept out of the app earlier, and it
- * survived because the guard scans for the `text-<family>` *class* and an
- * inline style is invisible to it. The guard now covers both forms.
+ * The `-text` variants, not the bare fill tokens: on `--card`, `--warning` measures 2.14 and
+ * `--destructive` 1.73 as a foreground. The guard scans for the `text-<family>` class and for an
+ * inline `style` colour alike.
  */
 const WARNING_CLASS = "text-warning-text";
 
@@ -95,11 +91,10 @@ function P99Crossed({
 }
 
 /**
- * ramp_up hero card #2 - whether the server has hit its capacity ceiling.
- * "Degrading" when p99 has crossed the SLO breakpoint or transport errors have
- * appeared; the call-out names the concurrency at which degradation began.
- * A capacity run reads {@link CapacitySaturationCard} instead, which never says
- * "healthy": a search that found no limit has not shown the target healthy.
+ * ramp_up hero card #2: whether the server has hit its capacity ceiling. "Degrading" when p99 has
+ * crossed the SLO breakpoint or transport errors have appeared, the call-out naming the concurrency
+ * where degradation began. A capacity run reads {@link CapacitySaturationCard} instead, which never
+ * says "healthy": a search that found no limit has not shown the target healthy.
  */
 export function SaturationCard({
 	breakpoint,
@@ -241,11 +236,10 @@ function ErrorCount({ failedRequests, live }: { failedRequests: number; live: bo
 }
 
 /**
- * capacity hero card #2 - what the adaptive search concluded about the target.
- * The search ends on a reason the engine records in the report, so a live run
- * reads "searching" (with the ticks' p99 crossing as evidence) and a finished
- * one words that reason. "No limit found" is the neutral reading of a search
- * that ran out of ceiling, time or patience, and "healthy" is never printed.
+ * capacity hero card #2: what the adaptive search concluded about the target. The search ends on a
+ * reason the engine records in the report, so a live run reads "searching" (with the ticks' p99
+ * crossing as evidence) and a finished one words that reason. "No limit found" is the neutral
+ * reading of a search that ran out of ceiling, time or patience; "healthy" is never printed.
  */
 export function CapacitySaturationCard({
 	capacity,

@@ -6,20 +6,18 @@
  */
 
 /**
- * A finished load run as a file to share (#2139): the run tab's header and the
- * post-run dashboard's both mount it, and each mounts it only for a finished
- * load run - the engine refuses any other (`read_exportable_run`).
+ * A finished load run as a file to share (#2139). The run tab's header and the post-run dashboard's
+ * both mount it, each only for a finished load run: the engine refuses any other
+ * (`read_exportable_run`).
  *
- * The engine writes the document, names the file and picks its type; this menu
- * asks, then hands the answer to `downloadTextFile` untouched, and says
- * "Exported" only once the file is written (#3246): a cancelled save dialog is
- * silent, a failed write says why. A failed export downloads nothing and says
- * why, in the engine's words.
+ * The engine writes the document, names the file and picks its type; this menu asks, hands the
+ * answer to `downloadTextFile` untouched, and says "Exported" only once the file is written
+ * (#3246): a cancelled save dialog is silent, and a failed write or export downloads nothing and
+ * says why, in the engine's words.
  *
- * The items are `runExportActions`, the list the palette's export commands are
- * generated from, and the palette reaches them through this menu's own handler
- * (`useRegisterExportRunSurface`): the comparison toggle below decides what a
- * palette export carries too.
+ * The items are `runExportActions`, the list the palette's export commands are generated from, and
+ * the palette reaches them through this menu's own handler (`useRegisterExportRunSurface`), so the
+ * comparison toggle below decides what a palette export carries too.
  */
 
 import { useId, useState } from "react";

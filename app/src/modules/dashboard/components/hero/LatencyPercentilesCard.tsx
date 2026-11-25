@@ -12,16 +12,13 @@ import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell } from "./HeroCardShell";
 
 /**
- * Tail latency beside throughput for the modes whose stats row has no p99 of
- * its own (constant_rps, constant_concurrency, iterations): the first screen
- * answers "how fast, and how slow at the tail" without a scroll. Values cover
- * the run so far - the live tick's cumulative percentiles, or the final
- * report's once the run completes - so the mean and median beside the tail
- * describe the same population (issue #2385), not the last 100 ms.
- *
- * `pooledLatency` is set for a scenario load run: the figures pool every step,
- * so the card says so and names the slowest step where the producer knows it
- * (#2823).
+ * Tail latency beside throughput for the modes whose stats row has no p99 of its own (constant_rps,
+ * constant_concurrency, iterations), so the first screen answers "how fast, and how slow at the
+ * tail" without a scroll. Values cover the run so far (the live tick's cumulative percentiles, or
+ * the final report's once complete), so the mean and median beside the tail describe the same
+ * population (issue #2385), not the last 100 ms. `pooledLatency` is set for a scenario load run:
+ * the figures pool every step, so the card says so and names the slowest step where the producer
+ * knows it (#2823).
  */
 export function LatencyPercentilesCard({
 	p95,

@@ -64,11 +64,10 @@ function LatencyCard({ d }: { d: DashboardDerived }) {
 
 /** The two mode-sensitive hero cards (card #1 and card #2). */
 function renderModeCards(d: DashboardDerived) {
-	// "Active virtual users" is an instantaneous metric - it's 0 once the run
-	// ends. On completed runs show the peak reached instead, so the live-only
-	// concurrency cards stay meaningful in the historical view. The utilisation
-	// card in constant_concurrency prefers the mean on the wire (`avgInFlight`)
-	// and uses this only for a run stored before the mean existed.
+	// "Active virtual users" is instantaneous and 0 once the run ends, so a completed run shows the
+	// peak reached, keeping the live-only concurrency cards meaningful in the historical view.
+	// constant_concurrency's utilisation card prefers the mean on the wire (`avgInFlight`) and uses
+	// this only for a run stored before the mean existed.
 	const activeConcurrency = d.isCompleted ? d.peakConcurrency : d.currentConcurrency;
 	switch (d.mode) {
 		case "constant_concurrency":
@@ -99,14 +98,12 @@ function renderModeCards(d: DashboardDerived) {
 					/>
 				</>
 			);
-		// Capacity discovery climbs toward the ceiling the user set, so the
-		// question its hero answers is "how far up is it, and has the target
-		// given out yet" - the same pair `ramp_up` asks, read against the cap
-		// rather than against a planned curve. `ConcurrencyUtilCard` is not
-		// reused either: its "N of 100 active" reads progress toward the ceiling
-		// as load held (#2929). `CurrentConcurrencyCard` is
-		// deliberately not reused here: its subtitle states a ramp duration and
-		// a ramp lag, and a search has neither.
+		// Capacity discovery climbs toward the user's ceiling, so its hero answers "how far up is
+		// it, and has the target given out yet", `ramp_up`'s pair read against the cap rather than
+		// a planned curve. Neither concurrency card is reused: `ConcurrencyUtilCard`'s "N of 100
+		// active" reads progress toward the ceiling as load held (#2929), and
+		// `CurrentConcurrencyCard`'s subtitle states a ramp duration and a ramp lag, which a search
+		// has neither of.
 		case "capacity":
 			return (
 				<>

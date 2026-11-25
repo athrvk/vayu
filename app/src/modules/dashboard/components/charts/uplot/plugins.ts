@@ -6,14 +6,11 @@
  */
 
 /**
- * uPlot plugins for Vayu - the diagnostic-interactivity layer.
- *
- * The point of the Canvas migration is not prettier lines; it is letting a user
- * *understand the service under test*: read exact values at any instant,
- * correlate metrics at that instant, zoom into the moment of degradation, and
- * see computed insights (the capacity breakpoint, the target rate, the SLO)
- * marked on the axes. These plugins provide those affordances; uPlot's built-ins
- * (drag-zoom, cursor.sync) provide the rest.
+ * uPlot plugins for Vayu, the diagnostic-interactivity layer: what lets a user *understand the
+ * service under test*, reading exact values at any instant, correlating metrics at that instant,
+ * zooming into the moment of degradation, and seeing computed insights (the capacity breakpoint,
+ * the target rate, the SLO) marked on the axes. uPlot's built-ins (drag-zoom, cursor.sync) provide
+ * the rest.
  */
 
 import type uPlot from "uplot";
@@ -167,14 +164,11 @@ function drawMarkers(u: uPlot, markers: readonly Marker[], theme: UplotTheme): P
 }
 
 /**
- * A shaded x-axis window: the chart's way of saying "this interval was
- * different". Where a {@link Marker} pins one value, an annotation covers the
- * span a condition held for - the run's degradation windows, drawn on the same
- * axis as the metric that degraded.
- *
- * Chart-layer vocabulary on purpose: it carries a span, a colour role and a
- * label, and knows nothing about what made the window interesting. The semantic
- * wrappers map their domain findings onto it.
+ * A shaded x-axis window, the chart's way of saying "this interval was different": where a
+ * {@link Marker} pins one value, an annotation covers the span a condition held for (the run's
+ * degradation windows), on the axis of the metric that degraded. Chart-layer vocabulary on purpose:
+ * a span, a colour role and a label, knowing nothing of what made the window interesting; the
+ * semantic wrappers map their findings onto it.
  */
 export interface Annotation {
 	/** Window start on the x axis (elapsed seconds). */

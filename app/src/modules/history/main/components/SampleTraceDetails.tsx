@@ -6,11 +6,9 @@
  */
 
 /**
- * What a stored sample's trace says beyond its timing: the error type, the data
- * row it bound and the assertions that failed.
- *
- * Each block is absent when the trace does not carry its field, so a plain
- * success sample expands to exactly what it did before.
+ * What a stored sample's trace says beyond its timing: the error type, the data row it bound and
+ * the assertions that failed. Each block is absent when the trace lacks its field, so a plain
+ * success sample expands to timing alone.
  */
 
 import { Callout } from "@/components/shared";
