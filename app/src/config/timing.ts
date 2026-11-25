@@ -10,8 +10,10 @@
 /*
  * The auto-save delay is deliberately not here: it is a user setting, not a fixed timing
  * (`autoSave.delayMs` in `constants/client-settings.ts`, chosen in Settings → General and read by
- * `useSaveManager`). A copy here would drift from the real default, and this file is where
- * CLAUDE.md tells you to look for a millisecond value.
+ * `useSaveManager`). An `AUTO_SAVE_DELAY_MS` here would drift from the real default, and this file
+ * is where CLAUDE.md tells you to look for a millisecond value. The name stays in this note:
+ * `docs/app/state-management/draft-hooks.md` cites its removal, and `state-management-doc.test.ts`
+ * counts comments as source.
  */
 export const TIMING = {
 	/**
