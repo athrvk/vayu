@@ -6,12 +6,10 @@
  */
 
 /**
- * @brief `get_graphql_schema`'s pure parts: the introspection payload, the
- *        reading of the endpoint's answer, and the SDL printer (#2097).
- *
- * `graphql` is imported on demand inside the calls that need it, never at the
- * top: the MCP barrel loads every tool file, and an agent that never asks for
- * a schema should not pay for parsing the library.
+ * @brief `get_graphql_schema`'s pure parts: the introspection payload, the reading of the
+ *        endpoint's answer, and the SDL printer (#2097). `graphql` is imported on demand inside the
+ *        calls that need it, never at the top: the MCP barrel loads every tool file, and an agent
+ *        that never asks for a schema should not pay for parsing the library.
  */
 
 import type { IntrospectionQuery } from "graphql";
@@ -99,15 +97,12 @@ function headerLinesOf(headers: unknown): Array<{ name: string; value: string }>
 }
 
 /**
- * The introspection query overlaid onto a composed payload: the main-process
- * twin of the renderer's `buildIntrospectionRequest`
- * (`src/lib/graphql/introspect.ts`), which this tree cannot import.
- * `introspection-payload.conformance.test.ts` holds the two to one answer.
- *
- * Only url, headers and a concrete auth are carried over; the composed body,
- * elements and the rest belong to sending the request, not to reading its
- * schema. `transient` files no run row (#382), and `environmentId` scopes the
- * cookie jar the engine sends through.
+ * The introspection query overlaid onto a composed payload: the main-process twin of the renderer's
+ * `buildIntrospectionRequest` (`src/lib/graphql/introspect.ts`), which this tree cannot import;
+ * `introspection-payload.conformance.test.ts` holds the two to one answer. Only url, headers and a
+ * concrete auth are carried over; the composed body, elements and the rest belong to sending the
+ * request, not reading its schema. `transient` files no run row (#382), and `environmentId` scopes
+ * the cookie jar the engine sends through.
  */
 export async function introspectionPayload(
 	composed: Record<string, unknown>,

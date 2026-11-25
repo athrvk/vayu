@@ -28,14 +28,11 @@ export interface CollectionRow {
 }
 
 /**
- * The collection a row sits under, or `null` for a root one.
- *
- * Two spellings reach here for "no parent": the engine serializes a root
- * collection's `parentId` as `null`, while a row that has been through a client
- * whose type calls it optional can arrive without the key at all. An empty
- * string is the third - what the cascade walk has always treated as a root.
- * Comparing raw values would file a root collection under a parent named "",
- * which is a destination that does not exist.
+ * The collection a row sits under, or `null` for a root one. Three spellings reach here for "no
+ * parent": the engine serializes a root's `parentId` as `null`, a row that has been through a
+ * client whose type calls it optional can arrive without the key, and an empty string is what the
+ * cascade walk has always treated as a root. Comparing raw values would file a root collection
+ * under a parent named "", a destination that does not exist.
  */
 export function collectionParent(row: CollectionRow): string | null {
 	// One definition of the rule, shared with the chain walk `resolve_variables`
@@ -54,14 +51,11 @@ export function readCollectionRows(value: unknown): CollectionRow[] {
 }
 
 /**
- * Every collection a cascade delete of `rootId` destroys, root first - itself
- * plus every descendant, since collections nest through `parentId` and
- * `DELETE /collections/:id` takes the whole subtree with it.
- *
- * Null when `rootId` is not in the list: the caller must say "no such
- * collection" rather than ask the user to confirm destroying nothing. The
- * `seen` set is what stops a malformed parent cycle from looping forever - the
- * engine rejects cycles on write, but this walk reads whatever is stored.
+ * Every collection a cascade delete of `rootId` destroys, root first: itself plus every descendant,
+ * since collections nest through `parentId` and `DELETE /collections/:id` takes the whole subtree.
+ * Null when `rootId` is not in the list, so the caller says "no such collection" rather than asking
+ * the user to confirm destroying nothing. The `seen` set stops a malformed parent cycle from
+ * looping forever: the engine rejects cycles on write, but this walk reads whatever is stored.
  */
 export function collectionSubtree(rows: CollectionRow[], rootId: string): string[] | null {
 	if (!rows.some((row) => row.id === rootId)) return null;
@@ -92,13 +86,11 @@ export interface CascadeScope {
 }
 
 /**
- * Read the subtree `collectionId` roots and count what goes with it.
- *
- * Every count here is read from the engine rather than assumed, because it is
- * the number the user agrees to: a prompt that guessed would be asking consent
- * for something other than what happens. A failed read therefore throws instead
- * of degrading to "0 requests" - `ToolArgError` for a collection that does not
- * exist, the transport error otherwise, and either way nothing is deleted.
+ * Read the subtree `collectionId` roots and count what goes with it. Every count is read from the
+ * engine rather than assumed, because it is the number the user agrees to: a prompt that guessed
+ * would ask consent for something other than what happens. A failed read therefore throws instead
+ * of degrading to "0 requests" (`ToolArgError` for a collection that does not exist, the transport
+ * error otherwise), and either way nothing is deleted.
  */
 export async function readCascadeScope(
 	client: EngineClient,

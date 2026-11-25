@@ -85,12 +85,11 @@ function engineErrorOf(resp: Record<string, unknown>): { error: string } | undef
 }
 
 /**
- * An `mcp` request's failure as the engine reports it (`mcp: {errorClass, code?,
- * message}`, `{}` on success), as a row's `mcp` (#3809). Absent when the node
- * names no class, which is every success and every non-`mcp` request, and when
- * the exchange itself failed: `engineErrorOf` already says so, and the engine
- * files that under `transport` too. `message` is server-controlled text,
- * masked with the row's other strings by the projection `runOutputShape` returns.
+ * An `mcp` request's failure as the engine reports it (`mcp: {errorClass, code?, message}`, `{}` on
+ * success), as a row's `mcp` (#3809). Absent when the node names no class (every success and every
+ * non-`mcp` request) and when the exchange itself failed: `engineErrorOf` already says so, and the
+ * engine files that under `transport` too. `message` is server-controlled text, masked with the
+ * row's other strings by the projection `runOutputShape` returns.
  */
 function mcpFailureOf(
 	resp: Record<string, unknown>
@@ -337,16 +336,13 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					// the list the agent is shown.
 					const tests = readTestVerdict(resp);
 					const testsOk = !tests || tests.failed === 0;
-					// The contract's own verdict, folded in the way `testResults`
-					// folds (issue #681): a response the document declares a
-					// schema for and that does not match it is a failed request.
-					// Only a *checked* verdict can fail one - `checked: false`
-					// says the response could not be judged, which is not the
-					// same as judged and wrong, and failing a smoke run on it
-					// would make an undocumented status look like a broken API.
-					//
-					// `failOnSchemaError: false` unfolds it (issue #720): the
-					// verdict still rides the row, it just stops deciding `ok`.
+					// The contract's own verdict, folded in as `testResults` folds (issue #681): a
+					// response the document declares a schema for and that does not match it is a
+					// failed request. Only a *checked* verdict can fail one: `checked: false` means
+					// the response could not be judged, not that it was judged wrong, and failing a
+					// smoke run on it would make an undocumented status look like a broken API.
+					// `failOnSchemaError: false` unfolds it (issue #720): the verdict still rides
+					// the row but stops deciding `ok`.
 					const schema = readSchemaVerdict(resp);
 					const schemaOk =
 						!failOnSchemaError || !(schema?.checked === true && schema.valid === false);
@@ -465,13 +461,12 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				.describe(
 					"Set true to end an iteration at every errored step, a script error and a transport failure included. Left off (the default), an errored step (a script that threw, a request that got no response, an unbindable data row) stays `errored` with its message and the iteration moves on to the next request, as in Postman and Newman; the runner's own refusals (an unresolved setNextRequest target, the maxStepsPerIteration cap) end the iteration either way. What an error cost is counted in `stepsNotRun`."
 				),
-			// Only `timers` - not `scripts` - from #1495's override block
-			// (issue #1559): unlike a scenario load run, this design-mode
-			// runner has no inline/deferred distinction for script.pre/
-			// script.post to make, but it does run timer.pacing/timer.think
-			// waits (`execute_scenario_run` wires `RunContext::timers_override`
-			// exactly as the load path does - see `elementsTimersInput`'s doc
-			// comment), so silencing them here is real, not a no-op control.
+			// Only `timers`, not `scripts`, from #1495's override block (issue #1559): this
+			// design-mode runner has no inline/deferred distinction for script.pre/script.post to
+			// make, but it does run timer.pacing/timer.think waits (`execute_scenario_run` wires
+			// `RunContext::timers_override` exactly as the load path does, see
+			// `elementsTimersInput`'s doc comment), so silencing them here is real, not a no-op
+			// control.
 			elements: z
 				.strictObject({ timers: elementsTimersInput() })
 				.optional()
@@ -520,12 +515,11 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					iterations
 				),
 				...(environmentId !== undefined ? { environmentId } : {}),
-				// Top-level, beside `scenario` rather than inside it: that is where
-				// `read_fail_on_schema_error` looks, and where the app's dialog puts
-				// it. Omitted when off - the engine's default - so a run snapshot
-				// carries the key exactly when it changed what "failed" meant, which
-				// is what keeps a payload written before the flag existed reading the
-				// way it always did.
+				// Top-level, beside `scenario` rather than inside it: where
+				// `read_fail_on_schema_error` looks and where the app's dialog puts it. Omitted
+				// when off (the engine's default), so a run snapshot carries the key exactly when
+				// it changed what "failed" meant, which keeps a payload written before the flag
+				// existed reading as it always did.
 				...(args.failOnSchemaError === true ? { failOnSchemaError: true } : {}),
 				// Top-level and omitted when off, on the same terms: the engine's
 				// default is false, and a snapshot carries the key exactly when it
