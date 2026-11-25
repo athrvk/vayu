@@ -33,16 +33,13 @@ import {
 } from "./kit.js";
 
 /**
- * Run types, statuses and outcomes `list_runs` filters on, spelled as the engine
- * parses them (`parse_run_type` / `parse_run_status`, engine `types.hpp`; the
- * outcome is the verdict stored on the row, #3547) and matching
- * the renderer's own `Run` union in `app/src/types/domain.ts`.
- *
- * Restated here rather than imported because `electron/` shares no module graph
- * with `app/src/` - the same reason `HTTP_VERSIONS` has its own copy. Declared
- * as Zod enums so an unrecognised value is a refusal: `GET /runs` *ignores* a
- * filter it cannot parse, so a typo would otherwise answer the unfiltered page
- * and read as "nothing matched anywhere".
+ * Run types, statuses and outcomes `list_runs` filters on, spelled as the engine parses them
+ * (`parse_run_type` / `parse_run_status`, engine `types.hpp`; the outcome is the verdict stored on
+ * the row, #3547) and matching the renderer's own `Run` union in `app/src/types/domain.ts`.
+ * Restated because `electron/` shares no module graph with `app/src/` (as `HTTP_VERSIONS` has its
+ * own copy). Declared as Zod enums so an unrecognised value is a refusal: `GET /runs` *ignores* a
+ * filter it cannot parse, so a typo would otherwise answer the unfiltered page and read as "nothing
+ * matched anywhere".
  */
 export const RUN_TYPES = ["design", "load", "scenario"] as const;
 export const RUN_STATUSES = ["pending", "running", "completed", "failed", "stopped"] as const;
@@ -56,14 +53,12 @@ export const RUN_OUTCOMES = ["passed", "failed", "not_judged"] as const;
 export const DEFAULT_RUN_SAMPLE_LIMIT = 25;
 
 /**
- * Default and ceiling for the two per-tick series reads.
- *
- * The engine defaults these to 5000 rows and caps them at 50000 - sized for the
- * dashboard's charts, which draw every point and show a human the shape. An
- * agent reads them as JSON through a context window, so both are far past what
- * a tool result can carry, and the #319 lesson (`get_live_metrics` returning
- * whatever a run had accumulated) is that the bound belongs on this side of the
- * boundary. Refused rather than clamped, so an agent asking for more is told.
+ * Default and ceiling for the two per-tick series reads. The engine defaults these to 5000 rows and
+ * caps them at 50000, sized for the dashboard's charts, which draw every point and show a human the
+ * shape. An agent reads them as JSON through a context window, so both are far past what a tool
+ * result can carry, and the #319 lesson (`get_live_metrics` returning whatever a run had
+ * accumulated) is that the bound belongs on this side of the boundary. Refused rather than clamped,
+ * so an agent asking for more is told.
  */
 export const DEFAULT_RUN_SERIES_LIMIT = 100;
 export const MAX_RUN_SERIES_LIMIT = 1_000;
@@ -106,15 +101,13 @@ interface PageCursor {
 }
 
 /**
- * What a bounded page did *not* return, disclosed inside the document (#2445).
- *
- * The envelope already carries `total` and `hasMore`, but a bound an agent has
- * to reconstruct from two numbers is one it can miss - the same disclose-in-band
- * rule the smoke matrix and the report's trace budget follow. So `nextOffset`
- * is the offset to read next, and `note` says it in words. `nextOffset` is null
- * and `note` absent when the page is the whole answer: a caveat on a complete
- * read is noise that teaches an agent to skip the caveats that matter. `null`
- * when the engine answered no `pagination` block at all.
+ * What a bounded page did *not* return, disclosed inside the document (#2445). The envelope carries
+ * `total` and `hasMore`, but a bound an agent has to reconstruct from two numbers is one it can
+ * miss (the disclose-in-band rule the smoke matrix and the report's trace budget follow). So
+ * `nextOffset` is the offset to read next and `note` says it in words. `nextOffset` is null and
+ * `note` absent when the page is the whole answer: a caveat on a complete read is noise that
+ * teaches an agent to skip the caveats that matter. `null` when the engine answered no `pagination`
+ * block at all.
  */
 function pageCursor(value: unknown, noun: string): PageCursor | null {
 	if (!isRecord(value) || !isRecord(value.pagination)) return null;
@@ -143,12 +136,10 @@ function pageRecord(shaped: unknown, cursor: PageCursor | null): Record<string, 
 }
 
 /**
- * A run named in words, for the prompt that asks a human to delete it.
- *
- * The same rule `delete_request` follows: a confirmation carrying only an opaque
- * id is not one a person can answer. Every part is optional because a run row is
- * only as descriptive as the snapshot it stored - a malformed one serializes to
- * an empty summary engine-side rather than failing - so this degrades to the id
+ * A run named in words, for the prompt that asks a human to delete it. The rule `delete_request`
+ * follows: a confirmation carrying only an opaque id is not one a person can answer. Every part is
+ * optional because a run row is only as descriptive as the snapshot it stored (a malformed one
+ * serializes to an empty summary engine-side rather than failing), so this degrades to the id
  * instead of printing "undefined".
  */
 export function describeRun(runId: string, run: Record<string, unknown>): string {
@@ -171,13 +162,11 @@ export function describeRun(runId: string, run: Record<string, unknown>): string
 }
 
 /**
- * A webhook inbox named in words, for the prompt that asks a human to delete it.
- *
- * The capture count is the part that has to be there: a stopped inbox holding
- * 40 recorded webhooks and one holding none are the same call with very
- * different consequences, and only this sentence tells them apart. It is stated
- * even at zero, because "captures 0 requests" is the reassurance that makes the
- * prompt answerable - an absent count reads as unknown, not as none.
+ * A webhook inbox named in words, for the prompt that asks a human to delete it. The capture count
+ * has to be there: a stopped inbox holding 40 recorded webhooks and one holding none are the same
+ * call with very different consequences, and only this sentence tells them apart. It is stated even
+ * at zero, because "captures 0 requests" is the reassurance that makes the prompt answerable; an
+ * absent count reads as unknown, not as none.
  */
 export function describeInbox(inboxId: string, inbox: Record<string, unknown>): string {
 	const parts: string[] = [];
@@ -189,13 +178,11 @@ export function describeInbox(inboxId: string, inbox: Record<string, unknown>): 
 }
 
 /**
- * The `GET /runs` query a `list_runs` call describes.
- *
- * Only the filters the caller actually stated travel. An omitted one must not
- * reach the URL as `type=undefined`: the engine ignores a filter it cannot
- * parse, so that spelling happens to behave like "unfiltered" today - by way of
- * the same rule that silently swallows a typo. Sending nothing is the honest
- * form, and leaves the schema as the only thing rejecting a bad value.
+ * The `GET /runs` query a `list_runs` call describes. Only the filters the caller stated travel. An
+ * omitted one must not reach the URL as `type=undefined`: the engine ignores a filter it cannot
+ * parse, so that spelling happens to behave like "unfiltered" today, by way of the same rule that
+ * silently swallows a typo. Sending nothing is the honest form and leaves the schema as the only
+ * thing rejecting a bad value.
  */
 export function runListQuery(args: Record<string, unknown>): RunListQuery {
 	const query: RunListQuery = {
@@ -211,15 +198,12 @@ export function runListQuery(args: Record<string, unknown>): RunListQuery {
 }
 
 /**
- * A paginated engine read whose result says what it left behind: one JSON
- * document, also returned as `structuredContent` for the tools'
- * `pagedEnvelopeSchema`. A caveat appended as a second text block made
- * the answer stop parsing as JSON exactly when there was a page two (#2445).
- *
- * `shape` is the same seam {@link callEngine} offers. The cursor is computed
- * from the engine's unshaped `pagination` and written onto the shaped record
- * afterwards, so it describes the page the engine answered rather than a
- * body-bounded copy, and the withholding pass never reads the note.
+ * A paginated engine read whose result says what it left behind: one JSON document, also returned
+ * as `structuredContent` for the tools' `pagedEnvelopeSchema`. A caveat appended as a second text
+ * block made the answer stop parsing as JSON exactly when there was a page two (#2445). `shape` is
+ * the same seam {@link callEngine} offers. The cursor is computed from the engine's unshaped
+ * `pagination` and written onto the shaped record afterwards, so it describes the page the engine
+ * answered rather than a body-bounded copy, and the withholding pass never reads the note.
  */
 export async function pagedRead(
 	ctx: ToolContext,
@@ -260,24 +244,21 @@ function describeIdentity(identity: RunIdentity): string {
 }
 
 /**
- * The run pinned as baseline for whatever saved request or collection
- * @p targetRunId ran - `compare_runs`'s answer when the caller named no base,
- * tool and prompt alike: the prompt asked for both ids while the tool resolved
- * one, so the same question reached the agent two ways (issue #760). Exported
- * for the prompt rather than copied into it, since a second resolution rule
- * would be a second definition of "the baseline".
+ * The run pinned as baseline for whatever saved request or collection @p targetRunId ran:
+ * `compare_runs`'s answer when the caller named no base, tool and prompt alike (the prompt asked
+ * for both ids while the tool resolved one, so the same question reached the agent two ways, issue
+ * #760). Exported for the prompt rather than copied into it, since a second resolution rule would
+ * be a second definition of "the baseline".
  *
- * Resolution is the engine's, not a scan here: `GET /runs?baseline=true&
- * requestId=...` (or `collectionId=...` for a load run over a collection) is
- * ordered newest-first, so "the baseline" is its first row. That is the same
- * question the history view's vs-baseline strip asks, so an agent and the UI
- * compare a run against the same pin.
+ * Resolution is the engine's, not a scan here: `GET /runs?baseline=true&requestId=...` (or
+ * `collectionId=...` for a load run over a collection) is ordered newest-first, so "the baseline"
+ * is its first row. That is the question the history view's vs-baseline strip asks, so an agent and
+ * the UI compare a run against the same pin.
  *
- * Every way this can fail to find one throws a message naming the fix, because
- * the alternative - silently comparing against some other run - is a wrong
- * answer presented as a right one. A run that has neither a saved request nor
- * a collection behind it (an ad-hoc load run) has nothing to resolve *through*,
- * which is a different problem from an identity with no pin, and says so.
+ * Every way this can fail to find one throws a message naming the fix, because silently comparing
+ * against some other run is a wrong answer presented as a right one. A run with neither a saved
+ * request nor a collection behind it (an ad-hoc load run) has nothing to resolve *through*, a
+ * different problem from an identity with no pin, and says so.
  */
 export async function resolveBaseline(
 	targetRunId: string,
@@ -314,12 +295,11 @@ export async function resolveBaseline(
 }
 
 /**
- * Why @p comparison must not be answered with its deltas, or `null` when it
- * can be (#2438). Runs of different types measure different things, so a load
- * test's throughput against a collection run's is not a regression either way.
- * Shared by the `compare_runs` tool and prompt so neither hands a model deltas
- * the other refuses. `compareReports` itself keeps the `run_type` entry: the
- * History strip and the run-report export show it rather than refusing.
+ * Why @p comparison must not be answered with its deltas, or `null` when it can be (#2438). Runs of
+ * different types measure different things, so a load test's throughput against a collection run's
+ * is not a regression either way. Shared by the `compare_runs` tool and prompt so neither hands a
+ * model deltas the other refuses. `compareReports` itself keeps the `run_type` entry: the History
+ * strip and the run-report export show it rather than refusing.
  */
 export function runTypeRefusal(comparison: RunComparison): string | null {
 	const mismatch = comparison.comparability.find((entry) => entry.code === "run_type");
