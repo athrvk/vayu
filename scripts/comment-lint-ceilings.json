@@ -1,9 +1,5 @@
 {
   "files": {
-    "app/electron/constants.ts": 2,
-    "app/electron/file-ipc.ts": 2,
-    "app/electron/file-trust-client.ts": 1,
-    "app/electron/json-store.ts": 1,
     "app/electron/main.ts": 1,
     "app/electron/mcp/engine-client.ts": 2,
     "app/electron/mcp/listener.ts": 1,
