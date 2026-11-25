@@ -6,8 +6,9 @@
  */
 
 /**
- * @brief See the header: the `x-vayu-request` / `x-vayu-collection` vocabulary,
- *        its secret redaction, and the checks an import runs before trusting it.
+ * The `x-vayu-request` / `x-vayu-collection` vocabulary, its secret redaction,
+ * and the checks an import runs before trusting it; the header holds the
+ * contract.
  */
 
 #include "vayu/core/vayu_extensions.hpp"
@@ -77,16 +78,15 @@ std::to_array<std::string_view> ({ "client_secret", "client_assertion", "code_ve
 "refresh_token", "access_token", "id_token", "password", "assertion" });
 
 /**
- * The members of a `config` bag that say how to authenticate rather than carry
- * a credential, across every mode stored as `{mode, config}`: an OAuth 2.0
- * config's own fields, AWS (Postman `awsv4`, Insomnia `iam`), digest, NTLM,
- * Hawk, OAuth 1.0, EdgeGrid and JWT. A bag is redacted by *this* list, not by
- * `SECRET_AUTH_KEYS`: the names a bag can hold are open (Insomnia writes
- * `secretAccessKey` and `accessKeyId`, Postman `authKey`, a future type
- * something else), so a name list that has to know every credential misses
- * the first one it did not hear of, and an unlisted member is blanked instead.
- * Identifiers (`username`, `clientId`, `consumerKey`, `authId`) stay, as they
- * do in the named `basic` and `oauth2` blocks.
+ * The `config` bag members that say how to authenticate rather than carry a
+ * credential, across every `{mode, config}` mode: an OAuth 2.0 config's fields,
+ * AWS (Postman `awsv4`, Insomnia `iam`), digest, NTLM, Hawk, OAuth 1.0,
+ * EdgeGrid and JWT. A bag is redacted by this allowlist, not by
+ * `SECRET_AUTH_KEYS`: its names are open (Insomnia writes `secretAccessKey` and
+ * `accessKeyId`, Postman `authKey`, a future type something else), so a list of
+ * credentials misses the first it has not heard of, while here an unlisted
+ * member is blanked. Identifiers (`username`, `clientId`, `consumerKey`,
+ * `authId`) stay, as in the named `basic` and `oauth2` blocks.
  */
 constexpr auto NON_SECRET_CONFIG_KEYS = std::to_array<std::string_view> (
 { // OAuth 2.0 (`OAuth2Config` in the app's `domain.ts`), less `clientSecret`
@@ -754,9 +754,8 @@ std::optional<Json> rows_of (const Json& value) {
 namespace {
 
 /// A `binary` body: its `file` object's string members (`src`, `fileName`,
-/// `contentType`). A missing `file` is a body with
-/// no file chosen; a `file` of another type, or a member that is not a string,
-/// is refused.
+/// `contentType`). A missing `file` is a body with no file chosen; a `file` of
+/// another type, or a non-string member, is refused.
 std::optional<Json> file_body_of (const Json& value) {
     const auto stated = value.find ("file");
     Json file{ { "src", "" } };

@@ -6,12 +6,12 @@
  */
 
 /**
- * @brief The run-report document as Markdown (#2131): a verdict, the run, the
- *        headline numbers, latency against budgets, a streaming run's events
- *        (#3240), a capacity search's result, the contract's coverage and schema
- *        checks, a scenario's sequence and transactions, errors, the comparison
- *        and the warnings, in that order. What each section says is
- *        `run_export_view.cpp`; this file is Markdown's syntax and escaping.
+ * The run-report document as Markdown (#2131), in this order: a verdict, the
+ * run, the headline numbers, latency against budgets, a streaming run's events
+ * (#3240), a capacity search's result, the contract's coverage and schema
+ * checks, a scenario's sequence and transactions, errors, the comparison and
+ * the warnings. What each section says is `run_export_view.cpp`; this file is
+ * Markdown's syntax and escaping.
  */
 
 #include "vayu/core/run_export_markdown.hpp"
@@ -160,9 +160,9 @@ std::string code_span (std::string_view text) {
 } // namespace
 
 std::string escape_markdown_cell (std::string_view text) {
-    // Leading spaces go: two to three of them before a `#` or `1.`, or four
-    // before anything, still open a block after a `- ` prefix, and no reader
-    // of a cell or a heading sees them.
+    // Leading spaces go: two or three before a `#` or `1.`, or four before
+    // anything, still open a block after a `- ` prefix, and no reader of a cell
+    // or heading sees them.
     const std::string collapsed = collapse_breaks (text);
     const std::string_view flat = std::string_view (collapsed).substr (
     std::min (collapsed.find_first_not_of (' '), collapsed.size ()));
