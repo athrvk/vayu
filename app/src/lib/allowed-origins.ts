@@ -6,15 +6,13 @@
  */
 
 /**
- * The `allowedOrigins` a mock server or an inbox starts with (#2367).
- *
- * With none, the listener answers `Access-Control-Allow-Origin: *` and never
- * with credentials; with a list, only those pages may read it, with the user's
- * cookies. The engine refuses a malformed entry with a `400` naming it, so this
- * mirrors the same rules (`origin_shape_error`, `canonical_origin` in
- * `engine/src/http/url_parts.cpp`, and `parse_allowed_origins` in `routes.hpp`)
- * to say so in the form instead of after a round trip. The engine stays the
- * authority: nothing here is needed for correctness, only for the wording.
+ * The `allowedOrigins` a mock server or an inbox starts with (#2367). With none, the listener
+ * answers `Access-Control-Allow-Origin: *` and never with credentials; with a list, only those
+ * pages may read it, with the user's cookies. The engine refuses a malformed entry with a `400`
+ * naming it, so this mirrors its rules (`origin_shape_error`, `canonical_origin` in
+ * `engine/src/http/url_parts.cpp`, and `parse_allowed_origins` in `routes.hpp`) to say so in the
+ * form instead of after a round trip. The engine stays the authority: nothing here is needed for
+ * correctness, only for the wording.
  */
 
 import { pluralize } from "@/modules/dashboard/utils/format";

@@ -6,31 +6,26 @@
  */
 
 /**
- * Dynamic variables - `{{$guid}}`, `{{$timestamp}}`, `{{$randomInt}}`, …
- *
- * A `{{name}}` starting with `$` is not looked up in any scope; it names a
- * **generator** that is called where it is written. Postman and Bruno both have
- * these, so a collection imported from either arrives full of them - and before
- * this table they resolved to an empty string, which made a broken import look
- * like a working one.
+ * Dynamic variables: `{{$guid}}`, `{{$timestamp}}`, `{{$randomInt}}`, … A `{{name}}` starting with
+ * `$` is not looked up in any scope; it names a **generator** called where it is written. Postman
+ * and Bruno both have these, so a collection imported from either arrives full of them, and
+ * resolving them to an empty string would make a broken import look like a working one.
  *
  * Two rules the implementation turns on:
  *
- * - **Per occurrence, not per request.** Every entry is a function called once
- *   per `{{…}}` match, so two `{{$guid}}` in one body differ. A table of
- *   pre-computed values would satisfy every other test and fail this one, which
- *   is the entire point of a `$guid`.
- * - **A user-defined variable of the same name wins.** The resolver consults its
- *   scope map first and only falls through to this table, so a collection that
- *   already defines a literal `$guid` variable keeps the value it had.
+ * - **Per occurrence, not per request.** Every entry is a function called once per `{{…}}` match,
+ *   so two `{{$guid}}` in one body differ. A table of pre-computed values would satisfy every other
+ *   test and fail this one, which is the entire point of a `$guid`.
+ * - **A user-defined variable of the same name wins.** The resolver consults its scope map first
+ *   and only falls through to this table, so a collection that already defines a literal `$guid`
+ *   variable keeps its value.
  *
  * **This is app-side, at interpolation time** (see `docs/app/variable-resolution.md`).
- * `pm.variables.get("$guid")` inside a script is *not* covered - scripts run
- * engine-side, and the engine does no `{{…}}` interpolation. This table is a
- * genuine second implementation of `engine/src/http/request_composer.cpp`'s
- * C++ table, held in parity with it only by the shared conformance fixture
- * (`engine/tests/fixtures/variable-resolution-conformance.json`) and by
- * matching value shapes - there is no shared source.
+ * `pm.variables.get("$guid")` inside a script is *not* covered: scripts run engine-side, and the
+ * engine does no `{{…}}` interpolation there. This table is a genuine second implementation of
+ * `engine/src/http/request_composer.cpp`'s C++ table, held in parity only by the shared conformance
+ * fixture (`engine/tests/fixtures/variable-resolution-conformance.json`) and matching value shapes;
+ * there is no shared source.
  */
 
 /** One generator: the name as written (with `$`), what it makes, and how. */
@@ -61,12 +56,11 @@ function pick(items: readonly string[]): string {
 }
 
 /**
- * RFC 4122 v4, built on `getRandomValues` rather than `crypto.randomUUID` so the
- * renderer, the MCP main process and the test environments all take the same
- * path - `randomUUID` needs a secure context and is absent from some of them.
- * Deliberately not `lib/id.ts`'s `generateUUID`, which is `Math.random`-based:
- * that one stamps an `X-Request-ID` header, this one can end up as the primary
- * key a load test writes a few hundred thousand times.
+ * RFC 4122 v4, built on `getRandomValues` rather than `crypto.randomUUID` so the renderer, the MCP
+ * main process and the test environments take the same path (`randomUUID` needs a secure context
+ * and is absent from some of them). Not `lib/id.ts`'s `generateUUID`, which is `Math.random`-based:
+ * that one stamps an `X-Request-ID` header, this one can become the primary key a load test writes
+ * a few hundred thousand times.
  */
 function uuidV4(): string {
 	const bytes = new Uint8Array(16);
@@ -363,14 +357,11 @@ function jsDateString(date: Date): string {
 }
 
 /**
- * The set Vayu supports, in the order the autocomplete offers it: the identity
- * and time generators first, because they are what imported collections use
- * most, then the `$random*` faker values.
- *
- * Postman's own list runs to about a hundred faker entries. This is the
- * documented subset rather than a partial copy of the rest: a name that is not
- * here does not silently produce an empty string, it stays written as
- * `{{$name}}` in the outgoing request (see `resolveDynamicVariable`).
+ * The set Vayu supports, in the order the autocomplete offers it: the identity and time generators
+ * first, because imported collections use them most, then the `$random*` faker values. Postman's
+ * own list runs to about a hundred faker entries; this is the documented subset, not a partial copy
+ * of the rest: a name not here does not produce an empty string, it stays written as `{{$name}}` in
+ * the outgoing request (see `resolveDynamicVariable`).
  */
 export const DYNAMIC_VARIABLES: readonly DynamicVariable[] = [
 	{
@@ -587,13 +578,10 @@ export function isDynamicVariableName(name: string): boolean {
 }
 
 /**
- * Generate a value for `name` (including the `$`), or `null` when the table
- * does not have it.
- *
- * `null` rather than `""` is the whole contract: the caller leaves an unknown
- * `{{$typo}}` written as it stands, so it reaches the request visibly and the
- * token stays marked unresolved in the UI. An empty string here would recreate
- * the defect this table exists to fix, one typo at a time.
+ * Generate a value for `name` (including the `$`), or `null` when the table does not have it.
+ * `null` rather than `""` is the whole contract: the caller leaves an unknown `{{$typo}}` written
+ * as it stands, so it reaches the request visibly and the token stays marked unresolved in the UI.
+ * An empty string here would bring back the silent empty field, one typo at a time.
  */
 export function resolveDynamicVariable(name: string): string | null {
 	return BY_NAME.get(name)?.generate() ?? null;

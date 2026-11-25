@@ -6,23 +6,18 @@
  */
 
 /**
- * The command registry - every action the app offers by name, declared once.
+ * The command registry: every action the app offers by name, declared once, so the surfaces that
+ * reach one (the native-menu bridge, the Dock, the settings sidebar, a keydown case, the palette)
+ * cannot spell it differently, and the palette can enumerate them.
  *
- * Before this, an action's definition was wherever it happened to be invoked
- * from: "open settings" existed in the native-menu bridge, in the Dock, in the
- * settings sidebar and in a keydown case, each a separate spelling of the same
- * intent. Nothing kept them in step, and nothing could enumerate them - which is
- * why the palette could not offer "do Y" at all.
+ * The rule this file exists to enforce: **a new user-facing action is declared here, and its
+ * surfaces point at it.** A menu item, a tile or a palette row is a way of reaching a command,
+ * never a second definition of one.
  *
- * The rule this file exists to enforce: **a new user-facing action is declared
- * here, and its surfaces point at it.** A menu item, a tile or a palette row is
- * a way of reaching a command, never a second definition of one.
- *
- * Each `perform` calls the very function the pre-existing surface calls, so a
- * command is a pointer rather than a reimplementation. The settings roster is
- * generated from the two settings registries for the same reason: a category
- * added there appears here without an edit, and cannot be named differently.
- * The run-export commands are generated from the export formats the same way.
+ * Each `perform` calls the very function the surface itself calls, so a command is a pointer rather
+ * than a reimplementation. The settings roster is generated from the two settings registries for
+ * the same reason (a category added there appears here without an edit, and cannot be named
+ * differently), and the run-export commands from the export formats.
  */
 
 // `Zap` is the load-test mark throughout the app - the dashboard tab, a finished
@@ -413,20 +408,15 @@ const ACTION_COMMANDS: readonly Command[] = [
 ];
 
 /**
- * One command per drawer view, generated from the table the Dock's strip is
- * drawn from - so the palette cannot offer a seventh view, name one differently
- * or draw it with another icon.
+ * One command per drawer view, generated from the table the activity rail is drawn from, so the
+ * palette cannot offer a seventh view, name one differently or draw it with another icon. Settings
+ * is excluded: `open-settings` already opens the tab and brings its drawer view along, and a second
+ * row for the same ⌘, would be two names for one key.
  *
- * Settings is excluded because it already has `open-settings`, which opens the
- * tab and brings its drawer view along; a second row for the same ⌘, would be
- * two names for one key.
- *
- * `revealDrawerView`, not `activateDrawerView`: the chord toggles, which is
- * right for a switcher pressed twice, and the store's own note says the
- * revealing half is what "a palette result" wants - a row read as "Show
- * history" that hid History because it was already open would be answering a
- * question nobody asked. The chord still appears on the row, because it is the
- * key that shows this view.
+ * `revealDrawerView`, not `activateDrawerView`: the chord toggles, which is right for a switcher
+ * pressed twice, and the store's own note says the revealing half is what "a palette result" wants;
+ * a row reading "Show history" that hid History because it was already open would answer a question
+ * nobody asked. The chord still appears on the row, because it is the key that shows this view.
  */
 const DRAWER_VIEW_COMMANDS: readonly Command[] = DRAWER_VIEWS.filter(
 	({ view }) => view !== "settings"
@@ -443,14 +433,12 @@ const DRAWER_VIEW_COMMANDS: readonly Command[] = DRAWER_VIEWS.filter(
 }));
 
 /**
- * One command per run-export action (#2139), generated from `runExportActions`,
- * the list the export menu draws its items from - so the palette offers exactly
- * the menu's items and a format added to `RUN_EXPORT_FORMATS` arrives in both.
- *
- * Each delivers through the mounted menu's own handler (`exportRun`), so the
- * menu's comparison toggle decides what a palette export carries, and the rows
- * exist only while a finished load run's menu is on screen. No chord: an export
- * is an occasional, deliberate act.
+ * One command per run-export action (#2139), generated from `runExportActions`, the list the export
+ * menu draws its items from, so the palette offers exactly the menu's items and a format added to
+ * `RUN_EXPORT_FORMATS` arrives in both. Each delivers through the mounted menu's own handler
+ * (`exportRun`), so the menu's comparison toggle decides what a palette export carries, and the
+ * rows exist only while a finished load run's menu is on screen. No chord: an export is an
+ * occasional, deliberate act.
  */
 const RUN_EXPORT_COMMANDS: readonly Command[] = runExportActions().map((action): Command => ({
 	id: `export-run-${action.id}`,
@@ -522,12 +510,10 @@ export function availableCommands(ctx: CommandContext): Command[] {
 }
 
 /**
- * Look one up by id, for a surface that offers a single named command (the
- * native menu's Settings… item) rather than the whole roster.
- *
- * Throws on an unknown id: a menu item pointing at a command that no longer
- * exists is a dead menu item, and a silent no-op is exactly how the drift this
- * registry removes got in.
+ * Look one up by id, for a surface that offers a single named command (the native menu's Settings…
+ * item) rather than the roster. Throws on an unknown id: a menu item pointing at a command that no
+ * longer exists is a dead menu item, and a silent no-op is how the drift this registry removes gets
+ * in.
  */
 export function commandById(id: string): Command {
 	const command = COMMANDS.find((c) => c.id === id);

@@ -6,27 +6,22 @@
  */
 
 /**
- * The reference line: how the app names an entity to an agent (#2046).
+ * The reference line: how the app names an entity to an agent (#2046). Every line is
+ * `Vayu <kind> "<name>" (<id>)` plus, for most kinds, a tail that places the entity
+ * (` in <collection path>`) or describes it (` - <detail>`). The name is for a person to recognise;
+ * the id is the key every MCP tool takes. A kind that belongs to another entity (a variable, a spec
+ * operation, a graphql operation, a run sample, an element, a threshold) names that owner in its
+ * tail instead. The grammar, every kind's example and the fixture the examples are formatted from
+ * are in `docs/engine/mcp/runs-and-reports.md` ("Naming what the user means"), which
+ * `agent-reference.docs.test.ts` holds to this file.
  *
- * Every line is `Vayu <kind> "<name>" (<id>)` plus, for most kinds, a tail that
- * places the entity (` in <collection path>`) or describes it (` - <detail>`).
- * The name is for a person to recognise; the id is the key every MCP tool
- * takes. A kind that belongs to another entity (a variable, a spec operation, a
- * graphql operation, a run sample, an element, a threshold) names that owner in
- * its tail instead.
- * The grammar, every kind's example and the fixture the examples are
- * formatted from are in `docs/engine/mcp/runs-and-reports.md` ("Naming what the user means"),
- * which `agent-reference.docs.test.ts` holds to this file.
+ * **No value ever rides in a reference.** Each formatter takes a `Pick<>` of exactly the fields it
+ * prints, so a URL's query or userinfo, a header, a body, a variable's value or a token is not
+ * reachable from inside it, and a caller handing over a whole entity cannot widen what is printed.
+ * A run's URL is reduced to its path, as a tab title is.
  *
- * **No value ever rides in a reference.** Each formatter takes a `Pick<>` of
- * exactly the fields it prints, so a URL's query or userinfo, a header, a body,
- * a variable's value or a token is not reachable from inside it, and a caller
- * handing over a whole entity cannot widen what is printed. A run's URL is
- * reduced to its path, the way a tab title is.
- *
- * Pure on purpose: no React, store or query import. The surfaces that put a
- * line on the clipboard resolve what the line names (a collection chain, a
- * collection's name) and pass it in.
+ * Pure on purpose: no React, store or query import. The surfaces that put a line on the clipboard
+ * resolve what it names (a collection chain, a collection's name) and pass it in.
  */
 
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";

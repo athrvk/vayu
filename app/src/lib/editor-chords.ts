@@ -6,20 +6,17 @@
  */
 
 /**
- * The app's window chords, inside a Monaco editor.
+ * The app's window chords, inside a Monaco editor. Monaco consumes the keys it recognises before
+ * they reach `window`, and Send is one of them: `ownsEnterKey` excludes editors from the window
+ * handler on purpose (a code editor owns Enter), so without this ⌘↵ inserts a newline in the body,
+ * GraphQL and script editors, the panes the palette's own comment calls where users spend "most of
+ * the time" (#938).
  *
- * Monaco consumes the keys it recognises before they reach `window`, and Send
- * is one of them: `ownsEnterKey` deliberately excludes editors from the window
- * handler (a code editor owns Enter), so ⌘↵ inserted a newline in the body,
- * GraphQL and script editors - the panes the palette's own comment calls where
- * users spend "most of the time" (#938).
- *
- * The bridge is a re-dispatch rather than a second call site for `executeRequest`:
- * the editor says "this chord was pressed", on `document.body` so that no
- * editor-owns-Enter guard sees it, and the one window handler still decides.
- * That keeps every gate it holds - a run already in flight, an empty URL, an
- * open modal, a layout with no load test available - in the single place they
- * are written, instead of copying four conditions into the editor wrapper.
+ * The bridge is a re-dispatch rather than a second call site for `executeRequest`: the editor says
+ * "this chord was pressed", on `document.body` so no editor-owns-Enter guard sees it, and the one
+ * window handler still decides. That keeps every gate it holds (a run in flight, an empty URL, an
+ * open modal, a layout with no load test available) in the single place they are written, instead
+ * of copying four conditions into the editor wrapper.
  */
 
 import type * as Monaco from "monaco-editor";
@@ -79,26 +76,24 @@ export function dispatchChord(chord: Chord): void {
 /**
  * The window chords an editor would otherwise swallow.
  *
- * Enter for the two send chords, because Monaco owns Enter and `ownsEnterKey`
- * excludes editors from the window handler on purpose (#938).
+ * Enter for the two send chords, because Monaco owns Enter and `ownsEnterKey` excludes editors from
+ * the window handler on purpose (#938).
  *
- * ⌘I for the opposite reason: I is claimed. The standalone editor binds CtrlCmd+I
- * as a secondary keybinding for `triggerSuggest` on every platform, and its
- * keybinding service calls `preventDefault` *and* `stopPropagation` for any
- * binding it resolves, so the context-bar toggle died at the editor instead of
- * reaching `Shell`'s bubble-phase listener. S, W, B, comma, the digits and the
- * ⇧ view chords really are unbound there and still arrive on their own, as
- * does N.
+ * ⌘I for the opposite reason: I is claimed. The standalone editor binds CtrlCmd+I as a secondary
+ * keybinding for `triggerSuggest` on every platform, and its keybinding service calls
+ * `preventDefault` *and* `stopPropagation` for any binding it resolves, so the context-bar toggle
+ * would die at the editor instead of reaching `Shell`'s bubble-phase listener. S, W, B, comma, the
+ * digits and the ⇧ view chords really are unbound there and arrive on their own, as does N.
  *
- * ⌘L is claimed the same way - `expandLineSelection`
- * (`contrib/lineSelection/browser/lineSelection.js`) - and it is the chord a
- * user in a body editor is most likely to reach for, "take me back to the
- * address bar" being how you leave a page you are done with (#1219).
+ * ⌘L is claimed the same way (`expandLineSelection`,
+ * `contrib/lineSelection/browser/lineSelection.js`), and it is the chord a user in a body editor
+ * most likely reaches for, "take me back to the address bar" being how you leave a page you are
+ * done with (#1219).
  *
- * ⇧⌘[ and ⇧⌘] are deliberately *not* here. Monaco binds them to fold and
- * unfold, which is what those keys should do with a caret in code, and
- * `keyCodeFor` has no `KeyCode` for a bracket anyway - so they switch tabs
- * everywhere except inside an editor, where the editor's own meaning wins.
+ * ⇧⌘[ and ⇧⌘] are deliberately *not* here. Monaco binds them to fold and unfold, which is what
+ * those keys should do with a caret in code, and `keyCodeFor` has no `KeyCode` for a bracket
+ * anyway, so they switch tabs everywhere except inside an editor, where the editor's own meaning
+ * wins.
  */
 const BRIDGED_CHORDS: readonly Chord[] = [
 	SEND_CHORD,
@@ -108,21 +103,18 @@ const BRIDGED_CHORDS: readonly Chord[] = [
 ];
 
 /**
- * Move focus to the first focusable element after `container`, or - when the
- * editor is the last thing on the page - back to the nearest one before it.
+ * Move focus to the first focusable element after `container`, or, when the editor is the last
+ * thing on the page, back to the nearest one before it. This is the editor's way out, so the target
+ * has to be somewhere Tab would have gone; the container itself is not, since Monaco's textarea is
+ * *inside* it and the next Tab would walk straight back in.
  *
- * This is the editor's way out, so the target has to be somewhere Tab would
- * have gone. Focusing the container itself is not: Monaco's textarea is *inside*
- * it, so the next Tab would walk straight back in.
+ * Document order, not the tab order proper: a positive `tabIndex` would come first in a real Tab
+ * press and does not here. Nothing in `app/src` uses one, and the day something does, this is the
+ * line to revisit.
  *
- * Document order, not the tab order proper: a positive `tabIndex` would come
- * first in a real Tab press and does not here. Nothing in `app/src` uses one,
- * and the day something does, this is the line to revisit.
- *
- * Returns whether focus moved. Nothing acts on `false` - when an editor is the
- * only focusable thing on the page there is no better place to send focus than
- * where it already is - so the reader is `editor-chords.test.ts`, which is what
- * makes "nowhere to go" a case rather than an assumption.
+ * Returns whether focus moved. Nothing acts on `false` (with the editor the only focusable thing
+ * there is no better place for focus than where it is), so the reader is `editor-chords.test.ts`,
+ * which makes "nowhere to go" a case rather than an assumption.
  */
 export function focusAfterEditor(container: HTMLElement | null | undefined): boolean {
 	if (!container) return false;

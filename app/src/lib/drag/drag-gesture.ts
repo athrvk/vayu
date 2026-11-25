@@ -6,23 +6,19 @@
  */
 
 /**
- * When a press becomes a drag, and what happens to the click that follows.
+ * When a press becomes a drag, and what happens to the click that follows. A pure state machine
+ * over pointer coordinates, with no React and no DOM, because the two things it has to get right
+ * are both about *ordering*, and neither is observable through a gesture in jsdom:
  *
- * A pure state machine over pointer coordinates, with no React and no DOM,
- * because the two things this has to get right are both about *ordering* and
- * neither is observable through a gesture in jsdom:
+ * 1. **A press is a click until it has moved far enough.** The tree's rows open on click and the
+ *    hit-area rules exist because those rows already fought dead zones, so the discriminator has to
+ *    be movement, never a timer; `RequestItem.test.tsx` pins that opening is synchronous.
+ * 2. **A completed drag eats its trailing click.** `pointerup` after a drag is followed by a real
+ *    `click` on the row, which would open the thing the user just dropped. The flag survives the
+ *    release for exactly one click, so a normal click on the next row is untouched.
  *
- * 1. **A press is a click until it has moved far enough.** The tree's rows open
- *    on click and the hit-area rules exist because those rows already fought
- *    dead zones, so the discriminator has to be movement, never a timer -
- *    `RequestItem.test.tsx` pins that opening is synchronous.
- * 2. **A completed drag eats its trailing click.** `pointerup` after a drag is
- *    followed by a real `click` on the row, which would open the thing the user
- *    just dropped. The flag survives the release for exactly one click, so a
- *    normal click on the next row is untouched.
- *
- * Every transition returns the same object when nothing changed, so the hook can
- * hold this in state without a render per `pointermove`.
+ * Every transition returns the same object when nothing changed, so the hook can hold this in state
+ * without a render per `pointermove`.
  */
 
 /**
@@ -115,19 +111,16 @@ export function consumeClick(gesture: DragGesture): {
 }
 
 /**
- * Whether an event that reached a draggable item's handler actually happened on that item.
+ * Whether an event that reached a draggable item's handler actually happened on that item. An item
+ * can own a menu, and Radix renders the menu's items through a **portal**: a React child of the
+ * item whose DOM lives on `document.body`. React bubbles synthetic events through the component
+ * tree, not the DOM tree, so pressing "Delete" arrives here as a press on the item.
  *
- * An item can own a menu, and Radix renders the menu's items through a
- * **portal** - a React child of the item whose DOM lives on `document.body`.
- * React bubbles synthetic events through the component tree rather than the DOM
- * tree, so pressing "Delete" arrives here as a press on the item.
- *
- * Treating it as one is not a cosmetic bug: the press captures the pointer on
- * the item, and the capture retargets the `pointerup` the menu item needed, so
- * every action in every such menu silently stops working. A DOM containment
- * check is the difference between the two, and it is the *only* difference -
- * `closest("[data-tree-menu]")` cannot see it, because portalled content is not
- * inside the trigger it belongs to.
+ * Treating it as one is not cosmetic: the press captures the pointer on the item, and the capture
+ * retargets the `pointerup` the menu item needed, so every action in every such menu silently stops
+ * working. A DOM containment check is the difference between the two, and the *only* one:
+ * `closest("[data-tree-menu]")` cannot see it, because portalled content is not inside the trigger
+ * it belongs to.
  */
 export function isOwnEvent(e: { target: EventTarget | null; currentTarget: HTMLElement }): boolean {
 	return e.target instanceof Node && e.currentTarget.contains(e.target);

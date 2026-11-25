@@ -6,12 +6,10 @@
  */
 
 /**
- * Small, context-free reads over an `ElementDef[]` list (issue #1512), and
- * `SaveBlockedError` (issue #1635) - the same save-path contract both a
- * request's autosave and a collection's manual save button need - shared by
- * the request-builder module, the collections module and the generic
- * reference scanners in `lib/` - none of which may depend on each other, so
- * this lives in `lib/` rather than under any one of them.
+ * Small, context-free reads over an `ElementDef[]` list (#1512), and `SaveBlockedError` (#1635),
+ * the save-path contract both a request's autosave and a collection's manual save button need.
+ * Shared by the request-builder module, the collections module and the generic reference scanners
+ * in `lib/`, none of which may depend on each other, so this lives in `lib/`.
  */
 
 import type {
@@ -22,15 +20,12 @@ import type {
 } from "@/types";
 
 /**
- * The joined text of every enabled element of one script kind (`script.pre`
- * or `script.post`) in a list - what the variable-reference scanners
- * (`ColumnAudit`, `column-audit.ts`, `request-references.ts`) need: one flat
- * string per entity rather than the element list itself.
- *
- * Joined with a blank line only so a scanner reads one string; nothing runs
- * the joined text (the engine runs each element as its own script, #3125).
- * Every part is kept rather than only the first, so a reference in a later
- * element is still found.
+ * The joined text of every enabled element of one script kind (`script.pre` or `script.post`) in a
+ * list: what the variable-reference scanners (`ColumnAudit`, `column-audit.ts`,
+ * `request-references.ts`) need, one flat string per entity rather than the element list. Joined
+ * with a blank line only so a scanner reads one string; nothing runs the joined text (the engine
+ * runs each element as its own script, #3125). Every part is kept rather than only the first, so a
+ * reference in a later element is still found.
  */
 export function scriptTextFor(
 	elements: ElementDef[],
@@ -57,13 +52,11 @@ export function isBlankScriptElement(el: Pick<ElementDef, "kind" | "config">): b
 }
 
 /**
- * The top-level `required` keys of an element's kind that its own `config` is
- * missing outright (issue #1635) - presence only. That matches what
- * `addElement`'s fresh `config: {}` produces exactly (no key at all) and is
- * what the row's "Needs ..." chip names. The value constraints (`minLength`,
- * `minimum`, a missing nested key, ...) are `validateElementConfig`'s, which
- * leaves a missing top-level key to this function so the two never report the
- * same field.
+ * The top-level `required` keys of an element's kind that its own `config` is missing outright
+ * (#1635), presence only: what `addElement`'s fresh `config: {}` produces exactly (no key at all),
+ * and what the row's "Needs ..." chip names. The value constraints (`minLength`, `minimum`, a
+ * missing nested key, ...) are `validateElementConfig`'s, which leaves a missing top-level key to
+ * this function so the two never report the same field.
  */
 export function missingRequiredKeys(
 	element: Pick<ElementDef, "kind" | "config">,
@@ -554,14 +547,12 @@ export function parseElementRefusal(
 }
 
 /**
- * Thrown by a save callback to mean "nothing was sent, and nothing should be
- * retried" (issue #1635) - a payload the caller already knows the server
- * will refuse (an incomplete element, per `hasIncompleteElement`), as
- * opposed to a save that was attempted and failed. Both save paths -
- * `useSaveManager`'s autosave and `useDraftSaveContext`'s manual-button
- * model - read this type to report "still dirty, nothing in flight" rather
- * than a genuine failure; neither retries against a payload that will not
- * have changed by the next attempt.
+ * Thrown by a save callback to mean "nothing was sent, and nothing should be retried" (#1635): a
+ * payload the caller already knows the server will refuse (an incomplete element, per
+ * `hasIncompleteElement`), as opposed to a save that was attempted and failed. Both save paths,
+ * `useSaveManager`'s autosave and `useDraftSaveContext`'s manual-button model, read this type to
+ * report "still dirty, nothing in flight" rather than a failure; neither retries against a payload
+ * that will not have changed by the next attempt.
  */
 export class SaveBlockedError extends Error {
 	constructor(message = "Save blocked: fix the incomplete field first") {
