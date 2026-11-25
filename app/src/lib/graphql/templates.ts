@@ -6,31 +6,28 @@
  */
 
 /**
- * `{{variable}}` tokens inside GraphQL text, for the two readers that have to
- * cope with them: the diagnostics pass and the envelope serializer.
+ * `{{variable}}` tokens inside GraphQL text, for the two readers that have to cope with them: the
+ * diagnostics pass and the envelope serializer.
  *
- * The engine resolves `{{name}}` anywhere in a body before it goes on the wire,
- * so both a query and a variables object may legitimately hold tokens that are
- * *not* valid GraphQL and *not* valid JSON at rest. Three maskings fall out of
- * that, and which one a caller wants is decided by one question: does it need
- * the *positions* back, or does it need the *token text* back?
+ * The engine resolves `{{name}}` anywhere in a body before it goes on the wire, so a query and a
+ * variables object may both hold tokens that are *not* valid GraphQL or JSON at rest. Three
+ * maskings follow, chosen by one question: does the caller need the *positions* back, or the *token
+ * text*?
  *
- * - **GraphQL text** is masked in place, character for character, because the
- *   markers that come back carry positions into the masked string and those
- *   positions are only usable if they are also positions into the original.
- * - **JSON text on the wire path** is masked into a *sentinel string*, which
- *   changes the length, because the token has to be recognisable again after a
- *   `JSON.parse` / `JSON.stringify` round trip: the sentinel is a needle no user
- *   can type, and a same-length placeholder is not - `"vvv"` is text somebody
- *   might have written themselves, so unmasking it would corrupt their document.
- *   Nothing on that path needs offsets, only the parsed value.
- * - **JSON text for diagnostics** is masked in place, into a string literal of
- *   the token's exact length, because the JSON worker's markers carry positions
- *   into what it was given. It is never unmasked - which is precisely why it can
- *   afford a placeholder the sentinel masking cannot.
+ * - **GraphQL text** is masked in place, character for character, because the markers that come
+ *   back carry positions into the masked string, usable only if they are also positions into the
+ *   original.
+ * - **JSON text on the wire path** is masked into a *sentinel string*, which changes the length,
+ *   because the token must be recognisable after a `JSON.parse` / `JSON.stringify` round trip: the
+ *   sentinel is a needle no user can type, and a same-length placeholder is not (`"vvv"` is text
+ *   somebody might have written, so unmasking it would corrupt their document). Nothing on that
+ *   path needs offsets, only the parsed value.
+ * - **JSON text for diagnostics** is masked in place, into a string literal of the token's exact
+ *   length, because the JSON worker's markers carry positions into what it was given. It is never
+ *   unmasked, which is why it can afford a placeholder the sentinel masking cannot.
  *
- * All three take their token syntax from `@/constants/variables`, the app's
- * single `{{name}}` matcher; none of them re-declares it.
+ * All three take their token syntax from `@/constants/variables`, the app's single `{{name}}`
+ * matcher; none re-declares it.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -44,26 +41,20 @@ export interface TemplateSpan {
 }
 
 /**
- * A GraphQL Name, repeated to the token's exact length.
- *
- * `V` rather than a keyword because a Name is the one lexeme that is grammatical
- * in every position a token realistically appears in - a field in a selection
- * set, an enum value in an argument, a fragment of an identifier - and because
- * `null` / `true` / `false` are excluded from EnumValue by the spec. The
- * shortest possible token is `{{a}}`, five characters, so the placeholder is
- * never so short that it fails the "starts with a letter" rule.
+ * A GraphQL Name, repeated to the token's exact length. `V` rather than a keyword because a Name is
+ * the one lexeme grammatical in every position a token realistically appears in (a field in a
+ * selection set, an enum value in an argument, a fragment of an identifier), and `null` / `true` /
+ * `false` are excluded from EnumValue by the spec. The shortest token, `{{a}}`, is five characters,
+ * so the placeholder never fails the "starts with a letter" rule.
  */
 const PLACEHOLDER_CHAR = "V";
 
 /**
- * Replace every `{{token}}` with an identical-length GraphQL Name, and report
- * where they were.
- *
- * The point is that the document *parses*: an unmasked token is a syntax error
- * that aborts the parse, so one mid-edit variable costs the whole document its
- * validation. Masking keeps the rest of the document checked; the spans let the
- * caller drop the markers the placeholder itself provokes (a Name where an `Int`
- * was expected is still wrong, just wrong about something the user did not type).
+ * Replace every `{{token}}` with an identical-length GraphQL Name, and report where they were. The
+ * point is that the document *parses*: an unmasked token is a syntax error that aborts the parse,
+ * so one mid-edit variable costs the whole document its validation. The spans let the caller drop
+ * the markers the placeholder itself provokes (a Name where an `Int` was expected is still wrong,
+ * just about something the user did not type).
  */
 export function maskGraphqlTemplates(text: string): { masked: string; spans: TemplateSpan[] } {
 	const spans: TemplateSpan[] = [];
@@ -99,12 +90,10 @@ function before(lineA: number, colA: number, lineB: number, colB: number): boole
 }
 
 /**
- * The stand-in a `{{token}}` becomes inside JSON.
- *
- * NUL-delimited because JSON.stringify escapes NUL to the six characters
- * `\\u0000`, so the needle `unmaskJsonTemplates` looks for cannot be produced by
- * any character a user can type into an editor - a token is put back exactly
- * where the masker put one, and nowhere else.
+ * The stand-in a `{{token}}` becomes inside JSON. NUL-delimited because JSON.stringify escapes NUL
+ * to the six characters `\\u0000`, so no character a user can type produces the needle
+ * `unmaskJsonTemplates` looks for: a token is put back exactly where the masker put one, and
+ * nowhere else.
  */
 const sentinel = (index: number) => `\u0000vayu:tpl:${index}\u0000`;
 
@@ -118,12 +107,8 @@ export interface MaskedJson {
 }
 
 /**
- * Replace `{{token}}`s that sit where a JSON *value* would go with a placeholder
- * string, so the text parses.
- *
- * Tokens already inside a JSON string (`{"id": "{{userId}}"}`) are left alone:
- * that text is valid JSON as it stands, and wrapping it again would break it.
- * The scan tracks string state for exactly that reason - a regex cannot.
+ * Replace `{{token}}`s that sit where a JSON *value* would go with a placeholder string, so the
+ * text parses. Tokens already inside a JSON string are left alone; `scanJsonTemplates` says why.
  */
 export function maskJsonTemplates(text: string): MaskedJson {
 	const found = scanJsonTemplates(text);
@@ -134,17 +119,14 @@ export function maskJsonTemplates(text: string): MaskedJson {
 }
 
 /**
- * Replace every out-of-string `{{token}}` with a JSON string of the *same
- * length*, and report where they were.
- *
- * For the one caller that needs positions back: Monaco's JSON worker parses the
- * pane's text itself, and an unmasked token is a syntax error it reports three
- * ways - at the token, and then at the next character, and then not at all for
- * the rest of the document, because the parse gave up. Masking makes the
- * document parse, so everything after the token is checked again; the spans let
- * the caller drop the markers the placeholder itself earns (a string where the
- * schema wanted an `Int` is still wrong, just wrong about characters the user
- * never typed - the same rule `diagnostics.ts` applies to the query pane).
+ * Replace every out-of-string `{{token}}` with a JSON string of the *same length*, and report where
+ * they were. For the one caller that needs positions back: Monaco's JSON worker parses the pane's
+ * text itself, and an unmasked token is a syntax error it reports at the token, then at the next
+ * character, and then not at all for the rest of the document, because the parse gave up. Masking
+ * makes the document parse, so everything after the token is checked again; the spans let the
+ * caller drop the markers the placeholder itself earns (a string where the schema wanted an `Int`
+ * is still wrong, just about characters the user never typed, the rule `diagnostics.ts` applies to
+ * the query pane).
  */
 export function maskJsonTemplatesInPlace(text: string): { masked: string; spans: TemplateSpan[] } {
 	const found = scanJsonTemplates(text);
@@ -155,12 +137,10 @@ export function maskJsonTemplatesInPlace(text: string): { masked: string; spans:
 }
 
 /**
- * A JSON string literal of exactly `length` characters.
- *
- * The shortest token is `{{a}}`, five characters, so there is always room for
- * the two quotes and at least one character between them. A string is the one
- * JSON value that exists at every length, and it is grammatical in both places
- * a token realistically appears - as a value, and as an object key.
+ * A JSON string literal of exactly `length` characters. The shortest token, `{{a}}`, is five
+ * characters, so there is always room for the two quotes and one character between. A string is the
+ * one JSON value that exists at every length, and it is grammatical in both places a token
+ * realistically appears: as a value and as an object key.
  */
 function jsonStringOfLength(length: number): string {
 	return `"${PLACEHOLDER_CHAR.repeat(length - 2)}"`;
@@ -173,11 +153,9 @@ interface TokenRange {
 }
 
 /**
- * Every out-of-string `{{token}}`, in source order.
- *
- * Tokens already inside a JSON string (`{"id": "{{userId}}"}`) are skipped: that
- * text is valid JSON as it stands, and touching it would break it. The scan
- * tracks string state for exactly that reason - a regex cannot.
+ * Every out-of-string `{{token}}`, in source order. Tokens already inside a JSON string
+ * (`{"id": "{{userId}}"}`) are skipped: that text is valid JSON as it stands, and touching it would
+ * break it. The scan tracks string state for exactly that reason; a regex cannot.
  */
 function scanJsonTemplates(text: string): TokenRange[] {
 	const found: TokenRange[] = [];
