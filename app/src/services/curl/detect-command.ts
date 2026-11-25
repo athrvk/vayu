@@ -8,14 +8,12 @@
 /**
  * Whether some text is a shell command the request builder can import.
  *
- * A leaf of its own, with no imports, because the main process has to ask the
- * same question: the URL bar's context menu offers "Paste as curl" only for a
- * clipboard `importCommand` would accept (#1359). `tsconfig.node.json` has no
- * `@/*` mapping, deliberately, so `electron/context-menu.ts` cannot import this
- * and keeps its own copy of these few lines - but a test there can, and does,
- * which is what keeps the two answers the same. Splitting the detector out is
- * what makes that import cheap: `parseCurl.ts` reaches the `@/types` barrel and
- * pulls half the renderer in with it.
+ * A leaf with no imports, because the main process asks the same question: the URL bar's context
+ * menu offers "Paste as curl" only for a clipboard `importCommand` would accept (#1359).
+ * `tsconfig.node.json` deliberately has no `@/*` mapping, so `electron/context-menu.ts` cannot
+ * import this and keeps its own copy of these few lines; a test there can, and does, which keeps
+ * the two answers the same. Splitting the detector out makes that import cheap: `parseCurl.ts`
+ * reaches the `@/types` barrel and pulls half the renderer in with it.
  */
 
 export type CommandKind = "curl" | "wget";

@@ -8,21 +8,18 @@
 /**
  * curl / wget command parser.
  *
- * Detects a pasted curl or wget command and maps it onto the request-builder
- * state. The result is a request-shape replacement: every request field is set
- * (with explicit defaults before flag overrides) so no stale body/auth/header
- * can survive from the previous request. Identity and scripts (`id`, `name`,
- * `collectionId`, `elements`) are deliberately never included - curl can't
+ * Detects a pasted curl or wget command and maps it onto the request-builder state. The result
+ * replaces the request's shape: every request field is set (explicit defaults before flag
+ * overrides), so no stale body, auth or header survives from the previous request. Identity and
+ * scripts (`id`, `name`, `collectionId`, `elements`) are deliberately never included: curl cannot
  * express them, so the caller keeps its own.
  *
- * A file the command reads is never read here: the engine opens it at send
- * time, so only its path has to survive. A **form file part**
- * (`-F field=@file`) imports as a file row (issue #393), and a **whole-body
- * file** (`--data-binary @file`, `-d @file`, `-T file`) as a `binary` body.
- * Neither was picked on this machine: the path names a file on whoever's
- * machine the command came from, and the engine sends it only once it is
- * picked again in the editor or lives under a folder allowed in Settings >
- * Files.
+ * A file the command reads is never read here: the engine opens it at send time, so only its path
+ * has to survive. A **form file part** (`-F field=@file`) imports as a file row (#393), and a
+ * **whole-body file** (`--data-binary @file`, `-d @file`, `-T file`) as a `binary` body. Neither
+ * was picked on this machine: the path names a file on whoever's machine the command came from, and
+ * the engine sends it only once it is picked again in the editor or lives under a folder allowed in
+ * Settings > Files.
  */
 
 import type { HttpMethod, SettingsCategory } from "@/types";
@@ -82,12 +79,9 @@ export type ParsedRequest = Pick<
 // ============================================================================
 
 /**
- * Where a dropped flag's intent lives in Vayu, if anywhere.
- *
- * A settings category and the anchor inside it - the same pair the settings
- * search and the command palette reveal a row with, so a pointer here opens
- * exactly what those two open and there is one definition of "go to this
- * setting" in the app.
+ * Where a dropped flag's intent lives in Vayu, if anywhere: a settings category and the anchor
+ * inside it, the pair the settings search and the command palette reveal a row with, so a pointer
+ * here opens exactly what those two open and "go to this setting" has one definition in the app.
  */
 export interface DisclosurePointer {
 	category: SettingsCategory;
@@ -98,13 +92,10 @@ export interface DisclosurePointer {
 }
 
 /**
- * What one pasted command becomes: the request, plus what could not be carried.
- *
- * The two travel together because the paste succeeded either way - the import
- * is never blocked by a flag with no home here - and a caller that takes the
- * request without ever looking at `dropped` is exactly the silent eating this
- * ledger exists to end. The structured importers have had this discipline since
- * #666; curl paste is the one import path that never did.
+ * What one pasted command becomes: the request, plus what could not be carried. The two travel
+ * together because the paste succeeds either way (a flag with no home here never blocks the
+ * import), and a caller that takes the request without ever looking at `dropped` is exactly the
+ * silent eating this ledger exists to end, the discipline the structured importers keep (#666).
  */
 export interface CommandImport {
 	request: ParsedRequest;
@@ -137,19 +128,16 @@ const NETWORK: SettingsCategory = "network_performance";
 /**
  * What each skipped flag asked for, and where that lives here.
  *
- * Keyed by flag and consulted only when the parser has *already* decided to
- * skip one, which is what keeps it from becoming a second source of truth: a
- * flag mapped tomorrow leaves the skip set, and an entry left behind here is
- * unreachable rather than wrong. `parseCurl.test.ts` asserts that every key
- * here is still in a skip set, so "unreachable" fails the suite too.
+ * Keyed by flag and consulted only once the parser has *already* decided to skip one, which keeps
+ * it from becoming a second source of truth: a flag that gets mapped leaves the skip set, and an
+ * entry left behind here is unreachable rather than wrong. `parseCurl.test.ts` asserts that every
+ * key here is still in a skip set, so "unreachable" fails the suite too.
  *
- * Only value-carrying flags with a known home (or a known absence of one) are
- * listed: a `-s` or a `--compressed` asked for nothing about the request, and
- * a notice that fired on every pasted command would be one nobody reads by
- * the third time. A flag this parser has never seen at all is still ledgered
- * (issue #1445), through the generic fallback rather than an entry here - it
- * might carry a value or might not, and disclosing the gap costs less than
- * guessing wrong about which.
+ * Only value-carrying flags with a known home (or a known absence of one) are listed: a `-s` or a
+ * `--compressed` asked for nothing about the request, and a notice that fired on every pasted
+ * command would go unread by the third time. A flag this parser has never seen is still ledgered
+ * (#1445), through the generic fallback rather than an entry here: it may or may not carry a value,
+ * and disclosing the gap costs less than guessing wrong about which.
  */
 export const DROPPED_FLAG_INFO: Record<string, { what: string; pointer?: DisclosurePointer }> = {
 	"-x": {
@@ -228,13 +216,11 @@ export type CommandReading =
 	{ ok: true; command: CommandImport } | { ok: false; reason: CommandFailure };
 
 /**
- * Parse a pasted curl/wget command into a request-shape partial and the ledger
- * of what it could not carry, or say why it cannot be imported.
- *
- * Never throws to the caller. An unterminated quote and a missing URL are
- * named; any other throw from the parser (a lone surrogate reaching
- * `encodeURIComponent`, say) is `unreadable`, so a caller that does not guard
- * the call (`ImportModal`) is as safe as one that does.
+ * Parse a pasted curl/wget command into a request-shape partial and the ledger of what it could not
+ * carry, or say why it cannot be imported. Never throws to the caller: an unterminated quote and a
+ * missing URL are named, and any other throw from the parser (a lone surrogate reaching
+ * `encodeURIComponent`, say) is `unreadable`, so a caller that does not guard the call
+ * (`ImportModal`) is as safe as one that does.
  */
 export function readCommand(text: string): CommandReading {
 	const kind = detectCommand(text);
@@ -257,13 +243,11 @@ export function readCommand(text: string): CommandReading {
 }
 
 /**
- * The tokenizer rewrites every shell variable it meets, including one a skipped
- * flag read (`-o $OUT`), which never reaches the request. Only a name whose
- * `{{NAME}}` sits in a string the request carries is one the user has to define.
- *
- * `bindableStrings` is the app's enumeration of those strings. A digest or NTLM
- * login keeps its credentials in `config`, which it leaves to the binder, so
- * those are added here.
+ * The tokenizer rewrites every shell variable it meets, including one a skipped flag read
+ * (`-o $OUT`), which never reaches the request. Only a name whose `{{NAME}}` sits in a string the
+ * request carries is one the user has to define. `bindableStrings` is the app's enumeration of
+ * those strings; a digest or NTLM login keeps its credentials in `config`, which it leaves to the
+ * binder, so those are added here.
  */
 function variablesInRequest(request: ParsedRequest, names: string[]): string[] {
 	if (names.length === 0) return names;
@@ -295,11 +279,9 @@ export function importCommand(text: string): CommandImport | null {
 }
 
 /**
- * The request half of `importCommand`, for callers with nothing to disclose to.
- *
- * The codegen round-trip test is the honest example: it asks whether a
- * generated command parses back into the request it came from, and a ledger has
- * no bearing on that question.
+ * The request half of `importCommand`, for callers with nothing to disclose to, such as the codegen
+ * round-trip test: it asks whether a generated command parses back into the request it came from,
+ * and a ledger has no bearing on that.
  */
 export function parseCommand(text: string): ParsedRequest | null {
 	return importCommand(text)?.request ?? null;
@@ -373,9 +355,8 @@ function newBuilder(): Builder {
 		bearer: null,
 		stream: false,
 		insecure: false,
-		// curl's own default: a command with no `-L` does not follow redirects,
-		// unlike Vayu's (issue #1445) - `parseWget` overrides this to match
-		// wget's opposite default.
+		// curl's own default: a command with no `-L` does not follow redirects, unlike Vayu
+		// (#1445); `parseWget` overrides this to match wget's opposite default.
 		followRedirects: false,
 		maxRedirects: DEFAULT_MAX_REDIRECTS,
 		timeoutMs: null,
@@ -384,13 +365,11 @@ function newBuilder(): Builder {
 }
 
 /**
- * Record a flag whose value was read off the command line and thrown away.
- *
- * Called from the one place a value-carrying flag is skipped, so the ledger is
- * a *consequence* of the skip sets rather than a second list beside them: a
- * flag that gets mapped leaves the set, stops reaching here, and disappears
- * from the ledger with no edit here at all. Deduplicated by flag, because a
- * command may name the same one twice and one notice per flag is the point.
+ * Record a flag whose value was read off the command line and thrown away. Called from the one
+ * place a value-carrying flag is skipped, so the ledger is a *consequence* of the skip sets, not a
+ * second list beside them: a flag that gets mapped leaves the set, stops reaching here and drops
+ * out of the ledger with no edit here. Deduplicated by flag, because a command may name the same
+ * one twice and one notice per flag is the point.
  */
 function recordDropped(
 	b: Builder,
@@ -433,10 +412,9 @@ function isFileRef(value: string): boolean {
 /** An explicit scheme, e.g. `https://` - curl's own URL syntax, not just ours. */
 const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 /**
- * A bare `host[:port][/path]` with no scheme - curl accepts one (it assumes
- * `http://`), so a hostname shape counts too. Requires a dotted, letter-ending
- * label (`example.com`) or `localhost`: a lone digit or word is syntactically
- * a valid `new URL()` host once a scheme is assumed, which would make an
+ * A bare `host[:port][/path]` with no scheme: curl accepts one (it assumes `http://`), so a
+ * hostname shape counts too. Requires a dotted, letter-ending label (`example.com`) or `localhost`:
+ * a lone digit or word is a valid `new URL()` host once a scheme is assumed, which would make an
  * unrelated flag value such as `5` or `bar` look like a URL too.
  */
 const BARE_HOST_RE =
@@ -447,16 +425,12 @@ function looksLikeUrl(token: string): boolean {
 }
 
 /**
- * Choose the URL among the command's bare positional tokens, and ledger every
- * other one as an ignored argument.
- *
- * Before issue #1445's fix, the first bare token simply won, so an unknown
- * flag whose value this parser has no case for consuming (`--retry-delay 5`)
- * left that value as the next bare token, which then beat the real URL into
- * the slot. Preferring the first URL-shaped token means a swallowed value
- * loses that race wherever it lands, and is disclosed instead of imported.
- * Falls back to the first token when none look URL-shaped, matching the
- * previous behaviour for a command with no recognizable URL at all.
+ * Choose the URL among the command's bare positional tokens, and ledger every other one as an
+ * ignored argument. The first URL-shaped token wins, not the first bare one: an unknown flag whose
+ * value this parser has no case for consuming (`--retry-delay 5`) leaves that value as a bare
+ * token, which would otherwise beat the real URL into the slot (#1445). A swallowed value loses
+ * wherever it lands and is disclosed instead of imported. With no URL-shaped token the first token
+ * is used, for a command with no recognizable URL at all.
  */
 function pickUrl(b: Builder): string {
 	const urlIndex = b.positionals.findIndex(looksLikeUrl);
@@ -526,11 +500,10 @@ function addHeader(b: Builder, raw: string): void {
 }
 
 /**
- * curl's `-H`, which gives two more spellings than `Name: value` a meaning:
- * `Name;` sends the header with no value, an enabled row with an empty value
- * that the engine now sends as such, and `Name:` (nothing after the colon) asks
- * curl to leave out a header it would add itself, which imports as a stored
- * opt-out rather than an empty row (#3220, #3194).
+ * curl's `-H`, which gives two more spellings than `Name: value` a meaning: `Name;` sends the
+ * header with no value (an enabled row with an empty value, which the engine sends as such), and
+ * `Name:` with nothing after the colon asks curl to leave out a header it would add itself, which
+ * imports as a stored opt-out rather than an empty row (#3220, #3194).
  */
 function addCurlHeader(b: Builder, raw: string): void {
 	const idx = raw.indexOf(":");
@@ -548,13 +521,10 @@ function addCurlHeader(b: Builder, raw: string): void {
 }
 
 /**
- * curl `-m` / `--max-time` and wget `-T` / `--timeout`: the whole-request limit,
- * in seconds with decimals allowed (what the generated `--max-time` writes),
- * stored as the request's `timeout` in ms inside the engine's range - it
- * refuses anything outside with a 400.
- *
- * Zero is curl's "no limit" and the engine refuses 0, so it and any non-number
- * import no timeout and are disclosed.
+ * curl `-m` / `--max-time` and wget `-T` / `--timeout`: the whole-request limit, in seconds with
+ * decimals allowed (what the generated `--max-time` writes), stored as the request's `timeout` in
+ * ms inside the engine's range, which refuses anything outside with a 400. Zero is curl's "no
+ * limit" and the engine refuses 0, so it and any non-number import no timeout and are disclosed.
  */
 function setTimeoutSeconds(b: Builder, flag: string, raw: string): void {
 	const seconds = Number.parseFloat(raw);
@@ -595,17 +565,14 @@ interface FormPart {
 }
 
 /**
- * `-F name=@path;type=image/png;filename=avatar.png` → a file part.
+ * `-F name=@path;type=image/png;filename=avatar.png` → a file part (#393), so a command that
+ * uploads a file does not import as one that posts the literal text `@path`. The path is kept as
+ * written (it names a file on whoever's machine the command came from) and carries no trust flag,
+ * so the editor marks it until the engine answers for it (`lib/file-trust.ts`).
  *
- * Before issue #393 this was skipped as unreadable and the row landed as the
- * literal text `@path`: a command that uploaded a file imported as one that
- * posts a path string. The path is kept as written - it names a file on
- * whoever's machine the command came from - and carries no trust flag, so the
- * editor marks it until the engine answers for it (`lib/file-trust.ts`).
- *
- * `<path` (curl's "read the file as the value" form) is deliberately NOT a file
- * part: it means the file's *contents* become the field value, which is a text
- * part whose text this parser cannot read. It stays skipped.
+ * `<path` (curl's "read the file as the value" form) is deliberately NOT a file part: the file's
+ * *contents* become the field value, a text part whose text this parser cannot read. It stays
+ * skipped.
  */
 function formPart(key: string, raw: string): FormPart | null {
 	if (!raw.startsWith("@")) return textPart(key, raw);
@@ -628,12 +595,11 @@ function formPart(key: string, raw: string): FormPart | null {
 }
 
 /**
- * A text `-F` value: `v`, or a typed one, `v;type=application/json` or
- * `"v";type=...` with the double-quoted form curl reads as text whatever it
- * starts with (`\` and `\"` the only escapes, #2539). A bare value runs to the
- * first `;` and may hold quotes itself, as in `meta={"x":1};type=...` (#3194).
- * The type takes the rest of the word, as curl does, so `;charset=` parameters
- * stay inside it. Anything else is the literal text it always was.
+ * A text `-F` value: `v`, or a typed one, `v;type=application/json` or `"v";type=...`, the
+ * double-quoted form curl reads as text whatever it starts with (`\` and `\"` the only escapes,
+ * #2539). A bare value runs to the first `;` and may hold quotes itself, as in
+ * `meta={"x":1};type=...` (#3194). The type takes the rest of the word, as curl does, so
+ * `;charset=` parameters stay inside it. Anything else is literal text.
  */
 function textPart(key: string, raw: string): FormPart {
 	const typed = /^(?:"((?:[^"\\]|\\.)*)"|([^;]*));type=(.+)$/is.exec(raw);
@@ -678,14 +644,11 @@ function hasHeaderRow(b: Builder, name: string): boolean {
 const STRIPS_NEWLINES = new Set(["-d", "--data", "--data-ascii"]);
 
 /**
- * The file a command sends as its whole body, or null.
- *
- * `-T` wins outright: curl sends the upload and nothing else. Otherwise a body
- * read from a file is one only when it is the command's *only* data: curl
- * joins every `-d` with `&`, and a file's bytes spliced between text parts is
- * not something one file reference can say. Anything else keeps the text
- * parts and discloses each file part, as `-G` does (its data becomes the query,
- * and a file's contents cannot).
+ * The file a command sends as its whole body, or null. `-T` wins outright: curl sends the upload
+ * and nothing else. Otherwise a body read from a file is one only when it is the command's *only*
+ * data: curl joins every `-d` with `&`, and one file reference cannot say a file's bytes spliced
+ * between text parts. Anything else keeps the text parts and discloses each file part, as `-G` does
+ * (its data becomes the query, and a file's contents cannot).
  */
 function wholeBodyFile(b: Builder): string | null {
 	if (b.uploadPath !== null) return b.uploadPath || null;
@@ -775,11 +738,10 @@ function resolve(b: Builder): ParsedArguments {
 		if (!hasHeaderRow(b, "accept") && !isRemoved(b, "accept"))
 			headers.push({ key: "Accept", value: "application/json" });
 	}
-	// The same header the Event stream toggle arms, through the same rule: a
-	// command that already declares an Accept keeps what it wrote, because a
-	// silent override would send a request the pasted command never described.
-	// `autoHeaderToAdd` rather than a fourth copy of that check - a hand-rolled
-	// copy of a primitive does not receive the primitive's fixes.
+	// The header the Event stream toggle arms, through the same rule: a command that already
+	// declares an Accept keeps what it wrote, because a silent override would send a request the
+	// pasted command never described. `autoHeaderToAdd` rather than a fourth copy of that check: a
+	// hand-rolled copy of a primitive does not receive the primitive's fixes.
 	if (b.stream) {
 		const accept = autoHeaderToAdd(
 			ACCEPT_HEADER,
@@ -796,11 +758,10 @@ function resolve(b: Builder): ParsedArguments {
 	if (b.bearer !== null) {
 		auth = { mode: "bearer", token: b.bearer };
 	} else if (b.basic && b.authScheme) {
-		// `--digest` / `--ntlm` beside `-u` name a different scheme for the same
-		// credentials (issue #1445) - without this, both silently became `basic`,
-		// which is a request that would send an Authorization header the
-		// challenge never asked for, rather than the stored-but-unresolved mode
-		// the auth editor warns about (`isUneditableAuthMode`).
+		// `--digest` / `--ntlm` beside `-u` name a different scheme for the same credentials
+		// (#1445). As `basic` they would send an Authorization header the challenge never asked
+		// for, not the stored-but-unresolved mode the auth editor warns about
+		// (`isUneditableAuthMode`).
 		auth = {
 			mode: b.authScheme,
 			config: { username: b.basic.username, password: b.basic.password },
@@ -865,11 +826,10 @@ function resolve(b: Builder): ParsedArguments {
 			binaryFile,
 			auth,
 			stream: b.stream,
-			// `-k` says "do not verify", so the stored field is its inverse.
-			// Mapped rather than skipped (issue #706): a pasted command that
-			// turns verification off described a host whose certificate does not
-			// verify, and importing it as a verifying request means the paste
-			// fails on the first send for a reason the command already named.
+			// `-k` says "do not verify", so the stored field is its inverse. Mapped, not skipped
+			// (#706): a pasted command that turns verification off described a host whose
+			// certificate does not verify, and importing it as a verifying request fails the first
+			// send for a reason the command already named.
 			verifySSL: !b.insecure,
 			followRedirects: b.followRedirects,
 			maxRedirects: b.maxRedirects,
@@ -895,16 +855,15 @@ function looksLikeFormData(data: string): boolean {
 }
 
 /**
- * Split `-d`/`--data*` parts into pairs, for the urlencoded bodies these are
- * reinterpreted as (explicit Content-Type, or the form-shaped heuristic).
+ * Split `-d`/`--data*` parts into pairs, for the urlencoded bodies these are read as (an explicit
+ * Content-Type, or the form-shaped heuristic).
  *
- * curl sends `-d`'s bytes on the wire exactly as written, so a `%20` in one is
- * already the wire's own percent-escape of the logical value - decoded here
- * with `safeDecode`, so the stored value matches what every other urlencoded
- * body row in the app holds (decoded; re-encoded once, at send or codegen
- * time). Query params are the exception: they are kept raw (issue #1771). Decoding twice (once here, again at generation)
- * is issue #1445's `-d 'b=x%20y'` bug: without this, the stored `x%20y` came
- * back out through `--data-urlencode` re-encoded to `x%2520y`.
+ * curl sends `-d`'s bytes on the wire exactly as written, so a `%20` in one is already the wire's
+ * own percent-escape of the logical value. It is decoded here with `safeDecode`, so the stored
+ * value matches what every other urlencoded body row in the app holds (decoded; encoded once, at
+ * send or codegen time). Query params are the exception: they are kept raw (#1771). Stored
+ * undecoded, `-d 'b=x%20y'` would be encoded twice, coming back out through `--data-urlencode` as
+ * `x%2520y` (#1445).
  */
 function parseFormPairs(parts: string[]): Array<{ key: string; value: string }> {
 	const pairs: Array<{ key: string; value: string }> = [];
@@ -925,13 +884,11 @@ function parseFormPairs(parts: string[]): Array<{ key: string; value: string }> 
 }
 
 /**
- * Split `--data-urlencode` parts into pairs.
- *
- * Each occurrence of the flag is one whole `name=content` pair - curl does not
- * split its value on `&` the way `-d`'s form-shaped content is, and it encodes
- * the value itself when the command runs, so what the user typed is exactly
- * the logical (unencoded) value and is kept verbatim (issue #1445: `--data-urlencode
- * 'q=café au lait & more'` is one field named `q`, not two).
+ * Split `--data-urlencode` parts into pairs. Each occurrence of the flag is one whole
+ * `name=content` pair: its value is not split on `&` the way `-d`'s form-shaped content is, and
+ * curl encodes the value itself when the command runs, so what the user typed is the logical
+ * (unencoded) value and is kept verbatim (#1445: `--data-urlencode 'q=café au lait & more'` is one
+ * field named `q`, not two).
  */
 function parseUrlEncodeParts(parts: string[]): Array<{ key: string; value: string }> {
 	return parts.map((part) => {
@@ -1000,16 +957,15 @@ const CURL_SHORT_NOARG = new Set("IGkLNsvfS#Oj");
 const CURL_SHORT_WITH_ARG = new Set("XHAebudFTowmExcD");
 
 /**
- * curl's own reading of a short-flag cluster, as the separate arguments it
- * stands for: boolean letters combine (`-sSL` is `-s -S -L`), and a letter that
- * takes a value ends the cluster and takes the rest of the word as that value
- * when there is any (`-XPOST`, `-ualice:pw`), or the next argument when not
- * (`-sSX POST`). The pieces go back through the one switch in `parseCurl`.
+ * curl's own reading of a short-flag cluster, as the separate arguments it stands for: boolean
+ * letters combine (`-sSL` is `-s -S -L`), and a letter that takes a value ends the cluster and
+ * takes the rest of the word as that value when there is any (`-XPOST`, `-ualice:pw`), or else the
+ * next argument (`-sSX POST`). The pieces go back through the one switch in `parseCurl`.
  *
- * Null for anything that is not a cluster of letters this parser knows: a
- * lone flag, a `--long` one, or a cluster with an unknown letter, which stays
- * one unknown flag and is disclosed as before rather than guessed at (guessing
- * that `-Z` takes no value could leave its value to be taken for the URL).
+ * Null for anything that is not a cluster of letters this parser knows: a lone flag, a `--long`
+ * one, or a cluster with an unknown letter, which stays one unknown flag and is disclosed rather
+ * than guessed at (guessing that `-Z` takes no value could leave its value to be taken for the
+ * URL).
  */
 function expandShortCluster(arg: string): string[] | null {
 	if (arg.length < 3 || arg[0] !== "-" || arg[1] === "-") return null;
@@ -1157,11 +1113,10 @@ function parseCurl(argv: string[]): ParsedArguments {
 				break;
 			case "-T":
 			case "--upload-file": {
-				// The whole body is the file, sent as a PUT unless `-X` says
-				// otherwise. Standard input (`-` or `.`) is the one upload a
-				// pasted command cannot carry; it is ledgered with its own text
-				// rather than through the shared table, because curl's `-T`
-				// uploads and wget's means a timeout (issue #1445).
+				// The whole body is the file, sent as a PUT unless `-X` says otherwise. Standard
+				// input (`-` or `.`) is the one upload a pasted command cannot carry; it is
+				// ledgered with its own text, not through the shared table, because curl's `-T`
+				// uploads and wget's means a timeout (#1445).
 				const src = value().trim();
 				const stdin = !src || src === "-" || src === ".";
 				b.uploadPath = stdin ? "" : src;
@@ -1194,10 +1149,9 @@ function parseCurl(argv: string[]): ParsedArguments {
 			}
 			case "-N":
 			case "--no-buffer":
-				// curl's unbuffered flag is how a streaming endpoint is consumed
-				// from a terminal, so it is the request's stream setting rather
-				// than an output nicety to skip (issue #575). Round-trips: the
-				// curl generator emits it back for a stream-flagged request.
+				// curl's unbuffered flag is how a terminal consumes a streaming endpoint, so it is
+				// the request's stream setting rather than an output nicety to skip (#575).
+				// Round-trips: the curl generator emits it back for a stream-flagged request.
 				b.stream = true;
 				break;
 			case "--url":
@@ -1205,12 +1159,10 @@ function parseCurl(argv: string[]): ParsedArguments {
 				break;
 			default:
 				if (CURL_SKIP_WITH_ARG.has(flag)) {
-					// Only the separate-token form has a value to consume. The
-					// `--flag=value` form already carries it, and eating the
-					// next token there swallowed whatever followed - usually the
-					// URL, which made `curl --proxy=http://p:8080 <url>` import
-					// as nothing at all. Found by the ledger below, which
-					// disclosed the flag on a paste that then had no URL.
+					// Only the separate-token form has a value to consume. The `--flag=value` form
+					// already carries it, and eating the next token there would swallow whatever
+					// followed, usually the URL: `curl --proxy=http://p:8080 <url>` would import as
+					// nothing at all.
 					if (inlineValue === undefined) next();
 					recordDropped(b, flag);
 				} else if (CURL_NOARG.has(flag)) {
@@ -1221,10 +1173,9 @@ function parseCurl(argv: string[]): ParsedArguments {
 					// every token on the line has been read (issue #1445).
 					b.positionals.push(arg);
 				} else {
-					// A flag this parser has never seen. It may take a value the
-					// next token would otherwise become the URL for (issue #1445) -
-					// safer to disclose the gap than guess at consuming a token
-					// that might be the URL itself.
+					// A flag this parser has never seen. It may take a value the next token would
+					// otherwise become the URL for (#1445): disclosing the gap is safer than
+					// guessing at consuming a token that might be the URL itself.
 					recordDropped(b, flag);
 				}
 				break;
@@ -1320,10 +1271,9 @@ function parseWget(args: string[]): ParsedArguments {
 				if (src) b.dataFiles.push({ flag, src });
 				break;
 			}
-			// wget's spelling of `-k`, mapped for the same reason and through
-			// the same builder field - the two commands resolve into one
-			// request, so honouring the intent on one path and eating it on the
-			// other is the drift this parser exists to avoid.
+			// wget's spelling of `-k`, mapped for the same reason and through the same builder
+			// field: the two commands resolve into one request, so honouring the intent on one path
+			// and eating it on the other is the drift this parser exists to avoid.
 			case "--no-check-certificate":
 				b.insecure = true;
 				break;
@@ -1333,8 +1283,8 @@ function parseWget(args: string[]): ParsedArguments {
 				break;
 			default:
 				if (WGET_SKIP_WITH_ARG.has(flag)) {
-					// See the curl branch: `--flag=value` carries its own value,
-					// and consuming the next token there ate the URL.
+					// See the curl branch: `--flag=value` carries its own value, and consuming the
+					// next token there would eat the URL.
 					if (inlineValue === undefined) next();
 					recordDropped(b, flag);
 				} else if (WGET_NOARG.has(flag)) {

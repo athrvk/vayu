@@ -8,15 +8,14 @@
 /**
  * curl, POSIX shells.
  *
- * Quoting is the whole job. Every value goes inside single quotes, where a
- * shell expands nothing at all, and the one character that cannot appear there
- * - the single quote itself - is closed, escaped and reopened (`'\''`). That
- * covers the cases generators usually get wrong in one rule: `$HOME` and
- * backticks in a body stay literal, a newline inside the quotes is a newline,
- * and unicode passes through untouched.
+ * Quoting is the whole job. Every value goes inside single quotes, where a shell expands nothing,
+ * and the one character that cannot appear there, the single quote itself, is closed, escaped and
+ * reopened (`'\''`). That one rule covers the cases generators usually get wrong: `$HOME` and
+ * backticks in a body stay literal, a newline inside the quotes is a newline, and unicode passes
+ * through untouched.
  *
- * A cmd.exe/PowerShell variant is deliberately a separate target rather than a
- * flag on this one - its quoting rules share nothing with these.
+ * A cmd.exe/PowerShell variant is deliberately a separate target, not a flag on this one: its
+ * quoting rules share nothing with these.
  */
 
 import {
@@ -97,11 +96,10 @@ export function generateCurl(
 		// `-N` is curl's unbuffered mode, and it is what `parseCurl` reads back
 		// as the stream setting - the round trip issue #575 asks for.
 		args.push("-N");
-		// The header the setting implies, added only where the request declares
-		// none: the same rule the app's toggle applies through
-		// `autoHeaderToAdd`, so a snippet and the request it came from ask the
-		// server for the same thing. A declared Accept - even a different one -
-		// is the author's and is emitted above untouched.
+		// The header the setting implies, added only where the request declares none: the rule the
+		// app's toggle applies through `autoHeaderToAdd`, so a snippet and its request ask the
+		// server for the same thing. A declared Accept, even a different one, is the author's and
+		// is emitted above untouched.
 		const accept = autoHeaderToAdd(
 			ACCEPT_HEADER,
 			SSE_ACCEPT,
@@ -111,18 +109,16 @@ export function generateCurl(
 	}
 
 	if (!prepared.verifySSL) {
-		// Emitted only when verification is off, and `parseCurl` reads it back
-		// as the same setting - the round trip issue #706 asks for. The verifying
-		// default needs no flag: `curl` verifies unless told otherwise, so
-		// emitting nothing is emitting the request.
+		// Emitted only when verification is off, and `parseCurl` reads it back as the same setting
+		// (the round trip #706 asks for). The verifying default needs no flag: curl verifies unless
+		// told otherwise.
 		args.push("-k");
 	}
 
 	if (prepared.followRedirects) {
-		// The opposite split from `-k`: curl does NOT follow redirects unless
-		// told to, while the engine does by default, so the common case is the
-		// one that needs the flag (issue #1445). `parseCurl` reads `-L` back as
-		// the same setting.
+		// The opposite split from `-k`: curl does NOT follow redirects unless told to, while the
+		// engine does by default, so the common case is the one that needs the flag (#1445).
+		// `parseCurl` reads `-L` back as the same setting.
 		args.push("-L");
 		// Only beside `-L`: a cap on hops that are never taken says nothing. curl's
 		// own cap is 50 and Vayu's default 10, so the flag is worth its line.
@@ -145,15 +141,13 @@ export function generateCurl(
 	}
 
 	if (prepared.body?.kind === "raw") {
-		// `--data-raw`, not `-d`: `-d` treats a body starting with `@` as a file
-		// name, which silently sends the wrong bytes for any payload that begins
-		// with one.
+		// `--data-raw`, not `-d`: `-d` reads a body starting with `@` as a file name and silently
+		// sends the wrong bytes.
 		args.push(`--data-raw ${shellQuote(prepared.body.content)}`);
 	} else if (prepared.body?.kind === "binary") {
-		// `--data-binary @path` sends the file byte for byte; `-d @path` would
-		// strip its newlines. The `@` stays outside the quotes so the path is
-		// quoted like any other value. Content-Type is already among the headers
-		// above: `prepare.ts` always supplies one, because curl's own default for
+		// `--data-binary @path` sends the file byte for byte; `-d @path` would strip its newlines.
+		// The `@` stays outside the quotes so the path is quoted like any other value. Content-Type
+		// is among the headers above: `prepare.ts` always supplies one, because curl's default for
 		// `--data-binary` is `application/x-www-form-urlencoded`.
 		args.push(`--data-binary @${shellQuote(prepared.body.path)}`);
 	} else if (prepared.body?.kind === "form-data") {
@@ -162,12 +156,11 @@ export function generateCurl(
 		}
 	} else if (prepared.body?.kind === "urlencoded") {
 		for (const [key, value] of prepared.body.fields) {
-			// curl encodes only what follows the first `=`, so the field *name* has
-			// to arrive already encoded: a raw space, `&` or `=` in it sends a
-			// different field than the request carries, and a raw `@` hits curl's
-			// `name@file` form and reads a local file. Encoding the name here and
-			// leaving the value to curl is the split curl documents; the `%20` for a
-			// space matches what curl emits on the value side.
+			// curl encodes only what follows the first `=`, so the field *name* has to arrive
+			// encoded: a raw space, `&` or `=` in it sends a different field than the request
+			// carries, and a raw `@` hits curl's `name@file` form and reads a local file. Encoding
+			// the name here and leaving the value to curl is the split curl documents; the `%20`
+			// for a space matches what curl emits for the value.
 			args.push(`--data-urlencode ${shellQuote(`${encodeURIComponent(key)}=${value}`)}`);
 		}
 	}

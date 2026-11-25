@@ -6,22 +6,19 @@
  */
 
 /**
- * What the schema explorer remembers: whether it is open, and per schema, what
- * the user has searched for, opened and scrolled to.
+ * What the schema explorer remembers: whether it is open, and per schema, what the user has
+ * searched for, opened and scrolled to.
  *
- * **A store rather than component state, because the pane is unmounted often
- * and for no reason the user did.** Radix tears the Body tab down on every
- * glance at Headers or Auth (`utils/body-drafts.ts` exists for exactly this),
- * and a component-state explorer comes back collapsed to its roots with an
- * empty search box - after a glance the user did not think of as leaving. The
- * body drafts learned this the hard way; this starts where they ended up.
+ * **A store rather than component state, because the pane unmounts often and for no reason the user
+ * did.** Radix tears the Body tab down on every glance at Headers or Auth (`utils/body-drafts.ts`
+ * exists for exactly this), and a component-state explorer would come back collapsed to its roots
+ * with an empty search box after a glance the user did not think of as leaving.
  *
- * **Keyed by schema identity, not by request.** The key is the schema cache's
- * own (`schemaCacheKey`), so two requests against one endpoint share the tree
- * they have opened, and the same URL reached with different credentials does
- * not - which is the same rule the schema itself is cached under, for the same
- * reason. Deliberately in memory only: an expansion set is a description of a
- * schema that may not exist on the next launch.
+ * **Keyed by schema identity, not by request.** The key is the schema cache's own
+ * (`schemaCacheKey`), so two requests against one endpoint share the tree they have opened and the
+ * same URL reached with different credentials does not: the rule the schema itself is cached under,
+ * for the same reason. In memory only: an expansion set describes a schema that may not exist on
+ * the next launch.
  */
 
 import { create } from "zustand";
@@ -32,11 +29,9 @@ export interface ExplorerViewState {
 	expanded: string[];
 	scrollTop: number;
 	/**
-	 * Whether every row shows its full description rather than one clipped line.
-	 *
-	 * Per schema, like everything else here: how much documentation a user wants
-	 * on screen is a property of the schema they are reading, and an endpoint
-	 * that documents nothing has nothing to answer for.
+	 * Whether every row shows its full description rather than one clipped line. Per schema, like
+	 * everything here: how much documentation a user wants on screen is a property of the schema
+	 * they are reading, and an endpoint that documents nothing has nothing to answer for.
 	 */
 	showDescriptions: boolean;
 }
@@ -64,13 +59,10 @@ interface ExplorerState {
 	setSearch: (key: string, search: string) => void;
 	toggleExpanded: (key: string, id: string) => void;
 	/**
-	 * Open every row on a path and clear the search, so a result found by name
-	 * can be shown where it lives.
-	 *
-	 * A union rather than a toggle, and one write rather than one per ancestor:
-	 * revealing a row already half-open must not close the half that was open,
-	 * and a per-ancestor loop would render the tree once per level on its way
-	 * down.
+	 * Open every row on a path and clear the search, so a result found by name can be shown where
+	 * it lives. A union rather than a toggle, and one write rather than one per ancestor: revealing
+	 * a row already half-open must not close the half that was open, and a per-ancestor loop would
+	 * render the tree once per level on its way down.
 	 */
 	revealPath: (key: string, ids: string[]) => void;
 	setScrollTop: (key: string, scrollTop: number) => void;

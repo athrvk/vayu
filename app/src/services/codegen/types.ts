@@ -8,12 +8,11 @@
 /**
  * The shapes the snippet generators read.
  *
- * Deliberately structural rather than an import of `ComposedRequest`: the
- * generators are pure functions with no opinion about where their input came
- * from, and both entry points feed them the same fields - `POST /compose`'s
- * resolved payload, and the stored request mapped to the same shape for the
- * templated view. `ComposedRequest` satisfies `SnippetRequest` structurally, so
- * the call site needs no conversion.
+ * Structural, deliberately not an import of `ComposedRequest`: the generators are pure functions
+ * with no opinion about where their input came from, and both entry points feed them the same
+ * fields (`POST /compose`'s resolved payload, and the stored request mapped to that shape for the
+ * templated view). `ComposedRequest` satisfies `SnippetRequest` structurally, so the call site
+ * needs no conversion.
  */
 
 import type { HttpVersion } from "@/constants/request";
@@ -51,11 +50,10 @@ export interface SnippetRequest {
 	method: string;
 	url: string;
 	/**
-	 * The request's params rows, read for its path rows only (issue #1764): a
-	 * `:name` segment of `url` is substituted from them exactly as the engine
-	 * composes it (`substitutePathVariables`). The query is already in `url`.
-	 * On a composed payload, the path rows composition left waiting (a value
-	 * holding a token only a run answers), whose `:name` is still in `url`.
+	 * The request's params rows, read for its path rows only (#1764): a `:name` segment of `url` is
+	 * substituted from them exactly as the engine composes it (`substitutePathVariables`). The
+	 * query is already in `url`. On a composed payload, these are the path rows composition left
+	 * waiting (a value holding a token only a run answers), whose `:name` is still in `url`.
 	 */
 	params?: readonly KeyValueEntry[];
 	/**
@@ -67,30 +65,25 @@ export interface SnippetRequest {
 	body?: unknown;
 	auth?: Record<string, unknown>;
 	/**
-	 * Consume the response as a `text/event-stream` (issue #575).
-	 *
-	 * An execution setting rather than a transfer option, so it changes what a
-	 * snippet has to *say* rather than a flag it passes along: curl and HTTPie
-	 * have a first-class unbuffered mode and emit it, and the targets whose
-	 * stock idiom buffers the whole body say so in a note instead of emitting a
-	 * command that would hang on an endless stream.
+	 * Consume the response as a `text/event-stream` (#575). An execution setting, not a transfer
+	 * option, so it changes what a snippet has to *say*: curl and HTTPie have a first-class
+	 * unbuffered mode and emit it, and the targets whose stock idiom buffers the whole body say so
+	 * in a note instead of emitting a command that would hang on an endless stream.
 	 */
 	stream?: boolean;
 	/**
-	 * Verify the TLS certificate (issue #706). Default `true`, and the snippet
-	 * only says anything when it is off - `curl -k` is the flag `parseCurl`
-	 * reads back, so a request pasted from a command that turned verification
-	 * off regenerates the command it came from. Targets with no first-class
-	 * spelling for it carry a note instead of silently emitting a verifying
-	 * request, the same split `stream` above takes.
+	 * Verify the TLS certificate (#706). Default `true`, and the snippet says anything only when it
+	 * is off: `curl -k` is the flag `parseCurl` reads back, so a request pasted from a command that
+	 * turned verification off regenerates the command it came from. Targets with no first-class
+	 * spelling for it carry a note instead of silently emitting a verifying request, the split
+	 * `stream` takes.
 	 */
 	verifySSL?: boolean;
 	/**
-	 * Follow redirects (issue #1445). Default `true` - the engine's own
-	 * default, unlike curl's - so `curl -L` is the flag `parseCurl` reads back:
-	 * a request pasted from a command with no `-L` came from one that does not
-	 * follow, and the generated command for a following request needs it to
-	 * describe the same behaviour.
+	 * Follow redirects (#1445). Default `true`, the engine's own default and unlike curl's, so
+	 * `curl -L` is the flag `parseCurl` reads back: a request pasted from a command with no `-L`
+	 * came from one that does not follow, and the generated command for a following request needs
+	 * it to do the same.
 	 */
 	followRedirects?: boolean;
 	/**
@@ -101,10 +94,9 @@ export interface SnippetRequest {
 	 */
 	maxRedirects?: number;
 	/**
-	 * The request's own deadline in milliseconds (issue #2937), `null` or absent
-	 * when it states none. Absent means the engine's `defaultTimeout` setting
-	 * decides at send time, which a snippet cannot know, so nothing is emitted
-	 * and nothing is said - the same reading `POST /compose` takes.
+	 * The request's own deadline in milliseconds (#2937), `null` or absent when it states none.
+	 * Then the engine's `defaultTimeout` setting decides at send time, which a snippet cannot know,
+	 * so nothing is emitted and nothing is said, the reading `POST /compose` takes.
 	 */
 	timeout?: number | null;
 	/**
@@ -114,19 +106,18 @@ export interface SnippetRequest {
 	 */
 	httpVersion?: HttpVersion;
 	/**
-	 * The request's `disableUrlEncoding' (issue #1765). Default `false`. On, a
-	 * `:name` path value and an API-key query param go into the URL as written,
-	 * which is what the engine sends; the snippet quotes that URL unchanged.
+	 * The request's `disableUrlEncoding` (#1765). Default `false`. On, a `:name` path value and an
+	 * API-key query param go into the URL as written, as the engine sends them; the snippet quotes
+	 * that URL unchanged.
 	 */
 	disableUrlEncoding?: boolean;
 }
 
 export interface CodegenOptions {
 	/**
-	 * Values to hide before the snippet is built. Every one of them is replaced
-	 * wherever it occurs - a URL, a header, a body - because a secret variable
-	 * substitutes into all three and a generator that only masked the auth field
-	 * would leak the same value one line down.
+	 * Values to hide before the snippet is built, each replaced wherever it occurs (a URL, a
+	 * header, a body): a secret variable substitutes into all three, and a generator that masked
+	 * only the auth field would leak the same value one line down.
 	 */
 	secrets?: string[];
 	/** Off produces the real values; on is the default the UI ships with. */
@@ -136,11 +127,10 @@ export interface CodegenOptions {
 export interface GeneratedSnippet {
 	code: string;
 	/**
-	 * What the snippet cannot carry, in the user's words - an auth mode the
-	 * engine performs at send time and no static command can reproduce, or the
-	 * jar cookies libcurl attaches on the wire. Rendered beside the code rather
-	 * than buried in it: a snippet that silently drops a credential is worse
-	 * than one that says it did.
+	 * What the snippet cannot carry, in the user's words: an auth mode the engine performs at send
+	 * time that no static command can reproduce, or the jar cookies libcurl attaches on the wire.
+	 * Rendered beside the code, not buried in it: a snippet that silently drops a credential is
+	 * worse than one that says it did.
 	 */
 	notes: string[];
 	/** Whether any masking actually happened, so the UI can say "masked". */

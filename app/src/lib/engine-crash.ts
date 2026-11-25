@@ -12,9 +12,8 @@ import { RUN_TYPE_NAME } from "@/modules/history/types";
 const STDERR_LINES_SHOWN = 3;
 
 /**
- * What happened to the engine's process, in a sentence: a failure to run is
- * named by its message, a kill by its signal, an exit by its code. The three
- * can coexist in the record; the one that explains the most comes first.
+ * What happened to the engine's process: a failure to run named by its message, a kill by its
+ * signal, an exit by its code. The record can hold all three; the most telling comes first.
  */
 export function describeEngineCrash(crash: EngineCrash): string {
 	if (crash.error !== null) return `Vayu's engine reported an error - ${crash.error}`;
@@ -36,11 +35,10 @@ export function engineCrashOutput(crash: EngineCrash): string {
 }
 
 /**
- * The sentence that says a crash ended a run, or `null` when none ended
- * (`crashEndedRuns`, #3605). Named from `RUN_TYPE_NAME`, the one table of run
- * kind words. A load test and a collection run cannot normally be live
- * together, but a load run whose stream was lost still counts as live while a
- * collection run holds the stream.
+ * The sentence that says a crash ended a run, or `null` when none ended (`crashEndedRuns`, #3605),
+ * named from `RUN_TYPE_NAME`, the one table of run kind words. Both kinds can appear: a load test
+ * and a collection run are not normally live together, but a load run whose stream was lost still
+ * counts as live while a collection run holds the stream.
  */
 export function describeCrashEndedRuns(ended: readonly CrashEndedRun[]): string | null {
 	const names = [
