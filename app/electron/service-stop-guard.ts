@@ -6,35 +6,30 @@
  */
 
 /**
- * Saying what a close is about to stop, before it stops it (issue #1363).
+ * Saying what a close is about to stop, before it stops it (#1363).
  *
- * Everything the Services drawer starts - webhook inboxes, mock servers, mock
- * issuers - lives inside the engine, and the engine dies with the app. On
- * Windows and Linux `window-all-closed` quits, so the X button stops every one
- * of them; on macOS the same click leaves them serving. That split is Electron's
- * default rather than a decision anyone made for Vayu, and the resolution
- * (#1363, option A) keeps it: services are window-scoped, and the close says so
- * when there is something to say. A live run dies the same way, so the same
- * question names it, first (#3604). Restarting the engine stops it too, so
- * Restart asks the same question when a run is live (#3604).
+ * Everything the Services drawer starts (webhook inboxes, mock servers, mock issuers) lives inside
+ * the engine, and the engine dies with the app. On Windows and Linux `window-all-closed` quits, so
+ * the X button stops every one of them; on macOS the same click leaves them serving. That split is
+ * Electron's default, not a decision made for Vayu, and the resolution (#1363, option A) keeps it:
+ * services are window-scoped, and the close says so when there is something to say. A live run dies
+ * the same way, so the same question names it, first (#3604); restarting the engine stops it too,
+ * so Restart asks the same question when a run is live (#3604).
  *
- * **The renderer says what is running; this side says what that costs.** Only
- * the renderer holds the three lists and the one rule that makes them
- * comparable (a stopped inbox keeps its record, a stopped mock or issuer is
- * gone from the engine's list), and only it knows which run it shows live, so
- * it publishes both, each on its own channel, on every change. The
- * dialog's words, the platform rule and the button order are OS surface and
- * stay here - the same split `run-progress.ts` and `notify.ts` use, and the
- * reason no platform detail reaches React.
+ * **The renderer says what is running; this side says what that costs.** Only the renderer holds
+ * the three lists and the one rule that makes them comparable (a stopped inbox keeps its record, a
+ * stopped mock or issuer is gone from the engine's list), and only it knows which run it shows
+ * live, so it publishes both, each on its own channel, on every change. The dialog's words, the
+ * platform rule and the button order are OS surface and stay here, the split `run-progress.ts` and
+ * `notify.ts` use and the reason no platform detail reaches React.
  *
- * A snapshot rather than a question asked at close time: the round trip
- * `quit-flow.ts` runs would put a second ceiling on the one gesture the user
- * is waiting on, and it would read the same TanStack cache this snapshot is
- * already published from - no fresher, strictly slower, and unanswerable in the
- * case that matters most, a renderer that is gone.
+ * A snapshot rather than a question asked at close time: the round trip `quit-flow.ts` runs would
+ * put a second ceiling on the one gesture the user is waiting on, and would read the same TanStack
+ * cache this snapshot is already published from (no fresher, strictly slower, and unanswerable in
+ * the case that matters most, a renderer that is gone).
  *
- * Kept out of main.ts so it can be tested - main.ts creates windows and starts
- * the engine at import time, which no unit test can do.
+ * Kept out of main.ts so it can be tested: main.ts creates windows and starts the engine at import
+ * time, which no unit test can do.
  */
 
 import { createRendererWatch, type IpcEventLike } from "./renderer-watch.js";
@@ -49,11 +44,9 @@ export const CONFIRM_RESTART_CHANNEL = "engine:confirm-restart";
 export type RunningServiceKind = "inbox" | "mock-server" | "issuer";
 
 /**
- * One service the engine is holding for this window.
- *
- * `name` is what the user recognises it by where the kind has one - a mock
- * server serves a named collection - and null where the port is the only name
- * it has, which is how the drawer lists inboxes and issuers too.
+ * One service the engine is holding for this window. `name` is what the user recognises it by where
+ * the kind has one (a mock server serves a named collection), and null where the port is its only
+ * name, which is how the drawer lists inboxes and issuers too.
  */
 export interface RunningService {
 	kind: RunningServiceKind;
@@ -107,11 +100,9 @@ export interface ServiceStopPrompt {
 }
 
 /**
- * Read one snapshot off the channel, or `null` for anything that is not one.
- *
- * A malformed message drops the whole snapshot rather than the bad entry: a
- * half-read list would understate what a close destroys, which is the exact
- * silence this guard exists to break.
+ * Read one snapshot off the channel, or `null` for anything that is not one. A malformed message
+ * drops the whole snapshot, not the bad entry: a half-read list would understate what a close
+ * destroys, the exact silence this guard exists to break.
  */
 export function parseRunningServices(raw: unknown): RunningService[] | null {
 	if (!Array.isArray(raw)) return null;
@@ -186,12 +177,10 @@ function stopConsequence({ run, services }: StopTargets): string {
 }
 
 /**
- * What to put in front of the user, for targets known to hold something.
- *
- * The count leads and the names follow: the question a user answers is "how
- * much am I about to lose", and a message box's first line is the only part
- * every platform shows at full size. The run is listed first because it is the
- * one thing here that cannot be started again where it left off.
+ * What to put in front of the user, for targets known to hold something. The count leads and the
+ * names follow: the question a user answers is "how much am I about to lose", and a message box's
+ * first line is the only part every platform shows at full size. The run is listed first because it
+ * is the one thing here that cannot be started again where it left off.
  */
 export function buildStopPrompt(gesture: AskingGesture, targets: StopTargets): ServiceStopPrompt {
 	const { lead, confirm } = GESTURE_WORDS[gesture];
@@ -212,10 +201,9 @@ export interface ServiceStopGuardDeps {
 	/** Put the prompt in front of the user; resolves true for "Close anyway". */
 	ask: (prompt: ServiceStopPrompt) => Promise<boolean>;
 	/**
-	 * True while no renderer is left to have published a fresh snapshot. Read at
-	 * ask time rather than trusted to arrive as a message: a renderer that
-	 * crashed never gets to say its services and its run are unreachable, and a
-	 * dialog naming them would be asking about a window that is already gone.
+	 * True while no renderer is left to have published a fresh snapshot. Read at ask time rather
+	 * than trusted to arrive as a message: a renderer that crashed never gets to say its services
+	 * and run are unreachable, and a dialog naming them would ask about a window already gone.
 	 */
 	rendererGone?: () => boolean;
 	/** Defaults to the host's. Injected so both branches can be tested. */
@@ -296,11 +284,10 @@ export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopG
 		confirm: (gesture) => {
 			if (!wouldStop(gesture)) return Promise.resolve(true);
 			return deps.ask(buildStopPrompt(gesture, targets())).catch((error: unknown) => {
-				// A question that could not be asked is not a yes. In the case that
-				// actually raises this - a window destroyed while its own dialog was
-				// up - the close already happened and the answer is moot; in any
-				// other, refusing to stop the user's run or services on an error is
-				// the safe half, and a signal still quits without asking at all.
+				// A question that could not be asked is not a yes. Where this actually happens (a
+				// window destroyed while its own dialog was up) the close already happened and the
+				// answer is moot; anywhere else, refusing to stop the user's run or services on an
+				// error is the safe half, and a signal still quits without asking.
 				log("service-stop-guard: could not ask about what the gesture would stop", {
 					error: String(error),
 				});
@@ -316,12 +303,10 @@ export interface IpcLike {
 }
 
 /**
- * Wire both channels, and drop what they carried with the renderer that sent it.
- *
- * The teardown is what keeps the dialog honest: a renderer that reloads or
- * crashes never sends a closing "nothing is running", and without this the next
- * close would name services and a run that died with it. One watch for both
- * channels, so either one's sender going takes both publications with it.
+ * Wire both channels, and drop what they carried with the renderer that sent it. The teardown keeps
+ * the dialog honest: a renderer that reloads or crashes never sends a closing "nothing is running",
+ * and without this the next close would name services and a run that died with it. One watch for
+ * both channels, so either one's sender going takes both publications with it.
  */
 export function registerRunningServicesIpc(
 	ipc: IpcLike,

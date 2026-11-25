@@ -6,39 +6,36 @@
  */
 
 /**
- * Asking Windows to start Vayu again after a restart (issue #2098).
+ * Asking Windows to start Vayu again after a restart (#2098).
  *
- * Windows reopens the apps that were running when the user restarts the machine
- * for an update (or restarts with "Restart apps" signed in), but only the ones
- * that registered with `RegisterApplicationRestart`. Electron does not, and
- * `setLoginItemSettings` is the wrong tool: it starts the app at every sign-in,
- * which the user switches on and off by itself in Settings.
+ * Windows reopens the apps that were running when the user restarts the machine for an update (or
+ * restarts with "Restart apps" signed in), but only those registered with
+ * `RegisterApplicationRestart`. Electron does not register, and `setLoginItemSettings` is the wrong
+ * tool: it starts the app at every sign-in, which the user switches on and off separately in
+ * Settings.
  *
- * The call is made through `koffi`, a prebuilt FFI binding, because Electron has
- * no API for it. Everything that can fail is therefore optional: a missing
- * binding, a platform package that was not installed or a call Windows refuses
- * costs the user the restart and nothing else, so none of it may reach the
- * caller. `koffi` is imported on Windows only; elsewhere it is never loaded.
+ * The call goes through `koffi`, a prebuilt FFI binding, because Electron has no API for it. So
+ * everything that can fail is optional: a missing binding, a platform package that was not
+ * installed or a call Windows refuses costs the user the restart and nothing else, and none of it
+ * may reach the caller. `koffi` is imported on Windows only; elsewhere it is never loaded.
  *
- * Windows restarts only an app that had been running for at least a minute when
- * the session ended, with the arguments registered here and none of the original
- * ones. The relaunch is an ordinary launch: the window opens and the
- * single-instance lock is taken like any other (`docs/architecture.md`).
+ * Windows restarts only an app that had been running for at least a minute when the session ended,
+ * with the arguments registered here and none of the original ones. The relaunch is an ordinary
+ * launch: the window opens and the single-instance lock is taken like any other
+ * (`docs/architecture.md`).
  *
- * Kept out of main.ts so it can be tested - the binding arrives as `load`, the
- * same seam `login-item.ts` leaves for Electron.
+ * Kept out of main.ts so it can be tested: the binding arrives as `load`, the seam `login-item.ts`
+ * leaves for Electron.
  */
 
 /** The argument Windows relaunches the app with. `open-intent.ts` ignores it. */
 export const RESTARTED_AFTER_REBOOT_ARG = "--restarted-after-reboot";
 
 /*
- * `RegisterApplicationRestart` flags. They name the cases NOT to restart for,
- * and the three set here each belong to another subsystem: a crash or a hang of
- * the main process is not something to answer with a second launch
- * (`renderer-recovery.ts` recovers the renderer in place), and an update in
- * progress is the updater's relaunch. `RESTART_NO_REBOOT` (8) stays clear: it
- * is the case this exists for.
+ * `RegisterApplicationRestart` flags, naming the cases NOT to restart for; the three set here each
+ * belong to another subsystem. A crash or a hang of the main process is not answered with a second
+ * launch (`renderer-recovery.ts` recovers the renderer in place), and an update in progress is the
+ * updater's relaunch. `RESTART_NO_REBOOT` (8) stays clear: it is the case this exists for.
  */
 const RESTART_NO_CRASH = 1;
 const RESTART_NO_HANG = 2;
@@ -73,9 +70,8 @@ export function wasRestartedAfterReboot(argv: readonly string[]): boolean {
 }
 
 /**
- * Registers the app for Windows' restart-after-reboot. Never rejects.
- *
- * A packaged Windows build only: anywhere else `load` is not called.
+ * Registers the app for Windows' restart-after-reboot; never rejects. A packaged Windows build
+ * only: anywhere else `load` is not called.
  */
 export async function registerForRestart(deps: RestartRegistrationDeps): Promise<void> {
 	if (deps.platform !== "win32" || !deps.isPackaged) return;

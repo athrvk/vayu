@@ -6,28 +6,25 @@
  */
 
 /**
- * The settle protocol for the embedded OAuth window.
+ * The settle protocol for the embedded OAuth window, which must answer exactly once.
  *
- * The window must answer exactly once, and until this existed it could answer
- * never. It is created hidden and shown on `ready-to-show`, so an authorize URL
- * that failed before first paint left an invisible window behind: the flow's
- * only other exit was the user closing that window, and there was no window to
- * close. The `loadURL` rejection that would have named the failure was swallowed
- * by a catch written for a different failure entirely - the deliberate abort of
- * the callback navigation, which is how a *successful* capture ends.
+ * It is created hidden and shown on `ready-to-show`, so an authorize URL that fails before first
+ * paint leaves an invisible window: the flow's only other exit is the user closing a window they
+ * cannot see. The `loadURL` rejection that names that failure looks like the deliberate abort of
+ * the callback navigation, which is how a *successful* capture ends, so a catch for one swallows
+ * the other.
  *
- * `settled` is the discriminator between those two. A load failure before the
- * flow has settled is the authorize page failing and must be reported; the same
- * failure after is the (usually unresolvable) callback host, which is expected
- * and already answered. ERR_ABORTED is never a failure in either direction - it
- * is what a superseded navigation reports, including the capture's own
- * `preventDefault` and an IdP page that redirects itself mid-load.
+ * `settled` tells those two apart. A load failure before the flow has settled is the authorize page
+ * failing and must be reported; the same failure after is the (usually unresolvable) callback host,
+ * expected and already answered. ERR_ABORTED is never a failure in either direction: it is what a
+ * superseded navigation reports, including the capture's own `preventDefault` and an IdP page that
+ * redirects itself mid-load.
  *
- * The deadline is the backstop for the case neither covers: a load that neither
- * completes nor fails (a host that accepts the connection and never responds).
+ * The deadline is the backstop for the case neither covers: a load that neither completes nor fails
+ * (a host that accepts the connection and never responds).
  *
- * Kept out of oauth.ts so a fake window can drive it - oauth.ts registers
- * Electron IPC handlers at import time, which no unit test can do.
+ * Kept out of oauth.ts so a fake window can drive it: oauth.ts registers Electron IPC handlers at
+ * import time, which no unit test can do.
  */
 
 import { isBrowsableUrl } from "./external-url.js";
@@ -62,16 +59,14 @@ function readNonEmptyString(value: unknown, what: string): string {
 }
 
 /**
- * Read the `oauth:openWindow` payload off the wire, before any session or
- * window exists.
+ * Read the `oauth:openWindow` payload off the wire, before any session or window exists.
  *
- * The partition rule is the load-bearing one: `session.fromPartition("")` is the
- * default session, the one that carries the engine bridge, so an unprefixed
- * partition would put an IdP page inside it. A malformed `redirectUri` would
- * otherwise throw only after the window was constructed, leaking a hidden one.
- * Custom-scheme callbacks are legal, so `redirectUri` is checked for presence
- * only. A deadline that is not a positive finite number is refused: a timer
- * armed with NaN fires at once, and one armed with Infinity never does.
+ * The partition rule is the load-bearing one: `session.fromPartition("")` is the default session,
+ * which carries the engine bridge, so an unprefixed partition would put an IdP page inside it. A
+ * malformed `redirectUri` would otherwise throw only after the window was built, leaking a hidden
+ * one; custom-scheme callbacks are legal, so it is checked for presence only. A deadline that is
+ * not a positive finite number is refused: a timer armed with NaN fires at once, and one armed with
+ * Infinity never does.
  */
 export function readAuthWindowParams(value: unknown): OpenAuthWindowParams {
 	if (!value || typeof value !== "object") {

@@ -8,27 +8,23 @@
 /**
  * Getting the window back when its renderer process dies or stops answering.
  *
- * Electron does not recover a gone renderer. Nothing in the app listened for
- * `render-process-gone` or `unresponsive`, so a renderer that died - an OOM
- * from a huge response body being the realistic trigger for a load-testing tool
- * - left the BrowserWindow up, blank and frozen, with no reload, no dialog and
- * no diagnostics. The recovery story was "force-quit and relaunch, lose edits",
- * which is beneath the standard quit-flow.ts and save-flush.ts set for the ordinary close.
+ * Electron does not recover a gone renderer: without a `render-process-gone` and `unresponsive`
+ * handler, a renderer that died (an OOM from a huge response body is the realistic trigger for a
+ * load-testing tool) leaves the BrowserWindow up, blank and frozen, with no reload, no dialog and
+ * no diagnostics, and the only way out is force-quit, relaunch and lose edits, beneath the standard
+ * quit-flow.ts and save-flush.ts set for the ordinary close.
  *
- * A reload is the whole recovery, and it has to be bounded: a renderer that
- * crashes on the content it reloads crashes again on the same content, so an
- * unguarded reload is an infinite loop the user cannot get out of. Past two
- * crashes inside CRASH_WINDOW_MS the app stops trying and asks.
+ * A reload is the whole recovery, and it has to be bounded: a renderer that crashes on the content
+ * it reloads crashes again on the same content, so an unguarded reload is an infinite loop the user
+ * cannot get out of. Past two crashes inside CRASH_WINDOW_MS the app stops trying and asks.
  *
- * The crash also matters to the *close* path. A dead renderer's WebContents
- * object outlives the process it drove, so `isDestroyed()` keeps reporting
- * false and the quit flow would ask a renderer that can never ACK - burning the
- * full 2s ceiling on a window whose unsaved work is gone regardless. Hence
- * `isRendererGone`, which main.ts's flush request reads to answer "there is
- * nobody to ask" straight away.
+ * The crash also matters to the *close* path. A dead renderer's WebContents outlives the process it
+ * drove, so `isDestroyed()` keeps reporting false and the quit flow would ask a renderer that can
+ * never ACK, burning the full 2s ceiling on a window whose unsaved work is gone regardless. Hence
+ * `isRendererGone`, which main.ts's flush request reads to answer "there is nobody to ask" at once.
  *
- * Kept out of main.ts so it can be tested - main.ts creates windows and starts
- * the engine at import time, which no unit test can do.
+ * Kept out of main.ts so it can be tested: main.ts creates windows and starts the engine at import
+ * time, which no unit test can do.
  */
 
 /** How far back a crash still counts toward the loop guard. */
@@ -44,9 +40,8 @@ export interface RendererGoneDetails {
 }
 
 /**
- * A renderer that exited with status zero was not lost, it was let go - the
- * window is being torn down. Reloading there fights the teardown and can bring
- * a window back up on the way out of the app.
+ * A renderer that exited with status zero was not lost but let go: the window is being torn down,
+ * and reloading there fights the teardown and can bring a window back up on the way out of the app.
  */
 function isCrash(details: RendererGoneDetails): boolean {
 	return details.reason !== "clean-exit";
@@ -55,10 +50,8 @@ function isCrash(details: RendererGoneDetails): boolean {
 export type CrashAction = "reload" | "prompt";
 
 /**
- * Whether to reload again or stop and ask, given every crash seen so far
- * (including the one being handled) and the current time.
- *
- * Pure so the loop guard is testable without a window.
+ * Whether to reload again or stop and ask, given every crash so far (the one being handled
+ * included) and the current time. Pure so the loop guard is testable without a window.
  */
 export function decideCrashAction(crashTimes: readonly number[], now: number): CrashAction {
 	const recent = crashTimes.filter((at) => now - at < CRASH_WINDOW_MS);
@@ -82,12 +75,10 @@ export interface RendererRecoveryTransport {
 	/** Where a crash and a crash loop are reported. Category `"window"`. */
 	log: (msg: string, fields?: Record<string, unknown>) => void;
 	/**
-	 * A new renderer has replaced the one main was talking to: a crashed one
-	 * came back, or a hung one was reloaded. Whatever the old one still owed is
-	 * unrecoverable, so main.ts resets the quit flow here - otherwise a flush
-	 * that settled against the old renderer would let the new one's window close
-	 * without ever being asked to save, and an answer it never sent would be
-	 * waited on.
+	 * A new renderer has replaced the one main was talking to (a crashed one came back, or a hung
+	 * one was reloaded). Whatever the old one owed is unrecoverable, so main.ts resets the quit
+	 * flow here: otherwise a flush that settled against the old renderer would let the new one's
+	 * window close without being asked to save, and an answer it never sent would be waited on.
 	 */
 	onRecovered: () => void;
 }
@@ -158,10 +149,9 @@ export function createRendererRecovery(transport: RendererRecoveryTransport): Re
 			promptOpen = true;
 			void transport.promptUnresponsive().then((choice) => {
 				promptOpen = false;
-				// There is no API to take a message box back down, so `responsive`
-				// cannot close this one - it invalidates the answer instead.
-				// Reloading a renderer that has since caught up would throw away
-				// the user's work to fix a hang that is already over.
+				// No API takes a message box back down, so `responsive` invalidates the answer
+				// instead of closing it: reloading a renderer that has since caught up would throw
+				// away the user's work to fix a hang already over.
 				if (responding) return;
 				if (choice !== "reload") return;
 				transport.reload();

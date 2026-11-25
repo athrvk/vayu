@@ -6,19 +6,16 @@
  */
 
 /**
- * What a renderer left behind, cleaned up when the renderer is gone.
+ * What a renderer left behind, cleaned up when the renderer is gone. Two main-process features hold
+ * state on a renderer's behalf and cannot be told by that renderer when it dies: the wake lock's
+ * tokens (#1357) and the taskbar's progress bar (#1362). Both need the same two lifecycle events
+ * exactly once per renderer, so this is the one copy; a second hand-rolled one would be the copy
+ * that misses the next fix.
  *
- * Two main-process features hold state on a renderer's behalf and cannot be
- * told by that renderer when it dies: the wake lock's tokens (#1357) and the
- * taskbar's progress bar (#1362). Both need the same two lifecycle events, and
- * both need them exactly once per renderer, so this is the one copy of that -
- * a second hand-rolled one would be the copy that misses the next fix.
- *
- * `destroyed` is the window closing or the process going; a main-frame
- * cross-document `did-start-navigation` is a reload, where the new page cannot
- * hand back what the old page took. `did-start-loading` is not that signal: it
- * also fires for a subframe, so the response viewer's HTML preview iframe would
- * release a running load test's wake lock and progress bar (#3377).
+ * `destroyed` is the window closing or the process going; a main-frame cross-document
+ * `did-start-navigation` is a reload, where the new page cannot hand back what the old page took.
+ * `did-start-loading` is not that signal: it also fires for a subframe, so the response viewer's
+ * HTML preview iframe would release a running load test's wake lock and progress bar (#3377).
  */
 
 import { startsMainFramePage } from "./main-frame-page.js";

@@ -6,39 +6,33 @@
  */
 
 /**
- * What the OS is asking Vayu to open (issue #1364).
+ * What the OS is asking Vayu to open (#1364).
  *
- * Two of the icon integrations hand the app something rather than showing it
- * something, and both arrive the same way - as a launch, with the request on the
- * command line or on an Electron event:
+ * Two of the icon integrations hand the app something rather than show it something, and both
+ * arrive as a launch, with the request on the command line or on an Electron event:
  *
- * - **A file dropped on the Dock or taskbar icon.** macOS raises `open-file`;
- *   Windows and Linux put the path in `process.argv` on a cold start, and in
- *   `second-instance`'s argv when Vayu is already up.
- * - **A Jump List task.** Windows tasks are shortcuts to the executable, so the
- *   collection travels as {@link OPEN_COLLECTION_ARG} on the same command line,
- *   through the same two doors.
+ * - **A file dropped on the Dock or taskbar icon.** macOS raises `open-file`; Windows and Linux put
+ *   the path in `process.argv` on a cold start, and in `second-instance`'s argv when Vayu is
+ *   already up.
+ * - **A Jump List task.** Windows tasks are shortcuts to the executable, so the collection travels
+ *   as {@link OPEN_COLLECTION_ARG} on the same command line, through the same two doors.
  *
- * One reader for all of it, because the doors differ and the request does not,
- * and because a second argv parser is the one that would miss the next fix.
+ * One reader for all of it, because the doors differ and the request does not, and because a second
+ * argv parser is the one that would miss the next fix.
  *
- * **Everything is buffered until the renderer can act on it.** A cold launch
- * raises `open-file` before `whenReady` resolves - that is the whole point of
- * the event - and there is no window to send to, let alone a mounted store. So
- * intents queue, and {@link OpenIntents.ready} flushes them when the renderer
- * says it has loaded. That holds again whenever the page goes away: a new
- * window or a reload calls {@link OpenIntents.notReady}, and an intent offered
- * before the next `ready` waits rather than going to a page with no subscriber
- * (#3339).
+ * **Everything is buffered until the renderer can act on it.** A cold launch raises `open-file`
+ * before `whenReady` resolves (the whole point of the event), when there is no window to send to,
+ * let alone a mounted store. So intents queue, and {@link OpenIntents.ready} flushes them when the
+ * renderer says it has loaded. That holds again whenever the page goes away: a new window or a
+ * reload calls {@link OpenIntents.notReady}, and an intent offered before the next `ready` waits
+ * rather than going to a page with no subscriber (#3339).
  *
- * This side does not read the file. It decides the path is worth offering - the
- * extension allowlist is `spec-file.ts`'s own, imported rather than restated -
- * and the renderer reads it through the gated `specFile:read` channel that
- * already exists, so nothing here becomes a second door onto the file system.
- * What it does do is record the path as one a person chose (`grant`, the
- * `file-grants.ts` registry, #2356): the OS handed it over on the user's
- * gesture, which is the one fact a main-process reader of a renderer-named path
- * can trust it by.
+ * This side does not read the file. It decides the path is worth offering (the extension allowlist
+ * is `spec-file.ts`'s own, imported rather than restated), and the renderer reads it through the
+ * gated `specFile:read` channel, so nothing here becomes a second door onto the file system. It
+ * does record the path as one a person chose (`grant`, the `file-grants.ts` registry, #2356): the
+ * OS handed it over on the user's gesture, the one fact a main-process reader of a renderer-named
+ * path can trust it by.
  */
 
 import path from "path";
@@ -51,12 +45,10 @@ import { NEW_REQUEST_ARG, OPEN_COLLECTION_ARG } from "./os-icon.js";
 export const OPEN_INTENT_CHANNEL = "intent:open";
 
 /**
- * One thing the OS asked for.
- *
- * The Dock menu's own items land here too, rather than on a channel of their
- * own: a click on **Payments** in the Dock menu and a Jump List task named
- * Payments are the same request arriving through different doors, and the
- * buffering below is what a click with no window yet needs either way.
+ * One thing the OS asked for. The Dock menu's own items land here too, not on a channel of their
+ * own: a click on **Payments** in the Dock menu and a Jump List task named Payments are the same
+ * request arriving through different doors, and the buffering below is what a click with no window
+ * yet needs either way.
  */
 export type OpenIntent =
 	/** A document to import, by absolute path. */
@@ -67,12 +59,10 @@ export type OpenIntent =
 	| { kind: "newRequest" };
 
 /**
- * Whether `candidate` is a document the import pipeline could read.
- *
- * The allowlist is the one `readSpecFile` enforces when the renderer comes back
- * for the bytes, so a path that passes here cannot be refused there for its
- * name - and a path that fails here never becomes an event the renderer has to
- * have an error state for.
+ * Whether `candidate` is a document the import pipeline could read. The allowlist is the one
+ * `readSpecFile` enforces when the renderer comes back for the bytes, so a path that passes here
+ * cannot be refused there for its name, and one that fails here never becomes an event the renderer
+ * must have an error state for.
  */
 export function isImportableFile(candidate: string): boolean {
 	if (!candidate || candidate.startsWith("-")) return false;
@@ -82,14 +72,11 @@ export function isImportableFile(candidate: string): boolean {
 const FILE_URL_PREFIX = /^file:/i;
 
 /**
- * The path an argument names, or null when it is a `file://` URL that does not
- * name a local file.
- *
- * electron-builder ends the Linux desktop entry's `Exec` in `%U`, so a file
- * manager may hand over `file:///home/u/my%20spec.json` rather than a path
- * (#2000). Anything else is already a path and passes through untouched.
- * `fileURLToPath` throws on a host other than `localhost` and on an encoded
- * separator, and a URL that cannot be a local file is not worth offering.
+ * The path an argument names, or null for a `file://` URL that names no local file.
+ * electron-builder ends the Linux desktop entry's `Exec` in `%U`, so a file manager may hand over
+ * `file:///home/u/my%20spec.json` rather than a path (#2000); anything else is already a path and
+ * passes through untouched. `fileURLToPath` throws on a host other than `localhost` and on an
+ * encoded separator, and a URL that cannot be a local file is not worth offering.
  */
 function argumentToPath(argument: string): string | null {
 	if (!FILE_URL_PREFIX.test(argument)) return argument;
@@ -101,12 +88,10 @@ function argumentToPath(argument: string): string | null {
 }
 
 /**
- * Every intent on one command line, in the order it appears.
- *
- * `argv[0]` is skipped because it is the executable, never a request. A launch
- * ordinarily carries one intent; the loop is here because nothing stops a user
- * selecting two files and pressing Open, and dropping the second silently would
- * be the app deciding which of them the user meant.
+ * Every intent on one command line, in the order it appears. `argv[0]` is skipped: it is the
+ * executable, never a request. A launch ordinarily carries one intent; the loop is there because
+ * nothing stops a user selecting two files and pressing Open, and silently dropping the second
+ * would be the app deciding which one the user meant.
  */
 export function parseOpenIntents(argv: readonly string[]): OpenIntent[] {
 	const intents: OpenIntent[] = [];
@@ -167,10 +152,9 @@ export function createOpenIntents(deps: OpenIntentDeps): OpenIntents {
 
 	function deliver(intent: OpenIntent): void {
 		if (deps.send(intent)) return;
-		// A send that found no window is a renderer that is not there after all -
-		// on macOS the app outlives its window, and `activate` builds a new one.
-		// Queue the intent and wait to be told again, rather than dropping the
-		// file the user just double-clicked.
+		// A send that found no window is a renderer that is not there after all (on macOS the app
+		// outlives its window, and `activate` builds a new one): queue the intent and wait to be
+		// told again, rather than dropping the file the user just double-clicked.
 		notReady();
 		pending.push(intent);
 	}
