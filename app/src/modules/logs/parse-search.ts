@@ -6,15 +6,13 @@
  */
 
 /**
- * The search box's grammar as the main process reads it (#3635).
+ * The search box's grammar as the main process reads it (#3635). `electron/log-reader.ts`'s
+ * `parseSearchInput` is the reader's own copy and `src/` may not import from `electron/`, so this
+ * is a second one, held equal by `electron/log-search.conformance.test.ts`, which runs both over
+ * the same inputs: a rule changed on one side alone reds that test.
  *
- * `electron/log-reader.ts`'s `parseSearchInput` is the reader's own copy and
- * `src/` may not import from `electron/`, so this is a second one, and the two
- * are held equal by `electron/log-search.conformance.test.ts`, which runs both
- * over the same inputs. A rule changed on one side alone reds that test.
- *
- * Filters are evaluated in main, so what leaves the renderer is this parse
- * (free text plus `field:value` terms), never the raw box.
+ * Filters are evaluated in main, so what leaves the renderer is this parse (free text plus
+ * `field:value` terms), never the raw box.
  */
 
 import type { LogFieldTerm } from "@/types/electron";

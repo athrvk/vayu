@@ -6,13 +6,11 @@
  */
 
 /**
- * A capture's raw HTTP text, and the way out for a body that is not text.
- *
- * The engine spells a body that is not valid UTF-8 as base64 (#3109). Printing
- * that string would show a protobuf or a gzip as a wall of letters that look
- * like a payload and are not, so the Raw view says what the body is and its
- * size, and Download and Copy hand over the exact bytes the engine stored. A
- * save that fails is a toast; a cancelled save dialog is not (#3246).
+ * A capture's raw HTTP text, and the way out for a body that is not text. The engine spells a body
+ * that is not valid UTF-8 as base64 (#3109); printing it would show a protobuf or a gzip as letters
+ * that look like a payload and are not, so the Raw view says what the body is and its size, and
+ * Download and Copy hand over the exact bytes the engine stored. A failed save is a toast; a
+ * cancelled save dialog is not (#3246).
  */
 
 import { useMemo } from "react";

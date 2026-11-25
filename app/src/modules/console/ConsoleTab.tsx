@@ -6,11 +6,9 @@
  */
 
 /**
- * The bottom panel's Console tab (#3634): everything this window sent, newest
- * last, from the session ring (`stores/console-store.ts`).
- *
- * `BottomPanel` mounts it in the tab's content box, a flex child that clips,
- * so the list scrolls itself. It takes no props. The ring outlives the tab:
+ * The bottom panel's Console tab (#3634): everything this window sent, newest last, from the
+ * session ring (`stores/console-store.ts`). `BottomPanel` mounts it in the tab's content box, a
+ * flex child that clips, so the list scrolls itself; it takes no props. The ring outlives the tab:
  * closing the panel unmounts this and drops the filters, never the rows.
  */
 

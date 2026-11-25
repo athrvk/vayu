@@ -44,8 +44,6 @@
     "app/src/lib/monaco-variable-tokens.ts": 1,
     "app/src/lib/query-client.ts": 1,
     "app/src/lib/resize-gesture.ts": 1,
-    "app/src/modules/inbox/CannedResponseControls.tsx": 1,
-    "app/src/modules/mock-server/index.tsx": 1,
     "app/src/modules/request-builder/components/RequestTabs/panels/SettingsPanel.tsx": 1,
     "app/src/modules/request-builder/hooks/useSendWithRow.ts": 1,
     "app/src/modules/welcome/LauncherSkeleton.tsx": 1,

@@ -6,15 +6,13 @@
  */
 
 /**
- * One line of the Logs table (#3635): the columns a record has, then its other
- * fields as `key=value` (`electron/log.ts`'s text rendering), and the whole record
- * as formatted JSON when the row is opened. A line that is not a record is shown
- * raw with a marker in the component column.
+ * One line of the Logs table (#3635): the columns a record has, then its other fields as
+ * `key=value` (`electron/log.ts`'s text rendering), and the whole record as formatted JSON when the
+ * row is opened. A line that is not a record is shown raw with a marker in the component column.
  *
- * A button rather than table cells: the row's one action is to open it, and a
- * button spanning cells would not be a table row to a screen reader. The header
- * above the list is for the eye (`aria-hidden`) and the row's own text carries
- * each value.
+ * A button rather than table cells: the row's one action is to open it, and a button spanning cells
+ * would not be a table row to a screen reader. The header above the list is for the eye
+ * (`aria-hidden`); the row's own text carries each value.
  */
 
 import { memo } from "react";

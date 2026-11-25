@@ -6,15 +6,14 @@
  */
 
 /**
- * A Console row's request as a cURL command (#3634), built from what the row
- * holds: its masked URL and header values, so the copy carries `<redacted>`
- * wherever the row does and never a credential the row no longer has.
+ * A Console row's request as a cURL command (#3634), built from what the row holds: its masked URL
+ * and header values, so the copy carries `<redacted>` wherever the row does and never a credential
+ * the row no longer has.
  *
- * Through `generateCurl`, the app's one cURL writer, with two of its inputs
- * pinned. `disableUrlEncoding` because the URL is the one that was sent:
- * encoding it again would turn the marker into `%3Credacted%3E`. Masking stays
- * off, because the row is already masked and the codegen masker has no secret
- * values to look for here.
+ * Through `generateCurl`, the app's one cURL writer, with two inputs pinned: `disableUrlEncoding`,
+ * because the URL is the one that was sent and encoding it again turns the marker into
+ * `%3Credacted%3E`; masking off, because the row is already masked and the codegen masker has no
+ * secret values to look for.
  */
 
 import { generateCurl } from "@/services/codegen/curl";
