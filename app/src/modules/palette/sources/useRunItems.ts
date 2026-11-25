@@ -8,26 +8,19 @@
 /**
  * Past runs, as palette results.
  *
- * The only server-backed source. The others read caches the app has already
- * warmed; the run archive has no bound and lives in the engine's database, so
- * this one asks - `GET /runs?q=`, the same server-side substring filter the
- * History sidebar's search box drives, capped to one small page.
+ * The only server-backed source: the others read caches the app has warmed, but the run archive is
+ * unbounded and lives in the engine's database, so this one asks `GET /runs?q=` (the server-side
+ * substring filter the History sidebar's search box drives), capped to one small page. Three
+ * consequences:
  *
- * Three consequences the other sources do not have:
- *
- * - **The query is debounced.** A keystroke is not a search. Without this every
- *   character of "checkout" is its own request, and seven of the eight answers
- *   are thrown away.
- * - **An engine that is down hides the group, silently.** Typing is idle input,
- *   and a toast fired by idle input is the palette shouting at someone who did
- *   not ask it anything. The query does not retry either - a typist should not
- *   wait out a retry budget for a group that is about to disappear.
- * - **Nothing re-judges these rows.** The engine matched against the whole
- *   stored snapshot, which includes text no row prints, so a second opinion
- *   formed from the row alone would drop matches that are real. Each row says
- *   so with `preMatched`, and `ranking.ts` takes it at its word. The query
- *   itself used to be stuffed into the keywords to the same end, which worked
- *   by making every run score as an exact match - and outrank everything else.
+ * - **The query is debounced.** Without it every character of "checkout" is its own request, and
+ *   seven of the eight answers are thrown away.
+ * - **An engine that is down hides the group, silently.** Typing is idle input, and a toast from
+ *   idle input is the palette shouting at someone who asked it nothing. No retry either: a typist
+ *   should not wait out a retry budget for a group about to disappear.
+ * - **Nothing re-judges these rows.** The engine matched the whole stored snapshot, including text
+ *   no row prints, so a second opinion from the row alone would drop real matches. Each row says so
+ *   with `preMatched`, and `ranking.ts` takes it at its word.
  */
 
 /* global setTimeout, clearTimeout */
@@ -72,10 +65,9 @@ function runTitle(run: Run, collectionsById: Map<string, Collection>): string {
 }
 
 /**
- * The status word, then the run's verdict in words when it adds one: a subtitle
- * is plain text, so where the other lists colour "Completed" red the palette
- * says `verdict failed`, the accessible name's own phrase. Without it a
- * collection run with failed steps reads as plain "Completed" (#3496). A
+ * The status word, then the verdict in words when it adds one: a subtitle is plain text, so where
+ * other lists colour "Completed" red the palette says `verdict failed`, the accessible name's
+ * phrase. Without it a collection run with failed steps reads as plain "Completed" (#3496); a
  * `Failed` status already says it (#3643).
  */
 function statusWords(run: Run): string {
@@ -93,9 +85,8 @@ export function useRunItems(query: string): PaletteItem[] {
 		return () => clearTimeout(timer);
 	}, [trimmed]);
 
-	// Clearing the box empties the group at once rather than 300ms later: the
-	// debounce exists to spare the engine requests, not to leave stale rows on
-	// screen under a query that no longer asks for them.
+	// Clearing the box empties the group at once, not 300ms later: the debounce spares the engine
+	// requests, not stale rows under a query that no longer asks for them.
 	const search = trimmed === "" ? "" : debounced;
 	const { data, isError } = useRunSearchQuery(search);
 	const { data: collections = [] } = useCollectionsQuery();
@@ -116,11 +107,9 @@ export function useRunItems(query: string): PaletteItem[] {
 			preMatched: true,
 			title: runTitle(run, collectionsById),
 			subtitle: `${RUN_TYPE_NAME[run.type]} · ${statusWords(run)} · ${formatInstant(run.startTime, "relative")}`,
-			// The query itself used to be first in this list, so cmdk's second
-			// filter could not drop a row the engine had matched on snapshot
-			// text no row prints. That is `ranking.ts`'s job now, and carrying
-			// the query was never free: a row whose keywords contain the query
-			// verbatim scores near 1, so every run outranked every real match.
+			// Not the query: a row whose keywords contain the query verbatim scores near 1, so
+			// every run would outrank every real match. `ranking.ts` keeps engine-matched rows
+			// through `preMatched` instead.
 			keywords: [run.summary?.method ?? "", run.type, run.status],
 			icon: run.type === "load" ? Zap : run.summary?.scenario ? FolderTree : Clock,
 			...(run.summary?.method ? { method: run.summary.method } : {}),
