@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Collections Queries
- *
- * TanStack Query hooks for collections and requests CRUD operations.
- */
+/** TanStack Query hooks for collection and request CRUD. */
 
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient, QueryKey, UseQueryResult } from "@tanstack/react-query";
@@ -46,9 +42,7 @@ import { compareTreeOrder } from "@/types";
 
 // ============ Collection Queries ============
 
-/**
- * Fetch all collections
- */
+/** Fetch all collections */
 export function useCollectionsQuery() {
 	return useQuery({
 		queryKey: queryKeys.collections.list(),
@@ -57,10 +51,9 @@ export function useCollectionsQuery() {
 }
 
 /**
- * The name a run's collection goes by on a surface that has only its id.
- *
- * The id stands in once the collection is deleted, and while the tree is still
- * loading, never a blank. `undefined` only when the run names no collection.
+ * The name a run's collection goes by on a surface that has only its id. The id stands in once the
+ * collection is deleted and while the tree loads, never a blank; `undefined` only when the run
+ * names no collection.
  */
 export function useCollectionName(collectionId: string | undefined): string | undefined {
 	const { data: collections = [] } = useCollectionsQuery();
@@ -69,30 +62,27 @@ export function useCollectionName(collectionId: string | undefined): string | un
 }
 
 /**
- * Every collection's request list, keyed by collection id, from one
- * `GET /requests?fields=summary` - every collection the collections list names
- * has an entry, an empty one included.
+ * Every collection's request list, keyed by collection id, from one `GET /requests?fields=summary`.
+ * Every collection the collections list names has an entry, an empty one included.
  */
 type RequestsByCollection = Record<string, RequestSummary[]>;
 
 /**
- * The warm-cache pass: every collection's request list, seeded into each
- * collection's own `listByCollection` entry.
+ * The warm-cache pass: every collection's request list, seeded into each collection's own
+ * `listByCollection` entry.
  *
- * Summaries, not whole rows (#2546): the tree draws a name, a method and a
- * URL, and serializing every body, header set and script in the workspace
- * made this one answer 10.7 MB on a 6,000-request workspace. A reader that
- * needs more fetches the request through `requestDetailOptions`.
+ * Summaries, not whole rows (#2546): the tree draws a name, a method and a URL, and serializing
+ * every body, header set and script in the workspace made this one answer 10.7 MB on a
+ * 6,000-request workspace. A reader that needs more fetches the request through
+ * `requestDetailOptions`.
  *
- * One `GET /requests` for the whole workspace, fetched alongside the
- * collections rather than after them. It used to be one list call per
- * collection, issued once the collections had arrived: measured on a
- * 300-collection workspace, 312 engine requests at launch and ~7s before the
- * burst settled, every one of them serialized on the engine's database lock.
- * The collections are fetched here too (joining the collections query, never
- * duplicating it) so a collection with no requests gets its empty list seeded
- * as well - a parent folder usually has none of its own, and an unseeded key
- * is a fetch of its own the moment the tree mounts it.
+ * One `GET /requests` for the whole workspace, fetched alongside the collections, not after them:
+ * one list call per collection, issued once the collections arrived, measured 312 engine requests
+ * at launch and ~7s before the burst settled on a 300-collection workspace, every one serialized on
+ * the engine's database lock. The collections are fetched here too (joining the collections query,
+ * never duplicating it) so a collection with no requests gets its empty list seeded as well: a
+ * parent folder usually has none of its own, and an unseeded key is a fetch of its own the moment
+ * the tree mounts it.
  */
 async function seedRequestsByCollection(queryClient: QueryClient): Promise<RequestsByCollection> {
 	const [collections, requests] = await Promise.all([
@@ -114,14 +104,12 @@ async function seedRequestsByCollection(queryClient: QueryClient): Promise<Reque
 }
 
 /**
- * One collection's request list, for its `listByCollection` query.
- *
- * Joins the warm-cache pass while it is in flight instead of issuing a list
- * call of its own: the tree mounts one query per collection as soon as the
- * collections arrive, which is before the pass lands, and each of those would
- * otherwise put the per-collection fan-out straight back. Outside that window -
- * a mutation invalidating one collection, say - it fetches just that list,
- * because the pass's answer is then older than whatever made this refetch.
+ * One collection's request list, for its `listByCollection` query. Joins the warm-cache pass while
+ * it is in flight instead of issuing its own list call: the tree mounts one query per collection as
+ * soon as the collections arrive, before the pass lands, and each would otherwise put the
+ * per-collection fan-out straight back. Outside that window (a mutation invalidating one
+ * collection, say) it fetches just that list, because the pass's answer is then older than whatever
+ * made this refetch.
  */
 function requestsForCollection(
 	queryClient: QueryClient,
@@ -140,10 +128,9 @@ function requestsForCollection(
 }
 
 /**
- * Invalidate every collection's request list, joined into one `GET /requests`.
- *
- * Ahead of `requests.all`: the lists that refetch then join the warm-cache pass
- * this starts instead of each making a call of their own (`requestsForCollection`).
+ * Invalidate every collection's request list, joined into one `GET /requests`. Ahead of
+ * `requests.all`: the lists that refetch then join the warm-cache pass this starts instead of each
+ * making a call of its own (`requestsForCollection`).
  */
 export function invalidateAllRequestLists(queryClient: QueryClient): void {
 	queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
@@ -151,9 +138,8 @@ export function invalidateAllRequestLists(queryClient: QueryClient): void {
 }
 
 /**
- * The collection a request belongs to, read out of the list caches the tree is
- * already showing. An uncached one yields `undefined`: nothing on screen is
- * displaying it.
+ * The collection a request belongs to, read out of the list caches the tree already shows. An
+ * uncached one yields `undefined`: nothing on screen displays it.
  */
 export function ownerOfRequest(queryClient: QueryClient, requestId: string): string | undefined {
 	for (const [, rows] of queryClient.getQueriesData<RequestSummary[]>({
@@ -166,11 +152,9 @@ export function ownerOfRequest(queryClient: QueryClient, requestId: string): str
 }
 
 /**
- * Prefetch all collections and their requests
- *
- * Mounted once by `App`, at launch. Invalidating `prefetch.allRequests` re-runs
- * the whole pass as one call - a caller that also invalidates `requests.all`
- * does this one first, so the lists that refetch join it (see
+ * Prefetch all collections and their requests. Mounted once by `App`, at launch. Invalidating
+ * `prefetch.allRequests` re-runs the whole pass as one call; a caller that also invalidates
+ * `requests.all` does this one first, so the lists that refetch join it (see
  * `requestsForCollection`).
  */
 export function usePrefetchCollectionsAndRequests() {
@@ -187,9 +171,7 @@ export function usePrefetchCollectionsAndRequests() {
 	return { collections };
 }
 
-/**
- * Fetch requests for a specific collection
- */
+/** Fetch requests for a specific collection */
 export function useRequestsQuery(collectionId: string | null) {
 	const queryClient = useQueryClient();
 	return useQuery({
@@ -200,16 +182,12 @@ export function useRequestsQuery(collectionId: string | null) {
 }
 
 /**
- * Fetch requests for multiple collections (e.g., all expanded ones)
- * Uses TanStack Query's useQueries for parallel fetching.
- *
- * The returned `requestsByCollection` is **referentially stable** while the
- * underlying query results are unchanged, and callers depend on that: an effect
- * that lists it in its dependency array must fire when the requests change and
- * not merely because the tree re-rendered. This used to build the map inline on
- * every call, which is what pinned a collection open in the sidebar - the
- * reveal effect in `CollectionTree` re-ran after every render and undid the
- * chevron click that had just collapsed it.
+ * Fetch requests for several collections (all the expanded ones, say), in parallel through
+ * `useQueries`. The returned `requestsByCollection` is **referentially stable** while the query
+ * results are unchanged, and callers depend on that: an effect listing it as a dependency must fire
+ * when the requests change, not because the tree re-rendered. A map built inline on every call
+ * pinned a collection open in the sidebar: the reveal effect in `CollectionTree` re-ran after every
+ * render and undid the chevron click that had just collapsed it.
  */
 export function useMultipleCollectionRequests(collectionIds: string[]) {
 	const queryClient = useQueryClient();
@@ -233,9 +211,8 @@ export function useFullCollectionRequests(collectionIds: string[]) {
 }
 
 /**
- * One query per collection, combined into a map of collectionId -> rows sorted
- * by `compareTreeOrder`, stable while the results are (see
- * `useMultipleCollectionRequests`).
+ * One query per collection, combined into a map of collectionId -> rows sorted by
+ * `compareTreeOrder`, stable while the results are (see `useMultipleCollectionRequests`).
  */
 function useListsByCollection<Row extends RequestSummary>(
 	collectionIds: string[],
@@ -249,11 +226,10 @@ function useListsByCollection<Row extends RequestSummary>(
 	const stableCollectionIds = useMemo(() => collectionIds, [idsKey]);
 
 	/*
-	 * `combine` is memoised by TanStack: it re-runs only when the query results
-	 * or the query hashes change - *and* only if the function itself is the same
-	 * reference as last render (`QueriesObserver` compares `combine` by
-	 * identity). An inline arrow would therefore rebuild the map every render
-	 * and defeat the whole point, so this is a `useCallback`.
+	 * `combine` is memoised by TanStack: it re-runs only when the query results or hashes change,
+	 * and only if the function is the same reference as last render (`QueriesObserver` compares
+	 * `combine` by identity). An inline arrow would rebuild the map every render and defeat the
+	 * point, so this is a `useCallback`.
 	 */
 	const combine = useCallback(
 		(results: Array<UseQueryResult<Row[]>>) => {
@@ -280,15 +256,11 @@ function useListsByCollection<Row extends RequestSummary>(
 }
 
 /**
- * The error thrown when the lookup completes and the request is genuinely gone -
- * as opposed to a transport failure, which throws whatever the fetch rejected
- * with. Callers that must tell a real deletion from an unreachable engine
- * (`DesignRunView`, which replays an orphan run's recorded headers only for a
- * true deletion) discriminate with `isRequestNotFound`, not by matching the
- * message string - so the wording below can change without silently reopening
- * that bug. It matters because `.catch(() => [])` on each per-collection list
- * fetch means one swallowed transient failure can otherwise masquerade as "not
- * found" on an otherwise healthy engine.
+ * Thrown when the lookup completes and the request is genuinely gone, as opposed to a transport
+ * failure, which throws whatever the fetch rejected with. Callers that must tell a real deletion
+ * from an unreachable engine (`DesignRunView`, which replays an orphan run's recorded headers only
+ * for a true deletion) discriminate with `isRequestNotFound`, not by matching the message string,
+ * so the wording below can change without silently reopening that bug.
  */
 export class RequestNotFoundError extends Error {
 	readonly requestId: string;
@@ -305,37 +277,23 @@ export function isRequestNotFound(error: unknown): error is RequestNotFoundError
 }
 
 /**
- * Fetch a single request by ID.
+ * Fetch a single request by id: the options behind `useRequestQuery`, exported so a caller that
+ * needs many requests at once can feed them to `useQueries` without restating the retry and 404
+ * rules. The tab strip does exactly that: it has to know what every open tab is called before it
+ * can decide how many fit, and a hook per tab inside a map would be a variable number of hooks.
  *
- * One round trip: `GET /requests/:id`. The engine reads it straight out of the
- * DB, so this no longer fetches every collection's list and scans them for the
- * id - the N+1 fan-out that used to run on every cold start, once per restored
- * request tab.
+ * One round trip, `GET /requests/:id`, read by the engine straight out of the DB, so a restored
+ * request tab costs no scan of every collection's list. A point lookup also has no launch race:
+ * tabs are persisted, so this runs for each restored tab while the lists are still two round trips
+ * from being filled, and a 404 is authoritative the instant it returns.
  *
- * That scan was also a race it usually lost on launch: tabs are persisted, so
- * this runs immediately for each restored tab while the lists are still two
- * round trips from being filled, and `staleTime: Infinity` parked the "not
- * found" it threw so it never recovered once the lists *did* arrive. A point
- * lookup has no such window - a 404 is authoritative the instant it returns.
+ * The 404-vs-everything-else split is load-bearing: `getRequest` throws `ApiError` on any non-2xx,
+ * only a real 404 becomes `RequestNotFoundError` (a genuine deletion), and every other failure (a
+ * 5xx, an unreachable engine) is rethrown untouched. That is what lets callers like `DesignRunView`
+ * tell "the request was deleted" from "the engine hiccuped".
  *
- * The 404-vs-everything-else split is load-bearing, not cosmetic. `getRequest`
- * throws `ApiError` on any non-2xx; only a real 404 becomes
- * `RequestNotFoundError` (a genuine deletion), and every other failure - a 5xx,
- * an unreachable engine - is rethrown untouched. That is what lets callers like
- * `DesignRunView` tell "the request was deleted" from "the engine hiccuped",
- * which the old `.catch(() => [])` scan could not: one swallowed list failure
- * looked identical to "not in any list".
- *
- * Already-cached ids (a request just created or updated writes its own detail
- * cache) are served without a network call, because `staleTime: Infinity` keeps
- * the cached value fresh.
- */
-/**
- * The options behind `useRequestQuery`, exported so a caller that needs many
- * requests at once can feed them to `useQueries` without restating the retry
- * and 404 rules. The tab strip does exactly that: it has to know what every
- * open tab is called before it can decide how many fit, and a hook per tab
- * inside a map would be a variable number of hooks.
+ * Already-cached ids (a request just created or updated writes its own detail cache) are served
+ * without a network call, because `staleTime: Infinity` keeps the cached value fresh.
  */
 export function requestDetailOptions(requestId: string | null) {
 	return {
@@ -374,9 +332,9 @@ export function useRequestQuery(requestId: string | null) {
 export function useCollectionAncestors(collectionId: string | null | undefined): Collection[] {
 	const { data: collections = [] } = useCollectionsQuery();
 
-	// `walkAncestors` carries the cycle guard this loop was missing: it runs
-	// inside a `useMemo`, so a `parentId` cycle hangs the renderer rather than
-	// producing a wrong chain (see modules/collections/tree-utils).
+	// `walkAncestors` carries the cycle guard: this runs inside a `useMemo`, so a `parentId` cycle
+	// would hang the renderer rather than produce a wrong chain (see
+	// modules/collections/tree-utils).
 	return useMemo(
 		() => (collectionId ? walkAncestors(collectionId, collections) : []),
 		[collections, collectionId]
@@ -385,9 +343,7 @@ export function useCollectionAncestors(collectionId: string | null | undefined):
 
 // ============ Collection Mutations ============
 
-/**
- * Create a new collection
- */
+/** Create a new collection */
 export function useCreateCollectionMutation() {
 	const queryClient = useQueryClient();
 
@@ -413,18 +369,15 @@ export function useCreateCollectionMutation() {
 const FILE_BINDING_FIELDS: ReadonlySet<string> = new Set(["id", "specFile", "dataFile"]);
 
 /**
- * Whether @p update changes only where the collection's files are (#2765). A
- * binding is read by the Spec and Data tabs and the run dialogs, never by
- * `POST /compose`, so such a write leaves every composition as it was - and a
- * re-read of a data file writes one on every changed hash.
+ * Whether @p update changes only where the collection's files are (#2765). A binding is read by the
+ * Spec and Data tabs and the run dialogs, never by `POST /compose`, so such a write leaves every
+ * composition as it was, and a re-read of a data file writes one on every changed hash.
  */
 function changesOnlyFileBindings(update: UpdateCollectionRequest): boolean {
 	return Object.keys(update).every((field) => FILE_BINDING_FIELDS.has(field));
 }
 
-/**
- * Update an existing collection
- */
+/** Update an existing collection */
 export function useUpdateCollectionMutation() {
 	const queryClient = useQueryClient();
 
@@ -457,9 +410,7 @@ export function useDataFileReadingMutation() {
 	});
 }
 
-/**
- * Delete a collection
- */
+/** Delete a collection */
 export function useDeleteCollectionMutation() {
 	const queryClient = useQueryClient();
 
@@ -472,29 +423,24 @@ export function useDeleteCollectionMutation() {
 				(old) => old?.filter((c) => c.id !== deletedId) ?? []
 			);
 			/*
-			 * The engine cascade-deletes every descendant collection and their
-			 * requests, and which rows those are is engine-side knowledge - the
-			 * client must not re-derive the tree to patch caches surgically, or
-			 * the two definitions of "descendant" drift.
+			 * The engine cascade-deletes every descendant collection and its requests, and which
+			 * rows those are is engine-side knowledge: the client must not re-derive the tree to
+			 * patch caches surgically, or the two definitions of "descendant" drift.
 			 *
-			 * So both families are invalidated wholesale. `requests.all` rather
-			 * than this collection's list: descendants had their own list caches,
-			 * and `requests.detail` entries carry `staleTime: Infinity`, so
-			 * without this a deleted request stays fresh forever and keeps feeding
-			 * restored tabs. `collections.all` covers the descendants left behind
-			 * by the single-id filter above, which the ancestor walk and the
-			 * resolver would otherwise still see. The lists that refetch join one
-			 * `GET /requests` rather than each making a call of their own
-			 * (`invalidateAllRequestLists`).
+			 * So both families are invalidated wholesale. `requests.all`, not this collection's
+			 * list: descendants had their own list caches, and `requests.detail` entries carry
+			 * `staleTime: Infinity`, so a deleted request would otherwise stay fresh forever and
+			 * keep feeding restored tabs. `collections.all` covers the descendants the single-id
+			 * filter above left behind, which the ancestor walk and the resolver would otherwise
+			 * still see. The lists that refetch join one `GET /requests` rather than each making a
+			 * call (`invalidateAllRequestLists`).
 			 */
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 			invalidateAllRequestLists(queryClient);
 			/*
-			 * The delete is soft (issue #988): the row left the tree for the
-			 * trash rather than the void, so the list that shows the trash is
-			 * stale from this moment. Without this the Trash view - open in the
-			 * drawer beside the tree the row just left - keeps its cached answer
-			 * and does not show what was deleted.
+			 * The delete is soft (#988): the row went to the trash, not the void, so the list that
+			 * shows the trash is stale from this moment. Without this the Trash view, open in the
+			 * drawer beside the tree, keeps its cached answer and does not show what was deleted.
 			 */
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 			// The spec-file and data-file bindings are not cleared: they are
@@ -513,9 +459,7 @@ export function useDeleteCollectionMutation() {
 
 // ============ Request Mutations ============
 
-/**
- * Create a new request
- */
+/** Create a new request */
 export function useCreateRequestMutation() {
 	const queryClient = useQueryClient();
 
@@ -539,9 +483,7 @@ export function useCreateRequestMutation() {
 	});
 }
 
-/**
- * Update an existing request
- */
+/** Update an existing request */
 export function useUpdateRequestMutation() {
 	const queryClient = useQueryClient();
 
@@ -549,17 +491,15 @@ export function useUpdateRequestMutation() {
 		mutationFn: (data: UpdateRequestRequest) => apiService.updateRequest(data),
 		onSuccess: (updatedRequest) => {
 			/*
-			 * Only the lists that can have changed. This used to invalidate every
-			 * collection's list on any single-request update, so a rename refetched
-			 * the whole tree - and the sibling PUTs a reorder issues would storm the
-			 * engine once per row.
+			 * Only the lists that can have changed: invalidating every collection's list on a
+			 * single-request update would refetch the whole tree on a rename, and the sibling PUTs
+			 * a reorder issues would storm the engine once per row.
 			 *
-			 * A cross-collection move touches two lists. The response carries only
-			 * the *new* collectionId, so the source is read from the detail cache,
-			 * which still holds the pre-update row until the write below - the one
-			 * place the old owner is knowable. An uncached detail (nothing had the
-			 * request open) leaves the source list to its normal staleness rather
-			 * than reinstating the fan-out.
+			 * A cross-collection move touches two lists. The response carries only the new
+			 * collectionId, so the source is read from the detail cache, which still holds the
+			 * pre-update row until the write below: the one place the old owner is knowable. An
+			 * uncached detail (nothing had the request open) leaves the source list to its normal
+			 * staleness rather than reinstating the fan-out.
 			 */
 			const previous = queryClient.getQueryData<Request>(
 				queryKeys.requests.detail(updatedRequest.id)
@@ -573,15 +513,13 @@ export function useUpdateRequestMutation() {
 			}
 			invalidateCompositions(queryClient, updatedRequest.id);
 			/*
-			 * A foreign write's own refetch can land in this cache while this
-			 * save's response is still in flight (issue #1436) - an MCP agent's
-			 * `update_request` racing this one. `previous` is whichever won that
-			 * race; if it is newer than what this save is about to write, it is
-			 * the row to keep, not the now-stale response this mutation is
-			 * holding. `updatedAt` is a `toISOString()` string end to end
-			 * (`request-transformer.ts`), so lexical and chronological order
-			 * agree - guarded on both sides carrying one, since a row missing it
-			 * cannot be a participant in the race this compares.
+			 * A foreign write's own refetch can land in this cache while this save's response is in
+			 * flight (#1436): an MCP agent's `update_request` racing this one. `previous` is
+			 * whichever won; if it is newer than what this save is about to write, it is the row to
+			 * keep, not this mutation's now-stale response. `updatedAt` is a `toISOString()` string
+			 * end to end (`request-transformer.ts`), so lexical and chronological order agree;
+			 * guarded on both sides carrying one, since a row without it cannot be in the race this
+			 * compares.
 			 */
 			if (
 				!previous ||
@@ -601,16 +539,14 @@ export function useUpdateRequestMutation() {
 // ============ Reorder ============
 
 /**
- * Every cache key a plan can touch, worked out before anything is written.
+ * Every cache key a plan can touch, worked out before anything is written. A normalized parent
+ * touches two caches, not one: its sub-folders live in the collections list and its requests in its
+ * own list, and the renumber runs over both as one sibling list (#2535). The root holds collections
+ * only.
  *
- * A normalized parent touches two caches, not one: its sub-folders live in the
- * collections list and its requests in its own list, and the renumber runs over
- * both as one sibling list (#2535). The root holds collections only.
- *
- * A request move that states no `collectionId` stays where it is, but the plan
- * does not say where that is - so the owner is read out of the list caches the
- * tree is already showing. An uncached one simply contributes no key: nothing
- * on screen is displaying it, so nothing on screen can go stale.
+ * A request move that states no `collectionId` stays where it is, but the plan does not say where
+ * that is, so the owner is read out of the list caches the tree already shows. An uncached one
+ * contributes no key: nothing on screen displays it, so nothing on screen can go stale.
  */
 function affectedKeys(queryClient: ReturnType<typeof useQueryClient>, plan: ReorderRequest) {
 	let touchesCollections = plan.normalize.length > 0;
@@ -670,13 +606,10 @@ function normalizeParentScope(
 }
 
 /**
- * Draws the plan into the caches, exactly as the engine will apply it -
- * normalize each named scope, then position each move.
- *
- * Every write goes through `setQueryData` with a fresh array. The maps
- * `useMultipleCollectionRequests` builds are referentially compared by the
- * reveal effect (see the comment on that hook), so mutating a cached array in
- * place would move a row on screen without the tree ever noticing.
+ * Draws the plan into the caches exactly as the engine will apply it: normalize each named scope,
+ * then position each move. Every write is a `setQueryData` with a fresh array: the reveal effect
+ * compares the maps `useMultipleCollectionRequests` builds by reference, so mutating a cached array
+ * in place would move a row on screen without the tree noticing.
  */
 function drawPlan(queryClient: ReturnType<typeof useQueryClient>, plan: ReorderRequest) {
 	for (const scope of plan.normalize) normalizeParentScope(queryClient, scope.parentId);
@@ -705,14 +638,11 @@ function drawPlan(queryClient: ReturnType<typeof useQueryClient>, plan: ReorderR
 }
 
 /**
- * Puts one request at `order`, moving it between list caches when `collectionId`
- * names a different owner. Shared by the optimistic draw and by the settle on
- * the engine's response, so a move cannot be applied one way going out and
- * another coming back.
- *
- * A move leaves every cached list of the old owner, not only the first one
- * found: the owner can hold its full list (`fullListByCollection`) beside the
- * tree's, and both sit under `lists()`.
+ * Puts one request at `order`, moving it between list caches when `collectionId` names a different
+ * owner. Shared by the optimistic draw and the settle on the engine's response, so a move cannot be
+ * applied one way going out and another coming back. A move leaves every cached list of the old
+ * owner, not only the first found: the owner can hold its full list (`fullListByCollection`) beside
+ * the tree's, and both sit under `lists()`.
  */
 function placeRequest(
 	queryClient: ReturnType<typeof useQueryClient>,
@@ -759,29 +689,24 @@ function placeRequest(
 }
 
 /**
- * Apply one atomic batch reorder - the write path behind a drop.
- *
- * One `POST /reorder` per drop, not one `PUT` per displaced sibling: the engine
- * validates the whole batch and writes it in a single transaction, so a drop
- * that displaces N rows cannot half-land, cannot race a concurrent create into
- * the middle of its range, and costs one round trip instead of N.
+ * Apply one atomic batch reorder, the write path behind a drop. One `POST /reorder` per drop, not
+ * one `PUT` per displaced sibling: the engine validates the whole batch and writes it in one
+ * transaction, so a drop that displaces N rows cannot half-land, cannot race a concurrent create
+ * into the middle of its range, and costs one round trip instead of N.
  *
  * The cache work is three passes over the same helpers:
  *
- *  - `onMutate` snapshots every key the plan can touch and draws the plan into
- *    the caches, so the row is where the user dropped it before the request
- *    leaves.
- *  - `onSuccess` re-applies the rows the engine actually wrote. They are
- *    normally what was drawn, but a normalization the client planned and the
- *    engine performed is authoritative here, so the tree settles on real
- *    positions rather than on a guess that happens to sort the same.
- *  - `onError` restores the snapshots wholesale and reports through a toast. A
- *    failed reorder is rolled back, not an edit left unsaved, so it stays off
- *    the save store, which would park the Dock on "Not saved" with nothing
- *    pending (#1885).
+ * - `onMutate` snapshots every key the plan can touch and draws the plan into the caches, so the
+ *   row is where the user dropped it before the request leaves.
+ * - `onSuccess` re-applies the rows the engine actually wrote. They are normally what was drawn,
+ *   but a normalization the client planned and the engine performed is authoritative here, so the
+ *   tree settles on real positions, not on a guess that happens to sort the same.
+ * - `onError` restores the snapshots wholesale and reports through a toast. A failed reorder is
+ *   rolled back, not an edit left unsaved, so it stays off the save store, which would park the
+ *   Dock on "Not saved" with nothing pending (#1885).
  *
- * `onSettled` then invalidates the affected keys once - not per row, which is
- * the invalidation storm the per-row path produced.
+ * `onSettled` then invalidates the affected keys once, not per row, which would storm the engine
+ * with invalidations.
  */
 export function useReorderMutation() {
 	const queryClient = useQueryClient();
@@ -848,9 +773,7 @@ export function useReorderMutation() {
 	});
 }
 
-/**
- * Delete a request
- */
+/** Delete a request */
 export function useDeleteRequestMutation() {
 	const queryClient = useQueryClient();
 
@@ -876,11 +799,10 @@ export function useDeleteRequestMutation() {
 			// The row went to the trash rather than the void (issue #988), so the
 			// list that shows the trash is stale - see the collection delete above.
 			queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
-			// The response map is keyed by request id and nothing else evicts from
-			// it, so a deleted request would otherwise hold its body (plus the raw
-			// copy) for the rest of the session. Here rather than only at the tab
-			// seam: the delete is what makes the response unreachable, whether or
-			// not a tab was open on it.
+			// The response map evicts only by its LRU bound, so a deleted request would hold its
+			// body (plus the raw copy) until enough other sends push it out. Here rather than only
+			// at the tab seam: the delete is what makes the response unreachable, whether or not a
+			// tab was open on it.
 			useResponseStore.getState().clearResponse(deletedId);
 		},
 	});

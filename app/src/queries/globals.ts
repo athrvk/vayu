@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Globals Queries
- *
- * TanStack Query hooks for global variables operations.
- */
+/** TanStack Query hooks for the global variables. */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
@@ -17,9 +13,7 @@ import { invalidateCompositions } from "./compose-invalidation";
 import { queryKeys } from "./keys";
 import type { GlobalVariables, VariableValue } from "@/types";
 
-/**
- * Fetch global variables
- */
+/** Fetch global variables */
 export function useGlobalsQuery() {
 	return useQuery({
 		queryKey: queryKeys.globals.all,
@@ -27,9 +21,7 @@ export function useGlobalsQuery() {
 	});
 }
 
-/**
- * Update global variables
- */
+/** Update global variables */
 export function useUpdateGlobalsMutation() {
 	const queryClient = useQueryClient();
 

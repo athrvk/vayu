@@ -6,12 +6,9 @@
  */
 
 /**
- * Element Kind Catalogue Query
- *
- * TanStack Query hook for the engine's element registry (issue #1512):
- * every extractor, assertion, timer, controller and script kind, with its
- * label, category and config JSON Schema. Drives the Add-element menu and
- * the generic schema-driven form.
+ * The engine's element registry (#1512): every extractor, assertion, timer, controller and script
+ * kind, with its label, category and config JSON Schema. Drives the Add-element menu and the
+ * generic schema-driven form.
  */
 
 import { useQuery } from "@tanstack/react-query";
