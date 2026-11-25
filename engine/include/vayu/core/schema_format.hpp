@@ -8,13 +8,13 @@
  */
 
 /**
- * @file core/schema_format.hpp
- * @brief The JSON Schema `format` checkers valijson does not have (issue #2581).
+ * @brief The JSON Schema `format` checkers valijson does not have (issue
+ *        #2581).
  *
  * valijson asserts `format` for `date`, `time`, `date-time` and `ipv4` and
- * treats every other name as an annotation, so `{"format": "email"}` passed
- * `"not-an-email"` and a contract or a `jsonSchema` assertion that relied on it
- * reported a clean body. valijson has no checker table to extend; its one
+ * treats every other name as an annotation, so on its own `{"format": "email"}`
+ * passes `"not-an-email"`, and a contract or a `jsonSchema` assertion relying
+ * on it reports a clean body. valijson has no checker table to extend; its one
  * extension point is a custom constraint, which `schema_validation.cpp` adds
  * beside the built-in one for the names listed here. A name absent from the
  * table stays an annotation, as the specification allows (`int64`, `binary`,
@@ -23,7 +23,7 @@
  *
  * Each checker is a plain predicate over the string, written against the RFC
  * its name cites rather than as a regular expression: `std::regex` recurses per
- * input character and the strings checked are a response body's.
+ * input character, and the strings checked are a response body's.
  */
 
 #include <string_view>

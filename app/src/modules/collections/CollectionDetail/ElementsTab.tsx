@@ -6,26 +6,19 @@
  */
 
 /**
- * ElementsTab (issue #1512)
+ * The collection's elements (issue #1512): one list of typed behaviours (extractors, assertions,
+ * timers and scripts) bound to the collection's `elements` column through the shared `ElementList`
+ * primitive.
  *
- * Replaces the separate Pre-request and Post-request `ScriptTab`s with one
- * list of typed behaviours - extractors, assertions, timers and scripts -
- * bound to the collection's `elements` column through the shared
- * `ElementList` primitive.
+ * **A button, not a blur-commit, on `AuthTab`'s basis (#446).** This tab is not one buffer: adding
+ * a kind, naming a row, toggling it, reordering it and editing its form are separate focus stops,
+ * and a script element's own `CodeEditor` in the list would fire the half-typed-value blur
+ * `AuthTab`'s doc comment measured. The fields only make sense saved together, which is what the
+ * button means.
  *
- * **A button, not a blur-commit, on the same basis as `AuthTab` (#446).**
- * `ScriptTab` committed on focus leaving its one `CodeEditor`, because a
- * script tab has exactly one focus stop and leaving it means you are done.
- * This tab is not one buffer: adding a kind, naming a row, toggling it,
- * reordering it and editing its form are all separate stops, and a script
- * element's own `CodeEditor` inside the list would fire the same
- * half-typed-value blur `AuthTab`'s doc comment measured. The fields only
- * make sense saved together, which is what the button means here too.
- *
- * A `script.pre`/`script.post` row gets the "Names mentioned" chip row above
- * its editor (issue #1553), via `ElementList`'s `renderAboveForm` - the same
- * `useDataContract`/`useVariableResolver` pair the retired `ScriptTab` read
- * directly, since `ScriptElementForm` itself cannot depend on either.
+ * A `script.pre`/`script.post` row gets the "Names mentioned" chip row above its editor (issue
+ * #1553) via `ElementList`'s `renderAboveForm`, from the `useDataContract`/`useVariableResolver`
+ * pair, since `ScriptElementForm` itself cannot depend on either.
  */
 
 import { useCallback, useMemo } from "react";
@@ -49,8 +42,10 @@ import type { Collection, ElementDef, VariableSupport } from "@/types";
 import { persistedDraft, useStoredCollectionDraft } from "./collection-drafts";
 import { InfoBanner, SaveFailed } from "./shared";
 
-/** How many referenced names get a chip before the rest become a count - the
- * collection tab's own, wider limit from before the migration (`ScriptTab`). */
+/**
+ * How many referenced names get a chip before the rest become a count; the collection's own, wider
+ * limit.
+ */
 const CHIP_LIMIT = 8;
 
 interface ElementsTabProps {
@@ -68,12 +63,11 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 	});
 	/*
 	 * The write half of the same scope (issue #1651): `useVariableWriter` is
-	 * `RequestBuilderProvider`'s own `updateVariable`/`writableScopes` extracted
-	 * so a tree with no request builder above it can still use them. Global and
-	 * this collection's own variables are writable here; environment is too,
-	 * whenever one is active (`useSessionStore`'s `activeEnvironmentId` is a
-	 * global, session-wide pick, not something scoped to a request) - the same
-	 * create targets `writableScopes` already lists.
+	 * `RequestBuilderProvider`'s `updateVariable`/`writableScopes`, extracted so a tree with no
+	 * request builder above it can use them. Global and this collection's own variables are
+	 * writable here, and so is the environment whenever one is active (`useSessionStore`'s
+	 * `activeEnvironmentId` is a session-wide pick, not scoped to a request): the create targets
+	 * `writableScopes` lists.
 	 */
 	const { updateVariable, writableScopes } = useVariableWriter({ collectionId: collection.id });
 
@@ -123,13 +117,11 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 
 	const persist = useCallback(async () => {
 		if (!isDirty) return;
-		// Same whole-array 400 as the request builder's autosave (issue #1635):
-		// this button is disabled while `incomplete`, but `useDraftSaveContext`
-		// also registers `persist` for Cmd+S and the quit flush, neither of
-		// which reads the disabled attribute - so the check has to live here
-		// too, not only on the button below. Reads `kinds` directly (not
-		// `kindsList`, a fresh `[]` reference on every render while the query is
-		// still loading) so this callback's identity does not churn with it.
+		// Same whole-array 400 as the request builder's autosave (issue #1635): the button is
+		// disabled while `incomplete`, but `useDraftSaveContext` also registers `persist` for Cmd+S
+		// and the quit flush, which read no disabled attribute, so the check lives here too. Reads
+		// `kinds`, not `kindsList` (a fresh `[]` every render while the query loads), so this
+		// callback's identity does not churn.
 		if (hasIncompleteElement(elements, kinds ?? [])) throw new SaveBlockedError();
 		try {
 			await updateCollection.mutateAsync({ id: collection.id, elements });

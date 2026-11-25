@@ -6,17 +6,12 @@
  */
 
 /**
- * The collection's own Info tab.
- *
- * **Name and description persist on blur, the request builder's model.** Two
- * Info tabs with opposite save models is a coherence bug: the same act on the
- * same kind of field either sticks or does not depending on which pane you are
- * in. The builder's is the model the app is mostly made of.
- *
- * Losing the buttons costs the blank-name guard its disabled state, so the
- * refusal is spoken instead - see `reportBlankNameRefused`. `SaveFailed` still
- * reports a *rejected* save, which is a different failure and still needs its
- * own surface.
+ * The collection's own Info tab. **Name and description persist on blur, the request builder's
+ * model**: two Info tabs with opposite save models would make the same act on the same kind of
+ * field stick or not depending on the pane, and the builder's is the model most of the app uses.
+ * With no buttons the blank-name guard has no disabled state, so the refusal is spoken (see
+ * `reportBlankNameRefused`); `SaveFailed` still reports a *rejected* save, a different failure that
+ * needs its own surface.
  */
 
 import { useCallback } from "react";
@@ -73,13 +68,10 @@ function mergeField<K extends keyof InfoDraft>(
 export default function InfoTab({ collection, requestCount, active = false }: InfoTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 
-	// Draft/resync/isDirty/mutation-reset all live in the shared hook. See
-	// useEntityDraft.
-	//
-	// The resync also re-runs after a save (the props come back changed), which
-	// clears the post-trim divergence: `persist` writes `name.trim()`, so a
-	// draft with trailing whitespace would otherwise stay dirty against the
-	// trimmed saved value forever.
+	// Draft, resync, isDirty and mutation reset live in the shared hook (see useEntityDraft). The
+	// resync also re-runs after a save (the props come back changed), which clears the post-trim
+	// divergence: `persist` writes `name.trim()`, so a draft with trailing whitespace would
+	// otherwise stay dirty against the trimmed saved value forever.
 	const stored = useStoredCollectionDraft(collection.id, "info");
 	const { draft, setDraft, adopt, consumeDiscard, markSaved, isDirty, baseline, externalValue } =
 		useEntityDraft<InfoDraft>({
@@ -88,10 +80,9 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 			mutation: updateCollection,
 		});
 
-	// Merged per key rather than as one value (#1437): a field the user has not
-	// touched adopts an agent's change silently, the way a clean tab always
-	// has; a field both sides touched is a conflict, named and left for the
-	// user to resolve rather than picked for them.
+	// Merged per key (#1437): a field the user has not touched adopts an agent's change silently,
+	// as a clean tab does; a field both sides touched is a conflict, named and left for the user to
+	// resolve rather than picked for them.
 	const nameMerge = mergeField("name", draft, baseline, externalValue);
 	const descriptionMerge = mergeField("description", draft, baseline, externalValue);
 	const { value: name, conflict: nameConflict } = nameMerge;
@@ -133,12 +124,10 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 	const commit = () => void persist().catch(() => {});
 
 	/*
-	 * Trim, then commit - or refuse and put the stored name back.
-	 *
-	 * `canSave` already stops a blank one reaching the engine, including from
-	 * Ctrl/Cmd+S and the quit flush. What it cannot do is *say* anything: with
-	 * the Save button gone there is no disabled control left to show the refusal,
-	 * so the draft is reset to the stored name and the save channel reports it.
+	 * Trim, then commit, or refuse and put the stored name back. `canSave` already keeps a blank
+	 * one from the engine, Ctrl/Cmd+S and the quit flush included, but cannot *say* anything: with
+	 * no Save button there is no disabled control to show the refusal, so the draft resets to the
+	 * stored name and the save channel reports it.
 	 */
 	const commitName = () => {
 		const trimmed = name.trim();
@@ -172,14 +161,9 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 			</Field>
 
 			{/*
-			 * This field has advertised "Markdown supported" beside a plain
-			 * textarea for as long as it has existed - stored as markdown, rendered
-			 * as never. It gets the same editor as a request's description: prose
-			 * when you are reading, source when you click in.
-			 *
-			 * The hint is gone because the behaviour now says it. `onCommit` fires
-			 * on the same blur that renders the markdown, which is what makes this
-			 * form's save model the request builder's.
+			 * The request description's editor: prose while reading, source when clicked in, stored
+			 * as markdown. `onCommit` fires on the same blur that renders the markdown, which is
+			 * what makes this form's save model the request builder's.
 			 */}
 			<Field label="Description">
 				<MarkdownEditor
@@ -187,10 +171,9 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 					onChange={(value) => setDraft((d) => ({ ...d, description: value }))}
 					onCommit={commit}
 					/*
-					 * A failed save means the stored text is not what is on
-					 * screen, and rendering shows what is stored - so it would
-					 * hide the edit behind a tidy view of the old value, directly
-					 * above the `SaveFailed` notice telling you to try again.
+					 * A failed save means the stored text is not what is on screen, and the
+					 * rendered view shows what is stored, so it would hide the edit behind the old
+					 * value right above the `SaveFailed` notice telling you to retry.
 					 */
 					keepSourceOpen={updateCollection.isError}
 					aria-label="Collection description"

@@ -7,10 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file core/pass_duration.hpp
- * @brief How long a scenario load run's completed passes took (#3570).
- */
+/** @brief How long a scenario load run's completed passes took (#3570). */
 
 #include <atomic>
 #include <cstddef>
@@ -25,11 +22,11 @@ namespace vayu::core {
 /**
  * One histogram of pass durations, plus the exact sum and count beside it.
  *
- * Written by every event-loop worker, so a record is
- * `hdr_record_value_atomic` and two relaxed increments, with no lock. The
- * histogram is read only after the run has drained (`build`): a plain hdr read
- * of a histogram still being written races the writers (#2823). `mean_ms`
- * reads only the two atomics, which is what makes it safe on a gate frame.
+ * Written by every event-loop worker, so a record is `hdr_record_value_atomic`
+ * and two relaxed increments, with no lock. The histogram is read only after
+ * the run has drained (`build`): a plain hdr read of a histogram still being
+ * written races the writers (#2823). `mean_ms` reads only the two atomics,
+ * which makes it safe on a gate frame.
  */
 class PassDurationRecorder {
     public:

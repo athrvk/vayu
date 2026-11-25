@@ -6,30 +6,22 @@
  */
 
 /**
- * AuthTab - collection auth source.
+ * The collection auth source. A collection never uses `inherit` (it *is* the source), so this tab
+ * offers the editable modes plus `noauth`, which says "and nothing is inherited past here" (see
+ * `RequestAuth`). The fields are the shared `AuthFields`, as on the request builder's Auth tab; the
+ * inheritance chain below shows which ancestor a child request would resolve to.
  *
- * Collections never use `inherit` - they ARE the source, so this tab offers the
- * editable modes plus `noauth`, the one that says "and nothing is inherited past
- * here" (see `RequestAuth`). The fields are the shared `AuthFields`, the
- * same component the request builder's Auth tab renders. The bottom shows the
- * inheritance chain so the user can see which ancestor a child request would
- * resolve to.
+ * **It waits for a button, by decision (#446).** The Info tab commits each field when focus leaves
+ * it, as each is one text buffer. This form is not one buffer: an OAuth 2.0 config with Advanced
+ * open is 20 focus stops, 9 of them not value fields (the grant-type and Add-to pickers, three
+ * switches, the secret's reveal toggle, the Advanced disclosure, Get Token). Measured: clicking
+ * reveal to check a half-typed password fires `focusout` on that field while the draft is dirty, so
+ * a blur-commit would write half a credential to the record every descendant request inherits from.
+ * The fields only make sense saved together, which is what the button means; the Elements tab waits
+ * for its button on the same basis.
  *
- * **This is the one tab on the screen that still waits for a button, and that is
- * a decision (#446), not a leftover.** Info and both Script tabs commit when
- * focus leaves the field, because each is one text buffer and leaving it means
- * you are done with it. This form is not one buffer: an OAuth 2.0 config with
- * Advanced open is 20 focus stops, 9 of which are not value fields at all - the
- * grant-type and Add-to pickers, three switches, the secret's reveal toggle, the
- * Advanced disclosure, Get Token. Measured: clicking reveal to check a
- * half-typed password fires `focusout` on that field while the draft is dirty,
- * so a blur-commit would write half a credential to the record every descendant
- * request inherits from. The fields only make sense saved together, which is
- * what the button means here.
- *
- * A form that saves differently from its neighbours has to say so where the
- * typing is, not only through a button further down the page - hence the note
- * above the fields.
+ * A form that saves unlike its neighbours has to say so where the typing is, not only through a
+ * button further down the page, hence the note above the fields.
  */
 
 import { useCallback } from "react";
@@ -63,16 +55,11 @@ import { defaultOAuth2Config } from "@/services/oauth/defaults";
 type CollectionAuth = Collection["auth"];
 
 /*
- * The one collection-specific extra, layered on the shared mode registry: an
- * inheritance-worded hint per mode. Labels and the mode list itself come from
- * `@/constants/auth-modes`, which the request `AuthPanel` reads too - they used
- * to be two arrays that had already drifted.
- *
- * OAuth 2.0 was once listed as uneditable here. It is editable now: the engine
- * resolves it, an import can produce it, requests inherit it, and `OAuth2Form`
- * was written to be shared - so the collection side was anticipated and simply
- * never wired up. digest/aws/ntlm stay uneditable: the engine has no resolution
- * for them, so offering them would let you configure something that silently
+ * The one collection-specific extra on the shared mode registry: an inheritance-worded hint per
+ * mode. Labels and the mode list come from `@/constants/auth-modes`, which the request `AuthPanel`
+ * reads too, so the two lists cannot drift. OAuth 2.0 is editable (the engine resolves it, an
+ * import can produce it, requests inherit it, and `OAuth2Form` is shared); digest/aws/ntlm are not:
+ * the engine has no resolution for them, so offering them would configure something that silently
  * does nothing.
  */
 const AUTH_MODE_HINTS: Record<CollectionAuthMode, string> = {
@@ -84,13 +71,10 @@ const AUTH_MODE_HINTS: Record<CollectionAuthMode, string> = {
 	oauth2: 'Token is fetched once and inherited by requests that use "Inherit from collection".',
 };
 
-// Narrow the broader Collection auth union to the modes we expose.
-// digest/aws/ntlm return null: they are stored (an import can produce
-// them - see services/importers/postman.ts `collectionAuth`) but not editable
-// here, and they are emphatically *not* "none". Collapsing them to "none" made
-// this tab state "No authentication for this collection. Requests using
-// 'Inherit from collection' will send no auth." about a collection that does
-// have auth - contradicting the inheritance chain three lines below it.
+// Narrow the Collection auth union to the modes exposed here. digest/aws/ntlm return null: they are
+// stored (an import can produce them, see services/importers/postman.ts `collectionAuth`) but not
+// editable, and emphatically *not* "none", which would have this tab say requests inheriting from
+// it send no auth, contradicting the inheritance chain below.
 function asEditable(auth: CollectionAuth): CollectionAuthMode | null {
 	return isCollectionAuthMode(auth.mode) ? auth.mode : null;
 }
@@ -121,11 +105,10 @@ interface AuthTabProps {
 export default function AuthTab({ collection, active = false }: AuthTabProps) {
 	const updateCollection = useUpdateCollectionMutation();
 
-	// Draft/resync/isDirty/mutation-reset all live in the shared hook. See
-	// useEntityDraft.
-	// The key is also what the context bar's `CollectionAuthSection` reads the
-	// draft by (`useCollectionAuthDraft`), so it shows the picked-but-unsaved
-	// mode instead of the stored one (#1483).
+	// Draft, resync, isDirty and mutation reset live in the shared hook (see useEntityDraft). The
+	// key is also how the context bar's `CollectionAuthSection` reads the draft
+	// (`useCollectionAuthDraft`), so it shows the picked-but-unsaved mode, not the stored one
+	// (#1483).
 	const stored = useStoredCollectionDraft(collection.id, "auth");
 	const {
 		draft: auth,
@@ -145,9 +128,8 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 	// `mode === null` is exactly the digest/aws/ntlm set.
 	const uneditableLabel = uneditableAuthLabel(auth.mode);
 	const hint = mode ? AUTH_MODE_HINTS[mode] : undefined;
-	// The modes with fields to type into - gates the "saved together" hint
-	// above them. `none`/`noauth` render an empty state with nothing to type,
-	// but share the same Save Auth button below: every mode on this tab
+	// The modes with fields to type into gate the "saved together" hint. `none`/`noauth` render an
+	// empty state with nothing to type but share the Save Auth button: every mode on this tab
 	// commits on that click, never on the picker alone.
 	const hasCredentialFields = mode !== null && mode !== "none" && mode !== "noauth";
 
@@ -236,10 +218,9 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 			</div>
 
 			{/*
-			 * Where the typing is, not only at the button. Info and the script
-			 * tabs on this same screen persist on their own, so the one form that
-			 * does not has to say which kind it is before the first keystroke
-			 * rather than after the user goes looking for a way to keep it.
+			 * Where the typing is, not only at the button: the Info tab on this screen persists on
+			 * its own, so this form says it does not before the first keystroke, rather than after
+			 * the user goes looking for a way to keep it.
 			 */}
 			{hasCredentialFields && (
 				<p className="text-label text-muted-foreground mb-2 flex items-center gap-1.5">
@@ -249,10 +230,9 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 			)}
 
 			{/*
-			 * The same fields the request builder's Auth tab renders. No
-			 * `TextInput` is injected: a collection has no per-request variable
-			 * scope to resolve against at edit time, so the shared default -
-			 * a plain input that accents `{{var}}` - is the right one here.
+			 * The request builder's Auth fields. No `TextInput` is injected: a collection has no
+			 * per-request variable scope to resolve against at edit time, so the shared default (a
+			 * plain input accenting `{{var}}`) is the right one here.
 			 */}
 			<AuthFields
 				value={auth}

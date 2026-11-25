@@ -6,9 +6,8 @@
  */
 
 /**
- * VariablesTab - reuses VariableTableEditor in embedded mode so the inline
- * "new row" UX matches the Variables screen, but rendered headless so the
- * Collection Detail screen's own header/banner aren't duplicated.
+ * VariableTableEditor in embedded mode, so the inline "new row" UX matches the Variables screen,
+ * rendered headless so Collection Detail's own header and banner are not duplicated.
  */
 
 import VariableTableEditor from "@/modules/variables/main/VariableTableEditor";

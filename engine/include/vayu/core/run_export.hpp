@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/run_export.hpp
  * @brief A finished load run as a shareable document (`POST /export/run-report`,
  *        #2127), schema `docs/engine/run-export.schema.json`.
  *

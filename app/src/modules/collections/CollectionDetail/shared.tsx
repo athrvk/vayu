@@ -5,9 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Shared building blocks for CollectionDetail tabs.
- */
+/** Shared building blocks for the CollectionDetail tabs. */
 
 import type { ReactNode } from "react";
 import { Callout } from "@/components/shared";
@@ -16,13 +14,9 @@ import { Card } from "@/components/ui/card";
 import { Eyebrow } from "@/components/ui/eyebrow";
 
 /**
- * A failed save on these tabs used to be invisible.
- *
- * Every tab calls `updateCollection.mutate(...)`, there is no global
- * `MutationCache.onError` (see lib/query-client.ts), and no tab read
- * `isError`/`error` - so a rejected save just flipped the button from "Saving…"
- * back to "Save Changes" and left the user believing it had gone through. The
- * mutation *recorded* the failure; nothing rendered it.
+ * A failed save on these tabs, made visible: there is no global `MutationCache.onError` (see
+ * lib/query-client.ts), so a rejected `updateCollection.mutate(...)` that no tab rendered would
+ * flip the button back from "Saving…" and leave the user believing the save went through.
  *
  * `blocking`, not `warning`: nothing was written, so this is the error tier.
  */

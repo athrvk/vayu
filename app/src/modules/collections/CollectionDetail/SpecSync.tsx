@@ -6,43 +6,35 @@
  */
 
 /**
- * The Spec tab's Sync section - re-read the bound document, say what moved, and
- * apply the parts the user ticks (issues #654 and #655, phase 2 of #625).
+ * The Spec tab's Sync section: re-read the bound document, say what moved, and apply the parts the
+ * user ticks (issues #654 and #655, phase 2 of #625).
  *
- * The read half and the write half stayed separate all the way down. Every
- * judgement about what changed is `POST /specs/diff`'s (engine-side, #854, where
- * the reader that says what a document produces already
- * lives), and every judgement about what to *write* lives in `spec-apply`; the
- * first stores nothing and the second only builds a payload, so the rules that
- * matter - a field somebody edited is never overwritten unless they ask, a
- * removal is never a default - are provable without a row to damage. This
- * component ticks boxes and calls two engine routes.
+ * The read half and the write half stay separate all the way down. Every judgement about what
+ * changed is `POST /specs/diff`'s (engine-side, #854, beside the reader that says what a document
+ * produces), and every judgement about what to *write* is `spec-apply`'s; the first stores nothing
+ * and the second only builds a payload, so the rules that matter (a field somebody edited is never
+ * overwritten unless they ask, a removal is never a default) are provable without a row to damage.
+ * This component ticks boxes and calls two engine routes.
  *
- * **Applying is one call because it has to be one transaction.** `POST
- * /specs/sync` writes the document, moves the binding and applies the rows
- * together; a sync that stopped halfway would leave the collection bound to a
- * document its requests do not reflect, which is the state binding exists to
+ * **Applying is one call because it has to be one transaction.** `POST /specs/sync` writes the
+ * document, moves the binding and applies the rows together; a sync that stopped halfway would
+ * leave the collection bound to a document its requests do not reflect, the state binding exists to
  * make impossible.
  *
- * **Every apply stores the document; the ticks decide which rows ride along**
- * (issue #717). That one rule is what makes the dead end structurally
- * impossible: the comparison covers request-shaped fields, so a document that
- * only moved a response schema, a status, or its `servers` block produces three
- * empty buckets - and gating Apply on those buckets left the commonest contract
- * change of all permanently unapplyable, with the stored document, the
- * response-schema index and the coverage index stale forever while the UI
- * truthfully said the document had changed. The apply is labelled for which of
- * the two it is about to be, because an unlabelled one would be a write nobody
+ * **Every apply stores the document; the ticks decide which rows ride along** (issue #717). The
+ * comparison covers request-shaped fields, so a document that only moved a response schema, a
+ * status or its `servers` block produces three empty buckets, and gating Apply on them would leave
+ * the commonest contract change unapplyable, with the stored document and the response-schema and
+ * coverage indexes stale forever while the UI truthfully says the document changed. The apply is
+ * labelled for which of the two it is about to be, as an unlabelled one would be a write nobody
  * asked for.
  *
- * **The stored document is never read here at all** (issues #712, #854). The
- * engine compares its own stored bytes against the re-fetched ones, so all this
- * needs of the binding is `sourceUrl` - where to re-fetch from - which is what
- * `useSpecMetaReader` answers without the document.
+ * **The stored document is never read here** (issues #712, #854): the engine compares its own
+ * stored bytes against the re-fetched ones, so all this needs of the binding is `sourceUrl` (where
+ * to re-fetch from), which `useSpecMetaReader` answers without the document.
  *
- * The counts are stated in full, zeros included, for the reason `MatchSummary`
- * states its three: "4 changed" alone reads as the whole answer, while "4
- * changed, 0 added, 0 removed, 12 unchanged" is the answer.
+ * The counts are stated in full, zeros included, for `MatchSummary`'s reason: "4 changed" alone
+ * reads as the whole answer, while "4 changed, 0 added, 0 removed, 12 unchanged" is the answer.
  */
 
 import { useState } from "react";
@@ -81,11 +73,9 @@ interface SpecSyncProps {
 	/** Every stored collection, to find the tag folder an added operation lands in. */
 	collections: readonly Collection[];
 	/**
-	 * The bound document's id, from the collection's own binding (issue #712).
-	 *
-	 * The id rather than the document, not even for the bytes (#854): the
-	 * engine compares its own stored document, so this is used to look up where
-	 * that document was fetched from and for nothing else.
+	 * The bound document's id, from the collection's own binding (issue #712); the id, not the
+	 * document or even its bytes (#854): the engine compares its own stored document, so this only
+	 * looks up where that document was fetched from.
 	 */
 	specId: string;
 	/**
@@ -114,12 +104,10 @@ type CheckState =
 			/** The bytes that were diffed, and the ones an apply stores - never a re-fetch. */
 			content: string;
 			/**
-			 * Where the bound document said it came from, read with it (issue #712).
-			 *
-			 * Carried from the check to the apply rather than held beside this state:
-			 * an apply stores a row that records the same origin, and a second piece
-			 * of state for it would go stale the moment a sync moved the binding to a
-			 * new document.
+			 * Where the bound document said it came from, read with it (issue #712). Carried from
+			 * the check to the apply, not held beside this state: an apply stores a row recording
+			 * the same origin, and a second piece of state for it would go stale the moment a sync
+			 * moved the binding to a new document.
 			 */
 			sourceUrl: string | null;
 			selection: SpecApplySelection;
@@ -145,10 +133,9 @@ export default function SpecSync({
 		setState({ phase: "checking" });
 		try {
 			/*
-			 * Where the bound document came from, which is all this needs of it
-			 * (issues #712, #854): the re-fetch goes to that source, and the
-			 * comparison against the stored bytes is the engine's. Cached beside
-			 * the tab's own card, so this normally costs no request.
+			 * Where the bound document came from, all this needs of it (issues #712, #854): the
+			 * re-fetch goes to that source, and the comparison against the stored bytes is the
+			 * engine's. Cached beside the tab's own card, so this normally costs no request.
 			 */
 			const meta = await readSpecMeta(specId);
 			const readsFile = !meta.sourceUrl && !!specFile;
@@ -332,10 +319,9 @@ export default function SpecSync({
 			</Card>
 
 			{/*
-			 * The count-naming confirm every destructive path here uses. A sync can
-			 * delete several requests in one click, and the number is the part a
-			 * user needs before agreeing - "delete the removed operations" is not
-			 * something anyone can weigh.
+			 * The count-naming confirm every destructive path here uses: a sync can delete several
+			 * requests in one click, and the number is what a user needs before agreeing; "delete
+			 * the removed operations" cannot be weighed.
 			 */}
 			<DeleteConfirmDialog
 				open={confirmingDeletes}
@@ -357,11 +343,9 @@ export default function SpecSync({
 }
 
 /**
- * "3 to create, 1 to update, 0 to delete" - what the button is about to do.
- *
- * The document is named on both branches because it is written on both: with
- * nothing ticked it is the whole of the change, and with rows ticked it still
- * rides along, which is what makes the collection bound to what it just synced.
+ * "3 to create, 1 to update, 0 to delete": what the button is about to do. The document is named on
+ * both branches because it is written on both: with nothing ticked it is the whole change, and with
+ * rows ticked it still rides along, which binds the collection to what it just synced.
  */
 function applySummary(selection: SpecApplySelection): string {
 	if (isEmptySelection(selection))
@@ -376,11 +360,9 @@ function applySummary(selection: SpecApplySelection): string {
 }
 
 /**
- * The document moved, but nothing it says about *this collection's* operations
- * did - the shape the comparison answers with as three empty buckets.
- *
- * Named rather than inferred from the summary, because "0 · 0 · 0 · N" is the
- * one reading a user cannot act on without being told what it means (#717).
+ * The document moved, but nothing it says about *this collection's* operations did: the three empty
+ * buckets. Named rather than inferred from the summary, as "0 · 0 · 0 · N" is the one reading a
+ * user cannot act on without being told what it means (#717).
  */
 function documentLevelOnly(diff: SpecDiffResponse): boolean {
 	return (
@@ -622,11 +604,10 @@ function ChangedRow({
 							)
 						}
 						aria-label={`Apply changes to ${changed.name}`}
-						// `size-target` (issue #1679), not `size-icon`: same reason as
-						// the field-level checkbox below - a bare checkbox is its own
-						// hit target. `items-center`, not `items-baseline`, above: a
-						// checkbox this size floats above a single-line label at its
-						// text baseline rather than sitting level with it.
+						// `size-target` (issue #1679), not `size-icon`: as for the field-level
+						// checkbox below, a bare checkbox is its own hit target. `items-center`,
+						// not `items-baseline`, above: a checkbox this size floats above a
+						// single-line label at its text baseline instead of sitting level with it.
 						className="size-target"
 					/>
 					<span className="text-xs font-medium">{changed.name}</span>
