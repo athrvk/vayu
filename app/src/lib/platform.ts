@@ -6,10 +6,8 @@
  */
 
 /**
- * Platform detection for renderer-side UI (keyboard hints, etc.).
- *
- * Prefers the Electron main process's reported platform; falls back to the
- * browser's user-agent when running outside Electron (dev in a browser).
+ * Platform detection for renderer-side UI (keyboard hints, etc.): the Electron main process's
+ * reported platform, else the browser's user-agent outside Electron (dev in a browser).
  */
 
 function detectMac(): boolean {
@@ -35,16 +33,15 @@ export const modKey: string = isMac ? "⌘" : "Ctrl";
 /**
  * How a chord wants the primary modifier.
  *
- * `true` is lenient - either ⌘ or Ctrl satisfies it, which is what almost every
- * chord wants: one definition that reads ⌘S on a Mac and Ctrl+S elsewhere, and
- * fires for whichever key that platform's users actually press.
+ * `true` is lenient (either ⌘ or Ctrl satisfies it), which is what almost every chord wants: one
+ * definition that reads ⌘S on a Mac and Ctrl+S elsewhere, and fires for whichever key that
+ * platform's users actually press.
  *
- * `"strict"` demands the platform's own modifier and refuses the other one:
- * ⌘ *without* Ctrl on macOS, Ctrl *without* ⌘ elsewhere. Exactly one chord
- * needs it - the palette's ⌘K, because Ctrl+K on macOS is the Cocoa
- * kill-to-end-of-line every text field implements (and Monaco's
- * `deleteAllRight`). A lenient ⌘K listening on the capture phase stole it from
- * the focused control before the control ever saw it.
+ * `"strict"` demands the platform's own modifier and refuses the other one: ⌘ *without* Ctrl on
+ * macOS, Ctrl *without* ⌘ elsewhere. Exactly one chord needs it, the palette's ⌘K, because Ctrl+K
+ * on macOS is the Cocoa kill-to-end-of-line every text field implements (and Monaco's
+ * `deleteAllRight`): a lenient ⌘K listening on the capture phase would steal it from the focused
+ * control before the control saw it.
  */
 export type ChordMod = boolean | "strict";
 
@@ -54,46 +51,38 @@ export interface Chord {
 	shift?: boolean;
 	alt?: boolean;
 	/**
-	 * A literal Control key on macOS, where `mod` is ⌘ - what ⌃⌘F, the system
-	 * full-screen toggle, needs. Display only: `matchesChord`, `chordKeybinding`
-	 * and `dispatchChord` do not read it, so a chord carrying it must never reach
-	 * a live handler (it would answer to ⌘F instead).
+	 * A literal Control key on macOS, where `mod` is ⌘: what ⌃⌘F, the system full-screen toggle,
+	 * needs. Display only: `matchesChord`, `chordKeybinding` and `dispatchChord` do not read it, so
+	 * a chord carrying it must never reach a live handler (it would answer to ⌘F instead).
 	 */
 	ctrl?: boolean;
 	/** The final key, e.g. "E", "," or "↵". Always what is *displayed*. */
 	key: string;
 	/**
-	 * What pressing this does, as a surface listing shortcuts would name it -
-	 * "Send request", "Close tab".
-	 *
-	 * On the definition rather than in a table beside it, for the reason the
-	 * registry exists at all: a parallel list of names keyed by chord is a
-	 * second place a chord is written down, and it goes stale the first time one
-	 * is added. Optional on the type because a chord can be declared for a
-	 * binding nothing lists (an editor's own); every chord in
+	 * What pressing this does, as a surface listing shortcuts would name it ("Send request", "Close
+	 * tab"). On the definition rather than in a table beside it, for the reason the registry exists
+	 * at all: a parallel list of names keyed by chord is a second place a chord is written down,
+	 * and it goes stale the first time one is added. Optional on the type because a chord can be
+	 * declared for a binding nothing lists (an editor's own); every chord in
 	 * `constants/shortcuts.ts` carries one, and a test holds that.
 	 */
 	label?: string;
 	/**
-	 * Physical key (`KeyboardEvent.code`, e.g. "Digit1") to match on instead of
-	 * `key`, for chords whose character moves with the layout.
-	 *
-	 * The digit row is the case: on AZERTY the unshifted top row produces
-	 * `&é"'(-è_çà`, so `e.key === "1"` never arrives without Shift - and the
-	 * shifted press that does produce it collides with the shifted chords. The
-	 * position is stable where the character is not, which is why VS Code binds
-	 * these by code too. `key` stays the label, so the hint still reads ⌘1.
+	 * Physical key (`KeyboardEvent.code`, e.g. "Digit1") to match on instead of `key`, for chords
+	 * whose character moves with the layout. The digit row is the case: on AZERTY the unshifted top
+	 * row produces `&é"'(-è_çà`, so `e.key === "1"` never arrives without Shift, and the shifted
+	 * press that does produce it collides with the shifted chords. The position is stable where the
+	 * character is not, which is why VS Code binds these by code too. `key` stays the label, so the
+	 * hint still reads ⌘1.
 	 */
 	code?: string;
 }
 
 /**
- * The individual key-caps of a chord, in display order - ["⇧", "⌘", "E"] on
- * macOS, ["Ctrl", "Shift", "E"] elsewhere.
- *
- * Surfaces that render one `<Kbd>` per key (the response pane's empty state)
- * read this; `formatChord` joins it for the single-string surfaces. Both come
- * from the one `Chord`, so no display site spells a modifier itself.
+ * The individual key-caps of a chord, in display order: ["⇧", "⌘", "E"] on macOS, ["Ctrl", "Shift",
+ * "E"] elsewhere. Surfaces that render one `<Kbd>` per key (the response pane's empty state) read
+ * this; `formatChord` joins it for the single-string surfaces. Both come from the one `Chord`, so
+ * no display site spells a modifier itself.
  */
 export function chordKeys({ mod, ctrl, shift, alt, key }: Chord): string[] {
 	if (isMac) {

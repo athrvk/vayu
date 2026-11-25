@@ -6,18 +6,15 @@
  */
 
 /**
- * MCP data-change invalidation.
+ * MCP data-change invalidation. An MCP tool call mutates the engine from the Electron main process,
+ * so the renderer's caches cannot notice on their own (`refetchOnWindowFocus` is off app-wide, see
+ * `lib/query-client.ts`). The main process sends one `mcp:data-changed` per family a successful
+ * call touched; this maps that family to the query keys that read it. The engine's change feed maps
+ * its events onto the same families (`lib/change-feed-invalidation.ts`, #3420), so this is the one
+ * key table for both.
  *
- * An MCP tool call mutates the engine from the Electron main process, so the
- * renderer's caches have no way to notice on their own: `refetchOnWindowFocus`
- * is off app-wide (see `lib/query-client.ts`). The main process sends one
- * `mcp:data-changed` per family a successful call touched; this maps that
- * family to the query keys that read it. The engine's change feed maps its
- * events onto the same families (`lib/change-feed-invalidation.ts`, #3420), so
- * this is the one key table for both.
- *
- * Invalidation only - no engine data rides over IPC or the feed, so there is
- * exactly one path by which a row reaches the UI and it is the query layer.
+ * Invalidation only: no engine data rides over IPC or the feed, so the query layer is the one path
+ * by which a row reaches the UI.
  */
 
 import type { QueryClient } from "@tanstack/react-query";
@@ -37,56 +34,47 @@ export function invalidateRequestRow(queryClient: QueryClient, requestId: string
 }
 
 /**
- * Which caches each family invalidates.
- *
- * A `Record` over the union rather than a `switch`: a new entity added to
- * `McpDataEntity` fails to compile until it names a reader here, which is the
- * check that keeps this from becoming a channel that writes events nothing
- * listens for.
+ * Which caches each family invalidates. A `Record` over the union rather than a `switch`: a new
+ * `McpDataEntity` fails to compile until it names a reader here, which keeps this from becoming a
+ * channel that writes events nothing listens for.
  */
 const INVALIDATORS: Record<
 	McpDataEntity,
 	(queryClient: QueryClient, event: McpDataChangedEvent) => void
 > = {
 	/*
-	 * A collection write is taken coarsely, the way `useDeleteCollectionMutation`
-	 * takes it: `delete_collection` cascades through every descendant collection
-	 * and every request inside them, and which rows those are is engine-side
-	 * knowledge - a client that re-derived the subtree would drift from the
-	 * engine's definition of "descendant". `requests.all` rather than a list key
-	 * because `requests.detail` entries carry `staleTime: Infinity`, so a deleted
-	 * request would otherwise stay fresh forever and keep feeding restored tabs.
+	 * A collection write is taken coarsely, as `useDeleteCollectionMutation` takes it:
+	 * `delete_collection` cascades through every descendant collection and every request inside
+	 * them, and which rows those are is engine-side knowledge; a client that re-derived the subtree
+	 * would drift from the engine's definition of "descendant". `requests.all` rather than a list
+	 * key, because `requests.detail` entries carry `staleTime: Infinity`, so a deleted request
+	 * would otherwise stay fresh forever and keep feeding restored tabs.
 	 *
-	 * `trash` because a delete is what *adds* a row to it and a restore or purge
-	 * is what takes one away - `delete_collection` declares this family alone,
-	 * and `restore_trash_entry` and `purge_trash_entry` declare it beside
-	 * `request` and `environment` (issue #1438). The list is the only read of that
-	 * family, so without this an agent's delete never appears in an open Trash drawer and a
-	 * row it purged stays there until the drawer is closed and reopened; clicking
-	 * Restore on that phantom row 404s.
+	 * `trash` because a delete *adds* a row to it and a restore or purge takes one away:
+	 * `delete_collection` declares this family alone, and `restore_trash_entry` and
+	 * `purge_trash_entry` declare it beside `request` and `environment` (#1438). The list is the
+	 * family's only read, so without this an agent's delete never appears in an open Trash drawer,
+	 * and a row it purged stays there until the drawer is closed and reopened, where Restore on
+	 * that phantom row 404s.
 	 *
-	 * `mockServer.list()` because the engine stops the mocks of a deleted
-	 * collection and its descendants as part of the delete (#3449), so the
-	 * running-mock list the Dock and the Services drawer poll would otherwise
-	 * keep showing a mock that is gone until its next poll.
+	 * `mockServer.list()` because the engine stops the mocks of a deleted collection and its
+	 * descendants as part of the delete (#3449), so the running-mock list the Dock and the Services
+	 * drawer poll would show a mock that is gone until its next poll.
 	 *
-	 * `compose` at the `all` prefix rather than per request: a collection write
-	 * changes the chain every descendant request inherits its auth, headers and
-	 * scripts from, and which requests those are is the same engine-side
-	 * knowledge `requests.all` is taken wholesale for. Only a mounted Code
-	 * section composes at all (the section is unmounted while collapsed), so the
-	 * cost is one round trip per open snippet.
+	 * `compose` at the `all` prefix rather than per request: a collection write changes the chain
+	 * every descendant request inherits auth, headers and scripts from, the same engine-side
+	 * knowledge `requests.all` is taken wholesale for. Only a mounted Code section composes (it
+	 * unmounts while collapsed), so the cost is one round trip per open snippet.
 	 *
-	 * The lists go through `invalidateAllRequestLists`, so the mounted ones that
-	 * refetch join one `GET /requests` for the whole workspace rather than each
-	 * making a call of their own. That is still a workspace-wide read, which is
-	 * why this family is only for the occasional tools (a delete, a move, an
-	 * import, a spec bind or sync, a trash restore or purge) and the per-row
-	 * collection writes an agent loops over declare `collectionRow` instead.
+	 * The lists go through `invalidateAllRequestLists`, so the mounted ones that refetch join one
+	 * `GET /requests` for the whole workspace instead of a call each. That is still a
+	 * workspace-wide read, so this family is only for the occasional tools (a delete, a move, an
+	 * import, a spec bind or sync, a trash restore or purge); the per-row collection writes an
+	 * agent loops over declare `collectionRow` instead.
 	 *
-	 * The event's `collectionId` is not read here: each of these tools names a
-	 * different collection by it (the one deleted, a move's destination, a spec's
-	 * binder), and none of them changes that collection's list alone.
+	 * The event's `collectionId` is not read here: each of these tools names a different collection
+	 * by it (the one deleted, a move's destination, a spec's binder), and none changes that
+	 * collection's list alone.
 	 */
 	collection: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
@@ -97,14 +85,13 @@ const INVALIDATORS: Record<
 	},
 
 	/*
-	 * `create_collection`, `update_collection` and `unbind_spec` write one
-	 * collection row and nothing beneath it, so no request list and no trash row
-	 * can have moved: a new collection holds no requests (its list is fetched
-	 * when the tree first mounts it), an update cannot reach a trashed row, and
-	 * an unbind leaves the requests' operation stamps in place. The same two
-	 * reads `useUpdateCollectionMutation` refreshes: the collections, and every
-	 * composition, because a collection's auth, headers, scripts and variables
-	 * are what its descendant requests compose against.
+	 * `create_collection`, `update_collection` and `unbind_spec` write one collection row and
+	 * nothing beneath it, so no request list or trash row can have moved: a new collection holds no
+	 * requests (its list is fetched when the tree first mounts it), an update cannot reach a
+	 * trashed row, and an unbind leaves the requests' operation stamps in place. The same two reads
+	 * `useUpdateCollectionMutation` refreshes: the collections, and every composition, because a
+	 * collection's auth, headers, scripts and variables are what its descendant requests compose
+	 * against.
 	 */
 	collectionRow: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
@@ -112,43 +99,36 @@ const INVALIDATORS: Record<
 	},
 
 	/*
-	 * The tree reads one list per collection, so a created request only needs its
-	 * owner's list - the same narrowing `useUpdateRequestMutation` does rather
-	 * than refetching every collection on one row's change. Without a named
-	 * collection the owner is unknowable from here, so the whole `lists()` prefix
-	 * goes; that prefix also covers the reorder pass, which reads at `lists()`
-	 * itself and would be missed by a per-collection key alone.
+	 * The tree reads one list per collection, so a created request needs only its owner's list, the
+	 * narrowing `useUpdateRequestMutation` does rather than refetching every collection on one
+	 * row's change. Without a named collection the owner is unknowable here, so the whole `lists()`
+	 * prefix goes; that prefix also covers the reorder pass, which reads at `lists()` itself and a
+	 * per-collection key would miss.
 	 *
-	 * A named `requestId` also takes that row's detail cache, which the lists do
-	 * not cover: `requestDetailOptions` is `staleTime: Infinity`, so an updated
-	 * or deleted request would keep feeding a restored tab the copy it read on
-	 * open. Only the tools that name one row (`update_request`, `delete_request`)
-	 * carry the hint; `create_request` names none, and its row has no detail
-	 * entry yet.
+	 * A named `requestId` also takes that row's detail cache, which the lists do not cover:
+	 * `requestDetailOptions` is `staleTime: Infinity`, so an updated or deleted request would keep
+	 * feeding a restored tab the copy it read on open. Only the tools that name one row
+	 * (`update_request`, `delete_request`) carry the hint; `create_request` names none, and its row
+	 * has no detail entry yet.
 	 *
-	 * `trash` for the same reason the `collection` family takes it:
-	 * `delete_request` declares this family alone and stamps a row the Trash
-	 * drawer lists, and `restore_trash_entry` / `purge_trash_entry` declare it
-	 * beside `collection` and `environment` (issue #1438). Unguarded, because the two
-	 * trash tools name no request and the event says which family changed, never how - so a
-	 * `create_request` pays a refetch of a short list that the drawer has to be
-	 * open to mount at all. That is this map's standing trade, taken here for the
-	 * same reason the `run` family takes it: a stale answer is a lie, a refetch
-	 * is a wait. There is no per-row key to narrow to - the list is the family's
-	 * only read.
+	 * `trash` for the `collection` family's reason: `delete_request` declares this family alone and
+	 * stamps a row the Trash drawer lists, and `restore_trash_entry` / `purge_trash_entry` declare
+	 * it beside `collection` and `environment` (#1438). Unguarded, because the two trash tools name
+	 * no request and the event says which family changed, never how, so a `create_request` pays a
+	 * refetch of a short list the drawer has to be open to mount at all. That is this map's
+	 * standing trade, taken for the `run` family's reason: a stale answer is a lie, a refetch is a
+	 * wait. There is no per-row key to narrow to; the list is the family's only read.
 	 *
-	 * `compose` only when the event names a request, and then only that
-	 * request's compositions. A composition is per request, and every tool that
-	 * can change one either names the row it wrote (`update_request`,
-	 * `delete_request`, the three example tools) or declares `collection` too
-	 * (`move_item`, `import_document`, `bind_spec`, `sync_spec`, the two trash
-	 * tools), where the prefix above already covers it. The one `request` tool
-	 * that names no row is `create_request`, and a row that has never been
-	 * composed has nothing cached to drop. So the narrow key loses no coverage,
-	 * and it is what keeps an agent looping request writes from re-composing an
-	 * open snippet for a request it never touched: `invalidateQueries` refetches
-	 * a *mounted* observer whatever its `staleTime`, so `compose.all` here would
-	 * put the Code section through one round trip per write in the loop.
+	 * `compose` only when the event names a request, and then only that request's compositions. A
+	 * composition is per request, and every tool that can change one either names the row it wrote
+	 * (`update_request`, `delete_request`, the three example tools) or declares `collection` too
+	 * (`move_item`, `import_document`, `bind_spec`, `sync_spec`, the two trash tools), where the
+	 * prefix above covers it. The one `request` tool that names no row is `create_request`, and a
+	 * row never composed has nothing cached to drop. So the narrow key loses no coverage, and it
+	 * keeps an agent looping request writes from re-composing an open snippet for a request it
+	 * never touched: `invalidateQueries` refetches a *mounted* observer whatever its `staleTime`,
+	 * so `compose.all` here would put the Code section through one round trip per write in the
+	 * loop.
 	 */
 	request: (queryClient, event) => {
 		void queryClient.invalidateQueries({
@@ -161,33 +141,27 @@ const INVALIDATORS: Record<
 	},
 
 	/*
-	 * `all`, not `list()`: an environment's variables are read through the detail
-	 * cache as well as the list, and `update_environment` changes exactly those.
+	 * `all`, not `list()`: an environment's variables are read through the detail cache as well as
+	 * the list, and `update_environment` changes exactly those.
 	 *
-	 * `compose` too, and at the `all` prefix rather than the written environment's
-	 * key: `POST /compose` substitutes those same variables, so a composition -
-	 * and the curl/fetch snippet the context bar builds from one - is built from
-	 * the pre-write values. The prefix, because a request composed against a
-	 * *different* environment still reads the globals this write may have
-	 * shadowed. Nothing refetches compose on its own, so a miss here is stale
-	 * until the tab is reopened.
+	 * `compose` too, at the `all` prefix rather than the written environment's key: `POST /compose`
+	 * substitutes those same variables, so a composition (and the curl/fetch snippet the context
+	 * bar builds from one) holds the pre-write values. The prefix, because a request composed
+	 * against a *different* environment still reads the globals this write may have shadowed.
+	 * Nothing refetches compose on its own, so a miss here is stale until the tab is reopened.
 	 *
-	 * `globals` rides on this family rather than getting one of its own (issue
-	 * #758): globals are the bottom of the same resolution order the
-	 * environments sit in, `update_globals` is the same read-merge-write against
-	 * the same variable shape, and the Variables drawer shows them as one more
-	 * scope in the same tree. The cost of the pairing is that an
-	 * `update_environment` also refetches one small singleton; the cost of
-	 * *not* pairing them would have been an entity whose only reader is one
-	 * query key, or - worse - an `update_globals` that declared `environment`
-	 * and left the globals card showing the pre-write values, which is exactly
-	 * the "written but never read" wiring bug this map exists to prevent.
+	 * `globals` rides on this family rather than getting its own (#758): globals are the bottom of
+	 * the resolution order the environments sit in, `update_globals` is the same read-merge-write
+	 * against the same variable shape, and the Variables drawer shows them as one more scope in the
+	 * same tree. The pairing costs an `update_environment` a refetch of one small singleton; not
+	 * pairing would leave an entity whose only reader is one query key, or worse an
+	 * `update_globals` that declared `environment` and left the globals card showing the pre-write
+	 * values, the "written but never read" wiring bug this map exists to prevent.
 	 *
-	 * `trash` for the reason the `request` family takes it: `delete_environment`
-	 * declares this family alone and stamps a row the Trash drawer lists (#2970),
-	 * and the two trash tools declare it so a restored environment reappears in
-	 * the Variables view. Unguarded, so an `update_environment` pays a refetch of
-	 * the trash list while the drawer is open - the same standing trade.
+	 * `trash` for the `request` family's reason: `delete_environment` declares this family alone
+	 * and stamps a row the Trash drawer lists (#2970), and the two trash tools declare it so a
+	 * restored environment reappears in the Variables view. Unguarded, so an `update_environment`
+	 * pays a refetch of the trash list while the drawer is open: the same standing trade.
 	 */
 	environment: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
@@ -197,29 +171,24 @@ const INVALIDATORS: Record<
 	},
 
 	/*
-	 * The history list polls on its own, so this is about immediacy there - but
-	 * `count` (Settings' stored-run count) and the four small per-request/per-collection
-	 * families are not polled at all, and an MCP write left them stale
-	 * indefinitely. They are covered at their prefixes rather than per row: a
-	 * run write can change what any of them answers (a delete may have taken the
-	 * pin, or the newest send) and the event names at most one request, so the
-	 * narrow key would leave whichever list actually moved behind. Each is five
-	 * rows, and only the mounted ones refetch - the same trade
-	 * `useDeleteRunMutation` makes for the same reason: a run id gives no way
-	 * back to the request or collection it belonged to.
+	 * The history list polls on its own, so this is about immediacy there; but `count` (Settings'
+	 * stored-run count) and the four small per-request/per-collection families are not polled at
+	 * all, and an MCP write would leave them stale indefinitely. They are covered at their
+	 * prefixes, not per row: a run write can change what any of them answers (a delete may have
+	 * taken the pin, or the newest send) and the event names at most one request, so a narrow key
+	 * would leave whichever list moved behind. Each is five rows and only the mounted ones refetch,
+	 * the trade `useDeleteRunMutation` makes for the same reason: a run id gives no way back to the
+	 * request or collection it belonged to.
 	 *
-	 * `lastDesigns()` is a prefix for that same reason and takes the same trade
-	 * knowingly: `delete_run` and `set_run_baseline` name a `runId` and no
-	 * request, so a per-request key could never reach the tab whose run went
-	 * away, while a `run_request` now invalidates every open tab's last-design
-	 * query rather than the one it ran. Each is a single filtered row, only
-	 * mounted tabs refetch, and the alternative is carrying a run-to-request map
-	 * purely to patch it.
+	 * `lastDesigns()` is a prefix for that same reason and takes the same trade knowingly:
+	 * `delete_run` and `set_run_baseline` name a `runId` and no request, so a per-request key could
+	 * never reach the tab whose run went away, while a `run_request` invalidates every open tab's
+	 * last-design query rather than the one it ran. Each is a single filtered row, only mounted
+	 * tabs refetch, and the alternative is carrying a run-to-request map purely to patch it.
 	 *
-	 * Per-run *report* and series keys are still not invalidated wholesale, and
-	 * that exclusion is the point: a `run_request` creates a run and cannot have
-	 * changed an existing one's report, which is the expensive fetch in this
-	 * family. They are dropped only for the one run a call named - see below.
+	 * Per-run *report* and series keys are not invalidated wholesale, and that exclusion is the
+	 * point: a `run_request` creates a run and cannot have changed an existing one's report, the
+	 * expensive fetch in this family. They are dropped only for the one run a call named (below).
 	 */
 	run: (queryClient, event) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
@@ -230,24 +199,21 @@ const INVALIDATORS: Record<
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastDesigns() });
 		/*
-		 * A named run is one that already existed and was rewritten or removed
-		 * (`delete_run`, `stop_run`, `set_run_baseline` - the only tools that take
-		 * a `runId`). Its per-run caches are `staleTime: Infinity` for the series
-		 * and the samples, so invalidation alone would leave a deleted run's
-		 * report rendering under an open History tab until it was garbage
+		 * A named run is one that already existed and was rewritten or removed (`delete_run`,
+		 * `stop_run`, `set_run_baseline`, the only tools that take a `runId`). Its per-run caches
+		 * are `staleTime: Infinity` for the series and the samples, so invalidation alone would
+		 * leave a deleted run's report rendering under an open History tab until it was garbage
 		 * collected: they are removed, not marked stale.
 		 *
-		 * `detail` goes with them deliberately. It is what makes the deleted case
-		 * *correct* rather than merely fresh - dropping it lets `runDetailOptions`
-		 * refetch, take its 404 and hand `HistoryDetail` the `RunNotFoundError` it
-		 * already renders as "This run no longer exists", instead of a pane that
-		 * keeps describing a run the sidebar no longer lists.
+		 * `detail` goes with them deliberately: dropping it lets `runDetailOptions` refetch, take
+		 * its 404 and hand `HistoryDetail` the `RunNotFoundError` it already renders as "This run
+		 * no longer exists", which makes the deleted case *correct* rather than merely fresh,
+		 * instead of a pane that keeps describing a run the sidebar no longer lists.
 		 *
-		 * The hint says which run changed, not how, so this cannot tell a delete
-		 * from a re-pin. That is the accepted cost: after `stop_run` the report
-		 * and series genuinely did change (the run went terminal), and after
-		 * `set_run_baseline` an open detail pane pays one refetch of data it
-		 * already had. A stale answer is a lie; a refetch is a wait.
+		 * The hint says which run changed, not how, so this cannot tell a delete from a re-pin. The
+		 * accepted cost: after `stop_run` the report and series did change (the run went terminal),
+		 * and after `set_run_baseline` an open detail pane pays one refetch of data it already had.
+		 * A stale answer is a lie; a refetch is a wait.
 		 */
 		if (event.runId) {
 			for (const key of [
@@ -271,18 +237,16 @@ const INVALIDATORS: Record<
 	},
 
 	/*
-	 * `requestDefaults` beside `config` because it is a second endpoint reading
-	 * the same entries, not a slice of the first: five of them
-	 * (`negotiateCompression`, `loadNegotiateCompression`, `sendExpectContinue`,
-	 * `correlationIdEnabled`, `correlationIdHeader`) decide what a send adds on its own, and the engine
-	 * resolves the answer - its libcurl decides which encodings can even be
-	 * asked for - so the declared set has to be re-read rather than derived here.
-	 * `useUpdateConfigMutation` drops both keys for exactly this reason, and this
-	 * map dropping only the first is the asymmetry issue #1438 names: the Headers
-	 * tab's read-only "Added by Vayu" rows and the load-test dialog's
-	 * design-vs-load notice keep listing a header the engine no longer adds.
-	 * `all` rather than a scope key: design and load are separate cache entries
-	 * and one write can move both.
+	 * `requestDefaults` beside `config` because it is a second endpoint reading the same entries,
+	 * not a slice of the first: five of them (`negotiateCompression`, `loadNegotiateCompression`,
+	 * `sendExpectContinue`, `correlationIdEnabled`, `correlationIdHeader`) decide what a send adds
+	 * on its own, and the engine resolves the answer (its libcurl decides which encodings can even
+	 * be asked for), so the declared set is re-read rather than derived here.
+	 * `useUpdateConfigMutation` drops both keys for this reason; dropping only the first is the
+	 * asymmetry #1438 names, where the Headers tab's read-only "Added by Vayu" rows and the
+	 * load-test dialog's design-vs-load notice keep listing a header the engine no longer adds.
+	 * `all` rather than a scope key: design and load are separate cache entries and one write can
+	 * move both.
 	 */
 	config: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.config.all });
@@ -290,45 +254,35 @@ const INVALIDATORS: Record<
 	},
 
 	/*
-	 * The engine's local services (issues #756, #757). Every list here is polled,
-	 * so this is about immediacy in the Services drawer and the Dock's
-	 * running-services count - an agent that starts an inbox or a mock and
-	 * reports its URL should not be describing a listener the window will not
-	 * show for another poll interval.
+	 * The engine's local services (#756, #757). Every list here is polled, so this is about
+	 * immediacy in the Services drawer and the Dock's running-services count: an agent that starts
+	 * an inbox or a mock and reports its URL should not be describing a listener the window will
+	 * not show for another poll interval.
 	 *
-	 * All three lists are invalidated on every `service` event rather than one
-	 * per kind, because the entity is deliberately one family: the drawer and
-	 * the Dock count ask "what is listening", not "which kind" (see
-	 * `MCP_DATA_ENTITIES` in `electron/mcp/tools/contract.ts`). Three refetches of a
-	 * short list is the price of not carrying a discriminator no reader wants.
+	 * All three lists are invalidated on every `service` event rather than one per kind, because
+	 * the entity is deliberately one family: the drawer and the Dock count ask "what is listening",
+	 * not "which kind" (see `MCP_DATA_ENTITIES` in `electron/mcp/tools/contract.ts`). Three
+	 * refetches of a short list is the price of not carrying a discriminator no reader wants.
 	 *
-	 * The captures are the half that cannot be handled by invalidation.
-	 * `useInboxCapturesQuery` *merges* its fetched page into whatever the cache
-	 * holds - three writers feed one entry, so union-by-id is what keeps the SSE
-	 * stream and the fetch from overwriting each other - and a union with the
-	 * rows a `clear_inbox_captures` just destroyed puts every one of them back.
-	 * The app's own clear mutation writes an empty page before refetching for
-	 * exactly this reason; from here the equivalent is to drop the entry, so the
-	 * merge starts from nothing. A delete needs the same drop for a different
-	 * reason: `useDeleteInboxMutation` removes rather than invalidates, because
-	 * refetching an id the engine now 404s leaves an error state describing a
-	 * list that no longer exists.
+	 * The captures are the half invalidation cannot handle. `useInboxCapturesQuery` *merges* its
+	 * fetched page into whatever the cache holds (three writers feed one entry, and union-by-id
+	 * keeps the SSE stream and the fetch from overwriting each other), so a union with the rows a
+	 * `clear_inbox_captures` just destroyed puts every one back. The app's own clear mutation
+	 * writes an empty page before refetching for this reason; from here the equivalent is to drop
+	 * the entry, so the merge starts from nothing. A delete needs the same drop for another reason:
+	 * `useDeleteInboxMutation` removes rather than invalidates, because refetching an id the engine
+	 * now 404s leaves an error state describing a list that no longer exists.
 	 *
-	 * The hint says which inbox a call named, not what it did to it, so a
-	 * `update_inbox_response` costs its open tab one refetch of captures it
-	 * already had (and any "load more" pages beyond the first). That is the
-	 * `run` family's trade taken again and for the same reason: a stale answer
-	 * is a lie, a refetch is a wait.
+	 * The hint says which inbox a call named, not what it did to it, so an `update_inbox_response`
+	 * costs its open tab one refetch of captures it already had (and any "load more" pages beyond
+	 * the first): the `run` family's trade, for the same reason.
 	 *
-	 * A mock's route table needs the same drop for a different reason.
-	 * `invalidateQueries` refetches an active query regardless of its
-	 * `staleTime` - `useMockServerRoutesQuery`'s `staleTime: Infinity` only
-	 * stops a second mount from forcing a redundant fetch, it is not a shield
-	 * from invalidation - but after a `stop_mock_server` there is nothing to
-	 * refetch: the record dies with the listener and the id now 404s, so an
-	 * invalidation here would just leave an error state describing a table
-	 * that no longer exists. Dropping the entry is what
-	 * `useStopMockServerMutation` already does app-side, for the same reason
+	 * A mock's route table needs the drop too. `invalidateQueries` refetches an active query
+	 * whatever its `staleTime` (`useMockServerRoutesQuery`'s `staleTime: Infinity` only stops a
+	 * second mount forcing a redundant fetch, it does not shield from invalidation), but after a
+	 * `stop_mock_server` there is nothing to refetch: the record dies with the listener and the id
+	 * now 404s, so an invalidation would leave an error state describing a table that no longer
+	 * exists. `useStopMockServerMutation` drops the entry app-side, for the reason
 	 * `useDeleteInboxMutation` removes rather than invalidates.
 	 */
 	service: (queryClient, event) => {
@@ -344,54 +298,46 @@ const INVALIDATORS: Record<
 	},
 
 	/*
-	 * The engine's OAuth 2.0 token cache (issue #760). Invalidated at
-	 * `oauth.all` rather than at the one key the call named, because the event
-	 * carries no cache key: the key an agent clears is an argument, but the key
-	 * a `fetch_oauth2_token` writes is derived engine-side and only appears in
-	 * the answer, so a per-key hint would be present for one tool and absent for
-	 * the other - the shape that leaves a stale row exactly when it matters.
-	 * The prefix costs a refetch of every mounted status query, and only an open
-	 * Auth tab mounts one.
+	 * The engine's OAuth 2.0 token cache (#760), invalidated at `oauth.all` rather than at the one
+	 * key the call named, because the event carries no cache key: the key an agent clears is an
+	 * argument, but the key a `fetch_oauth2_token` writes is derived engine-side and only appears
+	 * in the answer, so a per-key hint would be present for one tool and absent for the other,
+	 * leaving a stale row exactly when it matters. The prefix costs a refetch of every mounted
+	 * status query, and only an open Auth tab mounts one.
 	 *
-	 * The query polls at 30s on its own (`useOAuth2TokenStatusQuery`), so this
-	 * is about immediacy in the same way the `service` family is: an agent that
-	 * clears a token and says so must not leave the row that shows it valid
-	 * standing for another half minute.
+	 * The query polls at 30s on its own (`useOAuth2TokenStatusQuery`), so this is about immediacy,
+	 * as for `service`: an agent that clears a token and says so must not leave the row that shows
+	 * it valid standing for another half minute.
 	 */
 	oauth: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.oauth.all });
 	},
 
 	/*
-	 * The registry the Settings card lists (#2973). No MCP tool writes it - an
-	 * entry is added and removed by the user - so the one event is a trash
-	 * restore (and a purge, which declares the same set as the restore because
-	 * the tool cannot say which kind it will meet): the card lists live rows
-	 * only, and a restored entry is presented to its host again on the next
-	 * send, so a card left showing the old list misstates what is registered.
+	 * The registry the Settings card lists (#2973). No MCP tool writes it (the user adds and
+	 * removes entries), so the one event is a trash restore, and a purge, which declares the same
+	 * set as the restore because the tool cannot say which kind it will meet. The card lists live
+	 * rows only, and a restored entry is presented to its host again on the next send, so a card
+	 * left showing the old list misstates what is registered.
 	 *
-	 * Not `trash`: the tools that declare this family declare `collection`
-	 * beside it, whose invalidator already refetches the Trash list, and an
-	 * entry here carrying it again would be a second refetch of the same read.
+	 * Not `trash`: the tools that declare this family declare `collection` beside it, whose
+	 * invalidator already refetches the Trash list, so a second would refetch the same read.
 	 */
 	clientCertificate: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.clientCertificates.all });
 	},
 
 	/*
-	 * Variables a script or extractor saved back while a send ran (issue #1916):
-	 * the engine persists environment, globals and collection variables after the
-	 * run tools finish, and none of them declares a variable family of its own.
-	 * The renderer's own Send invalidates the same three reads after it
-	 * (environments, globals, collections), and `compose` rides along for the
-	 * reason the `environment` family gives - a composition substitutes these
-	 * values.
+	 * Variables a script or extractor saved back while a send ran (#1916): the engine persists
+	 * environment, globals and collection variables after the run tools finish, and none of them
+	 * declares a variable family of its own. The renderer's own Send invalidates the same three
+	 * reads after it (environments, globals, collections), and `compose` rides along for the
+	 * `environment` family's reason: a composition substitutes these values.
 	 *
-	 * Not the coarse `collection` family: a variable write changes no request and
-	 * no trash row, and an agent looping `run_request` would otherwise refetch
-	 * every request list, the Trash drawer and the warm-cache pass per send.
-	 * `collections.all` is taken because the event cannot say which of the three
-	 * scopes moved, and a collection's variables live on its row.
+	 * Not the coarse `collection` family: a variable write changes no request and no trash row, and
+	 * an agent looping `run_request` would otherwise refetch every request list, the Trash drawer
+	 * and the warm-cache pass per send. `collections.all` is taken because the event cannot say
+	 * which of the three scopes moved, and a collection's variables live on its row.
 	 */
 	variables: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
@@ -402,13 +348,11 @@ const INVALIDATORS: Record<
 };
 
 /**
- * Apply one `mcp:data-changed` event.
- *
- * An unknown entity is dropped rather than thrown: the event crosses a process
- * boundary, so a main process newer than the renderer bundle (a hot reload
- * against a rebuilt main) can legitimately name a family this build has never
- * heard of, and losing one invalidation is a stale list while throwing inside
- * an IPC listener is an unhandled rejection with the same stale list.
+ * Apply one `mcp:data-changed` event. An unknown entity is dropped rather than thrown: the event
+ * crosses a process boundary, so a main process newer than the renderer bundle (a hot reload
+ * against a rebuilt main) can legitimately name a family this build has never heard of, and losing
+ * one invalidation is a stale list while throwing inside an IPC listener is an unhandled rejection
+ * with the same stale list.
  */
 export function invalidateForMcpEvent(
 	queryClient: QueryClient,

@@ -6,12 +6,10 @@
  */
 
 /**
- * Extract a short display path from a request URL. URLs may contain
- * {{variables}} or be malformed mid-edit, so this never throws.
- *
- * Lives here rather than in `tab-descriptors.ts` because the agent reference
- * lines (`agent-reference.ts`) name a run by the same path, and a pure module
- * cannot import a hook file.
+ * Extract a short display path from a request URL. URLs may contain {{variables}} or be malformed
+ * mid-edit, so this never throws. Lives here rather than in `tab-descriptors.ts` because the agent
+ * reference lines (`agent-reference.ts`) name a run by the same path, and a pure module cannot
+ * import a hook file.
  */
 export function pathLabel(url: string): string {
 	if (!url) return "";

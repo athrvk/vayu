@@ -6,42 +6,35 @@
  */
 
 /**
- * JSON diagnostics for an editor whose text carries `{{token}}`s outside strings,
- * computed on masked text. Two editors attach it: the GraphQL Variables pane and
- * the request body in its JSON and JSON-RPC modes.
+ * JSON diagnostics for an editor whose text carries `{{token}}`s outside strings, computed on
+ * masked text. Two editors attach it: the GraphQL Variables pane and the request body in its JSON
+ * and JSON-RPC modes.
  *
- * The UI says a `{{token}}` is resolved and sent, and the editor underneath
- * painted it red - the same self-contradiction #384 found in the GraphQL query
- * pane (#3137 for the request body). The query pane's fix does not transfer,
- * because there the parse is ours (`computeGraphqlDiagnostics`) and here it
- * happens inside Monaco's JSON worker.
+ * The UI says a `{{token}}` is resolved and sent, so an editor painting it red contradicts itself
+ * (#384 for the GraphQL query pane, #3137 for the request body). The query pane's fix does not
+ * transfer: there the parse is ours (`computeGraphqlDiagnostics`), here it happens inside Monaco's
+ * JSON worker.
  *
- * **So the worker is given a document it can parse, and the visible model shows
- * that verdict.** A hidden twin model holds the model's text with every
- * out-of-string token masked into a same-length JSON string; the worker
- * validates the twin as it would any JSON model, and its markers are copied onto
- * the real model minus the ones that land on a masked token. Positions carry
- * across unchanged because the mask preserves length.
+ * **So the worker is given a document it can parse, and the visible model shows that verdict.** A
+ * hidden twin model holds the model's text with every out-of-string token masked into a same-length
+ * JSON string; the worker validates the twin as it would any JSON model, and its markers are copied
+ * onto the real model minus the ones that land on a masked token. Positions carry across unchanged
+ * because the mask preserves length.
  *
  * Why not the two cheaper routes:
  *
- * - **Filtering the worker's markers on the real model** does not work, and the
- *   worker's own output is why. For `{"limit": {{n}}}` it reports three markers:
- *   `Incorrect type` over the token, `Property expected` inside it, and
- *   `End of file expected` on the character *after* it - so an overlap filter
- *   leaves a squiggle behind. Worse, the parse stops there: a genuine error
- *   later in the same document is reported for the twin and was reported
- *   nowhere at all before this.
- * - **Turning JSON validation off** is a property of the language, not of a
- *   model (`jsonDefaults.setDiagnosticsOptions`), so it would silence every JSON
- *   editor in the app, and silence them exactly when the text is most likely to
- *   have a real mistake in it.
+ * - **Filtering the worker's markers on the real model** fails on the worker's own output. For
+ *   `{"limit": {{n}}}` it reports three markers: `Incorrect type` over the token,
+ *   `Property expected` inside it, and `End of file expected` on the character *after* it, so an
+ *   overlap filter leaves a squiggle behind. Worse, the parse stops there: a genuine error later in
+ *   the document is reported for the twin and would be reported nowhere on the real model.
+ * - **Turning JSON validation off** is a property of the language, not of a model
+ *   (`jsonDefaults.setDiagnosticsOptions`), so it would silence every JSON editor in the app,
+ *   exactly when the text is most likely to hold a real mistake.
  *
- * The cost of this shape is that the worker still validates the visible model
- * too, ~500ms after each edit, and writes its own markers there. That write
- * fires `onDidChangeMarkers`, which is what this listens to, so the correction
- * lands in a microtask of the same task - the wrong markers never survive to a
- * paint.
+ * The cost: the worker still validates the visible model too, ~500ms after each edit, and writes
+ * its own markers there. That write fires `onDidChangeMarkers`, which this listens to, so the
+ * correction lands in a microtask of the same task and the wrong markers never survive to a paint.
  */
 
 import type * as Monaco from "monaco-editor";
@@ -49,11 +42,9 @@ import type { MonacoApi } from "../monaco-api";
 import { maskJsonTemplatesInPlace, rangesOverlap, type TemplateSpan } from "./templates";
 
 /**
- * The owner Monaco's JSON worker publishes markers under - its language id.
- *
- * The same owner is written back deliberately: markers replace per owner, so
- * publishing the corrected set under a name of our own would leave the worker's
- * set beside it and show every squiggle twice.
+ * The owner Monaco's JSON worker publishes markers under (its language id), written back
+ * deliberately: markers replace per owner, so publishing the corrected set under a name of our own
+ * would leave the worker's set beside it and show every squiggle twice.
  */
 const JSON_MARKER_OWNER = "json";
 
