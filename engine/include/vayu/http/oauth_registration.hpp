@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/oauth_registration.hpp
  * @brief Dynamic client registration (RFC 7591) for the authorize flow of a
  *        discovered MCP server (#3766).
  *
