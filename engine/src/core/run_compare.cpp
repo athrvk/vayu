@@ -6,13 +6,13 @@
  */
 
 /**
- * @brief `compareReports` (`app/src/lib/run-compare.ts`) in C++, for the
- *        run-report export's comparison block (#2127).
+ * `compareReports` (`app/src/lib/run-compare.ts`) in C++, for the run-report
+ * export's comparison block (#2127).
  *
- * Every reading rule is the app's, JavaScript semantics included: a value is
- * a number only when finite, a string only when non-empty, a flag only when
- * `true`; a number is spelled as `String(number)` spells it. A figure the
- * report flags as unrecorded reads as absent (`recorded_number_node`).
+ * Every reading rule is the app's, JavaScript semantics included: a number only
+ * when finite, a string only when non-empty, a flag only when `true`, a number
+ * spelled as `String(number)` spells it. A figure the report flags as
+ * unrecorded reads as absent (`recorded_number_node`).
  */
 
 #include "vayu/core/run_compare.hpp"
@@ -468,8 +468,8 @@ void collect_codes (const json& report, const char* side, json& merged) {
 
 /// A report's `summary.errorClasses` is recorded when it is an object: `{}`
 /// says nothing failed, and an absent or non-object value says the run never
-/// counted (a run stored before the engine did). A side that never counted is
-/// not a side with zero failures, so a comparison against it has no figure.
+/// counted. A side that never counted is not one with zero failures, so a
+/// comparison against it has no figure.
 bool has_recorded_error_classes (const json& report) {
     const json* classes = walk (report, { "summary", "errorClasses" });
     return classes != nullptr && classes->is_object ();

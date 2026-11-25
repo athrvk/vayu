@@ -6,28 +6,26 @@
  */
 
 /**
- * @brief The requests an import of a document would build (issue #865).
- *        See the header for what a draft is and why it is not an identity.
+ * The requests an import of a document would build (#865); the header says what
+ * a draft is and why it is not an identity.
  *
- * This is a port of `app/src/services/importers/openapi-v3.ts`,
- * `openapi-v2.ts`, their shared half and the schema sampler, kept to the *same*
- * answers rather than to the same code - the sync diff compares a stored
- * request against a draft, so anywhere the two readers differ the diff reports
- * a field as changed for a document that did not change. Everything below that
- * looks like a JavaScript idiom in C++ clothing is that faithfulness: `??`
- * falling through `null` but not `false`, `String(x)` on a value that is not a
- * string, `JSON.stringify`'s number formatting. Where a rule has a reason, the
- * reason is in the header or in the renderer file this mirrors; where it has
- * only a shape, the shape is pinned by
+ * A port of `app/src/services/importers/openapi-v3.ts`, `openapi-v2.ts`, their
+ * shared half and the schema sampler, held to the same answers, not the same
+ * code: the sync diff compares a stored request against a draft, so wherever
+ * the readers differ it reports a field changed for a document that did not.
+ * What looks like a JavaScript idiom in C++ clothing is that faithfulness: `??`
+ * falling through `null` but not `false`, `String(x)` on a non-string,
+ * `JSON.stringify`'s number formatting. A rule's reason is in the header or the
+ * renderer file it mirrors; a rule with only a shape is pinned by
  * `tests/fixtures/spec-request-drafts-conformance.json`.
  *
- * What is deliberately *not* ported: the skip tally (`meta.skipped`), which
- * describes an import to a user rather than a document to the diff, and is the
- * renderer's to keep until the import itself moves.
+ * Not ported: the skip tally (`meta.skipped`), which describes an import to a
+ * user, not a document to the diff, and stays the renderer's until the import
+ * moves.
  *
- * The documented responses **are** ported (issue #854), although the diff does
- * not compare them: applying a change writes them, so a draft without them is
- * an answer no apply can be built from.
+ * The documented responses are ported (#854) though the diff does not compare
+ * them: applying a change writes them, so a draft without them is an answer no
+ * apply can be built from.
  */
 
 #include "vayu/core/openapi_document.hpp"
@@ -60,10 +58,10 @@ namespace {
 
 using json = nlohmann::ordered_json;
 
-// The JavaScript semantics these rules are written in - `prop`, truthiness,
-// `JSON.stringify`'s number and string forms, `encodeURIComponent` - and the
-// query join `append_params`. Shared with the import (issue #877) rather than
-// kept here, so the two readers of a foreign document cannot drift apart.
+// The JavaScript semantics these rules are written in (`prop`, truthiness,
+// `JSON.stringify`'s number and string forms, `encodeURIComponent`) and the
+// query join `append_params`, shared with the import (#877) so the two readers
+// of a foreign document cannot drift.
 using namespace js;
 
 /// `tally.add(kind)` for a caller that may not be keeping one - the sync diff
@@ -86,9 +84,8 @@ void tally_add_count (ImportTally* tally, std::string_view kind, int count) {
 // The schema sampler (`app/src/services/importers/schema-sampler.ts`)
 // ---------------------------------------------------------------------------
 
-/// The sampler's own depth cap. A schema deeper than this samples to `{}`,
-/// which is the renderer's answer too - a stub the user edits beats a walk that
-/// does not end.
+/// The sampler's depth cap. A deeper schema samples to `{}`, as the renderer's
+/// does: a stub the user edits beats a walk that does not end.
 constexpr int MAX_SAMPLE_DEPTH = 6;
 
 /// A `$ref` chain already followed on this branch, copied per branch exactly as
@@ -107,15 +104,13 @@ class Sampler {
     }
 
     /**
-     * `schemaFormFields(schema, resolveRef)`: a form body's fields, read off the
-     * *sampled* stub rather than off `properties`.
-     *
-     * Going through the sampler is the point: a form schema written as `$ref` or
-     * `allOf` - what generators emit - has no literal `properties`, and reading
-     * that key directly produced an empty field list. `file` is resolved
-     * separately against the property schemas, because the sampler flattens a
-     * `format: binary` string to `""` and that is indistinguishable from a text
-     * field (issue #425).
+     * `schemaFormFields(schema, resolveRef)`: a form body's fields, read off
+     * the sampled stub rather than `properties`. A form schema written as
+     * `$ref` or `allOf` (what generators emit) has no literal `properties`, so
+     * reading the key directly gives no fields. `file` is resolved separately
+     * against the property schemas, because the sampler flattens a
+     * `format: binary` string to `""`, indistinguishable from a text field
+     * (#425).
      */
     [[nodiscard]] std::vector<DraftField> form_fields (const json* schema) const {
         std::vector<DraftField> fields;
@@ -160,10 +155,10 @@ class Sampler {
     private:
     const json& document_;
 
-    /// The schema a node ultimately denotes: `$ref` and the first
-    /// `allOf`/`oneOf`/`anyOf` branch followed, under the same cap and guard the
-    /// sampler walks with. Split out because the walk returns a *value* and the
-    /// form-field lookup needs the declaration.
+    /// The schema a node ultimately denotes, following `$ref` and the first
+    /// `allOf` / `oneOf` / `anyOf` branch under the sampler's cap and guard.
+    /// Separate because the walk returns a value and the form-field lookup
+    /// needs the declaration.
     [[nodiscard]] const json*
     resolve_to_schema (const json* node, int depth, SeenRefs seen) const {
         if (depth > MAX_SAMPLE_DEPTH || node == nullptr || !node->is_structured ()) {
@@ -216,11 +211,9 @@ class Sampler {
     }
 
     /**
-     * The value a schema *states*, whatever its type says - a `const`, an
-     * `example`, or the first of 3.1's `examples` array.
-     *
-     * `const` outranks `example`: JSON Schema says the value MUST be exactly
-     * this, where `example` is only an annotation.
+     * The value a schema states, whatever its type: a `const`, an `example`, or
+     * the first of 3.1's `examples`. `const` outranks `example`: JSON Schema
+     * says the value must be exactly this, where `example` is an annotation.
      */
     [[nodiscard]] static const json* stated_value (const json* node) {
         if (const json* constant = prop (node, "const")) {
@@ -238,14 +231,12 @@ class Sampler {
     }
 
     /**
-     * The type this sampler stubs for.
-     *
-     * 3.1 writes a nullable field as a type array (`["string", "null"]`) where
-     * 3.0 wrote `nullable: true`. The first non-null member is the one sampled:
-     * a typed stub is what the user edits, and only an all-`"null"` type has
-     * nothing else to offer. A member that is not a string is still the one
-     * found, and then matches no arm below, exactly as it matches no `case`
-     * in the renderer's switch.
+     * The type this sampler stubs for. 3.1 writes a nullable field as a type
+     * array (`["string", "null"]`) where 3.0 wrote `nullable: true`; the first
+     * non-null member is sampled, since a typed stub is what the user edits and
+     * only an all-`"null"` type has nothing else. A non-string member is still
+     * the one found, and then matches no arm below, as it matches no `case` in
+     * the renderer's switch.
      */
     [[nodiscard]] static std::string declared_type (const json* node) {
         const json* declared = prop (node, "type");
@@ -268,10 +259,8 @@ class Sampler {
 
     /**
      * The stub a scalar type is sampled as, or nothing for a structured one.
-     *
-     * `make_optional` rather than a bare return, for the reason `rows_for` in
-     * `spec_sync.cpp` carries: copy-initializing an `optional<json>` from a
-     * `json` puts nlohmann's `operator ValueType()` up against `optional`'s
+     * `make_optional`, not a bare return: copy-initializing an `optional<json>`
+     * from a `json` pits nlohmann's `operator ValueType()` against `optional`'s
      * converting constructor, which GCC reports as an ambiguity under
      * `-Werror`.
      */
@@ -363,12 +352,11 @@ class Sampler {
 // Parameters (`openapi-shared.ts`)
 // ---------------------------------------------------------------------------
 
-/// `paramValueText(declared)`: the text a row holds, or "undefined".
-///
-/// Only scalars convert. An array or object value is serialized by the
-/// parameter's `style`/`explode` (3.x) or `collectionFormat` (2.0), neither of
-/// which the importer reads; a row holds one string, so picking a separator
-/// here would send a value the document did not declare.
+/// `paramValueText(declared)`: the text a row holds, or "undefined". Only
+/// scalars convert: an array or object is serialized by `style` / `explode`
+/// (3.x) or `collectionFormat` (2.0), which the importer does not read, and a
+/// row holds one string, so picking a separator would send a value the document
+/// did not declare.
 std::optional<std::string> param_value_text (const json* declared) {
     if (declared == nullptr) {
         return std::nullopt;
@@ -395,10 +383,10 @@ const json* enabled_override) {
     row.key   = std::move (name);
     row.value = param_value_text (declared).value_or ("");
     if (enabled_override != nullptr && enabled_override->is_boolean ()) {
-        // A Vayu-authored skeleton export states the row's toggle explicitly
-        // (`x-vayu-enabled`, issue #1441) precisely because an empty-valued
-        // enabled row and a non-empty-valued disabled one both defeat the
-        // heuristic below - trust it over guessing from `required`/`value`.
+        // A Vayu-authored skeleton export states the toggle (`x-vayu-enabled`,
+        // #1441) because an empty-valued enabled row and a non-empty disabled
+        // one both defeat the heuristic below, so it is trusted over `required`
+        // / `value`.
         row.enabled = enabled_override->get<bool> ();
     } else {
         // `required === true`, strictly: a document writing `required: "true"`
@@ -422,11 +410,10 @@ const json* parameter_list (const json* parameters) {
 
 /**
  * A path item's `parameters` merged with the operation's, keyed by `in` and
- * `name` with the operation's winning **in the path item's position**.
- *
- * The position matters as much as the value: a JavaScript `Map.set` on a key it
- * already holds replaces the value and keeps the insertion order, and the rows
- * reach the draft - and the URL's query - in that order.
+ * `name`, the operation's winning in the path item's position. Position matters
+ * as much as value: `Map.set` on a held key replaces the value and keeps the
+ * insertion order, and the rows reach the draft and the URL's query in that
+ * order.
  */
 std::vector<const json*> merged_parameters (const json& document,
 const json* path_item,
@@ -506,12 +493,10 @@ bool is_version_segment (const std::string& segment) {
 
 /**
  * `pathFolderName(path)`: the folder an untagged operation belongs in, read off
- * its path (issue #710), or "" when the path names no resource to group by.
- *
- * Leading segments that name no resource are stepped over: a version (`v1`,
- * `v2.1`), the ubiquitous `api` mount point, and a `{template}` segment, which
- * holds a value rather than naming anything. The segment is taken exactly as
- * written - a prettified name is one the document never contained.
+ * its path (#710), or "" when the path names no resource. Leading segments
+ * naming no resource are stepped over: a version (`v1`, `v2.1`), the `api`
+ * mount point, and a `{template}`, which holds a value. The segment is taken as
+ * written: a prettified name is one the document never contained.
  */
 std::string path_folder_name (const std::string& path) {
     size_t start = 0;
@@ -572,9 +557,9 @@ const json* find_json_media (const json& content) {
     return nullptr;
 }
 
-/// One 3.x `examples` map entry, unwrapped from its Example Object, with the
-/// key it was found at (issue #1457) - what the bound export needs to write
-/// an edited example back into that same entry rather than beside it.
+/// One 3.x `examples` entry, unwrapped from its Example Object, with its key
+/// (#1457), so the bound export writes an edited example back into that entry,
+/// not beside it.
 struct NamedExample {
     std::string key;
     const json* value = nullptr;
@@ -614,9 +599,9 @@ struct DeclaredExampleValue {
 
 /// `media.example ?? firstNamedExample(media.examples)`: `??` falls through
 /// `null` as well as absence, so a documented `example: null` is not the
-/// answer - the named example, then nothing, still is. Pulled out of
-/// `examples_v3`'s payload lambda to keep that lambda's own branching within
-/// the cognitive-complexity budget.
+/// answer; the named example, then nothing, still is. Separate from
+/// `examples_v3`'s payload lambda to keep its branching within the
+/// cognitive-complexity budget.
 DeclaredExampleValue declared_example_value (const json* media) {
     if (const json* example = prop (media, "example");
     example != nullptr && !example->is_null ()) {
@@ -630,18 +615,16 @@ DeclaredExampleValue declared_example_value (const json* media) {
 }
 
 /**
- * `declaredParamValue(param)`: the value a 3.x parameter declares.
+ * `declaredParamValue(param)`: the value a 3.x parameter declares. The
+ * `example` first, then the first `examples` entry, then the schema: an
+ * `example` is authored as "a realistic value for this parameter", while a
+ * `default` only describes what the server assumes when it is absent, so it
+ * comes last.
  *
- * The concrete `example` first, then the first entry of `examples`, then what
- * the schema says. An `example` is authored as "a realistic value for this
- * parameter" - written for exactly this - while a `default` only describes what
- * the server assumes when the parameter is absent, so it comes last.
- *
- * A Parameter Object declares exactly one of `schema` or `content` (the
- * latter for a value that needs a media type to be parsed at all, e.g. a
- * JSON object serialized into a query string) - when `schema` is absent,
- * `content`'s one entry is read as the same {example, examples, schema}
- * shape a `schema`-based parameter would carry.
+ * A Parameter Object declares one of `schema` or `content` (the latter for a
+ * value needing a media type to parse, such as a JSON object serialized into a
+ * query string). Without `schema`, `content`'s one entry is read as the same
+ * {example, examples, schema} shape.
  */
 const json* declared_param_value_v3 (const Sampler& sampler, const json* param) {
     if (const json* example = prop (param, "example")) {
@@ -675,10 +658,9 @@ const json* declared_param_value_v3 (const Sampler& sampler, const json* param) 
     return prop (schema, "default");
 }
 
-/// `exampleBodyText(value)`: a documented string is the body verbatim - a spec
-/// that writes `"<xml/>"` documents those bytes, not a quoted JSON string.
-/// Declared here and defined with the documented-response reader below, which
-/// needs the same rule for the same reason.
+/// `exampleBodyText(value)`: a documented string is the body verbatim (a spec
+/// writing `"<xml/>"` documents those bytes, not a quoted JSON string). Defined
+/// with the documented-response reader below, which needs the same rule.
 std::string example_body_text (const json& value);
 
 /// The media object of an XML type in a 3.x `content` map (`application/xml`,
@@ -695,13 +677,11 @@ const json* find_xml_media (const json& content) {
 }
 
 /**
- * A `text/plain` or XML request body (3.x), its `example` as the text it is -
- * never parsed or sampled - or nothing when @p content declares neither.
- *
- * The `example` is the whole reason a skeleton export writes these media
- * types at all (issue #1441): reading only `mode` back left the content
- * behind on every round trip. Vayu has an `xml` mode, which the export writes
- * as `application/xml`.
+ * A `text/plain` or XML request body (3.x), its `example` as the text it is,
+ * never parsed or sampled, or nothing when @p content declares neither. The
+ * `example` is why a skeleton export writes these media types (#1441): reading
+ * back only `mode` would lose the content on every round trip. Vayu's `xml`
+ * mode exports as `application/xml`.
  */
 std::optional<DraftBody> text_body_v3 (const json& content) {
     DraftBody body;
@@ -735,10 +715,10 @@ std::string sendable_media_type (const std::string& declared) {
 }
 
 /**
- * A whole-file request body (3.x): `application/octet-stream`, whatever its
- * schema says, or else the first media type whose schema is one file's bytes
- * (`format: binary`). It imports as a `binary` body with no file chosen - the
- * document names the upload, never the file - under that media type.
+ * A whole-file request body (3.x): `application/octet-stream` whatever its
+ * schema, else the first media type whose schema is one file's bytes
+ * (`format: binary`). It imports as a `binary` body with no file chosen (the
+ * document names the upload, never the file) under that media type.
  */
 std::optional<DraftBody> binary_body_v3 (const Sampler& sampler, const json& content) {
     std::optional<std::string> declared;
@@ -787,9 +767,9 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally
         }
         body.mode = "json";
         // A string `example` is the body's bytes as written, `{{variable}}`
-        // tokens included - `js_json_text` would re-quote it into a JSON
-        // string literal, which is exactly what the export side avoids by
-        // writing such a body as a string in the first place (issue #1441).
+        // tokens included: `js_json_text` would re-quote it into a JSON string
+        // literal, which the export avoids by writing such a body as a string
+        // (#1441).
         body.content = example_body_text (sample);
         return body;
     }
@@ -804,10 +784,10 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally
         const bool multipart = std::string_view (type) == "multipart/form-data";
         body.mode   = multipart ? "form-data" : "x-www-form-urlencoded";
         body.fields = sampler.form_fields (prop (declared, "schema"));
-        // A document names the upload, never the file - the part imports with no
-        // path and the user attaches one. Only under multipart: urlencoded has no
-        // file form on the wire, so a `format: binary` there is a document that
-        // cannot mean what it says.
+        // A document names the upload, never the file, so the part imports with
+        // no path for the user to attach. Only under multipart: urlencoded has
+        // no file form on the wire, so a `format: binary` there cannot mean
+        // what it says.
         if (!multipart) {
             for (DraftField& field : body.fields) {
                 field.file = false;
@@ -820,11 +800,10 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally
         tally_add (tally, "file_body");
         return std::move (*file);
     }
-    // A body in a media type the importer has no mode for - an `image/png`
-    // with no binary schema, say - is `none`, the same as no body, and the
-    // draft is identical. The two are told apart only for the tally: an
-    // operation with no `requestBody` at all lost nothing, and one that
-    // declared a media type imported without the body it declared (issue #719).
+    // A media type the importer has no mode for (an `image/png` with no binary
+    // schema) is `none`, as no body is, and the draft is identical. Only the
+    // tally tells them apart: an operation without `requestBody` lost nothing,
+    // one that declared a media type lost its body (#719).
     if (!content->empty ()) {
         tally_add (tally, "unmapped_body");
     }
@@ -835,9 +814,9 @@ DraftBody body_v3 (const Sampler& sampler, const json* request_body, ImportTally
 // Documented responses
 // ---------------------------------------------------------------------------
 
-/// `findJsonMediaType(content)`: the *key* of a 3.x `content` map's JSON media
-/// type. `find_json_media` answers with the node; an example needs the name of
-/// the type it is in, because that is the row's `Content-Type`.
+/// `findJsonMediaType(content)`: the key of a 3.x `content` map's JSON media
+/// type. `find_json_media` returns the node; an example needs the type's name,
+/// its row's `Content-Type`.
 std::optional<std::string> find_json_media_type (const json& content) {
     if (truthy (prop (&content, "application/json"))) {
         return std::string ("application/json");
@@ -868,14 +847,12 @@ struct ExamplePayload {
 };
 
 /**
- * `responseExample(code, response, payload)`: one entry of an operation's
- * `responses` as a saved example, or absent when it cannot be stored as one.
- *
- * Shared by the two dialects, which disagree only about where the payload lives
- * - @p payload is that half. A key that is not a final numeric status
- * (`default`, `2XX`, or a 1xx interim response) has no status line to be served
- * under and is skipped rather than guessed at; the renderer counts those for
- * its import preview, and a draft has no preview to report to.
+ * `responseExample(code, response, payload)`: one `responses` entry as a saved
+ * example, or absent when it cannot be stored as one. Shared by both dialects,
+ * which differ only in where the payload lives (@p payload). A key that is not
+ * a final numeric status (`default`, `2XX`, a 1xx) has no status line to be
+ * served under and is skipped; the renderer counts those for its preview, which
+ * a draft lacks.
  */
 template <typename Payload>
 std::optional<DraftExample>
@@ -886,9 +863,9 @@ response_example (const std::string& code, const json* response, ImportTally* ta
         return std::nullopt;
     }
     if (code == "default") {
-        // Spec-conformant and near-universal - Stripe declares one on all 568
-        // of its operations - so it is counted apart from a malformed key
-        // rather than painting a valid document as one defect per operation.
+        // Spec-conformant and near-universal (Stripe declares one on all 568
+        // operations), so it is counted apart from a malformed key rather than
+        // painting a valid document as one defect per operation.
         tally_add (tally, "default_response");
         return std::nullopt;
     }
@@ -907,9 +884,8 @@ response_example (const std::string& code, const json* response, ImportTally* ta
 
     const std::optional<ExamplePayload> found = payload (*node);
     DraftExample example;
-    // "200 - A user" when the document describes the response, "200" when it
-    // does not. The status leads because that is what a reader scans a list of
-    // examples for.
+    // "200 - A user" when the document describes the response, "200" when not:
+    // the status leads, being what a reader scans a list of examples for.
     const std::string* description = as_str (prop (node, "description"));
     example.name = description == nullptr ? code : code + " - " + *description;
     example.status           = status;
@@ -955,9 +931,9 @@ bool is_text_media_type (const std::string& key) {
 
 /**
  * Whether a declared example under media type @p key is served as the bytes it
- * is: the example is a string, or the key is a text-family type. A media
- * *range* (any key containing a wildcard, such as `text` over a star) names no type, so it never
- * becomes a literal `Content-Type` header; a `null` example is no example.
+ * is: the example is a string, or the key is a text-family type. A media range
+ * (any key with a wildcard) names no type, so it never becomes a literal
+ * `Content-Type`; a `null` example is no example.
  */
 bool is_text_example (const std::string& key, const json& value) {
     if (value.is_null () || key.find ('*') != std::string::npos) {
@@ -967,12 +943,11 @@ bool is_text_example (const std::string& key, const json& value) {
 }
 
 /**
- * The first non-JSON media type of @p content, in document order, whose declared
- * example is served as the bytes it is (`is_text_example`).
- *
- * Only a *declared* example is read. A schema is sampled into JSON, and JSON
- * bytes under a `text/csv` or `text/html` media type document nothing the spec
- * said, so a schema-only media type stays unchosen.
+ * The first non-JSON media type of @p content, in document order, whose
+ * declared example is served as the bytes it is (`is_text_example`). Only a
+ * declared example: a schema samples into JSON, and JSON under `text/csv` or
+ * `text/html` documents nothing the spec said, so a schema-only media type
+ * stays unchosen.
  */
 std::optional<ExamplePayload> text_example_payload (const json& content) {
     for (auto entry = content.begin (); entry != content.end (); ++entry) {
@@ -1020,9 +995,9 @@ examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) 
         return out;
     }
     for (auto entry = map->begin (); entry != map->end (); ++entry) {
-        // A response that is itself a `$ref` is read through, one hop - the shape
-        // a document that declares its errors once and names them everywhere
-        // leaves (issue #714).
+        // A response that is itself a `$ref` is read through, one hop: the
+        // shape a document declaring its errors once and naming them everywhere
+        // leaves (#714).
         const json* response = sampler.deref (&entry.value ());
         auto example =
         response_example (entry.key (), response, tally, [&] (const json& node) {
@@ -1036,10 +1011,9 @@ examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) 
 }
 
 /**
- * The JSON media type a 2.0 operation says it produces, if it says one.
- *
- * An operation with no `produces` at all - and no document-level default -
- * documents JSON by convention, which is what the fallback says.
+ * The JSON media type a 2.0 operation says it produces, if any. With no
+ * `produces` (and no document default) an operation documents JSON by
+ * convention, which the fallback says.
  */
 std::optional<std::string> json_produced_type (const std::vector<std::string>& produces) {
     for (const std::string& type : produces) {
@@ -1073,11 +1047,9 @@ std::vector<std::string> produced_types (const json& document, const json* opera
 
 /**
  * A 2.0 response's JSON body: the example it documents, or a sample of its
- * schema.
- *
- * `declared[contentType] ?? declared["application/json"]`, then `!== undefined` -
- * so an explicitly documented `null` is a body ("null"), while a `null` under
- * the produced type falls through to the plain one first.
+ * schema. `declared[contentType] ?? declared["application/json"]`, then
+ * `!== undefined`: an explicitly documented `null` is a body ("null"), while a
+ * `null` under the produced type falls through to the plain one first.
  */
 std::optional<ExamplePayload>
 json_payload_v2 (const json& node, const Sampler& sampler, const std::string& content_type) {
@@ -1098,10 +1070,9 @@ json_payload_v2 (const json& node, const Sampler& sampler, const std::string& co
     return ExamplePayload{ example_body_text (sampler.sample (schema)), content_type, {} };
 }
 
-/// The first entry of a 2.0 response's `examples`, in document order, that is
-/// served as the bytes it is (`is_text_example`), under its own key: `examples`
-/// is keyed by the MIME type, so the key is the media type whatever `produces`
-/// lists.
+/// The first entry of a 2.0 response's `examples`, in document order, served as
+/// the bytes it is (`is_text_example`), under its own key: `examples` is keyed
+/// by MIME type, so the key is the media type whatever `produces` lists.
 std::optional<ExamplePayload> text_payload_v2 (const json& node) {
     const json* documented = as_record (prop (&node, "examples"));
     if (documented == nullptr) {
@@ -1126,9 +1097,8 @@ bool documents_a_body_v2 (const json& node) {
 /**
  * What a 2.0 response documents, by the 3.x rule: a JSON body when there is a
  * JSON type to give it (the operation's, else a JSON key of `examples`), else
- * the first text example. A schema is sampled only into JSON, never into a
- * non-JSON produced type, so a response that documents something yet yields no
- * body is counted, and the preview says it imported without one.
+ * the first text example. A schema samples only into JSON, so a response that
+ * documents something yet yields no body is counted, and the preview says so.
  */
 std::optional<ExamplePayload> response_payload_v2 (const json& node,
 const Sampler& sampler,
@@ -1155,13 +1125,10 @@ ImportTally* tally) {
 }
 
 /**
- * A 2.0 operation's documented responses.
- *
- * The 2.0 shape puts the payload on the response itself rather than under a
- * media-type map: `examples` is keyed by MIME type and holds the value
- * directly, and `schema` describes it. The JSON type comes from the
- * operation's `produces`, falling back to the document's, because a 2.0
- * response does not name its own.
+ * A 2.0 operation's documented responses. 2.0 puts the payload on the response,
+ * not under a media-type map: `examples` is keyed by MIME type and holds the
+ * value, and `schema` describes it. The JSON type comes from the operation's
+ * `produces`, else the document's, since a 2.0 response names none.
  */
 std::vector<DraftExample> examples_v2 (const json& document,
 const Sampler& sampler,
@@ -1232,9 +1199,8 @@ void name_draft (const json* operation, const walk::WalkedOperation& walked, Dra
     if (const std::string* summary = as_str (prop (operation, "summary"))) {
         draft.name = *summary;
     } else if (const std::string* id = as_str (prop (operation, "operationId"))) {
-        // The operation's own id, not the identity's: a repeated one is
-        // dropped from the *identity* (issue #715), and the request an
-        // import builds is still named after it.
+        // The operation's own id, not the identity's: a repeated one is dropped
+        // from the identity (#715), but the request is still named after it.
         draft.name = *id;
     } else {
         draft.name = walked.identity.method + " " + path;
@@ -1246,15 +1212,9 @@ void name_draft (const json* operation, const walk::WalkedOperation& walked, Dra
 }
 
 /**
- * Every parameter the operation and its path item declare, as the rows a draft
- * carries - query, header, 2.0's `body` and `formData`, and the 3.x `cookie`
- * that is dropped and counted.
- */
-/**
- * One parameter, as the row it becomes.
- *
- * `in: "path"` is deliberately neither a row nor counted: a path parameter is
- * already carried, as the `{{var}}` the URL was rewritten with.
+ * One parameter, as the row it becomes. `in: "path"` is neither a row nor
+ * counted: a path parameter is already carried as the `{{var}}` the URL was
+ * rewritten with.
  */
 void read_draft_parameter (const json* parameter,
 walk::Dialect dialect,
@@ -1286,8 +1246,7 @@ std::vector<DraftField>& form_fields) {
         const json* value = dialect == walk::Dialect::V3 ?
         declared_param_value_v3 (sampler, parameter) :
         prop (parameter, "default");
-        // No description: the Headers table has no column for one, so
-        // carrying it would be a field nothing reads.
+        // No description: the Headers table has no column for one.
         draft.headers.push_back (
         declared_param_row (name, value, required, nullptr, enabled_override));
     } else if (dialect == walk::Dialect::V2 && kind == "body" &&
@@ -1308,17 +1267,17 @@ std::vector<DraftField>& form_fields) {
         field.file = declared != nullptr && *declared == "file";
         form_fields.push_back (std::move (field));
     } else if (dialect == walk::Dialect::V3 && kind == "cookie") {
-        // Dropped - a request's cookies come from the jar - and counted
-        // rather than folded into one `Cookie` header, which would
-        // invent a merge the document never wrote (#719). 2.0 has no
-        // cookie parameter, so its parser counts none either.
+        // Dropped (a request's cookies come from the jar) and counted, not
+        // folded into one `Cookie` header, which would invent a merge the
+        // document never wrote (#719). 2.0 has no cookie parameter.
         tally_add (tally, "cookie_param");
     }
 }
 
 /**
  * Every parameter the operation and its path item declare, as the rows a draft
- * carries.
+ * carries: query, header, 2.0's `body` and `formData`, and the 3.x `cookie`
+ * that is dropped and counted.
  */
 void read_draft_parameters (const json& document,
 const walk::WalkedOperation& walked,
@@ -1334,15 +1293,13 @@ std::vector<DraftField>& form_fields) {
 }
 
 /**
- * The 2.0 body, corrected against what the operation `consumes`.
- *
- * 2.0 ties `formData` encoding to `consumes` - urlencoded and multipart are
- * distinct wire encodings and distinct body modes here. Multipart wins when both
- * are listed (only it can carry a `type: file` field), and a `consumes` naming
- * neither keeps the historical multipart default. A file part has no urlencoded
- * wire form, so a document declaring one under a urlencoded-only `consumes`
- * contradicts itself; multipart is the half of that contradiction which can
- * carry the field.
+ * The 2.0 body, corrected against what the operation `consumes`. 2.0 ties
+ * `formData` encoding to `consumes`, urlencoded and multipart being distinct
+ * wire encodings and body modes. Multipart wins when both are listed (only it
+ * carries a `type: file` field), and a `consumes` naming neither keeps the
+ * multipart default. A file part has no urlencoded form, so a document
+ * declaring one under a urlencoded-only `consumes` contradicts itself, and
+ * multipart is the half that can carry the field.
  */
 void apply_v2_body_encoding (const json& document,
 const json* operation,
@@ -1379,14 +1336,6 @@ DraftRequest& draft) {
         }
     }
     if (!form_fields.empty ()) {
-        // 2.0 ties `formData` encoding to `consumes` - urlencoded and
-        // multipart are distinct wire encodings and distinct body modes
-        // here. Multipart wins when both are listed (only it can carry a
-        // `type: file` field), and a `consumes` naming neither keeps the
-        // historical multipart default. A file part has no urlencoded
-        // wire form, so a document declaring one under a urlencoded-only
-        // `consumes` contradicts itself; multipart is the half of that
-        // contradiction which can carry the field.
         const bool urlencoded =
         std::any_of (consumes.begin (), consumes.end (), [] (const std::string& type) {
             return media_type (type) == "application/x-www-form-urlencoded";
@@ -1405,10 +1354,10 @@ DraftRequest& draft) {
 }
 
 /**
- * The operation members only an import reads - its own `security` and the
- * `x-vayu-*` extensions a Vayu export writes - copied verbatim onto @p entry.
- * None of them reaches `DraftRequest`, which is what the sync diff compares:
- * a re-fetched document must never overwrite what a user edited locally.
+ * The operation members only an import reads (its `security` and the `x-vayu-*`
+ * extensions a Vayu export writes), copied verbatim onto @p entry. None reaches
+ * `DraftRequest`, which the sync diff compares: a re-fetched document must
+ * never overwrite a user's local edit.
  */
 void read_import_only_members (const json* operation, SpecRequestDraft& entry) {
     if (const json* security = prop (operation, "security"); security != nullptr) {
@@ -1429,13 +1378,11 @@ void read_import_only_members (const json* operation, SpecRequestDraft& entry) {
 }
 
 /**
- * The drafts, for either caller: the sync diff, which wants the operations a
- * document *declares*, and the import, which wants a request for every
- * operation it *writes* plus a tally of what it had to drop.
- *
- * One function rather than two, because a draft the two built differently is
- * exactly the divergence #865 exists to prevent - the import would then apply
- * a request the diff never compared.
+ * The drafts, for either caller: the sync diff, wanting the operations a
+ * document declares, and the import, wanting a request for every operation it
+ * writes plus a tally of what it dropped. One function, because a draft the two
+ * built differently is the divergence #865 exists to prevent: the import would
+ * apply a request the diff never compared.
  */
 std::vector<SpecRequestDraft>
 build_drafts (const json& document, ImportTally* tally, bool include_unidentified) {
@@ -1467,10 +1414,8 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         }
         if (const json* deprecated = prop (operation, "deprecated"); deprecated != nullptr &&
         deprecated->is_boolean () && deprecated->get<bool> ()) {
-            // Vayu's request model has no deprecated flag to carry the marker
-            // into, so the operation imports identically to a current one;
-            // counted so the loss is at least named (issue #1444's "nothing
-            // dropped quietly").
+            // Vayu's request model has no deprecated flag, so the operation
+            // imports like a current one, counted so the loss is named (#1444).
             tally_add_count (tally, "deprecated_operation", 1);
         }
 
@@ -1488,9 +1433,8 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
         examples_v3 (sampler, prop (operation, "responses"), tally) :
         examples_v2 (document, sampler, operation, tally);
 
-        // Not Postman's set (issue #1771): the sync diff compares stored URLs
-        // with this one, so a changed encoding would mark every bound request
-        // changed.
+        // Not Postman's set (#1771): the sync diff compares stored URLs with
+        // this one, so another encoding would mark every bound request changed.
         draft.url = append_params ("{{baseUrl}}" + normalize_path_templates (path),
         draft.params, QueryEncoding::UriComponent);
 
@@ -1566,14 +1510,10 @@ void ImportTally::name_dropped (std::string_view kind, const std::vector<std::st
 }
 
 nlohmann::ordered_json ImportTally::items () const {
-    // The order `SkippedItem["kind"]` declares, so that two walks of one
-    // document produce one list whatever order they met the losses in - for
-    // the closed, enumerable set of loss categories the app's own
-    // `SkippedItem["kind"]` union names. A kind outside that set (issue
-    // #1518: JMeter's own class names, open-ended by nature - there is no
-    // enumerating every JMeter plugin class in advance) is appended after,
-    // in `counts_`'s own insertion order, rather than the `nothing dropped
-    // quietly` rule silently losing it to a list it was never going to fit.
+    // The order `SkippedItem["kind"]` declares, so two walks of one document
+    // produce one list whatever order they met the losses in. A kind outside
+    // that closed set (#1518: JMeter's class names, open-ended) is appended
+    // after, in `counts_`' insertion order, rather than silently lost.
     static constexpr auto ORDER = std::to_array<const char*> ({ "websocket", "grpc",
     "api_spec", "unit_test", "file_body", "malformed_item", "unsupported_method",
     "malformed_spec", "example_no_status", "example_no_media_type",

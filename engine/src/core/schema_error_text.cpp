@@ -23,11 +23,12 @@ namespace vayu::core {
 
 namespace {
 
-/** The subschema `pointer` (an RFC 6901 JSON Pointer, e.g. "/range/min")
- *  names, walking only `properties` - see the header's own doc comment for
- *  why that is the whole shape this needs to cover. `nullptr` for a pointer
- *  this cannot resolve, kept as a documented "I don't know" rather than a
- *  crash on a shape a schema might reach through `$ref`. */
+/**
+ * The subschema an RFC 6901 `pointer` (e.g. "/range/min") names, walking only
+ * `properties` (the header says why that suffices). `nullptr` when it cannot
+ * resolve, a documented "I don't know" rather than a crash on a shape reached
+ * through `$ref`.
+ */
 const nlohmann::json*
 schema_node_at (const nlohmann::json& schema, const std::string& pointer) {
     const nlohmann::json* node = &schema;
@@ -218,13 +219,13 @@ const std::string& d) {
     return std::format ("{} is not in the expected format", subject);
 }
 
-/** @p text as a `double`, or nothing unless the whole of it is one - the
- *  `monitor.cpp` idiom (`std::stod` plus a consumed-length check), not
- *  `vayu::utils::parse_number<double>`: libc++'s floating-point
- *  `std::from_chars` overload is unavailable before macOS 26 (that pin is
- *  the whole reason `parse_number` exists for integers, but it cannot cover
- *  a type its own backing function does not support on every platform this
- *  engine ships on). */
+/**
+ * @p text as a `double`, or nothing unless all of it is one: `monitor.cpp`'s
+ * idiom (`std::stod` plus a consumed-length check), not
+ * `vayu::utils::parse_number<double>`, because libc++'s floating-point
+ * `std::from_chars` is unavailable before macOS 26 and `parse_number` only
+ * covers what its backing function supports everywhere.
+ */
 std::optional<double> parse_double_whole (std::string_view text) {
     const std::string token (text);
     try {
@@ -284,10 +285,12 @@ length_rejection (const std::string& subject, const std::string& d) {
     return std::nullopt;
 }
 
-/** The constraints above all name one property directly, read off the node
- *  `error_json_pointer` itself points at (unlike `required`/
- *  `additionalProperties`, which point at the *container* instead). Tried in
- *  the order a schema most often fails them; the first match wins. */
+/**
+ * The constraints above each name one property, read off the node
+ * `error_json_pointer` points at (unlike `required` / `additionalProperties`,
+ * which point at the container). Tried in the order schemas most often fail
+ * them; the first match wins.
+ */
 std::optional<std::string> scalar_constraint_rejection (const nlohmann::json& schema,
 const std::string& d,
 const std::string& pointer,

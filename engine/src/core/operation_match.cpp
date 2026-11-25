@@ -53,11 +53,9 @@ bool is_variable_token (std::string_view text) {
 }
 
 /**
- * The length of the `scheme://host[:port]` @p rest begins with, or `0` when it
- * begins with none.
- *
- * The host part may be empty (`http://` is still an origin), and it ends at the
- * first `/` - the query and the fragment are gone by the time this is asked.
+ * The length of the `scheme://host[:port]` @p rest begins with, or `0` for
+ * none. The host may be empty (`http://` is still an origin) and ends at the
+ * first `/`; the query and fragment are already gone.
  */
 size_t origin_prefix_length (std::string_view rest) {
     if (rest.empty () || !is_alpha (rest[0])) {
@@ -78,13 +76,11 @@ size_t origin_prefix_length (std::string_view rest) {
 }
 
 /**
- * Every template placeholder in @p path replaced by a single `{}` - Vayu's
- * `{{petId}}` and OpenAPI's `{petId}` alike.
- *
- * One left-to-right scan where the app runs two regex passes (`{{name}}` first,
- * then `{name}`), which is the same reduction: the variable form is checked
- * first at each position, so a `{{...}}` is never read as a `{` followed by a
- * `{...}`.
+ * Every placeholder in @p path, Vayu's `{{petId}}` and OpenAPI's `{petId}`
+ * alike, replaced by one `{}`. One left-to-right scan where the app runs two
+ * regex passes (`{{name}}`, then `{name}`): the same reduction, because the
+ * variable form is tried first at each position, so `{{...}}` is never read as
+ * `{` then `{...}`.
  */
 std::string flatten_placeholders (std::string_view path) {
     std::string out;
@@ -122,10 +118,9 @@ std::string flatten_placeholders (std::string_view path) {
     return out;
 }
 
-/// @p path with each Postman `:name` path variable (issue #1764) already
-/// flattened to `{}` - a request stored as `/pets/:petId` is the operation
-/// `/pets/{petId}` exactly as `/pets/{{petId}}` is. A `.suffix` after the name
-/// stays, as it does after a `{{name}}`.
+/// @p path with each Postman `:name` path variable (#1764) flattened to `{}`:
+/// `/pets/:petId` is the operation `/pets/{petId}`, as `/pets/{{petId}}` is. A
+/// `.suffix` after the name stays, as after a `{{name}}`.
 std::string flatten_colon_variables (std::string_view path) {
     std::string out;
     size_t copied = 0;
@@ -150,14 +145,12 @@ std::string normalize_path_shape (std::string_view path) {
 }
 
 /**
- * Whether @p segment is @p pattern, one path segment of a flattened template,
- * with each `{}` filled.
- *
- * A segment of only `{}` takes anything. One mixing literal text with
- * placeholders (`{}.json`, `{}:cancel`, `meta-{}`, #3085) takes a segment that
- * starts with the text before the first `{}`, ends with the text after the
- * last, and holds the text between them in order. A placeholder inside such a
- * segment is never empty, so `meta-` does not fill `meta-{}`.
+ * Whether @p segment is @p pattern, one segment of a flattened template, with
+ * each `{}` filled. A segment of only `{}` takes anything. One mixing text with
+ * placeholders (`{}.json`, `{}:cancel`, `meta-{}`, #3085) takes a segment
+ * starting with the text before the first `{}`, ending with the text after the
+ * last, and holding the text between in order. A placeholder there is never
+ * empty, so `meta-` does not fill `meta-{}`.
  */
 bool segment_fills_template (std::string_view segment, std::string_view pattern) {
     constexpr std::string_view PLACEHOLDER = "{}";
@@ -197,11 +190,10 @@ bool segment_fills_template (std::string_view segment, std::string_view pattern)
 } // namespace
 
 /**
- * Whether a concrete path could be this template with its placeholders filled:
- * the same number of segments, and every segment filling its template segment.
- *
- * A placeholder matches within one segment and never a `/`, which is what the
- * OpenAPI path-templating rules say - so `/pets/42/toys` is not `/pets/{petId}`.
+ * Whether a concrete path could be this template filled in: as many segments,
+ * each filling its template segment. A placeholder matches within one segment,
+ * never across a `/`, as OpenAPI's path templating says, so `/pets/42/toys` is
+ * not `/pets/{petId}`.
  */
 bool fills_template (std::string_view path_shape, std::string_view template_shape) {
     size_t path_cursor     = 0;
@@ -399,15 +391,13 @@ MatchState& state) {
 }
 
 /**
- * For the requests a hand-built collection is full of: a URL with the id filled
- * in (`/pets/42`) is the same operation as `/pets/{petId}`, and refusing to see
- * that would leave bind-from-here matching almost nothing outside a collection
- * that was itself imported from a document.
+ * For hand-built collections: a URL with the id filled in (`/pets/42`) is the
+ * operation `/pets/{petId}`, and without this pass bind-from-here would match
+ * almost nothing outside a collection imported from a document.
  *
- * It runs only over what the exact comparison did not claim, so a literal path
- * in the document always wins over a placeholder it could also have filled -
- * which is the precedence OpenAPI itself gives (`/pets/mine` before
- * `/pets/{petId}`).
+ * Runs only over what the exact comparison left, so a literal path in the
+ * document beats a placeholder it could also fill, OpenAPI's own precedence
+ * (`/pets/mine` before `/pets/{petId}`).
  */
 void match_filled_templates (const std::vector<MatchableRequest>& requests,
 const std::vector<MatchableOperation>& operations,
@@ -459,14 +449,11 @@ std::vector<std::string> base_path_shapes (const std::vector<std::string>& base_
 }
 
 /**
- * @p shape with @p base taken off its front, or nothing when @p shape does not
- * sit under it.
- *
- * Whole segments only: `/v1` is a prefix of `/v1/pets` and not of `/v10/pets`.
- * A placeholder segment of the base (`{}`, from a templated `/{version}`)
- * stands for any one non-empty segment, and one mixing text with a placeholder
- * (`api-{}`) fills the way a template segment does. A request that is exactly
- * the base path is the root operation, `/`.
+ * @p shape with @p base taken off its front, or nothing when it does not sit
+ * under it. Whole segments only: `/v1` prefixes `/v1/pets`, not `/v10/pets`. A
+ * placeholder base segment (`{}`, from `/{version}`) stands for any one
+ * non-empty segment, and a mixed one (`api-{}`) fills as a template segment
+ * does. A request that is exactly the base path is the root operation, `/`.
  */
 std::optional<std::string> strip_base_path (std::string_view shape, std::string_view base) {
     // Both start with `/`; each round compares the segment after a cursor.
@@ -544,10 +531,9 @@ const std::vector<std::string>& base_paths) {
 MatchResult match_operations (const std::vector<MatchableRequest>& requests,
 const std::vector<MatchableOperation>& operations,
 const std::vector<std::string>& base_paths) {
-    // Both sides' shapes once, not once per comparison: the template comparison
-    // is a cross product over what the exact one left open, and a document
-    // declaring hundreds of operations would otherwise re-flatten every path
-    // per request.
+    // Both sides' shapes once, not per comparison: the template pass is a cross
+    // product over what the exact one left, and hundreds of declared operations
+    // would otherwise re-flatten every path per request.
     RequestShapes request_shapes (requests.size ());
     for (size_t i = 0; i < requests.size (); ++i) {
         if (std::optional<std::string> shape = request_path_shape (requests[i].url)) {

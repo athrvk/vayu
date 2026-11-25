@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief Line charts of a run's time series as inline `<svg>` (#2135).
- */
+/** Line charts of a run's time series as inline `<svg>` (#2135). */
 
 #include "svg_chart.hpp"
 
@@ -56,14 +54,14 @@ chart_envelope (const std::vector<ChartPoint>& points, std::size_t limit) {
 }
 
 std::string format_chart_coordinate (double value) {
-    // Layout arithmetic lands on exact decimal ties (106.85) one ulp either
-    // side of the tie, and the side depends on whether the compiler contracts
-    // a*b+c into a fused multiply-add: Apple clang on arm64 does, GCC and MSVC
-    // on x86 do not, so "{:.1f}" alone printed 106.9 on one and 106.8 on the
-    // other. The tie is resolved here, half away from zero, by an offset far
-    // above the arithmetic's error (~1e-13) and far below the 0.05 between a
-    // tie and the next value that rounds differently. The goldens are compared
-    // byte for byte on every platform (#2135).
+    // Layout arithmetic lands on exact decimal ties (106.85) one ulp to either
+    // side, depending on whether the compiler contracts a*b+c into a fused
+    // multiply-add: Apple clang on arm64 does, GCC and MSVC on x86 do not, so
+    // "{:.1f}" alone printed 106.9 on one and 106.8 on the other. The tie is
+    // resolved half away from zero by an offset far above the arithmetic's
+    // error (~1e-13) and far below the 0.05 to the next value that rounds
+    // differently. The goldens are compared byte for byte on every platform
+    // (#2135).
     constexpr double TIE_NUDGE = 1e-6;
     const double tenths = std::round ((value * 10.0) + std::copysign (TIE_NUDGE, value));
     return std::format ("{:.1f}", tenths / 10.0);

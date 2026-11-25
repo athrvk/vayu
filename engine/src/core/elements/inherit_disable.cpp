@@ -6,13 +6,11 @@
  */
 
 /**
- * @brief The one phase-0 behaviour kind: `inherit.disable` (issue #1513).
- *
- * Not itself a behaviour - it names an inherited element's id to drop when
- * `compose_elements` resolves a request's chain (`request_composer.cpp`), so
- * it validates and carries no `compile` (nothing ever constructs an
- * `Element` from it, and `compose_elements` reads its `config.elementId`
- * directly rather than through the pipeline).
+ * `inherit.disable` (#1513), the one phase-0 kind, and not a behaviour: it
+ * names an inherited element's id for `compose_elements`
+ * (`request_composer.cpp`) to drop from a request's chain, reading
+ * `config.elementId` directly. It validates and has no `compile`, since nothing
+ * constructs an `Element` from it.
  */
 
 #include "vayu/core/elements.hpp"

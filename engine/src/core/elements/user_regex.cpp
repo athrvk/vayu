@@ -5,9 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief The only translation unit that includes `<re2/re2.h>` (#1874).
- */
+/** The only translation unit that includes `<re2/re2.h>` (#1874). */
 
 #include "user_regex.hpp"
 

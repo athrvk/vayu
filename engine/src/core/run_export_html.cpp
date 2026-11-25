@@ -6,11 +6,10 @@
  */
 
 /**
- * @brief The run-report document as one self-contained HTML page (#2135).
- *
- * What each section says is `run_export_view.cpp`; this file is the page: its
- * stylesheet and palette, the section markup, and the three charts drawn from
- * the document's `timeSeries`.
+ * The run-report document as one self-contained HTML page (#2135). What each
+ * section says is `run_export_view.cpp`; this file is the page: its stylesheet
+ * and palette, the section markup, and the three charts drawn from the
+ * document's `timeSeries`.
  */
 
 #include "vayu/core/run_export_html.hpp"

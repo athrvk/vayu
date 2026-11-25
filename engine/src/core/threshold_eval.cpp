@@ -28,40 +28,38 @@ enum class Direction : std::uint8_t {
 };
 
 /// One budget: its wire key, the run figure it judges, and the range a client
-/// may declare it in. Kept as data so the route's validation and the run's
-/// verdict read the same row rather than two hand-written lists that drift -
-/// the failure that would produce is silent, a key accepted and never checked.
+/// may declare. Data, so the route's validation and the run's verdict read one
+/// row; two hand-written lists would drift silently, a key accepted and never
+/// checked.
 struct ThresholdMetric {
     const char* key;
-    /// Display name, the same one `budgets.ts`'s `BUDGET_FIELDS` shows beside
-    /// this key's field in the Load Test dialog - a rejection names this, not
-    /// the wire key, the same rule `ElementKind::label` follows for element
-    /// validation.
+    /// The display name `budgets.ts`'s `BUDGET_FIELDS` shows beside this key in
+    /// the Load Test dialog. A rejection names this, not the wire key, as
+    /// `ElementKind::label` does for elements.
     const char* label;
     Direction direction;
     double min_limit;
-    /// Whether `min_limit` itself is a legal budget. True only for the error
-    /// rate: "no request may fail" is a real ask, where a latency ceiling or a
-    /// throughput floor of zero is a typo rather than an intent.
+    /// Whether `min_limit` itself is legal. Only for the error rate: "no
+    /// request may fail" is a real ask, a zero latency ceiling or throughput
+    /// floor a typo.
     bool min_inclusive;
     double max_limit;
     const char* range; // the accepted span, spelled for the rejection message
     const char* why;   // appended to a rejection, explains the bound
     double (*measured) (const RunSummaryInputs&);
-    /// Whether this run's numbers mean anything for this metric. `nullptr`
-    /// means always yes: only throughput, whose starved floor already fails on
-    /// its own. A latency percentile needs a real completion to mean anything,
-    /// so it is not evaluated when the run recorded none; the error rate needs a
-    /// request to take a share of (0/0 is no rate, not a clean 0%); a stream
-    /// budget likewise needs the run to have streamed.
+    /// Whether this run's numbers mean anything for the metric; `nullptr` is
+    /// always yes (only throughput, whose starved floor fails on its own). A
+    /// latency percentile needs a real completion, the error rate a request to
+    /// take a share of (0/0 is no rate, not a clean 0%), a stream budget a run
+    /// that streamed.
     bool (*has_data) (const RunSummaryInputs&);
     /// The populations an evaluated check carries onto the report, for a
     /// metric judged from more than one; `nullptr` for every other metric.
     const std::optional<AssertionPopulations>& (*populations) (const RunSummaryInputs&);
 };
 
-/// Share of this run's requests that were errors, as a percentage - the same
-/// figure `GET /runs/:id/report` prints, by the one definition
+/// The share of requests that errored, as a percentage: the figure
+/// `GET /runs/:id/report` prints, by the one definition
 /// (`vayu::count_status_failures`). Read only when `error_rate_data_present`
 /// holds, so the denominator is never zero.
 double measured_error_rate (const RunSummaryInputs& inputs) {
@@ -87,10 +85,10 @@ double failure_rate_pct (const AssertionTotals& totals) {
     static_cast<double> (totals.total ());
 }
 
-/// The worse of the exact and the sampled failure rate (#2892), so neither
-/// population's volume dilutes the other's failures. Zero when the run made
-/// no assertion, which `assertion_data_present` keeps out of the verdict
-/// rather than letting it pass trivially.
+/// The worse of the exact and sampled failure rates (#2892), so neither
+/// population's volume dilutes the other's failures. Zero when the run asserted
+/// nothing, which `assertion_data_present` keeps out of the verdict rather than
+/// passing trivially.
 double measured_assertion_failure_rate (const RunSummaryInputs& inputs) {
     if (!inputs.assertions) {
         return 0.0;
@@ -185,9 +183,9 @@ const std::array<ThresholdMetric, 9>& metrics () {
     return table;
 }
 
-/// The known budgets, for a rejection that tells the caller what it may send -
-/// each one's display label with its wire key alongside, since a caller typing
-/// JSON needs the key and a person reading the message needs the label.
+/// The known budgets, for a rejection: each display label with its wire key,
+/// since a caller typing JSON needs the key and a person reading needs the
+/// label.
 std::string known_keys () {
     std::string keys;
     for (const auto& metric : metrics ()) {
@@ -213,14 +211,12 @@ const ThresholdMetric* find_metric (const std::string& key) {
 }
 
 // ---------------------------------------------------------------------------
-// `custom.<name>.<stat>` (issue #1500) - a dynamic key family the fixed
-// `ThresholdMetric` table cannot hold (its `measured` function pointer takes
-// no name), so it is parsed and evaluated beside that table rather than
-// forced into a row of it. Always a ceiling (`Direction::AtMost`): every
-// stat this reads - a trend's percentiles, a counter's or a rate's running
-// value - is a "no more than" budget in every use the issue names, and a
-// floor is not something the acceptance criteria or the report's own
-// `customMetrics` shape ask for.
+// `custom.<name>.<stat>` (#1500): a dynamic key family the fixed
+// `ThresholdMetric` table cannot hold (its `measured` pointer takes no name),
+// so it is parsed and evaluated beside the table. Always a ceiling
+// (`Direction::AtMost`): every stat it reads (a trend's percentiles, a
+// counter's or rate's running value) is a "no more than" budget, and no use
+// or report shape (`customMetrics`) asks for a floor.
 // ---------------------------------------------------------------------------
 
 constexpr std::string_view CUSTOM_METRIC_PREFIX = "custom.";
@@ -236,9 +232,9 @@ const std::unordered_set<std::string>& custom_metric_stats () {
     return stats;
 }
 
-/// `custom.<name>.<stat>` split on its **last** dot, so a name is free to
-/// hold one of its own (unlikely - `metric.record`'s own `name` field is a
-/// plain identifier - but nothing here requires it not to).
+/// `custom.<name>.<stat>` split on its last dot, so a name may hold one
+/// (`metric.record` names are plain identifiers, but nothing here relies on
+/// it).
 std::optional<CustomMetricTarget> parse_custom_metric_key (const std::string& key) {
     if (key.rfind (CUSTOM_METRIC_PREFIX, 0) != 0) {
         return std::nullopt;
@@ -255,12 +251,11 @@ std::optional<CustomMetricTarget> parse_custom_metric_key (const std::string& ke
     return CustomMetricTarget{ rest.substr (0, last_dot), std::move (stat) };
 }
 
-/// One stat off a recorded custom metric's summary. `"rate"` and `"value"`
-/// are the same field under two names: `"rate"` reads naturally against a
-/// Rate metric (already a 0-100 percentage), `"value"` against a Counter's
-/// running total - a budget declared against the wrong type for its name
-/// still evaluates, since a distribution's `max` is meaningful for any of
-/// the three kinds.
+/// One stat of a recorded custom metric's summary. `"rate"` and `"value"` are
+/// one field under two names, reading naturally against a Rate (already a 0-100
+/// percentage) and a Counter's running total. A budget declared against the
+/// wrong type still evaluates: a distribution's `max` means something for all
+/// three kinds.
 double custom_metric_stat_value (const CustomMetricSummary& summary, const std::string& stat) {
     if (stat == "p50") {
         return summary.p50;
@@ -277,10 +272,9 @@ double custom_metric_stat_value (const CustomMetricSummary& summary, const std::
     return summary.value; // "rate" or "value".
 }
 
-/// The declared budgets, in table order. A key whose value is `null` or of the
-/// wrong type is skipped rather than guessed at - the route rejects both before
-/// a run exists, and a snapshot that reached here carrying one is an older or
-/// hand-edited row that must not take the whole section down with it.
+/// The declared budgets, in table order. A `null` or wrong-typed value is
+/// skipped, not guessed at: the route rejects both before a run exists, so one
+/// here is an older or hand-edited row that must not take the section down.
 std::vector<std::pair<const ThresholdMetric*, double>> declared_budgets (
 const nlohmann::json& thresholds) {
     std::vector<std::pair<const ThresholdMetric*, double>> declared;
@@ -304,9 +298,8 @@ const nlohmann::json& thresholds) {
     return declared;
 }
 
-/// `thresholds.failRun`'s own rule: not a budget, so it never joins the
-/// caller's declared count - a boolean, or (per the null-means-absent rule
-/// every key follows) absent.
+/// `thresholds.failRun`: not a budget, so never in the declared count; a
+/// boolean or (null meaning absent, as for every key) absent.
 std::optional<std::string> validate_fail_run_key (const nlohmann::json& value) {
     if (value.is_null () || value.is_boolean ()) {
         return std::nullopt;
@@ -315,9 +308,8 @@ std::optional<std::string> validate_fail_run_key (const nlohmann::json& value) {
     std::string (value.type_name ()) + ")";
 }
 
-/// One fixed-table budget's bound, read as a double first: an integer read
-/// of a fractional or huge value is itself undefined, and this is the guard
-/// that has to be total.
+/// One fixed-table budget's bound, read as a double first: an integer read of a
+/// fractional or huge value is itself undefined, and this guard must be total.
 std::optional<std::string> validate_known_metric_limit (const ThresholdMetric& metric,
 const nlohmann::json& value) {
     if (!value.is_number ()) {
@@ -334,9 +326,8 @@ const nlohmann::json& value) {
     return std::nullopt;
 }
 
-/// `custom.<name>.<stat>`'s own bound (issue #1500): always a ceiling, since
-/// every stat this reads - a percentile, a counter's total, a rate's
-/// percentage - is a "no more than" ask in every use the issue names.
+/// `custom.<name>.<stat>`'s bound (#1500): always a ceiling, for the reason the
+/// section banner gives.
 std::optional<std::string> validate_custom_metric_limit (const std::string& key,
 const nlohmann::json& value) {
     if (!value.is_number ()) {
@@ -397,9 +388,8 @@ std::optional<std::string> validate_thresholds (const nlohmann::json& config) {
         ++declared;
     }
 
-    // An object that says nothing is rejected rather than stored: a caller that
-    // sent it believes this run will be judged, and it is about to complete
-    // with no verdict at all.
+    // An object that says nothing is rejected, not stored: its caller believes
+    // the run will be judged, and it would complete with no verdict.
     if (declared == 0) {
         return "'thresholds' declares no budget - give at least one of " +
         known_keys () + ", or omit the object entirely";
@@ -427,19 +417,17 @@ const RunSummaryInputs& inputs) {
             check.assertions = metric.populations (inputs);
         }
     } else {
-        // A budget the run could not measure was not met - counted by the
-        // caller as a failure, never silently dropped from the tally.
+        // A budget the run could not measure was not met: counted as a failure,
+        // never dropped from the tally.
         check.passed = false;
     }
     return check;
 }
 
-/// One `custom.<name>.<stat>` budget's verdict, evaluated against whatever
-/// this run's collector actually recorded (issue #1500) - a name declared
-/// here but never recorded through (a typo, or a metric.record on a step the
-/// run never reached) reads exactly like a latency percentile with zero
-/// completions: `evaluated: false`, counted as a failure rather than a
-/// silent pass.
+/// One `custom.<name>.<stat>` verdict against what this run's collector
+/// recorded (#1500). A name never recorded (a typo, or a `metric.record` on a
+/// step never reached) reads like a latency percentile with no completions:
+/// `evaluated: false`, a failure rather than a silent pass.
 ThresholdCheck evaluate_custom_metric_check (const std::string& key,
 double limit,
 const CustomMetricTarget& target,
@@ -473,9 +461,8 @@ void tally (ThresholdOutcome& outcome, ThresholdCheck check) {
     outcome.checks.push_back (std::move (check));
 }
 
-/// Every `custom.<name>.<stat>` check @p thresholds declares, appended to
-/// @p outcome - the dynamic-key sibling of the fixed-table loop in
-/// `evaluate_thresholds` itself.
+/// Every `custom.<name>.<stat>` check in @p thresholds, appended to @p outcome:
+/// the dynamic-key sibling of `evaluate_thresholds`'s fixed-table loop.
 void append_custom_metric_checks (const nlohmann::json& thresholds,
 const RunSummaryInputs& inputs,
 ThresholdOutcome& outcome) {
@@ -549,10 +536,9 @@ nlohmann::json build_threshold_outcome_payload (const ThresholdOutcome& outcome)
     for (const auto& check : outcome.checks) {
         nlohmann::json row = { { "metric", check.metric }, { "limit", check.limit },
             { "passed", check.passed }, { "evaluated", check.evaluated } };
-        // Omitted rather than zeroed when unevaluated, the same rule this
-        // report follows for a section the run never populated - a ceiling of
-        // 0ms next to "passed": false would read as a real measurement
-        // instead of the absence it is.
+        // Omitted rather than zeroed when unevaluated, as for any section the
+        // run never filled: a 0ms ceiling beside "passed": false would read as
+        // a measurement, not the absence it is.
         if (check.evaluated) {
             row["actual"] = check.actual;
         }

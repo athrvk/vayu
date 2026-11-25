@@ -6,12 +6,12 @@
  */
 
 /**
- * @brief Assembling a collection back into an OpenAPI document (issue #855).
- *        See the header for the two directions and why neither invents.
+ * Assembling a collection back into an OpenAPI document (#855); the header
+ * gives the two directions and why neither invents.
  *
- * The rules here are the renderer's, ported rather than re-derived: every one
- * of them was learned from a document somebody exported and could not
- * re-import, and `openapi_export_test.cpp` carries the cases that found them.
+ * The rules are the renderer's, ported rather than re-derived: each was learned
+ * from a document somebody exported and could not re-import, and
+ * `openapi_export_test.cpp` carries the cases that found them.
  */
 
 #include "vayu/core/openapi_export.hpp"
@@ -43,47 +43,32 @@ namespace {
 
 using Json = nlohmann::ordered_json;
 
-/**
- * The dialect a skeleton is written in. 3.1 rather than 3.0 because it is the
- * current one and this document is new - there is no stored dialect to
- * preserve, which is the only reason the bound direction pins one.
- */
+/// 3.1, the current dialect: a skeleton has no stored dialect to preserve, the
+/// only reason the bound direction pins one.
 constexpr std::string_view SKELETON_VERSION = "3.1.0";
 
-/**
- * `info.version` is required and a collection records none. `0.0.0` rather than
- * `1.0.0`: a version nobody chose should not read like a release.
- */
+/// `info.version` is required and a collection records none. Not `1.0.0`: a
+/// version nobody chose should not read like a release.
 constexpr std::string_view PLACEHOLDER_VERSION = "0.0.0";
 
-/**
- * The sentence a derived schema carries. Load-bearing: it is the difference
- * between "the API declares this" and "Vayu saw one body that looked like
- * this", and the exported document is read by people who were not here when it
- * was made.
- */
+/// Load-bearing: it tells "the API declares this" from "Vayu saw one body like
+/// this" to readers who were not there when the document was made.
 constexpr std::string_view DERIVED_SCHEMA_NOTE =
 "Shape derived from an example body, not a declared schema.";
 
-/**
- * Whether a Params or Headers row is toggled on, since neither `required` nor
- * an empty `value` says so on its own (issue #1441) - see `parameter_object`.
- */
+/// Whether a Params or Headers row is on; neither `required` nor an empty
+/// `value` says so (#1441, `parameter_object`).
 constexpr std::string_view ROW_ENABLED_KEY = "x-vayu-enabled";
 
-/// The method keys a Path Item Object may carry - OpenAPI defines exactly
-/// these. `trace` is here and absent from `declared_operations_of`'s list on
-/// purpose: no request can carry a `trace` identity, but a document that
-/// declares one still has it removed when nothing claims it.
+/// Every method key a Path Item Object may carry. `trace` is absent from
+/// `declared_operations_of`'s list on purpose: no request carries a `trace`
+/// identity, but a declared one is still removed when nothing claims it.
 constexpr std::array<std::string_view, 8> PATH_ITEM_METHODS = { "get", "put",
     "post", "delete", "options", "head", "patch", "trace" };
 
-/**
- * Headers an operation does not declare as parameters. `Authorization` is
- * described by `security`, `Content-Type` by the request body's media type -
- * the same two the OpenAPI import drops on the way in, so a round trip does not
- * grow a parameter each time.
- */
+/// Never declared as parameters: `security` states `Authorization`, the body's
+/// media type states `Content-Type`. The import drops the same two, so a round
+/// trip does not grow a parameter each time.
 constexpr std::array<std::string_view, 2> NON_PARAMETER_HEADERS = {
     "authorization", "content-type"
 };
@@ -101,8 +86,8 @@ std::string_view trim (std::string_view text) {
     return text;
 }
 
-/// A node's string value when it is a non-empty string, `""` otherwise - the
-/// renderer's `asStr` plus the falsiness every one of its call sites applies.
+/// A non-empty string value, else `""`: the renderer's `asStr` plus the
+/// falsiness its call sites apply.
 std::string string_member (const Json& node, const std::string& key) {
     if (!node.is_object ()) {
         return {};
@@ -125,12 +110,10 @@ Json& child_record (Json& node, std::string_view key) {
 }
 
 /**
- * An example body as the value an `example` field holds.
- *
- * JSON when it parses as JSON, the text itself when it does not. A body Vayu
- * stored is whatever the server sent or the spec declared, so a non-JSON body -
- * XML, a plain-text error - is written as the string it is rather than dropped:
- * `example` is typed as "any value", and a string is a value.
+ * A body as an `example` value: JSON when it parses, else the text itself. A
+ * stored body is whatever the server sent or the spec declared, so XML or a
+ * plain-text error is written as a string rather than dropped; `example` is
+ * "any value".
  */
 Json example_value (const std::string& body) {
     const std::string_view text = trim (body);
@@ -145,34 +128,32 @@ Json example_value (const std::string& body) {
     return std::move (*parsed);
 }
 
-/**
- * The shape of one example value.
- *
- * Deliberately shallow in what it claims: types, `properties` for an object and
- * `items` for an array's first element, and nothing else - no `required`, no
- * formats, no enums. Those are assertions about the endpoint, and one sample
- * cannot support them.
- *
- * @p depth stops at the reader's own nesting bound, and for the same reason it
- * has one: this walk is recursive, and the value under it came out of a stored
- * body rather than out of anything Vayu wrote.
- */
-/// `{"type": @p type}`, built member by member. The initializer-list spelling
-/// builds a temporary array for each object first, twice the allocations, and
-/// a derived schema holds one of these per member of the body.
+/// Built member by member: the initializer-list spelling builds a temporary
+/// array per object first, twice the allocations, and a derived schema holds
+/// one per member.
 Json type_only (const char* type) {
     Json shape = Json::object ();
     shape.emplace ("type", type);
     return shape;
 }
 
+/**
+ * The shape of one example value, deliberately shallow: types, an object's
+ * `properties`, an array's first element as `items`, nothing else. No
+ * `required`, formats or enums: those are claims about the endpoint one sample
+ * cannot support.
+ *
+ * @p depth stops at the reader's nesting bound for the same reason it has one:
+ * the walk is recursive and the value is a stored body, not anything Vayu
+ * wrote.
+ */
 Json shape_of (const Json& value, size_t depth) {
     if (value.is_null ()) {
         return type_only ("null");
     }
     if (value.is_array ()) {
-        // An empty array says its type and nothing about its members - `items`
-        // from no member would be an invention.
+        // An empty array states its type only: `items` from no member would be
+        // an invention.
         Json out = type_only ("array");
         if (!value.empty () && depth < constants::spec_document::MAX_READ_DEPTH) {
             out["items"] = shape_of (value.front (), depth + 1);
@@ -202,20 +183,17 @@ Json shape_of (const Json& value, size_t depth) {
 
 Json schema_from_example (const Json& value) {
     Json schema = shape_of (value, 0);
-    // Room first: growing the object would copy `properties`, which is as
-    // wide as the body (`reserve_members` says why).
+    // Room first: growing the object would copy `properties`, as wide as the
+    // body (`reserve_members` says why).
     vayu::utils::reserve_members (schema, 1);
     schema["description"] = std::string (DERIVED_SCHEMA_NOTE);
     return schema;
 }
 
 /**
- * Items grouped by a key, in the order the keys were first seen.
- *
- * Insertion-ordered rather than sorted, because the order examples were stored
- * in is the order their statuses are written in, and a hash order would make
- * one collection's document differ from another's for no reason a reader could
- * name.
+ * Items grouped by key, in first-seen order: the order examples were stored is
+ * the order their statuses are written, and a hash order would make two
+ * collections' documents differ for no reason a reader could name.
  */
 template <typename KeyOf>
 std::vector<std::pair<std::string, std::vector<const ExportExample*>>>
@@ -235,12 +213,9 @@ group_by (const std::vector<const ExportExample*>& items, KeyOf key_of) {
 }
 
 /**
- * A key @p map does not hold yet - @p wanted, or the first free suffix of it.
- *
- * A name two examples share is suffixed rather than allowed to overwrite -
- * losing an example to a key collision is exactly the silent drop this export
- * may not make, and since the map can be the document's own, an entry Vayu
- * never read is one of the things that can be collided with.
+ * @p wanted, or its first free suffix in @p map. A shared name is suffixed,
+ * never overwritten: losing an example to a collision is the silent drop this
+ * export may not make, and a bound map holds entries Vayu never read.
  */
 std::string free_key (const Json& map, const std::string& wanted) {
     std::string key = wanted;
@@ -252,11 +227,9 @@ std::string free_key (const Json& map, const std::string& wanted) {
 }
 
 /**
- * Several examples of one status and media type, added to an `examples` map.
- *
- * Keyed by the example's name, which is what a reader of the document sees.
- * *Added*, never assigned over: the map is the document's in a bound export,
- * and an entry this export did not read is an entry it may not drop.
+ * Several examples of one status and media type, added to an `examples` map
+ * under their names. Added, never assigned over: in a bound export the map is
+ * the document's, and an entry this export did not read it may not drop.
  */
 void add_named_examples (Json& map,
 const std::vector<const ExportExample*>& examples,
@@ -270,16 +243,14 @@ const std::vector<Json>& values) {
 }
 
 /**
- * Several examples of one status and media type, written into an `examples`
- * map by the entry each was imported from (issue #1457), falling back to
- * `add_named_examples` for the rest.
+ * Several examples of one status and media type, each written into the
+ * `examples` entry it was imported from (#1457); the rest go through
+ * `add_named_examples`.
  *
- * A value comparison alone cannot tell an edited example from a new one, so
- * an example that named a key when it was imported and whose value has since
- * changed is written into that map entry - keeping its `summary` and
- * `description` - rather than beside it. An example naming no key, or one the
- * document no longer declares (the spec was re-fetched and the entry
- * renamed), takes today's answer: added under a free key of its own.
+ * A value comparison cannot tell an edited example from a new one, so an edited
+ * example that named a key at import lands in that entry, keeping its `summary`
+ * and `description`. One naming no key, or a key the document no longer
+ * declares (a re-fetched spec renamed it), is added under a free key.
  */
 void write_named_examples (Json& map,
 const std::vector<const ExportExample*>& examples,
@@ -301,26 +272,18 @@ const std::vector<Json>& values) {
 }
 
 /**
- * Stored examples as an operation's `responses`, for both export directions.
- *
- * One implementation, because it is one decision made twice: a bound document
- * writes examples into responses it may already declare, and a skeleton writes
- * them into responses that do not exist yet, but *which* status, *which* media
- * type, and what to do about a second example of the same pair are the same
- * questions with the same answers. What the two directions do not share is who
- * owns the document underneath: a skeleton is writing one that does not exist
- * yet, and a bound export is editing the user's contract. Everything below that
- * reads `ExportDirection` is a consequence of that one difference.
+ * One implementation for both directions, because which status, which media
+ * type and what to do with a second example of one pair are the same questions.
+ * The difference is who owns the document: a skeleton writes one that does not
+ * exist yet, a bound export edits the user's contract. Everything reading
+ * `ExportDirection` follows from that.
  */
 enum class ExportDirection : std::uint8_t { Bound, Skeleton };
 
 /**
- * The values a media object already documents - its `example`, and the payload
- * of every entry of its `examples` map.
- *
- * Read rather than assumed: a stored example equal to one of these is in the
- * contract already, and an imported example with none of these to be equal to
- * came from a schema the import sampled rather than from the document.
+ * A media object's `example` and every `examples` entry's payload. A stored
+ * example equal to one is in the contract already; an imported one equal to
+ * none came from a schema the import sampled.
  */
 std::vector<const Json*> declared_example_values (const Json* media) {
     std::vector<const Json*> values;
@@ -335,8 +298,7 @@ std::vector<const Json*> declared_example_values (const Json* media) {
         return values;
     }
     for (const auto& entry : *map) {
-        // An Example Object carries its payload in `value`; `externalValue`
-        // names a URL instead, which is nothing to compare a stored body to.
+        // `externalValue` names a URL, nothing to compare a stored body to.
         if (const auto value = entry.find ("value");
         entry.is_object () && value != entry.end ()) {
             values.push_back (&*value);
@@ -346,29 +308,24 @@ std::vector<const Json*> declared_example_values (const Json* media) {
 }
 
 /**
- * Whether two example values say the same thing.
- *
- * Through `nlohmann::json`, not the `ordered_json` both sides are held in: an
- * ordered object compares its members *positionally*, so `{"id":1,"name":"a"}`
- * and `{"name":"a","id":1}` would read as two different examples. An object is
- * a set of members, and a document reformatted between the import and this
- * export declares the example it always did - answering otherwise would have
- * the export add a second copy of a value already in the contract.
+ * Compared through `nlohmann::json`, not `ordered_json`: an ordered object
+ * compares members positionally, so `{"id":1,"name":"a"}` and
+ * `{"name":"a","id":1}` would differ. A document reformatted between import and
+ * export still declares the same example, and answering otherwise would add a
+ * second copy of it.
  */
 bool same_value (const Json& left, const Json& right) {
     return nlohmann::json (left) == nlohmann::json (right);
 }
 
 /**
- * Whether @p declared, a value the document wrote, is the example whose body
- * was stored as @p body and reads back as @p value.
+ * Whether @p declared, a value the document wrote, is the example stored as
+ * @p body that reads back as @p value.
  *
- * A declared string is imported as the bytes it is (`example_body_text`), which
- * `value` then reads back as JSON: a text example `"42"` is stored as `42` and
- * would differ from the string the document declared, so a string also matches
- * by its text (#3424). The one predicate `disposition_of` and `written_key_for`
- * both ask, so the export neither rewrites such an example nor loses its mock
- * key.
+ * A declared string is imported as its bytes (`example_body_text`) and read
+ * back as JSON: text `"42"` is stored as `42`, so a string also matches by its
+ * text (#3424). The one predicate `disposition_of` and `written_key_for` share,
+ * so the export neither rewrites such an example nor loses its mock key.
  */
 bool declares_example (const Json& declared, const Json& value, const std::string& body) {
     return same_value (declared, value) ||
@@ -383,11 +340,9 @@ enum class ExampleDisposition : std::uint8_t {
 };
 
 /**
- * Whether this example is news to the document.
- *
- * A skeleton always writes: there is no document to be second to. A bound
- * export answers three ways, and the two that are not `Write` are why an
- * unedited spec-origin collection now exports the document it came from.
+ * A skeleton always writes; it has no document to be second to. A bound export
+ * answers three ways, and the two that are not `Write` are why an unedited
+ * spec-origin collection exports the document it came from.
  */
 ExampleDisposition disposition_of (const ExportExample& example,
 const Json& value,
@@ -404,10 +359,10 @@ ExportDirection direction) {
     if (documented) {
         return ExampleDisposition::AlreadyDeclared;
     }
-    // An imported example exists *because* the import read this media object
-    // (`openapi_drafts.cpp`, `examples_v3`). One that the document declares no
-    // example for is one the import sampled off the schema, and writing that
-    // sample back would document a value the API never stated.
+    // An imported example exists because the import read this media object
+    // (`openapi_drafts.cpp`, `examples_v3`). With no declared example to match,
+    // the import sampled it off the schema, and writing it back would document
+    // a value the API never stated.
     if (declared.empty () && example.from_import) {
         return ExampleDisposition::SampledAtImport;
     }
@@ -415,18 +370,16 @@ ExportDirection direction) {
 }
 
 /**
- * The examples of one status that can honestly be written, and the counts for
- * the ones that cannot.
+ * The examples of one status that can honestly be written, and counts for the
+ * rest.
  *
- * A capped body is the first slice of a response, not the response (#659).
- * Written as an `example` it would be indistinguishable from a complete one -
- * and a body whose parse fails falls back to the raw string, so half a document
- * would enter the contract as a quoted fragment. The response still lands, and
- * the count says the body did not. Checked before the media type so a truncated
- * body with no recorded type is counted once, as the loss that actually stopped
- * it. A body whose media type nobody stated has no honest `content` key either -
- * the response still lands (a 204 documents itself) and the count says a body
- * was left out.
+ * A capped body is the first slice of a response (#659): as an `example` it
+ * would pass for a complete one, and a failed parse falls back to the raw
+ * string, so half a document would enter the contract as a quoted fragment.
+ * Checked before the media type, so a truncated body with no recorded type
+ * counts once, as the loss that stopped it. A body with no stated media type
+ * has no honest `content` key either. In both cases the response still lands (a
+ * 204 documents itself) and the count says the body did not.
  */
 std::vector<const ExportExample*>
 writable_examples (const std::vector<const ExportExample*>& group, ExportNotes& notes) {
@@ -446,11 +399,9 @@ writable_examples (const std::vector<const ExportExample*>& group, ExportNotes& 
 }
 
 /**
- * The media object a response already documents for @p content_type, or
- * `nullptr`.
- *
- * A read, deliberately, where the write path uses `child_record`: asking what
- * the document says must not add a `content` key to a response that has none.
+ * The media object a response documents for @p content_type, or `nullptr`. A
+ * read, where the write path uses `child_record`: asking must not add a
+ * `content` key to a response that has none.
  */
 const Json* declared_media_of (const Json* response, const std::string& content_type) {
     if (response == nullptr) {
@@ -471,12 +422,10 @@ struct MediaWrite {
 };
 
 /**
- * Which of one media type's examples are news to the document, and the counts
- * for the ones that are not.
- *
- * Decided before anything is created, from the media object the document
- * already has (`nullptr` when it has none): a response nobody documented must
- * not gain an empty `content` from having been asked about.
+ * Which of one media type's examples are news to the document, and counts for
+ * the rest. Decided before anything is created, from the existing media object
+ * (`nullptr` for none): a response nobody documented must not gain an empty
+ * `content` by being asked about.
  */
 MediaWrite select_examples (const std::vector<const ExportExample*>& media_group,
 const Json* declared_media,
@@ -502,13 +451,10 @@ ExportDirection direction) {
 }
 
 /**
- * The `examples` map a write goes into: everything the media object already
- * documents, in the order it documented it.
- *
- * A declared `example` moves in rather than being erased under the map. The two
- * members are mutually exclusive, so a media object that has to answer with a
- * map may not simply drop the one value it had; the key it moves under is the
- * member it came from, which says exactly what it is.
+ * The `examples` map a write goes into, holding everything the media object
+ * already documents, in its order. A declared `example` moves in, under the key
+ * `example`: the two members are mutually exclusive, so answering with a map
+ * may not drop the one value it had.
  */
 Json examples_map_of (Json& media) {
     Json map = Json::object ();
@@ -526,22 +472,18 @@ Json examples_map_of (Json& media) {
 }
 
 /**
- * One media type's examples under a response.
- *
- * One of `example` / `examples`, never both: OpenAPI states they are mutually
- * exclusive. Which one this writes is the document's choice where it has made
- * one - a media object already answering with a map gains an entry and keeps
- * every entry it had, and a single `example` becomes a map only when a second
- * example has to go somewhere, carrying the declared value in rather than
- * dropping it.
+ * One media type's examples under a response, as `example` or `examples`, never
+ * both (OpenAPI makes them exclusive). The document's choice wins where it made
+ * one: a map gains an entry and keeps every entry, and a single `example`
+ * becomes a map only when a second example needs a place, carrying the declared
+ * value in.
  */
 void write_media_examples (Json& media, const MediaWrite& write, ExportNotes& notes, ExportDirection direction) {
     const std::vector<const ExportExample*>& writing = write.examples;
     const std::vector<Json>& values                  = write.values;
     if (direction == ExportDirection::Skeleton && media.find ("schema") == media.end ()) {
-        // A bound document already states what its responses look like, and a
-        // shape read off one stored body is not an improvement on the
-        // contract's own schema.
+        // A bound document states its responses' shape already, and one stored
+        // body's shape is no improvement on the contract's schema.
         media["schema"] = schema_from_example (values.front ());
     }
     if (writing.size () == 1 && !media.contains ("examples")) {
@@ -555,17 +497,13 @@ void write_media_examples (Json& media, const MediaWrite& write, ExportNotes& no
 }
 
 /**
- * The description an undeclared response's Response Object is written with.
+ * The description of an undeclared response: the example's own name, which
+ * beats a generated line.
  *
- * The example's own name is what the user (or the import) called it, which
- * beats a generated line - and `response_example` always names a described
- * response "<status> - <description>", so a single leading copy of that
- * prefix is the normal, first-generation shape and stays. Only a *doubled*
- * prefix is rewritten: reimporting a prior export's own generated
- * description prepends the prefix again on top of the one it already carries,
- * and writing that back verbatim would accrete another copy every further
- * export/reimport cycle. One copy of the doubled pair is stripped so the text
- * a fresh export produces stays the same across repeated cycles.
+ * `response_example` names a described response "<status> - <description>", so
+ * one leading prefix is normal and stays. A doubled prefix (a reimported
+ * export's own generated description, prefixed again) loses one copy, or each
+ * export/reimport cycle would accrete another.
  */
 std::string undeclared_response_description (const std::string& status,
 const std::string& example_name) {
@@ -592,11 +530,10 @@ ExportDirection direction) {
          [] (const ExportExample& e) { return std::to_string (e.status); })) {
         const auto existing = responses.find (status);
         if (existing != responses.end () && !string_member (*existing, "$ref").empty ()) {
-            // A Reference Object admits no siblings: a `content` written beside
-            // a `$ref` is ignored by every conformant reader and rejects the
-            // document at a validator. The component it names is shared with
-            // every operation that references it, too - the same reason a
-            // `$ref` parameter is left alone.
+            // A Reference Object admits no siblings: a `content` beside a
+            // `$ref` is ignored by conformant readers and fails a validator.
+            // The component is also shared with every operation referencing it,
+            // as with a `$ref` parameter.
             notes.referenced_responses_left += 1;
             continue;
         }
@@ -605,8 +542,8 @@ ExportDirection direction) {
 
         const std::vector<const ExportExample*> writable =
         writable_examples (group, notes);
-        // Decided before anything is created: a response the document does not
-        // declare must not appear just because it was asked about.
+        // Decided before anything is created: an undeclared response must not
+        // appear just because it was asked about.
         std::vector<std::pair<std::string, MediaWrite>> planned;
         for (const auto& [content_type, media_group] : group_by (
              writable, [] (const ExportExample& e) { return e.content_type; })) {
@@ -617,20 +554,17 @@ ExportDirection direction) {
             }
         }
         if (!declared_here && !writable.empty () && planned.empty ()) {
-            // Every example of a status this document does not declare turned
-            // out to be one the import sampled off a schema - of a response the
-            // document has since dropped. Documenting the status from it would
-            // be this export putting back what the contract removed. A status
-            // whose examples were left out for a reason of *this* export's -
-            // a truncated body, a media type nobody recorded - still lands
-            // below, because there the response is known and only its body is
-            // missing.
+            // Every example of this undeclared status was sampled off a schema
+            // at import, for a response the document has since dropped;
+            // documenting it would put back what the contract removed. A status
+            // whose examples this export left out (a truncated body, no
+            // recorded media type) still lands below: the response is known,
+            // only its body is missing.
             continue;
         }
         if (!declared_here) {
-            // A Response Object's `description` is required, so one has to be
-            // written for a status the document does not already document, and
-            // an existing description is never replaced.
+            // `description` is required, so an undeclared status gets one; an
+            // existing description is never replaced.
             responses[status] = Json{ { "description",
             undeclared_response_description (status, group.front ()->name) } };
         }
@@ -644,17 +578,15 @@ ExportDirection direction) {
 }
 
 /**
- * The `examples` map key @p value already sits under in @p media, or
- * `nullopt` when it went in bare as the singular `example` (a key-addressed
- * vendor extension has nothing to name there) or is not present at all.
+ * The `examples` key @p target's value sits under in @p media, or `nullopt`
+ * when it went in bare as `example` (nothing for a key-addressed extension to
+ * name) or is absent.
  *
- * A value comparison, the same one `disposition_of` already makes
- * (`declares_example`), rather than a key threaded through `write_named_examples` /
- * `add_named_examples`: the write pipeline already decides a value's key by
- * equality, so reading it back off the finished object costs one pass where a
- * second out-parameter on every layer down to `add_named_examples` would cost
- * several - and it answers the *already-declared* case too, where nothing
- * about the write pipeline touched this value at all.
+ * Read back by value (`declares_example`, as `disposition_of` does) rather than
+ * threaded through `write_named_examples` / `add_named_examples`: the write
+ * pipeline keys values by equality anyway, so one pass here beats an
+ * out-parameter on every layer, and it also answers the already-declared case
+ * the pipeline never touched.
  */
 std::optional<std::string> written_key_for (const Json& media, const ExportExample& target) {
     const Json value = example_value (target.body);
@@ -673,14 +605,13 @@ std::optional<std::string> written_key_for (const Json& media, const ExportExamp
 }
 
 /**
- * The `x-vayu-mock.example` key for @p entry's `"fixed"` target, or
- * `nullopt` when it cannot be named - the target was deleted
- * (`mock_example_index` absent), filtered before writing (a truncated body,
- * no recorded media type), the response or media type this document does not
- * declare, or written bare as a singular `example`. Read off @p responses
- * *after* `write_response_examples` has run, or off a bound document's own
- * declared responses when the target was already there and nothing wrote it
- * again (`ExampleDisposition::AlreadyDeclared`).
+ * The `x-vayu-mock.example` key for @p entry's `"fixed"` target, or `nullopt`
+ * when it cannot be named: the target was deleted (`mock_example_index`
+ * absent), filtered out (truncated body, no recorded media type), sits under an
+ * undeclared response or media type, or went in bare as `example`. Read off
+ * @p responses after `write_response_examples` ran, or off a bound document's
+ * own responses when the target was already declared
+ * (`ExampleDisposition::AlreadyDeclared`).
  */
 std::optional<std::string>
 resolve_mock_key (const Json& responses, const ExportRequest& entry) {
@@ -697,15 +628,13 @@ resolve_mock_key (const Json& responses, const ExportRequest& entry) {
 }
 
 /**
- * `x-vayu-mock` (issue #1649): which of a request's saved examples a mock
- * server answers with, written beside `x-vayu-elements` under the same
- * "additive, never a rewrite" reasoning (`patch_operation` below) - only when
- * the mode is not `"first"`, the value every unconfigured row already has, so
- * an operation nobody set a mock choice on gains no key at all.
+ * `x-vayu-mock` (#1649): which saved example a mock server answers with.
+ * Additive like `x-vayu-elements` (`patch_operation`), and written only when
+ * the mode is not `"first"`, so an operation with no mock choice gains no key.
  *
- * A `"fixed"` target this export cannot name writes nothing, the same
- * "no opinion, serve first" answer `pick_example` gives a target this stale
- * at runtime (issue #481 phase 3) - there is no other honest key to give it.
+ * A `"fixed"` target this export cannot name writes nothing: the same "serve
+ * first" answer `pick_example` gives a stale target at runtime (#481 phase 3),
+ * the only honest one.
  */
 void write_mock_extension (Json& operation, const ExportRequest& entry, const Json* responses) {
     if (entry.mock_response_mode == "random") {
@@ -747,11 +676,9 @@ std::string method_path_key (std::string_view method, std::string_view path) {
 }
 
 /**
- * The request this operation is, by the identity a bind or an import stamped.
- *
- * `operationId` first and method+path second, the same precedence the sync diff
- * follows: an id is the document's own stable name for an operation and
- * survives a path change, while a path survives a rename of the id.
+ * The request this operation is, by the identity a bind or import stamped:
+ * `operationId` first, method+path second, as the sync diff does. An id
+ * survives a path change; a path survives an id rename.
  */
 const size_t* find_request (const Json& operation,
 std::string_view method,
@@ -769,27 +696,19 @@ const std::unordered_map<std::string, size_t>& by_method_path) {
     return found == by_method_path.end () ? nullptr : &found->second;
 }
 
-/**
- * The lowered names of the parameters the operation declares, by where they sit.
- *
- * Collected while patching rather than walked twice: the pass that writes a
- * row's value into a declared parameter is the one that knows which rows the
- * document has a home for.
- */
+/// The lowered names of the operation's declared parameters, by location.
+/// Collected while patching: that pass knows which rows the document has a home
+/// for.
 struct DeclaredParameters {
     std::unordered_set<std::string> query;
     std::unordered_set<std::string> header;
 };
 
 /**
- * The node a local JSON pointer names, or `nullptr` - one hop, no cycle to
- * chase, and nothing outside this document.
- *
- * The export follows a reference to *read* it, never to write through it, and
- * only for the one question a reference would otherwise make unanswerable:
- * which parameter the document declares here. Anything it cannot follow - an
- * external file, a pointer into a node that is not there - answers nothing,
- * which lands back on the behaviour of not knowing.
+ * The node a local JSON pointer names, or `nullptr`: one hop, no cycles,
+ * nothing outside this document. Followed to read, never to write, and only to
+ * answer which parameter the document declares here; anything unfollowable (an
+ * external file, a missing node) answers nothing, the same as not knowing.
  */
 const Json* resolve_local_ref (const Json& document, std::string_view pointer) {
     if (!pointer.starts_with ("#/")) {
@@ -801,8 +720,8 @@ const Json* resolve_local_ref (const Json& document, std::string_view pointer) {
         const size_t slash = pointer.find ('/', start);
         std::string segment (pointer.substr (start,
         slash == std::string_view::npos ? pointer.size () - start : slash - start));
-        // JSON Pointer's two escapes, in the order the standard states: `~1`
-        // before `~0`, or an encoded `~1` would decode twice.
+        // `~1` before `~0`, as the standard orders them, or an encoded `~1`
+        // decodes twice.
         for (const auto& [from, to] :
         std::array<std::pair<std::string_view, std::string_view>, 2>{
         { { "~1", "/" }, { "~0", "~" } } }) {
@@ -827,7 +746,6 @@ const Json* resolve_local_ref (const Json& document, std::string_view pointer) {
     return node;
 }
 
-/// One declared parameter's name, recorded under the location it sits in.
 void declare_parameter (const Json* parameter, DeclaredParameters& declared) {
     if (parameter == nullptr || !parameter->is_object ()) {
         return;
@@ -845,12 +763,10 @@ void declare_parameter (const Json* parameter, DeclaredParameters& declared) {
 }
 
 /**
- * The names a Path Item declares for every operation under it.
- *
- * OpenAPI's path-level `parameters` are the operation's parameters too, so a
- * row that matches one has a home in the document even though the operation
- * does not list it. Read, never written: an example written here would be one
- * request's value on every method of the path.
+ * Path-level `parameters` belong to every operation under the item, so a row
+ * matching one has a home though the operation does not list it. Read, never
+ * written: an example there would be one request's value on every method of the
+ * path.
  */
 DeclaredParameters inherited_parameters (const Json& document, const Json& path_item) {
     DeclaredParameters declared;
@@ -867,22 +783,19 @@ DeclaredParameters inherited_parameters (const Json& document, const Json& path_
 }
 
 /**
- * A declared parameter's `example`, from the request row that carries a value
- * for it, and the names the operation declared.
+ * Writes a declared parameter's `example` from the row carrying a value for it,
+ * and returns the names the operation declared.
  *
- * A blank row writes nothing - an import creates blank header rows, and a blank
- * one deleting the document's example would lose the contract's own
- * documentation to a row nobody typed in.
+ * A blank row writes nothing: the import creates blank header rows, and one
+ * deleting the document's example would lose the contract's documentation to a
+ * row nobody typed. A row withheld as a credential writes nothing either (no
+ * empty example over the document's own); @p counts_withheld says whether that
+ * is counted here, true where no `x-vayu-request` is written, which counts it
+ * otherwise.
  *
- * @p declared arrives holding the path item's own parameters and comes back
- * holding this operation's too. @p example_key is `example` in 3.x and the
- * `x-example` extension 2.0 tools read, which has no `example` on a
- * non-body parameter.
- *
- * A row whose value was withheld as a credential writes no example (the
- * document's own is not replaced by an empty one). @p counts_withheld says
- * whether that is counted here: it is where the export writes no
- * `x-vayu-request`, which counts the row otherwise.
+ * @p declared arrives with the path item's parameters and leaves with this
+ * operation's too. @p example_key is `example` in 3.x, or 2.0 tools'
+ * `x-example`, since 2.0 has no `example` on a non-body parameter.
  */
 DeclaredParameters patch_parameters (Json& operation,
 const Json& document,
@@ -902,10 +815,9 @@ std::string_view example_key) {
         if (const std::string reference = string_member (parameter, "$ref");
         !reference.empty ()) {
             notes.shared_parameters_left += 1;
-            // Not written into - a shared parameter belongs to every operation
-            // that names it - but its *name* is read through the reference, so
-            // a row the document declares this way is not then reported as a
-            // row the operation declares nowhere.
+            // A shared parameter belongs to every operation naming it, so it is
+            // not written into, but its name is read through the reference so a
+            // row it declares is not reported as declared nowhere.
             declare_parameter (resolve_local_ref (document, reference), declared);
             continue;
         }
@@ -948,14 +860,10 @@ std::string_view example_key) {
 }
 
 /**
- * Rows carrying a value that the operation declares no parameter for.
- *
- * A value goes into the parameter the document declares; a row somebody added
- * in Vayu would have this export declare a parameter the contract does not
- * have, which is the one thing neither direction does. `Authorization` and
- * `Content-Type` are not counted: OpenAPI states them as `security` and as the
- * request body's media type, so they were never parameters to begin with - the
- * same two the import drops on the way in.
+ * Counts rows with a value the operation declares no parameter for: declaring
+ * one would add a parameter the contract lacks, which neither direction does.
+ * `Authorization` and `Content-Type` are not counted; OpenAPI states them as
+ * `security` and the body's media type, the same two the import drops.
  */
 void count_undeclared_rows (const ExportRequest& entry,
 const DeclaredParameters& declared,
@@ -982,12 +890,10 @@ ExportNotes& notes) {
 }
 
 /**
- * A request body the bound direction has no way to write.
- *
- * It patches parameters and examples: a document's `requestBody` states the
- * schema the endpoint accepts, and a body somebody typed into Vayu is one
- * machine's payload rather than a new contract. The count is what makes the
- * omission visible on the export it happened on, instead of only in the docs.
+ * Counts a request body the bound direction cannot write: `requestBody` states
+ * the schema the endpoint accepts, and a body typed into Vayu is one machine's
+ * payload, not a new contract. The count shows the omission on the export it
+ * happened on.
  */
 void count_unwritten_body (const ExportRequest& entry, ExportNotes& notes) {
     if (entry.body.mode.empty () || entry.body.mode == "none") {
@@ -999,17 +905,15 @@ void count_unwritten_body (const ExportRequest& entry, ExportNotes& notes) {
 }
 
 /**
- * A request whose method or path is no longer the operation it is stamped as.
- * The path is judged as the matcher stamped it: `/users/1` still is
- * `/users/{id}`, so a concrete URL that fills its operation's template is not
- * an edit, and so is one under a server base path the matcher stripped.
+ * Counts a request whose method or path no longer matches its stamped
+ * operation. The path is judged as the matcher stamped it: `/users/1` still is
+ * `/users/{id}`, under any server base path the matcher stripped. A URL stating
+ * no path is not compared.
  *
- * The stamp is what finds the operation, so the request's values still land -
- * in the operation the document declares, under the method and path *it*
- * declares. Moving or renaming an operation is an edit to the contract, and
- * this export makes none; the count says so per export rather than leaving the
- * user to diff the file. A URL that states no path at all is not compared:
- * there is nothing to compare it with.
+ * The stamp still finds the operation, so the values land under the method and
+ * path the document declares. Moving or renaming an operation edits the
+ * contract, which this export never does; the count says so instead of leaving
+ * the user to diff the file.
  */
 void count_edited_identity (const ExportRequest& entry,
 ExportNotes& notes,
@@ -1030,12 +934,10 @@ const std::vector<std::string>& base_paths) {
 }
 
 /**
- * The dialect the stored document declares.
- *
- * The dialect is never changed: a 3.0 document exports as 3.0, a 2.0 document as
- * 2.0. For 2.0 the presence pass still runs, but nothing is written into an
- * operation - parameters and examples are a different vocabulary there, and half
- * a translation is a file that is neither.
+ * The dialect is never changed: a 3.0 document exports as 3.0, a 2.0 one as
+ * 2.0. For 2.0 the presence pass still runs but nothing is written into an
+ * operation: its parameters and examples are another vocabulary, and half a
+ * translation is neither.
  *
  * @return why there is nothing to patch, or nothing.
  */
@@ -1045,10 +947,6 @@ std::optional<std::string> read_dialect (const Json& document, Dialect& dialect)
         dialect = { "OpenAPI " + version, true };
     } else if (const std::string legacy = string_member (document, "swagger");
     !legacy.empty ()) {
-        // The dialect is never changed: a 3.0 document exports as 3.0, a 2.0
-        // document as 2.0. For 2.0 the presence pass still runs, but nothing is
-        // written into an operation - parameters and examples are a different
-        // vocabulary there, and half a translation is a file that is neither.
         dialect = { "Swagger " + legacy, false };
     } else {
         return "The stored document declares neither `openapi` nor `swagger`, "
@@ -1077,18 +975,15 @@ std::unordered_map<std::string, size_t>& by_method_path) {
 
 namespace ext = vayu::core::vayu_ext;
 
-/**
- * Which dialect an operation is being written in. A skeleton is always 3.x; a
- * full bound export writes into whatever the document already is, and 2.0
- * states a parameter's type and example, a body and a response's example in
- * a vocabulary of its own.
- */
+/// The dialect an operation is written in: a skeleton is always 3.x; a full
+/// bound export writes the document's own, and 2.0 has its own vocabulary for
+/// parameter types, examples, bodies and response examples.
 enum class Vocabulary : std::uint8_t { V3, V2 };
 
 /**
- * The name of a Postman path variable that is a whole segment (`:petId`,
- * issue #1764), or nothing - `:id.json` carries a suffix OpenAPI cannot
- * template, exactly as a `{{name}}.json` segment cannot.
+ * The name of a whole-segment Postman path variable (`:petId`, #1764), or
+ * nothing: `:id.json` has a suffix OpenAPI cannot template, as `{{name}}.json`
+ * does.
  */
 std::optional<std::string_view> colon_variable_name (std::string_view segment) {
     if (segment.size () < 2 || segment.front () != ':' ||
@@ -1099,13 +994,10 @@ std::optional<std::string_view> colon_variable_name (std::string_view segment) {
 }
 
 /**
- * A request path with Vayu's tokens written the way OpenAPI writes them:
- * `/pets/{{petId}}` and `/pets/:petId` both become `/pets/{petId}`.
- *
- * Only a segment that is *entirely* one token converts. A token inside a longer
- * segment (`/files/{{name}}.json`) is not a path parameter - OpenAPI has no
- * syntax for part of a segment - so it is left as it stands rather than turned
- * into a template the document cannot mean.
+ * A request path with Vayu's tokens in OpenAPI form: `/pets/{{petId}}` and
+ * `/pets/:petId` both become `/pets/{petId}`. Only a whole-segment token
+ * converts: OpenAPI cannot template part of a segment (`/files/{{name}}.json`),
+ * so that stays as written.
  */
 std::string path_template (std::string_view path) {
     std::string out;
@@ -1142,20 +1034,17 @@ void write_string_type (Json& parameter, Vocabulary vocabulary) {
 }
 
 /**
- * The `{name}` placeholders of the templated path, as required path parameters.
- *
- * `required: true` is not an inference: OpenAPI states that a path parameter is
- * always required, so this is the format's own rule rather than a claim about
- * this endpoint. The `string` type is the same kind of minimum - a parameter
- * object must carry one, and a URL segment is text until something says
- * otherwise.
+ * The templated path's `{name}` placeholders as path parameters.
+ * `required: true` is OpenAPI's own rule for path parameters, not a claim about
+ * this endpoint; `string` is the same kind of minimum, since a parameter object
+ * must carry a type.
  */
 void append_path_parameters (const std::string& templated,
 const std::vector<ExportKeyValue>& path_rows,
 Json& parameters,
 Vocabulary vocabulary) {
-    // The renderer's `/\{([^{}]+)\}/g`, read left to right: a `{` starts a name
-    // over, so `{a{b}` declares `b` rather than nothing.
+    // The renderer's `/\{([^{}]+)\}/g`, left to right: a `{` restarts the name,
+    // so `{a{b}` declares `b`.
     size_t open = std::string::npos;
     for (size_t index = 0; index < templated.size (); ++index) {
         if (templated[index] == '{') {
@@ -1169,8 +1058,8 @@ Vocabulary vocabulary) {
             const std::string name = templated.substr (open + 1, index - open - 1);
             Json parameter{ { "name", name }, { "in", "path" }, { "required", true } };
             write_string_type (parameter, vocabulary);
-            // The value a `:name` path row holds (issue #1764) is this
-            // request's example of the parameter, as a query row's is.
+            // A `:name` path row's value (#1764) is this request's example of
+            // the parameter, as a query row's is.
             const auto row = std::find_if (path_rows.rbegin (),
             path_rows.rend (), [&] (const ExportKeyValue& candidate) {
                 return candidate.enabled && candidate.key == name;
@@ -1186,12 +1075,9 @@ Vocabulary vocabulary) {
 }
 
 /**
- * One Params or Headers row as a parameter.
- *
- * A disabled row is still declared: the endpoint accepts the parameter either
- * way, and the toggle says what this request sends, not what the API takes -
- * which is why `x-vayu-enabled` carries it rather than `required`. A user
- * enabling a row is not the API demanding it.
+ * One Params or Headers row as a parameter. A disabled row is still declared:
+ * the endpoint takes the parameter either way, and the toggle says what this
+ * request sends, so `x-vayu-enabled` carries it, not `required`.
  */
 Json parameter_object (const ExportKeyValue& row, std::string_view location, Vocabulary vocabulary) {
     Json parameter{ { "name", row.key }, { "in", std::string (location) } };
@@ -1202,9 +1088,8 @@ Json parameter_object (const ExportKeyValue& row, std::string_view location, Voc
     if (!row.value.empty ()) {
         parameter[vocabulary == Vocabulary::V3 ? "example" : "x-example"] = row.value;
     }
-    // Written either way, not only when disabled: an empty-valued *enabled*
-    // row and a non-empty-valued *disabled* one are both real states a
-    // reimport cannot recover by looking at `value` alone (issue #1441).
+    // Written either way: an empty enabled row and a non-empty disabled one are
+    // both states a reimport cannot read off `value` (#1441).
     parameter[std::string (ROW_ENABLED_KEY)] = row.enabled;
     return parameter;
 }
@@ -1218,10 +1103,10 @@ bool is_non_parameter_header (const std::string& key) {
 }
 
 /**
- * Every Params and Headers row @p declared does not already hold, as
- * parameters. OpenAPI names a parameter by name and location, so a second row
- * with both is not written - `x-vayu-request` carries it, and every
- * `Authorization` / `Content-Type` row, verbatim.
+ * Every Params and Headers row @p declared does not hold yet, as parameters. A
+ * second row with the same name and location is not written (OpenAPI keys
+ * parameters by both); `x-vayu-request` carries it, and every `Authorization` /
+ * `Content-Type` row, verbatim.
  */
 void append_row_parameters (const ExportRequest& entry,
 DeclaredParameters& declared,
@@ -1242,10 +1127,9 @@ Vocabulary vocabulary) {
 }
 
 /**
- * The media type an enabled `Content-Type` row names, lowered and without its
- * parameters - `application/vnd.api+json` rather than the mode's generic
- * `application/json` - or `""` when the request has none, or one that is
- * still a `{{variable}}`.
+ * The media type an enabled `Content-Type` row names, lowered and without
+ * parameters (`application/vnd.api+json`, not the mode's generic
+ * `application/json`), or `""` for none or a `{{variable}}`.
  */
 std::string declared_content_type (const ExportRequest& entry) {
     for (const ExportKeyValue& row : entry.headers) {
@@ -1269,14 +1153,12 @@ std::string body_media_type (const ExportRequest& entry, std::string_view fallba
 }
 
 /**
- * A request body as the value an `example` holds and the media type it is
- * filed under, or nothing when the request states none.
- *
- * GraphQL is written as the JSON envelope a GraphQL-over-HTTP server receives
- * (`{query, variables}`, which is what Vayu stores), a form as the object of
- * its enabled text fields, a binary body as a `format: binary` string with no
- * example - the file is one machine's. Every mode round-trips exactly through
- * `x-vayu-request.body`; this is what another tool reads.
+ * A request body as an `example` value and the media type it is filed under.
+ * GraphQL is the `{query, variables}` envelope a GraphQL-over-HTTP server
+ * receives (what Vayu stores); a form is the object of its enabled text fields;
+ * a binary body is a `format: binary` string with no example, since the file is
+ * one machine's. Every mode round-trips through `x-vayu-request.body`; this is
+ * what other tools read.
  */
 struct BodyExample {
     std::string media_type;
@@ -1293,8 +1175,8 @@ Json file_schema () {
     return Json{ { "type", "string" }, { "format", "binary" } };
 }
 
-/// A GraphQL body as the JSON envelope a GraphQL-over-HTTP server receives -
-/// what Vayu stores, or a bare query wrapped as one.
+/// A GraphQL body as the envelope a GraphQL-over-HTTP server receives: Vayu's
+/// stored one, or a bare query wrapped as one.
 std::optional<BodyExample> graphql_example_of (const ExportRequest& entry) {
     if (trim (entry.body.content).empty ()) {
         return std::nullopt;
@@ -1335,8 +1217,8 @@ Json form_property_of (const nlohmann::json& field) {
     return property;
 }
 
-/// A form body: its fields as schema properties, its enabled text values as
-/// the example - a disabled row is not sent, a file part is one machine's file.
+/// A form body: fields as schema properties, enabled text values as the example
+/// (a disabled row is not sent; a file part is one machine's file).
 std::optional<BodyExample> form_example_of (const ExportRequest& entry) {
     const nlohmann::json fields = form_fields_of (entry);
     Json properties             = Json::object ();
@@ -1360,8 +1242,8 @@ std::optional<BodyExample> form_example_of (const ExportRequest& entry) {
         Json{ { "type", "object" }, { "properties", std::move (properties) } }) };
 }
 
-/// A binary body's own `contentType`, lowered and without its parameters, or
-/// `""` when it states none or one that is still a `{{variable}}`.
+/// A binary body's own `contentType`, lowered and without parameters, or `""`
+/// for none or a `{{variable}}`.
 std::string file_media_type (const ExportRequest& entry) {
     const auto file = entry.stored_body.find ("file");
     if (file == entry.stored_body.end () || !file->is_object ()) {
@@ -1380,8 +1262,8 @@ std::string file_media_type (const ExportRequest& entry) {
     return vayu::utils::ascii_lower (type);
 }
 
-/// The media type a binary body's file name implies, by the same extension
-/// table the send uses, or `""` for an unknown extension or no file.
+/// The media type the file name's extension implies, by the send's table, or
+/// `""` for an unknown extension or no file.
 std::string file_extension_media_type (const ExportRequest& entry) {
     const auto file = entry.stored_body.find ("file");
     if (file == entry.stored_body.end () || !file->is_object ()) {
@@ -1395,11 +1277,9 @@ std::string file_extension_media_type (const ExportRequest& entry) {
     src->get_ref<const std::string&> ()) };
 }
 
-/**
- * A binary body, under the media type it is sent with: an enabled
- * `Content-Type` row, else the file's own `contentType`, else what its
- * extension implies, else `application/octet-stream` - the send's own order.
- */
+/// A binary body under the media type it is sent with, in the send's order: an
+/// enabled `Content-Type` row, the file's `contentType`, its extension, then
+/// `application/octet-stream`.
 BodyExample binary_example_of (const ExportRequest& entry) {
     std::string stated = file_media_type (entry);
     if (stated.empty ()) {
@@ -1440,18 +1320,16 @@ std::optional<BodyExample> body_example_of (const ExportRequest& entry) {
 }
 
 /// One body example as a 3.x media object: the schema read off it (or the
-/// form's own fields), and the example itself when it says anything.
-///
-/// Takes @p body by value and moves its example in: the value is the parsed
-/// body, as wide as whatever was stored, and a copy is one allocation per
-/// member it holds.
+/// form's fields), and the example when it says anything. @p body is taken by
+/// value and its example moved in: the parsed body is as wide as what was
+/// stored, and a copy costs one allocation per member.
 Json media_object_of (BodyExample body) {
     if (body.file) {
         return Json{ { "schema", file_schema () } };
     }
     Json media = Json::object ();
-    // Both members' room at once, so writing the example does not copy the
-    // schema written before it (`reserve_members` says why).
+    // Room for both members, so writing the example does not copy the schema
+    // before it (`reserve_members` says why).
     vayu::utils::reserve_members (media, 2);
     media["schema"] = body.form_schema ? std::move (*body.form_schema) :
                                          schema_from_example (body.value);
@@ -1473,10 +1351,9 @@ std::optional<Json> request_body_object (const ExportRequest& entry) {
 }
 
 /**
- * A request body as 2.0 parameters: one `in: body` parameter carrying the
- * derived schema and the example on it, or one `in: formData` parameter per
- * form field (`type: file` for a file part). Empty when the request states no
- * body.
+ * A request body as 2.0 parameters: one `in: body` carrying the derived schema
+ * and example, or one `in: formData` per form field (`type: file` for a file
+ * part). Empty for no body.
  */
 Json body_parameters_v2 (const ExportRequest& entry) {
     Json parameters                       = Json::array ();
@@ -1507,7 +1384,7 @@ Json body_parameters_v2 (const ExportRequest& entry) {
     return parameters;
 }
 
-/// Explicit no-auth - `security: []` is exact for it, no scheme needed.
+/// Explicit no-auth: `security: []` states it exactly, no scheme needed.
 bool auth_is_none (const std::string& mode) {
     return mode.empty () || mode == "none" || mode == "noauth";
 }
@@ -1517,8 +1394,8 @@ bool auth_is_expressible (const std::string& mode) {
     return mode == "basic" || mode == "bearer" || mode == "apikey" || mode == "oauth2";
 }
 
-/// A space-separated OAuth2 scope string as a `scopes` map, each entry
-/// undescribed - Vayu stores no per-scope description to carry.
+/// A space-separated scope string as a `scopes` map, every entry undescribed:
+/// Vayu stores no per-scope description.
 Json oauth2_scopes_of (const std::string& scope) {
     Json scopes    = Json::object ();
     std::size_t at = 0;
@@ -1551,12 +1428,11 @@ Json security_scheme_of (const ExportAuth& auth) {
         return Json{ { "type", "apiKey" }, { "name", auth.api_key_name },
             { "in", auth.api_key_in.empty () ? "header" : auth.api_key_in } };
     }
-    // oauth2. `clientCredentials` is the fallback for a stored grant type this
-    // file does not recognize - the same default `default_oauth2_config`
-    // gives a fresh config, so an unrecognized value reads as though the
-    // request had never set one. `jwt_bearer` (#3632) is one: OpenAPI has no
-    // RFC 7523 flow, and the real config travels in `x-vayu-collection` /
-    // `x-vayu-request`, so the flow here only names the token endpoint.
+    // `clientCredentials` is the fallback for an unrecognized grant type, the
+    // default `default_oauth2_config` gives, so it reads as never set.
+    // `jwt_bearer` (#3632) lands here: OpenAPI has no RFC 7523 flow, and the
+    // real config travels in `x-vayu-collection` / `x-vayu-request`, so this
+    // flow only names the token endpoint.
     std::string flow = "clientCredentials";
     if (auth.oauth2_grant_type == "authorization_code") {
         flow = "authorizationCode";
@@ -1577,9 +1453,9 @@ Json security_scheme_of (const ExportAuth& auth) {
 }
 
 /**
- * `auth` as a 2.0 `securityDefinitions` entry, or nothing for bearer - 2.0
- * has no HTTP scheme besides `basic`, and an `apiKey` named `Authorization`
- * standing in for one would re-import as an API key.
+ * `auth` as a 2.0 `securityDefinitions` entry, or nothing for bearer: 2.0's
+ * only HTTP scheme is `basic`, and an `apiKey` named `Authorization` would
+ * re-import as an API key.
  */
 std::optional<Json> security_definition_of (const ExportAuth& auth) {
     if (auth.mode == "basic") {
@@ -1609,9 +1485,8 @@ std::optional<Json> security_definition_of (const ExportAuth& auth) {
     return std::make_optional (std::move (definition));
 }
 
-/// What an auth mode resolves to for export purposes: nothing to inherit
-/// from (`inherit`), an explicit absence (`auth_is_none`), a scheme this file
-/// can build, or a mode OpenAPI cannot name at all.
+/// An auth mode for export: `inherit` (nothing resolved), an explicit absence
+/// (`auth_is_none`), a scheme this file can build, or one OpenAPI cannot name.
 struct AuthDisposition {
     enum class Kind : std::uint8_t { Inherit, None, Scheme, Unsupported };
     Kind kind = Kind::Inherit;
@@ -1631,8 +1506,8 @@ AuthDisposition disposition_of (const ExportAuth& auth) {
     return { AuthDisposition::Kind::Unsupported, auth };
 }
 
-/// Whether two dispositions send the same thing: same kind, and for a scheme
-/// the same scheme.
+/// Whether two dispositions send the same: same kind and, for a scheme, the
+/// same scheme.
 bool same_disposition (const AuthDisposition& a, const AuthDisposition& b) {
     return a.kind == b.kind &&
     (a.kind != AuthDisposition::Kind::Scheme ||
@@ -1654,9 +1529,9 @@ std::string scheme_base_name (const ExportAuth& auth) {
 }
 
 /**
- * Who names the `securitySchemes` an operation references: a skeleton's own
- * registry, or a bound document's existing schemes (plus any it has to add).
- * Nothing when the document's dialect cannot state the scheme at all.
+ * Names the `securitySchemes` an operation references: a skeleton's own
+ * registry, or a bound document's schemes plus any it must add. Nothing when
+ * the dialect cannot state the scheme.
  */
 class SchemeNamer {
     public:
@@ -1670,11 +1545,10 @@ class SchemeNamer {
 };
 
 /**
- * `components.securitySchemes` for a skeleton, built up as requests ask for
- * one. Two requests whose auth reduces to the same scheme share it; the name
- * is derived from the scheme's own type and de-duplicated only when two
- * *different* schemes would otherwise collide (two api keys named
- * differently, say).
+ * A skeleton's `components.securitySchemes`, built as requests ask. Requests
+ * whose auth reduces to one scheme share it; a name comes from the scheme's
+ * type and is de-duplicated only when two different schemes collide (two
+ * differently named API keys).
  */
 class SkeletonSchemes final : public SchemeNamer {
     public:
@@ -1704,10 +1578,9 @@ class SkeletonSchemes final : public SchemeNamer {
 };
 
 /**
- * Whether a scheme the document declares states the same credential as
- * @p wanted - compared on what a client sends (type, HTTP scheme, API key
- * name and location), never on the description, `bearerFormat` or scopes a
- * document author wrote around it.
+ * Whether a declared scheme states the same credential as @p wanted: compared
+ * on what a client sends (type, HTTP scheme, API key name and location), never
+ * on the description, `bearerFormat` or scopes an author wrote around it.
  */
 bool scheme_matches (const Json& declared, const Json& wanted) {
     if (!declared.is_object () ||
@@ -1728,11 +1601,10 @@ bool scheme_matches (const Json& declared, const Json& wanted) {
 }
 
 /**
- * The schemes of a bound document, read without being written: a request's
- * auth names an existing scheme stating the same credential when there is one,
- * and a scheme it has to add is held here and written by `write_into` once
- * the walk over `paths` has finished - adding a root member while a path item
- * is being written would move the node under it.
+ * A bound document's schemes, read without being written: a request's auth
+ * names an existing scheme for the same credential if there is one. A scheme to
+ * add is held and written by `write_into` after the `paths` walk, since adding
+ * a root member mid-walk would move the path item being written.
  */
 class BoundSchemes final : public SchemeNamer {
     public:
@@ -1820,18 +1692,18 @@ class BoundSchemes final : public SchemeNamer {
     Json added_    = Json::object ();
 };
 
-/// `security` requirement referencing @p name, with no scopes named - Vayu
-/// resolves a token or key wholesale, never a subset of an oauth2 scope list.
+/// A `security` requirement naming @p name with no scopes: Vayu resolves a
+/// token or key whole, never a subset of an oauth2 scope list.
 Json security_requirement (const std::string& name) {
     return Json::array ({ Json{ { name, Json::array () } } });
 }
 
 /**
- * The operation-level `security` override for @p request_disp against
- * @p collection_disp already in force - `nullopt` when the operation simply
- * inherits the document's (an unresolved `inherit`, an identical scheme, a
- * mode OpenAPI cannot state, or a scheme this dialect has no word for; the
- * last two travel in `x-vayu-request.auth`).
+ * The operation-level `security` override of @p request_disp against
+ * @p collection_disp, or `nullopt` when the operation inherits the document's:
+ * an unresolved `inherit`, the same scheme, a mode OpenAPI cannot state, or a
+ * scheme this dialect cannot name (the last two travel in
+ * `x-vayu-request.auth`).
  */
 std::optional<Json> operation_security_of (const AuthDisposition& request_disp,
 const AuthDisposition& collection_disp,
@@ -1873,7 +1745,7 @@ Json settings_object_of (const ExportRequest& entry) {
     }
     if (entry.stream) {
         settings["stream"] = true;
-        // Only beside the stream it reads, the one shape the importer takes.
+        // Only beside the stream it reads, the one shape the importer accepts.
         if (entry.stream_text_path) {
             settings["streamTextPath"] = *entry.stream_text_path;
         }
@@ -1884,7 +1756,7 @@ Json settings_object_of (const ExportRequest& entry) {
     return settings;
 }
 
-/// Whether @p value is a non-empty object or array - the stored columns this
+/// Whether @p value is a non-empty object or array: the stored columns this
 /// export copies only when they say something.
 bool says_something (const nlohmann::json& value) {
     return (value.is_object () || value.is_array ()) && !value.empty ();
@@ -1892,17 +1764,17 @@ bool says_something (const nlohmann::json& value) {
 
 // --- Credentials outside an auth block (#1804) ------------------------------
 //
-// A header row, a Params row, a URL and a saved response's headers carry what
-// the user typed or a server sent, and a name says whether it is a credential
-// (`Authorization`, `api_key`, `Set-Cookie`). Each is written twice over: as the
-// standard member another tool reads (a parameter's `example`, a `servers`
-// entry) and verbatim in `x-vayu-request`. `export_openapi` blanks the copy
-// every standard writer reads once, up front, so a writer added later cannot
-// forget to; `vayu_request_object` blanks what it writes, and is where a
-// credential is counted, so the two copies of one value count once.
+// Header rows, Params rows, a URL and saved response headers carry what the
+// user typed or a server sent, and a name says whether it is a credential
+// (`Authorization`, `api_key`, `Set-Cookie`). Each is written twice: as the
+// standard member other tools read (a parameter's `example`, a `servers` entry)
+// and verbatim in `x-vayu-request`. `export_openapi` blanks the copy the
+// standard writers read once, up front, so a later writer cannot forget;
+// `vayu_request_object` blanks what it writes and is where a credential is
+// counted, so the two copies count once.
 
-/// The header and query-parameter names the API-key auth in force claims
-/// (`ext::apikey_*_names`): a row typed under that name is the credential too.
+/// The header and query names the API-key auth in force claims
+/// (`ext::apikey_*_names`): a row typed under one is the credential too.
 struct ApiKeyNames {
     std::vector<std::string> headers;
     std::vector<std::string> params;
@@ -1920,8 +1792,8 @@ ApiKeyNames apikey_names_of (const ExportAuth& auth) {
 /// `ext::blank_credential_rows` or `ext::blank_credential_param_rows`.
 using BlankRows = void (*) (Json&, const std::vector<std::string>&, int&);
 
-/// @p rows with each credential's value emptied and the row marked `withheld`:
-/// the key stays, so the parameter is still declared.
+/// Empties each credential row's value and marks it `withheld`; the key stays,
+/// so the parameter is still declared.
 void withhold_row_values (std::vector<ExportKeyValue>& rows,
 BlankRows blank,
 const std::vector<std::string>& names) {
@@ -1939,8 +1811,8 @@ const std::vector<std::string>& names) {
     }
 }
 
-/// @p entry with the values of its credential rows withheld, which is what
-/// every standard member (`parameter_object`, `patch_parameters`) reads.
+/// @p entry with its credential rows' values withheld: what every standard
+/// member (`parameter_object`, `patch_parameters`) reads.
 ExportRequest withhold_credentials (const ExportRequest& entry) {
     ExportRequest safe        = entry;
     const ApiKeyNames claimed = apikey_names_of (entry.auth);
@@ -1951,8 +1823,8 @@ ExportRequest withhold_credentials (const ExportRequest& entry) {
     return safe;
 }
 
-/// @p collection with a `baseUrl` that carries credentials blanked (`servers`
-/// reads it). Counted with the `baseUrl` variable that holds the same URL.
+/// @p collection with a credential-carrying `baseUrl` blanked (`servers` reads
+/// it); counted with the `baseUrl` variable holding the same URL.
 ExportCollection withhold_credentials (const ExportCollection& collection) {
     ExportCollection safe         = collection;
     int counted_with_the_variable = 0;
@@ -1961,8 +1833,8 @@ ExportCollection withhold_credentials (const ExportCollection& collection) {
     return safe;
 }
 
-/// A server origin read off a request URL, its userinfo password dropped.
-/// Counted with the URL it came from, which `x-vayu-request` carries.
+/// A request URL's server origin, its userinfo password dropped; counted with
+/// the URL, which `x-vayu-request` carries.
 std::string server_origin_of (const std::string& origin) {
     int counted_with_the_url = 0;
     return ext::redact_url_credentials (origin, {}, counted_with_the_url);
@@ -1974,11 +1846,11 @@ int withheld_in (const std::vector<ExportKeyValue>& rows) {
     [] (const ExportKeyValue& row) { return row.withheld; }));
 }
 
-/// @p table (a stored Params or Headers column) blanked in place, and how many
-/// credentials the request holds in it. The stored table and the parsed rows
-/// (@p parsed_withheld of them withheld) are one table read twice, so the
-/// larger count stands: equal for a route-built request, and right for one
-/// built with only one of the two.
+/// Blanks @p table (a stored Params or Headers column) in place and returns how
+/// many credentials the request holds in it. It and the parsed rows
+/// (@p parsed_withheld withheld) are one table read twice, so the larger count
+/// stands: equal for a route-built request, right for one built with only one
+/// of them.
 int blank_stored_table (Json& table,
 BlankRows blank,
 const std::vector<std::string>& names,
@@ -1988,9 +1860,9 @@ int parsed_withheld) {
     return std::max (stored, parsed_withheld);
 }
 
-/// A stored variables object with every secret variable blanked, and a
-/// `baseUrl` (the one variable this export reads as a URL) with its
-/// credentials blanked: `servers` carries the same URL, uncounted.
+/// Stored variables with every secret blanked, and `baseUrl` (the one variable
+/// read as a URL) with its credentials blanked; `servers` carries the same URL
+/// uncounted.
 Json redacted_variables (const nlohmann::json& stored, ExportNotes& notes) {
     Json variables = ext::redact_variables (Json (stored), notes.secrets_omitted);
     const auto base = variables.find ("baseUrl");
@@ -2005,11 +1877,11 @@ Json redacted_variables (const nlohmann::json& stored, ExportNotes& notes) {
     return variables;
 }
 
-/// The saved examples as `x-vayu-request.examples` writes them: the response
-/// headers a server sent (`Set-Cookie`, ...) blanked and counted - each
-/// example is its own source - and the body untouched, since a body cannot be
-/// judged. `origin` rides on every row: a re-import that lost it would read a
-/// user-saved example as one the next spec sync may replace (#2430).
+/// The saved examples as `x-vayu-request.examples`: response headers a server
+/// sent (`Set-Cookie`, ...) blanked and counted per example, each its own
+/// source; the body untouched, since a body cannot be judged. `origin` rides on
+/// every row: without it a re-import would read a user-saved example as one the
+/// next spec sync may replace (#2430).
 Json examples_object_of (const ExportRequest& entry, ExportNotes& notes) {
     Json examples = Json::array ();
     for (const ExportExample& example : entry.examples) {
@@ -2030,10 +1902,10 @@ Json examples_object_of (const ExportRequest& entry, ExportNotes& notes) {
 }
 
 /**
- * `x-vayu-request`: everything about @p entry the operation's standard members
- * cannot state exactly. @p standalone adds what an operation would otherwise
- * say (method, description, elements, mock mode), for a request carried in
- * `x-vayu-collection.requests` with no operation of its own.
+ * `x-vayu-request`: everything about @p entry the standard members cannot state
+ * exactly. @p standalone adds what an operation would otherwise say (method,
+ * description, elements, mock mode), for a request in
+ * `x-vayu-collection.requests` with no operation.
  */
 Json vayu_request_object (const ExportRequest& entry, ExportNotes& notes, bool standalone) {
     const ApiKeyNames claimed = apikey_names_of (entry.auth);
@@ -2087,11 +1959,11 @@ Json vayu_request_object (const ExportRequest& entry, ExportNotes& notes, bool s
 }
 
 /**
- * `x-vayu-collection`: the collection's variables, auth and data contract, its
- * whole folder tree, and @p extra_requests - the requests no operation holds.
- * `folders` is written even when empty: its presence is what tells an import
- * that this document states its own tree, so an untagged operation belongs
- * at the root rather than in a folder named after its path.
+ * `x-vayu-collection`: variables, auth, data contract, the whole folder tree,
+ * and @p extra_requests (those no operation holds). `folders` is written even
+ * when empty: its presence tells an import the document states its own tree, so
+ * an untagged operation belongs at the root, not in a folder named after its
+ * path.
  */
 Json vayu_collection_object (const ExportCollection& collection,
 Json extra_requests,
@@ -2137,8 +2009,8 @@ void carry_in_extension (const ExportRequest& entry, Json& extra_requests, Expor
     notes.requests_only_in_extension += 1;
 }
 
-/// A 2.0 operation's `responses` from its stored examples: one response per
-/// status, the first writable example per media type under its `examples` map.
+/// A 2.0 operation's `responses` from stored examples: one per status, the
+/// first writable example per media type in its `examples` map.
 Json responses_v2_of (const ExportRequest& entry, ExportNotes& notes) {
     Json responses = Json::object ();
     for (const ExportExample& example : entry.examples) {
@@ -2167,25 +2039,22 @@ Json responses_v2_of (const ExportRequest& entry, ExportNotes& notes) {
 /// What a new operation is written with, beyond the request itself.
 struct OperationContext {
     Vocabulary vocabulary = Vocabulary::V3;
-    /// Whether the dialect requires `responses` (3.0 and 2.0 do, 3.1 does not).
+    /// 3.0 and 2.0 require `responses`; 3.1 does not.
     bool responses_required = false;
     AuthDisposition collection;
 };
 
-/**
- * One request as a new operation - a skeleton's every operation, and a full
- * bound export's operation for a request the document never declared.
- */
+/// One request as a new operation: every operation of a skeleton, and a full
+/// bound export's operation for a request the document never declared.
 Json operation_object (const ExportRequest& entry,
 const std::string& templated,
 ExportNotes& notes,
 const OperationContext& context,
 SchemeNamer& schemes) {
-    // One per member written below. `requestBody` carries the body's example
-    // and schema, as wide as the body, and every member written after it
-    // would otherwise copy it whole when the object grew (`reserve_members`).
-    // A member added here and not counted costs that copy, never a wrong
-    // document.
+    // One per member written below. `requestBody` is as wide as the body, and
+    // every later member would copy it when the object grew
+    // (`reserve_members`). A member added and not counted costs that copy,
+    // never a wrong document.
     constexpr size_t OPERATION_MEMBERS = 8;
     Json operation                     = Json::object ();
     vayu::utils::reserve_members (operation, OPERATION_MEMBERS);
@@ -2218,16 +2087,15 @@ SchemeNamer& schemes) {
         disposition_of (entry.auth), context.collection, schemes)) {
         operation["security"] = std::move (*security);
     }
-    // `x-vayu-elements` (issue #1518): a vendor extension key, never a
-    // standard OpenAPI field, so writing it is never "rewriting the user's
-    // contract" - the same reasoning `x-vayu-enabled` already rests on.
+    // `x-vayu-elements` (#1518) is a vendor extension, never a standard field,
+    // so writing it never rewrites the contract (as with `x-vayu-enabled`).
     if (says_something (entry.elements)) {
         operation["x-vayu-elements"] = Json (entry.elements);
     }
 
-    // An operation with no stored example documents no response at all where
-    // the dialect allows it (3.1): an invented `200 OK` would be the one claim
-    // this export is most likely to be believed about.
+    // No stored example documents no response where the dialect allows (3.1):
+    // an invented `200 OK` is the claim this export is likeliest to be believed
+    // about.
     Json responses = Json::object ();
     if (context.vocabulary == Vocabulary::V2) {
         responses = responses_v2_of (entry, notes);
@@ -2250,14 +2118,12 @@ SchemeNamer& schemes) {
 constexpr std::string_view VAYU_BASE_URL_TOKEN = "{{baseUrl}}";
 
 /**
- * @p origin as a Server Object. A bare `{{baseUrl}}` becomes the single-brace
- * `{baseUrl}` OpenAPI's own Server Variable syntax expects, with a declared
- * `default` when the collection has one - `resolve_server_url` substitutes it
- * exactly, so a re-import gets the real value back instead of a variable
- * whose own value is its own unresolved token (issue #1441). With no known
- * value, the bare double-brace token is kept exactly as before: an
- * undeclared single-brace variable is invalid OpenAPI, and a base the user
- * can see is unfinished beats one Vayu silently declared a false default for.
+ * @p origin as a Server Object. A bare `{{baseUrl}}` becomes OpenAPI's
+ * single-brace `{baseUrl}` with the collection's value as `default`, which
+ * `resolve_server_url` substitutes exactly, so a re-import gets the value back
+ * rather than a variable whose value is its own token (#1441). With no value
+ * the double-brace token stays: an undeclared single-brace variable is invalid
+ * OpenAPI, and a visibly unfinished base beats a false default.
  */
 Json server_object (const std::string& origin, const ExportCollection& collection) {
     if (origin != VAYU_BASE_URL_TOKEN || collection.base_url_value.empty ()) {
@@ -2268,9 +2134,8 @@ Json server_object (const std::string& origin, const ExportCollection& collectio
         Json{ { "baseUrl", Json{ { "default", collection.base_url_value } } } } } };
 }
 
-/// The tag a request's folder is written as - its whole path joined
-/// (`Pets/Actions`), which is what another tool can group by. The nesting
-/// itself travels in `x-vayu-collection.folders`.
+/// A request's folder as a tag, its whole path joined (`Pets/Actions`), which
+/// other tools group by; the nesting travels in `x-vayu-collection.folders`.
 std::optional<std::string> tag_of (const ExportRequest& entry) {
     if (entry.folder_path.empty ()) {
         return std::nullopt;
@@ -2326,8 +2191,8 @@ const ExportCollection& collection) {
     }
 }
 
-/// The document's own `security` (from the collection's auth) and the
-/// `securitySchemes` every operation and the root together asked for.
+/// The document's `security` (from the collection's auth) and the
+/// `securitySchemes` the operations and root asked for.
 void write_root_security (Json& document,
 const AuthDisposition& collection_disp,
 SkeletonSchemes& schemes) {
@@ -2369,8 +2234,8 @@ const std::vector<ExportRequest>& requests) {
         const std::string templated = path_template (*parts.path);
         const std::string method    = vayu::utils::ascii_lower (entry.method);
         if (!claimed.insert (std::format ("{} {}", method, templated)).second) {
-            // Two requests on the same method and path are one operation in a
-            // document, and the second would silently replace the first.
+            // One method and path is one operation; the second would silently
+            // replace the first.
             assembly.notes.duplicate_operations += 1;
             carry_in_extension (entry, extra_requests, assembly.notes);
             continue;
@@ -2416,21 +2281,22 @@ const std::vector<ExportRequest>& requests) {
 
 // --- The bound direction, assembled ----------------------------------------
 
-/// How a bound export writes: which mode the user chose, the dialect's
-/// vocabulary, and - in the full mode - the schemes it names.
+/// How a bound export writes: the user's mode, the dialect's vocabulary and, in
+/// full mode, the schemes it names.
 struct BoundWrite {
     BoundMode mode = BoundMode::Contract;
     OperationContext context;
     BoundSchemes* schemes = nullptr;
-    /// `base_paths_of` the document: the paths the matcher stripped when it stamped.
+    /// The document's `base_paths_of`: what the matcher stripped when it
+    /// stamped.
     std::vector<std::string> base_paths;
 };
 
 /**
- * The root requirement an import reads (`primary_scheme` in
- * `import_document.cpp`): the document's own `security`, else its first
- * declared scheme - so a document that declares schemes but requires none
- * already says "the first one" and is not rewritten to say it again.
+ * The root requirement an import reads (`primary_scheme`,
+ * `import_document.cpp`): the document's `security`, else its first scheme. A
+ * document declaring schemes but requiring none already says "the first one"
+ * and is not rewritten to.
  */
 std::optional<Json> root_requirement_as_imported (const Json& document, Vocabulary vocabulary) {
     if (const auto own = document.find ("security"); own != document.end ()) {
@@ -2472,12 +2338,12 @@ const BoundSchemes& schemes) {
     return true; // inherit / a mode OpenAPI cannot state: nothing to write
 }
 
-/// @p body written into a media object the operation already declares: its
-/// example where the document states none, its schema only where it has none.
-/// A file states no example. By value for `media_object_of`'s reason.
+/// @p body written into a media object the operation declares: its example
+/// where the document states none, its schema only where it has none; a file
+/// states no example. By value for `media_object_of`'s reason.
 void write_into_media (Json& media, BodyExample body) {
-    // The schema is read off the value before the value moves; it is still
-    // written second, so the members land in the order they always have.
+    // Read off the value before it moves, still written second so members keep
+    // their order.
     std::optional<Json> schema;
     if (media.contains ("schema")) {
         // The document's own schema stays.
@@ -2499,12 +2365,10 @@ void write_into_media (Json& media, BodyExample body) {
 
 /**
  * A request body written into an operation the document declares (full mode).
- *
- * The document's own schema stays: the request's body lands as the media
- * type's `example` (an `examples` map, which admits no `example` beside it, is
- * left alone - `x-vayu-request.body` carries the body either way), and a media
- * type the operation does not declare is added whole. A `$ref` request body is
- * shared and is never written through.
+ * The document's schema stays; the body lands as the media type's `example`,
+ * except beside an `examples` map, which admits none (`x-vayu-request.body`
+ * carries it either way). An undeclared media type is added whole; a `$ref`
+ * body is shared and never written through.
  */
 void write_body_full (Json& operation, const ExportRequest& entry, Vocabulary vocabulary) {
     if (vocabulary == Vocabulary::V2) {
@@ -2551,10 +2415,9 @@ void write_body_full (Json& operation, const ExportRequest& entry, Vocabulary vo
 
 /// A 2.0 operation's saved examples merged into the responses it declares.
 void write_examples_v2 (Json& operation, const ExportRequest& entry, ExportNotes& notes) {
-    // An imported example came from this document - or was sampled off its
-    // schema, which the document never stated (see `disposition_of`, which
-    // makes the same call for 3.x). Examples cannot be edited in place, so
-    // only a response somebody saved is news to the document.
+    // An imported example came from this document or was sampled off its schema
+    // (`disposition_of` makes the same call for 3.x). Examples cannot be edited
+    // in place, so only a saved response is news.
     ExportRequest saved = entry;
     std::erase_if (
     saved.examples, [] (const ExportExample& e) { return e.from_import; });
@@ -2579,11 +2442,10 @@ void write_examples_v2 (Json& operation, const ExportRequest& entry, ExportNotes
 }
 
 /**
- * Everything the contract mode leaves out, written into an operation the
- * document declares (full mode): the request's name and description, a
- * parameter for every row the operation does not declare, its body, its auth
- * where the operation does not already state it, and the `x-vayu-*`
- * extensions for the rest.
+ * Full mode, into an operation the document declares: what contract mode leaves
+ * out. The request's name and description, a parameter per undeclared row, the
+ * body, the auth where the operation does not already state it, and `x-vayu-*`
+ * for the rest.
  */
 void write_everything (Json& operation,
 const ExportRequest& entry,
@@ -2591,9 +2453,8 @@ DeclaredParameters declared,
 ExportNotes& notes,
 const BoundWrite& write) {
     const Vocabulary vocabulary = write.context.vocabulary;
-    // The name an import reads (`name_draft`): the summary, else the
-    // operationId, else the method and path. A request still called that
-    // needs no summary written for it.
+    // The name an import reads (`name_draft`): summary, else operationId, else
+    // method and path. A request still named that needs no summary.
     std::string imported_name = string_member (operation, "summary");
     if (imported_name.empty () && !operation.contains ("summary")) {
         imported_name = string_member (operation, "operationId");
@@ -2625,8 +2486,8 @@ const BoundWrite& write) {
     }
     write_body_full (operation, entry, vocabulary);
 
-    // An operation with no `security` of its own imports as `inherit` - the
-    // collection's auth - so it already says the request's when the two agree.
+    // An operation with no `security` imports as `inherit` (the collection's
+    // auth), so it already says the request's when the two agree.
     const AuthDisposition request_disp = disposition_of (entry.auth);
     const auto own_security            = operation.find ("security");
     const bool already_said            = own_security == operation.end () ?
@@ -2669,9 +2530,8 @@ const BoundWrite& write) {
     } else {
         count_undeclared_rows (entry, declared, notes);
         count_unwritten_body (entry, notes);
-        // `x-vayu-elements` (issue #1518): a vendor extension key added to an
-        // operation the document already declares is additive, never a
-        // rewrite of what the operation itself means.
+        // `x-vayu-elements` (#1518) on a declared operation is an additive
+        // vendor key, never a rewrite of what it means.
         if (says_something (entry.elements)) {
             operation["x-vayu-elements"] = Json (entry.elements);
         }
@@ -2688,11 +2548,9 @@ const BoundWrite& write) {
 }
 
 /**
- * Every operation on one path item, patched or removed.
- *
- * @p document is the whole stored document, read for the components a `$ref`
- * names. Only members *under* @p path_item are written, so nothing this reads
- * moves while it is being read.
+ * Every operation on one path item, patched or removed. @p document is the
+ * whole stored document, read for the components a `$ref` names; only members
+ * under @p path_item are written, so nothing read moves.
  */
 void patch_path_item (Assembly& assembly,
 const std::vector<ExportRequest>& requests,
@@ -2720,9 +2578,8 @@ Json& path_item) {
         }
         claimed.insert (*found);
         assembly.notes.requests_exported += 1;
-        // The contract mode writes into a 3.x operation only: 2.0 states
-        // parameters and examples in a vocabulary of its own. The full mode
-        // was asked to write everything, and writes 2.0's.
+        // Contract mode writes into 3.x operations only (2.0 has its own
+        // vocabulary); full mode was asked to write everything, 2.0 included.
         if (dialect.writable || write.mode == BoundMode::Full) {
             patch_operation (*operation, document, requests[*found], inherited,
             assembly.notes, write);
@@ -2731,10 +2588,9 @@ Json& path_item) {
 }
 
 /**
- * Every operation the document declares, patched or removed.
- *
- * A path left with no operations goes with them. This is what makes a re-import
- * of the exported document produce the collection it came from.
+ * Every declared operation, patched or removed; a path left with no operations
+ * goes too. That is what makes re-importing the export produce the collection
+ * it came from.
  */
 void patch_document_paths (Assembly& assembly,
 const std::vector<ExportRequest>& requests,
@@ -2756,9 +2612,9 @@ std::unordered_set<std::string>& referenced_paths) {
                 referenced_paths.insert (entry.key ());
                 continue;
             }
-            // The document is read (for the components a `$ref` names) while a
-            // path item inside it is written; the two never touch the same
-            // node, and no member of the root is added or removed here.
+            // The document is read (for `$ref` components) while a path item in
+            // it is written; the two never touch one node, and no root member
+            // changes here.
             patch_path_item (assembly, requests, assembly.document, dialect, write,
             entry.key (), by_operation_id, by_method_path, claimed, path_item);
             const bool has_operation = std::any_of (PATH_ITEM_METHODS.begin (),
@@ -2766,9 +2622,6 @@ std::unordered_set<std::string>& referenced_paths) {
                 return path_item.contains (std::string (method));
             });
             if (!has_operation) {
-                // A path left with no operations goes with them. This is what
-                // makes a re-import of the exported document produce the
-                // collection it came from.
                 emptied.push_back (entry.key ());
             }
         }
@@ -2799,11 +2652,10 @@ ExportNotes& notes) {
 }
 
 /**
- * The requests no operation in the document claimed, added as operations of
- * their own (full mode) - under the path and method their URL states, filed
- * under their folder's tag. A request whose URL states no path, or whose
- * method and path an operation already holds, goes whole into
- * `x-vayu-collection.requests` instead.
+ * Full mode: the requests no operation claimed, added as operations under the
+ * method and path their URL states and their folder's tag. One whose URL states
+ * no path, or whose method and path an operation holds, goes whole into
+ * `x-vayu-collection.requests`.
  */
 void add_unclaimed_operations (Assembly& assembly,
 const std::vector<ExportRequest>& requests,
@@ -2848,8 +2700,8 @@ std::vector<std::string>& new_tags) {
     }
 }
 
-/// A Server Object's URL with each `{variable}` replaced by its `default` -
-/// the URL an import reads it as.
+/// A Server Object's URL with each `{variable}` replaced by its `default`: the
+/// URL an import reads.
 std::string resolved_server_url (const Json& server) {
     std::string url      = string_member (server, "url");
     const auto variables = server.find ("variables");
@@ -2865,8 +2717,8 @@ std::string resolved_server_url (const Json& server) {
     return url;
 }
 
-/// `servers[0]` pointed at @p base when it no longer resolves to it, keeping
-/// its description - a 3.x document's half of `write_base_url`.
+/// Points `servers[0]` at @p base when it no longer resolves there, keeping its
+/// description; the 3.x half of `write_base_url`.
 void write_server_v3 (Json& document, const std::string& base) {
     Json& servers = document["servers"];
     if (!servers.is_array ()) {
@@ -2887,8 +2739,8 @@ void write_server_v3 (Json& document, const std::string& base) {
     first = std::move (server);
 }
 
-/// `schemes`, `host` and `basePath` pointed at @p base where they no longer
-/// say it - a 2.0 document's half of `write_base_url`.
+/// Points `schemes`, `host` and `basePath` at @p base where they no longer say
+/// it; the 2.0 half of `write_base_url`.
 void write_host_v2 (Json& document, const std::string& base) {
     const size_t scheme_end = base.find ("://");
     if (scheme_end == std::string::npos) {
@@ -2916,10 +2768,9 @@ void write_host_v2 (Json& document, const std::string& base) {
 }
 
 /**
- * The document's base URL pointed at the collection's `baseUrl` when it no
- * longer says the same - the value a re-import turns back into
- * `{{baseUrl}}`. A value that is still a `{{variable}}` names no server and is
- * left out.
+ * Points the document's base URL at the collection's `baseUrl` when they
+ * differ: the value a re-import turns back into `{{baseUrl}}`. A value still a
+ * `{{variable}}` names no server and is skipped.
  */
 void write_base_url (Json& document, const ExportCollection& collection, Vocabulary vocabulary) {
     const std::string& base = collection.base_url_value;
@@ -2933,11 +2784,9 @@ void write_base_url (Json& document, const ExportCollection& collection, Vocabul
     }
 }
 
-/**
- * The document's own name, description, base URL and `security`, tags for the
- * folders new operations were filed under, and the `x-vayu-*` root members -
- * the collection-level half of the full mode.
- */
+/// Full mode's collection-level half: the document's name, description, base
+/// URL and `security`, tags for the folders new operations went into, and the
+/// `x-vayu-*` root members.
 void write_document_root (Assembly& assembly,
 const ExportCollection& collection,
 const BoundWrite& write,
@@ -2997,15 +2846,12 @@ const std::vector<std::string>& new_tags) {
 }
 
 /**
- * The stored bytes, patched.
- *
- * Everything Vayu does not model - `info`, `tags`, vendor extensions,
- * `security`, components no operation here references - is carried through
- * untouched, because it is carried through by simply not being visited. That is
- * the whole reason this direction exists: a rebuilt document would be Vayu's
- * opinion of the user's contract, and the parts it has no opinion about would
- * quietly disappear. The full mode (`BoundMode::Full`) visits more - see
- * `write_everything` and `write_document_root` - and still never rebuilds.
+ * The stored bytes, patched. Everything Vayu does not model (`info`, `tags`,
+ * vendor extensions, `security`, components no operation here references) is
+ * carried through by not being visited. That is why this direction exists: a
+ * rebuilt document would be Vayu's opinion of the user's contract, and what it
+ * has no opinion about would vanish. Full mode (`BoundMode::Full`) visits more
+ * (`write_everything`, `write_document_root`) and still never rebuilds.
  */
 Assembly patch_bound_document (const std::string& content,
 const ExportCollection& collection,
@@ -3047,12 +2893,11 @@ BoundMode mode) {
 
     std::unordered_set<size_t> claimed;
     /*
-     * Paths whose Path Item is itself a `$ref` (legal in 3.0/3.1, and what a
-     * bundler emits when it hoists a shared item into `components.pathItems`).
-     * Its methods are not readable from here without following the ref and
-     * mutating a node other paths may share, so such an item is left exactly as
-     * it is - and a request that names one of those paths is reported as
-     * carried rather than as missing, which is what it is.
+     * Paths whose Path Item is itself a `$ref` (legal in 3.0/3.1; bundlers emit
+     * it when hoisting a shared item into `components.pathItems`). Its methods
+     * are not readable without following the ref and mutating a node other
+     * paths may share, so it is left as is, and a request naming it is reported
+     * as carried, not missing.
      */
     std::unordered_set<std::string> referenced_paths;
 
@@ -3079,9 +2924,9 @@ std::string serialize (const Json& document, ExportFormat format) {
     if (format == ExportFormat::Yaml) {
         return emit_yaml (document);
     }
-    // `error_handler_t::replace` for the same reason the YAML writer carries
-    // it: a stored example body is bytes off somebody's server, and one invalid
-    // sequence in it must not cost the user the whole export.
+    // `error_handler_t::replace`, as the YAML writer: a stored example body is
+    // bytes off somebody's server, and one invalid sequence must not cost the
+    // whole export.
     return document.dump (2, ' ', false, Json::error_handler_t::replace) + "\n";
 }
 
@@ -3112,7 +2957,7 @@ const std::optional<std::string>& spec_content,
 ExportFormat format,
 BoundMode bound_mode) {
     // Every writer below reads these copies, so none can write a credential
-    // row's value (see "Credentials outside an auth block").
+    // row's value ("Credentials outside an auth block").
     const ExportCollection safe_collection = withhold_credentials (collection);
     std::vector<ExportRequest> safe_requests;
     safe_requests.reserve (requests.size ());
