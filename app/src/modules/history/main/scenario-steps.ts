@@ -6,22 +6,17 @@
  */
 
 /**
- * The step list of a scenario run, as data.
+ * The step list of a scenario run, as data. A collection run reaches the renderer from two sources
+ * that do not carry the same thing:
  *
- * A collection run reaches the renderer twice over and the two sources do not
- * carry the same thing:
+ * - **Live**, one `step` SSE event per step execution (`build_step_payload`,
+ *   engine/src/core/scenario_runner.cpp): identity, outcome, status code and latency, no exchange.
+ * - **Stored**, one `results` row per step execution, arriving as `RunReport.results[]` with the
+ *   design-mode trace plus the step identity `stamp_step_identity` writes onto it; the response
+ *   pane restores from that row.
  *
- * - **Live**, one `step` SSE event per step execution
- *   (`build_step_payload`, engine/src/core/scenario_runner.cpp) - identity,
- *   outcome, status code and latency, and no exchange.
- * - **Stored**, one `results` row per step execution, reaching the app as
- *   `RunReport.results[]` with the design-mode trace plus the step identity
- *   `stamp_step_identity` writes onto it. That row is what the response pane
- *   restores from.
- *
- * Both collapse to {@link ScenarioStepRow} here so the view renders one list
- * and not two. Everything in this file is pure: the merge, the ordering and
- * the counts are the parts worth pinning, and none of them need a DOM.
+ * Both collapse to {@link ScenarioStepRow} so the view renders one list, not two. Everything here
+ * is pure: the merge, the ordering and the counts are worth pinning, and none needs a DOM.
  */
 
 import type {
@@ -41,18 +36,15 @@ import { missedBudgetsReason } from "@/components/shared/run-outcome";
 export type OutcomeCounts = Record<StepOutcome, number>;
 
 /**
- * "41 passed, 2 failed" - what the run did, not that it is over (#1358): the
- * line its notification and its spoken announcement both carry.
+ * "41 passed, 2 failed": what the run did, not that it is over (#1358), the line its notification
+ * and its spoken announcement both carry. Skipped, errored and stopped steps are named only when
+ * there are any, so a clean run's line stays two numbers long and an errored run never reads as a
+ * pass. A step a Stop cut short (#3397) is named stopped and is in no failure count, so a stopped
+ * run does not read as failed.
  *
- * Skipped, errored and stopped steps are named only when there are any: a
- * clean run's line stays two numbers long, and a run that errored never reads
- * as a pass. A step a Stop cut short (#3397) is named as stopped and is in no
- * failure count, so a stopped run does not read as one that failed.
- *
- * Given the stored report's budget block, a run that missed a budget says so
- * after the counts ("12 passed, 0 failed. 1 of 2 budgets missed: p99", #3539):
- * a missed budget fails the run while every step passed, and the counts alone
- * would read as a clean run.
+ * Given the stored report's budget block, a run that missed a budget says so after the counts ("12
+ * passed, 0 failed. 1 of 2 budgets missed: p99", #3539): a missed budget fails the run while every
+ * step passed, and the counts alone would read clean.
  */
 export function stepOutcomeLine(
 	counts: OutcomeCounts,
@@ -68,11 +60,9 @@ export function stepOutcomeLine(
 }
 
 /**
- * One step execution, whichever source it came from.
- *
- * `result` is what separates the two: a live row has none, so the response
- * pane for that row is simply absent until the run ends and its stored row
- * arrives. A row is never invented to fill the gap.
+ * One step execution, whichever source it came from. `result` separates the two: a live row has
+ * none, so its response pane is absent until the run ends and the stored row arrives; a row is
+ * never invented to fill the gap.
  */
 export interface ScenarioStepRow {
 	/** 0-based pass over the plan. */
@@ -86,9 +76,8 @@ export interface ScenarioStepRow {
 	statusCode: number;
 	latencyMs: number;
 	/**
-	 * Which `data` row this iteration bound, absent for a run without a data
-	 * set. Both sources carry it, so a row does not gain a number when its
-	 * stored copy arrives.
+	 * Which `data` row this iteration bound; absent for a run without a data set. Both sources
+	 * carry it, so a row does not gain a number when its stored copy arrives.
 	 */
 	dataRowIndex?: number;
 	/**
@@ -98,9 +87,8 @@ export interface ScenarioStepRow {
 	 */
 	stepsNotRun?: number;
 	/**
-	 * This step's extractions that found nothing and unset their variable
-	 * (issue #3053). Both sources carry it, on the terms {@link stepsNotRun}
-	 * is carried on.
+	 * This step's extractions that found nothing and unset their variable (#3053). Both sources
+	 * carry it, on {@link stepsNotRun}'s terms.
 	 */
 	extractorMisses?: number;
 	/**
@@ -109,43 +97,32 @@ export interface ScenarioStepRow {
 	 */
 	unresolvedTokens?: number;
 	/**
-	 * The stored request this step executed, so a step that failed has a way
-	 * back to the request that sent it (issue #730).
+	 * The stored request this step executed, so a failed step has a way back to the request that
+	 * sent it (#730). **Both sources carry it** (#831): `stamp_step_identity` writes it onto the
+	 * stored trace and `build_step_payload` sends it on the live frame, so a step does not gain its
+	 * link when the run ends; one id is constant-size, which is why the frame can carry it while
+	 * the assertion list stays on the stored row.
 	 *
-	 * **Both sources carry it** (issue #831): `stamp_step_identity` writes it
-	 * onto the stored trace and `build_step_payload` sends it on the live
-	 * frame, so a step does not gain its link when the run ends - one id is
-	 * constant-size, which is what lets the frame carry it where the assertion
-	 * list stays on the stored row.
-	 *
-	 * Absent for a step whose plan entry names no stored request, and for a row
-	 * stored before the runner stamped one; the card offers no link rather than
-	 * one to an empty id.
+	 * Absent for a step whose plan entry names no stored request, and for a row stored before the
+	 * runner stamped one; the card then offers no link rather than one to an empty id.
 	 */
 	requestId?: string;
 	/**
-	 * What the contract says about this step's response (issue #681), on a row
-	 * that has no stored result yet.
+	 * What the contract says about this step's response (#681), on a row with no stored result yet.
+	 * **The live half only**: a stored row's verdict is read back through `responseFromRunResult`,
+	 * the funnel its response comes from, so there is one reader of `trace.validation`, not a
+	 * second copy here that would miss its fixes. `ScenarioStepCard` takes whichever the row has;
+	 * they are the same object, as the engine stores the one it published.
 	 *
-	 * **The live half only.** A stored row's verdict is read back through
-	 * `responseFromRunResult`, the same funnel its response comes from, so
-	 * there is one reader of `trace.validation` rather than a second copy here
-	 * that would not receive its fixes. `ScenarioStepCard` takes whichever of
-	 * the two the row has; they are the same object, because the engine stores
-	 * the one it published.
-	 *
-	 * Absent for a step of an unbound collection and for one that sent nothing;
-	 * absent is never rendered as "checked and fine".
+	 * Absent for a step of an unbound collection and for one that sent nothing; absent is never
+	 * rendered as "checked and fine".
 	 */
 	validation?: ResponseValidation;
 	/**
-	 * How many of this step's assertions held (issue #724), on a row that has no
-	 * stored result yet.
-	 *
-	 * **The live half only**, for the reason the verdict above is: a stored
-	 * row's assertions come back as the list itself, through the funnel its
-	 * response comes from, and `ScenarioStepCard` tallies that list rather than
-	 * reading a second copy the engine would have to keep in step.
+	 * How many of this step's assertions held (#724), on a row with no stored result yet. **The
+	 * live half only**, for the verdict's reason: a stored row's assertions come back as the list
+	 * itself, through its response's funnel, and `ScenarioStepCard` tallies that list rather than
+	 * read a second copy the engine would have to keep in step.
 	 */
 	tests?: StepTestTally;
 	/** The stored result, present only on a row read back from the report. */
@@ -153,12 +130,9 @@ export interface ScenarioStepRow {
 }
 
 /**
- * What the reader has narrowed the step list to (issues #730, #832).
- *
- * Two controls, one predicate. Narrowing by outcome and by name at once is the
- * useful case - "the failed executions of `POST /checkout`" - and two lists
- * filtered in sequence would be the same thing said twice, with two empty
- * states to keep in step.
+ * What the reader has narrowed the step list to (#730, #832). Two controls, one predicate: by
+ * outcome and by name at once is the useful case ("the failed executions of `POST /checkout`"), and
+ * two lists filtered in sequence would say it twice, with two empty states to keep in step.
  */
 export interface StepListFilter {
 	/** The outcome chip that is pressed, or `null` for all of them. */
@@ -168,46 +142,35 @@ export interface StepListFilter {
 }
 
 /**
- * Whether a step's **name** contains `query`, case-insensitively.
- *
- * The name and nothing else. A row's URL lives in its stored trace, which a
- * live row does not have, so matching it would make the box search less while
- * a run streams than it does once the run ends - a control that quietly
- * changes what it covers is worse than one that covers one field always. What
- * it matches is stated on the field itself and in
- * `docs/app/COMPONENTS/history.md`.
+ * Whether a step's **name** contains `query`, case-insensitively. The name only: a row's URL lives
+ * in its stored trace, which a live row lacks, so matching it would make the box search less while
+ * a run streams than after it ends, and a control that quietly changes what it covers is worse than
+ * one that always covers one field. The field itself and `docs/app/COMPONENTS/history.md` state
+ * what it matches.
  */
 function matchesQuery(step: ScenarioStepRow, query: string): boolean {
 	return step.name.toLowerCase().includes(query);
 }
 
 /**
- * Whether either control is narrowing the list.
- *
- * The one place that question is answered, because three callers ask it and
- * they must agree: {@link filterSteps} hands the list back untouched when
- * nothing narrows, {@link emptyStepListReason} has no control to blame an empty
- * list on, and `useFilteredSteps` has nothing to maintain. A whitespace-only
- * query narrows nothing, which is the half a second copy of this would get
- * wrong.
+ * Whether either control is narrowing the list. The one place that is answered, because three
+ * callers must agree: {@link filterSteps} hands the list back untouched when nothing narrows,
+ * {@link emptyStepListReason} then has no control to blame, and `useFilteredSteps` has nothing to
+ * maintain. A whitespace-only query narrows nothing, the half a second copy would get wrong.
  */
 export function narrowsSteps(filter: StepListFilter): boolean {
 	return filter.outcome !== null || filter.query.trim() !== "";
 }
 
 /**
- * The predicate `filter` describes, as a function of one row.
+ * The predicate `filter` describes, as a function of one row. **The one definition, which is why it
+ * is exported** (#1297): a live list counts its matches and produces its window in two passes that
+ * stop at different places (the count at the end of the batch, the window once it has enough rows),
+ * so neither can be a call to {@link filterSteps}, which returns every match. Handing out the
+ * predicate keeps that from becoming a second copy of the rule; {@link filterSteps} is this applied
+ * to a whole list, and the oracle a windowed reader is checked against.
  *
- * **The one definition, and the reason it is exported** (issue #1297). A live
- * list counts its matches and produces its window in two passes that stop at
- * different places - the count runs to the end of the batch, the window stops
- * as soon as it has enough rows - so neither can be expressed as a call to
- * {@link filterSteps}, which always returns every match as an array. Handing
- * out the predicate itself is what keeps that from becoming a second copy of
- * the rule: {@link filterSteps} is this function applied to a whole list, and
- * remains the oracle a windowed reader is checked against.
- *
- * The query is trimmed and lowercased once, here, rather than per row.
+ * The query is trimmed and lowercased once, here, not per row.
  */
 export function stepMatcher(filter: StepListFilter): (step: ScenarioStepRow) => boolean {
 	const query = filter.query.trim().toLowerCase();
@@ -218,15 +181,10 @@ export function stepMatcher(filter: StepListFilter): (step: ScenarioStepRow) => 
 }
 
 /**
- * The rows to show under `filter`.
- *
- * Returns the same array reference when nothing narrows, so an untouched view
- * hands its window the total it already had rather than a new array that only
- * looks like a new list.
- *
- * One predicate, wherever the rows come from: {@link stepMatcher} holds it, and
- * a live list (`useFilteredSteps`, issues #1205 and #1297) calls that directly
- * rather than testing rows a second way.
+ * The rows to show under `filter`. Returns the same array when nothing narrows, so an untouched
+ * view hands its window the total it had rather than a new array that only looks like a new list.
+ * One predicate wherever the rows come from: {@link stepMatcher} holds it, and a live list
+ * (`useFilteredSteps`, #1205, #1297) calls it directly rather than testing rows another way.
  */
 export function filterSteps(
 	steps: readonly ScenarioStepRow[],
@@ -243,16 +201,12 @@ export interface EmptyStepListReason {
 }
 
 /**
- * The empty state for a list some control narrowed to nothing, or `null` when
- * no control is narrowing it - that case is the run's own emptiness and the
- * view answers it with the run's status, not with this.
- *
- * Which control emptied the list is the whole content of the message, because
- * the two are cleared in different places: a reader who reads "no failed steps"
- * over a list their search emptied clears the wrong one. The outcome half also
- * has to hold the thinning disclosure - the chip counts the *run* and the rows
- * are the *store's*, and a filled store drops passes - which is why an
- * outcome-shaped emptiness cannot reuse the search's wording.
+ * The empty state for a list a control narrowed to nothing, or `null` when none is narrowing (the
+ * run's own emptiness, which the view answers with the run's status). Which control emptied the
+ * list is the whole message, as the two are cleared in different places: a reader shown "no failed
+ * steps" over a list their search emptied clears the wrong one. The outcome half also carries the
+ * thinning disclosure (the chip counts the *run*, the rows are the *store's*, and a filled store
+ * drops passes), so it cannot reuse the search's wording.
  */
 export function emptyStepListReason(
 	filter: StepListFilter,
@@ -288,13 +242,11 @@ export function emptyStepListReason(
 }
 
 /**
- * The tally of a stored step's assertion list, or `undefined` when it made none.
- *
- * The live half arrives counted (the `step` frame carries two numbers); a
- * stored row arrives as the list, so this is where the two meet. `undefined`
- * for an empty list keeps the chip absent on a scriptless step rather than
- * claiming "0 tests passed" - and a run stored before #724 has no list at all,
- * which reads the same way rather than as a failure.
+ * The tally of a stored step's assertion list, or `undefined` when it made none. The live half
+ * arrives counted (the `step` frame carries two numbers); a stored row arrives as the list, so the
+ * two meet here. `undefined` for an empty list keeps the chip off a scriptless step rather than
+ * claiming "0 tests passed", and a run stored before #724 has no list, which reads the same, not as
+ * a failure.
  */
 export function tallyTests(results: readonly TestResult[] | undefined): StepTestTally | undefined {
 	if (!results?.length) return undefined;
@@ -306,12 +258,10 @@ export function tallyTests(results: readonly TestResult[] | undefined): StepTest
 }
 
 /**
- * A step execution's identity within its run.
- *
- * `(iteration, stepIndex)` and not the arrival order: the SSE ring replays
- * from `Last-Event-ID` on reconnect, so a client that resumed mid-run receives
- * events it has already rendered. Keying on identity makes a replay idempotent
- * where appending would double every row it re-saw.
+ * A step execution's identity within its run: `(iteration, stepIndex)`, not arrival order. The SSE
+ * ring replays from `Last-Event-ID` on reconnect, so a resumed client receives events it already
+ * rendered; keying on identity makes a replay idempotent where appending would double every re-seen
+ * row.
  */
 export function stepKey(step: { iteration: number; stepIndex: number }): string {
 	return `${step.iteration}:${step.stepIndex}`;
@@ -323,15 +273,12 @@ function byPlanOrder(a: ScenarioStepRow, b: ScenarioStepRow): number {
 }
 
 /**
- * The first index of a plan-ordered list whose row does not sort before `row` -
- * where `row` belongs, and where its own earlier copy would be.
- *
- * A binary search rather than a re-sort and a scan (issue #730): the list is
- * sorted by construction, so sorting per arriving event re-establishes an
- * invariant that was never lost, and it did so on every one of a 5,000-step
- * run's events. The ordinary case is an append, which the first comparison
- * below answers; a gap-resume that lands out of order still finds its seat
- * rather than sitting at the end.
+ * The first index of a plan-ordered list whose row does not sort before `row`: where `row` belongs,
+ * and where its own earlier copy would be. A binary search, not a re-sort and a scan (#730): the
+ * list is sorted by construction, and sorting per event would re-establish an invariant never lost,
+ * on every one of a 5,000-step run's events. The ordinary append is answered by the first
+ * comparison below; a gap-resume that lands out of order still finds its seat rather than sitting
+ * at the end.
  */
 function planOrderIndex(steps: readonly ScenarioStepRow[], row: ScenarioStepRow): number {
 	if (steps.length === 0 || byPlanOrder(row, steps[steps.length - 1]) > 0) return steps.length;
@@ -346,12 +293,9 @@ function planOrderIndex(steps: readonly ScenarioStepRow[], row: ScenarioStepRow)
 }
 
 /**
- * Whether a replayed event says anything its row does not already say.
- *
- * The four fields a `step` event carries that can differ between the first
- * delivery of an execution and a replay of it. Identity is not among them: two
- * rows only reach this comparison when they sort equal, which is exactly when
- * `stepKey` would match.
+ * Whether a replayed event says anything its row does not: the four fields a `step` event carries
+ * that can differ between an execution's first delivery and a replay. Identity is not among them,
+ * as two rows only reach this when they sort equal, which is exactly when `stepKey` would match.
  */
 function sameStepRow(current: ScenarioStepRow, row: ScenarioStepRow): boolean {
 	return (
@@ -363,11 +307,9 @@ function sameStepRow(current: ScenarioStepRow, row: ScenarioStepRow): boolean {
 }
 
 /**
- * A live step list and the summary that describes it, folded together.
- *
- * They travel as one because the summary is only correct *for* these rows: the
- * fold maintains it incrementally ({@link foldStepEvents}), so a caller holding
- * one without the other holds a number nothing produced.
+ * A live step list and its summary, folded together. They travel as one because the summary is only
+ * correct *for* these rows: the fold maintains it incrementally ({@link foldStepEvents}), so one
+ * held without the other is a number nothing produced.
  */
 export interface StepFold {
 	steps: ScenarioStepRow[];
@@ -379,35 +321,28 @@ export interface StepFoldResult {
 	/** The list and its summary after the batch. */
 	fold: StepFold;
 	/**
-	 * Whether every row the batch changed landed at the end of the list.
+	 * Whether every row the batch changed landed at the end of the list: false when a replay
+	 * replaced a row in place or a gap-resume spliced one in (the two cases that disturb rows
+	 * already shown), true for the ordinary append and for a batch that changed nothing.
 	 *
-	 * False when a replay replaced a row in place or a gap-resume spliced one
-	 * in - the two cases that disturb rows a reader has already been shown.
-	 * True for the ordinary append, and for a batch that changed nothing.
-	 *
-	 * Its reader is `scenario-run-store`, which turns it into the epoch a
-	 * filtered view needs to tell "the same list, longer" from "a different
-	 * list" without comparing the rows (issue #1205). The fold is the only
-	 * place that knows: by the time the list reaches a reader, an appended row
-	 * and a replaced one look alike.
+	 * `scenario-run-store` turns it into the epoch a filtered view needs to tell "the same list,
+	 * longer" from "a different list" without comparing rows (#1205). The fold is the only place
+	 * that knows: by the time the list reaches a reader, an appended row and a replaced one look
+	 * alike.
 	 */
 	appendedOnly: boolean;
 }
 
 /**
- * Fold a batch of `step` events into the live list and its summary.
+ * Fold a batch of `step` events into the live list and its summary. **One commit per batch, one
+ * copy per batch**: the list is rebuilt once here however many events the batch carries, where
+ * folding them one at a time costs a full array copy each, quadratic over a run, and is why
+ * `ScenarioRunService` buffers rather than committing per event (#1153).
  *
- * **One commit per batch, one copy per batch.** The list is rebuilt once here
- * however many events the batch carries, where folding them one at a time cost
- * a full array copy each - quadratic over a run, and the reason
- * `ScenarioRunService` buffers rather than committing per event (issue #1153).
- *
- * Returns the `current` fold itself when no event changed anything, so a
- * replayed batch cannot force a re-render of a list it did not alter. A later
- * event for a key already present replaces it rather than being dropped: the
- * engine sends one event per step execution, so a second one for the same key
- * can only be a replay of that execution, and the newer copy is the one to
- * trust.
+ * Returns the `current` fold itself when no event changed anything, so a replayed batch cannot
+ * force a re-render. A later event for a key already present replaces it rather than being dropped:
+ * the engine sends one event per step execution, so a second one for the key can only be a replay,
+ * and the newer copy is the one to trust.
  */
 export function foldStepEvents(
 	current: StepFold,
@@ -422,11 +357,9 @@ export function foldStepEvents(
 		const fold = next ?? current;
 		const row: ScenarioStepRow = { ...event };
 		/*
-		 * One search answers both questions - "is this a replay?" and "where
-		 * does a new row go?" - because plan order *is* the identity order: two
-		 * rows sort equal exactly when `stepKey` would match. The scan this
-		 * replaces walked the whole list per event, which on a long run is the
-		 * same cost as the sort below it.
+		 * One search answers "is this a replay?" and "where does a new row go?", because plan order
+		 * *is* the identity order: two rows sort equal exactly when `stepKey` would match. A
+		 * whole-list scan per event costs as much as the sort it would avoid on a long run.
 		 */
 		const at = planOrderIndex(fold.steps, row);
 		const replacing = at < fold.steps.length && byPlanOrder(fold.steps[at], row) === 0;
@@ -454,10 +387,9 @@ export function foldStepEvents(
 }
 
 /**
- * The step identity the engine stamps onto a stored trace, when the row carries
- * one. A `results` row without it is not a scenario step - a report fetched for
- * a load run, or a row written before the runner existed - and is skipped
- * rather than rendered as step 0 of iteration 0.
+ * The step identity the engine stamps onto a stored trace, when the row has one. A `results` row
+ * without it is not a scenario step (a load run's report, or a row written before the runner
+ * existed) and is skipped, not rendered as step 0 of iteration 0.
  */
 function stepRowFromResult(result: RunResultSample): ScenarioStepRow | null {
 	const trace = result.trace;
@@ -477,9 +409,8 @@ function stepRowFromResult(result: RunResultSample): ScenarioStepRow | null {
 		...(typeof trace.unresolvedTokens === "number" && trace.unresolvedTokens > 0
 			? { unresolvedTokens: trace.unresolvedTokens }
 			: {}),
-		// The one thing the trace carried that nothing read (issue #730). A row
-		// written before the runner stamped it has none, and the card offers no
-		// link rather than one to an empty id.
+		// The stored trace's link back to its request (#730). A row written before the runner
+		// stamped it has none, and the card offers no link rather than one to an empty id.
 		requestId: trace.requestId,
 		name: trace.stepName ?? `Step ${trace.stepIndex + 1}`,
 		// An unstamped row predates the outcome and cannot be called passed -
@@ -503,25 +434,18 @@ export function stepRowsFromReport(report: RunReport | undefined): ScenarioStepR
 }
 
 /**
- * Everything the run tab's header says about a step list.
- *
- * Held as one object because the live path maintains all three incrementally
- * ({@link foldStepEvents}) rather than scanning the list per commit. Three
- * loose fields would be three things a caller can hold half of; one is one.
+ * Everything the run tab's header says about a step list, one object because the live path
+ * maintains all three fields incrementally ({@link foldStepEvents}) rather than scanning per
+ * commit: three loose fields are three things a caller can hold half of.
  */
 export interface StepListSummary {
 	/**
-	 * The outcomes, each its own number.
-	 *
-	 * `skipped` is its own number and is never folded into `passed`. A step the
-	 * runner skipped did not assert anything, and reporting it as a pass is the
-	 * false-pass class the run summary exists to avoid.
+	 * The outcomes, each its own number. `skipped` is never folded into `passed`: a skipped step
+	 * asserted nothing, and reporting it as a pass is the false-pass class the run summary exists
+	 * to avoid.
 	 */
 	counts: OutcomeCounts;
-	/**
-	 * How many steps are past the first pass. `> 0` means a row should say
-	 * which iteration it belongs to.
-	 */
+	/** Steps past the first pass; `> 0` means a row says which iteration it belongs to. */
 	iterationSteps: number;
 	/** How many steps recorded the `data` row their iteration bound. */
 	dataBoundSteps: number;
@@ -545,34 +469,28 @@ function cloneStepSummary(summary: StepListSummary): StepListSummary {
 }
 
 /**
- * Add one row to `summary`, or take one back out. Mutates: callers own the
- * object they pass.
+ * Add one row to `summary`, or take one back out. Mutates: callers own the object they pass.
  *
- * Every field is a count rather than a flag, and `sign` is what makes the fold
- * reversible: a replay that replaces a row takes the old one out before putting
- * the new one in. A latched boolean would be cheaper by two integers and wrong
- * the moment a replacement stopped binding a data row - a replay is compared on
- * outcome, status, latency and name, not on `dataRowIndex` - and knowing
- * whether any *other* row still bound one would mean rescanning the list, which
- * is the whole-list scan this summary exists to avoid. Counting instead means
- * the incremental summary equals {@link summarizeSteps} for any sequence of
- * events, with no assumption about what the engine does or does not replay.
+ * Every field is a count, not a flag, and `sign` makes the fold reversible: a replay replacing a
+ * row takes the old one out before putting the new one in. A latched boolean would save two
+ * integers and be wrong as soon as a replacement stopped binding a data row (a replay is compared
+ * on outcome, status, latency and name, not `dataRowIndex`), and knowing whether any *other* row
+ * still binds one would mean the whole-list scan this summary avoids. Counting makes the
+ * incremental summary equal {@link summarizeSteps} for any event sequence, assuming nothing about
+ * what the engine replays.
  */
 function applyStepRow(summary: StepListSummary, row: ScenarioStepRow, sign: 1 | -1): void {
-	// A row whose outcome the engine did not name must not silently land in one
-	// of the buckets - `stepRowFromResult` has already decided what an
-	// unstamped row counts as.
+	// A row whose outcome the engine did not name must not land in a bucket silently:
+	// `stepRowFromResult` has already decided what an unstamped row counts as.
 	if (row.outcome in summary.counts) summary.counts[row.outcome] += sign;
 	if (row.iteration > 0) summary.iterationSteps += sign;
 	if (row.dataRowIndex !== undefined) summary.dataBoundSteps += sign;
 }
 
 /**
- * Summarize a whole list in one pass.
- *
- * The stored path reads its summary from here - the rows arrive complete, so
- * there is nothing to fold incrementally - and it is the oracle the live
- * path's incremental summary is checked against.
+ * Summarize a whole list in one pass. The stored path reads its summary here (its rows arrive
+ * complete, with nothing to fold), and it is the oracle the live path's incremental summary is
+ * checked against.
  */
 export function summarizeSteps(steps: readonly ScenarioStepRow[]): StepListSummary {
 	const summary = emptyStepSummary();
@@ -581,22 +499,19 @@ export function summarizeSteps(steps: readonly ScenarioStepRow[]): StepListSumma
 }
 
 /**
- * The run's outcome totals as the engine counted them, or `null` when the
- * report cannot say (a live run before its report arrives, or a sidecar older
- * than these fields).
+ * The run's outcome totals as the engine counted them, or `null` when the report cannot say (a live
+ * run before its report arrives, or a sidecar older than these fields).
  *
- * These are the **whole-run** counts - `report.scenario.passed/failed/...`,
- * written from every step the runner executed - not a tally of the stored rows.
- * The rows are thinned by `maxScenarioStoredSteps` and thinning drops only
- * passes, so counting the rows undercounts `passed` on any run that filled
- * its store: a 6,000-step run keeping 5,000 rows would read "4,990 passed"
- * beside a header claiming 6,000 steps. The stored-row count stays the list's
- * own disclosure line (`thinningDisclosure`); the chips read the truth here.
+ * These are **whole-run** counts (`report.scenario.passed/failed/...`, written from every step the
+ * runner executed), not a tally of the stored rows. Thinning by `maxScenarioStoredSteps` drops only
+ * passes, so counting rows undercounts `passed` on any run that filled its store: a 6,000-step run
+ * keeping 5,000 rows would read "4,990 passed" beside a header claiming 6,000 steps. The stored-row
+ * count stays the list's own disclosure (`thinningDisclosure`); the chips read the truth here.
  *
- * The first four are read defensively: an older report typed as carrying them
- * may omit one at runtime, and a partial read is worse than falling back to the
- * rows wholesale. `stopped` (#3397) is the exception: a report stored before it
- * has none, and that is a run with nothing stopped, not an unreadable one.
+ * The first four are read defensively: an older report typed as carrying them may omit one at
+ * runtime, and a partial read is worse than falling back to the rows wholesale. `stopped` (#3397)
+ * is the exception: a report stored before it has none, which is a run with nothing stopped, not an
+ * unreadable one.
  */
 export function outcomeCountsFromReport(report: RunReport | undefined): OutcomeCounts | null {
 	const scenario = report?.scenario;
@@ -614,14 +529,11 @@ export function outcomeCountsFromReport(report: RunReport | undefined): OutcomeC
 }
 
 /**
- * What the report says the run's own store thinned away, or `null` when it
- * dropped nothing (or is too old to say).
- *
- * The disclosure exists because `results[]` otherwise reads as the whole run:
- * `stepsExecuted` is what the sequence did and `stepsStored` is what survived
- * `maxScenarioStoredSteps`. Failures are kept first, so what is missing is
- * always successes - which is worth stating rather than leaving a reader to
- * infer from two numbers that do not match.
+ * What the run's own store thinned away, or `null` when it dropped nothing (or is too old to say).
+ * Without it `results[]` reads as the whole run: `stepsExecuted` is what the sequence did,
+ * `stepsStored` what survived `maxScenarioStoredSteps`. Failures are kept first, so what is missing
+ * is always successes, worth stating rather than leaving a reader to infer from two mismatched
+ * numbers.
  */
 export interface ThinningDisclosure {
 	stepsExecuted: number;
@@ -640,13 +552,10 @@ export function thinningDisclosure(report: RunReport | undefined): ThinningDiscl
 }
 
 /**
- * "3 steps did not run", or `null` when `count` says nothing was lost.
- *
- * One sentence for the two places an error's cost is read - the header's
- * run-wide sum (`scenario.stepsNotRun`) and the step that ended its iteration
- * (issue #2526) - so they cannot disagree on wording. The engine omits the
- * field rather than sending `0`, and a report from before it is `undefined`:
- * neither is a claim, so neither renders.
+ * "3 steps did not run", or `null` when `count` says nothing was lost. One sentence for both places
+ * an error's cost is read (the header's run-wide `scenario.stepsNotRun`, and the step that ended
+ * its iteration, #2526), so they cannot disagree on wording. The engine omits the field rather than
+ * sending `0`, and an older report is `undefined`: neither is a claim, so neither renders.
  */
 export function stepsNotRunText(count: number | undefined): string | null {
 	if (typeof count !== "number" || !(count > 0)) return null;

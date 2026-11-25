@@ -44,8 +44,6 @@
     "app/src/lib/monaco-variable-tokens.ts": 1,
     "app/src/lib/query-client.ts": 1,
     "app/src/lib/resize-gesture.ts": 1,
-    "app/src/modules/history/main/ScenarioRunView.tsx": 1,
-    "app/src/modules/history/main/useFilteredSteps.ts": 1,
     "app/src/modules/inbox/CannedResponseControls.tsx": 1,
     "app/src/modules/mock-server/index.tsx": 1,
     "app/src/modules/palette/CommandPalette.tsx": 1,
