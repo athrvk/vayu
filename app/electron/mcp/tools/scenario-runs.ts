@@ -66,20 +66,15 @@ export interface WalkedRequest {
 }
 
 /**
- * The saved requests under a collection, in the order the engine's scenario plan
- * executes them (issue #754), each with the collections above it.
- *
- * Mirrors `collect_requests` (`engine/src/core/scenario_plan.cpp`): without
- * `recursive` a collection's direct requests are the whole plan; with it, each
- * collection's sub-collections and requests are walked as one sibling list
- * (#2535), a request emitted where it sits and a sub-collection's whole subtree
- * where the sub-collection sits - the order the sidebar renders.
- * `recursive-run-order-conformance.json` pins this walk to the engine's
- * (`sibling-order.conformance.test.ts`).
- *
- * The `visited` set is the same guard the engine's walk carries: a corrupted
- * `parentId` (a self-parent, an A -> B -> A loop) must terminate rather than
- * enumerate forever.
+ * The saved requests under a collection, in the order the engine's scenario plan executes them
+ * (issue #754), each with the collections above it. Mirrors `collect_requests`
+ * (`engine/src/core/scenario_plan.cpp`): without `recursive` a collection's direct requests are the
+ * whole plan; with it, each collection's sub-collections and requests are walked as one sibling
+ * list (#2535), a request emitted where it sits and a sub-collection's whole subtree where the
+ * sub-collection sits, the order the sidebar renders. `recursive-run-order-conformance.json` pins
+ * this walk to the engine's (`sibling-order.conformance.test.ts`). The `visited` set is the engine
+ * walk's guard: a corrupted `parentId` (a self-parent, an A -> B -> A loop) must terminate rather
+ * than enumerate forever.
  */
 export async function walkCollectionRequests(
 	client: Pick<EngineClient, "listCollections" | "listRequests">,
@@ -118,11 +113,10 @@ export async function walkCollectionRequests(
 }
 
 /**
- * The saved requests a scenario run will execute, in the order the engine will
- * execute them: {@link walkCollectionRequests} as plan steps. The order matters
- * here for one reason - the pre-flight refusal names the first step that fails -
- * so a walk in some other order would name a different step than the run would
- * have reached first.
+ * The saved requests a scenario run will execute, in the order the engine will execute them:
+ * {@link walkCollectionRequests} as plan steps. The order matters for one reason: the pre-flight
+ * refusal names the first step that fails, so another order would name a different step than the
+ * run would have reached first.
  */
 export async function scenarioStepRows(
 	client: Pick<EngineClient, "listCollections" | "listRequests">,
@@ -149,29 +143,26 @@ function describeScenarioStep(index: number, row: ScenarioStepRow): string {
 }
 
 /**
- * Gate every step of a scenario against the allowlist *before* the run exists,
- * and return how many steps the plan has.
+ * Gate every step of a scenario against the allowlist *before* the run exists, and return how many
+ * steps the plan has.
  *
- * A scenario is one run: there is no per-step skip the way `run_collection_smoke`
- * has one, because the engine starts the whole sequence or none of it. So a
- * single un-allowlisted step refuses the run and **nothing is started** - the
- * alternative would be an agent generating traffic against a host it was never
- * pointed at, in the middle of a sequence it cannot stop selectively.
+ * A scenario is one run: there is no per-step skip as in `run_collection_smoke`, because the engine
+ * starts the whole sequence or none of it. So a single un-allowlisted step refuses the run and
+ * **nothing is started**; the alternative is an agent generating traffic against a host it was
+ * never pointed at, in a sequence it cannot stop selectively.
  *
- * Composition is the engine's, by id, with the caller's environment - the same
- * call `resolve_scenario` makes for each step, which is what makes the URL this
- * gate reads the URL the run would send to. A step that will not compose refuses
- * here too: the engine resolves the identical plan before it creates the run row
- * and would refuse it for the same reason, so failing early costs nothing and
- * says so in the same words.
+ * Composition is the engine's, by id, with the caller's environment: the same call
+ * `resolve_scenario` makes for each step, which makes the URL this gate reads the URL the run would
+ * send to. A step that will not compose refuses here too: the engine resolves the identical plan
+ * before it creates the run row and would refuse it for the same reason, so failing early costs
+ * nothing and says so in the same words.
  *
- * A refusal names the host (`gate.error` does) and never the composed URL: the
- * URL is secret-resolved, so its query string or userinfo can carry a secret
- * variable's value or a literal credential, and this error is not passed through
- * the reveal-off withholding (#1892).
+ * A refusal names the host (`gate.error` does) and never the composed URL: it is secret-resolved,
+ * so its query string or userinfo can carry a secret variable's value or a literal credential, and
+ * this error is not passed through the reveal-off withholding (#1892).
  *
- * Throws {@link ToolArgError} for a refusal; engine transport failures propagate
- * to the caller's `engineErrorResult`.
+ * Throws {@link ToolArgError} for a refusal; engine transport failures propagate to the caller's
+ * `engineErrorResult`.
  */
 export async function preflightScenarioSteps(
 	target: { collectionId: string; recursive: boolean; environmentId?: string },
@@ -234,14 +225,12 @@ export function readScenarioArg(args: Record<string, unknown>): ScenarioArg | un
 }
 
 /**
- * `start_load_run`'s arguments that describe a *single* target, which a scenario
- * replaces wholesale, mapped to what an agent should do instead.
- *
- * Refused rather than ignored: each of these would otherwise be an argument an
- * agent believes shaped the run and that nothing on the scenario path ever reads
- * - the codebase's most-repeated defect, arriving through the front door. The
- * steps are saved requests, so their method, body, auth, protocol and scripts
- * are the stored ones, composed per step.
+ * `start_load_run`'s arguments that describe a *single* target, which a scenario replaces
+ * wholesale, mapped to what an agent should do instead. Refused rather than ignored: each would
+ * otherwise be an argument an agent believes shaped the run and that nothing on the scenario path
+ * reads, the codebase's most-repeated defect arriving through the front door. The steps are saved
+ * requests, so their method, body, auth, protocol and scripts are the stored ones, composed per
+ * step.
  */
 const SINGLE_TARGET_LOAD_FIELDS: ReadonlyArray<[string, string]> = [
 	["url", "a scenario's targets are the collection's saved requests"],
@@ -350,17 +339,14 @@ function scenarioModeRefusal(mode: string): string | null {
 }
 
 /**
- * Start a scenario **load** run: the collection's plan driven by virtual users
- * (issue #754, reversing #454's deferral).
- *
- * Split from `start_load_run`'s single-target path rather than folded into it,
- * because the two share only their gates: there is no request to compose here
- * (every step composes engine-side at plan time), no url to check (the
- * pre-flight walk checks every step's), and a different set of load fields
- * applies. What they do share - the allowlist, the load shape resolved against
- * the caps (each executor with its own defaults), `checkLoadCaps` and the
- * confirmation - runs through the same helpers, so a cap raised in Settings
- * binds both paths identically.
+ * Start a scenario **load** run: the collection's plan driven by virtual users (issue #754,
+ * reversing #454's deferral). Split from `start_load_run`'s single-target path rather than folded
+ * into it, because the two share only their gates: there is no request to compose here (every step
+ * composes engine-side at plan time), no url to check (the pre-flight walk checks every step's),
+ * and a different set of load fields applies. What they share (the allowlist, the load shape
+ * resolved against the caps with each executor's own defaults, `checkLoadCaps` and the
+ * confirmation) runs through the same helpers, so a cap raised in Settings binds both paths
+ * identically.
  */
 export async function startScenarioLoadRun(
 	args: Record<string, unknown>,

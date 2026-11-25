@@ -6,14 +6,13 @@
  */
 
 /**
- * @brief The helpers every tool shares: result builders, argument coercion and
- *        the write and confirmation gates.
+ * @brief The helpers every tool shares: result builders, argument coercion and the write and
+ *        confirmation gates.
  *
- * The bottom of the `tools/` import graph beside `contract.ts`: a section file
- * may import from here and this file imports from no section, so a helper two
- * sections need lives here rather than in either of them. `NOTHING_CHANGED`,
- * `STARTED_RUNS` and `INPUT_REQUIRED` are module state the dispatch path reads after a handler
- * returns; they are defined here and nowhere else, so the handlers that mark a
+ * The bottom of the `tools/` import graph beside `contract.ts`: a section file may import from here
+ * and this file imports from no section, so a helper two sections need lives here.
+ * `NOTHING_CHANGED`, `STARTED_RUNS` and `INPUT_REQUIRED` are module state the dispatch path reads
+ * after a handler returns; they are defined here and nowhere else, so the handlers that mark a
  * result and the dispatcher that reads the mark share one instance.
  */
 
@@ -50,12 +49,11 @@ import {
 // --- Argument schema ---------------------------------------------------------
 
 /**
- * The arguments object a tool's `inputSchema` or a prompt's `argsSchema`
- * describes, as the SDK validates a call against it. Strict (#3556): a key the
- * shape does not declare is refused by name (`Unrecognized key: "<name>"`),
- * never dropped, so a misspelt or misplaced argument cannot change what a call
- * does without the agent hearing of it. A test that parses through a tool's
- * schema builds it here too, so it reads a call the way production does.
+ * The arguments object a tool's `inputSchema` or a prompt's `argsSchema` describes, as the SDK
+ * validates a call against it. Strict (#3556): a key the shape does not declare is refused by name
+ * (`Unrecognized key: "<name>"`), never dropped, so a misspelt or misplaced argument cannot change
+ * what a call does unheard. A test that parses through a tool's schema builds it here too, so it
+ * reads a call as production does.
  */
 export function argumentsSchema<Shape extends Record<string, z.ZodType>>(shape: Shape) {
 	return z.strictObject(shape);
@@ -191,14 +189,11 @@ export function recognisedEngineFailure(err: unknown, ctx: ToolContext): Failure
 }
 
 /**
- * @p result with the engine's text in its failure masked as a run's output is:
- * every secret variable's value and literal credential reads `<redacted>`.
- * Unchanged for a result that holds no engine text, and for a user who chose to
- * reveal secrets, with no engine call made.
- *
- * Fails closed like every other masking read: when the lookups the secret values
- * come from fail, the answer is the masking error and none of the engine's text,
- * never the text unmasked.
+ * @p result with the engine's text in its failure masked as a run's output is: every secret
+ * variable's value and literal credential reads `<redacted>`. Unchanged for a result that holds no
+ * engine text, and for a user who chose to reveal secrets (no engine call made). Fails closed like
+ * every other masking read: when the lookups the secret values come from fail, the answer is the
+ * masking error and none of the engine's text, never the text unmasked.
  */
 export async function maskEngineText(
 	result: ToolResult,
@@ -232,12 +227,10 @@ const MASKING_WITHHELD_NOTE =
 	"Nothing is returned: a result that may carry a secret is withheld whole until the engine answers.";
 
 /**
- * The error result for a read whose masking lookup failed (#2780). When the
- * lookup's cause is the engine being down or failing, that is the lead - the
- * agent's remedy is the engine, never a Reveal secrets setting - and the
- * withholding is the second sentence. A cause that says nothing about the
- * engine keeps the masking message whole, so an `Unexpected error:` fallback
- * never leads.
+ * The error result for a read whose masking lookup failed (#2780). When the lookup's cause is the
+ * engine being down or failing, that leads (the agent's remedy is the engine, never a Reveal
+ * secrets setting) and the withholding is the second sentence. A cause that says nothing about the
+ * engine keeps the masking message whole, so an `Unexpected error:` fallback never leads.
  */
 export function maskingIncompleteResult(err: MaskingIncompleteError, ctx: ToolContext): ToolResult {
 	const outage = maskingOutage(err, ctx);
@@ -245,11 +238,10 @@ export function maskingIncompleteResult(err: MaskingIncompleteError, ctx: ToolCo
 }
 
 /**
- * {@link maskingIncompleteResult}'s outage-led wording as the text of a thrown
- * error, for a resource or a prompt, which answer a failed request rather than
- * a result. Undefined when the cause is not an outage, so the caller keeps the
- * masking message (or a failure that is more telling). An interrupted cause
- * drops the tool-call retry advice: a read sent nothing that could have
+ * {@link maskingIncompleteResult}'s outage-led wording as the text of a thrown error, for a
+ * resource or a prompt, which answer a failed request rather than a result. Undefined when the
+ * cause is not an outage, so the caller keeps the masking message (or a more telling failure). An
+ * interrupted cause drops the tool-call retry advice: a read sent nothing that could have
  * completed.
  */
 export function maskingOutageMessage(
@@ -567,13 +559,11 @@ export class ToolArgError extends Error {
 }
 
 /**
- * An optional `elements` argument: an array of `{ id?, kind, enabled?, name?,
- * config }` objects (see {@link elementSchema}). The SDK validates a call
- * against the Zod schema before the handler runs, but `dispatchTool` is also
- * called directly (tests, and any future non-SDK transport), so the shape is
- * re-checked here the same defensive way `headers` and `auth` already are -
- * a non-array or an entry with no string `kind` is the caller's mistake
- * rather than an empty list.
+ * An optional `elements` argument: an array of `{ id?, kind, enabled?, name?, config }` objects
+ * (see {@link elementSchema}). The SDK validates a call against the Zod schema first, but
+ * `dispatchTool` is also called directly (tests, any future non-SDK transport), so the shape is
+ * re-checked here as `headers` and `auth` are: a non-array or an entry with no string `kind` is the
+ * caller's mistake rather than an empty list.
  */
 export function elementsArg(
 	args: Record<string, unknown>,
@@ -596,14 +586,11 @@ export function elementsArg(
 }
 
 /**
- * A whole number greater than zero, or `fallback` when the caller omitted the
- * argument.
- *
- * Rejects rather than clamps. The values this guards feed `Array.slice(-limit)`,
- * where a non-positive number does not mean "fewer rows" but *more* than asked
- * for - `0` returns everything, `-3` returns all but the three oldest - so a
- * silent repair would hand back a plausible-looking result built on an argument
- * the caller got wrong.
+ * A whole number greater than zero, or `fallback` when the caller omitted the argument. Rejects
+ * rather than clamps: the values this guards feed `Array.slice(-limit)`, where a non-positive
+ * number means *more* than asked for (`0` returns everything, `-3` all but the three oldest), so a
+ * silent repair would hand back a plausible-looking result built on an argument the caller got
+ * wrong.
  */
 export function optionalPositiveInt(
 	args: Record<string, unknown>,
@@ -650,11 +637,10 @@ export function optionalOffset(args: Record<string, unknown>, key: string): numb
 }
 
 /**
- * The refusal a data-mutating tool returns while the write toggle is off, or
- * null when writes are allowed. One wording for the collection / request /
- * environment tools: which of them was called does not change what the user has
- * to do about it, and a copy per tool is a copy per tool to drift.
- * `update_engine_config` keeps its own sentence, which names config.
+ * The refusal a data-mutating tool returns while the write toggle is off, or null when writes are
+ * allowed. One wording for the collection / request / environment tools: which was called does not
+ * change what the user has to do, and a copy per tool is a copy to drift. `update_engine_config`
+ * keeps its own sentence, which names config.
  */
 export function writesDisabled(ctx: ToolContext): ToolResult | null {
 	if (ctx.config.allowWrites) return null;
@@ -667,18 +653,15 @@ export function writesDisabled(ctx: ToolContext): ToolResult | null {
 // --- Confirmation gate -------------------------------------------------------
 
 /**
- * Results that reported success while changing nothing - a confirmation
- * preview, or a prompt the user declined.
+ * Results that reported success while changing nothing: a confirmation preview, or a prompt the
+ * user declined.
  *
- * Dispatch's rule is "a call that did not error changed what its tool
- * declares", and a gated tool is the one shape that breaks it: the preview's
- * whole point is that nothing happened, so emitting for it would refetch the
- * collection tree every time an agent asked what a delete would destroy - and
- * would say a run started when `start_load_run` only described one.
- *
- * A WeakSet rather than a field on {@link ToolResult}: the result object is
- * handed to the SDK verbatim (`server.ts`), so an extra property would be
- * serialized to the client as though it were part of the MCP result shape.
+ * Dispatch's rule is "a call that did not error changed what its tool declares", and a gated tool
+ * breaks it: the preview's point is that nothing happened, so emitting for it would refetch the
+ * collection tree every time an agent asked what a delete would destroy, and would say a run
+ * started when `start_load_run` only described one. A WeakSet rather than a field on
+ * {@link ToolResult}: the result object is handed to the SDK verbatim (`server.ts`), so an extra
+ * property would be serialized to the client as part of the MCP result shape.
  */
 export const NOTHING_CHANGED = new WeakSet<ToolResult>();
 
@@ -689,21 +672,17 @@ export function unchanged(result: ToolResult): ToolResult {
 }
 
 /**
- * Results that started a run the app should watch (#1419), keyed by the run.
- *
- * A WeakMap for the reason {@link NOTHING_CHANGED} is a WeakSet: the result
- * object is handed to the SDK verbatim (`server.ts`), so a field here would be
- * serialized to the client as though it were part of the MCP result shape.
+ * Results that started a run the app should watch (#1419), keyed by the run. A WeakMap for the
+ * reason {@link NOTHING_CHANGED} is a WeakSet: a field on the result would be serialized to the
+ * client as part of the MCP result shape (`server.ts`).
  */
 export const STARTED_RUNS = new WeakMap<ToolResult, StartedRun>();
 
 /**
- * Mark a result as having started `kind`'s run, taking the id from the engine's
- * own answer (see {@link STARTED_RUNS}).
- *
- * An answer without a `runId` marks nothing: the engine's 202 body is what says
- * a run exists, and a body shaped some other way is handed back to the agent as
- * it came rather than announced to the renderer as a run to attach to.
+ * Mark a result as having started `kind`'s run, taking the id from the engine's own answer (see
+ * {@link STARTED_RUNS}). An answer without a `runId` marks nothing: the engine's 202 body is what
+ * says a run exists, and a body shaped any other way is handed back as it came rather than
+ * announced to the renderer as a run to attach to.
  */
 export function watchedRun(
 	result: ToolResult,
@@ -737,13 +716,11 @@ interface ConfirmationPrompt {
 }
 
 /**
- * Results that stand for a question to the person rather than an answer
- * (`input_required`), keyed by the question the client is to put to them.
- *
- * A WeakMap for the reason {@link NOTHING_CHANGED} is a WeakSet. The result
- * itself carries the preview text, so a reader that only knows `ToolResult`
- * (a test, the dispatch log) sees what the question is about; `server.ts`
- * answers the SDK with the marked question instead.
+ * Results that stand for a question to the person rather than an answer (`input_required`), keyed
+ * by the question the client is to put to them. A WeakMap for the reason {@link NOTHING_CHANGED} is
+ * a WeakSet. The result itself carries the preview text, so a reader that only knows `ToolResult`
+ * (a test, the dispatch log) sees what the question is about; `server.ts` answers the SDK with the
+ * marked question instead.
  */
 export const INPUT_REQUIRED = new WeakMap<ToolResult, InputRequiredResult>();
 
@@ -755,16 +732,13 @@ const confirmAnswer = z.object({ proceed: z.boolean() });
 /**
  * Ask the human before something destructive, however the client can manage it.
  *
- * Preferred path is a question to the person, put by the client
- * (`ctx.userInput`): the first call returns it as `input_required` and does
- * nothing, and the client calls again carrying the answer. That handler entry
- * is a fresh one, so everything a gated tool does before this gate must be a
- * read. A client that cannot be asked falls back to the agent-side flag: the
- * first call returns a preview and does nothing, and only a second call
- * carrying `confirmed: true` proceeds. Anti-accident rather than
- * anti-adversary (an agent can set the flag itself), which is the same posture
- * `start_load_run` has always had; the question is what upgrades it to a human
- * decision.
+ * The preferred path is a question to the person, put by the client (`ctx.userInput`): the first
+ * call returns it as `input_required` and does nothing, and the client calls again carrying the
+ * answer. That handler entry is a fresh one, so everything a gated tool does before this gate must
+ * be a read. A client that cannot be asked falls back to the agent-side flag: the first call
+ * returns a preview and does nothing, and only a second call carrying `confirmed: true` proceeds.
+ * This is anti-accident rather than anti-adversary (an agent can set the flag itself), the posture
+ * `start_load_run` takes; the question is what upgrades it to a human decision.
  *
  * Returns `null` when the caller may proceed, or the result to return instead.
  */
