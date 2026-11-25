@@ -34,12 +34,10 @@ export interface Tab {
 }
 
 /**
- * Somewhere the user has been - a `Tab` without its instance id (issue #1245).
- *
- * The navigation history is a list of these rather than of tab ids, and that is
- * the whole reason back can reopen a tab the user closed: an id dies with its
- * tab, so a history of ids would name nothing the moment a step of it is closed.
- * A location outlives the tab, and `openTab` takes exactly this shape.
+ * Somewhere the user has been: a `Tab` without its instance id (#1245). The navigation history is a
+ * list of these, not of tab ids, which is the whole reason back can reopen a tab the user closed:
+ * an id dies with its tab, so a history of ids would name nothing once a step of it closed. A
+ * location outlives the tab, and `openTab` takes exactly this shape.
  */
 export interface TabLocation {
 	type: TabType;
@@ -47,9 +45,8 @@ export interface TabLocation {
 }
 
 /**
- * What a navigation asks of the screen it opens, beyond which tab to show.
- * `target` is the id of the entity the intent is for (collection, request or
- * run), and the matching tab is `intentTab`.
+ * What a navigation asks of the screen it opens, beyond which tab to show. `target` is the id of
+ * the entity it is for (collection, request or run); the matching tab is `intentTab`.
  */
 export type NavIntent =
 	| { kind: "spec"; target: string }
@@ -76,21 +73,17 @@ function intentIfOpen(intent: NavIntent | null, tabs: readonly Tab[]): NavIntent
 }
 
 /**
- * Exported because `response-store`'s cache bound is derived from it: that
- * store retains the open tabs' responses plus an equal tail, and a guard there
- * fails if the two numbers drift apart.
+ * Exported because `response-store`'s cache bound derives from it: that store keeps the open tabs'
+ * responses plus an equal tail, and a guard there fails if the two numbers drift apart.
  */
 export const MAX_OPEN_TABS = 12;
 
 /**
- * Singletons: only one tab of this type can exist at a time.
- *
- * One tab, not one address. Opening a singleton that is already open with a
- * *different* `entityId` retargets the open tab rather than focusing whatever
- * it was showing - the inbox tab is one surface pointed at one inbox, and the
- * drawer row that names inbox B has to be able to show B in it (issue #554).
- * The others are always opened with a null `entityId`, for which retargeting is
- * a no-op.
+ * Singletons: only one tab of each type at a time. One tab, not one address: opening an open
+ * singleton with a different `entityId` retargets the tab rather than focusing what it showed,
+ * since the inbox tab is one surface pointed at one inbox, and the drawer row naming inbox B has to
+ * show B in it (#554). The others always open with a null `entityId`, for which retargeting is a
+ * no-op.
  */
 const SINGLETON_TYPES: TabType[] = ["welcome", "variables", "settings", "inbox", "mock-server"];
 
@@ -98,12 +91,10 @@ const SINGLETON_TYPES: TabType[] = ["welcome", "variables", "settings", "inbox",
 const LRU_EXEMPT_TYPES: TabType[] = ["dashboard"];
 
 /**
- * How many places back the history remembers.
- *
- * A browser's is unbounded because a browser session ends; this one is a working
- * set inside a workspace, and fifty steps is well past the "where was I" a user
- * can still picture. The cap is what keeps a long session's history from being
- * an ever-growing list of every request ever visited.
+ * How many places back the history remembers. A browser's is unbounded because a browser session
+ * ends; this one is a working set inside a workspace, and fifty steps is well past the "where was
+ * I" a user can still picture. The cap keeps a long session's history from growing into every
+ * request ever visited.
  */
 const MAX_NAV_HISTORY = 50;
 
@@ -111,75 +102,61 @@ interface TabsState {
 	openTabs: Tab[];
 	activeTabId: string | null;
 	/**
-	 * When each open tab was last focused, in epoch ms.
+	 * When each open tab was last focused, in epoch ms. Read by the command palette, which lists
+	 * open tabs most recently used first (the order a switcher needs, which `openTabs` cannot give:
+	 * it is insertion order), and by `openTab`'s LRU eviction, which takes the least recently
+	 * focused clean tab. Both read it, so every path that makes a tab active stamps it, a close
+	 * that activates a survivor included.
 	 *
-	 * Read by the command palette, which lists open tabs most-recently-used
-	 * first - the order a switcher has to have, and one `openTabs` cannot give:
-	 * that array is insertion order, so the tab you were just in sits wherever
-	 * it was opened - and by `openTab`'s LRU eviction, which takes the least
-	 * recently focused clean tab. Both read it, so every path that makes a tab
-	 * active stamps it, a close that activates a survivor included.
-	 *
-	 * Session-scoped by design (absent from `partialize`). Tabs *are* restored
-	 * across launches, so a persisted copy would rank a restored list by
-	 * yesterday's attention; an empty map falls back to strip order, which is
-	 * what the user sees on screen anyway. Entries for closed tabs are dropped
-	 * on the next focus rather than in every close path - nothing reads a
-	 * stamp for a tab that is no longer open.
+	 * Session-scoped by design (absent from `partialize`): tabs are restored across launches, so a
+	 * persisted copy would rank a restored list by yesterday's attention; an empty map falls back
+	 * to strip order, which is what the user sees anyway. Entries for closed tabs drop on the next
+	 * focus, not in every close path: nothing reads a stamp for a tab no longer open.
 	 */
 	tabFocusedAt: Record<string, number>;
 	/**
-	 * The one in-flight hand-off from a navigation to the screen it opened, or
-	 * `null` (issues #680, #730, #2164, #3355, #3400).
+	 * The one in-flight hand-off from a navigation to the screen it opened, or `null` (#680, #730,
+	 * #2164, #3355, #3400).
 	 *
-	 * `openTab` can only name a tab, and four navigations need to say more: which
-	 * sub-tab a collection opens on (`spec`), which data row a request's Send binds
-	 * (`dataRow`), whether a run's report opens on its comparison (`compare`), and
-	 * whether a request opens with its URL field focused (`focusUrl`).
-	 * That state lives in the destination screen, so the navigation leaves a
-	 * `NavIntent` here and the screen takes it with `takeNavIntent`, once.
+	 * `openTab` can only name a tab, and four navigations need to say more: which sub-tab a
+	 * collection opens on (`spec`), which data row a request's Send binds (`dataRow`), whether a
+	 * run's report opens on its comparison (`compare`), and whether a request opens with its URL
+	 * field focused (`focusUrl`). That state lives in the destination screen, so the navigation
+	 * leaves a `NavIntent` here and the screen takes it, once, with `takeNavIntent`.
 	 *
-	 * It belongs to the navigation that issued it, not to the entity it names. Every
-	 * activation that does not itself issue one (`openTab`, `focusTab`, `goBack`,
-	 * `goForward`, `focusAdjacentTab`) clears it, and so does closing the tab it
-	 * names, so a screen that never mounted to take it cannot fire it on a later
-	 * visit. A consumer that finds nothing for its own kind and target does nothing.
+	 * It belongs to the navigation that issued it, not to the entity it names. Every activation
+	 * that does not issue one (`openTab`, `focusTab`, `goBack`, `goForward`, `focusAdjacentTab`)
+	 * clears it, and so does closing the tab it names, so a screen that never mounted to take it
+	 * cannot fire it on a later visit. A consumer that finds nothing for its own kind and target
+	 * does nothing.
 	 *
-	 * Session-scoped (absent from `partialize`): it is one navigation in flight, and
-	 * a persisted copy would jump a user to a Spec tab, a data row or a comparison
-	 * for a choice made in a previous launch. A data row in particular points into a
-	 * file whose rows are deliberately never persisted.
+	 * Session-scoped (absent from `partialize`): it is one navigation in flight, and a persisted
+	 * copy would jump a user to a Spec tab, a data row or a comparison for a choice made in a
+	 * previous launch. A data row in particular points into a file whose rows are deliberately
+	 * never persisted.
 	 */
 	navIntent: NavIntent | null;
 	/**
-	 * Every place the user has been in this session, oldest first, with
-	 * `navIndex` marking where they are in it (issue #1245).
+	 * Every place the user has been this session, oldest first, with `navIndex` marking where they
+	 * are in it (#1245). A browser's model, for the browser's reason: "where was I before this" is
+	 * a question `tabFocusedAt` cannot answer past one step (a set of stamps leaves the second Back
+	 * nothing to read), and no ordering of `openTabs`, an insertion-order array, can answer at all.
 	 *
-	 * A browser's model, and for the browser's reason: "where was I before this"
-	 * is a question `tabFocusedAt` cannot answer past one step - it is a set of
-	 * stamps, so the second Back has nothing to read - and one that no ordering
-	 * of `openTabs` can answer at all, that array being insertion order.
+	 * Here rather than in a store of its own, though only the navigation controls read it: it
+	 * derives from the activations this store performs, and a second store would have to be told
+	 * about every one by every caller. `openTab`, `focusTab` and `closeTab` are where a location
+	 * changes, so they record it.
 	 *
-	 * Here rather than in a store of its own, though it is only read by the
-	 * navigation controls: it is derived from the very activations this store
-	 * performs, and a second store would have to be told about every one of them
-	 * by every caller. `openTab`, `focusTab` and `closeTab` are where a location
-	 * changes, so they are where it is recorded.
-	 *
-	 * Session-scoped by design (absent from `partialize`), like `tabFocusedAt`.
-	 * Tabs *are* restored across launches, and a restored history would offer a
-	 * Back that walks yesterday's route through today's window - or reopens a
-	 * request deleted since. An empty history disables both buttons until the
-	 * user goes somewhere, which is what a fresh session should say.
+	 * Session-scoped by design (absent from `partialize`), like `tabFocusedAt`: tabs are restored
+	 * across launches, and a restored history would offer a Back that walks yesterday's route
+	 * through today's window, or reopens a request deleted since. An empty history disables both
+	 * buttons until the user goes somewhere, which is what a fresh session should say.
 	 */
 	navHistory: TabLocation[];
 	/**
-	 * Where in `navHistory` the user is: the index of the current location, or
-	 * `-1` before anything has been visited.
-	 *
-	 * A cursor rather than two stacks. The forward half is simply the entries
-	 * after this index, so nothing has to be moved from one stack to the other on
-	 * every step, and the two halves cannot disagree about the present.
+	 * Where in `navHistory` the user is: the current location's index, or `-1` before anything has
+	 * been visited. A cursor, not two stacks: the forward half is the entries after it, so nothing
+	 * moves between stacks on a step, and the two halves cannot disagree about the present.
 	 */
 	navIndex: number;
 
@@ -187,12 +164,10 @@ interface TabsState {
 	/** Show a collection, on its Spec tab - a `spec` intent. */
 	openCollectionSpecTab: (collectionId: string) => void;
 	/**
-	 * Show a request, with one row of its collection's data file selected for
-	 * Send-with-row - a `dataRow` intent.
-	 *
-	 * A negative or non-integer index is refused rather than stored: it can only
-	 * come from a malformed trace, and a picker asked to select row -1 would
-	 * open on nothing with no way to tell that from a file that failed to read.
+	 * Show a request with one row of its collection's data file selected for Send-with-row: a
+	 * `dataRow` intent. A negative or non-integer index is refused, not stored: it can only come
+	 * from a malformed trace, and a picker asked to select row -1 would open on nothing, with no
+	 * way to tell that from a file that failed to read.
 	 */
 	openRequestWithDataRow: (requestId: string, rowIndex: number) => void;
 	/** Show a load run's report on its comparison view - a `compare` intent. */
@@ -213,61 +188,49 @@ interface TabsState {
 	) => Extract<NavIntent, { kind: K }> | null;
 	closeTab: (tabId: string) => void;
 	/**
-	 * Close every tab except one - the strip's "Close Others".
-	 *
-	 * A bulk close is one close, not a loop of closes: it removes the whole set
-	 * in a single `set`, and records at most one visit for wherever the user
-	 * ends up. Closing them one at a time would record a visit per tab and walk
-	 * the user through a history of places they never went.
+	 * Close every tab except one: the strip's "Close Others". One close, not a loop: it removes the
+	 * whole set in a single `set` and records at most one visit, for wherever the user ends up.
+	 * Closing them one at a time would record a visit per tab and walk the user through a history
+	 * of places they never went.
 	 */
 	closeOtherTabs: (tabId: string) => void;
 	/** Close every tab after this one in the strip. Nothing to its left moves. */
 	closeTabsToRight: (tabId: string) => void;
 	/**
-	 * Put `tabId` at `toIndex` in the strip, the index it occupies afterwards,
-	 * clamped to the list. Reorders `openTabs` only: the active tab, the focus
-	 * stamps and the navigation history name tabs by id and location, never by
-	 * position, so none of them changes. The `Tab` objects are reused, not
+	 * Put `tabId` at `toIndex` in the strip (its index afterwards), clamped to the list. Reorders
+	 * `openTabs` only: the active tab, the focus stamps and the history name tabs by id and
+	 * location, never by position, so none of them changes. The `Tab` objects are reused, not
 	 * copied: `tabItemPropsEqual` compares `prev.tab === next.tab`.
 	 */
 	moveTab: (tabId: string, toIndex: number) => void;
 	/**
-	 * Close every tab that holds no unsaved edits, keeping the dirty ones.
-	 *
-	 * "Saved" is `isTabDirty` read backwards - the same answer that decides
-	 * which tab LRU eviction may take - so the one definition of a dirty tab
-	 * serves both, and a tab type that learns to be dirty is covered here for
-	 * free.
+	 * Close every tab that holds no unsaved edits, keeping the dirty ones. "Saved" is `isTabDirty`
+	 * read backwards, the same answer that decides which tab LRU eviction may take, so one
+	 * definition of a dirty tab serves both, and a tab type that learns to be dirty is covered here
+	 * for free.
 	 */
 	closeSavedTabs: () => void;
 	/**
-	 * Close every tab bound to one of the given entity ids (e.g. after deletion).
-	 *
-	 * `type` narrows the sweep to one kind of tab. Ids are engine-generated and
-	 * do not collide across families, so it is not needed for correctness - it
-	 * states at the call site which tabs a deletion is allowed to close, which
-	 * is the difference between "close the run tabs for these deleted runs" and
-	 * "close whatever happens to carry these ids".
+	 * Close every tab bound to one of the given entity ids (e.g. after deletion). `type` narrows
+	 * the sweep to one kind of tab: ids are engine-generated and do not collide across families, so
+	 * it is not needed for correctness, but it states at the call site which tabs a deletion may
+	 * close ("the run tabs for these deleted runs", not "whatever happens to carry these ids").
 	 */
 	closeTabsForEntities: (entityIds: Iterable<string>, type?: TabType) => void;
 	focusTab: (tabId: string) => void;
 	/**
-	 * Focus the tab `step` places along from the active one, wrapping at both
-	 * ends. `1` is the next tab, `-1` the previous.
-	 *
-	 * Here rather than at the caller for the reason `closeTab` picks its own
-	 * replacement: "which tab is next" is one rule, and the ⇧⌘] chord, a future
-	 * menu item and anything else that offers it should not each re-derive it
-	 * from `openTabs` and disagree about what happens at the ends.
+	 * Focus the tab `step` places along from the active one, wrapping at both ends: `1` is the next
+	 * tab, `-1` the previous. Here, not at the caller, for the reason `closeTab` picks its own
+	 * replacement: "which tab is next" is one rule, and the ⇧⌘] chord, a future menu item and
+	 * anything else offering it should not each re-derive it from `openTabs` and disagree about the
+	 * ends.
 	 */
 	focusAdjacentTab: (step: 1 | -1) => void;
 	/**
-	 * Go to the previous place in `navHistory` - and, for `goForward`, the next.
-	 *
-	 * A location whose tab is still open is focused; one whose tab was closed is
-	 * reopened, which is what makes Back answer "put back what I just closed".
-	 * Neither records a visit: they move the cursor, they do not extend the
-	 * history, exactly as a browser's do.
+	 * Go to the previous place in `navHistory` (and, for `goForward`, the next). A location whose
+	 * tab is still open is focused; one whose tab was closed is reopened, which is what makes Back
+	 * answer "put back what I just closed". Neither records a visit: they move the cursor and do
+	 * not extend the history, as a browser's do.
 	 */
 	goBack: () => void;
 	goForward: () => void;
@@ -288,19 +251,15 @@ function sameLocation(a: TabLocation, b: TabLocation): boolean {
 }
 
 /**
- * Is an activation happening *because* of Back or Forward?
+ * Is an activation happening because of Back or Forward? Those two navigate through `focusTab` /
+ * `openTab`, deliberately the paths every other navigation takes, so a reopened tab is opened
+ * exactly the way anything else opens it. A visit recorded there would rewrite the history the user
+ * is walking: every Back would truncate the forward half it had just created, and the stack would
+ * grow by one on every step instead of the cursor moving through it.
  *
- * Those two navigate by calling `focusTab` / `openTab` - the same paths every
- * other navigation takes, deliberately, so a reopened tab is opened exactly the
- * way anything else opens it - and a recorded visit there would rewrite the
- * history the user is walking through: every Back would truncate the forward
- * half it had just created, and the stack would grow by one on every step
- * instead of the cursor moving through it.
- *
- * A module-level flag rather than a parameter threaded through both actions:
- * the store's actions are synchronous, so the window is one call, and every
- * caller of `openTab` would otherwise have to carry an argument that means
- * nothing to it.
+ * A module-level flag, not a parameter threaded through both actions: the actions are synchronous,
+ * so the window is one call, and every caller of `openTab` would otherwise carry an argument that
+ * means nothing to it.
  */
 let traversingHistory = false;
 
@@ -323,15 +282,12 @@ function recordVisit(
 }
 
 /**
- * Drop every entry the predicate names, keeping the cursor on the same place -
- * or, when that place was one of the dropped ones, on the nearest surviving
- * entry behind it, and failing that the first one ahead.
- *
- * That last fallback is what keeps `-1` meaning one thing. It is reached when
- * everything at or before the cursor was deleted while places ahead survived,
- * and a `-1` there would say "nowhere" about a history that still holds open
- * tabs - after which the next recorded visit would truncate them as though they
- * were a forward half the user had left.
+ * Drop every entry the predicate names, keeping the cursor on the same place or, when that place
+ * was dropped, on the nearest surviving entry behind it, failing that the first one ahead. That
+ * last fallback keeps `-1` meaning one thing: it is reached when everything at or before the cursor
+ * was deleted while places ahead survived, and a `-1` there would say "nowhere" about a history
+ * still holding open tabs, after which the next recorded visit would truncate them as a forward
+ * half the user had left.
  */
 function forgetLocations(
 	history: TabLocation[],
@@ -350,14 +306,10 @@ function forgetLocations(
 }
 
 /**
- * Drops the dirty tabs from a bulk close while the engine cannot take a save
- * (#3324), and says once how many stayed.
- *
- * `closeTab` refuses a dirty tab for the same reason (#1489): the unmount flush
- * would fail into a pane that no longer exists. A bulk close that skipped the
- * check would discard exactly those edits, so the clean tabs close and the
- * dirty ones are held back. `closeSavedTabs` needs none of this - it never
- * selects a dirty tab.
+ * Drops the dirty tabs from a bulk close while the engine cannot take a save (#3324), and says once
+ * how many stayed. `closeTab` refuses a dirty tab for the same reason (#1489): the unmount flush
+ * would fail into a pane that no longer exists, so a bulk close that skipped the check would
+ * discard exactly those edits. `closeSavedTabs` needs none of this: it never selects a dirty tab.
  */
 function withoutUnsavableTabs(openTabs: readonly Tab[], closing: ReadonlySet<string>) {
 	if (selectKnownEngineStatus(useEngineStore.getState()) === "connected") return closing;
@@ -376,26 +328,22 @@ function withoutUnsavableTabs(openTabs: readonly Tab[], closing: ReadonlySet<str
 }
 
 /**
- * Remove every tab the id set names, and answer where that leaves the user.
+ * Remove every tab the id set names, and answer where that leaves the user. One function behind
+ * every close in this store, because "which tab takes the place of the one showing" is one rule in
+ * three parts (the nearest still-open place behind the cursor, then the neighbour to the left, then
+ * the one to the right), and a second copy would answer a bulk close differently from a single one.
  *
- * One function behind every close in this store, because "which tab takes the
- * place of the one that was showing" is a single rule in three parts - the
- * nearest still-open place behind the cursor, then the neighbour to the left,
- * then the one to the right - and a second copy of it would answer a bulk close
- * differently from a single one.
+ * A bulk close is one close, not a loop: the whole set goes in one `set` and at most one visit is
+ * recorded. Calling `closeTab` per tab would record a visit for every tab it focused on the way,
+ * leaving Back to walk the user through places they never went.
  *
- * A bulk close is one close, not a loop of them: the whole set goes in one
- * `set` and at most one visit is recorded. Calling `closeTab` per tab would
- * record a visit for every intermediate tab it focused on the way, leaving Back
- * to walk the user through places they never went.
+ * `null` means nothing matched, so the caller leaves the store untouched rather than publishing an
+ * identical state.
  *
- * `null` means nothing matched, so the caller leaves the store untouched rather
- * than publishing an identical state.
- *
- * The history itself is left alone. A closed tab is still somewhere the user has
- * been, and Back is what puts it back (#1245); only a *deleted* entity leaves
- * the history, which is `closeTabsForEntities`' own concern. A pending
- * `navIntent` is the opposite: it goes with the tab it names.
+ * The history itself is left alone: a closed tab is still somewhere the user has been, and Back is
+ * what puts it back (#1245); only a deleted entity leaves the history, which is
+ * `closeTabsForEntities`' concern. A pending `navIntent` is the opposite: it goes with the tab it
+ * names.
  */
 function closeTabs(
 	state: Pick<
@@ -435,12 +383,10 @@ function closeTabs(
 	}
 
 	/*
-	 * Nothing behind is open, so the strip's own rule answers: the nearest tab
-	 * that is staying, preferring the left.
-	 *
-	 * Recorded as a visit, because the user is now somewhere the history did not
-	 * send them. The cursor always names where they are - the invariant every
-	 * other path here holds - and what was just closed stays behind it.
+	 * Nothing behind is open, so the strip's own rule answers: the nearest tab that is staying,
+	 * preferring the left. Recorded as a visit, because the user is now somewhere the history did
+	 * not send them: the cursor always names where they are (the invariant every other path here
+	 * holds), and what was just closed stays behind it.
 	 */
 	const survivor = nearestSurvivor(openTabs, activeIndex, closing);
 	if (!survivor) return { openTabs: remaining, activeTabId: null, navIntent };
@@ -457,10 +403,9 @@ function closeTabs(
 }
 
 /**
- * Closes the tabs and throws away the collection drafts they held (#3459). A
- * stored draft outlives its editor only while its tab is open: once the tab is
- * gone nothing can show the draft again, and its context must not save it on
- * quit.
+ * Closes the tabs and throws away the collection drafts they held (#3459). A stored draft outlives
+ * its editor only while its tab is open: once the tab is gone nothing can show the draft again, and
+ * its context must not save it on quit.
  */
 function closeTabsNow(
 	get: () => TabsState,
@@ -497,29 +442,23 @@ function nearestSurvivor(
 }
 
 /**
- * Does this tab hold unsaved edits?
+ * Does this tab hold unsaved edits? The save registry is keyed by editor, and editors do not line
+ * up with tabs: `settings` and `variables` are singletons with no `entityId`, so a
+ * `request-${entityId}` lookup finds nothing for them and reads clean, which would let LRU eviction
+ * take a dirty Settings tab and its edits. The real keys are `settings` (`SettingsMain`) and
+ * `globals-editor` / `environment-<id>` / `collection-<id>` (`VariableTableEditor`).
  *
- * The save registry is keyed by *editor*, and editors do not line up with tabs.
- * `settings` and `variables` are singletons with no `entityId`, so the old
- * `request-${entityId}` lookup returned nothing for them and read as clean:
- * a dirty Settings tab was eligible for LRU eviction, taking its edits with it.
- * The real keys are `settings` (`SettingsMain`) and `globals-editor` /
- * `environment-<id>` / `collection-<id>` (`VariableTableEditor`).
- *
- * The variables tab hosts whichever of those three editors the sidebar has
- * selected and a `Tab` does not record which, so any dirty variable-editor
- * context counts as that tab's. A `collection-<id>` context can equally come
- * from a collection tab's Variables sub-tab, so this over-matches - which is
- * the safe direction. Over-matching keeps a tab that could have closed;
+ * The variables tab hosts whichever of those three editors the sidebar has selected, and a `Tab`
+ * does not record which, so any dirty variable-editor context counts as that tab's. A
+ * `collection-<id>` context can equally come from a collection tab's Variables sub-tab, so this
+ * over-matches, the safe direction: over-matching keeps a tab that could have closed;
  * under-matching discards someone's work.
  *
- * A collection tab hosts more than that one editor, and its siblings key
- * themselves off the same id with a suffix: `collection-<id>-info`, `-auth`,
- * `-elements` (`useDraftSaveContext`). Matching
- * only the exact key read every one of those as clean, so the case scans for
- * its own id plus that suffix family. It stays scoped to `tab.entityId` - a
- * blanket `collection-` prefix would make every collection tab dirty whenever
- * any one of them was.
+ * A collection tab hosts more than that one editor, and its siblings key themselves off the same id
+ * with a suffix: `collection-<id>-info`, `-auth`, `-elements` (`useDraftSaveContext`). Matching
+ * only the exact key would read every one of those as clean, so the case scans for its own id plus
+ * that suffix family. It stays scoped to `tab.entityId`: a blanket `collection-` prefix would make
+ * every collection tab dirty whenever any one of them was.
  */
 function isTabDirty(tab: Tab, contexts: Map<string, SaveContext>): boolean {
 	const isDirty = (key: string) => contexts.get(key)?.hasPendingChanges === true;
@@ -552,13 +491,10 @@ function isTabDirty(tab: Tab, contexts: Map<string, SaveContext>): boolean {
 			return false;
 		case "inbox":
 			/*
-			 * Never dirty, stated rather than left to the default.
-			 *
-			 * An inbox holds no draft: its listener and its canned response are
-			 * engine state, written through as they are changed. The explicit
-			 * case is here because a *missing* one reads as clean too, and the
-			 * two are indistinguishable to the next reader - which is how a
-			 * dirty Settings tab became LRU-evictable.
+			 * Never dirty, stated rather than left to the default. An inbox holds no draft: its
+			 * listener and its canned response are engine state, written through as they change.
+			 * The case is explicit because a missing one reads as clean too, and the two look alike
+			 * to the next reader, which is how a dirty Settings tab became LRU-evictable.
 			 */
 			return false;
 		case "mock-server":
@@ -572,17 +508,14 @@ function isTabDirty(tab: Tab, contexts: Map<string, SaveContext>): boolean {
 }
 
 /**
- * Index of the tab LRU eviction takes: the least recently focused one that is
- * safe to lose, or `-1` when none is.
+ * Index of the tab LRU eviction takes: the least recently focused one that is safe to lose, or `-1`
+ * when none is. Safe means not on screen, not exempt and clean. The tab being opened is never a
+ * candidate: it has no stamp, so it would rank first, and dropping it would leave `activeTabId`
+ * naming a tab that is not there. When every other tab is dirty the strip runs past the cap rather
+ * than losing work.
  *
- * Safe means not on screen, not exempt and clean. The tab being opened is never
- * a candidate - it has no stamp, so it would rank first, and dropping it would
- * leave `activeTabId` naming a tab that is not there. When every other tab is
- * dirty the strip therefore runs past the cap rather than losing work.
- *
- * A tab with no stamp (restored this session, never focused) ranks as `0`, so it
- * goes before any tab the user has actually used. Ties keep strip order, the
- * earlier tab first.
+ * A tab with no stamp (restored this session, never focused) ranks as `0`, so it goes before any
+ * tab the user has used. Ties keep strip order, the earlier tab first.
  */
 function leastRecentlyFocusedIndex(
 	tabs: Tab[],
@@ -612,13 +545,11 @@ interface PersistedTabs {
 }
 
 /**
- * Version translation for the persisted tab list.
- *
- * zustand *discards* a payload whose stamped version does not match `version`
- * unless a `migrate` is supplied - it logs to the console and hands the store
- * its defaults - so a future bump without this would silently close everyone's
- * tabs. This is where that bump goes: add a branch per old version. Until then
- * there is one shape, and the only work is refusing a payload that is not it.
+ * Version translation for the persisted tab list. zustand discards a payload whose stamped version
+ * does not match `version` unless a `migrate` is supplied (it logs to the console and hands the
+ * store its defaults), so a future bump without this would silently close everyone's tabs. That
+ * bump goes here, a branch per old version; until then there is one shape, and the only work is
+ * refusing a payload that is not it.
  */
 function migrateTabs(persisted: unknown): PersistedTabs {
 	const stored = (persisted ?? {}) as Partial<PersistedTabs>;
@@ -629,14 +560,11 @@ function migrateTabs(persisted: unknown): PersistedTabs {
 }
 
 /**
- * Stamp `focusedId` as focused now, keeping only the tabs that still exist.
- *
- * Every path that makes a tab active calls this, the close paths included: a
- * tab a close brings on screen is being focused, and eviction ranks by the
- * stamp. Pruning here rather than in the close branches that activate nothing
- * is what keeps those unchanged: a stamp for a closed tab is unreachable
- * (nothing ranks a tab that is not open) and is dropped the next time anything
- * is focused.
+ * Stamp `focusedId` as focused now, keeping only the tabs that still exist. Every path that makes a
+ * tab active calls this, the close paths included: a tab a close brings on screen is being focused,
+ * and eviction ranks by the stamp. Pruning here, not in the close branches that activate nothing,
+ * keeps those unchanged: a stamp for a closed tab is unreachable (nothing ranks a tab that is not
+ * open) and drops the next time anything is focused.
  */
 function stampFocus(
 	previous: Record<string, number>,
@@ -653,14 +581,11 @@ function stampFocus(
 }
 
 /**
- * Move the cursor one step and show what it lands on.
- *
- * The activation goes through `focusTab` / `openTab` rather than setting
- * `activeTabId` here, so a location arrived at by Back is opened exactly the way
- * it was opened the first time - the singleton dedupe, the LRU cap and the focus
- * stamp all apply, and there is no second definition of what showing a place
- * means. `traversingHistory` is what stops those calls from recording the step
- * as a new visit.
+ * Move the cursor one step and show what it lands on. The activation goes through `focusTab` /
+ * `openTab` rather than setting `activeTabId` here, so a location reached by Back is opened exactly
+ * as it was the first time (the singleton dedupe, the LRU cap and the focus stamp all apply), with
+ * no second definition of what showing a place means. `traversingHistory` stops those calls from
+ * recording the step as a new visit.
  */
 function traverse(
 	get: () => TabsState,
@@ -690,15 +615,12 @@ function makeId() {
 }
 
 /**
- * Show a tab, opening it if it is not already open, and leave `intent` pending
- * for the screen it lands on - or clear whatever was pending when there is none.
- *
- * One `set` for the tab and the intent together: the destination screen reads
- * the intent on the very render the tab becomes active, and an intent set in a
- * separate step would either miss that render or be cleared by this activation.
- * Every other path that makes a tab active clears the intent instead (`openTab`
- * through here with `null`, `focusTab` directly), which is what ends one whose
- * screen never took it.
+ * Show a tab, opening it if it is not open, and leave `intent` pending for the screen it lands on,
+ * or clear whatever was pending when there is none. One `set` for the tab and the intent: the
+ * destination reads the intent on the very render the tab becomes active, and an intent set in a
+ * separate step would miss that render or be cleared by this activation. Every other path that
+ * makes a tab active clears the intent instead (`openTab` through here with `null`, `focusTab`
+ * directly), which ends one whose screen never took it.
  */
 function activateTab(
 	get: () => TabsState,
@@ -744,10 +666,9 @@ function activateTab(
 	const tabs = [...openTabs, newTab];
 	const evicted: Tab[] = [];
 
-	// LRU eviction when over cap. Nothing is flushed on the way out:
-	// the selector refuses a dirty tab, so there is no flush to run -
-	// and had there been one, `void ctx.save()` would have dropped the
-	// rejection. Eviction simply never takes unsaved work.
+	// LRU eviction when over the cap. Nothing is flushed on the way out: the selector refuses a
+	// dirty tab, so there is no flush to run (and had there been one, `void ctx.save()` would have
+	// dropped its rejection). Eviction never takes unsaved work.
 	if (tabs.length > MAX_OPEN_TABS) {
 		const evictIndex = leastRecentlyFocusedIndex(
 			tabs,
@@ -892,26 +813,22 @@ export const useTabsStore = create<TabsState>()(
 				const ids = new Set(entityIds);
 				if (ids.size === 0) return;
 
-				// A delete that can name a request takes its response with it: the
-				// collection tree reaches here after deleting a request or a whole
-				// collection, and each entry holds a body plus its raw copy. The
-				// map's own LRU bound (#1156) only puts a ceiling on the session -
-				// a response nothing can reach again should go now, not in
-				// twenty-four sends' time. Skipped for a `type`-scoped sweep
-				// that is not about requests - `"run"` ids cannot key a response, so
-				// walking them would only look like it meant something. Done before
-				// the early return below, since a deleted request with no open tab
-				// still leaves a response behind.
+				// A delete that can name a request takes its response with it: the collection tree
+				// reaches here after deleting a request or a whole collection, and each entry holds
+				// a body plus its raw copy. The map's own LRU bound (#1156) only caps the session;
+				// a response nothing can reach again should go now, not in twenty-four sends' time.
+				// Skipped for a `type`-scoped sweep that is not about requests: `"run"` ids cannot
+				// key a response. Done before the early return below, since a deleted request with
+				// no open tab still leaves a response behind.
 				if (type === undefined || type === "request") {
 					const { clearResponse } = useResponseStore.getState();
 					for (const id of ids) clearResponse(id);
 				}
 
-				// A deleted request or collection's remembered sub-tab goes with it
-				// too - unlike the response above, this runs for every `type`: a
-				// collection id keys `collectionTab` the same way a request id keys
-				// `requestTab`/`responseTab`, and `clearEntity` is a harmless no-op
-				// for whichever of the four maps never held the id.
+				// A deleted request or collection's remembered sub-tab goes with it too, for every
+				// `type`, unlike the response above: a collection id keys `collectionTab` as a
+				// request id keys `requestTab`/`responseTab`, and `clearEntity` is a no-op for
+				// whichever of the four maps never held the id.
 				const { clearEntity } = useTabSelectionStore.getState();
 				for (const id of ids) clearEntity(id);
 				// And so does any unsaved draft it held, descendants' included: the
@@ -928,15 +845,12 @@ export const useTabsStore = create<TabsState>()(
 					(type === undefined || t.type === type);
 
 				/*
-				 * A deleted entity leaves the history too, and this is the moment it
-				 * can: deletion is the one point where the app knows an entity is
-				 * gone, everywhere else finding out lazily from a 404 when a pane
-				 * renders. Pruning here is what makes Back never land on a request
-				 * that no longer exists - it is not there to land on - rather than
-				 * reopening a tab whose only content is an error.
-				 *
-				 * Before the early return below: an entity with no open tab can
-				 * still be somewhere the user has been.
+				 * A deleted entity leaves the history too, and this is the moment it can: deletion
+				 * is the one point where the app knows an entity is gone, everywhere else finding
+				 * out lazily from a 404 when a pane renders. Pruning here makes Back never land on
+				 * a request that no longer exists, rather than reopening a tab whose only content
+				 * is an error. Before the early return below: an entity with no open tab can still
+				 * be somewhere the user has been.
 				 */
 				const forgotten = forgetLocations(navHistory, navIndex, shouldClose);
 
@@ -1008,10 +922,9 @@ export const useTabsStore = create<TabsState>()(
 				const { openTabs, activeTabId } = get();
 				if (openTabs.length === 0) return;
 				/*
-				 * `openTabs` order, not `tabFocusedAt` order: "next" means the tab
-				 * to the right of this one in the strip, which is what the user is
-				 * looking at. The recency stamps answer a different question, and
-				 * the palette is where they are asked.
+				 * `openTabs` order, not `tabFocusedAt` order: "next" means the tab to the right of
+				 * this one in the strip, which is what the user is looking at. The recency stamps
+				 * answer a different question, and the palette is where it is asked.
 				 */
 				const current = openTabs.findIndex((t) => t.id === activeTabId);
 				// With no active tab, forwards starts at the first and backwards at
