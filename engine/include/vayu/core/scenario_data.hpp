@@ -8,11 +8,10 @@
  */
 
 /**
- * @file core/scenario_data.hpp
  * @brief Bind a data row into a composed request through the reserved
- *        `{{data.column}}` namespace (issue #402).
+ *        `{{data.column}}` namespace (#402).
  *
- * `pm.iterationData` (#356) gave *scripts* the row. It cannot make the row
+ * `pm.iterationData` (#356) gives *scripts* the row. It cannot make the row
  * influence the request itself, because a scenario plan is composed once,
  * before the first send, and a script that reads a row after the request was
  * built is reading it too late to change where it goes. `{{data.column}}` is
@@ -25,12 +24,12 @@
  * global, collection or environment variable. That is what makes the feature
  * safe to add to collections people already have.
  *
- * **A bound row answers for bare column names too** (issue #1007), and that one
- * *is* a tier - the highest, and only while a row is bound. Postman writes a
+ * **A bound row answers for bare column names too** (#1007), and that one *is*
+ * a tier - the highest, and only while a row is bound. Postman writes a
  * dataset's columns bare, so every imported data-driven collection spells them
  * `{{username}}`, and a run that answered those from the scopes (or from
- * nowhere) sends a request the file's author never wrote. Which bare names a
- * bind owns is decided where the dataset is known and travels as
+ * nowhere) would send a request the file's author never wrote. Which bare names
+ * a bind owns is decided where the dataset is known and travels as
  * `http::BoundColumnNames`: composition leaves those tokens written as it
  * stands, exactly as it does the reserved ones, and this module joins both
  * spellings against the row through the same walk - so the escaping, the
@@ -38,59 +37,51 @@
  * for a bare column identically. A file bound to a run cannot reach the wire
  * through a path with fewer rules than the prefixed spelling has.
  *
- * A column the row does not carry is an **error, not an empty string**: the
- * whole point of the token is that the value came from the file, and sending a
- * request with a silently blank field is the failure mode this namespace
- * exists to remove. The runner turns that into an errored step, before the
- * request is sent.
+ * The token says the value came from the file, so a request sent with a
+ * silently blank or wrong field is the failure mode this namespace exists to
+ * remove. Each of these is therefore an **error**:
  *
- * A run started with **no data set at all** is the same failure one step
- * earlier, and is refused one step earlier too: plan resolution tokenises the
- * composed steps and returns a `400` rather than starting a run whose every
- * iteration would send the literal token (issue #415).
- *
- * A cell that is **null** is the same failure again, one type down: the token
- * says the value comes from the file and the file says there is none, so the
- * bind errors rather than writing nothing where a value belonged (issue #593).
- *
- * Two header names that **bind to the same name** are the same failure once
- * more, one field over: `X-{{data.h}}` resolving to `authorization` beside a
- * literal `Authorization` would leave a map with one of them in it, so the bind
- * errors rather than dropping a header (issue #595). Composition's duplicate
- * rule is last-wins, and this deliberately is not: a duplicate there is two
- * headers the user typed and can see, while this one exists only for the rows
- * that produce it - a file whose row 3 collides sends two good requests and
- * then one quietly missing its auth.
- *
- * A cell carrying a **CR or LF bound into a header** is the same failure once
- * more, on the same field (issue #732). A header line ends at CRLF, so a cell
- * holding `ok\r\nX-Admin: true` does not put that text in the header - it ends
- * the header and makes the remainder a header of its own, which is a request
- * the file's author never wrote. There is no escape for a line break in a
- * header, so unlike a quote in a JSON body this cannot be encoded around: the
- * bind errors. It covers a header name, a header value, and a credential
- * `apply_auth` writes into a header line (a bearer token, an api key sent in a
- * header) - not basic auth's pair or an api key sent in the query, whose bytes
- * are base64- and percent-encoded before they reach the wire.
+ * - A column the row does not carry - **not an empty string**. The runner turns
+ *   it into an errored step, before the request is sent.
+ * - A run started with **no data set at all**, refused one step earlier: plan
+ *   resolution tokenises the composed steps and returns a `400` rather than
+ *   starting a run whose every iteration would send the literal token (#415).
+ * - A **null** cell: the file says there is no value, so the bind errors rather
+ *   than writing nothing where a value belonged (#593).
+ * - Two header names that **bind to the same name**: `X-{{data.h}}` resolving
+ *   to `authorization` beside a literal `Authorization` would leave a map with
+ *   one of them in it, so the bind errors rather than dropping a header (#595).
+ *   Composition's duplicate rule is last-wins, and this deliberately is not: a
+ *   duplicate there is two headers the user typed and can see, while this one
+ *   exists only for the rows that produce it - a file whose row 3 collides
+ *   sends two good requests and then one quietly missing its auth.
+ * - A **CR or LF bound into a header** (#732). A header line ends at CRLF, so a
+ *   cell holding `ok\r\nX-Admin: true` does not put that text in the header -
+ *   it ends the header and makes the remainder a header of its own, a request
+ *   the file's author never wrote. There is no escape for a line break in a
+ *   header, so unlike a quote in a JSON body this cannot be encoded around. It
+ *   covers a header name, a header value, and a credential `apply_auth` writes
+ *   into a header line (a bearer token, an api key sent in a header) - not
+ *   basic auth's pair or an api key sent in the query, whose bytes are base64-
+ *   and percent-encoded before they reach the wire.
  *
  * ## A value is written for the document it lands in
  *
- * Substitution is textual, so a value carrying a `"` used to end the JSON
- * string it was dropped into and put a malformed body on the wire, silently
- * (issue #593). A token inside a string literal of a JSON body therefore binds
- * **escaped**: the cell's text stays what it was, and the document stays
- * readable. A token placed *outside* a string literal - `{"n":{{data.n}}}` -
- * still binds verbatim, which is what makes typed placement work.
+ * Substitution is textual, so a value carrying a `"` would end the JSON string
+ * it was dropped into and put a malformed body on the wire, silently (#593). A
+ * token inside a string literal of a JSON body therefore binds **escaped**: the
+ * cell's text stays what it was, and the document stays readable. A token
+ * placed *outside* a string literal - `{"n":{{data.n}}}` - still binds
+ * verbatim, which is what makes typed placement work.
  *
- * An `xml` body is a document with a quoting rule too, and not JSON's (issue
- * #618): a cell holding `Ben & Jerry's` used to go out byte for byte and make
- * the document malformed, and one holding `</customer><injected/>` used to
- * change its shape. The rule depends on *where* the token sits, which is more
- * than a single bit can say - character data and an attribute value escape
- * different sets, a CDATA section escapes nothing, and a comment or a
- * processing instruction has no right answer at all and is refused. The
- * position is scanned at split time, from the same literals the JSON scan
- * reads.
+ * An `xml` body is a document with a quoting rule too, and not JSON's (#618):
+ * sent byte for byte, a cell holding `Ben & Jerry's` makes the document
+ * malformed, and one holding `</customer><injected/>` changes its shape. The
+ * rule depends on *where* the token sits, which is more than a single bit can
+ * say - character data and an attribute value escape different sets, a CDATA
+ * section escapes nothing, and a comment or a processing instruction has no
+ * right answer at all and is refused. The position is scanned at split time,
+ * from the same literals the JSON scan reads.
  *
  * Nothing else is escaped: a URL, a header, a form field and a text body take
  * the rendered value byte for byte, because none of them is a document with a
@@ -99,19 +90,19 @@
  * ## Split once, joined per row
  *
  * A step is tokenised when the plan is resolved (`tokenize_bindable_fields`)
- * and only *joined* afterwards (`apply_iteration_template`). Design mode could afford to
- * re-scan every field per iteration; the load-mode executor cannot, because it
- * binds a row per iteration per virtual user (issue #449). Both modes drive the
- * same template rather than one keeping a scanner of its own, so a step binds
- * identically however it is executed.
+ * and only *joined* afterwards (`apply_iteration_template`). Design mode could
+ * afford to re-scan every field per iteration; the load-mode executor cannot,
+ * because it binds a row per iteration per virtual user (#449). Both modes
+ * drive the same template rather than one keeping a scanner of its own, so a
+ * step binds identically however it is executed.
  *
  * ## A generator belongs to the send, not to the composition
  *
- * `{{$guid}}` and its family are generated by composition (issue #186's table),
- * and a run composes once and sends many times - so the same id used to reach
- * the wire on every request of every virtual user, which is the opposite of
- * what a unique-id token is written for (issue #995). A composition that knows
- * its payload will be repeated therefore *defers* the family instead
+ * `{{$guid}}` and its family are generated by composition (#186's table), and a
+ * run composes once and sends many times - so a generated id would reach the
+ * wire on every request of every virtual user, the opposite of what a unique-id
+ * token is written for (#995). A composition that knows its payload will be
+ * repeated therefore *defers* the family instead
  * (`http::DynamicResolution::Defer`): the token survives exactly as
  * `{{data.column}}` does, is split into the template below, and is generated
  * per iteration by the same join. Nothing else changes about it - the value is
@@ -119,8 +110,8 @@
  * escaped inside a JSON string and refused inside an XML comment on the same
  * rules a cell is.
  *
- * What a run that spells no generator pays for this is nothing: composition
- * substituted nothing, so the split finds nothing and the template stays empty.
+ * A run that spells no generator pays nothing for this: composition substituted
+ * nothing, so the split finds nothing and the template stays empty.
  *
  * ## Credentials are bound before they are encoded
  *
@@ -128,8 +119,8 @@
  * the fields above cannot serve it: `apply_auth` collapses a username and a
  * password into one base64 `Authorization` value, so a `{{data.user}}` resolved
  * into the plan is already unreadable by the time anything scans the built
- * request - it went out as base64 of the literal token text, silently (issue
- * #591). `tokenize_auth_fields` therefore splits the *typed* credentials
+ * request, and would go out as base64 of the literal token text, silently
+ * (#591). `tokenize_auth_fields` therefore splits the *typed* credentials
  * instead, and a step that carries one binds them and applies its auth per
  * iteration rather than at plan time.
  */
@@ -296,13 +287,13 @@ struct StepDataTemplate {
 const std::vector<nlohmann::json>& rows);
 
 /**
- * Which iteration of which virtual user is about to send (issue #994).
+ * Which iteration of which virtual user is about to send (#994).
  *
  * Declared in `http/request_composer.hpp` beside the two names it answers for,
- * and named here because this is the layer that binds one. It moved down when
- * the script sandbox needed to resolve the identity from below core (issue
- * #1057); the type is the same one, so a bind and a script resolution cannot
- * disagree about what the identity is.
+ * below core, because the script sandbox resolves the identity from there too
+ * (#1057); named here because this is the layer that binds one. It is the same
+ * type, so a bind and a script resolution cannot disagree about what the
+ * identity is.
  */
 using vayu::http::IterationIdentity;
 
@@ -339,12 +330,12 @@ struct IterationBinding {
 
 /**
  * Split every bindable field of @p request around its reserved tokens -
- * `{{data.column}}` (issue #402), `{{$vu}}` / `{{$iteration}}` (issue #994),
- * every bare name @p bound_columns says a row will substitute (issue #1007),
- * and every generator name composition left written as it stands (issue #995).
- * The bare names are empty for every run with no dataset behind it, and the
- * generators are absent from anything a Send composed, which is what keeps the
- * split for those exactly the scan it always was.
+ * `{{data.column}}` (#402), `{{$vu}}` / `{{$iteration}}` (#994), every bare
+ * name @p bound_columns says a row will substitute (#1007), and every generator
+ * name composition left written as it stands (#995). The bare names are empty
+ * for every run with no dataset behind it, and the generators are absent from
+ * anything a Send composed, so for those the split finds only the reserved
+ * tokens.
  *
  * Run once per step, when the plan is resolved, or once per run for a single
  * request. The request is copied for it - the shared walk rewrites in place and
@@ -393,21 +384,18 @@ const IterationBinding& binding);
 
 /**
  * Split @p auth's credential strings around their `{{data.column}}` tokens and
- * their `{{$vu}}` / `{{$iteration}}` identity (issue #1055).
+ * their `{{$vu}}` / `{{$iteration}}` identity (#1055).
  *
  * **Both namespaces the bind can answer, and only those.** A `{{$guid}}` is not
  * one of them: composition generates a generator inside the auth block rather
- * than deferring it (issue #995), so none survives into a credential to be
- * split, and one kept here would defer a build for a token that is already a
- * value.
+ * than deferring it (#995), so none survives into a credential to be split, and
+ * one kept here would defer a build for a token that is already a value.
  *
- * The identity used to be excluded, because deferring a build was what let a
- * row reach a credential and a build was deferred only for a run that *had*
- * rows - so splitting it out would have bound `{{$vu}}` in a data-driven run
- * and sent it base64-encoded as written in every other, which is a rule nobody
- * could hold in their head. What changed is the deferral, not this: a build is
- * deferred for the credentials that carry a token rather than for the runs that
- * carry rows, so one rule now holds on every run shape.
+ * The identity is split too because a build is deferred for the credentials
+ * that carry a token, not for the runs that carry rows. Keyed to rows, it would
+ * bind `{{$vu}}` in a data-driven run and send it base64-encoded as written in
+ * every other, a rule nobody could hold in their head; keyed to the
+ * credentials, one rule holds on every run shape.
  *
  * The same splitter the request walk drives, over `walk_auth_credentials`
  * instead of `walk_bindable_fields` - one field list per walk, and the join
@@ -427,7 +415,7 @@ const IterationBinding& binding);
  * auth mode rather than of the string.
  *
  * Empty for the ordinary step, whose credentials carry no token and whose auth
- * is therefore resolved into the plan once, as it always was.
+ * is therefore resolved into the plan once.
  */
 [[nodiscard]] StepDataTemplate tokenize_auth_fields (const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns = {});
@@ -607,13 +595,12 @@ const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
- * `render_data_value` moved to `http/request_composer.hpp` (issue #890).
- *
- * It is the `data.` namespace's own spelling rule, and the namespace lives in
- * the composer beside `DATA_NAMESPACE_PREFIX` and `is_data_variable_name`. The
- * script sandbox needs it too - `pm.variables.replaceIn` resolves the namespace
- * now - and the runtime layer sits *below* core, so leaving it here would have
- * meant a second copy of a five-line rule. Use `vayu::http::render_data_value`.
+ * `render_data_value` lives in `http/request_composer.hpp` (#890), the `data.`
+ * namespace's own spelling rule beside `DATA_NAMESPACE_PREFIX` and
+ * `is_data_variable_name`. The script sandbox needs it too -
+ * `pm.variables.replaceIn` resolves the namespace - and the runtime layer sits
+ * *below* core, so a copy here would be a second copy of a five-line rule. Use
+ * `vayu::http::render_data_value`.
  */
 
 /**
