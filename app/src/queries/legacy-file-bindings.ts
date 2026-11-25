@@ -6,22 +6,20 @@
  */
 
 /**
- * The one-time import of the file bindings the app kept in `localStorage`
- * before they rode the collection row (#2765).
+ * The one-time import of the file bindings the app kept in `localStorage` before they rode the
+ * collection row (#2765).
  *
  * Each key is the payload the old zustand `persist` store wrote,
- * `{"state":{"locations":{<collectionId>:{...}}},"version":1}`, read through
- * the same normalizers a row is, and written to every collection the engine
- * still lists that has no binding of that kind yet - a binding the engine
- * already holds is never overwritten. An id the list does not name (a
- * collection deleted, or sitting in the trash, before the upgrade) is dropped.
- * The key is removed only once every write it asked for has landed, so a
- * launch that cannot reach the engine leaves it for the next.
+ * `{"state":{"locations":{<collectionId>:{...}}},"version":1}`, read through the same normalizers a
+ * row is, and written to every collection the engine still lists that has no binding of that kind
+ * yet: a binding the engine already holds is never overwritten. An id the list does not name (a
+ * collection deleted, or sitting in the trash, before the upgrade) is dropped. The key is removed
+ * only once every write it asked for has landed, so a launch that cannot reach the engine leaves it
+ * for the next.
  *
- * Retirement (#2809): this module, `useLegacyFileBindingImport` and
- * `LEGACY_FILE_BINDING_KEYS` go together once no supported release can leave
- * the keys behind - with the `file:` origin hand-off they are fed by
- * (`electron/legacy-storage-migration.ts`, #2763).
+ * Retirement (#2809): this module, `useLegacyFileBindingImport` and `LEGACY_FILE_BINDING_KEYS` go
+ * together once no supported release can leave the keys behind, with the `file:` origin hand-off
+ * they are fed by (`electron/legacy-storage-migration.ts`, #2763).
  */
 
 import { asRecord } from "@/lib/json-node";
@@ -74,9 +72,8 @@ function asError(error: unknown): Error {
 }
 
 /**
- * The entries a legacy payload holds, keyed by collection id, or `null` when
- * it is not one the old store could have written - which no later launch can
- * import either.
+ * The entries a legacy payload holds, keyed by collection id, or `null` when it is not one the old
+ * store could have written, which no later launch can import either.
  */
 function legacyEntries(raw: string): Record<string, unknown> | null {
 	try {
@@ -113,9 +110,8 @@ async function importKey(
 }
 
 /**
- * Move every legacy binding onto the rows in @p collections - the engine's
- * live list - and clear each key that moved whole. Never rejects: a failure
- * is logged and its key kept for the next launch.
+ * Move every legacy binding onto the rows in @p collections, the engine's live list, and clear each
+ * key that moved whole. Never rejects: a failure is logged, its key kept for the next launch.
  */
 export async function importLegacyFileBindings(
 	collections: readonly Collection[],

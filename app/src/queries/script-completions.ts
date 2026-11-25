@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Script Completions Query
- *
- * TanStack Query hook for fetching Monaco editor autocomplete data.
- */
+/** Monaco editor autocomplete data for scripts. */
 
 import { useQuery } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
@@ -17,10 +13,7 @@ import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { retryWithin } from "@/lib/query-client";
 
-/**
- * Fetch script completions for Monaco editor
- * These rarely change, so we cache for a long time.
- */
+/** Script completions for the Monaco editor; they rarely change, so they are cached long. */
 export function useScriptCompletionsQuery({ enabled = true }: { enabled?: boolean } = {}) {
 	return useQuery({
 		enabled,

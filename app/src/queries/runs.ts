@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Runs Queries
- *
- * TanStack Query hooks for run history operations.
- */
+/** TanStack Query hooks for run history. */
 
 import { useEffect } from "react";
 import {
@@ -45,54 +41,47 @@ const RUNS_POLL_MS = 5000;
 export const RUN_IN_PROGRESS_POLL_MS = 3000;
 
 /**
- * A run's stored data is final only once the engine says the run is. The
- * engine answers the report and series endpoints for a live run too (#1925),
- * so a copy read mid-run and cached as final is what the pane then shows
- * forever (#1934). `status` is the run's own, from its detail or report; an
- * absent one is a caller with no run in hand, which keeps the terminal policy.
+ * A run's stored data is final only once the engine says the run is. The engine answers the report
+ * and series endpoints for a live run too (#1925), so a copy read mid-run and cached as final is
+ * what the pane then shows forever (#1934). `status` is the run's own, from its detail or report;
+ * an absent one is a caller with no run in hand, which keeps the terminal policy.
  */
 function runStaleTime(status: string | null | undefined, terminalMs: number): number {
 	return isRunInProgress(status) ? 0 : terminalMs;
 }
 
 /**
- * Polling is gated to the unpaged state on purpose.
- *
- * Refetching an infinite query re-fetches *every* loaded page in sequence, so a
- * user ten pages deep drove ~10 engine requests every 5s for as long as the
- * drawer stayed open. Only page 1 can gain rows anyway (`start_time DESC`), and
- * paging older runs in is an explicit act - once the user has done it the list
- * refreshes on the next mutation or invalidation instead of on a timer.
+ * Polling is gated to the unpaged state on purpose. Refetching an infinite query re-fetches every
+ * loaded page in sequence, so a user ten pages deep would drive ~10 engine requests every 5s while
+ * the drawer stays open. Only page 1 can gain rows (`start_time DESC`), and paging older runs in is
+ * an explicit act: after it the list refreshes on the next mutation or invalidation, not on a
+ * timer.
  */
 export function runsPollInterval(loadedPages: number): number | false {
 	return loadedPages > 1 ? false : RUNS_POLL_MS;
 }
 
 /**
- * The runs list as infinite-query options, shared by the hook that observes it
- * and the startup warm-up that only fills it.
+ * The runs list as infinite-query options, shared by the hook that observes it and the startup
+ * warm-up that only fills it. One factory, not two copies of the key and the fetcher: the entry the
+ * warm-up writes has to be the exact entry the visible surfaces read, and a key or a page shape
+ * that drifted apart would leave a cache nobody reads and every surface fetching on mount anyway
+ * ("written but never read" in cache form).
  *
- * One factory rather than two copies of the key and the fetcher: the entry the
- * warm-up writes has to be the exact entry the visible surfaces read. A key or
- * a page shape that drifted apart would leave a cache nobody reads and every
- * surface fetching on mount anyway - "written but never read" in cache form.
- *
- * @param q Optional server-side substring search over the stored snapshot.
- *          Only the sort and the MCP-client narrowing stay client-side (see history-store `filterRuns`).
- * @param pinnedOnly Server-side too: `baseline=true` lists only pinned runs, so
- *          a pin older than the loaded pages is reachable. Left unset rather
- *          than passed as `false`, which the engine reads as "only unpinned".
- * @param origin Server-side as well (`origin=<kind>`): an agent's runs older
- *          than the loaded pages have to be reachable. Part of the key only
- *          when set, so the unfiltered list - the key the warm-up writes and
- *          the other observers read - is the same entry it was before.
- * @param type Server-side (`type=<kind>`), keyed in only when set, for the same
- *          reason as `origin`: "Failed" has to find the failures older than the
- *          loaded pages, and the header total has to count what is listed.
+ * @param q Optional server-side substring search over the stored snapshot. Only the sort and the
+ *        MCP-client narrowing stay client-side (see history-store `filterRuns`).
+ * @param pinnedOnly Server-side too: `baseline=true` lists only pinned runs, so a pin older than
+ *        the loaded pages is reachable. Left unset rather than passed as `false`, which the engine
+ *        reads as "only unpinned".
+ * @param origin Server-side as well (`origin=<kind>`): an agent's runs older than the loaded pages
+ *        have to be reachable. Part of the key only when set, so the unfiltered list (the key the
+ *        warm-up writes and the other observers read) stays the same entry.
+ * @param type Server-side (`type=<kind>`), keyed in only when set, for `origin`'s reason: "Failed"
+ *        has to find the failures older than the loaded pages, and the header total has to count
+ *        what is listed.
  * @param status Server-side (`status=<status>`) and keyed like `type`.
- * @param outcome Server-side (`outcome=<verdict>`) and keyed like `type`: the
- *          engine stores the verdict, so "Failed" finds the failed runs older
- *          than the loaded pages (#3547).
+ * @param outcome Server-side (`outcome=<verdict>`) and keyed like `type`: the engine stores the
+ *        verdict, so "Failed" finds the failed runs older than the loaded pages (#3547).
  */
 export function runsListInfiniteOptions(
 	q?: string,
@@ -124,25 +113,21 @@ export function runsListInfiniteOptions(
 				limit: RUNS_PAGE_LIMIT,
 				before: pageParam,
 			}),
-		// The cursor a page is read after: unset for the first page, then the
-		// engine's own `nextBefore` (null on the last page ends the paging).
-		// A cursor page costs the same at any depth and does not shift when a
-		// run starts between two pages (#2978).
+		// The cursor a page is read after: unset for the first page, then the engine's own
+		// `nextBefore` (null on the last page ends the paging). A cursor page costs the same at any
+		// depth and does not shift when a run starts between two pages (#2978).
 		initialPageParam: undefined as string | undefined,
 		getNextPageParam: (lastPage: RunListResponse) => lastPage.pagination.nextBefore,
 	};
 }
 
 /**
- * Fetch run history as an infinite query over the `{data, pagination}`
- * envelope, newest first. The 5s `refetchInterval` keeps the loaded pages
- * fresh - in the default state that is just the first page, so new runs (which
- * land on page 1 under start_time DESC) appear without re-fetching older pages.
- * Older pages are fetched on demand via `fetchNextPage`.
- *
- * The interval belongs to this hook rather than to the options above because it
- * is what an *observer* costs: a surface that renders runs pays it while it is
- * mounted, and nothing pays it while none is (#1150).
+ * Fetch run history as an infinite query over the `{data, pagination}` envelope, newest first. The
+ * 5s `refetchInterval` keeps the loaded pages fresh; by default that is just the first page, so new
+ * runs (which land on page 1 under start_time DESC) appear without re-fetching older pages, which
+ * `fetchNextPage` loads on demand. The interval belongs to this hook, not to the options above,
+ * because it is what an observer costs: a surface that renders runs pays it while mounted, and
+ * nothing pays it while none is (#1150).
  */
 export function useRunsQuery(
 	q?: string,
@@ -159,21 +144,16 @@ export function useRunsQuery(
 }
 
 /**
- * Warm the unfiltered runs list once, without becoming an observer of it.
+ * Warm the unfiltered runs list once, without becoming an observer of it. An observer at the App
+ * root would keep the 5s poll running for the app's whole visible life (History closed, nothing
+ * running, nothing at the root reading the result), waking the renderer, the engine and, through
+ * the engine's stdout pipe, the main process every tick (#1150). A prefetch does only the warming:
+ * the three surfaces that render runs (`HistoryList`, `WelcomeScreen` and the palette's entity
+ * source) observe this same key while mounted and drive the cadence themselves.
  *
- * The App root used to call `useRunsQuery()` for this. That warmed the cache
- * and then kept the 5s poll running for the app's whole visible life - History
- * closed, nothing running, and nothing at the root reading the result - waking
- * the renderer, the engine and (through the engine's stdout pipe) the main
- * process every tick (#1150). A prefetch does the warming half only: the three
- * surfaces that actually render runs - `HistoryList`, `WelcomeScreen` and the
- * palette's entity source - observe this same key while they are mounted and
- * drive the cadence themselves.
- *
- * `prefetchInfiniteQuery`, not `prefetchQuery`: those readers are infinite
- * queries, so the entry has to be written in `InfiniteData` shape. A plain
- * prefetch would store one bare page under the key and the first reader would
- * walk a `pages` that is not there.
+ * `prefetchInfiniteQuery`, not `prefetchQuery`: those readers are infinite queries, so the entry
+ * has to be written in `InfiniteData` shape. A plain prefetch would store one bare page under the
+ * key, and the first reader would walk a `pages` that is not there.
  */
 export function usePrefetchRuns() {
 	const queryClient = useQueryClient();
@@ -183,11 +163,10 @@ export function usePrefetchRuns() {
 }
 
 /**
- * Flatten an infinite runs query's pages into a de-duplicated list. A refetch
- * walks the pages in order and reads each cursor off the page it just fetched,
- * so consecutive pages abut and a run cannot sit in two of them; dedup by id
- * is the cheap guard that keeps a doubled row out of the list if one ever
- * does, first occurrence winning.
+ * Flatten an infinite runs query's pages into a de-duplicated list. A refetch walks the pages in
+ * order and reads each cursor off the page it just fetched, so consecutive pages abut and a run
+ * cannot sit in two of them; dedup by id is the cheap guard that keeps a doubled row out if one
+ * ever does, first occurrence winning.
  */
 export function flattenRunPages(data: InfiniteData<RunListResponse> | undefined): Run[] {
 	if (!data) return [];
@@ -212,23 +191,17 @@ export function runsTotal(data: InfiniteData<RunListResponse> | undefined): numb
 export const RUN_SEARCH_LIMIT = 7;
 
 /**
- * One small page of runs matching a free-text query - the command palette's
- * Runs group.
+ * One small page of runs matching a free-text query: the command palette's Runs group. Its own
+ * hook, not {@link useRunsQuery} with a `q`, for three reasons that all come from the caller being
+ * a search box, not a list: it wants one page and never pages further, it must not install a 5s
+ * poll for every query a user types through, and its rows must not join the infinite-list caches
+ * the delete patch walks (see `queryKeys.runs.searches`).
  *
- * Its own hook rather than {@link useRunsQuery} with a `q`, for three reasons
- * that all come from the caller being a search box rather than a list: it wants
- * one page and never pages further, it must not install a 5s poll for every
- * query a user types through, and its rows must not join the infinite-list
- * caches the delete patch walks (see `queryKeys.runs.searches`).
- *
- * No `staleTime`: the palette mounts its sources only while it is open, so a
- * refetch on open is one small request and is what keeps a run deleted since
- * the last search out of the list. `retry: false` because an engine that is
- * down is an answer here - the group hides rather than making a typist wait
- * through a retry budget.
- *
- * Disabled on an empty query: the palette's empty state is "what you were just
- * doing", which is the job of the tab and request sources.
+ * No `staleTime`: the palette mounts its sources only while it is open, so a refetch on open is one
+ * small request and keeps a run deleted since the last search out of the list. `retry: false`
+ * because an engine that is down is an answer here: the group hides rather than making a typist
+ * wait through a retry budget. Disabled on an empty query: the palette's empty state is "what you
+ * were just doing", which is the job of the tab and request sources.
  */
 export function useRunSearchQuery(q: string) {
 	const search = q.trim();
@@ -241,10 +214,9 @@ export function useRunSearchQuery(q: string) {
 }
 
 /**
- * How many runs are stored - Settings' "N stored runs". One `limit=1` read of
- * the list envelope, whose `pagination.total` is the unfiltered count, so the
- * answer costs one request and one row however long the history is (#2979).
- * Not polled.
+ * How many runs are stored: Settings' "N stored runs". One `limit=1` read of the list envelope,
+ * whose `pagination.total` is the unfiltered count, so the answer costs one request and one row
+ * however long the history is (#2979). Not polled.
  */
 export function useRunsCountQuery() {
 	return useQuery({
@@ -254,13 +226,11 @@ export function useRunsCountQuery() {
 }
 
 /**
- * A run that the engine says is gone, as opposed to an engine that did not
- * answer. Deleting a run is permanent and its tab can outlive it (a persisted
- * tab rehydrates on the next launch), so the pane has to tell "this was
- * deleted - close the tab" from "the engine is down - try again". Callers
- * discriminate with `isRunNotFound`, never by matching the message.
- *
- * The same contract `RequestNotFoundError` carries for requests.
+ * A run that the engine says is gone, as opposed to an engine that did not answer. Deleting a run
+ * is permanent and its tab can outlive it (a persisted tab rehydrates on the next launch), so the
+ * pane has to tell "this was deleted, close the tab" from "the engine is down, try again". Callers
+ * discriminate with `isRunNotFound`, never by matching the message: the contract
+ * `RequestNotFoundError` carries for requests.
  */
 export class RunNotFoundError extends Error {
 	readonly runId: string;
@@ -277,11 +247,10 @@ export function isRunNotFound(error: unknown): error is RunNotFoundError {
 }
 
 /**
- * Fetch one run, including its configSnapshot and - for a design run - the
- * stored exchange. The report is a load-test aggregate and carries no
- * configuration for a design run, so this is the only source for it.
+ * Fetch one run, including its configSnapshot and, for a design run, the stored exchange. The
+ * report is a load-test aggregate with no configuration for a design run, so this is the only
+ * source for it. Exported for the reason `requestDetailOptions` is.
  */
-/** See `requestDetailOptions` - same reason, for runs. */
 export function runDetailOptions(runId: string | null) {
 	return {
 		queryKey: queryKeys.runs.detail(runId ?? ""),
@@ -297,19 +266,17 @@ export function runDetailOptions(runId: string | null) {
 			}
 		},
 		enabled: !!runId,
-		// Never retry a real deletion - a 404 is final, and a zombie run tab
-		// retrying it forever is exactly what the global retry produced. A
-		// transport failure still gets the default budget, and an engine that is
-		// still starting does not spend it.
+		// Never retry a real deletion: a 404 is final, and under the global retry a zombie run tab
+		// would retry it forever. A transport failure still gets the default budget, and an engine
+		// that is still starting does not spend it.
 		retry: (count: number, error: unknown) =>
 			!isRunNotFound(error) &&
 			(isEngineStartFailure(error) || count < QUERY_CACHE.DEFAULT_QUERY_RETRY),
 		staleTime: QUERY_CACHE.RUNS_STALE_TIME_MS,
-		// A run opened while it executes has to notice that it ended: nothing
-		// else invalidates this key for a run another window, an agent or a
-		// relaunch started (#1934). Function form because this object is spread
-		// into every tab's query in `tab-descriptors`, and only a live run's
-		// should poll.
+		// A run opened while it executes has to notice that it ended: nothing else invalidates this
+		// key for a run another window, an agent or a relaunch started (#1934). Function form
+		// because this object is spread into every tab's query in `tab-descriptors`, and only a
+		// live run's should poll.
 		refetchInterval: (query: Query<Run>) =>
 			isRunInProgress(query.state.data?.status) ? RUN_IN_PROGRESS_POLL_MS : false,
 	};
@@ -320,11 +287,9 @@ export function useRunQuery(runId: string | null) {
 }
 
 /**
- * Fetch a single run's report.
- *
- * Pass the run's `status` when it is known: a run still executing gets a report
- * that is stale at once and re-read on a timer, where a terminal one is cached
- * for good (#1934). Omitted, the report is treated as a finished run's.
+ * Fetch a single run's report. Pass the run's `status` when it is known: a run still executing gets
+ * a report that is stale at once and re-read on a timer, where a terminal one is cached for good
+ * (#1934). Omitted, the report is treated as a finished run's.
  */
 export function useRunReportQuery(runId: string | null, status?: string | null) {
 	return useQuery({
@@ -337,15 +302,11 @@ export function useRunReportQuery(runId: string | null, status?: string | null) 
 }
 
 /**
- * Fetch a run's captured response exchanges, indexed by result id.
- *
- * `enabled` is the point of this hook: the bodies are not part of the report
- * and must not be fetched with it - a surface passes `true` only once a reader
- * has expanded a sample. Returns a Map so a card can look its own exchange up
- * in constant time instead of scanning the page.
- *
- * Captured data never changes after a run finishes, so it is cached like the
- * time series rather than the polled report.
+ * Fetch a run's captured response exchanges, indexed by result id. `enabled` is the point of this
+ * hook: the bodies are not part of the report and must not be fetched with it, so a surface passes
+ * `true` only once a reader has expanded a sample. A Map, so a card looks its own exchange up in
+ * constant time instead of scanning the page. Captured data never changes after a run finishes, so
+ * it is cached like the time series, not the polled report.
  */
 export function useRunSamplesQuery(runId: string | null, enabled: boolean) {
 	return useQuery({
@@ -362,15 +323,13 @@ export function useRunSamplesQuery(runId: string | null, enabled: boolean) {
 
 /**
  * A run's stored series for the History charts, in one request: at most
- * {@link HISTORY_SERIES_MAX_POINTS} ticks, folded into buckets by the engine
- * when the run stored more (#2547; `bucketed` / `ticksPerBucket` on the answer
- * say so). Never paged: a 24 h soak used to be 18 pages of raw ticks held for
- * half an hour.
+ * {@link HISTORY_SERIES_MAX_POINTS} ticks, folded into buckets by the engine when the run stored
+ * more (#2547; `bucketed` / `ticksPerBucket` on the answer say so). Never paged: paged, a 24 h soak
+ * was 18 pages of raw ticks held for half an hour.
  *
- * A finished run's ticks never change, so they are cached for good; `status`
- * says when the run is not finished, and the ticks written so far are then
- * stale at once (#1934). Not polled: the live ticks have the dashboard's
- * stream.
+ * A finished run's ticks never change, so they are cached for good; `status` says when the run is
+ * not finished, and the ticks written so far are then stale at once (#1934). Not polled: the live
+ * ticks have the dashboard's stream.
  */
 export function useRunTimeSeriesQuery(runId: string | null, status?: string | null) {
 	return useQuery<TimeSeriesResponse, Error>({
@@ -384,16 +343,14 @@ export function useRunTimeSeriesQuery(runId: string | null, status?: string | nu
 }
 
 /**
- * The server vitals scraped during a run, for the History view's overlay, in
- * one request: at most {@link HISTORY_SERIES_MAX_POINTS} samples, folded into
- * buckets by the engine when the run stored more (#2611; `bucketed` /
- * `ticksPerBucket` on the answer say so). Never paged, like
+ * The server vitals scraped during a run, for the History view's overlay, in one request: at most
+ * {@link HISTORY_SERIES_MAX_POINTS} samples, folded into buckets by the engine when the run stored
+ * more (#2611; `bucketed` / `ticksPerBucket` on the answer say so). Never paged, like
  * {@link useRunTimeSeriesQuery}.
  *
- * Its own query beside that one rather than a field on it: the two series come
- * from different endpoints and different cadences, and a run that configured no
- * monitor must not pay a second fetch it would only ever read as empty - which
- * is what `enabled` expresses at the call site.
+ * Its own query beside that one, not a field on it: the two series come from different endpoints
+ * and cadences, and a run that configured no monitor must not pay a second fetch it would only ever
+ * read as empty, which is what `enabled` expresses at the call site.
  */
 export function useRunMonitorSeriesQuery(
 	runId: string | null,
@@ -412,10 +369,9 @@ export function useRunMonitorSeriesQuery(
 }
 
 /**
- * Find the last completed design run for a specific request. One filtered
- * server call (`requestId`, `type=design`, `status=completed`, `limit=1`) -
- * the server already sorts start_time DESC, so the single row it returns is
- * the most recent. No client-side download-and-filter.
+ * Find the last completed design run for a request. One filtered server call (`requestId`,
+ * `type=design`, `status=completed`, `limit=1`): the server already sorts start_time DESC, so its
+ * single row is the most recent, with no client-side download-and-filter.
  */
 export function useLastDesignRunQuery(requestId: string | null | undefined) {
 	const { data, isLoading: runLoading } = useQuery({
@@ -451,19 +407,16 @@ export function useLastDesignRunQuery(requestId: string | null | undefined) {
 export const RECENT_DESIGN_RUN_LIMIT = 5;
 
 /**
- * The last few design runs of one request, newest first - the rows behind the
- * context bar's Recent sends section.
+ * The last few design runs of one request, newest first: the rows behind the context bar's Recent
+ * sends section. **One list call and no report fetch**: each row carries its own `resultSummary`
+ * (status code + latency) from the engine, which is what makes the section affordable; the
+ * alternative is one `GET /runs/:id/report` per row, and that path loads and parses every result's
+ * `trace_data`.
  *
- * **One list call and no report fetch.** Each row carries its own
- * `resultSummary` (status code + latency) from the engine, which is the change
- * that made this section affordable: the alternative was one `GET /runs/:id/report`
- * per row, and that path loads and parses every result's `trace_data`.
- *
- * Deliberately **unfiltered by status**, unlike {@link useLastDesignRunQuery}:
- * a failed send is exactly what a trend is for, and `status` takes one value,
- * so filtering to `completed` would hide every failure. A run still in flight
- * comes back too, with no `resultSummary`; the section renders its status
- * rather than inventing an outcome for it.
+ * Deliberately **unfiltered by status**, unlike {@link useLastDesignRunQuery}: a failed send is
+ * exactly what a trend is for, and `status` takes one value, so filtering to `completed` would hide
+ * every failure. A run still in flight comes back too, with no `resultSummary`; the section renders
+ * its status rather than inventing an outcome for it.
  */
 export function useRecentDesignRunsQuery(requestId: string | null | undefined) {
 	return useQuery({
@@ -480,19 +433,15 @@ export function useRecentDesignRunsQuery(requestId: string | null | undefined) {
 }
 
 /**
- * The most recent run of one collection - the row behind the context bar's
- * Last run section.
+ * The most recent run of one collection: the row behind the context bar's Last run section. **One
+ * filtered call, one row**: `collectionId` is matched engine-side against the scenario snapshot's
+ * own field, so the server's `start_time DESC` order makes `limit: 1` the answer directly. Without
+ * the filter, finding a collection's last run would mean paging the whole history and searching
+ * each snapshot's text for the id.
  *
- * **One filtered call, one row.** `collectionId` is matched engine-side against
- * the scenario snapshot's own field, so the server's `start_time DESC` order
- * makes `limit: 1` the answer directly. The alternative this replaces is why the
- * section did not exist: without the filter, finding a collection's last run
- * meant paging the whole history and searching each snapshot's text for the id.
- *
- * Deliberately **unfiltered by status**, for the same reason `useRecentDesignRunsQuery`
- * is: a run that failed is the one worth surfacing, and `status` takes a single
- * value. A run still in flight comes back too; the section says so rather than
- * calling it an outcome.
+ * Deliberately **unfiltered by status**, for `useRecentDesignRunsQuery`'s reason: a run that failed
+ * is the one worth surfacing, and `status` takes a single value. A run still in flight comes back
+ * too; the section says so rather than calling it an outcome.
  */
 export function useLastCollectionRunQuery(collectionId: string | null | undefined) {
 	return useQuery({
@@ -508,11 +457,10 @@ export function useLastCollectionRunQuery(collectionId: string | null | undefine
 }
 
 /**
- * What a load run is a run *of*: a saved request, or the collection a scenario
- * load run drove (its `requestId` is null, the collection is in its scenario
- * manifest). The two are the only identities the engine can filter runs by, so
- * this is what compare, trend and baseline are scoped to. `runIdentity`
- * (`@/lib/run-reference-input`) reads one off a run.
+ * What a load run is a run of: a saved request, or the collection a scenario load run drove (its
+ * `requestId` is null; the collection is in its scenario manifest). These are the only two
+ * identities the engine can filter runs by, so compare, trend and baseline are scoped to them.
+ * `runIdentity` (`@/lib/run-reference-input`) reads one off a run.
  */
 export type RunIdentity = { requestId: string } | { collectionId: string };
 
@@ -525,14 +473,11 @@ function identityRunsKey(identity: RunIdentity | null | undefined) {
 }
 
 /**
- * The load runs of one request or one collection, newest first, for the
- * compare picker and the trend.
- *
- * One page of the engine's own `start_time DESC` order, so an identity run more
- * than a page's worth of times offers its newest runs and not its oldest. The
- * rows are returned whole: which of them are comparable (finished, not the open
- * run) is the caller's rule, because a status takes one value engine-side and
- * the picker wants two.
+ * The load runs of one request or one collection, newest first, for the compare picker and the
+ * trend. One page of the engine's own `start_time DESC` order, so an identity run more than a
+ * page's worth of times offers its newest runs, not its oldest. The rows are returned whole: which
+ * are comparable (finished, not the open run) is the caller's rule, because a status takes one
+ * value engine-side and the picker wants two.
  */
 export function useRequestRunsQuery(identity: RunIdentity | null | undefined) {
 	return useQuery({
@@ -549,23 +494,19 @@ export function useRequestRunsQuery(identity: RunIdentity | null | undefined) {
 }
 
 /**
- * How the run being viewed says which baseline it is judged against - the ways
- * a baseline can be looked up, in the order they are tried.
- *
- * A saved request has an id, and a scenario load run has its collection's; the
- * engine filters on either exactly. A run of an unsaved request has neither
- * (its `requestId` is null and it ran no collection), and the only identity it
- * left behind is the url and method on its row summary - so those are matched
- * instead, over a bounded page of pinned runs.
+ * How the run being viewed says which baseline it is judged against: the ways a baseline can be
+ * looked up, in the order they are tried. A saved request has an id and a scenario load run has its
+ * collection's; the engine filters on either exactly. A run of an unsaved request has neither (its
+ * `requestId` is null and it ran no collection), and the only identity it left behind is the url
+ * and method on its row summary, so those are matched instead, over a bounded page of pinned runs.
  */
 export type BaselineTarget = RunIdentity | { url: string; method: string };
 
 /**
- * How many pinned runs the url/method fallback looks at. `q` is a substring
- * match over the stored snapshot text, so it over-matches by design (a url is
- * a substring of longer urls, and of any body quoting it); the exact match
- * happens here, over a page small enough that an unsaved request with a heavily
- * pinned history costs one bounded request rather than a walk of the archive.
+ * How many pinned runs the url/method fallback looks at. `q` is a substring match over the stored
+ * snapshot text, so it over-matches by design (a url is a substring of longer urls, and of any body
+ * quoting it); the exact match happens here, over a page small enough that an unsaved request with
+ * a heavily pinned history costs one bounded request, not a walk of the archive.
  */
 const BASELINE_SCAN_LIMIT = 20;
 
@@ -621,23 +562,20 @@ function baselineLookup(target: BaselineTarget) {
 }
 
 /**
- * The load run pinned as baseline for the same request or collection as
- * @p target, or `null` when nothing is pinned.
+ * The load run pinned as baseline for the same request or collection as @p target, or `null` when
+ * nothing is pinned.
  *
- * `GET /runs?baseline=true` is ordered newest-first, so "the baseline" is the
- * first row - the engine allows several pins (one per request is the expected
- * use) and deliberately holds no opinion about which applies where, so choosing
- * is the client's job and this is the one place the renderer does it. The MCP
- * `compare_runs` tool resolves it the same way, against the same endpoint.
+ * `GET /runs?baseline=true` is ordered newest first, so "the baseline" is the first row: the engine
+ * allows several pins (one per request is the expected use) and deliberately holds no opinion about
+ * which applies where, so choosing is the client's job and this is the one place the renderer does
+ * it. The MCP `compare_runs` tool resolves it the same way, against the same endpoint.
  *
- * `type: "load"` because a pin is not load-specific (#1509) - a design or
- * scenario run of the same request can be pinned too - but this comparison
- * is: only a load run has the percentiles and throughput it diffs, so a
- * more-recently-pinned non-load run must never shadow the load baseline.
+ * `type: "load"` because a pin is not load-specific (#1509; a design or scenario run of the same
+ * request can be pinned too) but this comparison is: only a load run has the percentiles and
+ * throughput it diffs, so a more recently pinned non-load run must never shadow the load baseline.
  *
- * `null` and "still loading" are different answers and stay different: the
- * caller renders nothing until this settles, rather than flashing a
- * "no baseline" state at every run it opens.
+ * `null` and "still loading" are different answers and stay different: the caller renders nothing
+ * until this settles, rather than flashing a "no baseline" state at every run it opens.
  */
 export function useBaselineRunQuery(target: BaselineTarget | null) {
 	const lookup = target ? baselineLookup(target) : null;
@@ -654,19 +592,15 @@ export function useBaselineRunQuery(target: BaselineTarget | null) {
 // ============ Run Mutations ============
 
 /**
- * Start a collection run.
+ * Start a collection run. The mutation ends where the engine's answer does, at `202 {runId}`: it
+ * does **not** attach to the live stream or open a tab, because the run is now the engine's and
+ * what the app does with it is the caller's decision (`RunCollectionDialog` opens the tab and
+ * starts monitoring). Keeping those out means a caller that only wants the run (a future keyboard
+ * shortcut, a re-run button) does not inherit a tab it did not ask for.
  *
- * The mutation ends where the engine's answer does - at `202 {runId}`. It does
- * **not** attach to the live stream or open a tab: the run is now the engine's,
- * and what the app does with it is the caller's decision (`RunCollectionDialog`
- * opens the tab and starts monitoring). Keeping those out means a caller that
- * only wants the run - a future keyboard shortcut, a re-run button - does not
- * inherit a tab it did not ask for.
- *
- * Every rejection is a `400` raised before a run row exists (an empty
- * collection, a step that will not compose, a plan over `maxScenarioSteps`), so
- * a failed mutation leaves nothing behind to clean up. The list is invalidated
- * only on success for that reason.
+ * Every rejection is a `400` raised before a run row exists (an empty collection, a step that will
+ * not compose, a plan over `maxScenarioSteps`), so a failed mutation leaves nothing behind to clean
+ * up, and the list is invalidated only on success.
  */
 export function useStartScenarioRunMutation() {
 	const queryClient = useQueryClient();
@@ -677,10 +611,9 @@ export function useStartScenarioRunMutation() {
 			// The new run belongs at the head of History, and the list's 5s poll
 			// is off once the user has paged it.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
-			// ...and it is now the collection's last run. That family is its own
-			// (see `queryKeys.runs.lastCollectionRuns`), so `lists()` does not
-			// reach it and an open context bar would keep showing the run before
-			// this one.
+			// ...and it is now the collection's last run. That family is its own (see
+			// `queryKeys.runs.lastCollectionRuns`), so `lists()` does not reach it, and an open
+			// context bar would keep showing the run before this one.
 			void queryClient.invalidateQueries({
 				queryKey: queryKeys.runs.lastCollectionRuns(),
 			});
@@ -688,9 +621,7 @@ export function useStartScenarioRunMutation() {
 	});
 }
 
-/**
- * Delete a run
- */
+/** Delete a run */
 export function useDeleteRunMutation() {
 	const queryClient = useQueryClient();
 
@@ -731,10 +662,9 @@ export function useDeleteRunMutation() {
 			queryClient.removeQueries({
 				queryKey: queryKeys.runs.report(deletedId),
 			});
-			// The Recent sends caches are keyed by request, and a deleted run
-			// gives no way back to one - so the whole family is invalidated
-			// rather than patched. Refetching a five-row list is cheaper than
-			// carrying a run-to-request map just to patch it.
+			// The Recent sends caches are keyed by request, and a deleted run gives no way back to
+			// one, so the whole family is invalidated, not patched: refetching a five-row list is
+			// cheaper than carrying a run-to-request map just to patch it.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesigns() });
 			// Same for the per-collection Last run caches: deleting a collection's
 			// most recent run changes what that section says, and the deleted id
@@ -748,27 +678,22 @@ export function useDeleteRunMutation() {
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.baselines() });
 			// And the compare picker's per-request and per-collection lists, for the same reason.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.requestRuns() });
-			// And the per-request last-design caches, for the fourth time and
-			// the same reason. This one is the tab-visible case: every open
-			// request tab mounts `useLastDesignRunQuery`, so without it a tab
-			// goes on restoring the response of the run just deleted.
+			// And the per-request last-design caches, for the same reason. This one is the
+			// tab-visible case: every open request tab mounts `useLastDesignRunQuery`, so without
+			// it a tab goes on restoring the response of the run just deleted.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastDesigns() });
 		},
 	});
 }
 
 /**
- * Pin or unpin a run as its request's baseline.
- *
- * The engine answers with the updated row, so the loaded list pages are patched
- * from it rather than refetched - the same in-place patch `useDeleteRunMutation`
- * does, and for the same reason: the sidebar polls only its first page, so a
- * refetch would leave a pin invisible on any page the user had scrolled to.
- *
- * The baseline family is invalidated rather than patched: the pin *moves*, so
- * the previous holder's cached answer is now wrong and there is no way back
- * from a run id to the request whose baseline it was (a run of an unsaved
- * request has no `requestId` at all).
+ * Pin or unpin a run as its request's baseline. The engine answers with the updated row, so the
+ * loaded list pages are patched from it, not refetched: the in-place patch `useDeleteRunMutation`
+ * does, for the same reason (the sidebar polls only its first page, so a refetch would leave a pin
+ * invisible on any page the user had scrolled to). The baseline family is invalidated, not patched:
+ * the pin moves, so the previous holder's cached answer is now wrong, and there is no way back from
+ * a run id to the request whose baseline it was (a run of an unsaved request has no `requestId` at
+ * all).
  */
 export function useSetRunBaselineMutation() {
 	const queryClient = useQueryClient();
@@ -809,11 +734,10 @@ export function useSetRunBaselineMutation() {
 }
 
 /**
- * Invalidate every runs list (trigger refetch) - the polled infinite list, the
- * stored-run count Settings shows, the per-request Recent sends and per-collection
- * Last run lists, the baseline lookups and the compare picker's lists (per
- * request and per collection) and the per-request last-design lookups, which are their
- * own families and would otherwise survive a cleared history.
+ * Invalidate every runs list (trigger refetch): the polled infinite list, Settings' stored-run
+ * count, the per-request Recent sends and per-collection Last run lists, the baseline lookups, the
+ * compare picker's per-request and per-collection lists, and the per-request last-design lookups,
+ * which are their own families and would otherwise survive a cleared history.
  */
 export function useInvalidateRuns() {
 	const queryClient = useQueryClient();

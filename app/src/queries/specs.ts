@@ -6,10 +6,8 @@
  */
 
 /**
- * Spec Queries
- *
- * Reading a bound OpenAPI document, binding one to a collection that already
- * exists, and applying a re-fetched one (issues #637, #638, #655).
+ * Reading a bound OpenAPI document, binding one to a collection that already exists, and applying a
+ * re-fetched one (#637, #638, #655).
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -35,14 +33,11 @@ import type {
 } from "@/types";
 
 /**
- * The one description of a full-document read, shared by the query and the two
- * readers below.
- *
- * A document is **immutable** - a changed one is a new document with a new id -
- * so every reader of it wants the same thing: cached indefinitely, fetched once.
- * Written once here because three copies of `staleTime: Infinity` beside three
- * copies of the same `queryFn` is how one of them comes to refetch a 12 MB
- * document on a window focus.
+ * The one description of a full-document read, shared by the query and the two readers below. A
+ * document is **immutable** (a changed one is a new document with a new id), so every reader wants
+ * it cached indefinitely and fetched once. Written once here, because three copies of
+ * `staleTime: Infinity` beside three copies of one `queryFn` is how one of them comes to refetch a
+ * 12 MB document on a window focus.
  */
 function specDocumentQuery(specId: string) {
 	return {
@@ -53,13 +48,11 @@ function specDocumentQuery(specId: string) {
 }
 
 /**
- * The whole document a collection is bound to - `content` included.
- *
- * For the readers that need the text: the bound-spec matching the import dialog
- * does, and nothing else since the export moved engine-side (issue #855 - it
- * reads its own stored bytes). It runs on a user action, which
- * is the rule this read follows - the Spec tab's card describes the document
- * with `useSpecMetaQuery` below rather than transferring it (issue #712).
+ * The whole document a collection is bound to, `content` included, for a reader that needs the
+ * text. No component mounts it today: the import dialog's bound-spec matching reads the same key
+ * through `useBoundSpecReader`, and the export reads its own stored bytes engine-side (#855). A
+ * full read runs on a user action: the Spec tab's card describes the document with
+ * `useSpecMetaQuery` below rather than transferring it (#712).
  */
 export function useSpecQuery(specId: string | null | undefined) {
 	return useQuery({
@@ -71,16 +64,12 @@ export function useSpecQuery(specId: string | null | undefined) {
 }
 
 /**
- * What the bound document *is* - where it came from, when, its hash and size -
- * without the document (issue #712).
- *
- * Opening the Spec tab used to transfer the whole stored document to paint a
- * source line and a date: 12 MB for Stripe's spec, 9.7 MB for GitHub's, on
- * every first open, because those two fields live on the document rather than
- * on the collection's binding. `GET /specs/:id/meta` answers them directly.
- *
- * Cached on the same terms as the document itself, and for the same reason: the
- * row it describes cannot change under a given id.
+ * What the bound document is (where it came from, when, its hash and size) without the document
+ * (#712). Those fields live on the document, not on the collection's binding, so painting the Spec
+ * tab's source line and date by transferring it cost 12 MB for Stripe's spec and 9.7 MB for
+ * GitHub's on every first open; `GET /specs/:id/meta` answers them directly. Cached on the same
+ * terms as the document itself, for the same reason: the row it describes cannot change under a
+ * given id.
  */
 export function useSpecMetaQuery(specId: string | null | undefined) {
 	return useQuery({
@@ -92,14 +81,11 @@ export function useSpecMetaQuery(specId: string | null | undefined) {
 }
 
 /**
- * Read a stored document's text on demand (issue #712).
- *
- * A reader rather than a query, for `useBoundSpecReader`'s reason: the caller is
- * an event handler. The Sync section needs the bound bytes to compare a
- * re-fetched document against, and needs them *when Check is pressed* - holding
- * the button hostage to a background transfer is what this replaced. Going
- * through `fetchQuery` on the document's own key means a document the tab, the
- * export dialog or the import dialog has already read is answered from cache.
+ * Read a stored document's text on demand (#712). A reader, not a query, for `useBoundSpecReader`'s
+ * reason: the caller is an event handler and wants the bytes at the moment it acts, not after a
+ * background transfer. Going through `fetchQuery` on the document's own key (`specDocumentQuery`)
+ * means a document already read is answered from cache. No component calls it today: the Sync
+ * section compares engine-side (#854) and reads only `sourceUrl`, through `useSpecMetaReader`.
  */
 export function useSpecContentReader(): (specId: string) => Promise<SpecDocument> {
 	const queryClient = useQueryClient();
@@ -110,17 +96,12 @@ export function useSpecContentReader(): (specId: string) => Promise<SpecDocument
 }
 
 /**
- * Read a stored document's description on demand, without the document.
- *
- * The imperative half of `useSpecMetaQuery`, for the same reason
- * `useSpecContentReader` is one: the caller is an event handler. The Sync
- * section needs `sourceUrl` - where to re-fetch from - at the moment Check is
- * pressed, and since the comparison moved engine-side (issue #854) that is the
- * *only* thing it needs from the stored document. The engine reads its own bytes
- * to compare them, so a check of a 12 MB document transfers nothing.
- *
- * Shared cache with the tab's card, which describes the same document, so the
- * click normally costs no request at all.
+ * Read a stored document's description on demand, without the document: the imperative half of
+ * `useSpecMetaQuery`, because the caller is an event handler. The Sync section needs `sourceUrl`
+ * (where to re-fetch from) the moment Check is pressed, and with the comparison engine-side (#854)
+ * that is the only thing it needs from the stored document: the engine reads its own bytes to
+ * compare them, so a check of a 12 MB document transfers nothing. Shared cache with the tab's card,
+ * which describes the same document, so the click normally costs no request at all.
  */
 export function useSpecMetaReader(): (specId: string) => Promise<SpecDocumentMeta> {
 	const queryClient = useQueryClient();
@@ -136,20 +117,16 @@ export function useSpecMetaReader(): (specId: string) => Promise<SpecDocumentMet
 }
 
 /**
- * Read the document behind every collection's binding (issue #680).
+ * Read the document behind every collection's binding (#680). A reader, not a query, because the
+ * caller is an event handler: the import dialog asks once, when Import is pressed, and paying for
+ * every bound document merely because someone opened the dialog would fetch whole specs nobody is
+ * going to compare. `fetchQuery` on the document's own key (`specDocumentQuery`) answers a document
+ * already read from cache, and keeps what it reads there.
  *
- * A reader rather than a query, because the caller is an event handler: the
- * import dialog asks this once, when Import is pressed, and paying for every
- * bound document merely because someone opened the dialog would fetch whole
- * specs nobody is going to compare. `fetchQuery` on `useSpecQuery`'s own key
- * means the answer is shared with the Spec tab both ways - a document either
- * side has read is already here, and one this reads is there for the tab.
- *
- * A document that cannot be read is left out rather than failing the lookup. A
- * binding whose document the engine no longer has is not a re-import target -
- * there is nothing to sync against - and an import must not be blocked by a
- * check that could not run. A failure that is really the engine being down
- * surfaces on the import itself, which happens next and says so.
+ * A document that cannot be read is left out rather than failing the lookup. A binding whose
+ * document the engine no longer has is not a re-import target (there is nothing to sync against),
+ * and an import must not be blocked by a check that could not run. A failure that is really the
+ * engine being down surfaces on the import itself, which happens next and says so.
  */
 export function useBoundSpecReader(): (collections: readonly Collection[]) => Promise<BoundSpec[]> {
 	const queryClient = useQueryClient();
@@ -186,26 +163,22 @@ export function useBoundSpecReader(): (collections: readonly Collection[]) => Pr
 }
 
 /**
- * What a picked document is, before anything is stored (issue #869).
+ * What a picked document is, before anything is stored (#869). `POST /specs/describe` is the same
+ * reader the bind uses, so the card cannot preview a pairing the bind would not commit, as a second
+ * parser of the picked bytes in the Spec tab could; what it answers is what the caller hands to
+ * `useSpecMatchQuery` below.
  *
- * The Spec tab used to answer this itself, by running the import parsers over
- * the picked bytes. The engine reads the same bytes on the bind, so two readers
- * had an opinion about one document and the card could preview a pairing the
- * bind would not commit. `POST /specs/describe` is the same reader the write
- * uses, and what it answers is what the caller hands to `useSpecMatchQuery`
- * below.
+ * Keyed by the pick, not by the document: the bytes are not stored and so have no id, and a key
+ * holding a 12 MB string would be one copy of the document per cache entry. The caller stamps each
+ * picked document with a token, which makes `staleTime: Infinity` honest: a token names one
+ * immutable document.
  *
- * Keyed by the pick, not by the document: the bytes are not stored and so have
- * no id, and a key holding a 12 MB string would be one copy of the document per
- * cache entry. The caller stamps each picked document with a token, which makes
- * `staleTime: Infinity` honest - a token names one immutable document.
+ * `retry: false` because the failures worth showing here are answers about the document (it is not
+ * a contract, it is too large, it does not read), and asking again only delays the sentence that
+ * says so.
  *
- * `retry: false` because the failures worth showing here are answers about the
- * document - it is not a contract, it is too large, it does not read - and
- * asking again only delays the sentence that says so.
- *
- * @param token `null` while nothing is picked, which disables the query rather
- *        than describing an empty document.
+ * @param token `null` while nothing is picked, which disables the query rather than describing an
+ *        empty document.
  */
 export function useSpecDescribeQuery(token: string | null, content: string) {
 	return useQuery({
@@ -218,29 +191,23 @@ export function useSpecDescribeQuery(token: string | null, content: string) {
 }
 
 /**
- * Which request of this collection is which operation of a document
- * (issue #761).
+ * Which request of this collection is which operation of a document (#761). The matching rule is
+ * the engine's (`POST /specs/match`), so this is a read, of two things neither of which is stored:
+ * a document the user has picked and not yet bound, and whatever the collection's subtree holds at
+ * this moment. Both are in the key, as a fingerprint of exactly what the matcher reads off them,
+ * which makes `staleTime: Infinity` honest: an answer cannot go stale while both inputs are pinned,
+ * and either changing is a different key, not a refetch of this one.
  *
- * The matching rule is the engine's now (`POST /specs/match`), so this is a
- * read rather than a computation - and a read of two things neither of which is
- * stored: the document is one the user has picked and not yet bound, and the
- * requests are whatever the collection's subtree holds at this moment. Both are
- * therefore in the key, as a fingerprint of exactly what the matcher reads off
- * them, which is what makes `staleTime: Infinity` honest here: an answer cannot
- * go stale while both of its inputs are pinned, and either changing is a
- * different key rather than a refetch of this one.
+ * The requests are fingerprinted but not sent: the engine gathers the subtree itself, since a
+ * spec-bound root usually owns no request directly. The list is passed in because the caller
+ * already holds it (it paints the counts beside this), so the fingerprint costs no extra read.
  *
- * The requests are fingerprinted but not *sent* - the engine gathers the
- * subtree itself, since a spec-bound root usually owns no request directly. The
- * list is passed in because the caller already holds it (it paints the counts
- * beside this), so the fingerprint costs no extra read.
- *
- * @param operations `null` while there is no document to match - a picked file
- *        that did not parse, or nothing picked - which disables the query
- *        rather than asking the engine about an empty document.
- * @param basePaths The document's server base paths, as `POST /specs/describe`
- *        answered them (issue #3030). They decide which literal-URL requests
- *        match, so they are part of the key like the operations are.
+ * @param operations `null` while there is no document to match (a picked file that did not parse,
+ *        or nothing picked), which disables the query rather than asking the engine about an empty
+ *        document.
+ * @param basePaths The document's server base paths, as `POST /specs/describe` answered them
+ *        (#3030). They decide which literal-URL requests match, so they are part of the key like
+ *        the operations are.
  */
 export function useSpecMatchQuery(
 	collectionId: string,
@@ -250,10 +217,9 @@ export function useSpecMatchQuery(
 ) {
 	const fingerprint = useMemo(() => {
 		if (!operations) return "";
-		// Every part of an input that changes the answer, and nothing else: a
-		// request's id, method and URL decide what it matches, an operation's
-		// identity is what a match carries onto it, and the base paths decide which
-		// literal-URL requests reach an operation (issue #3030).
+		// Every part of an input that changes the answer, and nothing else: a request's id, method
+		// and URL decide what it matches, an operation's identity is what a match carries onto it,
+		// and the base paths decide which literal-URL requests reach an operation (#3030).
 		const requestPart = requests.map((r) => `${r.id} ${r.method} ${r.url}`).join("\n");
 		const operationPart = operations
 			.map((o) => `${o.operationId ?? ""} ${o.method} ${o.path}`)
@@ -276,35 +242,28 @@ export function useSpecMatchQuery(
 }
 
 /**
- * The collection, assembled into an OpenAPI document (issue #855).
+ * The collection, assembled into an OpenAPI document (#855). A read, not a mutation, though it is a
+ * POST: nothing is stored, and the dialog toggles between two formats of one answer, which is
+ * exactly what a cache keyed by both is for; the toggle back is free.
  *
- * A read, not a mutation, even though it is a POST: nothing is stored, and the
- * dialog toggles between two formats of the same answer, which is exactly what
- * a cache keyed by both is for - the second toggle back is free.
+ * **Fresh when you open it, cached while you toggle**, which no single `staleTime` can say: `0`
+ * re-assembles a 12 MB document every time the format goes back to one already read, and `Infinity`
+ * would hand a reopened dialog an export from before the user's last edit. So the moment the dialog
+ * mounted is part of the key (the caller mounts this only while the dialog is open, so the mount is
+ * the reset), and within that reading nothing goes stale.
  *
- * **Fresh when you open it, cached while you toggle**, which neither
- * `staleTime` alone can say: `0` re-assembles a 12 MB document every time the
- * format goes back to one already read, and `Infinity` would hand a reopened
- * dialog an export from before the user's last edit. So the moment the dialog
- * mounted is part of the key - the caller mounts this only while the dialog is
- * open, so the mount *is* the reset - and within that reading nothing goes
- * stale.
+ * `retry: false` because the two failures worth showing (a binding whose document is not stored,
+ * one that will not read as OpenAPI) are answers rather than transport hiccups, and retrying them
+ * only delays the sentence that says so.
  *
- * `retry: false` because the two failures worth showing - a binding whose
- * document is not stored, and one that will not read as OpenAPI - are answers
- * rather than transport hiccups, and retrying them only delays the sentence
- * that says so.
- *
- * **The previous answer stays on screen while the next one assembles**
- * (`placeholderData`, issue #1311). Format is part of the key, so switching it
- * is a cache miss, and without a placeholder `data` went undefined for the
- * length of one engine round trip: the dialog's summary card - a bordered block
- * of eight or so lines - was torn down for a one-line spinner and put back,
- * moving both edges of a dialog that centres on itself. What the card states is
- * a property of the collection, not of the serialisation: the counts are the
- * same in JSON and YAML, and only `text` and `fileName` differ. So the honest
- * placeholder is the previous format's answer, and `isFetching` is what the
- * dialog shows while the new one is in flight.
+ * **The previous answer stays on screen while the next one assembles** (`placeholderData`, #1311).
+ * Format is part of the key, so switching it is a cache miss, and without a placeholder `data`
+ * would go undefined for one engine round trip: the dialog's summary card (a bordered block of
+ * eight or so lines) would be torn down for a one-line spinner and put back, moving both edges of a
+ * dialog that centres on itself. What the card states is a property of the collection, not of the
+ * serialisation (the counts are the same in JSON and YAML; only `text` and `fileName` differ), so
+ * the honest placeholder is the previous format's answer, and `isFetching` is what the dialog shows
+ * while the new one is in flight.
  */
 export function useSpecExportQuery(
 	collectionId: string,
@@ -335,33 +294,26 @@ export interface BindSpecInput {
 }
 
 /**
- * Bind a collection to an OpenAPI document (issues #638, #862).
+ * Bind a collection to an OpenAPI document (#638, #862). **One call, one transaction, and no
+ * pairing sent**: `POST /specs/bind` stores the document, moves the binding and stamps or clears
+ * the matching requests, all of it or none, and works the pairing out itself from the bytes it
+ * stores, so the identity a request records and the operation index coverage resolves it through
+ * come from one read of one document. Three writes from here could each land without the next, and
+ * a bind that wrote only the matches would leave every non-matcher carrying identity from the
+ * previous document (#718).
  *
- * **One call, one transaction, and no pairing sent.** This used to be three
- * writes made from here - store the document, move the binding, then stamp the
- * requests that matched and clear the ones that no longer did - each of which
- * could land without the next. Both halves of that were bugs before they were
- * rules: a bind that wrote only the matches left every non-matcher carrying
- * identity from the previous document (issue #718), and three writes are three
- * places to stop. `POST /specs/bind` does all of it or none of it, and works
- * the pairing out itself from the bytes it stores - so the identity a request
- * records and the operation index coverage resolves it through come from one
- * read of one document.
+ * What stays here is what the user is shown before committing: `useSpecMatchQuery` previews the
+ * same pairing over the same rule, writing nothing. The bind matches again rather than being handed
+ * that preview, because a request may have moved in between: what the two share is the rule, not a
+ * result carried between them.
  *
- * What stays here is what the user is shown *before* committing:
- * `useSpecMatchQuery` previews the same pairing over the same rule, writing
- * nothing. The bind matches again rather than being handed that preview,
- * because a request may have moved in between - what the two share is the rule,
- * not a result carried between them.
+ * The one other write is where the picked file is (`specFile` on the collection, #2765), made after
+ * the bind lands: it binds no document and stamps no request, so a bind cannot land in halves
+ * through it.
  *
- * The one other write is where the picked file is (`specFile` on the
- * collection, #2765), made after the bind lands: it binds no document and
- * stamps no request, so a bind cannot land in halves through it.
- *
- * Settled rather than success, still: the counts the tab shows are read off the
- * request rows, and a failed bind leaves them where they were - refetching them
- * is how the tab shows that. The request lists go as a family, since a
- * document's operations land across every tag sub-collection.
+ * Settled rather than success: the counts the tab shows are read off the request rows, and a failed
+ * bind leaves them where they were, which refetching is how the tab shows. The request lists go as
+ * a family, since a document's operations land across every tag sub-collection.
  */
 export function useBindSpecMutation() {
 	const queryClient = useQueryClient();
@@ -377,10 +329,9 @@ export function useBindSpecMutation() {
 				collectionId,
 				spec: { content, ...(sourceUrl ? { sourceUrl } : {}) },
 			});
-			// Where the file is, once the document is bound - a path beside an
-			// unbound collection names a document nothing compares against. Inside
-			// the mutation rather than after it, so the collections refetch below
-			// reads the file binding instead of racing its write.
+			// Where the file is, once the document is bound: a path beside an unbound collection
+			// names a document nothing compares against. Inside the mutation, not after it, so the
+			// collections refetch below reads the file binding instead of racing its write.
 			await apiService.updateCollection({ id: collectionId, specFile });
 			return bound;
 		},
@@ -392,16 +343,11 @@ export function useBindSpecMutation() {
 }
 
 /**
- * Ask what a re-fetched document would change (issue #854).
- *
- * A mutation rather than a query although it writes nothing, for the reason
- * `useBindSpecMutation` is one: it runs on a click, once, with an input the
- * user just produced - a re-fetch of a document that may differ every time it is
- * asked for. Caching that under a key would mean fingerprinting the whole
- * document to know when the answer expired, and the answer is wanted *now*
- * rather than kept.
- *
- * Nothing is invalidated on success: the engine stored nothing.
+ * Ask what a re-fetched document would change (#854). A mutation, not a query, though it writes
+ * nothing: it runs on a click, once, with an input the user just produced (a re-fetch of a document
+ * that may differ every time). Caching that under a key would mean fingerprinting the whole
+ * document to know when the answer expired, and the answer is wanted now, not kept. Nothing is
+ * invalidated on success: the engine stored nothing.
  */
 export function useDiffSpecMutation() {
 	return useMutation({
@@ -411,19 +357,15 @@ export function useDiffSpecMutation() {
 }
 
 /**
- * Apply a re-fetched document to the collection bound to it (issue #655).
+ * Apply a re-fetched document to the collection bound to it (#655). One mutation for one engine
+ * call: a sync creates, updates and deletes at once, and half of it landing would leave the
+ * collection bound to a document its requests do not reflect. The engine refuses that structurally
+ * (`POST /specs/sync` is one transaction), so there is nothing here to sequence or roll back.
  *
- * One mutation for one engine call, unlike `useBindSpecMutation`'s three writes:
- * a sync creates, updates and deletes at once, and half of it landing would
- * leave the collection bound to a document its requests do not reflect. The
- * engine refuses that structurally (`POST /specs/sync` is one transaction), so
- * there is nothing here to sequence or to roll back.
- *
- * On success, not settled: a failed sync wrote nothing, so nothing it touched
- * needs refetching. The request lists go as a family - a document's operations
- * land across every tag sub-collection, so the affected set is the subtree - and
- * that also drops the examples a sync refreshed, which are cached under their
- * own request's key.
+ * On success, not settled: a failed sync wrote nothing, so nothing it touched needs refetching. The
+ * request lists go as a family (a document's operations land across every tag sub-collection, so
+ * the affected set is the subtree), which also drops the examples a sync refreshed, cached under
+ * their own request's key.
  */
 export function useSyncSpecMutation() {
 	const queryClient = useQueryClient();
