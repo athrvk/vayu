@@ -7,12 +7,10 @@
 
 /**
  * What the response viewer is handed for a captured load-run sample (#3159).
- *
- * `GET /runs/:id/samples` spells a body that is not valid UTF-8 text, or holds
- * a zero byte, as base64 (`bodyEncoding`). It goes through the decoder the
- * design-mode funnels use, so a text type reads as text through its charset
- * and any other type becomes `rawBytes`, which the viewer renders as a
- * binary body instead of a wall of base64.
+ * `GET /runs/:id/samples` spells a body that is not valid UTF-8, or holds a zero byte, as base64
+ * (`bodyEncoding`). It goes through the design-mode funnels' decoder, so a text type reads as text
+ * through its charset and any other becomes `rawBytes`, which the viewer renders as a binary body,
+ * not a wall of base64.
  */
 
 import {

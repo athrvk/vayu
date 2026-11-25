@@ -6,20 +6,16 @@
  */
 
 /**
- * Confirms copying a stored run's values back onto the request it came from.
- * It asks first because it cannot be undone - the request's current values are
- * simply replaced.
+ * Confirms copying a stored run's values back onto the request it came from. It asks first because
+ * it cannot be undone: the request's current values are replaced.
  *
- * The body is one uniform changeset: every field is a row, told apart only by
- * its state marker - `~` changed, `-` removed, `+` added, `=` kept. There is no
- * separate "unchanged" section. Auth and scripts are rows like headers and
- * params; a field the run cannot write back (auth always, a legacy run's
- * scripts) is a `=` kept row with its reason inline, at the same weight as
- * everything else.
+ * The body is one uniform changeset: every field is a row, told apart only by its marker (`~`
+ * changed, `-` removed, `+` added, `=` kept), with no separate "unchanged" section. Auth and
+ * scripts are rows like headers and params; a field the run cannot write back (auth always, a
+ * legacy run's scripts) is a `=` kept row with its reason inline, at the same weight as the rest.
  *
- * Structurally this follows `DeleteConfirmDialog`: same `Dialog` primitives and
- * focus redirected to Cancel on open, so a reflexive Enter backs out rather than
- * overwrites.
+ * Follows `DeleteConfirmDialog`: the same `Dialog` primitives, and focus on Cancel at open, so a
+ * reflexive Enter backs out rather than overwrites.
  */
 
 import { useRef, useState } from "react";

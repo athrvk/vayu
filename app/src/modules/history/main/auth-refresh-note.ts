@@ -6,10 +6,9 @@
  */
 
 /**
- * The one line a run report says about keeping its OAuth 2.0 credential alive.
- *
- * Pure, so the wording is unit-testable without rendering the whole detail
- * pane, and so the component file keeps exporting only a component.
+ * The one line a run report says about keeping its OAuth 2.0 credential alive. Pure, so the wording
+ * is unit-testable without rendering the detail pane, and the component file keeps exporting only a
+ * component.
  */
 
 import { formatDuration, pluralize } from "@/modules/dashboard/utils/format";
@@ -22,10 +21,9 @@ export interface AuthRefreshNote {
 }
 
 /**
- * Describe a run's mid-run token refreshes, or `null` when there is nothing to
- * say: a run that could not refresh at all reports no section (see
- * `RunReport.auth`), and a run that was watched and never needed a refresh has
- * a section with nothing in it.
+ * A run's mid-run token refreshes, or `null` with nothing to say: a run that could not refresh at
+ * all has no section (see `RunReport.auth`), and one watched that never needed a refresh has an
+ * empty one.
  */
 export function authRefreshNote(auth: RunReport["auth"]): AuthRefreshNote | null {
 	if (!auth) return null;

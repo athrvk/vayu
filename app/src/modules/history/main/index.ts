@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * History Main Content Components
- *
- * Components displayed in the main content area for viewing run details.
- */
+/** The History run views for the main content area. */
 
 export { default as HistoryDetail } from "./HistoryDetail";
 export { default as LoadTestDetail } from "./LoadTestDetail";
