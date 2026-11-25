@@ -17,12 +17,11 @@ namespace vayu::utils {
 
 namespace {
 
-// One PRNG per thread: concurrent generators never contend on a lock or share
-// mutable state, which is what makes the thread-safety test pass. Seeded from
-// std::random_device and XOR-folded with a steady_clock reading as belt and
-// braces - some libstdc++/libc++ targets ship a random_device that is thin or
-// even deterministic, and the time term keeps two threads that seed in the same
-// instant from marching in lockstep.
+// One PRNG per thread, so concurrent generators never contend on a lock or
+// share mutable state. Seeded from std::random_device and XOR-folded with a
+// steady_clock reading as belt and braces: some libstdc++/libc++ targets ship a
+// random_device that is thin or even deterministic, and the time term keeps two
+// threads that seed in the same instant from marching in lockstep.
 std::mt19937_64& thread_rng () {
     static thread_local std::mt19937_64 rng = [] {
         std::random_device rd;
@@ -38,25 +37,20 @@ std::mt19937_64& thread_rng () {
 
 } // namespace
 
-// Build `prefix` + a canonical version-4 UUID (RFC 4122 section 4.4).
-//
-// A UUID is 128 bits = 16 bytes, rendered as lowercase hex in 8-4-4-4-12
-// groups. Every bit starts random (two 64-bit PRNG draws laid out big-endian),
-// then two fields are overwritten so the value advertises itself as "version 4,
-// variant 1":
+// `prefix` + a canonical version-4 UUID (RFC 4122 section 4.4): 16 random
+// bytes (two 64-bit PRNG draws laid out big-endian) as lowercase hex in
+// 8-4-4-4-12 groups, with two fields overwritten to say "version 4, variant 1":
 //
 //   byte index: 0 1 2 3 | 4 5 | 6 7 | 8 9 | 10 11 12 13 14 15
 //   groups:     \__8__/   \4_/  \4_/  \4_/  \_____12______/
 //   fixed bits:                 ^byte6 hi nibble = 4   ^byte8 top 2 bits = 10
 //
-// So the 3rd group always begins with '4' (version) and the 4th with one of
-// 8/9/a/b (variant). Those 6 fixed bits are the only non-random ones, leaving
-// 128 - 4 - 2 = 122 bits of entropy - the number behind the vanishing collision
-// probability.
+// So the 3rd group always begins with '4' and the 4th with one of 8/9/a/b. The
+// 6 fixed bits leave 128 - 4 - 2 = 122 bits of entropy.
 //
 // mt19937_64 is a statistical PRNG, not a CSPRNG: these IDs are database keys
-// (they must be unique, not secret), so an adversary predicting them is out of
-// scope. If a prefix ever becomes a security token, switch to a CSPRNG.
+// (unique, not secret), so an adversary predicting them is out of scope. A
+// prefix that becomes a security token needs a CSPRNG.
 std::string generate_id (const char* prefix) {
     std::mt19937_64& rng = thread_rng ();
     uint64_t hi          = rng ();
