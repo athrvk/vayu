@@ -48,8 +48,6 @@
     "app/src/modules/mock-server/index.tsx": 1,
     "app/src/modules/request-builder/components/RequestTabs/panels/SettingsPanel.tsx": 1,
     "app/src/modules/request-builder/hooks/useSendWithRow.ts": 1,
-    "app/src/modules/welcome/LauncherSkeleton.tsx": 1,
-    "app/src/modules/welcome/WelcomeScreen.tsx": 1,
     "app/src/queries/collections.ts": 4,
     "app/src/queries/inbox.ts": 2,
     "app/src/queries/keys.ts": 1,
