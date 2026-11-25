@@ -21,8 +21,8 @@ namespace vayu::http {
  * the start/stop discipline both need to be correct.
  *
  * The engine opens a listener per OAuth callback attempt, per mock issuer, per
- * webhook inbox and per mock server (see docs/engine/architecture.md#listeners).
- * Each of those managers used to hand-roll the same four steps, and the steps
+ * webhook inbox and per mock server (see
+ * docs/engine/architecture.md#listeners). Each needs the same steps, and they
  * are subtle:
  *
  * - **Bind before listening.** `bind_to_any_port` / `bind_to_port` report the
@@ -32,9 +32,9 @@ namespace vayu::http {
  *   cpp-httplib sets `SO_REUSEPORT`, so on Linux a second bind on the same
  *   `127.0.0.1:port` succeeds and the kernel then splits arriving connections
  *   between the two accept loops - two inboxes, each capturing a random half of
- *   the webhooks (issue #512). Every live listener therefore claims its
- *   address:port here, and an explicitly requested port that is already claimed
- *   is refused before the bind, naming the holder.
+ *   the webhooks (#512). Every live listener therefore claims its address:port
+ *   here, and an explicitly requested port that is already claimed is refused
+ *   before the bind, naming the holder.
  * - **Return only once the accept loop is live.** `stop()` racing ahead of
  *   `listen()` is *missed* by cpp-httplib, and the `join()` that follows then
  *   hangs forever. `start()` therefore does not return until the server reports
@@ -45,8 +45,9 @@ namespace vayu::http {
  * - **Own the listener last.** Whatever a handler reaches for - a canned
  *   response, an issuer's token maps, an attempt's config - must outlive the
  *   thread reading it, so the `ManagedListener` member is declared **last** in
- *   its owner and is therefore destroyed **first**. The same reverse-member-order
- *   rule puts the four managers before `server_` in server.hpp.
+ *   its owner and is therefore destroyed **first**. The same
+ *   reverse-member-order rule puts the four managers before `server_` in
+ *   server.hpp.
  *
  * Not thread-safe against concurrent `start()` / `stop()`: each runs on an
  * object only one thread can reach, either an entry not yet committed to its

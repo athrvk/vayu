@@ -55,20 +55,20 @@ dns_entry_is_fresh (bool negative, std::chrono::steady_clock::duration age, long
 /**
  * @brief Thread-safe DNS cache for pre-resolved hostnames
  *
- * Resolves hostnames once and caches the IP addresses to avoid overwhelming
- * the system DNS resolver under high load.
+ * Resolves hostnames once and caches the IP addresses to avoid overwhelming the
+ * system DNS resolver under high load.
  *
  * Entries expire. The cached address is pinned onto every transfer with
  * `CURLOPT_RESOLVE`, which curl treats as authoritative - so an entry that
- * never expired would outlive a DNS change for the whole process lifetime
- * (this cache is shared by every worker and every run), and every request to
- * that host would fail until the daemon restarted. The TTL is the caller's
+ * never expired would outlive a DNS change for the whole process lifetime (this
+ * cache is shared by every worker and every run), and every request to that
+ * host would fail until the daemon restarted. The TTL is the caller's
  * `dnsCacheTimeout`, the same setting curl's own cache uses.
  *
- * Failed lookups are cached too, briefly: `resolve` runs a blocking
- * getaddrinfo on the event loop worker thread, so an unresolvable host that
- * was never remembered re-blocked that thread - stalling every in-flight
- * transfer it owns - once per request, forever.
+ * Failed lookups are cached too, briefly: `resolve` runs a blocking getaddrinfo
+ * on the event loop worker thread, so an unresolvable host that was not
+ * remembered would re-block that thread - stalling every in-flight transfer it
+ * owns - once per request, for as long as the daemon runs.
  */
 class DnsCache {
     public:

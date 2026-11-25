@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/event_loop.hpp
  * @brief Async HTTP event loop using curl_multi for concurrent requests
  */
 
@@ -42,18 +41,12 @@ class EventLoopImpl;
  */
 using RequestCallback = std::function<void (size_t request_id, Result<Response>)>;
 
-/**
- * @brief Progress callback for tracking request progress
- */
 using ProgressCallback =
 std::function<void (size_t request_id, size_t downloaded, size_t total)>;
 
 using BatchResult    = vayu::BatchResult;
 using EventLoopStats = vayu::EventLoopStats;
 
-/**
- * @brief Event loop configuration
- */
 struct EventLoopConfig {
     /// Number of worker event loops (0 = auto-detect CPU cores)
     size_t num_workers = 0;
@@ -73,9 +66,9 @@ struct EventLoopConfig {
     bool verbose = vayu::core::constants::defaults::VERBOSE;
 
     /// How this run's transfers reach the network. Resolved once at run start
-    /// and held for the run (issue #705, epic decision 3 of #704): libcurl
-    /// reuses a cached connection only when its proxy and TLS config match, so
-    /// a policy that varied per transfer would partition each worker's pool.
+    /// and held for the run (#705, epic decision 3 of #704): libcurl reuses a
+    /// cached connection only when its proxy and TLS config match, so a policy
+    /// that varied per transfer would partition each worker's pool.
     TransportPolicy transport;
 
     /// The hosts this run's caller allows it to reach (#2521): every transfer
@@ -120,7 +113,7 @@ struct RequestHandle {
  * });
  *
  * // Or use futures
- * auto handle = loop.submit(request);
+ * auto handle = loop.submit_async(request);
  * auto result = handle.future.get();
  *
  * // Or batch execute
@@ -131,9 +124,6 @@ struct RequestHandle {
  */
 class EventLoop {
     public:
-    /**
-     * @brief Construct a new Event Loop
-     */
     explicit EventLoop (EventLoopConfig config = {});
 
     /**
@@ -168,8 +158,9 @@ class EventLoop {
      * @param drain_timeout Upper bound on the wait when `wait_for_pending` is
      *        true; whatever is still in flight when it expires is cancelled the
      *        same way. Zero (the default) means wait indefinitely, which is
-     * only safe when every transfer carries a timeout of its own. Ignored when
-     *        `wait_for_pending` is false - that path cancels immediately.
+     *        only safe when every transfer carries a timeout of its own.
+     *        Ignored when `wait_for_pending` is false - that path cancels
+     *        immediately.
      */
     void stop (bool wait_for_pending = true,
     std::chrono::milliseconds drain_timeout = std::chrono::milliseconds::zero ());
@@ -193,9 +184,6 @@ class EventLoop {
      */
     void cancel ();
 
-    /**
-     * @brief Check if the event loop is running
-     */
     [[nodiscard]] bool is_running () const;
 
     /**

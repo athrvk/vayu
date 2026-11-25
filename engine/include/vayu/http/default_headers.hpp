@@ -21,16 +21,15 @@ class Database;
 } // namespace vayu::db
 
 /**
- * @file default_headers.hpp
  * @brief What Vayu adds to a request nobody wrote it into - one set, one place.
  *
- * Before issue #1229 two of these were the renderer's: it wrote
+ * The engine is the one layer every send passes through, so the defaults live
+ * here and the clients only *display* them (#1229). A client writing
  * `X-Vayu-Version` and a fresh `X-Request-ID` into the payload at send time and
- * into the request document at save time, so a stored request carried a frozen
- * correlation id that a load run then replayed on every iteration, and the same
- * request went out with a different header set depending on which client sent
- * it. The engine is the one layer every send passes through, so the defaults
- * live here and the clients only *display* them.
+ * into the request document at save time leaves a stored request carrying a
+ * frozen correlation id that a load run replays on every iteration, and sends
+ * the same request with a different header set depending on which client sent
+ * it.
  *
  * The rules, which are what makes this set safe to add to a request the user
  * did not write:
@@ -38,16 +37,15 @@ class Database;
  * - **A user header of the same name wins.** Nothing here overwrites a name the
  *   request already carries, so a browser's `User-Agent` or a hand-typed
  *   correlation id is sent as typed.
- * - **Every one of them is refusable per send** (`Request::suppressed_default_headers`),
- *   so a testing tool can send exactly the request that was written, including
- *   one with no `User-Agent` at all.
+ * - **Every one of them is refusable per send**
+ *   (`Request::suppressed_default_headers`), so a testing tool can send exactly
+ *   the request that was written, including one with no `User-Agent` at all.
  * - **Nothing here is stored.** These are applied at send time from config, so
- *   they cannot go stale in a saved request the way the renderer's copies did.
- *   A load or collection run's `config_snapshot` is the one deliberate
- *   exception (issue #1488, `with_default_headers_snapshot` in
- *   `http/routes/execution.cpp`): it records the resolved decision for a
- *   later run's report to compare itself against, and never reads it back
- *   into a send.
+ *   they cannot go stale in a saved request. A load or collection run's
+ *   `config_snapshot` is the one deliberate exception (#1488,
+ *   `with_default_headers_snapshot` in `http/routes/execution.cpp`): it records
+ *   the resolved decision for a later run's report to compare itself against,
+ *   and never reads it back into a send.
  * - **The correlation id is namespaced and off by default.** `X-Request-ID` is
  *   a public name gateways give their own meaning to; the default here is
  *   `X-Vayu-Request-Id`, and the name is configurable for a server that reads
@@ -67,9 +65,9 @@ inline constexpr std::string_view NEGOTIATE_COMPRESSION_KEY =
 /// Config key: the same decision for a load run, which measures with it.
 inline constexpr std::string_view LOAD_NEGOTIATE_COMPRESSION_KEY =
 "loadNegotiateCompression";
-/// Config key: send `Expect: 100-continue` on a large body (issue #2468).
-/// One key for a design send and a load run, unlike compression: it changes
-/// whether a transfer waits for a server's interim reply, not what is measured.
+/// Config key: send `Expect: 100-continue` on a large body (#2468). One key for
+/// a design send and a load run, unlike compression: it changes whether a
+/// transfer waits for a server's interim reply, not what is measured.
 inline constexpr std::string_view SEND_EXPECT_CONTINUE_KEY =
 "sendExpectContinue";
 
@@ -77,10 +75,9 @@ inline constexpr std::string_view SEND_EXPECT_CONTINUE_KEY =
 inline constexpr std::string_view DEFAULT_CORRELATION_HEADER =
 "X-Vayu-Request-Id";
 
-/// The `source` value the header-strip repair pass stamps on a row it
-/// disables (issue #1491), read by the app as the same optional marker
-/// #1481 already added to a header row for exactly this purpose - telling a
-/// row a client wrote apart from one the user typed.
+/// The `source` value the header-strip repair pass stamps on a row it disables
+/// (#1491), read by the app as the optional marker #1481 gives a header row, to
+/// tell a row a client wrote apart from one the user typed.
 inline constexpr std::string_view LEGACY_DEFAULT_SOURCE = "legacy-default";
 
 /**
@@ -101,7 +98,7 @@ struct DefaultHeaderPolicy {
     std::string accept_encoding;
     /// True lets libcurl send its own `Expect: 100-continue` on a large body
     /// (over 1 MiB on HTTP/1.1); false, the default, removes it. A server that
-    /// ignores the header costs each such transfer about a second (issue #2468).
+    /// ignores the header costs each such transfer about a second (#2468).
     bool expect_continue = false;
 };
 
@@ -149,10 +146,9 @@ const DefaultHeaderPolicy& policy);
  * @brief Why @p name is not an RFC 9110 header name (a `token`), or nothing.
  *
  * The whole check for a name a request *refuses* (`disabledDefaultHeaders`,
- * `disabledSystemHeaders`, issue #1765): opting out of `User-Agent` or
- * `Content-Type` is exactly what those lists are for, so the correlation-id
- * rule below - which refuses the names the engine derives - must never be
- * applied to them.
+ * `disabledSystemHeaders`, #1765): opting out of `User-Agent` or `Content-Type`
+ * is exactly what those lists are for, so the correlation-id rule below - which
+ * refuses the names the engine derives - must never be applied to them.
  *
  * The message quotes @p name, so it is for a name the author typed; a name a
  * variable produced is judged by `invalid_header_name_refusal`, which quotes
@@ -209,7 +205,7 @@ const DefaultHeaderPolicy& policy);
  * so they are disabled once, at startup.
  *
  * A matching row is set `enabled: false` and `source: "legacy-default"`
- * rather than removed (issue #1491): the wire is just as clean, since a
+ * rather than removed (#1491): the wire is just as clean, since a
  * disabled row is never sent, but the row survives for a user to find and
  * re-enable if the match turns out to be a false positive. That is why each
  * of the three rules below matches the renderer's *exact* value shape, not

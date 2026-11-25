@@ -84,9 +84,6 @@ MockIssuerConfig parse_mock_issuer_settings (const nlohmann::json& body);
 MockIssuerConfig apply_mock_issuer_patch (const nlohmann::json& body,
 const MockIssuerSettings& current);
 
-/**
- * Result of starting a mock issuer.
- */
 struct MockIssuerStart {
     bool ok = true;
     std::string issuer_id;

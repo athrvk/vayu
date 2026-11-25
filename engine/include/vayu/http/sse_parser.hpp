@@ -8,8 +8,7 @@
  */
 
 /**
- * @file http/sse_parser.hpp
- * @brief The `text/event-stream` line protocol (issue #573), as a pure parser.
+ * @brief The `text/event-stream` line protocol (#573), as a pure parser.
  *
  * Pure in the sense that matters here: it holds only the bytes of the frame it
  * is still assembling, touches no clock, no socket and no database, and is
@@ -61,8 +60,7 @@ struct SseEvent {
  * **Bounded by construction.** `max_event_bytes` caps both the line being
  * assembled and the data buffer being accumulated, so a server that sends a
  * gigabyte without a newline - or a single event larger than memory - costs the
- * cap and a `truncated` flag rather than the process. This is the byte bound
- * `write_callback` on the design path never had.
+ * cap and a `truncated` flag rather than the process.
  *
  * Not thread-safe: one parser belongs to one transfer, which libcurl drives
  * from one thread.
