@@ -1,6 +1,5 @@
 {
   "files": {
-    "app/electron/main.ts": 1,
     "app/electron/mcp/engine-client.ts": 2,
     "app/electron/mcp/listener.ts": 1,
     "app/electron/mcp/status.ts": 1,
@@ -10,9 +9,6 @@
     "app/electron/mcp/tools/input-schemas.ts": 2,
     "app/electron/mcp/tools/mock-issuer.tools.ts": 1,
     "app/electron/mcp/tools/trash.tools.ts": 1,
-    "app/electron/sidecar.ts": 2,
-    "app/electron/startup-probe.ts": 1,
-    "app/electron/updater.ts": 1,
     "app/src/components/layout/tab-descriptors.ts": 1,
     "app/src/components/shared/KeyValueEditor/KeyValueRow.tsx": 1,
     "app/src/components/shared/OAuth2Form/token-phase.ts": 1,
