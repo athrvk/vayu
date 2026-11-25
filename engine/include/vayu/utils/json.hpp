@@ -8,7 +8,6 @@
  */
 
 /**
- * @file utils/json.hpp
  * @brief JSON utilities for request/response serialization
  */
 
@@ -42,14 +41,8 @@ using Json = nlohmann::json;
  */
 [[nodiscard]] Result<Json> parse (const std::string& str);
 
-/**
- * @brief Serialize a Request to JSON
- */
 [[nodiscard]] Json serialize (const Request& request);
 
-/**
- * @brief Serialize a Collection to JSON
- */
 [[nodiscard]] Json serialize (const vayu::db::Collection& collection);
 
 /**
@@ -69,45 +62,38 @@ const vayu::http::FileAccessPolicy& files);
 [[nodiscard]] Json serialize (const vayu::db::RequestSummary& summary);
 
 /**
- * @brief Serialize a saved example response to JSON (issue #481)
+ * @brief Serialize a saved example response to JSON (#481)
  */
 [[nodiscard]] Json serialize (const vayu::db::RequestExample& example);
 
 /**
- * @brief Serialize a stored OpenAPI document to JSON (issue #637)
+ * @brief Serialize a stored OpenAPI document to JSON (#637)
  */
 [[nodiscard]] Json serialize (const vayu::db::SpecDocument& spec);
 
 /**
- * @brief The same document without the parts that make it big (issue #712).
+ * @brief The same document without the parts that make it big (#712).
  *
- * What `GET /specs/:id/meta` answers: the fields describing the document -
- * where it came from, when, its hash and how many bytes it is - with `content`
- * and both stored indexes left out entirely rather than emptied, because
- * an empty index is a document that declares nothing and this is a document
- * whose index was not read.
+ * What `GET /specs/:id/meta` answers: where the document came from, when, its
+ * hash and its byte size, with `content` and both stored indexes left out
+ * rather than emptied, because an empty index means a document that declares
+ * nothing and this one's index was not read.
  */
 [[nodiscard]] Json serialize_meta (const vayu::db::SpecDocument& spec);
 
-/**
- * @brief Serialize an Environment to JSON
- */
 [[nodiscard]] Json serialize (const vayu::db::Environment& environment);
 
 /**
- * @brief Serialize a client-certificate registry entry (issue #707).
+ * @brief Serialize a client-certificate registry entry (#707).
  *
  * `passphrase` is **not** part of the shape: it is write-only over the wire.
- * The card that manages these entries never needs to display one - it needs to
- * know whether the key has one, which `hasPassphrase` says - and a secret that
- * is never sent back cannot end up in a log, a screenshot or a bug report.
- * Storing it plaintext is the repo's precedent; echoing it would be a new one.
+ * The card managing these entries only needs to know whether the key has one
+ * (`hasPassphrase`), and a secret never sent back cannot end up in a log, a
+ * screenshot or a bug report. Storing it plaintext is the repo's precedent;
+ * echoing it would be a new one.
  */
 [[nodiscard]] Json serialize (const vayu::db::ClientCertificate& certificate);
 
-/**
- * @brief Serialize a Run to JSON
- */
 [[nodiscard]] Json serialize (const vayu::db::Run& run);
 
 /**
@@ -142,7 +128,7 @@ const vayu::http::FileAccessPolicy& files);
  * The exact inverse of `parse_variables`: it must write every field the parser
  * reads. `POST /execute` rewrites the three variable scopes through this pair
  * after running scripts, so a field missing here is erased from disk on the
- * next design run - which is how `createdAt` was lost (issue #135).
+ * next design run (#135 lost `createdAt` this way).
  *
  * `created_at` is omitted when unset rather than defaulted, so a variable whose
  * creation time is genuinely unknown stays unknown instead of being stamped
@@ -175,20 +161,20 @@ const std::vector<vayu::db::Result>& results);
  * a `body` exceeds @p max_body_bytes it is cut to at most that many bytes and
  * its node gains `bodyTruncated: true` and `bodyBytes` (the original byte
  * length) so a reader can tell a stored slice from the whole body. A text body
- * is cut on a character boundary (`without_incomplete_utf8_tail`, issue #3423),
- * so the slice can be up to three bytes shorter than the cap. A node whose
+ * is cut on a character boundary (`without_incomplete_utf8_tail`, #3423), so
+ * the slice can be up to three bytes shorter than the cap. A node whose
  * `bodyEncoding` is `base64` is capped by its decoded bytes instead, cut at a
  * multiple of three so the slice is still whole base64, and `bodyBytes` counts
- * decoded bytes too (issue #2458). A node that already carries `bodyBytes`
- * keeps it: `build_result_trace` writes the held length on every response node
- * (issue #3423), and a stream's wire count (issue #3238), which the body it
- * holds can be shorter than.
+ * decoded bytes too (#2458). A node that already carries `bodyBytes` keeps it:
+ * `build_result_trace` writes the held length on every response node (#3423),
+ * and a stream's wire count (#3238), which the body it holds can be shorter
+ * than.
  *
  * The request node's `rawRequest` ends with that same body, so it is capped to
  * the same limit - body half only, header block kept whole, since the headers
- * are what the field is stored for. That cut lands on a character boundary
- * too. A header value can still carry a byte that is not UTF-8, so the caller
- * dumps with `error_handler_t::replace`. See docs/engine/db-schema/run-artifacts.md
+ * are what the field is stored for. That cut lands on a character boundary too.
+ * A header value can still carry a byte that is not UTF-8, so the caller dumps
+ * with `error_handler_t::replace`. See docs/engine/db-schema/run-artifacts.md
  * (results.trace_data).
  */
 void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);
@@ -241,20 +227,14 @@ void erase_file_trust (Json& body);
  */
 void derive_file_trust (Json& body, const vayu::http::FileAccessPolicy& files);
 
-/**
- * @brief Deserialize a Request from JSON
- */
 [[nodiscard]] Result<Request> deserialize_request (const Json& json);
 
-/**
- * @brief Deserialize a Request from a JSON string
- */
 [[nodiscard]] Result<Request> deserialize_request (const std::string& str);
 
 /**
- * How a response body's JSON string is to be read (issue #2458): `bodyRaw` on
- * the `POST /execute` answer, `body` on a stored trace's `response` node. A
- * JSON string holds only UTF-8, so a body that is not text
+ * How a response body's JSON string is to be read (#2458): `bodyRaw` on the
+ * `POST /execute` answer, `body` on a stored trace's `response` node. A JSON
+ * string holds only UTF-8, so a body that is not text
  * (`vayu::utils::is_valid_utf8_text`) travels as its base64 instead of failing
  * the serializer.
  */
@@ -276,7 +256,7 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
 
 /**
  * @brief `Response::header_lines` as a JSON array of `{name, value}` objects,
- *        in wire order (issue #2460).
+ *        in wire order (#2460).
  *
  * The one spelling behind `serialize`'s `headerLines` and the stored trace's
  * `response.headerLines`. An empty array for no lines.
@@ -284,19 +264,19 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
 [[nodiscard]] Json serialize_header_lines (const std::vector<HeaderLine>& lines);
 
 /// The followed redirect hops as `[{status, statusText, headerLines, url,
-/// schemeDowngrade}]`, in the order they arrived (issue #2461). `url` is the
+/// schemeDowngrade}]`, in the order they arrived (#2461). `url` is the
 /// hop's `display_url`, a withheld credential written as `<redacted>` (#3707).
 [[nodiscard]] Json serialize_redirects (const std::vector<RedirectHop>& hops);
 
 /// `Response::warnings` as `[{code, message}]`, in the order they were found
-/// (issue #3307). The one spelling behind `serialize`'s `warnings` and the
+/// (#3307). The one spelling behind `serialize`'s `warnings` and the
 /// stored trace's top-level `warnings`.
 [[nodiscard]] Json serialize_warnings (const std::vector<ResponseWarning>& warnings);
 
-/// `Response::mcp_reply` as `{errorClass?, code?, message?}` (issue #3762):
-/// `{}` for a reply that succeeded, `code` only when the reply carried a
-/// JSON-RPC error code. The one spelling behind `serialize`'s `mcp` and the
-/// stored trace's `response.mcp`.
+/// `Response::mcp_reply` as `{errorClass?, code?, message?}` (#3762): `{}` for
+/// a reply that succeeded, `code` only when the reply carried a JSON-RPC error
+/// code. The one spelling behind `serialize`'s `mcp` and the stored trace's
+/// `response.mcp`.
 [[nodiscard]] Json serialize_mcp_reply (const McpReply& reply);
 
 /**
@@ -304,14 +284,14 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
  *
  * `bodyEncoding` is always present. `headerLines` is always present too, an
  * empty array when none were recorded, so a reader can tell "none" from "an
- * engine too old to say". A text body is `bodyRaw` as it arrived
- * (less a capped body's incomplete last character, `response_body_text`) and
- * `body` its parse (or `null`); any other body is `bodyRaw` in base64 with
- * `body` `null`. `bodySize` counts the bytes either way.
+ * engine too old to say". A text body is `bodyRaw` as it arrived (less a capped
+ * body's incomplete last character, `response_body_text`) and `body` its parse
+ * (or `null`); any other body is `bodyRaw` in base64 with `body` `null`.
+ * `bodySize` counts the bytes either way.
  *
  * `body` is also `null`, and no parse runs, when @p include_parsed_body is
  * false (`POST /execute`'s `includeParsedBody`) or the text is longer than
- * `MAX_PARSED_RESPONSE_BODY_BYTES` (issue #2544). The key is always present.
+ * `MAX_PARSED_RESPONSE_BODY_BYTES` (#2544). The key is always present.
  */
 [[nodiscard]] Json serialize (const Response& response, bool include_parsed_body = true);
 
@@ -319,21 +299,15 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
  * @brief The body bytes of a serialized Response: `bodyRaw`, decoded when
  *        `bodyEncoding` says base64.
  *
- * An absent `bodyEncoding` reads as `utf8`, which is what every answer meant
- * before the field existed. `std::nullopt` for an encoding this engine does not
- * write, or a `base64` body that does not decode.
+ * An absent `bodyEncoding` (an engine without the field) reads as `utf8`.
+ * `std::nullopt` for an encoding this engine does not write, or a `base64` body
+ * that does not decode.
  */
 [[nodiscard]] std::optional<std::string> response_body_bytes (const Json& answer);
 
-/**
- * @brief Serialize a Response to JSON string
- */
 [[nodiscard]] std::string serialize_string (const Response& response,
 int indent = vayu::core::constants::json::DEFAULT_INDENT);
 
-/**
- * @brief Serialize an Error to JSON
- */
 [[nodiscard]] Json serialize (const Error& error);
 
 /**
@@ -341,19 +315,13 @@ int indent = vayu::core::constants::json::DEFAULT_INDENT);
  */
 [[nodiscard]] std::string pretty_print (const Json& json, bool color = true);
 
-/**
- * @brief Check if a string is valid JSON
- */
 [[nodiscard]] bool is_valid_json (const std::string& str);
 
-/**
- * @brief Try to parse response body as JSON
- */
 [[nodiscard]] std::optional<Json> try_parse_body (const std::string& body);
 
 /**
- * @brief Stream a Request to a string output stream as JSON.
- * This is used for streaming responses to avoid loading all data into memory.
+ * @brief Stream a Request to @p out as JSON, so a streamed response never holds
+ *        the whole document in memory.
  * @param request The request to serialize
  * @param out Output stream to write JSON to
  * @param files What the body's derived `unresolved` is read from, as for

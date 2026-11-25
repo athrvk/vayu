@@ -131,7 +131,7 @@ struct DesignResultOutcome {
 };
 
 /**
- * @brief One thing the user deleted, as the trash lists it (issue #988).
+ * @brief One thing the user deleted, as the trash lists it (#988).
  *
  * A root only, never what its cascade took; that is counted instead, answering
  * "restoring brings back what?" and "purging destroys what?".
@@ -172,7 +172,7 @@ struct TrashEntry {
 };
 
 /// What a restore or a purge acted on - the entry as it was, plus whether the
-/// restore had to re-parent it (issue #988).
+/// restore had to re-parent it (#988).
 struct TrashOutcome {
     TrashEntry entry;
     /// True when the restored collection's parent was gone or itself deleted,
@@ -200,7 +200,7 @@ enum class RestoreRefusal : std::uint8_t {
     TargetTaken
 };
 
-/// A refused restore, as the route reports it (issue #988).
+/// A refused restore, as the route reports it (#988).
 struct RestoreFailure {
     RestoreRefusal reason = RestoreRefusal::NotFound;
     std::string message;
@@ -221,7 +221,7 @@ class MissingRowError : public std::runtime_error {
 };
 
 /**
- * @brief One OpenAPI sync, as the rows it writes (issue #655).
+ * @brief One OpenAPI sync, as the rows it writes (#655).
  *
  * The one write that creates, updates and deletes; all-or-nothing, since half
  * of it leaves a collection bound to a document its requests do not reflect.
@@ -255,8 +255,7 @@ struct SpecSyncBatch {
 };
 
 /**
- * @brief One workspace snapshot, as `POST /workspace/backup` reports it (issue
- *        #987).
+ * @brief One workspace snapshot, as `POST /workspace/backup` reports it (#987).
  *
  * `path` is absolute on every real start (the daemon gets a data directory), as
  * the user needs: restoring is a file copy they make themselves.
@@ -273,7 +272,7 @@ struct BackupRecord {
 };
 
 /**
- * @brief Why a workspace backup did not happen (issue #987).
+ * @brief Why a workspace backup did not happen (#987).
  *
  * A flag, not a message to parse: a refused concurrent backup is a 409 with
  * nothing wrong; any other failure is a 500 naming what SQLite or the
@@ -324,7 +323,7 @@ class Database {
 
     /**
      * @brief What this startup did about a database it could not open, if
-     *        anything (issue #922).
+     *        anything (#922).
      *
      * `nullopt` is a clean start (a first run too); a value means the data was
      * restored from a backup or deleted, which `GET /health` reports. Why it
@@ -360,11 +359,11 @@ class Database {
     /// binding moving off the document they were decided on.
     ///
     /// @param departed the requests this write takes out of a spec contract
-    ///        (stamps cleared), with
-    /// @p declined_under naming where each is declined: `apply_reorder`'s two
-    ///        parameters, for a `PUT /collections/:id` that unbinds and
-    ///        reparents at once (#3470). The forget runs after them, so
-    ///        declines under @p collection go too.
+    ///        (stamps cleared), with @p declined_under naming where each is
+    ///        declined: `apply_reorder`'s two parameters, for a
+    ///        `PUT /collections/:id` that unbinds and reparents at once
+    ///        (#3470). The forget runs after them, so declines under
+    ///        @p collection go too.
     // db_collections.cpp
     void rebind_collection (const Collection& collection,
     const std::vector<Request>& departed                               = {},
@@ -377,9 +376,9 @@ class Database {
     ///        records nothing.
     void save_request (const Request& r,
     const std::optional<std::string>& declined_under = std::nullopt);
-    /// Live only - see `get_collection` (issue #988).
+    /// Live only - see `get_collection` (#988).
     std::optional<Request> get_request (const std::string& id);
-    /// Live only, and empty for a deleted collection (issue #988).
+    /// Live only, and empty for a deleted collection (#988).
     std::vector<Request> get_requests_in_collection (const std::string& collection_id);
     /// Every live request of every live collection, grouped by collection in
     /// `get_requests_in_collection`'s order: the whole tree in one query.
@@ -421,7 +420,7 @@ class Database {
     /// @p collection_id (#3031), in the order they were recorded.
     std::vector<DeclinedOperation> get_declined_operations (const std::string& collection_id);
 
-    // Trash - what soft delete left behind (issue #988)
+    // Trash - what soft delete left behind (#988)
 
     /// Every deleted root, newest first: a stamped row whose owner is not
     /// stamped. Environments and certificates have no owner, so are always
@@ -467,7 +466,7 @@ class Database {
     int64_t purge_expired_trash (int retention_days, int64_t now);
 
     /// `purge_expired_trash` with the configured `trashRetentionDays` and the
-    /// system clock - what startup runs (issue #988).
+    /// system clock - what startup runs (#988).
     int64_t purge_expired_trash_configured ();
 
     // Saved example responses, owned by a request (#481): read only by request
@@ -482,7 +481,7 @@ class Database {
     /// a deleted example of either origin is gone (#722, #2971).
     std::vector<RequestExample> get_request_examples (const std::string& request_id);
     /// The tombstones only - deleted imported examples, which exist so a spec
-    /// sync does not write back what the user removed (issue #722).
+    /// sync does not write back what the user removed (#722).
     std::vector<RequestExample> get_suppressed_request_examples (const std::string& request_id);
     /// Live examples only - what counts against `MAX_PER_REQUEST`.
     int64_t count_request_examples (const std::string& request_id);
@@ -494,7 +493,7 @@ class Database {
     /// is tombstoned (`suppress_request_example`).
     void delete_request_example (const std::string& id);
     /// Keeps an imported example's row as a tombstone instead of removing it
-    /// (issue #722). `now` is the caller's clock, as every other write here.
+    /// (#722). `now` is the caller's clock, as every other write here.
     void suppress_request_example (const std::string& id, int64_t now);
 
     // OpenAPI documents (db_specs.cpp): bound by collections, not owned, so
@@ -516,7 +515,7 @@ class Database {
 
     /**
      * @brief Reclaim documents nothing can reach any more, returning how many
-     *        went (issue #718).
+     *        went (#718).
      *
      * Nothing owns a `spec_documents` row, so no cascade removes one: each sync
      * mints a new document, and unbinding, re-binding or deleting the binder
@@ -542,7 +541,7 @@ class Database {
 
     /**
      * @brief Repair bindings stored without the document version they name
-     *        (issue #709), returning how many were stamped.
+     *        (#709), returning how many were stamped.
      *
      * Coverage and schema validation need `specHash` to match the stored
      * document; bindings imports wrote before #709 lack it, so their runs
@@ -585,7 +584,7 @@ class Database {
     int64_t clear_empty_parent_ids (); // db_maintenance.cpp
 
     /**
-     * @brief Persist a whole import in one transaction (issue #96).
+     * @brief Persist a whole import in one transaction (#96).
      *
      * All rows or none, written collections -> requests -> examples ->
      * environments so parents exist first. Ids are the caller's
@@ -600,7 +599,7 @@ class Database {
     const std::vector<SpecDocument>& specs      = {});
 
     /**
-     * @brief Persist a whole batch reorder in one transaction (issue #365).
+     * @brief Persist a whole batch reorder in one transaction (#365).
      *
      * The rows' positions (and, for a move, owners) are pre-validated against
      * each other; all land or none. N sibling `PUT`s could stop halfway and
@@ -621,7 +620,7 @@ class Database {
     const std::unordered_map<std::string, std::string>& declined_under = {});
 
     /**
-     * @brief Persist a whole OpenAPI sync in one transaction (issue #655).
+     * @brief Persist a whole OpenAPI sync in one transaction (#655).
      *
      * Not `import_apply`, for `apply_reorder`'s reason: it rewrites and deletes
      * named rows, where an upsert would resurrect what a concurrent delete
@@ -633,21 +632,21 @@ class Database {
     void spec_sync_apply (const SpecSyncBatch& batch); // db_specs.cpp
 
     /**
-     * @brief Run @p fn with the DB mutex held for the whole of it (issue #386).
+     * @brief Run @p fn with the DB mutex held for the whole of it (#386).
      *
      * Per-call locking does not cover a read-decide-write composite: between
      * `POST /reorder`'s validation and commit another write can move the ground
      * (two legal reparents commit a cycle; a create computes `max_order + 1`
-     * inside the range being renumbered). The mutex is recursive, so
-     * @p fn may call any method here. Keep @p fn bounded: `/health`, the runs
-     *        poll and SSE all wait.
+     * inside the range being renumbered). The mutex is recursive, so @p fn may
+     * call any method here. Keep @p fn bounded: `/health`, the runs poll and
+     * SSE all wait.
      */
     void with_lock (const std::function<void ()>& fn); // database.cpp
 
     /**
-     * @brief What `GET /changes` relays (issue #3420): one event per committed
-     *        write of a collection, request, example, environment, the globals
-     *        or a trash entry (when, and what a cascade publishes:
+     * @brief What `GET /changes` relays (#3420): one event per committed write
+     *        of a collection, request, example, environment, the globals or a
+     *        trash entry (when, and what a cascade publishes:
      *        `db/change_feed.hpp`).
      *
      * Only public writes of those kinds publish; startup repairs run before the
@@ -669,8 +668,8 @@ class Database {
     void delete_environment (const std::string& id);
 
     /**
-     * Client-certificate registry (issue #707), plain CRUD: the routes own
-     * validation and the uniqueness answer, needing a status code.
+     * Client-certificate registry (#707), plain CRUD: the routes own validation
+     * and the uniqueness answer, needing a status code.
      * `get_client_certificates` runs once per resolved transport policy (per
      * design send, once per load or collection run), never per transfer
      * (`vayu::http::resolve_transport_policy`). Reads see live rows only
@@ -975,7 +974,7 @@ class Database {
      */
     int64_t clear_inbox_requests_all ();
 
-    // Workspace backup (issue #987)
+    // Workspace backup (#987)
 
     /**
      * @brief Where snapshots are written: `backups/` beside the database file.
@@ -1004,8 +1003,7 @@ class Database {
     std::expected<BackupRecord, BackupFailure> backup_workspace (int64_t now);
 
     /**
-     * @brief The single-backup slot, held while one snapshot is written (issue
-     *        #987).
+     * @brief The single-backup slot, held while one snapshot is written (#987).
      *
      * Two concurrent `VACUUM INTO`s would each write a whole copy (unbounded
      * disk for a double-click), and the later would race the earlier's
@@ -1081,17 +1079,16 @@ class Database {
      * held. Skipped when the session wrote nothing after `init` (by
      * `sqlite3_total_changes64` on the shared connection; other connections'
      * writes are not seen); otherwise the WAL is checkpointed and the backup
-     * replaced as
-     * @ref refresh_recovery_backup does. Bounded by the smaller of @p budget
-     *        and `database::SHUTDOWN_BACKUP_DEADLINE_MS`: the copy is
-     *        interrupted at the deadline and one finishing past it is discarded
-     *        unvalidated; validation, flush and rename run to completion.
-     *        Failures keep the previous backup; the caller logs why.
+     * replaced as @ref refresh_recovery_backup does. Bounded by the smaller of
+     * @p budget and `database::SHUTDOWN_BACKUP_DEADLINE_MS`: the copy is
+     * interrupted at the deadline and one finishing past it is discarded
+     * unvalidated; validation, flush and rename run to completion. Failures
+     * keep the previous backup; the caller logs why.
      *
      * @param budget what is left of the caller's shutdown window; zero or less
      *        refreshes nothing.
      * @return why nothing was written, or nothing (also when the session wrote
-     *        nothing). Never throws.
+     *         nothing). Never throws.
      */
     std::expected<void, std::string> refresh_recovery_backup_on_shutdown (
     std::chrono::milliseconds budget); // db_maintenance.cpp
@@ -1110,7 +1107,7 @@ class Database {
 
     /**
      * @brief Whether @p key is one this build declares (`seed_default_config`
-     *        upserts it), not merely one with a row (issue #1492).
+     *        upserts it), not merely one with a row (#1492).
      *
      * A newer engine's rows outlive its catalogue in a workspace this build
      * reopens, and `seed_default_config` deletes only its own retired keys,
@@ -1134,8 +1131,8 @@ class Database {
      * @brief SQLite's `synchronous` level on this connection, read back rather
      *        than echoed (0 = OFF, 1 = NORMAL, 2 = FULL): it is applied twice
      *        (the compile-time default before the schema sync, `dbSynchronous`
-     *        once `init` reads it), and the startup line once reported the
-     *        request while sync and seed ran at SQLite's default (#838).
+     *        once `init` reads it), and an echoed request would misreport the
+     *        level sync and seed run at, SQLite's default (#838).
      */
     int applied_synchronous () const; // db_maintenance.cpp
 
@@ -1171,8 +1168,7 @@ class Database {
     /**
      * @brief Whether the database at @p path opens with this build's schema, is
      *        corrupt, or cannot be examined: validates the file and its `.bak`
-     *        at construction, and
-     * @ref refresh_recovery_backup's snapshot.
+     *        at construction, and @ref refresh_recovery_backup's snapshot.
      */
     static ProbeResult probe_database (const std::string& path,
     std::chrono::milliseconds busy_timeout); // db_maintenance.cpp
@@ -1320,11 +1316,11 @@ class Database {
 
     /**
      * @brief Record that deleting @p request declined its operation under the
-     *        bound collection
-     * @p collection_id (#3031); nothing if `spec_operation` names no whole
-     *        identity. One row per operation per binding, a later delete taking
-     *        it over. For `delete_request` and `delete_collection`, under the
-     *        DB mutex inside the delete's transaction.
+     *        bound collection @p collection_id (#3031); nothing if
+     *        `spec_operation` names no whole identity. One row per operation
+     *        per binding, a later delete taking it over. For `delete_request`
+     *        and `delete_collection`, under the DB mutex inside the delete's
+     *        transaction.
      */
     void record_declined_operation_locked (const std::string& collection_id,
     const Request& request); // db_requests.cpp
@@ -1406,10 +1402,9 @@ class Database {
      *
      * The mutex is released *before* the backoff sleep (@p base times the
      * attempt number, growing for ten steps), so a retry stalls no other
-     * endpoint. Non-busy exceptions rethrow at once; busy past
-     * @p attempts logs and rethrows; @ref RETRY_UNTIL_LANDED never exhausts,
-     *        warning on each retry past ten. @p what names the operation in
-     *        logs.
+     * endpoint. Non-busy exceptions rethrow at once; busy past @p attempts logs
+     * and rethrows; @ref RETRY_UNTIL_LANDED never exhausts, warning on each
+     * retry past ten. @p what names the operation in logs.
      */
     static constexpr int RETRY_UNTIL_LANDED = 0;
     void retry_on_busy (const char* what, // database.cpp
