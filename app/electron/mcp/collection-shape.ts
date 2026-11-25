@@ -6,31 +6,27 @@
  */
 
 /**
- * @brief A collection row as the MCP surface hands it back (issue #1742).
+ * @brief A collection row as the MCP surface hands it back (#1742).
  *
- * The engine answers `dataSchema: {}` for a collection with no declared data
- * contract, and a cleared contract is `{}` too. An agent reading that `{}`
- * cannot tell "no contract" from "a contract this reader failed to parse", so
- * every tool and resource that returns a collection row passes it through
- * here: a declared contract comes back as `{ columns, fileName?, declaredAt? }`,
+ * The engine answers `dataSchema: {}` for a collection with no declared data contract, and a
+ * cleared contract is `{}` too. An agent reading that `{}` cannot tell "no contract" from "a
+ * contract this reader failed to parse", so every tool and resource that returns a collection row
+ * passes it through here: a declared contract comes back as `{ columns, fileName?, declaredAt? }`,
  * and no contract drops the key rather than sending an empty placeholder.
  *
- * "Declared" is the renderer's `hasDataContract` rule (a non-empty `columns`
- * list), restated because `electron/` cannot import from `app/src`;
- * `collection-shape.conformance.test.ts` holds the two to the same answers.
+ * "Declared" is the renderer's `hasDataContract` rule (a non-empty `columns` list), restated
+ * because `electron/` cannot import from `app/src`; `collection-shape.conformance.test.ts` holds
+ * the two to the same answers.
  *
- * Beside it, `dataFile: { path, fileName, hash?, castNumbers? }` names the file the app
- * remembers for that collection on this machine, when the host has that record
- * (the Electron-hosted server; never the stdio CLI). `hash` is the SHA-256 of
- * the file's bytes (issue #2051), the digest a run records as `dataFileHash`,
- * so an agent can tell whether the file still is the one a past run used. A
- * list read (`list_collections` with `fields: "full"`, `vayu://collections`)
- * hashes the file as it is at call time through
- * {@link withCurrentDataFileHashes}; when the file cannot be read, or on a
- * single-row echo, it is the hash the app last read it with, absent until the
- * app has read the file once. `castNumbers: true` says
- * the app reads the file's unquoted CSV/TSV numbers as numbers (#2540); absent,
- * it reads every cell as text. Why a path may be named at all is in
+ * Beside it, `dataFile: { path, fileName, hash?, castNumbers? }` names the file the app remembers
+ * for that collection on this machine, when the host has that record (the Electron-hosted server;
+ * never the stdio CLI). `hash` is the SHA-256 of the file's bytes (#2051), the digest a run records
+ * as `dataFileHash`, so an agent can tell whether the file still is the one a past run used. A list
+ * read (`list_collections` with `fields: "full"`, `vayu://collections`) hashes the file as it is at
+ * call time through {@link withCurrentDataFileHashes}; when the file cannot be read, or on a
+ * single-row echo, it is the hash the app last read it with, absent until the app has read the file
+ * once. `castNumbers: true` says the app reads the file's unquoted CSV/TSV numbers as numbers
+ * (#2540); absent, it reads every cell as text. Why a path may be named at all is in
  * `data-file-locations.ts`. The rows are never read here.
  */
 
@@ -68,12 +64,10 @@ export function readDataContract(schema: unknown): DataContract | null {
 }
 
 /**
- * One collection row with its `dataSchema` stated or dropped, and its
- * remembered `dataFile` added when @p ctx knows one. The engine's own
- * `specFile` and `dataFile` bindings (#2765) are dropped: an agent has no use
- * for the spec file, and `dataFile` is named only from @p ctx, so a host with
- * no record of paths (the stdio CLI) still names none. Anything else passes
- * through.
+ * One collection row with its `dataSchema` stated or dropped, and its remembered `dataFile` added
+ * when @p ctx knows one. The engine's own `specFile` and `dataFile` bindings (#2765) are dropped:
+ * an agent has no use for the spec file, and `dataFile` is named only from @p ctx, so a host with
+ * no record of paths (the stdio CLI) still names none. Anything else passes through.
  */
 export function presentCollection(row: unknown, ctx?: DataFileLookup): unknown {
 	if (!isRecord(row)) return row;
@@ -88,9 +82,8 @@ export function presentCollection(row: unknown, ctx?: DataFileLookup): unknown {
 }
 
 /**
- * A remembered location as MCP names it: a path, a name, a digest and how the
- * app reads its values, never contents. `castNumbers` only when on, so "absent"
- * is the one spelling of the default.
+ * A remembered location as MCP names it: a path, a name, a digest and how the app reads its values,
+ * never contents. `castNumbers` only when on, so "absent" is the one spelling of the default.
  */
 function presentLocation(location: DataFileLocation): DataFileLocation {
 	return {

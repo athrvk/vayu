@@ -6,33 +6,28 @@
  */
 
 /**
- * @brief One-click "connect this agent to Vayu" by shelling out to a client's
- *        own CLI - `claude mcp add` (Claude Code, after a `mcp get` so a second
- *        click is a no-op) and `code --add-mcp` (VS Code).
- *        Both are designed for exactly this and handle merging into the user's
- *        config. Clients without an add-CLI (Cursor, Codex) are not handled here;
- *        the UI falls back to a copyable snippet for those.
+ * @brief One-click "connect this agent to Vayu" by shelling out to a client's own CLI:
+ *        `claude mcp add` (Claude Code, after a `mcp get` so a second click is a no-op) and
+ *        `code --add-mcp` (VS Code). Both are designed for exactly this and handle merging into the
+ *        user's config. Clients without an add-CLI (Cursor, Codex) are not handled here; the UI
+ *        falls back to a copyable snippet for those.
  *
- *        A GUI-launched Electron app often has a stripped PATH, so the target
- *        binary is resolved first (`where` / `command -v`) and only then spawned.
- *        Resolution and spawning both differ per platform, and getting either
- *        wrong looks identical to "the CLI is not installed":
+ * A GUI-launched Electron app often has a stripped PATH, so the target binary is resolved first
+ * (`where` / `command -v`) and only then spawned. Resolution and spawning both differ per platform,
+ * and getting either wrong looks identical to "the CLI is not installed":
  *
- *        - **Windows.** `where` lists every match and puts the extensionless
- *          POSIX script first (VS Code ships `code` next to `code.cmd`), which
- *          Node cannot execute at all; and since Node 20.12 it refuses to spawn
- *          a `.cmd`/`.bat` without `shell: true` (the CVE-2024-27980 fix). So
- *          the match is picked by extension and a shim is run through cmd.exe
- *          with every argument quoted by hand - the VS Code argument is a JSON
- *          blob, and an unquoted one loses its braces and quotes.
- *        - **POSIX.** `-lc` sources the login profile, which is what recovers
- *          the PATH a GUI launch stripped, so the login shell is tried first;
- *          `/bin/sh` is the fallback for a login shell that does not speak `-lc`
- *          (nushell, xonsh), which would otherwise report the CLI as missing.
+ * - **Windows.** `where` lists every match and puts the extensionless POSIX script first (VS Code
+ *   ships `code` next to `code.cmd`), which Node cannot execute at all; and since Node 20.12 it
+ *   refuses to spawn a `.cmd`/`.bat` without `shell: true` (the CVE-2024-27980 fix). So the match
+ *   is picked by extension and a shim is run through cmd.exe with every argument quoted by hand:
+ *   the VS Code argument is a JSON blob, and an unquoted one loses its braces and quotes.
+ * - **POSIX.** `-lc` sources the login profile, which is what recovers the PATH a GUI launch
+ *   stripped, so the login shell is tried first; `/bin/sh` is the fallback for a login shell that
+ *   does not speak `-lc` (nushell, xonsh), which would otherwise report the CLI as missing.
  *
- *        If the CLI cannot be found, the caller gets `reason: "cli-not-found"`
- *        and shows the copy snippet. Nothing here rejects: every failure is a
- *        `McpConnectResult`, because the renderer distinguishes the reasons.
+ * If the CLI cannot be found, the caller gets `reason: "cli-not-found"` and shows the copy snippet.
+ * Nothing here rejects: every failure is a `McpConnectResult`, because the renderer distinguishes
+ * the reasons.
  */
 
 import { spawn } from "node:child_process";
@@ -146,16 +141,15 @@ function needsShell(bin: string): boolean {
 }
 
 /**
- * Quote one argument for `cmd.exe /d /s /c "..."`, which Node builds when
- * `shell: true` is set on Windows.
+ * Quote one argument for `cmd.exe /d /s /c "..."`, which Node builds when `shell: true` is set on
+ * Windows.
  *
- * Two parsers read this string in turn: cmd.exe, then the target program's own
- * command-line splitter. Double quotes neutralise cmd's metacharacters
- * (`& | < > ^`) and hand the splitter a single argument; backslashes only need
- * doubling where they precede a quote (the MSVCRT rule). `%` is the one
- * character quotes do not protect - cmd expands `%VAR%` before anything else
- * sees the line, and there is no escape for it outside a batch file - so an
- * argument carrying one is refused rather than silently mangled.
+ * Two parsers read this string in turn: cmd.exe, then the target program's own command-line
+ * splitter. Double quotes neutralise cmd's metacharacters (`& | < > ^`) and hand the splitter a
+ * single argument; backslashes only need doubling where they precede a quote (the MSVCRT rule). `%`
+ * is the one character quotes do not protect: cmd expands `%VAR%` before anything else sees the
+ * line, and there is no escape for it outside a batch file, so an argument carrying one is refused
+ * rather than silently mangled.
  */
 function quoteForCmd(arg: string): string {
 	if (arg.includes("%")) {
@@ -232,11 +226,10 @@ function run(bin: string, args: string[], spawnImpl: SpawnFn): Promise<McpConnec
 const ANSI_SGR = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;]*m`, "g");
 
 /**
- * Whether `claude mcp get` output names exactly `url`. Only the URL is read:
- * the surrounding labels and scope wording are the CLI's to change. A longer
- * port or path (`:98770/mcp`, `/mcp2`) is a different endpoint, so the URL must
- * be delimited on both sides. Colour codes are stripped first: a coloured
- * run puts `ESC[0m` right after the URL, which is not a delimiter.
+ * Whether `claude mcp get` output names exactly `url`. Only the URL is read: the surrounding labels
+ * and scope wording are the CLI's to change. A longer port or path (`:98770/mcp`, `/mcp2`) is a
+ * different endpoint, so the URL must be delimited on both sides. Colour codes are stripped first:
+ * a coloured run puts `ESC[0m` right after the URL, which is not a delimiter.
  */
 function mentionsUrl(output: string | undefined, url: string): boolean {
 	if (!output) return false;
@@ -246,13 +239,12 @@ function mentionsUrl(output: string | undefined, url: string): boolean {
 }
 
 /**
- * `claude mcp add` refuses a name that is already registered, so a second
- * Connect would fail with a duplicate error. Ask first: the same URL needs
- * nothing, a stale one (the engine moved ports) is replaced, and any failure of
- * the lookup falls through to a plain add. "Already connected" is decided by
- * the URL alone: `get` resolves a name across scopes, so a project- or
- * local-scoped entry with the same URL counts. Replacing is remove then add,
- * not atomic: if the add fails the old entry is already gone.
+ * `claude mcp add` refuses a name that is already registered, so a second Connect would fail with a
+ * duplicate error. Ask first: the same URL needs nothing, a stale one (the engine moved ports) is
+ * replaced, and any failure of the lookup falls through to a plain add. "Already connected" is
+ * decided by the URL alone: `get` resolves a name across scopes, so a project- or local-scoped
+ * entry with the same URL counts. Replacing is remove then add, not atomic: if the add fails the
+ * old entry is already gone.
  */
 async function connectClaude(
 	bin: string,

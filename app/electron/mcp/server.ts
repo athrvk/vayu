@@ -6,14 +6,12 @@
  */
 
 /**
- * @brief Builds a configured MCP server (official SDK high-level `McpServer`)
- *        with the Vayu tool registry. Each enabled tool is registered with its
- *        strict Zod input schema (validated automatically), annotations, and
- *        optional output schema. A per-instance context (engine client +
- *        current safety config) is closed over each tool, and each call adds
- *        what only it knows (`callContext`). Transport-agnostic: built per
- *        request by the Streamable HTTP host (Electron) and per connection by
- *        the stdio CLI.
+ * @brief Builds a configured MCP server (official SDK high-level `McpServer`) with the Vayu tool
+ *        registry. Each enabled tool is registered with its strict Zod input schema (validated
+ *        automatically), annotations, and optional output schema. A per-instance context (engine
+ *        client + current safety config) is closed over each tool, and each call adds what only it
+ *        knows (`callContext`). Transport-agnostic: built per request by the Streamable HTTP host
+ *        (Electron) and per connection by the stdio CLI.
  */
 
 import {
@@ -66,13 +64,12 @@ const VAYU_DESCRIPTION =
 const VAYU_WEBSITE = "https://github.com/athrvk/vayu";
 
 /*
- * What belongs here: the cross-cutting facts no single tool description can
- * carry - the capability taxonomy, the safety model, and the other surfaces.
+ * What belongs here: the cross-cutting facts no single tool description can carry: the capability
+ * taxonomy, the safety model, and the other surfaces.
  *
- * What does not: tool names. The user can disable any tool individually, so a
- * roster written here is a list of things that may not exist in the session
- * reading it. Each tool's own description is the one copy of its contract, and
- * it ships only when the tool does.
+ * What does not: tool names. The user can disable any tool individually, so a roster written here
+ * is a list of things that may not exist in the session reading it. Each tool's own description is
+ * the one copy of its contract, and it ships only when the tool does.
  */
 const INSTRUCTIONS_HEAD =
 	"Vayu is a local API testing and load-testing platform (Postman-style requests " +
@@ -92,12 +89,11 @@ const INSTRUCTIONS_HEAD =
 	"retry. A tool that is subject to either gate says so in its own description. ";
 
 /**
- * The task families behind the write tools, so an agent can tell a save from a
- * read when it decides whether the missing tools matter. Without them an agent
- * that does not guess tool names concluded the MCP cannot save (#2442). Families,
- * never tool names: the user can disable any tool individually, and a family
- * outlives a rename. `protocol.integration.test.ts` classifies every write tool
- * into one of these, so a new write tool fails there until its family is named.
+ * The task families behind the write tools, so an agent can tell a save from a read when it decides
+ * whether the missing tools matter. Without them an agent that does not guess tool names concluded
+ * the MCP cannot save (#2442). Families, never tool names: the user can disable any tool
+ * individually, and a family outlives a rename. `protocol.integration.test.ts` classifies every
+ * write tool into one of these, so a new write tool fails there until its family is named.
  */
 const WRITE_TASK_FAMILIES = [
 	"saving, editing, moving or deleting collections, requests and examples",
@@ -113,15 +109,14 @@ const WRITE_TASK_FAMILIES = [
 ];
 
 /**
- * The write gate, stated where an agent reads it before its first call - and
- * only in the sessions it applies to, since the server is rebuilt per request
- * and this text is therefore as current as `tools/list` itself.
+ * The write gate, stated where an agent reads it before its first call, and only in the sessions it
+ * applies to, since the server is rebuilt per request and this text is therefore as current as
+ * `tools/list` itself.
  *
- * Withholding the write tools (#1429) took the handlers' "turn on write access"
- * refusal off the wire with them: the SDK rejects an unregistered name before
- * dispatch, so an agent on a default install saw no write tool and no reason
- * for its absence (#1431). It names how the host lifts the gate and which tasks
- * the gate covers, and no tool.
+ * Withholding the write tools (#1429) takes the handlers' "turn on write access" refusal off the
+ * wire with them: the SDK rejects an unregistered name before dispatch, so an agent on a default
+ * install would see no write tool and no reason for its absence (#1431). It names how the host
+ * lifts the gate and which tasks the gate covers, and no tool.
  */
 function writeGateSentence(host: McpHost): string {
 	return (
@@ -159,14 +154,13 @@ const INSTRUCTIONS_TAIL =
 	"auth and answered as SDL, before a query is written.";
 
 /**
- * The reveal setting, stated the same way and for the same reason as the write
- * gate: a withheld value is a marker in place of data, and an agent that does
- * not know why it is there reads it as missing data rather than as a setting a
- * person can change (#1805).
+ * The reveal setting, stated the same way and for the same reason as the write gate: a withheld
+ * value is a marker in place of data, and an agent that does not know why it is there reads it as
+ * missing data rather than as a setting a person can change (#1805).
  *
- * This is the one full statement of the withholding rules: a tool's
- * description carries only `withheldPointer`'s line (#2441), and a tools-only
- * client never reads the resources that restate parts of it.
+ * This is the one full statement of the withholding rules: a tool's description carries only
+ * `withheldPointer`'s line (#2441), and a tools-only client never reads the resources that restate
+ * parts of it.
  */
 function revealGateSentence(host: McpHost): string {
 	return (
@@ -327,14 +321,13 @@ export function createMcpServer(
 }
 
 /**
- * The tool context for one call: the session's, plus what only the call knows -
- * who the client is and whether the person behind it can be asked.
+ * The tool context for one call: the session's, plus what only the call knows: who the client is
+ * and whether the person behind it can be asked.
  *
- * A 2026-07-28 request carries both in its own envelope; a 2025-era one has
- * them only from the handshake, which a stdio or in-memory server saw and the
- * stateless legacy HTTP leg did not. That leg therefore never offers the
- * question: it has no way to carry the client's answer back to the server that
- * asked, and the SDK would refuse it anyway.
+ * A 2026-07-28 request carries both in its own envelope; a 2025-era one has them only from the
+ * handshake, which a stdio or in-memory server saw and the stateless legacy HTTP leg did not. That
+ * leg therefore never offers the question: it has no way to carry the client's answer back to the
+ * server that asked, and the SDK would refuse it anyway.
  */
 function callContext(
 	mcp: McpServer,
@@ -363,9 +356,8 @@ function callContext(
  * `{ progress }` for a call whose client sent a `progressToken`, else nothing.
  *
  * Sent through `mcpReq.notify`, which ties the notification to this request;
- * `mcp.server.notification` would go out on the session instead. A failed or
- * aborted send is dropped: progress is a courtesy and must never fail the run
- * it describes.
+ * `mcp.server.notification` would go out on the session instead. A failed or aborted send is
+ * dropped: progress is a courtesy and must never fail the run it describes.
  */
 function progressReporter(sdkCtx: ServerContext): Pick<ToolContext, "progress"> {
 	const progressToken = sdkCtx.mcpReq._meta?.progressToken;
@@ -389,12 +381,11 @@ function progressReporter(sdkCtx: ServerContext): Pick<ToolContext, "progress"> 
 }
 
 /**
- * Whether a client with @p capabilities can answer a form question - the kind
- * `confirmDestructive` puts. The SDK's own rule, which it applies by refusing
- * the call (`-32021`) rather than falling back: a mode named outright must
- * include `form`, and a bare `elicitation: {}` is the pre-mode form-only
- * declaration. The client package exports this as `getSupportedElicitationModes`;
- * the server package does not.
+ * Whether a client with @p capabilities can answer a form question, the kind `confirmDestructive`
+ * puts. The SDK's own rule, which it applies by refusing the call (`-32021`) rather than falling
+ * back: a mode named outright must include `form`, and a bare `elicitation: {}` is the pre-mode
+ * form-only declaration. The client package exports this as `getSupportedElicitationModes`; the
+ * server package does not.
  */
 function canAskForm(capabilities: ClientCapabilities | undefined): boolean {
 	const elicitation = capabilities?.elicitation;
