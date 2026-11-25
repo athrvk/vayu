@@ -445,9 +445,9 @@ export function refuseAgentScripts(
 }
 
 /**
- * The element kind a script of each phase becomes on the wire (issue #1512). Since #1514's clean
- * cut, `elements` is the only script field `/requests`, `/collections` and `/execute` accept: a
- * script is an entry of one of these kinds carrying its text at `config.script`, and the old
+ * The element kind a script of each phase becomes on the wire (issue #1512). `elements` is the
+ * only script field `/requests`, `/collections` and `/execute` accept (#1514's clean cut): a script
+ * is an entry of one of these kinds carrying its text at `config.script`, and the old
  * `preRequestScript` / `postRequestScript` / `tests` keys are refused with a 400 naming `elements`.
  *
  * The MCP tools keep the *old argument names* (an agent still writes `preRequestScript` /
