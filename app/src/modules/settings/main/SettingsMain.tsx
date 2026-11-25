@@ -6,10 +6,8 @@
  */
 
 /**
- * Settings Main
- *
- * Displays the settings editor for the selected category.
- * Shows a form with all configurable entries for that category.
+ * The settings editor for the selected category: an engine category's entries as a staged form with
+ * a Save bar, an app category through its registered panel.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -84,27 +82,19 @@ const SAVE_CONTEXT_ID = "settings";
 const PROXY_URL_KEY = "proxyUrl";
 
 /**
- * Check if a config entry requires a restart when changed
- *
  * `requiresRestart` is a typed field the engine serializes on every entry
- * (`engine/src/http/routes/config.cpp`). It replaced a "(Requires Restart)"
- * substring in the label, parsed here and again in the MCP tool surface - which
- * meant one stale label lied to both consumers at once, and said it three times
- * per card (suffix, chip, closing description sentence). The chip below is now
- * the single statement.
+ * (`engine/src/http/routes/config.cpp`), read here and by the MCP tool surface rather than parsed
+ * out of the label; the chip below is the one statement of it on a card.
  */
 const isRestartRequired = (entry: ConfigEntry): boolean => entry.requiresRestart;
 
 /**
- * Places each entry that names a `dependsOn` immediately after the entry it
- * names, indented in the render below - so "Header name" always sits under
- * "Correlation ID" regardless of where its own label would otherwise sort.
- *
- * Every other entry keeps the existing alphabetical-by-label order (issue
- * #1610): only entries with no `dependsOn`, or whose named parent is not in
- * this list, are sorted and treated as top-level; a dependent whose parent is
- * missing (filtered out elsewhere, or a data inconsistency) falls back to its
- * own alphabetical place rather than vanishing.
+ * Places each entry naming a `dependsOn` right after the entry it names, indented in the render
+ * below, so "Header name" always sits under "Correlation ID" wherever its own label would sort.
+ * Every other entry keeps the alphabetical-by-label order (#1610): only entries with no
+ * `dependsOn`, or whose parent is not in this list, are sorted as top-level, so a dependent with a
+ * missing parent (filtered out elsewhere, or a data inconsistency) falls back to its own
+ * alphabetical place rather than vanishing.
  */
 function nestDependents(entries: ConfigEntry[]): ConfigEntry[] {
 	const byKey = new Map(entries.map((entry) => [entry.key, entry]));
@@ -137,12 +127,10 @@ interface EditedValue {
 }
 
 /**
- * The banner over the settings list once a restart-required value is saved.
- *
- * Its own component so the restart machinery - the action, and the cache
- * invalidation that follows it - is mounted only while the banner is on
- * screen, the same split the Dock's pending signal uses. It shares that one
- * action through `useEngineRestart`.
+ * The banner over the settings list once a restart-required value is saved. Its own component so
+ * the restart machinery (the action, and the cache invalidation after it) is mounted only while the
+ * banner shows, the Dock's pending-signal split; both share the one action through
+ * `useEngineRestart`.
  */
 function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDismiss: () => void }) {
 	const { restart, isRestarting } = useEngineRestart();
@@ -218,7 +206,6 @@ export default function SettingsMain() {
 	const { data: configResponse, isLoading, error } = useConfigQuery();
 	const updateConfigMutation = useUpdateConfigMutation();
 
-	// Track edited values locally
 	const [editedValues, setEditedValues] = useState<Record<string, EditedValue>>({});
 	// Deliberately not persisted: the group is meant to be rediscovered rather
 	// than left open from a session the user has forgotten about.
@@ -233,14 +220,12 @@ export default function SettingsMain() {
 	const editedValuesRef = useRef(editedValues);
 
 	/*
-	 * Filter entries by selected category (calculate before early returns).
-	 *
-	 * Sorted by label, not by key: the key is an internal name, so key order put
-	 * `dbBusyTimeout` next to `dbCacheSize` but `maxScenarioSteps` nowhere near
-	 * `maxStepsPerIteration`. Seed insertion order was the other candidate and
-	 * cannot be trusted - the engine writes a changed setting with
-	 * `INSERT OR REPLACE` (`Database::set_config`), which assigns the row a new
-	 * rowid, so saving one value would reshuffle the screen.
+	 * Filter entries by the selected category, before the early returns. Sorted by label, not key:
+	 * the key is an internal name, so key order put `dbBusyTimeout` next to `dbCacheSize` but
+	 * `maxScenarioSteps` nowhere near `maxStepsPerIteration`. Seed insertion order cannot be
+	 * trusted: the engine writes a changed setting with `INSERT OR REPLACE`
+	 * (`Database::set_config`), which gives the row a new rowid, so saving one value would
+	 * reshuffle the screen.
 	 */
 	const categoryEntries =
 		selectedCategory && configResponse?.entries
@@ -284,19 +269,15 @@ export default function SettingsMain() {
 	}, [hasChanges, reportPending, discard]);
 
 	/**
-	 * Persist an explicit set of edits.
+	 * Persist an explicit set of edits. Split from `handleSave` because the category-switch flush
+	 * below saves the edits captured at the switch, not whatever state holds when the write lands.
+	 * Invalid entries are dropped here, not refused: `handleSave` still refuses the whole batch
+	 * (the Save button is disabled while any value is invalid, and the inline error says why), but
+	 * a flush has no screen left to show that error, so it saves what it can and says so, as a
+	 * typed value vanishing with no explanation is a silent discard.
 	 *
-	 * Split out from `handleSave` because the category-switch flush below saves
-	 * the edits captured at the moment of the switch, not whatever is in state by
-	 * the time the write lands. Invalid entries are dropped here rather than
-	 * refused: `handleSave` still refuses the whole batch (the Save button is
-	 * disabled while any value is invalid and the inline error says why), but a
-	 * flush has no screen left to show that error on, so it saves what it can -
-	 * and says so, because a value that was typed and then vanished with no
-	 * explanation is the silent discard this replaces.
-	 *
-	 * `flush` is that path: its edits are no longer staged, so a failure leaves
-	 * nothing for "Not saved" to describe and nothing to retry it, and is a toast.
+	 * `flush` is that path: its edits are no longer staged, so a failure leaves nothing for "Not
+	 * saved" to describe or to retry, and is a toast.
 	 */
 	const saveEntries = useCallback(
 		async (entries: Record<string, EditedValue>, flush: boolean) => {
@@ -311,7 +292,6 @@ export default function SettingsMain() {
 				}
 				updates[key] = edited.value;
 
-				// Check if this config requires restart
 				const entry = configResponse?.entries.find((e) => e.key === key);
 				if (entry && isRestartRequired(entry)) {
 					restartKeys.push(key);
@@ -336,11 +316,10 @@ export default function SettingsMain() {
 			reportSaving(SAVE_CONTEXT_ID);
 			try {
 				await updateConfigMutation.mutateAsync({ entries: updates });
-				// Clear only what this write actually persisted, and only where the
-				// value is still the one that was written. A category switch flushes
-				// asynchronously, so the user can be typing in the *next* category
-				// by the time this resolves - clearing wholesale took those edits
-				// with it.
+				// Clear only what this write persisted, and only where the value is still the one
+				// written: a category switch flushes asynchronously, so the user can be typing in
+				// the *next* category when this resolves, and clearing wholesale would take those
+				// edits with it.
 				setEditedValues((prev) => {
 					const next = { ...prev };
 					for (const key of Object.keys(updates)) {
@@ -355,7 +334,6 @@ export default function SettingsMain() {
 				if (unsent) reportPending(SAVE_CONTEXT_ID);
 				else reportSaved(SAVE_CONTEXT_ID);
 
-				// Track restart-required configs
 				for (const key of restartKeys) {
 					addRestartRequiredKey(key);
 				}
@@ -403,17 +381,13 @@ export default function SettingsMain() {
 	}, [saveEntries]);
 
 	/**
-	 * Leaving a category saves its edits instead of dropping them.
+	 * Leaving a category saves its edits instead of dropping them. Picking another category in the
+	 * sidebar, or leaving Settings entirely (which runs the same cleanup), would otherwise discard
+	 * what was typed with no save and no prompt. The writes are cheap merge-patches, so they are
+	 * saved rather than confirmed; the switch is not itself a destructive act.
 	 *
-	 * Picking another category in the sidebar - or navigating away from Settings
-	 * entirely, which runs the same cleanup - would otherwise discard whatever had
-	 * been typed, with no save and no prompt.
-	 * cheap merge-patches, so they are saved rather than confirmed; the switch is
-	 * not itself a destructive act.
-	 *
-	 * The cleanup reads the edits through a ref because it runs before this
-	 * commit's effect bodies, so the ref still holds the *outgoing* category's
-	 * values - which is exactly what needs writing.
+	 * The cleanup reads the edits through a ref because it runs before this commit's effect bodies,
+	 * so the ref still holds the *outgoing* category's values, which is what needs writing.
 	 */
 	const [editedCategory, setEditedCategory] = useState(selectedCategory);
 	if (editedCategory !== selectedCategory) {
@@ -436,26 +410,22 @@ export default function SettingsMain() {
 	}, [selectedCategory]);
 
 	/*
-	 * The scrolling and the outline belong to `useRevealedSetting`, which works
-	 * off the `data-setting-anchor` below - the same mechanism the app panels
-	 * use. What is left here is the one thing an attribute cannot do: an entry
-	 * inside the collapsed Advanced group has to be uncollapsed before it exists
-	 * to be revealed. Derived rather than pushed into state, since a
-	 * `setAdvancedOpen` here would fight the category switch that closes it.
+	 * The scrolling and the outline belong to `useRevealedSetting`, working off the
+	 * `data-setting-anchor` below as the app panels do. What is left here is what an attribute
+	 * cannot do: an entry in the collapsed Advanced group has to be uncollapsed before it exists to
+	 * be revealed. Derived, not pushed into state, as a `setAdvancedOpen` here would fight the
+	 * category switch that closes it.
 	 */
 	useRevealedSetting();
 	const highlightedIsAdvanced =
 		highlightedKey !== null && advancedEntries.some((entry) => entry.key === highlightedKey);
 	const showAdvanced = advancedOpen || highlightedIsAdvanced;
 
-	// Keep handleSave ref updated
 	useEffect(() => {
 		handleSaveRef.current = handleSave;
 	}, [handleSave]);
 
-	// Register save context when settings are ready (not loading, no error, category selected)
 	useEffect(() => {
-		// Only register when we have a valid settings view (not loading, no error, category selected, not a client-side category)
 		if (isLoading || error || !selectedCategory || isClientCategory(selectedCategory)) {
 			return;
 		}
@@ -482,7 +452,6 @@ export default function SettingsMain() {
 		hasInvalidValues,
 	]);
 
-	// Update context when hasChanges changes
 	useEffect(() => {
 		if (isLoading || error || !selectedCategory || isClientCategory(selectedCategory)) {
 			return;
@@ -509,10 +478,9 @@ export default function SettingsMain() {
 	if (appPanel) {
 		const Panel = APP_PANEL_COMPONENTS[appPanel.id];
 		return (
-			// Keyed on the category, so switching between two client panels
-			// remounts this rather than re-rendering the same instance with new
-			// props - `ClientSettingsPanel`'s own `enter-fade` only fires on that
-			// remount.
+			// Keyed on the category, so switching between two client panels remounts this rather
+			// than re-rendering it with new props: `ClientSettingsPanel`'s `enter-fade` only fires
+			// on a remount.
 			<ClientSettingsPanel
 				key={selectedCategory}
 				title={appPanel.label}
@@ -547,7 +515,6 @@ export default function SettingsMain() {
 		);
 	}
 
-	// Validate a value based on entry constraints
 	const validateValue = (
 		entry: ConfigEntry,
 		value: string
@@ -579,13 +546,11 @@ export default function SettingsMain() {
 		return { isValid: true };
 	};
 
-	// Get current value (edited or original)
 	const getCurrentValue = (entry: ConfigEntry): string => {
 		const edited = editedValues[entry.key];
 		return edited ? edited.value : entry.value;
 	};
 
-	// Get formatted size for display (suffix/helper text)
 	const getFormattedSize = (entry: ConfigEntry): string | null => {
 		if (!isByteUnit(entry.unit)) return null;
 		const value = getCurrentValue(entry);
@@ -594,7 +559,6 @@ export default function SettingsMain() {
 		return formatBytes(bytes);
 	};
 
-	// Handle value change
 	const handleValueChange = (entry: ConfigEntry, newValue: string) => {
 		const validation = validateValue(entry, newValue);
 		setEditedValues((prev) => ({
@@ -607,7 +571,6 @@ export default function SettingsMain() {
 		}));
 	};
 
-	// Handle boolean toggle
 	const handleBooleanToggle = (entry: ConfigEntry, checked: boolean) => {
 		setEditedValues((prev) => ({
 			...prev,
@@ -619,10 +582,8 @@ export default function SettingsMain() {
 	};
 
 	/**
-	 * Drop a staged edit, putting the field back to the saved value.
-	 *
-	 * Called Revert on screen, not Reset: Reset beside a "Default:" line would read
-	 * as the way back to the default, which this is not.
+	 * Drop a staged edit, putting the field back to the saved value. Revert on screen, not Reset:
+	 * Reset beside a "Default:" line would read as the way back to the default, which this is not.
 	 */
 	const handleRevert = (entry: ConfigEntry) => {
 		setEditedValues((prev) => {
@@ -640,7 +601,6 @@ export default function SettingsMain() {
 		}));
 	};
 
-	// Reset to defaults
 	const handleResetToDefaults = () => {
 		const defaultValues: Record<string, EditedValue> = {};
 		for (const entry of categoryEntries) {
@@ -654,7 +614,6 @@ export default function SettingsMain() {
 		setEditedValues(defaultValues);
 	};
 
-	// Get labels for restart-required keys
 	const getRestartRequiredLabels = (): string[] => {
 		if (!configResponse?.entries) return restartRequiredKeys;
 		return restartRequiredKeys.map((key) => {
@@ -664,11 +623,9 @@ export default function SettingsMain() {
 	};
 
 	/**
-	 * One entry's card.
-	 *
-	 * Extracted so the everyday list and the collapsed Advanced section below
-	 * render from one definition: an advanced setting is the same control in a
-	 * quieter place, not a second, thinner rendering of it.
+	 * One entry's card, so the everyday list and the collapsed Advanced section render from one
+	 * definition: an advanced setting is the same control in a quieter place, not a second, thinner
+	 * rendering.
 	 */
 	const renderEntryCard = (entry: ConfigEntry) => {
 		const currentValue = getCurrentValue(entry);
@@ -681,10 +638,9 @@ export default function SettingsMain() {
 		const defaultDisplay = isByteUnit(entry.unit)
 			? formatBytes(parseInt(entry.default, 10) || 0)
 			: undefined;
-		// A dependent whose named parent is missing from this payload (a data
-		// inconsistency the seed's `validate_dependencies` should already have
-		// refused) is rendered exactly like an entry with no `dependsOn` at all -
-		// enabled, unindented - rather than permanently disabled with no way in.
+		// A dependent whose parent is missing from this payload (an inconsistency the seed's
+		// `validate_dependencies` should already refuse) renders like an entry with no `dependsOn`,
+		// enabled and unindented, not disabled forever with no way in.
 		const parentEntry = entry.dependsOn
 			? configResponse?.entries.find((candidate) => candidate.key === entry.dependsOn)
 			: undefined;
@@ -717,18 +673,12 @@ export default function SettingsMain() {
 								)}
 								{isPendingRestart && (
 									/*
-									 * White on a solid `amber-500` measured 2.14 - the
-									 * worst text contrast in the app, and at 10px. It
-									 * failed in *both* themes, because a raw palette
-									 * fill and white are the same two colours whatever
-									 * the surface underneath.
-									 *
-									 * Now the wash pattern the sibling "Restart
-									 * Required" chip beside it already uses, on warning
-									 * tokens: 4.87 light / 7.45 dark. It keeps a
-									 * stronger border than that sibling so the two stay
-									 * distinguishable - "Pending" is the more urgent of
-									 * the pair and should not read as identical.
+									 * The wash pattern of the "Restart Required" chip beside it, on
+									 * warning tokens: 4.87 light / 7.45 dark, where white on a
+									 * solid `amber-500` measures 2.14 in both themes (a raw fill
+									 * and white are the same two colours on any surface). A
+									 * stronger border than that sibling keeps the two
+									 * distinguishable: "Pending" is the more urgent of the pair.
 									 */
 									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-warning/50 bg-warning/15 text-micro font-semibold text-warning-text">
 										Pending
@@ -768,11 +718,9 @@ export default function SettingsMain() {
 								checked={currentValue === "true"}
 								onCheckedChange={(checked) => handleBooleanToggle(entry, checked)}
 								disabled={dependentDisabled}
-								// The setting's name lives in the CardTitle above
-								// and is not associated with the control, so
-								// without this the switch announced as a bare
-								// "switch" - and every engine setting renders
-								// one of these.
+								// The setting's name is in the CardTitle above and is not
+								// associated with the control, so without this every engine
+								// setting's switch announces as a bare "switch".
 								aria-label={entry.label}
 							/>
 							<Label className="text-sm text-muted-foreground">
@@ -780,19 +728,16 @@ export default function SettingsMain() {
 							</Label>
 						</div>
 					) : entry.type === "enum" ? (
-						// The engine omits `options` entirely when a stored row's
-						// options fail to parse (logged there, not here) - render
-						// nothing rather than a select with no items, and never
-						// fall back to a label map kept in this file: labels come
-						// from the payload so the two sides of the boundary cannot
-						// drift apart.
+						// The engine omits `options` when a stored row's options fail to parse
+						// (logged there): render nothing rather than a select with no items, and
+						// never fall back to a label map in this file; labels come from the payload
+						// so the two sides cannot drift.
 						entry.options && entry.options.length > 0 ? (
 							/*
-							 * `labelHidden` for the same reason the numeric row below
-							 * passes it: the CardTitle above is the setting's name, and
-							 * the trigger's own text is the *chosen option*, so the
-							 * label stays in the DOM to name the control and out of
-							 * sight so the card does not say it twice.
+							 * `labelHidden` as on the numeric row below: the CardTitle is the
+							 * setting's name and the trigger's text is the *chosen option*, so the
+							 * label names the control in the DOM, out of sight, rather than said
+							 * twice.
 							 */
 							<SelectSettingRow
 								label={entry.label}
@@ -805,9 +750,8 @@ export default function SettingsMain() {
 						) : null
 					) : isNumeric ? (
 						/*
-						 * `labelHidden`: the CardTitle above is the setting's name,
-						 * so a visible second copy would say it twice - but the
-						 * input still needs it as its accessible name.
+						 * `labelHidden`: the CardTitle is the setting's name, so a visible copy
+						 * would say it twice, but the input still needs it as its accessible name.
 						 */
 						<NumberSettingRow
 							label={entry.label}
@@ -818,11 +762,9 @@ export default function SettingsMain() {
 							min={entry.min}
 							max={entry.max}
 							/*
-							 * The entry says what it measures, so every numeric
-							 * setting can reach the suffix. A byte
-							 * count reads as the formatted value itself ("100.0
-							 * MB" beside the raw number in the field); every
-							 * other unit is its own symbol.
+							 * The entry says what it measures, so every numeric setting can reach
+							 * the suffix: a byte count reads as the formatted value ("100.0 MB"
+							 * beside the raw number), every other unit its own symbol.
 							 */
 							unit={
 								isByteUnit(entry.unit)
@@ -842,11 +784,9 @@ export default function SettingsMain() {
 						/>
 					) : entry.type === "text" ? (
 						/*
-						 * The multi-line string: what goes in it is pasted rather
-						 * than typed (a PEM bundle, today), and a single-line
-						 * input shows one line of it with the rest scrolled out
-						 * of sight. Monospace because the content is delimited
-						 * text whose line breaks are load-bearing - a wrapped
+						 * The multi-line string: its content is pasted rather than typed (a PEM
+						 * bundle), and a single-line input shows one line of it. Monospace because
+						 * it is delimited text whose line breaks are load-bearing: a wrapped
 						 * -----BEGIN CERTIFICATE----- is not the same string.
 						 */
 						<Textarea
@@ -896,9 +836,8 @@ export default function SettingsMain() {
 	};
 
 	return (
-		// Keyed on the category, so switching between two engine categories
-		// remounts this rather than re-rendering the same instance with new
-		// content - `enter-fade` only fires on that remount.
+		// Keyed on the category, so switching between two engine categories remounts this rather
+		// than re-rendering it: `enter-fade` only fires on a remount.
 		<div key={selectedCategory} className="flex-1 flex flex-col overflow-hidden enter-fade">
 			{/* Restart Required Banner */}
 			{pendingRestart && (
@@ -959,15 +898,14 @@ export default function SettingsMain() {
 			<HeadingSection>
 				<div className="flex-1 overflow-auto p-6" data-setting-scroller>
 					<div className="grid gap-4 max-w-3xl mx-auto">
-						{/* Engine surfaces this category owns that are not config
-					    entries - the client-certificate registry (#707), the
-					    connection test (#708). Above the entries because they
-					    are what a user came here to manage, and they save
-					    themselves: the Save bar in the header belongs to the
-					    entries below. */}
-						{/* Keyed by index because the list is a module constant: it
-					    never reorders, grows or shrinks at runtime, so there is
-					    no identity for a key to preserve. */}
+						{/*
+						 * Engine surfaces this category owns that are not config entries: the
+						 * client-certificate registry (#707), the connection test (#708). Above the
+						 * entries, as what a user came to manage; they save themselves (the
+						 * header's Save bar belongs to the entries). Keyed by index: the list is a
+						 * module constant that never reorders, grows or shrinks, so there is no
+						 * identity to keep.
+						 */}
 						{categoryConfig?.Cards?.map((CategoryCard, index) => (
 							<CategoryCard key={index} />
 						))}

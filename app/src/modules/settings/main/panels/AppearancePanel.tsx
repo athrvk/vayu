@@ -6,10 +6,9 @@
  */
 
 /**
- * Cosmetic app preferences: theme mode, accent color scheme, and interface
- * (font / scale / roundedness / density). Client-side only (localStorage-backed), so
- * there's no Save button - changes apply live. Rendered inside
- * {@link ClientSettingsPanel} by the app-settings registry.
+ * Cosmetic app preferences: theme mode, accent colour scheme, and interface (font, scale,
+ * roundedness, density). Client side only (localStorage), so there is no Save button: changes apply
+ * live. Rendered inside {@link ClientSettingsPanel} by the app-settings registry.
  */
 
 import {
@@ -412,11 +411,10 @@ export default function AppearancePanel() {
 						/>
 						{osReducesMotion && (
 							/*
-							 * Without this the row reads "off" while the app is in
-							 * fact not animating, and the only honest explanation
-							 * lives outside Vayu. The switch stays interactive
-							 * because it still means something: turning it on keeps
-							 * motion reduced if the system preference later changes.
+							 * Otherwise the row reads "off" while the app is in fact not animating,
+							 * and the only honest explanation lives outside Vayu. The switch stays
+							 * interactive because it still means something: on, it keeps motion
+							 * reduced if the system preference later changes.
 							 */
 							<p className="enter-fade mt-2 text-xs text-muted-foreground">
 								Your system already asks for reduced motion, so Vayu is minimizing

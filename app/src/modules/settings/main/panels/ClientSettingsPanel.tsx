@@ -6,10 +6,9 @@
  */
 
 /**
- * Shared shell for client-side (app) settings panels - the header (title +
- * description) and the scrolling content column. App panels render only their
- * cards; this shell gives them the same chrome the engine settings view uses,
- * without a Save/Reset bar (client prefs auto-persist).
+ * The shared shell for app settings panels: the header (title, description) and the scrolling
+ * content column, the engine view's chrome without a Save/Reset bar (app prefs autosave). Panels
+ * render only their cards.
  */
 
 import type { ReactNode } from "react";

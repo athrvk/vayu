@@ -8,22 +8,19 @@
  */
 
 /**
- * @file capacity_controller.hpp
  * @brief Pure core for the capacity-discovery run mode: given what each
  *        concurrency level measured, what level to run next and when to stop.
  *
- * Finding a service's capacity used to be manual bisection - guess a
- * `concurrency`, run a ramp, read the dashboard, adjust, repeat. Every other
- * strategy's `target_fn` is a pure function of elapsed time and constants, so
- * none of them can react to what latency is doing; this file is the feedback
- * half that lets one of them.
+ * Every other strategy's `target_fn` is a pure function of elapsed time and
+ * constants, so none of them can react to what latency is doing; this is the
+ * feedback half that lets one of them, in place of manual bisection (guess a
+ * `concurrency`, run a ramp, read the dashboard, adjust, repeat).
  *
- * The controller is deliberately split out of the strategy the way
- * `load_pacing` and `threshold_eval` are: it holds no clock, no metrics
- * collector and no run context, so its whole policy is unit-testable without a
- * server. The strategy owns the clock (the deadline stop lives there, because
- * only it knows elapsed time) and feeds one @ref CapacityWindow per completed
- * level in here.
+ * Split out of the strategy the way `load_pacing` and `threshold_eval` are: it
+ * holds no clock, no metrics collector and no run context, so its whole policy
+ * is unit-testable without a server. The strategy owns the clock (the deadline
+ * stop lives there, because only it knows elapsed time) and feeds one
+ * @ref CapacityWindow per completed level in here.
  */
 
 #include <cstddef>

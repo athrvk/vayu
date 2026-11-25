@@ -6,40 +6,30 @@
  */
 
 /**
- * The registry that maps a host to the client certificate Vayu presents to it
- * (issue #707). An mTLS API is uncallable without one, and the certificate is a
- * property of *where you are calling* rather than of one request - so this is a
- * list of hosts, not a field on the request builder.
+ * The registry mapping a host to the client certificate Vayu presents to it (#707). An mTLS API is
+ * uncallable without one, and the certificate belongs to *where you are calling*, not to one
+ * request, so this is a list of hosts, not a request-builder field.
  *
- * A dedicated card rather than a settings row, on the `CookiesCard` /
- * `UpdatesCard` precedent: it is data with its own CRUD routes, not a config
- * entry the engine's generic settings view can render. It sits in the engine's
- * "Network & connectivity" category because that is where the rest of the
- * transport policy lives (proxy, custom CAs), and a certificate registry
- * anywhere else would be a second place to look for one story.
+ * A dedicated card, not a settings row, on the `CookiesCard` / `UpdatesCard` precedent: data with
+ * its own CRUD routes, not a config entry the generic settings view can render. It sits in the
+ * engine's "Network & connectivity" category with the rest of the transport policy (proxy, custom
+ * CAs); anywhere else would be a second place to look for one story.
  *
- * **Paths, never file contents.** The renderer names a file and the engine
- * opens it, which is why the picker reads only `getFilePath` - the private key
- * is never read here, never sent over the wire and never stored in the
- * database. The passphrase is the exception: it is stored (plaintext, the
- * repo's existing credential precedent) and, once stored, never sent back -
- * which is why an entry that has one shows a badge and not a value.
+ * **Paths, never file contents.** The renderer names a file and the engine opens it, which is why
+ * the picker reads only `getFilePath`: the private key is never read here, sent over the wire or
+ * stored in the database. The passphrase is the exception: stored (plaintext, the repo's credential
+ * precedent) and never sent back, which is why an entry with one shows a badge, not a value.
  *
- * **Every row says what it reaches** (issue #803). A host matches exactly and
- * `*.example.com` matches every subdomain but not `example.com` itself - a
- * distinction the pattern text does not carry on its own, so each row prints
- * the scope in words and the form states the wildcard form where the host is
- * typed. The matching itself stays in the engine; nothing here re-implements
- * it, because two copies of a rule about which certificate goes on a wire is
- * one copy too many.
+ * **Every row says what it reaches** (#803). A host matches exactly, and `*.example.com` matches
+ * every subdomain but not `example.com`, which the pattern text does not say, so each row prints
+ * the scope in words and the form states the wildcard form where the host is typed. The matching
+ * stays in the engine: two copies of a rule about which certificate goes on a wire is one too many.
  *
- * **The format is a field, not a guess** (issue #833). A PEM certificate keeps
- * its key in a second file; a PKCS#12 bundle carries both. The engine has to be
- * told which, or libcurl hands a bundle to its PEM parser (#851). So the form
- * asks which one, drops the key picker for a bundle - a card that kept
- * demanding a key file the format does not have is a dead end no engine change
- * fixes - and every row prints what it will present, because the engine may
- * have read the format off the file and the user is the one who can correct it.
+ * **The format is a field, not a guess** (#833). A PEM certificate keeps its key in a second file;
+ * a PKCS#12 bundle carries both. The engine has to be told which, or libcurl hands a bundle to its
+ * PEM parser (#851). So the form asks, drops the key picker for a bundle (a card demanding a key
+ * file the format lacks is a dead end), and every row prints what it will present, as the engine
+ * may have read the format off the file and the user is the one who can correct it.
  */
 
 import { useRef, useState } from "react";
@@ -91,17 +81,12 @@ function isWildcardHost(host: string): boolean {
 }
 
 /**
- * What a row will and will not answer for, in one sentence (issue #803).
- *
- * Printed for every row rather than only the wildcard ones, and stating the
- * negative half explicitly, because the pattern text alone is exactly what a
- * reader guesses wrong: `*.example.com` looks like it covers `example.com` and
- * does not, and a plain host looks like it covers its subdomains and does not.
- * A certificate silently *not* presented is the failure this registry exists to
- * end, so the scope is on screen rather than in the docs.
- *
- * The port is deliberately absent here - it is already the row's title and its
- * badge, and this sentence is about which *hosts* the entry reaches.
+ * What a row will and will not answer for, in one sentence (#803). Printed for every row, with the
+ * negative half stated, because the pattern text is exactly what a reader guesses wrong:
+ * `*.example.com` looks like it covers `example.com` and does not, and a plain host looks like it
+ * covers its subdomains and does not. A certificate silently *not* presented is the failure this
+ * registry exists to end, so the scope is on screen, not in the docs. No port: it is already the
+ * row's title and badge, and this is about which *hosts* the entry reaches.
  */
 function matchSummary(host: string): string {
 	if (!isWildcardHost(host)) {
@@ -112,12 +97,9 @@ function matchSummary(host: string): string {
 }
 
 /**
- * What each format is called on screen, and which files it needs. One table,
- * because the segmented control, the row badge and the pickers all describe the
- * same choice and three copies would be three things to keep in step.
- *
- * `accept` is a hint to the file dialog, never a rule: the engine reads the
- * format off the file's own bytes and refuses a contradiction, so an oddly
+ * Each format's on-screen name and the files it needs, in one table, as the segmented control, the
+ * row badge and the pickers describe the same choice. `accept` is a hint to the file dialog, never
+ * a rule: the engine reads the format off the file's bytes and refuses a contradiction, so an oddly
  * named certificate is still registrable by typing its path.
  */
 const FORMATS: Record<
@@ -139,14 +121,11 @@ const FORMATS: Record<
 };
 
 /**
- * What a stored format is called on a row, falling back to the value itself.
- *
- * The engine refuses to *store* a format it does not know, so this only ever
- * fires for a row hand-edited around the routes - which the engine still lists
- * (it drops such a row from the transport policy and logs it, rather than
- * hiding it). Indexing straight into the table there would throw on the lookup
- * and take the whole Settings screen down over one bad row, instead of showing
- * the user which row to fix.
+ * A stored format's row name, falling back to the value itself. The engine refuses to *store* an
+ * unknown format, so this fires only for a row hand-edited around the routes, which the engine
+ * still lists (dropping it from the transport policy with a log line). Indexing straight into the
+ * table would throw and take the whole Settings screen down over one bad row instead of showing
+ * which row to fix.
  */
 function formatBadge(certFormat: string): string {
 	return FORMATS[certFormat as ClientCertificateFormat]?.badge ?? certFormat;
@@ -163,12 +142,10 @@ const EMPTY_DRAFT = {
 };
 
 /**
- * A file the user picks, reduced to its absolute path.
- *
- * `getFilePath` reads the path off the `File` object and reports it to main as
- * a picked file - the renderer gains no ability to name paths of its own. Outside
- * Electron it answers `""`, and the field then stays empty rather than being
- * filled with a path that does not exist.
+ * A file the user picks, reduced to its absolute path. `getFilePath` reads the path off the `File`
+ * and reports it to main as a picked file, so the renderer gains no ability to name paths of its
+ * own. Outside Electron it answers `""`, and the field stays empty rather than hold a path that
+ * does not exist.
  */
 function PathPicker({
 	id,
@@ -260,10 +237,9 @@ export function ClientCertificatesCard() {
 			showToast(`Client certificate registered for ${draft.host.trim()}`, "success");
 			closeForm();
 		} catch (error) {
-			// The engine's message names what is wrong - an unreadable file, a
-			// host that carries a scheme, a target already registered - and it is
-			// the only thing that can, so it is kept alongside the fallback
-			// context rather than replaced by it.
+			// The engine's message names what is wrong (an unreadable file, a host with a scheme, a
+			// target already registered), and only it can, so it is kept beside the fallback
+			// context, not replaced by it.
 			showToast(
 				error instanceof Error
 					? `Couldn't register the certificate - ${error.message}`
@@ -293,9 +269,8 @@ export function ClientCertificatesCard() {
 		(!needsKeyFile || draft.keyPath.trim() !== "");
 
 	return (
-		// The anchor a pointer elsewhere in the app aims at - the curl-paste
-		// ledger's `--cert` / `--key` entries (#708) reveal this card the same
-		// way the settings search reveals a config row. Read by
+		// The anchor pointers elsewhere aim at: the curl-paste ledger's `--cert` / `--key` entries
+		// (#708) reveal this card as settings search reveals a config row, through
 		// `useRevealedSetting`, which scrolls it into view and outlines it.
 		<Card data-setting-anchor={CLIENT_CERTIFICATES.anchor}>
 			<CardHeader className="pb-3">
@@ -331,10 +306,8 @@ export function ClientCertificatesCard() {
 				) : (
 					<div>
 						{certificates.map((certificate) => (
-							// Flat hairline row, not a boxed card per entry - the
-							// list convention every other repeated-item list in the
-							// app uses (`RunItem`, `SampleRequestCard`), not the
-							// one-off "boxes within a box" look.
+							// A flat hairline row, not a boxed card per entry: the repeated-item
+							// list convention of the app (`RunItem`, `SampleRequestCard`).
 							<div
 								key={certificate.id}
 								className="border-b border-rule py-3 last:border-b-0 flex items-start justify-between gap-4"

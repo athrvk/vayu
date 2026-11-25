@@ -14,8 +14,7 @@
 #include "vayu/db/database.hpp"
 
 /**
- * @file spec_binding.hpp
- * @brief Completing a collection's `openapi` binding (issue #709).
+ * @brief Completing a collection's `openapi` binding (#709).
  *
  * A binding is `{specId, specHash, syncedAt}`: the document *and the version of
  * it* the collection was bound to. Every reader that measures a run against a
@@ -24,15 +23,15 @@
  * and no version of it silently disables both, forever, on the path that
  * produces nearly every binding: import.
  *
- * The cure is that no write path stores a half-binding. A client sends the
- * `specId`, which is the only half it can know; the engine fills in the hash
- * from the document it just stored or already holds - the same division
- * `spec_documents.hash` itself draws, where the hash is computed engine-side
- * and refused when sent. This is that one rule, in one place, because three
- * callers apply it: `POST /collections`, `POST /import/apply`, and the startup
- * pass that repairs bindings written before the rule existed. The first two
- * receive a binding the shared applier has stripped of any client-sent
- * version (#3348), so for them both halves always come from the store.
+ * So no write path stores a half-binding. A client sends the `specId`, the only
+ * half it can know; the engine fills in the hash from the document it just
+ * stored or already holds - the division `spec_documents.hash` itself draws,
+ * where the hash is computed engine-side and refused when sent. Three callers
+ * apply the rule, so it lives here once: `POST /collections`,
+ * `POST /import/apply`, and the startup pass that repairs bindings written
+ * before the rule existed. The first two receive a binding the shared applier
+ * has stripped of any client-sent version (#3348), so for them both halves
+ * always come from the store.
  */
 
 namespace vayu::core {
@@ -80,11 +79,10 @@ struct BoundSpec {
      * The collection the binding was found on - the run's own collection, or an
      * ancestor of it.
      *
-     * Carried rather than dropped because it is the difference between "this
-     * collection covers 4 of 618 operations" and the same sentence read as a
-     * catastrophe: a run of one tag sub-collection is measured against the
-     * whole document its root binds, and the reader has to be told that is what
-     * happened (issue #716).
+     * Carried because a run of one tag sub-collection is measured against the
+     * whole document its root binds: "this collection covers 4 of 618
+     * operations" reads as a catastrophe unless the reader is told that is what
+     * happened (#716).
      */
     std::string collection_id;
     std::string spec_id;
@@ -99,18 +97,17 @@ struct BoundSpec {
  *
  * **One walk, because the two callers must agree.** An OpenAPI import binds the
  * ROOT and files every request under tag sub-collections, so a request's own
- * collection almost never carries the binding. Design-mode validation resolved
- * that by walking the chain while scenario resolution read only the named
- * collection's own column, and the two disagreed about what "bound" means -
- * running the `pets` tag folder measured no coverage and validated nothing,
- * silently (issue #716). Nearest ancestor wins, so a sub-collection that binds a
+ * collection almost never carries the binding. Design-mode validation and
+ * scenario resolution both resolve it here: were only one to walk the chain,
+ * running the `pets` tag folder would measure no coverage and validate nothing,
+ * silently (#716). Nearest ancestor wins, so a sub-collection that binds a
  * document of its own answers for its own requests rather than the root's
  * document answering for everything.
  *
  * An unparseable or non-object `openapi` column binds nothing and the walk
- * continues past it, the reading every other reader of that column gives it. The
- * walk visits each collection once, so corrupted `parent_id` data terminates
- * instead of looping under the DB mutex.
+ * continues past it, the reading every other reader of that column gives it.
+ * The walk visits each collection once, so corrupted `parent_id` data
+ * terminates instead of looping under the DB mutex.
  */
 [[nodiscard]] std::optional<BoundSpec>
 nearest_spec_binding (vayu::db::Database& db, const std::string& collection_id);

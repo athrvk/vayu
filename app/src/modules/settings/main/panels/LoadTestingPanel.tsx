@@ -6,17 +6,15 @@
  */
 
 /**
- * The ceilings the load-test dialog offers. These are *this app's* policy, not
- * the engine's: the engine range-checks a run config too, but those bounds are
- * crash guards (a negative `concurrency` is an eager pre-allocation of ~1.8e19
- * curl handles), so they sit far above anything a dialog should offer and are
- * not settings. What was left was a shipped default of 1000 virtual users that a
- * user on real hardware had no way to raise.
+ * The ceilings the load-test dialog offers. They are *this app's* policy, not the engine's: the
+ * engine range-checks a run config too, but its bounds are crash guards (a negative `concurrency`
+ * is an eager pre-allocation of ~1.8e19 curl handles), far above anything a dialog should offer,
+ * and not settings. Without these, a user on real hardware could not raise the shipped default of
+ * 1000 virtual users.
  *
- * Each field here is clamped to the engine's guard on the way into the store,
- * so no value set on this screen can compose a run the engine will reject.
- * Client-side only (localStorage-backed); read by the load dialog through
- * `resolveLoadTestLimits`.
+ * Each field is clamped to the engine's guard on the way into the store, so no value set here
+ * composes a run the engine rejects. Client side only (localStorage); the load dialog reads them
+ * through `resolveLoadTestLimits`.
  */
 
 import { Coffee, Gauge, RotateCcw } from "lucide-react";
@@ -166,13 +164,10 @@ export default function LoadTestingPanel() {
 }
 
 /**
- * Whether a run may ask the operating system to stay awake (issue #1357).
- *
- * Off by default, and deliberately not a knob the app sets on the user's
- * behalf: a machine that refuses to sleep is the user's battery and the user's
- * decision. With it off, a run long enough to be walked away from asks once,
- * when it starts - see `KeepAwakePrompt`. This row is the standing answer for
- * people who would rather not be asked at all.
+ * Whether a run may ask the operating system to stay awake (#1357). Off by default and never set on
+ * the user's behalf: a machine that refuses to sleep is the user's battery and decision. Off, a run
+ * long enough to walk away from asks once when it starts (`KeepAwakePrompt`); this row is the
+ * standing answer for people who would rather not be asked.
  */
 function KeepAwakeCard() {
 	const keepAwake = useClientSettingsStore((s) => s.keepAwakeDuringRuns);

@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/vayu_extensions.hpp
  * @brief The `x-vayu-request` / `x-vayu-collection` vendor extensions: what a
  *        Vayu export carries that OpenAPI has no member for, and the one
  *        reading of it an import makes.

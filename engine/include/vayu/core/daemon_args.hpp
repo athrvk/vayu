@@ -8,14 +8,14 @@
  */
 
 /**
- * @file core/daemon_args.hpp
  * @brief What `vayu-engine`'s argument vector says to do (#1031).
  *
- * Moved out of `daemon.cpp` so it can be *called*: the loop is where every rule
- * in #1031 is either applied or not, and a test that reaches only the helpers
- * under it cannot tell a flag wired to the wrong reader from one wired to the
- * right one. `daemon.cpp` keeps what a parse should not own - printing, and the
- * exit code - so this answers with a decision rather than with `std::cout`.
+ * Kept out of `daemon.cpp` so a test can *call* the loop: the loop is where
+ * every rule in #1031 is applied or not, and a test that reaches only the
+ * helpers under it cannot tell a flag wired to the wrong reader from one wired
+ * to the right one. `daemon.cpp` keeps what a parse should not own - printing,
+ * and the exit code - so this answers with a decision rather than with
+ * `std::cout`.
  */
 
 #include <cstdint>
@@ -32,9 +32,8 @@
 
 namespace vayu::core {
 
-/// What the daemon was asked to run with. Seeded by the caller, because the
-/// data directory's default is a platform path this header has no business
-/// knowing.
+/// What the daemon was asked to run with. Seeded by the caller: the data
+/// directory's default is a platform path this header does not know.
 struct DaemonArgs {
     int port = vayu::core::constants::defaults::PORT;
     /// `--mcp-port`; absent means the MCP server is on `defaults::MCP_PORT`.

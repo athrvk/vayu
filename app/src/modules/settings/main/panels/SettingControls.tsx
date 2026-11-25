@@ -6,9 +6,8 @@
  */
 
 /**
- * Small shared primitives for the settings panels so the many pick-one / toggle
- * / numeric rows don't each re-implement the same markup. All use the
- * centralized `--primary` accent for the selected/on state.
+ * Shared primitives for the settings panels' pick-one, toggle and numeric rows, so each panel does
+ * not re-implement the markup; the selected/on state uses the `--primary` accent.
  */
 
 import { createContext, useContext, useId, useRef, useState, type ReactNode } from "react";
@@ -41,17 +40,13 @@ interface CollapsibleTextProps {
 }
 
 /**
- * A description that reads as one or two lines by default, with a "Show
- * more" that reveals the rest - for the MCP tool/category descriptions and
- * the engine's per-setting `CardDescription`, both of which run to full
- * paragraphs (issue: settings descriptions too long to scan).
+ * A description that reads as one or two lines, with a "Show more" for the rest: the MCP tool and
+ * category descriptions and the engine's per-setting `CardDescription` run to full paragraphs.
  *
- * Character-counted rather than CSS `line-clamp` + a measured overflow: jsdom
- * lays out nothing, so a test asserting on real overflow would have nothing
- * to assert on. A length threshold is deterministic here and in the test that
- * mutation-checks it, at the cost of not tracking the container's actual
- * width - an acceptable trade for a description, which is prose a user reads
- * once, not a value they compare pixel-for-pixel.
+ * Character-counted, not CSS `line-clamp` plus measured overflow: jsdom lays out nothing, so a test
+ * of real overflow would have nothing to assert on. A length threshold is deterministic here and in
+ * the test that mutation-checks it, at the cost of not tracking the container's width, acceptable
+ * for prose a user reads once rather than compares pixel for pixel.
  */
 export function CollapsibleText({
 	text,
@@ -89,13 +84,10 @@ export interface OptionButtonItem<T> {
 	label: string;
 	description?: string;
 	/**
-	 * Rendered above the label - a swatch, an icon badge, a shape preview.
-	 *
-	 * A function rather than a node because every existing preview restyles
-	 * itself when selected (the theme tiles fill their icon badge, the accent
-	 * swatches take a ring), and re-implementing the card just to change that
-	 * one element is how three copies of this button appeared in the first
-	 * place.
+	 * Rendered above the label: a swatch, an icon badge, a shape preview. A function, not a node,
+	 * because every preview restyles itself when selected (the theme tiles fill their icon badge,
+	 * the accent swatches take a ring), and re-implementing the card to change that one element
+	 * would fork this button.
 	 */
 	preview?: (isSelected: boolean) => ReactNode;
 }
@@ -139,18 +131,16 @@ interface TileGroupProps {
 const TileGroupContext = createContext<((value: string) => void) | null>(null);
 
 /**
- * The pick-one tile grid as a radio group: each {@link TileItem} is a
- * `role="radio"` with `aria-checked`, and arrow keys move the selection with
- * the focus, as the WAI-ARIA radio pattern has it (issue #1865). Shared by
- * {@link OptionButtons} and `FontPicker`, which differ only in what a tile
+ * The pick-one tile grid as a radio group: each {@link TileItem} is a `role="radio"` with
+ * `aria-checked`, and arrow keys move the selection with the focus, per the WAI-ARIA radio pattern
+ * (#1865). Shared by {@link OptionButtons} and `FontPicker`, which differ only in what a tile
  * holds.
  *
- * Not the `ui/toggle-group` segmented control: its items are a fixed-height
- * strip with the label rendered twice to reserve the bold width, which a tile
- * with a preview and a description cannot sit in. This is the Radix primitive
- * underneath, unstyled. Radix roves focus only, so selection-follows-focus is
- * added here: focus that arrives after a key press picks the tile, while a
- * pointer press is left to Radix's own click so `onChange` fires once.
+ * Not the `ui/toggle-group` segmented control: its items are a fixed-height strip with the label
+ * rendered twice to reserve the bold width, which a tile with a preview and a description cannot
+ * sit in. This is the Radix primitive underneath, unstyled. Radix roves focus only, so
+ * selection-follows-focus is added here: focus arriving after a key press picks the tile, while a
+ * pointer press is left to Radix's click so `onChange` fires once.
  */
 export function TileGroup({ value, onChange, label, columns, children }: TileGroupProps) {
 	// Set by a key press, cleared by a pointer press: Radix moves focus from the
@@ -396,28 +386,22 @@ interface SelectSettingRowProps {
 }
 
 /**
- * The pick-one row as a dropdown, for a set that reads as a list rather than a
- * tile grid.
+ * The pick-one row as a dropdown, for a set that reads as a list rather than a tile grid.
+ * {@link OptionButtons} is the other half and stays the default: three or four options a user
+ * browses (themes, accents, toast positions) are worth the space tiles take, while a protocol or a
+ * codec is a value the user already knows by name, answered by a line in a menu, which also keeps a
+ * request tab's row height the same as the rows around it.
  *
- * {@link OptionButtons} is the other half of this shape and stays the default:
- * three or four options a user browses (themes, accents, toast positions) are
- * worth the space tiles take. A protocol or a codec is a value the user already
- * knows the name of, and the answer is a line in a menu - which is also what
- * keeps a request tab's row height the same as the rows around it.
+ * Label wiring matches {@link NumberSettingRow}: `useId` pairs the visible label with the trigger,
+ * and the same string names the trigger for a screen reader, because Radix renders a button whose
+ * text is the *chosen option*, not the setting.
  *
- * Label wiring matches {@link NumberSettingRow}: `useId` pairs the visible
- * label with the trigger, and the same string names the trigger for a screen
- * reader, because Radix renders a button whose text is the *chosen option*, not
- * the setting.
- *
- * The trigger's width is the row's, not the caller's: `max-w-[12rem]` is what
- * {@link NumberSettingRow}'s input already caps at, so the two control types
- * line up down an engine settings card instead of ending at different places.
- * It holds every option label the two consumers have - "From environment",
- * the longest, at ~16 characters - so a knob would be a setting with one
- * value. It was `w-48` until that rode `--spacing`: at the Default density
- * 144px, 48px short of the input's fixed 192px cap, so the two stopped
- * lining up.
+ * The trigger's width is the row's, not the caller's: `max-w-[12rem]`, the cap
+ * {@link NumberSettingRow}'s input has, so the two control types line up down an engine settings
+ * card. It holds every option label of the two consumers ("From environment", the longest, at ~16
+ * characters), so a knob would be a setting with one value. A `--spacing`-based width (`w-48`) is
+ * 144px at the Default density, 48px short of the input's fixed 192px cap, which is why the cap is
+ * fixed.
  */
 export function SelectSettingRow({
 	label,
@@ -495,11 +479,8 @@ interface DefaultValueLineProps {
 }
 
 /**
- * "Default: x", with the way back to it.
- *
- * One definition because every row type needs it - the numeric row below, and
- * the boolean/enum/string engine cards. Before this, the engine cards printed
- * the line with no reset next to it and the app rows had neither.
+ * "Default: x", with the way back to it: one definition, as every row type needs it (the numeric
+ * row below, and the boolean, enum and string engine cards).
  */
 export function DefaultValueLine({ defaultValue, value, display, onReset }: DefaultValueLineProps) {
 	if (defaultValue === value) return null;
@@ -521,14 +502,11 @@ export function DefaultValueLine({ defaultValue, value, display, onReset }: Defa
 }
 
 /**
- * When a typed value reaches the owner of the setting.
- *
- * `change` is for settings that apply live (a chart window, a ceiling the next
- * dialog reads); `blur` is for the ones whose owner does real work on every
- * write (the MCP caps go over IPC and are re-sanitized). Either way an
- * unparseable draft - an emptied field mid-edit - is never committed: it stays
- * in the input until it is a number again, instead of reaching a store that
- * would clamp it to its floor.
+ * When a typed value reaches the setting's owner. `change` is for settings that apply live (a chart
+ * window, a ceiling the next dialog reads); `blur` for owners doing real work on each write (the
+ * MCP caps go over IPC and are re-sanitized). Either way an unparseable draft (a field emptied
+ * mid-edit) is never committed: it stays in the input until it is a number again, rather than reach
+ * a store that would clamp it to its floor.
  */
 export type NumberCommitStrategy = "change" | "blur";
 
@@ -595,14 +573,9 @@ function derivedRangeHint(min?: string, max?: string): string | null {
 }
 
 /**
- * The number row: input, unit suffix, range hint, validation, Default line.
- *
- * This shape existed four times over - the engine entry cards, the dashboard
- * SLO threshold, the load-test ceilings and the MCP caps - with divergent
- * markup *and* divergent behaviour (immediate commit, clamp-on-blur, debounce,
- * explicit save). A hand-rolled copy of a primitive does not receive the
- * primitive's fixes, so the four are one component with the commit strategy as
- * a prop.
+ * The number row: input, unit suffix, range hint, validation, Default line, for the engine entry
+ * cards, the dashboard SLO threshold, the load-test ceilings and the MCP caps, with the commit
+ * strategy as a prop. A hand-rolled copy of a primitive does not receive the primitive's fixes.
  */
 export function NumberSettingRow({
 	label,
@@ -638,14 +611,11 @@ export function NumberSettingRow({
 	const descriptionId = `${inputId}-description`;
 
 	/*
-	 * A value that changes from outside while the field is not being typed in -
-	 * a Revert, a Reset, a store the panel wrote elsewhere - replaces the draft.
-	 * Without this the row kept showing the number that was just reverted away.
-	 *
-	 * Gated on focus rather than on where the change came from: while the user
-	 * is typing, their draft outranks anything the owner echoes back, which is
-	 * what stops a store that clamps on every commit from rewriting the field
-	 * mid-number.
+	 * A value that changes from outside while the field is not being typed in (a Revert, a Reset, a
+	 * store the panel wrote elsewhere) replaces the draft, or the row would keep showing the number
+	 * just reverted away. Gated on focus, not on where the change came from: while the user types,
+	 * their draft outranks anything the owner echoes back, which stops a store that clamps on every
+	 * commit from rewriting the field mid-number.
 	 */
 	const [lastValue, setLastValue] = useState(value);
 	if (lastValue !== value) {
@@ -733,11 +703,9 @@ export function NumberSettingRow({
 							error && "border-destructive"
 						)}
 						/*
-						 * Out-of-range values used to be signalled by a red border and a
-						 * line of text sitting loose beside the field - colour alone, and
-						 * a message the field did not point at. `|| undefined` so valid
-						 * fields carry no attribute at all rather than a misleading
-						 * aria-invalid="false" on every row on the screen.
+						 * `aria-invalid` with the message pointed at below, so an out-of-range
+						 * value is not signalled by colour alone. `|| undefined` so a valid field
+						 * carries no attribute, not a misleading aria-invalid="false" on every row.
 						 */
 						aria-invalid={error ? true : undefined}
 						/*
