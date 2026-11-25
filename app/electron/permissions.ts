@@ -6,13 +6,10 @@
  */
 
 /**
- * Deny-all device permissions (#1780).
- *
- * Electron grants every `permissionRequest` when a session has no handler.
- * Vayu needs none of them, and the OAuth window loads identity-provider pages
- * that are not ours, so a page there could otherwise be granted camera,
- * microphone or geolocation (OS prompts aside). The one exception is the
- * sanitized clipboard write that the copy buttons use.
+ * Deny-all device permissions (#1780). Electron grants every `permissionRequest` when a session has
+ * no handler. Vayu needs none of them, and the OAuth window loads identity-provider pages that are
+ * not ours, so a page there could otherwise be granted camera, microphone or geolocation (OS
+ * prompts aside). The one exception is the sanitized clipboard write the copy buttons use.
  */
 
 import type { Session } from "electron";
