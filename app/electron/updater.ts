@@ -34,14 +34,12 @@ function releaseUrl(version: string): string {
 /**
  * One-liner that re-runs the ad-hoc-signing installer on macOS.
  *
- * This *is* the macOS update mechanism - the strategy is "notify" because an
- * ad-hoc signature gives Squirrel.Mac nothing to verify - so it has to stay
- * byte-identical to the command README.md documents, which
- * `updater.test.ts` asserts by reading the README.
+ * This *is* the macOS update mechanism (the strategy is "notify" because an ad-hoc signature gives
+ * Squirrel.Mac nothing to verify), so it has to stay byte-identical to the command README.md
+ * documents, which `updater.test.ts` asserts by reading the README.
  *
- * Not built from `REPO`: the script is served by the docs site (published from
- * the repo root by .github/hooks/install_script.py), which has no owner/repo in
- * its path.
+ * Not built from `REPO`: the script is served by the docs site (published from the repo root by
+ * .github/hooks/install_script.py), which has no owner/repo in its path.
  */
 function macInstallCommand(): string {
 	return `bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"`;
@@ -56,9 +54,8 @@ export interface UpdateAvailablePayload {
 }
 
 /**
- * electron-updater's own `ProgressInfo`, narrowed to the fields the banner
- * renders - only the silent strategies set `autoDownload`, so this only ever
- * appears on Windows and the Linux AppImage build.
+ * electron-updater's own `ProgressInfo`, narrowed to the fields the banner renders. Only the silent
+ * strategies set `autoDownload`, so this only ever appears on Windows and the Linux AppImage build.
  */
 export interface UpdateDownloadProgress {
 	/** 0-100. */
@@ -69,14 +66,12 @@ export interface UpdateDownloadProgress {
 }
 
 /**
- * Where the silent path's download stands (#3338), pushed on `update:state` at
- * every change and answered by `update:getState`, so a renderer that reloads
- * asks rather than waiting for an event it already missed. Mirrored by
- * `UpdateDownloadState` in `src/types/electron.d.ts`.
+ * Where the silent path's download stands (#3338), pushed on `update:state` at every change and
+ * answered by `update:getState`, so a renderer that reloads asks rather than waiting for an event
+ * it already missed. Mirrored by `UpdateDownloadState` in `src/types/electron.d.ts`.
  *
- * Only `verified` may install (#2372): electron-updater installs whichever file
- * it downloaded last, so neither the restart nor the quit-time install may
- * follow an earlier verification.
+ * Only `verified` may install (#2372): electron-updater installs whichever file it downloaded last,
+ * so neither the restart nor the quit-time install may follow an earlier verification.
  */
 export type UpdateDownloadState =
 	| { kind: "none" }
@@ -110,9 +105,8 @@ export type UpdateCheckResult =
 type CheckSource = "menu" | "renderer";
 
 /**
- * A check the user asked for and is waiting on. electron-updater answers
- * through events rather than the `checkForUpdates()` promise, so the settle
- * path runs from the event handlers.
+ * A check the user asked for and is waiting on. electron-updater answers through events rather than
+ * the `checkForUpdates()` promise, so the settle path runs from the event handlers.
  */
 interface PendingCheck {
 	source: CheckSource;
@@ -122,27 +116,25 @@ interface PendingCheck {
 }
 
 /**
- * How long to wait for an answer before giving up. Without this a check that
- * never gets a reply - a hung connection, a feed that stalls after the TCP
- * handshake - leaves the settings button spinning with no way back.
+ * How long to wait for an answer before giving up. Without this a check that never gets a reply (a
+ * hung connection, a feed that stalls after the TCP handshake) leaves the settings button spinning
+ * with no way back.
  *
- * This is one budget for the whole check, retry included: the user clicked once
- * and the wait they can see must stay bounded by one number. A retry that runs
- * out of budget reports the timeout rather than the first error - the first
- * error is logged either way.
+ * This is one budget for the whole check, retry included: the user clicked once and the wait they
+ * can see must stay bounded by one number. A retry that runs out of budget reports the timeout
+ * rather than the first error; the first error is logged either way.
  */
 const CHECK_TIMEOUT_MS = 30_000;
 
 /**
- * A check gets one automatic retry, because on a cold network stack the first
- * answer is often not the truth.
+ * A check gets one automatic retry, because on a cold network stack the first answer is often not
+ * the truth.
  *
- * A mac check is three sequential HTTPS requests through Chromium's net stack,
- * and a transient there (`ERR_NETWORK_CHANGED` while Wi-Fi settles after launch
- * or wake is the textbook one) used to become the final answer. The join rule
- * below amplifies it: a click that lands while the startup check is in flight
- * inherits that check's fate, so the coldest possible attempt answered a click
- * made minutes later. Retrying once absorbs that without giving up the join.
+ * A mac check is three sequential HTTPS requests through Chromium's net stack, and a transient
+ * there (`ERR_NETWORK_CHANGED` while Wi-Fi settles after launch or wake is the textbook one) would
+ * become the final answer. The join rule below amplifies it: a click that lands while the startup
+ * check is in flight inherits that check's fate, so the coldest possible attempt would answer a
+ * click made minutes later. Retrying once absorbs that without giving up the join.
  */
 const MAX_CHECK_ATTEMPTS = 2;
 
@@ -175,11 +167,10 @@ let startupTimer: NodeJS.Timeout | null = null;
 /**
  * How the updater finds the window to talk to, asked fresh every time.
  *
- * Not a captured `BrowserWindow`: on macOS the app outlives its window, and a
- * dock-activate builds a new one. A reference taken at startup would point at
- * the closed window for the rest of the session, so every periodic update event
- * would hit the `isDestroyed()` guard and be dropped - and on macOS that banner
- * is the whole passive update path.
+ * Not a captured `BrowserWindow`: on macOS the app outlives its window, and a dock-activate builds
+ * a new one. A reference taken at startup would point at the closed window for the rest of the
+ * session, so every periodic update event would hit the `isDestroyed()` guard and be dropped, and
+ * on macOS that banner is the whole passive update path.
  */
 export type WindowAccessor = () => BrowserWindow | null;
 
@@ -196,12 +187,10 @@ function send(channel: string, payload: unknown): void {
 /**
  * The fullest description of a failed check we can give the user.
  *
- * electron-updater raises coded errors (`newError(message, code)`), and the
- * code is the part worth reporting: "Cannot find latest-mac.yml" and
- * `ERR_UPDATER_LATEST_VERSION_NOT_FOUND` say different things about who is at
- * fault. The message is what the settings panel and the menu dialog print, so
- * the code has to travel inside it - there is no second field for a reader to
- * miss.
+ * electron-updater raises coded errors (`newError(message, code)`), and the code is the part worth
+ * reporting: "Cannot find latest-mac.yml" and `ERR_UPDATER_LATEST_VERSION_NOT_FOUND` say different
+ * things about who is at fault. The message is what the settings panel and the menu dialog print,
+ * so the code has to travel inside it: there is no second field for a reader to miss.
  */
 function describeError(err: unknown): string {
 	if (!(err instanceof Error)) return String(err);
@@ -210,10 +199,9 @@ function describeError(err: unknown): string {
 	if (typeof code === "string" && code && !err.message.includes(code)) {
 		parts.push(`(${code})`);
 	}
-	// Some codes already embed their cause in the message; only add one that is
-	// not already there. Read off the object rather than `err.cause`: the
-	// electron tsconfig's lib predates it, and a failure description is not a
-	// reason to move the whole target.
+	// Some codes already embed their cause in the message; only add one that is not already there.
+	// Read off the object rather than `err.cause`: the electron tsconfig's lib predates it, and a
+	// failure description is not a reason to move the whole target.
 	const cause: unknown = (err as { cause?: unknown }).cause;
 	const causeText =
 		cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "";
@@ -311,10 +299,9 @@ function endCheckCycle(): void {
 /**
  * Retry once, then report.
  *
- * A single failure is not an answer - it is one round trip that did not work.
- * The first one is logged at `error` level on the way past, because the retry
- * would otherwise hide a *deterministic* failure behind a working second
- * attempt, and then the only trace of the real mechanism is gone.
+ * A single failure is not an answer, it is one round trip that did not work. The first one is
+ * logged at `error` level on the way past, because the retry would otherwise hide a *deterministic*
+ * failure behind a working second attempt, and then the only trace of the real mechanism is gone.
  */
 function handleCheckFailure(err: unknown): void {
 	const message = describeError(err);
@@ -343,15 +330,14 @@ function handleCheckFailure(err: unknown): void {
 }
 
 /**
- * Arm auto-update for the current platform. The renderer's IPC channels are not
- * registered here: they are forwarders in main.ts's `setupIpcHandlers`, so they
- * exist before this runs and a call that lands first waits for it.
+ * Arm auto-update for the current platform (the strategies are `updater-strategy.ts`'s). The
+ * renderer's IPC channels are not registered here: they are forwarders in main.ts's
+ * `setupIpcHandlers`, so they exist before this runs and a call that lands first waits for it.
  *
- *   - silent (Windows, Linux AppImage): download in the background, verify the
- *     installer's attestation, then tell the renderer it can restart-and-install.
- *   - notify (macOS, Linux .deb): only check the version feed and surface the
- *     newer release in the UI; the user updates out-of-band.
- *   - disabled (development): no-op.
+ * Silent (Windows, Linux AppImage) downloads in the background, verifies the installer's
+ * attestation, then tells the renderer it can restart-and-install. Notify (macOS, Linux .deb) only
+ * checks the version feed and surfaces the newer release; the user updates out-of-band. Development
+ * is a no-op.
  */
 export function initAutoUpdater(getWindow: WindowAccessor): void {
 	const isDev = isDevelopmentBuild();
@@ -375,13 +361,12 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	autoUpdater.allowPrerelease = false;
 
 	autoUpdater.on("update-available", (info) => {
-		// Withdraws a standing verification ahead of the download that may replace
-		// its file. This is the earliest event that always precedes the swap:
-		// `doCheckForUpdates` emits it before calling `downloadUpdate`, and the
-		// rename runs inside that download, before `update-downloaded`.
-		// `checking-for-update` also fires on a check that finds nothing, which
-		// would strand a verified download with nothing to verify again;
-		// `download-progress` is later, and a cached file never emits it.
+		// Withdraws a standing verification ahead of the download that may replace its file. This
+		// is the earliest event that always precedes the swap: `doCheckForUpdates` emits it before
+		// calling `downloadUpdate`, and the rename runs inside that download, before
+		// `update-downloaded`. `checking-for-update` also fires on a check that finds nothing,
+		// which would strand a verified download with nothing to verify again; `download-progress`
+		// is later, and a cached file never emits it.
 		if (strategy === "silent") {
 			setDownload({ kind: "downloading", version: info.version, progress: null });
 		}
@@ -441,18 +426,15 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 
 	updaterReady = true;
 
-	// The startup and periodic checks retry on the same budget. They stay
-	// silent - `settleCheck` answers nobody when no one is waiting - but the
-	// startup one runs on the coldest network stack of the session, so it is
-	// the attempt that most needs a second try. The wait ahead of it warms that
-	// stack rather than replacing the retry: a minute in, Wi-Fi may still be
-	// settling, and a check the user clicks during the wait starts its own
-	// cycle with the same budget.
+	// The startup and periodic checks retry on the same budget. They stay silent (`settleCheck`
+	// answers nobody when no one is waiting), but the startup one runs on the coldest network stack
+	// of the session, so it is the attempt that most needs a second try. The wait ahead of it warms
+	// that stack rather than replacing the retry: a minute in, Wi-Fi may still be settling, and a
+	// check the user clicks during the wait starts its own cycle with the same budget.
 	//
-	// It is the *download* the wait is for. On the silent platforms the check
-	// pulls the release as soon as it finds one, and at t=0 that transfer
-	// competed with the user's own API traffic and with the engine's startup
-	// disk work (see `UPDATE_STARTUP_CHECK_DELAY_MS`).
+	// It is the *download* the wait is for. On the silent platforms the check pulls the release as
+	// soon as it finds one, and at t=0 that transfer would compete with the user's own API traffic
+	// and with the engine's startup disk work (see `UPDATE_STARTUP_CHECK_DELAY_MS`).
 	scheduleStartupCheck();
 	intervalTimer = setInterval(() => startCheckCycle(), CHECK_INTERVAL_MS);
 }
@@ -464,18 +446,15 @@ function isDownloadPending(
 }
 
 /**
- * Install nothing until the downloaded installer's attestation verifies
- * (#2372). Runs on every download, a cached one electron-updater reuses
- * included.
+ * Install nothing until the downloaded installer's attestation verifies (#2372). Runs on every
+ * download, a cached one electron-updater reuses included.
  *
- * BaseUpdater emits `update-downloaded` and then, in the same synchronous
- * step, calls `addQuitHandler()`, which registers the quit-time install only
- * if `autoInstallOnAppQuit` is true at that moment and reads the flag again
- * when the app quits. So the flag is raised for the registration and set back
- * from the state in a microtask, which runs once that step has returned; only
- * `verified` raises it again. A quit while the verification is still running
- * installs nothing. `updater-install-gate.test.ts` holds the installed
- * electron-updater to that ordering.
+ * BaseUpdater emits `update-downloaded` and then, in the same synchronous step, calls
+ * `addQuitHandler()`, which registers the quit-time install only if `autoInstallOnAppQuit` is true
+ * at that moment and reads the flag again when the app quits. So the flag is raised for the
+ * registration and set back from the state in a microtask, which runs once that step has returned;
+ * only `verified` raises it again. A quit while the verification is still running installs nothing.
+ * `updater-install-gate.test.ts` holds the installed electron-updater to that ordering.
  */
 function holdDownloadForVerification(info: UpdateDownloadedEvent): void {
 	const verifying: UpdateDownloadState = { kind: "verifying", version: info.version };
@@ -536,9 +515,8 @@ function refuseUnverifiedDownload(
 }
 
 /**
- * `update:restartToInstall`. Only meaningful on the silent path, and only once
- * the download's attestation has verified: `quitAndInstall` runs whatever
- * file electron-updater downloaded last.
+ * `update:restartToInstall`. Only meaningful on the silent path, and only once the download's
+ * attestation has verified: `quitAndInstall` runs whatever file electron-updater downloaded last.
  */
 export function restartToInstall(): void {
 	if (!updaterReady) return;
@@ -550,9 +528,8 @@ export function restartToInstall(): void {
 }
 
 /**
- * `update:openReleasePage`. Takes no argument: the renderer is not trusted to
- * name the URL, and the release page for the version on offer is the only one
- * this opens.
+ * `update:openReleasePage`. Takes no argument: the renderer is not trusted to name the URL, and the
+ * release page for the version on offer is the only one this opens.
  */
 export async function openReleasePage(): Promise<void> {
 	if (!offeredReleaseUrl) return;
@@ -560,16 +537,15 @@ export async function openReleasePage(): Promise<void> {
 }
 
 /**
- * `update:quitForUpdate`, the macOS notify path's other half: the installer
- * cannot replace a bundle whose processes are still running, so it has to quit
- * Vayu itself - and from a terminal that means an Apple Event, which macOS gates
- * behind an Automation consent prompt the user has to notice and approve.
+ * `update:quitForUpdate`, the macOS notify path's other half: the installer cannot replace a bundle
+ * whose processes are still running, so it has to quit Vayu itself, and from a terminal that means
+ * an Apple Event, which macOS gates behind an Automation consent prompt the user has to notice and
+ * approve.
  *
- * Quitting from in here needs no such permission and takes the ordinary
- * `before-quit` path in main.ts, which flushes pending renderer saves and
- * stops the engine and MCP server before exiting. So the app quitting itself
- * is strictly better than the script killing it, and the script's own quit
- * stays as the fallback for anyone who runs the command directly.
+ * Quitting from in here needs no such permission and takes the ordinary `before-quit` path in
+ * main.ts, which flushes pending renderer saves and stops the engine and MCP server before exiting.
+ * So the app quitting itself is strictly better than the script killing it, and the script's own
+ * quit stays as the fallback for anyone who runs the command directly.
  */
 export function quitForUpdate(): void {
 	app.quit();
@@ -609,10 +585,9 @@ function showAvailableDialog(version: string): void {
 }
 
 /**
- * Claim the check the user is waiting on, if any, so it can be answered exactly
- * once. Events fire for the periodic check too, so nothing waiting means there
- * is nothing to answer - that is the silent path doing its job, not a missed
- * result.
+ * Claim the check the user is waiting on, if any, so it can be answered exactly once. Events fire
+ * for the periodic check too, so nothing waiting means there is nothing to answer: that is the
+ * silent path doing its job, not a missed result.
  */
 function takePendingCheck(): PendingCheck | null {
 	const pending = pendingCheck;
@@ -627,9 +602,8 @@ function settleCheck(result: UpdateCheckResult): void {
 	const pending = takePendingCheck();
 	if (!pending) return;
 
-	// The menu item has no UI of its own, so it reports through a native
-	// dialog. The settings panel renders the same result in place, and a modal
-	// on top of it would be redundant.
+	// The menu item has no UI of its own, so it reports through a native dialog. The settings panel
+	// renders the same result in place, and a modal on top of it would be redundant.
 	if (pending.source === "menu") {
 		if (result.status === "up-to-date") {
 			void showUpdateDialog({
@@ -646,12 +620,10 @@ function settleCheck(result: UpdateCheckResult): void {
 				buttons: ["OK"],
 			});
 		} else if (result.status === "available" && !liveWindow()) {
-			// "available" normally needs no dialog - the banner is already
-			// showing it. But the banner is a `webContents.send`, and with no
-			// window there is nothing to send it to: the menu click would
-			// otherwise find an update and say nothing at all. On macOS a
-			// window-less app is the ordinary state, and the menu is still
-			// there to click.
+			// "available" normally needs no dialog (the banner is already showing it). But the
+			// banner is a `webContents.send`, and with no window there is nothing to send it to:
+			// the menu click would otherwise find an update and say nothing at all. On macOS a
+			// window-less app is the ordinary state, and the menu is still there to click.
 			showAvailableDialog(result.version);
 		}
 	}
