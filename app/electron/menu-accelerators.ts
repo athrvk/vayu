@@ -8,18 +8,15 @@
 /**
  * The accelerators the application menu registers (#3325).
  *
- * The renderer's `constants/shortcuts.ts` is the one list of what the app
- * answers to, and Settings > Keyboard shortcuts draws from it. The menu's
- * accelerators are chords too, but this process cannot import that file (the
- * main-process build is rooted at `electron/`), so the keys are written here
- * as plain shapes and `menu-accelerators.test.ts` compares every one against
- * the real chord. `createMenu` in main.ts takes its accelerator strings from
- * `menuAccelerators` and from nowhere else, which a source scan in the same
- * test holds - so a menu key cannot change without the panel's row changing
- * with it.
+ * The renderer's `constants/shortcuts.ts` is the one list of what the app answers to, and Settings
+ * > Keyboard shortcuts draws from it. This process cannot import that file (the main-process build
+ * is rooted at `electron/`), so the menu's keys are written here as plain shapes and
+ * `menu-accelerators.test.ts` compares each against the real chord. `createMenu` in main.ts takes
+ * its accelerator strings from `menuAccelerators` and nowhere else, which a source scan in the same
+ * test holds, so a menu key cannot change without the panel's row changing with it.
  *
- * Kept free of Electron types for the reason `app-menu.ts` gives: main.ts runs
- * its whole startup at import, and nothing here needs it.
+ * Kept free of Electron types for the reason `app-menu.ts` gives: main.ts runs its whole startup at
+ * import, and nothing here needs it.
  */
 
 /** The slice of the renderer's `Chord` an accelerator is spelled from. */
@@ -31,9 +28,8 @@ export interface AcceleratorChord {
 }
 
 /**
- * Keys whose display glyph is not the name Electron's accelerator grammar
- * takes. Everything else - letters, digits, `=`, `-`, `,`, brackets - is
- * written as it is.
+ * Keys whose display glyph is not the name Electron's accelerator grammar takes; everything else
+ * (letters, digits, `=`, `-`, `,`, brackets) is written as it is.
  */
 const ACCELERATOR_KEY_NAMES: Readonly<Record<string, string>> = {
 	"+": "Plus",
@@ -42,9 +38,8 @@ const ACCELERATOR_KEY_NAMES: Readonly<Record<string, string>> = {
 };
 
 /**
- * An Electron accelerator for a chord: `mod` is `CmdOrCtrl` (the lenient and the
- * strict spelling both land there - Electron has no weaker form), then Shift,
- * Alt and the key.
+ * An Electron accelerator for a chord: `mod` is `CmdOrCtrl` (the lenient and strict spellings both
+ * land there, as Electron has no weaker form), then Shift, Alt and the key.
  */
 export function chordAccelerator({ mod, shift, alt, key }: AcceleratorChord): string {
 	return [
@@ -62,9 +57,8 @@ export interface MenuAccelerators {
 	actualSize: string;
 	zoomIn: string;
 	/**
-	 * The hidden twin of Zoom In. The role this replaced also answered to
-	 * Cmd/Ctrl+Plus, the shifted key on most layouts, and one menu item holds
-	 * one accelerator.
+	 * The hidden twin of Zoom In: the role this replaced also answered to Cmd/Ctrl+Plus, the
+	 * shifted key on most layouts, and one menu item holds one accelerator.
 	 */
 	zoomInPlus: string;
 	zoomOut: string;
@@ -75,15 +69,13 @@ export interface MenuAccelerators {
 }
 
 /**
- * The menu's accelerators for a platform (`process.platform`).
+ * The menu's accelerators for a platform (`process.platform`). Back and forward are the one pair
+ * that differs: ⌘[ / ⌘] on macOS, Alt+Left / Alt+Right elsewhere, the split `GO_BACK_CHORD` makes
+ * in the renderer.
  *
- * Back and forward are the one pair that differs: ⌘[ / ⌘] on macOS, Alt+Left /
- * Alt+Right elsewhere, the same split `GO_BACK_CHORD` makes in the renderer.
- *
- * `preferences` is read on macOS only. On Windows and Linux the Settings item
- * carries no accelerator: the renderer binds its chord on `window`, and a menu
- * accelerator on the same key would take the keydown before the page sees it
- * while printing "Ctrl+Comma" beside the item.
+ * `preferences` is read on macOS only. On Windows and Linux the Settings item carries no
+ * accelerator: the renderer binds its chord on `window`, and a menu accelerator on the same key
+ * would take the keydown before the page sees it while printing "Ctrl+Comma" beside the item.
  */
 export function menuAccelerators(platform: string): MenuAccelerators {
 	const mac = platform === "darwin";
