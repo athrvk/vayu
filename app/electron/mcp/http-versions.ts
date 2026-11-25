@@ -8,17 +8,15 @@
 /**
  * @brief HTTP protocol values a request asks the engine to negotiate.
  *
- * Mirrors `HTTP_VERSIONS` in `app/src/constants/request.ts` - restated here
- * rather than imported because `electron/` shares no module graph with
- * `app/src/` (no `@/` alias). Lived in `resolve.ts` until issue #226 deleted
- * MCP's composition copy; the value list is all that had to survive, because
- * the tool schemas under `tools/` build their Zod enums from it.
+ * Mirrors `HTTP_VERSIONS` in `app/src/constants/request.ts`, restated here rather than imported
+ * because `electron/` shares no module graph with `app/src/` (no `@/` alias). The value list is all
+ * that survived the removal of MCP's own composition copy (#226), because the tool schemas under
+ * `tools/` build their Zod enums from it.
  *
- * The two arrays hold the same *values* but deliberately differ in *shape*:
- * the renderer's is `{value, label}[]` because it populates a picker, this one
- * is a flat tuple because `z.enum` takes bare strings. Do not "fix" the
- * difference by diffing them literally - it is the value list that must stay
- * in step, not the structure.
+ * The two arrays hold the same *values* but deliberately differ in *shape*: the renderer's is
+ * `{value, label}[]` because it populates a picker, this one is a flat tuple because `z.enum` takes
+ * bare strings. Do not "fix" the difference by diffing them literally: it is the value list that
+ * must stay in step, not the structure.
  */
 
 export const HTTP_VERSIONS = ["auto", "http1.1", "http2"] as const;

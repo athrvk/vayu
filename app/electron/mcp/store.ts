@@ -6,11 +6,10 @@
  */
 
 /**
- * @brief Disk persistence for the MCP safety config, so an allowlist / caps the
- *        user sets in Settings survive an app restart. Main-process only (uses
- *        `userData` through `json-store.ts`) - the shared tool registry and the
- *        stdio CLI never import this; the CLI takes its config from environment
- *        variables.
+ * @brief Disk persistence for the MCP safety config, so an allowlist / caps the user sets in
+ *        Settings survive an app restart. Main-process only (uses `userData` through
+ *        `json-store.ts`): the shared tool registry and the stdio CLI never import this; the CLI
+ *        takes its config from environment variables.
  */
 
 import { appLogger } from "../app-log.js";
@@ -28,14 +27,12 @@ interface McpStoreShape {
 
 let store: JsonStore<McpStoreShape> | null = null;
 
-// Lazily created so the store is only touched once `main.ts` has named
-// `userData` (at module scope, ahead of anything that opens a file there). Each
-// engine spawn reads it (`readMcpPort()`), the first one usually before
-// `app.whenReady`, and so does the MCP lifecycle's start. So a corrupt
-// mcp-config.json has to be an empty store rather than a throw, which would
-// fail the engine start on every launch until the user found and deleted a
-// hidden file. Every reader below resolves safe defaults from an empty store
-// (locked-down safety config, server on, port 9877).
+// Lazily created so the store is only touched once `main.ts` has named `userData` (at module scope,
+// ahead of anything that opens a file there). Each engine spawn reads it (`readMcpPort()`), the
+// first one usually before `app.whenReady`, and so does the MCP lifecycle's start. So a corrupt
+// mcp-config.json has to be an empty store rather than a throw, which would fail the engine start
+// on every launch until the user found and deleted a hidden file. Every reader below resolves safe
+// defaults from an empty store (locked-down safety config, server on, port 9877).
 function getStore(): JsonStore<McpStoreShape> {
 	store ??= createJsonStore<McpStoreShape>("mcp-config", undefined, (msg, fields) =>
 		appLogger().warn("main", msg, fields)
@@ -73,16 +70,15 @@ interface SafetyHolder {
 }
 
 /**
- * The safety config Settings must display: the running server's when there is
- * one, the persisted config when there is not.
+ * The safety config Settings must display: the running server's when there is one, the persisted
+ * config when there is not.
  *
- * The fallback cannot be `DEFAULT_MCP_SAFETY_CONFIG`. Settings adopts whatever
- * this returns as its source of truth and then commits *whole* fields computed
- * from it - adding a host commits `[...displayed, host]`. So handing a user with
- * MCP switched off (or a failed port bind) an empty allowlist means their next
- * edit persists a list of one and silently drops the rest. Both `updateSafety`
- * branches persist what they apply, so the persisted config is what the server
- * would be running.
+ * The fallback cannot be `DEFAULT_MCP_SAFETY_CONFIG`. Settings adopts whatever this returns as its
+ * source of truth and then commits *whole* fields computed from it: adding a host commits
+ * `[...displayed, host]`. So handing a user with MCP switched off (or a failed port bind) an empty
+ * allowlist means their next edit persists a list of one and silently drops the rest. Both
+ * `updateSafety` branches persist what they apply, so the persisted config is what the server would
+ * be running.
  */
 export function effectiveSafety(service: SafetyHolder | null | undefined): McpSafetyConfig {
 	return service?.getSafety() ?? loadPersistedSafety();
