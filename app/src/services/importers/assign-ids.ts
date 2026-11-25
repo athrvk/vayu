@@ -8,17 +8,13 @@
 import type { CollectionDraft, ImportResult } from "./types";
 
 /**
- * Stamp every draft with a temp id before the import is sent.
- *
- * These are **opaque client strings**, not record ids: `POST /import/apply` uses
- * them only to let one item reference another (`parentTempId`,
- * `collectionTempId`) inside a payload whose real ids do not exist yet, and the
+ * Stamp every draft with a temp id before the import is sent. These are **opaque client strings**,
+ * not record ids: `POST /import/apply` uses them only to let one item reference another
+ * (`parentTempId`, `collectionTempId`) inside a payload whose real ids do not exist yet, and the
  * engine returns the temp-id -> real-id map it generated. They are never stored.
  *
- * Counters are enough, because the ids are per-call and opaque, and they make a
- * failing import name a readable item (`c3`, `r17`; issues #96, #97).
- *
- * Mutates the result in place (and returns it).
+ * Counters are enough, because the ids are per-call and opaque, and they make a failing import name
+ * a readable item (`c3`, `r17`; #96, #97). Mutates the result in place (and returns it).
  */
 export function assignTempIds(result: ImportResult): ImportResult {
 	const next = { collection: 0, request: 0, environment: 0, spec: 0 };

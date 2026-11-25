@@ -6,11 +6,9 @@
  */
 
 /**
- * The one error type the data-file layer throws.
- *
- * It lives in its own module rather than in `index.ts` so the tokenizer can
- * throw it too: `tabular.ts` is imported *by* `index.ts`, and importing the
- * class back the other way would be a cycle.
+ * The one error type the data-file layer throws, in its own module rather than in `index.ts` so the
+ * tokenizer can throw it too: `tabular.ts` is imported *by* `index.ts`, and importing the class
+ * back the other way would be a cycle.
  */
 
 /**
