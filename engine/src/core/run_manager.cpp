@@ -54,10 +54,9 @@ inline int64_t now_ms () {
 /// warning would only restate what the operator was already told.
 std::atomic<bool> g_pacing_priority_denied_logged{ false };
 
-/// Nudge the calling thread's scheduling priority above default, best-effort,
-/// logging a denial once ever rather than inline in `execute_load_test` - a
-/// second call site (`readability-function-cognitive-complexity`) that
-/// function does not need to carry.
+/// Raises the calling thread's scheduling priority above default, best-effort,
+/// logging a denial once ever; a helper so `execute_load_test` does not carry
+/// the branch (`readability-function-cognitive-complexity`).
 void raise_pacing_thread_priority () {
     if (!vayu::platform::raise_current_thread_priority () &&
     !g_pacing_priority_denied_logged.exchange (true)) {
@@ -78,11 +77,11 @@ std::optional<std::string> named_id (const nlohmann::json& config, const char* k
     return it->get<std::string> ();
 }
 
-/** The collection scope a single-request run's scripts read: its
- *  `lifecycleElements` (issue #1573), its `requestElements`, the deferred
- *  `tests` replay and the start-of-run pass. `POST /execute`'s rule
- *  (`scope_collection_id`): the collection of the request the run links, else
- *  the composed `collectionId` (#3461), else none. */
+/// The collection scope a single-request run's scripts read: its
+/// `lifecycleElements` (#1573), its `requestElements`, the deferred `tests`
+/// replay and the start-of-run pass. `POST /execute`'s rule
+/// (`scope_collection_id`): the linked request's collection, else the composed
+/// `collectionId` (#3461), else none.
 std::string single_request_lifecycle_collection_id (vayu::db::Database& db,
 const nlohmann::json& config) {
     return vayu::http::routes::scope_collection_id (
@@ -90,16 +89,14 @@ const nlohmann::json& config) {
 }
 
 /**
- * The clock every *elapsed* figure is measured on.
+ * The clock every *elapsed* figure is measured on. `now_ms()` is wall time,
+ * which NTP steps and the user can set, so a run spanning an adjustment would
+ * report a duration that never happened, or a negative one. Durations come from
+ * here and timestamps from `now_ms()`: a tick's `timestamp` is a point a reader
+ * compares with their own clock, its `elapsedSeconds` a length.
  *
- * `now_ms()` is wall time: NTP steps it and the user can set it, so a run that
- * spans an adjustment reports a duration that never happened, and a backward
- * step reports a negative one. Durations therefore come from here and
- * timestamps from `now_ms()` - a tick's `timestamp` is a point in time a reader
- * compares against their own clock, while its `elapsedSeconds` is a length.
- *
- * The epoch is arbitrary, so a value is only ever meaningful against another
- * value from this same function.
+ * The epoch is arbitrary: a value means something only against another from
+ * this function.
  */
 inline int64_t steady_now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -108,13 +105,10 @@ inline int64_t steady_now_ms () {
 }
 
 /**
- * @brief One deferred replay: the scripts, the samples they run against, and
- *        the identity `pm.info` reports while they do.
- *
- * A single-request run builds exactly one of these; a scenario load run builds
- * one per scripted step, which is the whole of the per-step extension - the
- * replay itself is the same code either way, so the two shapes cannot drift
- * into reporting a pass differently.
+ * One deferred replay: the scripts, the samples they run against, and the
+ * identity `pm.info` reports meanwhile. A single-request run builds one; a
+ * scenario load run one per scripted step. The replay code is the same either
+ * way, so the two shapes cannot drift into reporting a pass differently.
  */
 struct ScriptReplay {
     /// One entry per `script.post` element, in compile order, each executed
@@ -135,33 +129,30 @@ struct ScriptReplay {
     /// Prefixed to every failure message so a scenario's failures name their
     /// step. Empty for a single-request run, whose failures need no qualifier.
     std::string failure_prefix;
-    /// The caps a streamed sample's events are parsed back under (issue #657).
-    /// Read once for the run, like `SseStreamRequest::limits` is read once for
-    /// a stream: every sample in one run is then bounded by one rule rather
-    /// than by whatever the settings said when each replay reached it.
+    /// The caps a streamed sample's events are parsed back under (#657), read
+    /// once for the run as `SseStreamRequest::limits` is for a stream, so every
+    /// sample is bounded by one rule rather than by the settings as each replay
+    /// reached it.
     vayu::http::SseLimits sse_limits;
     /// What a `pm.sendRequest` from this script inherits (#1188, #1256, #2833,
     /// #2841), built once for the pass by `validate_scripts`.
     vayu::runtime::ScriptSendInputs send;
-    /// What a `pm.cookies` read throws here (issue #1501), set by the same
-    /// per-branch rule `failure_prefix` above is: a scenario step's replay and
-    /// a single-request run's have different true things to say about why
-    /// there is nothing to read. A scenario step *did* carry per-VU cookies
-    /// during the run, just not into this replay, which runs after the fact
-    /// against a recorded sample; a single-request run never had a virtual
-    /// user or a cookie state to begin with.
+    /// What a `pm.cookies` read throws here (#1501), by the per-branch rule
+    /// `failure_prefix` follows: a scenario step *did* carry per-VU cookies
+    /// during the run, just not into this after-the-fact replay against a
+    /// recorded sample; a single-request run never had a virtual user or cookie
+    /// state.
     const char* cookie_read_refusal = nullptr;
 };
 
 /**
- * @brief The failures a deferred pass saw, one entry per distinct message.
- *
- * A script that fails on every sampled response fails with the same text each
- * time, so recording each occurrence would spend the whole cap on one
- * assertion (#3127). The step prefix is part of a message's identity: the
- * same text from two steps is two failures. Every distinct message is counted,
- * kept or not, so `distinct ()` stays true past the cap and the occurrences
- * of all of them sum to `totalFailed`.
+ * The failures a deferred pass saw, one entry per distinct message. A script
+ * failing on every sampled response fails with the same text each time, so
+ * recording each occurrence would spend the whole cap on one assertion (#3127).
+ * The step prefix is part of a message's identity: the same text from two steps
+ * is two failures. Every distinct message is counted, kept or not, so
+ * `distinct ()` stays true past the cap and the occurrences of all of them sum
+ * to `totalFailed`.
  */
 struct ReplayFailures {
     /// First-seen order, at most MAX_FAILURE_MESSAGES.
@@ -184,18 +175,17 @@ struct ReplayFailures {
 };
 
 /**
- * @brief Tally one replayed script's verdict into @p totals.
+ * Tallies one replayed script's verdict into @p totals.
  *
- * `result.tests` is populated whether or not the script went on to throw, so
- * it is read first: a mixed pass/fail script must not collapse into one
- * opaque failure (issue #1502). A throw after tests already ran (or a failed
- * `pm.request` writeback) is a second, distinct failure and is recorded
- * alongside them, never dropped just because the tests that did run are
- * counted - the same distinction `script_errored` draws in the design path.
+ * `result.tests` is filled whether or not the script then threw, so it is read
+ * first: a mixed pass/fail script must not collapse into one opaque failure
+ * (#1502). A throw after tests ran (or a failed `pm.request` writeback) is a
+ * second, distinct failure recorded beside them, as `script_errored`
+ * distinguishes in the design path.
  *
- * A script the run's Stop cut short (its `pm.sendRequest` cancelled, #3371,
- * or the script itself ended, #3460) is not tallied at all: the run ended
- * under it, so it judged nothing.
+ * A script the run's Stop cut short (its `pm.sendRequest` cancelled, #3371, or
+ * the script itself ended, #3460) is not tallied: the run ended under it, so it
+ * judged nothing.
  */
 template <typename RecordFailure>
 void tally_replay_result (const vayu::ScriptResult& result,
@@ -227,9 +217,9 @@ RecordFailure&& record_failure) {
 }
 
 /// The response a recorded sample stands for, as a script reads it.
-/// `body_truncated` stays false: the reservoir copies `Response::body`, which
-/// the byte cap has already ended the transfer over if it was ever exceeded.
-/// `CapturedExchange` is the path that truncates, and it is not this one.
+/// `body_truncated` stays false: the reservoir copies `Response::body`, whose
+/// transfer the byte cap already ended if it was exceeded; `CapturedExchange`
+/// is the path that truncates.
 vayu::Response sample_response (const ResponseSample& sample) {
     vayu::Response response;
     response.status_code      = sample.status_code;
@@ -243,13 +233,12 @@ vayu::Response sample_response (const ResponseSample& sample) {
 }
 
 /**
- * @brief The context every script of @p replay reads for one sample.
- *
- * Read-only for the engine (`execute` takes it by `const&` and opens a fresh
- * JavaScript context per call), so one context serves each element in turn;
- * only a scope write carries from one element to the next, through @p scopes.
- * @p request, @p response and @p stream_events are bound by address and must
- * outlive every execute that reads the result.
+ * The context every script of @p replay reads for one sample. Read-only for the
+ * engine (`execute` takes it by `const&` and opens a fresh JavaScript context
+ * per call), so one serves each element in turn; only a scope write carries
+ * between elements, through @p scopes. @p request, @p response and
+ * @p stream_events are bound by address and must outlive every execute that
+ * reads the result.
  */
 vayu::runtime::ScriptContext replay_context (const ScriptReplay& replay,
 vayu::http::routes::ScriptVariableScopes& scopes,
@@ -258,22 +247,19 @@ const vayu::Request& request,
 const vayu::Response& response,
 nlohmann::json& stream_events) {
     auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
-    // All four scopes, through the one function that knows which of them a
-    // script may write (issue #728). Binding only `environment` here - and an
-    // empty one at that - is what made the same test script pass on Send and
-    // fail on every replay.
+    // All four scopes, through the one function that knows which a script may
+    // write (#728); binding only an empty `environment` made a test script pass
+    // on Send and fail on every replay.
     vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
     script_ctx.cookie_read_refusal = replay.cookie_read_refusal;
     script_ctx.request_id          = replay.request_id;
     script_ctx.request_name        = replay.request_name;
-    // The iteration this response was actually sent in and the virtual user
-    // that sent it, both claimed on the submission path before the send
-    // (issue #994) - which is what keeps issue #300's ruling intact rather
-    // than reopening it: what that ruling refuses is reporting a *reservoir
-    // position* as an iteration number, and neither of these is one.
-    // `iterationCount` stays absent even here - a duration-bounded run has no
-    // total to report, and a script that could read it from one mode and not
-    // the other is worse than one that never reads it.
+    // The iteration this response was sent in and the virtual user that sent
+    // it, both claimed on the submission path before the send (#994). #300's
+    // ruling stands: it refuses reporting a *reservoir position* as an
+    // iteration number, and neither is one. `iterationCount` stays absent: a
+    // duration-bounded run has no total, and a script that could read it in one
+    // mode and not the other is worse than one that never can.
     script_ctx.iteration = sample.iteration;
     script_ctx.vu        = sample.vu;
     replay.send.apply (script_ctx);
@@ -296,12 +282,10 @@ bool replay_stopped (const vayu::runtime::ScriptSendInputs& send) {
     return send.stop != nullptr && send.stop->load ();
 }
 
-/**
- * Marks @p result, from a script that timed out, as not replayed against the
- * @p samples_after samples left (#3460): its deadline is its own, so each of
- * them could wait it out again, and at the 5 s default a thousand samples is
- * most of an hour of a run that has finished sending.
- */
+/// Marks @p result, from a script that timed out, as not replayed against the
+/// @p samples_after samples left (#3460): its deadline is its own, so each
+/// could wait it out again, and at the 5 s default a thousand samples is most
+/// of an hour after the run finished sending.
 void note_not_replayed (vayu::ScriptResult& result, size_t samples_after) {
     if (samples_after == 0) {
         return;
@@ -314,14 +298,12 @@ void note_not_replayed (vayu::ScriptResult& result, size_t samples_after) {
 }
 
 /**
- * @brief Run every script of @p replay against one sample, each on its own.
- *
- * A throw from one element is that element's failure; the elements after it
- * still run, the way a Send's pipeline runs the next level after one throws.
- * Every line a script logged is offered to @p console, whatever its verdict.
- * A script marked in @p timed_out is skipped, and one that times out here is
- * marked, with @p samples_after the samples still to come. A Stop ends the
- * sample between two scripts.
+ * Runs every script of @p replay against one sample, each on its own. A throw
+ * is that element's failure and the next elements still run, as a Send's
+ * pipeline runs the next level after one throws. Every line a script logged
+ * goes to @p console, whatever its verdict. A script marked in @p timed_out is
+ * skipped, and one that times out here is marked, with @p samples_after the
+ * samples still to come. A Stop ends the sample between two scripts.
  */
 template <typename RecordFailure>
 void replay_sample (vayu::runtime::ScriptEngine& engine,
@@ -371,19 +353,17 @@ RecordFailure& record_failure) {
 }
 
 /**
- * @brief Replay @p replay's scripts against its samples, tallying the results.
+ * Replays @p replay's scripts against its samples, tallying the results.
  *
  * @param scopes The pass's copy of the run's scopes as setup left them, shared
- *        by every replay of the pass and mutated in place by any `set()` a
- *        script performs - see `validate_scripts` for why those writes are
- *        never persisted.
- * @param failures Recorded into, and keeps at most MAX_FAILURE_MESSAGES
- *        distinct messages across the whole run - a forty-step plan must not
- *        multiply the cap by forty.
- * @return The tallies, and the console lines of this replay alone: a scenario
- *         step's own, never merged with another step's. `sampled` counts the
- *         samples the replay reached, fewer than it holds when a Stop or the
- *         engine shutting down ended it (#3460).
+ *        by every replay of the pass and mutated in place by a script's
+ *        `set()`; `validate_scripts` says why those writes are never persisted.
+ * @param failures Recorded into; at most MAX_FAILURE_MESSAGES distinct messages
+ *        across the whole run, so a forty-step plan does not multiply the cap
+ *        by forty.
+ * @return The tallies and this replay's own console lines, never merged with
+ *         another step's. `sampled` counts the samples reached, fewer than held
+ *         when a Stop or engine shutdown ended it (#3460).
  */
 ScriptValidationTotals run_replay (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
@@ -484,14 +464,12 @@ struct RunScriptIdentity {
 
 /**
  * The identity a single-request run's scripts read as `pm.info.requestId` and
- * `pm.info.requestName`, inline or replayed.
- *
- * A load run's script is the same script a Send runs, so it must not read the
- * two as undefined here and as a value there. Both fields ride in on the
- * composed payload for a run started from a saved request; resolved once, not
- * per sample. The linked row is read only for the `pm.info.requestName`
- * fallback - a failure is left to propagate, as the scopes' read does (see
- * `validate_scripts`).
+ * `pm.info.requestName`, inline or replayed: a load run's script is a Send's
+ * script, so it must not read them as undefined here and a value there. Both
+ * ride in on the composed payload for a run started from a saved request;
+ * resolved once, not per sample. The linked row is read only for the
+ * `pm.info.requestName` fallback, and a failure propagates, as the scopes' read
+ * does (`validate_scripts`).
  */
 RunScriptIdentity
 read_run_script_identity (vayu::db::Database& db, const nlohmann::json& config) {
@@ -516,13 +494,12 @@ read_run_script_identity (vayu::db::Database& db, const nlohmann::json& config) 
 }
 
 /**
- * A step's un-inlined, enabled, non-blank `script.post` texts in compile
- * order, or none (issue #1514's cut-over: `ScenarioStep::post_script` is gone,
- * so the deferred replay below reads the same `elements` list the sequential
- * runner does). Every such element is kept, the way
- * `RunContext::compile_step_elements` keeps them for a single-request run, so
- * the `deferred` tally and the replay count the same elements (#2167); each
- * replays as its own script (#3125).
+ * A step's un-inlined, enabled, non-blank `script.post` texts in compile order,
+ * or none; the deferred replay reads the same `elements` list the sequential
+ * runner does (#1514). Every such element is kept, as
+ * `RunContext::compile_step_elements` does for a single-request run, so the
+ * `deferred` tally and the replay count the same elements (#2167); each replays
+ * as its own script (#3125).
  */
 std::vector<std::string> find_step_post_scripts (const ScenarioStep& step,
 RunContext::ScriptsOverrideMode scripts_mode) {
@@ -557,14 +534,11 @@ IterationIdentity scenario_sample_identity (const ResponseSample& sample) {
 }
 
 /**
- * The per-step replays of a scenario load run.
- *
- * A step with no script, or one whose script never got a sample to run against,
- * reports nothing rather than a row of zeros - the same distinction the
- * whole-run section has always kept. Returns the steps' counts summed; each
- * step's console lines stay on its own entry of `validation.steps`. @p state,
- * null when the run's driver never started, is what each sample's request is
- * re-derived from.
+ * The per-step replays of a scenario load run. A step with no script, or whose
+ * script never got a sample, reports nothing rather than a row of zeros, as the
+ * whole-run section does. Returns the steps' counts summed; each step's console
+ * lines stay on its own `validation.steps` entry. @p state, null when the run's
+ * driver never started, is what each sample's request is re-derived from.
  */
 ScriptValidationTotals replay_scenario_steps (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::RunVariableScopes& scopes,
@@ -586,9 +560,8 @@ ReplayFailures& failures) {
         const auto& samples = context->metrics_collector->step_response_samples (i);
         const std::vector<std::string> post_scripts =
         find_step_post_scripts (step, context->scripts_override);
-        // A step with no script, or one whose script never got a sample to
-        // run against, reports nothing rather than a row of zeros - the
-        // same distinction the whole-run section has always kept.
+        // No script or no sample: no row, not a row of zeros (the docblock
+        // above).
         if (post_scripts.empty () || samples.empty ()) {
             continue;
         }
@@ -604,10 +577,9 @@ ReplayFailures& failures) {
         "pm.cookies.%s is not available here: a replayed script runs after "
         "the run, against a recorded response; the user's cookies at that "
         "moment are not recorded. See docs/engine/scripting/cookies.md.";
-        // The step's own request, so `pm.request` describes the step the
-        // script is asserting on rather than a run-level request a
-        // scenario payload does not have; as each sample sent it, where the
-        // run's state is there to re-derive it from (#3460).
+        // The step's own request, so `pm.request` describes the step being
+        // asserted on (a scenario payload has no run-level request), as each
+        // sample sent it where the run's state can re-derive it (#3460).
         replay.request = &step.request;
         if (state != nullptr) {
             replay.request_as_sent = [&execution = *context->scenario,
@@ -648,14 +620,12 @@ ReplayFailures& failures) {
     return run_totals;
 }
 
-/**
- * The failure summary this pass leaves behind as a result row. `trace_data`:
- * `failures` (distinct messages, first-seen order, at most
- * MAX_FAILURE_MESSAGES), `failureCounts` (the same length, how many times each
- * failed), `failuresDistinct` (every distinct message, so past the cap
- * `failuresDistinct - failures.size ()` were turned away), `totalFailed` and
- * `totalPassed` (assertion tallies, each occurrence counted).
- */
+/// The failure summary this pass stores as a result row. `trace_data`:
+/// `failures` (distinct messages, first-seen order, at most
+/// MAX_FAILURE_MESSAGES), `failureCounts` (same length, occurrences of each),
+/// `failuresDistinct` (every distinct message, so past the cap
+/// `failuresDistinct - failures.size ()` were turned away), `totalFailed` and
+/// `totalPassed` (assertion tallies, every occurrence counted).
 void store_validation_failures (vayu::db::Database& db,
 const std::string& run_id,
 const ReplayFailures& failures,
@@ -694,10 +664,10 @@ vayu::db::Database& db,
 const ReplayBase& base) {
     ScriptValidation validation;
 
-    // Which shape this run is. A scenario load run's scripts hang off its plan
-    // steps; a single-request run has the one run-level script. The step stores
-    // exist only where the executor sized them, so their presence is the test
-    // rather than a second flag that could disagree with them.
+    // Which shape this run is: a scenario load run's scripts hang off its plan
+    // steps, a single-request run has one run-level script. The step stores
+    // exist only where the executor sized them, so their presence is the test,
+    // not a second flag that could disagree.
     const bool per_step = context->scenario != nullptr &&
     context->metrics_collector->step_sample_step_count () > 0;
 
@@ -715,25 +685,23 @@ const ReplayBase& base) {
     // the execute path reads so an infinite-loop test script cannot spin the
     // run's worker thread forever.
     vayu::runtime::ScriptConfig script_config = vayu::core::read_script_config (db);
-    // Read off the run's own payload, through the same reader `POST /execute`
-    // uses. The `tests` script here is the same script a Send runs, so it must
-    // not have pm.sendRequest in one and not the other - and a run's script
-    // runs once per *sampled* response, which is what the per-script request
-    // cap is there to bound.
+    // Through the reader `POST /execute` uses: this `tests` script is a Send's
+    // script, so `pm.sendRequest` must not exist in one and not the other. It
+    // runs once per *sampled* response, which the per-script request cap
+    // bounds.
     script_config.allow_send_request =
     vayu::http::read_allow_script_requests (context->config);
 
     vayu::runtime::ScriptEngine engine (script_config);
     // One read for the whole pass, shared by every replay it drives.
     const vayu::http::SseLimits sse_limits = vayu::http::read_sse_limits (db);
-    // What a `pm.sendRequest` out of these scripts inherits. The route and the
-    // default headers are the run's own snapshot (`RunContext::script_send`,
-    // #1256, #2841): they are what the traffic being asserted on took, and a
-    // script that reached the target by a different route than the run did - a
-    // proxy edited mid-run, a client certificate registered since - would
-    // report a healthy target as broken. The bound (#1188, the load one,
-    // because this pass is the load path's) and the timeout (#2833) are what
-    // this pass may read *now*, so they are re-read here.
+    // What these scripts' `pm.sendRequest` inherits. Route and default headers
+    // are the run's snapshot (`RunContext::script_send`, #1256, #2841): what
+    // the asserted traffic took; a script reaching the target another way (a
+    // proxy edited mid-run, a client certificate registered since) would report
+    // a healthy target broken. The bound (#1188, the load one, as this is the
+    // load path) and the timeout (#2833) are what this pass may read *now*, so
+    // they are re-read.
     vayu::runtime::ScriptSendInputs script_send = context->script_send;
     script_send.max_response_bytes = vayu::http::routes::load_response_body_bound (db);
     script_send.request_timeout_ms =
@@ -753,36 +721,31 @@ const ReplayBase& base) {
         script_identity = read_run_script_identity (db, context->config);
     }
 
-    // The scopes the replayed scripts read (issue #728). A load run's `tests`
-    // script is the same script a Send runs, so `pm.environment.get('region')`
-    // must answer the same here as it does there - before this, every replay
-    // read an empty environment and no globals or collection scope at all, so a
-    // test comparing a response against a variable failed on every sample and
-    // reported the target as broken.
+    // The scopes the replayed scripts read (#728): a load run's `tests` script
+    // is a Send's, so `pm.environment.get('region')` must answer the same, or a
+    // test comparing a response with a variable fails every sample and reports
+    // the target broken.
     //
-    // Which collection scope is the run's is the same question the two
-    // sequential paths answer: a scenario step's is its own folder's chain, as
-    // in the run itself (#3248), a single-request run's is the collection of
-    // the request it links, else the payload's composed `collectionId`
+    // The collection scope is the one the sequential paths use: a scenario
+    // step's own folder chain (#3248); a single-request run's linked request's
+    // collection, else the payload's composed `collectionId`
     // (`single_request_lifecycle_collection_id`, #3461). Read off the payload,
-    // which is what the run row itself was populated from.
+    // which the run row was populated from.
     //
-    // A database failure here is deliberately not caught: it propagates to
+    // A database failure is deliberately not caught: it propagates to
     // `execute_load_test`, which logs it and stores no `testValidation`
-    // section. Tallies computed against scopes that failed to load would be
-    // the silently wrong verdicts this issue is about, and "never judged" must
-    // not be reported as "judged and passed".
+    // section. Tallies against scopes that failed to load would be silently
+    // wrong verdicts, and "never judged" must not read as "judged and passed".
     const auto environment_id = named_id (context->config, "environmentId");
 
     // Copied from what setup left (#3460), so a deferred script reads setup's
-    // writes as an inline one does; a copy, because teardown reads the
-    // original after this pass. Only a context with no worker behind it
-    // (`ReplayBase` empty) loads the stored rows. One set shared by every
-    // replay of the pass, so a `set()` is readable by the samples replayed
-    // after it - the same within-a-run visibility a sequential run gives.
-    // Never persisted: `persist_script_variables` is design-mode only, and a
-    // reservoir sample is not an iteration, so writing back whichever replay
-    // ran last would store a value no ordering justifies.
+    // writes as an inline one does; a copy, because teardown reads the original
+    // after this pass. Only a context with no worker behind it (`ReplayBase`
+    // empty) loads the stored rows. One set for every replay of the pass, so a
+    // `set()` is visible to later samples, as within a sequential run. Never
+    // persisted: `persist_script_variables` is design-mode only, and a
+    // reservoir sample is not an iteration, so storing the last replay's value
+    // would store one no ordering justifies.
     ScriptValidationTotals totals;
     ReplayFailures failures;
 
@@ -818,11 +781,10 @@ const ReplayBase& base) {
         "has no scenario and so no per-user cookie state to read. Use "
         "pm.response.cookies for the Set-Cookie of the response in hand. "
         "See docs/engine/scripting/cookies.md.";
-        // The rows this run bound, so a sampled submission reads the row it
-        // actually carried as `pm.iterationData` - the same reading a scenario
-        // step's replay gets, off the row index the sample was stamped with
-        // (issue #993). Null for a run sent without rows, which is what keeps
-        // `pm.iterationData` `undefined` there.
+        // The run's bound rows, so a sampled submission reads the row it
+        // carried as `pm.iterationData`, by the row index the sample was
+        // stamped with (#993), as a scenario step's replay does. Null for a run
+        // without rows, which keeps `pm.iterationData` `undefined`.
         replay.data_rows =
         context->load_data == nullptr ? nullptr : &context->load_data->rows;
         replay.request_id   = script_identity.request_id;
@@ -856,10 +818,9 @@ SampledValidationTotals validate_sampled_responses (
 const std::shared_ptr<RunContext>& context) {
     SampledValidationTotals totals;
 
-    // Scenario load runs only. A single-request load run resolves no collection
-    // and so no binding - the same reason it reports no coverage - and the
-    // per-step stores are what a scenario run is recognised by, exactly as the
-    // script pass recognises it.
+    // Scenario load runs only: a single-request load run resolves no
+    // collection, so no binding (and reports no coverage); the per-step stores
+    // identify a scenario run, as in the script pass.
     if (context->scenario == nullptr ||
     context->metrics_collector->step_sample_step_count () == 0) {
         return totals;
@@ -870,10 +831,10 @@ const std::shared_ptr<RunContext>& context) {
         return totals;
     }
 
-    // The one parse of the document's schema index this run ever pays for, and
-    // it happens after the last completion has landed. An index that will not
-    // parse is "not measured", the reading every other reader of a stored index
-    // gives it - never an empty contract that would pass every body.
+    // The run's one parse of the schema index, after the last completion
+    // landed. An index that will not parse is "not measured", as every other
+    // reader of a stored index treats it, never an empty contract that passes
+    // every body.
     const auto index = ResponseSchemaIndex::parse (spec.response_schemas);
     if (!index) {
         return totals;
@@ -885,10 +846,9 @@ const std::shared_ptr<RunContext>& context) {
 
     for (size_t i = 0; i < steps; ++i) {
         const auto& step = plan.steps[i];
-        // A step bound to no operation is not a step this contract speaks
-        // about. Skipped rather than counted as unchecked: it would fill the
-        // block with `no_operation` for every unbound step of a mixed
-        // collection, which says nothing about the contract.
+        // A step bound to no operation is outside this contract: counting it
+        // unchecked would fill the block with `no_operation` for every unbound
+        // step of a mixed collection.
         if (step.spec_operation.empty ()) {
             continue;
         }
@@ -959,11 +919,10 @@ bool plan_streams (const std::shared_ptr<const ScenarioExecution>& scenario) {
     return scenario != nullptr && longest_stream_bounds (scenario->plan).has_value ();
 }
 
-/// A single-request run's stream bounds: its caps over @p defaults, and its
+/// A single-request run's stream bounds: its caps over @p defaults, plus
 /// `streamTextPath` (#3773) and `streamFirstContentMarker` (#3774), each
 /// compiled once for every transfer. Nothing when the run does not stream.
-/// `read_stream_flag` has already checked all of them in the route, so a value
-/// here is usable.
+/// `read_stream_flag` checked them all in the route, so a value here is usable.
 std::optional<vayu::StreamBounds> single_request_stream_bounds (const nlohmann::json& config,
 const vayu::http::SseLimits& defaults) {
     if (!config.value ("stream", false)) {
@@ -1015,11 +974,11 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     slow_threshold_ms = config.value ("slow_threshold_ms",
     constants::metrics_collector::DEFAULT_SLOW_THRESHOLD_MS);
 
-    // Response capture for the retained samples. On by default because the
-    // policy is failure-and-outlier-shaped rather than uniform - a healthy run
-    // captures a handful of exemplars and nothing else. The per-body cap and
-    // the whole-run budget default from engine config (both `data_retention`
-    // keys) and can be overridden per run, the same way the retention caps are.
+    // Response capture for the retained samples, on by default because the
+    // policy is failure-and-outlier-shaped, not uniform: a healthy run captures
+    // a handful of exemplars. The per-body cap and whole-run budget default
+    // from engine config (both `data_retention` keys) and can be overridden per
+    // run, as the retention caps can.
     mc_config.capture_response_bodies = config.value ("capture_response_bodies",
     constants::metrics_collector::DEFAULT_CAPTURE_RESPONSE_BODIES);
     mc_config.max_sample_body_bytes =
@@ -1033,9 +992,9 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     mc_config.phase_histograms =
     config.value ("phase_histograms", engine_defaults.phase_histograms);
     // The event histogram behind the report's `stream` section. Run-config
-    // only, with no engine-wide setting beside `phaseHistograms`: that one
-    // exists to switch off a cost *every* run pays, and this one is paid only
-    // by a run that opted into streaming in the first place (issue #576).
+    // only, with no engine-wide setting as `phaseHistograms` has: that one
+    // switches off a cost *every* run pays, and this is paid only by a run that
+    // opted into streaming (#576).
     mc_config.stream_metrics = config.value (
     "stream_metrics", constants::metrics_collector::DEFAULT_STREAM_METRICS);
 
@@ -1051,10 +1010,9 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     max_element_body_bytes  = engine_defaults.max_element_body_bytes;
     sse_limits              = engine_defaults.sse_limits;
 
-    // Configure response sampling for script validation. Bounded twice: in
-    // count here, and in bytes by the budget below - a retained sample holds a
-    // whole response body, so the count alone bounds the store's memory only
-    // for a target whose bodies are small (issue #1155).
+    // Bounded twice: by count here and by bytes in the budget below, since a
+    // retained sample holds a whole body and the count alone bounds memory only
+    // for small bodies (#1155).
     mc_config.max_response_samples =
     static_cast<size_t> (config.value ("max_response_samples", 1000));
     mc_config.max_response_sample_bytes =
@@ -1063,10 +1021,9 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
     mc_config.response_sample_rate =
     static_cast<size_t> (config.value ("response_sample_rate", 100));
 
-    // Resolved from a payload `validate_elements_run_override` has already
-    // accepted (the route checks before the run row exists), so a value
-    // outside the known set here falls back to the default rather than
-    // throwing - there is no rejection left to make this late.
+    // `validate_elements_run_override` accepted this payload before the run row
+    // existed, so an unknown value here falls back to the default rather than
+    // throwing: there is no rejection left to make.
     if (auto elements = config.find ("elements");
     elements != config.end () && elements->is_object ()) {
         const std::string scripts = elements->value ("scripts", std::string{});
@@ -1077,11 +1034,9 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
         }
         include_script_time = elements->value ("includeScriptTime", false);
 
-        // "asConfigured" | "off" | {fixedMs} | {minMs,maxMs} - the object
-        // shapes are issue #1498's; `validate_elements_run_override` already
-        // refused anything else, so an unrecognised shape here falls back to
-        // the default rather than throwing, on the same rule the block above
-        // follows.
+        // "asConfigured" | "off" | {fixedMs} | {minMs,maxMs} (the object shapes
+        // are #1498's); any other shape falls back to the default, by the rule
+        // above.
         if (auto timers = elements->find ("timers"); timers != elements->end ()) {
             if (timers->is_string () && *timers == "off") {
                 timers_override.mode = vayu::core::TimersOverride::Mode::Off;
@@ -1096,13 +1051,12 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
             }
         }
 
-        // A run without an explicit seed still gets a real one (the default
-        // member initialiser above draws from `std::random_device`) - only a
-        // caller that wants *this* run reproducible supplies its own.
-        // `rng_seed` and `rng` are re-seeded together: a scenario load run
-        // derives its virtual users' generators from `rng_seed` alone, so
-        // the two must never disagree about which seed this run actually
-        // used.
+        // A run without an explicit seed still gets a real one (the member
+        // initialiser draws from `std::random_device`); only a caller wanting
+        // *this* run reproducible supplies one. `rng_seed` and `rng` are
+        // re-seeded together: a scenario load run derives its virtual users'
+        // generators from `rng_seed` alone, so the two must never disagree
+        // about the seed used.
         if (auto seed = elements->find ("seed"); seed != elements->end () &&
         seed->is_number_integer () && seed->get<int64_t> () >= 0) {
             rng_seed = static_cast<uint64_t> (seed->get<int64_t> ());
@@ -1158,16 +1112,14 @@ int64_t RunContext::honour_retry_after (const vayu::Response& response) const {
 }
 
 /**
- * `requestElements` (issue #1594), compiled once here into @ref
- * step_elements - refused beside a `scenario` block by the route, so this is
- * a no-op for that shape. Every `script.post` element found here that is not
- * running inline has its script text appended to @ref test_scripts in
- * compiled order, for the deferred replay (`validate_scripts`) to run one by
- * one (#3125); an inline one is left for the pipeline hooks
- * (`submit_one_request` / `run_request_elements_after_submission`,
- * `load_strategy.cpp`) to run, and the deferred replay must not run it a
- * second time. Split out of the constructor to keep its own cognitive
- * complexity down, not because anything else calls this.
+ * Compiles `requestElements` (#1594) once into @ref step_elements; the route
+ * refuses them beside a `scenario` block, so this is a no-op for that shape.
+ * Each `script.post` here not running inline has its text appended to
+ * @ref test_scripts in compile order, for the deferred replay
+ * (`validate_scripts`) to run one by one (#3125). An inline one is the pipeline
+ * hooks' (`submit_one_request` / `run_request_elements_after_submission`,
+ * `load_strategy.cpp`), and the replay must not run it again. Split out of the
+ * constructor for its cognitive complexity; nothing else calls it.
  */
 void RunContext::compile_step_elements (const nlohmann::json& run_config) {
     if (!declares_request_elements (run_config)) {
@@ -1190,9 +1142,9 @@ void RunContext::compile_step_elements (const nlohmann::json& run_config) {
         }
         // Every un-inlined `script.post` is kept, not only the first: a saved
         // request composes the collection chain's elements before its own
-        // (issue #1514's `compose_elements` order), and both are deferred by
-        // default. A blank one is left out: replayed on its own it would
-        // tally a pass per sample for a script that asserts nothing.
+        // (#1514's `compose_elements` order), and both defer by default. A
+        // blank one is left out: replayed alone it would tally a pass per
+        // sample for a script asserting nothing.
         if (auto script = element.config.find ("script");
         script != element.config.end () && script->is_string () &&
         !vayu::core::is_blank_script_text (script->get_ref<const std::string&> ())) {
@@ -1205,10 +1157,9 @@ void RunContext::compile_step_elements (const nlohmann::json& run_config) {
 
 RunContext::~RunContext () {
     request_stop ();
-    // The worker joins these itself before it returns; the join here only
-    // covers a context destroyed before its worker ever ran. The *worker*
-    // thread is owned by RunManager (run_workers_), never by the context - see
-    // the declaration for why.
+    // The worker joins these itself before returning; this covers a context
+    // destroyed before its worker ran. The *worker* thread is RunManager's
+    // (`run_workers_`), never the context's; the declaration says why.
     join_aux_threads ();
 }
 
@@ -1289,12 +1240,11 @@ void RunManager::retain_run (const std::string& run_id) {
         retained_runs_[run_id] = it->second;
         active_runs_.erase (it);
     }
-    // Retention is for the tick topic, not for the machinery that filled it:
-    // a finished run held its curl handle pools, its cached connections to the
-    // target, its submission queues and its bound rows for the whole window
-    // (issue #1154). Freed here, after the map move and with `mutex_` dropped,
-    // because closing thousands of sockets under it would stall /health, the
-    // runs poll and a starting run for the length of the teardown.
+    // Retention keeps the tick topic, not the machinery: a finished run held
+    // its curl handle pools, cached target connections, submission queues and
+    // bound rows for the whole window (#1154). Freed after the map move with
+    // `mutex_` dropped, because closing thousands of sockets under it would
+    // stall /health, the runs poll and a starting run for the whole teardown.
     retained->release_execution_resources ();
 }
 
@@ -1342,18 +1292,19 @@ void RunManager::start_sweeper (std::function<int64_t ()> ttl_provider) {
     sweeper_thread_ = std::thread ([this] () {
         std::unique_lock<std::mutex> lock (sweeper_mtx_);
         while (!sweeper_stop_) {
-            // Re-read the TTL each tick so a runtime change to liveRetentionMs
-            // (Settings → Observability) takes effect without a daemon restart.
-            // Sweep at half the TTL so a retained run is evicted within
-            // ttl..1.5*ttl of completion; the 500ms cadence floor keeps a tiny
-            // or zero TTL (retention disabled) from busy-looping. ttl==0 means
-            // "evict immediately", which sweep_retained already handles.
+            // The TTL is re-read each tick, so changing liveRetentionMs
+            // (Settings → Observability) needs no daemon restart. Sweeping at
+            // half the TTL evicts a retained run within ttl..1.5*ttl of
+            // completion; the 500ms cadence floor keeps a tiny or zero TTL
+            // (retention disabled) from busy-looping. ttl==0 means "evict
+            // immediately", which sweep_retained handles.
             //
-            // The provider reads the DB (the daemon wires it to get_config_int),
-            // so it can throw; uncaught inside the sweeper thread that calls
-            // std::terminate and takes the whole daemon down over a housekeeping
-            // tick. A tick whose TTL could not be read is skipped rather than
-            // swept against a guessed TTL, which would evict retained runs early.
+            // The provider reads the DB (the daemon wires it to
+            // get_config_int), so it can throw; uncaught in the sweeper thread
+            // that is std::terminate, taking the daemon down over a
+            // housekeeping tick. A tick whose TTL could not be read is skipped,
+            // not swept against a guessed TTL that would evict retained runs
+            // early.
             int64_t ttl   = 0;
             bool have_ttl = true;
             try {
@@ -1512,9 +1463,9 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         // workers themselves because a thread cannot join itself.
         finished = take_finished_workers ();
 
-        // The config-backed defaults RunContext cannot read for itself - it
-        // holds no Database - resolved here, the way `maxStoredErrors` always
-        // has been. A run's own config still overrides each of them.
+        // The config-backed defaults RunContext cannot read itself (it holds no
+        // Database), resolved here as `maxStoredErrors` is; a run's own config
+        // still overrides each.
         EngineDefaults engine_defaults;
         engine_defaults.max_sample_body_bytes =
         static_cast<size_t> (db.get_config_int ("maxSampleBodyBytes",
@@ -1575,10 +1526,9 @@ LoadAuthPlan auth_plan,
 std::shared_ptr<vayu::http::FilePlan> files) {
     return spawn_run (run_id, config, db, std::move (scenario),
     [&] (const std::shared_ptr<RunContext>& context) {
-        // Set before either thread starts: the worker splits this set's
-        // request template before its first submission and every strategy
-        // reads it after, so a later write would race the run it is meant to
-        // shape.
+        // Set before either thread starts: the worker splits this set's request
+        // template before its first submission and every strategy reads it
+        // after, so a later write would race the run it shapes.
         context->load_data = std::move (data);
         // And the credential plan beside it, which `build_load_request` reads
         // to decide whether the build resolves this run's auth at all.
@@ -1589,12 +1539,11 @@ std::shared_ptr<vayu::http::FilePlan> files) {
         // joined by the worker thread below.
         context->metrics_thread =
         std::thread ([context, &db] () { collect_metrics (context, &db); });
-        // Server vitals, when this run asked for them. Read from the config the
-        // route already validated; `monitor_config_from` returning nothing here
-        // means the run declared no monitor (or a snapshot this engine cannot
-        // read), and the run proceeds exactly as it did before the block
-        // existed. The totals live on the context so the summary can read them
-        // once this thread has been joined.
+        // Server vitals, when this run asked for them, from the config the
+        // route validated. Nothing from `monitor_config_from` means the run
+        // declared no monitor (or a snapshot this engine cannot read), and the
+        // run proceeds without one. The totals live on the context so the
+        // summary can read them once this thread is joined.
         if (auto monitor =
             monitor_config_from (context->config, read_monitor_limits (db))) {
             context->monitor_totals = std::make_unique<MonitorTotals> ();
@@ -1624,13 +1573,11 @@ vayu::http::CookieJar& cookie_jar) {
 }
 
 /**
- * The event loop this run drives, configured, started and published.
- *
- * Created, started, and only then published: the metrics thread has been ticking
- * since before this thread first ran (both are spawned by `start_run`, metrics
- * first) and reads the loop through `active_transfer_count()`, so the pointer
- * must land under the same lock (#956) - and only once the loop is already
- * started, so no reader can ever observe it half-built.
+ * The event loop this run drives, configured, started and published. Published
+ * last: the metrics thread has been ticking since before this thread ran
+ * (`start_run` spawns both, metrics first) and reads the loop through
+ * `active_transfer_count()`, so the pointer lands under the same lock (#956),
+ * and only once the loop is started, so no reader sees it half-built.
  */
 void configure_event_loop (vayu::db::Database& db,
 const nlohmann::json& config,
@@ -1653,21 +1600,19 @@ int default_max_per_host) {
     { "effective", loop_config.max_per_host },
     { "workers", configured_workers }, { "concurrency", concurrency } });
     // `target_rps` stays 0 on every run: a `constant_rps` run is paced by its
-    // pacing thread alone, and a worker-side bucket on top of it drifts
-    // against that schedule and counts the wait as latency (#2801). On any
-    // other mode a bucket throttles a closed-loop run (#2396).
+    // pacing thread alone, and a worker-side bucket on top drifts against that
+    // schedule and counts the wait as latency (#2801). On other modes a bucket
+    // throttles a closed-loop run (#2396).
     loop_config.dns_cache_timeout = db.get_config_int ("dnsCacheTimeout",
     vayu::core::constants::event_loop::DNS_CACHE_TIMEOUT_SECONDS);
-    // Read once for the run and held for it - see EventLoopConfig::transport
-    // for why a per-request policy would cost the connection pool. The
-    // client-certificate registry (#707) rides inside the policy and is
-    // therefore read once here too, which is the whole of "load runs
-    // resolve certificates at run start": libcurl reuses a pooled
-    // connection only when its TLS identity matches, so a certificate that
-    // could change mid-run would partition each worker's pool
-    // (`event_loop_worker.cpp`, `FORBID_REUSE=0`) and pay a fresh handshake
-    // per change. Matching per transfer stays cheap because it reads this
-    // snapshot, never the database.
+    // Read once and held for the run; EventLoopConfig::transport says why a
+    // per-request policy would cost the connection pool. The client-certificate
+    // registry (#707) rides inside, so load runs resolve certificates at run
+    // start: libcurl reuses a pooled connection only when its TLS identity
+    // matches, so a certificate changing mid-run would partition each worker's
+    // pool (`event_loop_worker.cpp`, `FORBID_REUSE=0`) and pay a fresh
+    // handshake per change. Per-transfer matching stays cheap because it reads
+    // this snapshot, never the database.
     loop_config.transport = vayu::http::resolve_transport_policy (db);
     // Run-scoped like the transport beside it (issue #1229). The load scope's
     // own compression setting is read here, because negotiating a compressed
@@ -1686,10 +1631,10 @@ int default_max_per_host) {
     context->script_send.default_headers = loop_config.default_headers;
     context->script_send.max_response_bytes = loop_config.max_response_body_bytes;
     context->script_send.request_timeout_ms = timeout_ms;
-    // Stop and shutdown both raise `should_stop` (#3371), which ends the
-    // scripts themselves too (#3460; teardown reads `teardown_stop`). Not
-    // `aux_cancel`: the worker raises that at every end before the replay and
-    // teardown run, and their sends must still go out after a natural end.
+    // Stop and shutdown both raise `should_stop` (#3371), which also ends the
+    // scripts (#3460; teardown reads `teardown_stop`). Not `aux_cancel`: the
+    // worker raises that at every end before the replay and teardown run, whose
+    // sends must still go out after a natural end.
     context->script_send.cancel = &context->should_stop;
     context->script_send.stop   = &context->should_stop;
     // Only enable curl verbose if explicitly requested in config,
@@ -1701,12 +1646,8 @@ int default_max_per_host) {
     { "maxConcurrent", loop_config.max_concurrent },
     { "maxPerHost", loop_config.max_per_host }, { "timeoutMs", timeout_ms } });
 
-    // Create, start, and only then publish the event loop. The metrics
-    // thread has been ticking since before this thread first ran (both are
-    // spawned by start_run, metrics first) and reads the loop through
-    // active_transfer_count(), so the pointer must land under the same
-    // lock (#956) - and only once the loop is already started, so no
-    // reader can ever observe it half-built.
+    // Published only once started, under the lock (#956); the docblock says
+    // why.
     auto event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
     event_loop->start ();
     context->publish_event_loop (std::move (event_loop));
@@ -1727,13 +1668,11 @@ bool names_stored_scopes (const nlohmann::json& config) {
     named_id (config, "requestId") || named_id (config, "collectionId");
 }
 
-/**
- * Whether a single-request run's credentials hold a name only a variable scope
- * answers that only the start-of-run pass will answer (#3288): the run names
- * stored scopes and its submissions do not hold the credentials for their own
- * scripts (`LoadAuthPlan::after_scripts`). The build then leaves them alone, as
- * it does for a bind (#591), so `apply_auth` does not encode the name first.
- */
+/// Whether a single-request run's credentials hold a name only a variable scope
+/// answers that only the start-of-run pass will answer (#3288): the run names
+/// stored scopes and its submissions do not hold the credentials for their own
+/// scripts (`LoadAuthPlan::after_scripts`). The build then leaves them alone,
+/// as for a bind (#591), so `apply_auth` does not encode the name first.
 bool credentials_resolve_at_start (const RunContext& context) {
     return !context.load_auth.after_scripts && names_stored_scopes (context.config) &&
     credentials_await_scripts (context.load_auth.auth, run_bound_columns (context));
@@ -1743,12 +1682,12 @@ bool credentials_resolve_at_start (const RunContext& context) {
  * Whether the start-of-run pass resolves the request itself: it holds a token
  * and its submissions do not run the residual pass
  * (`submissions_run_the_residual_pass`), which resolves each copy against these
- * scopes and what `script.setup` wrote into them. Every other run, a
- * `requestElements` run that sends the shared request included (#3288),
- * resolves here, before `script.setup`, so a setup write never reaches its
- * request. That is asked of the request before the pass, so a stored value that
- * is itself a bind token (`{{$guid}}`) still moves the run onto the copy path,
- * where a setup write to the name it answered is lost.
+ * scopes and `script.setup`'s writes. Every other run, a `requestElements` run
+ * sending the shared request included (#3288), resolves here, before
+ * `script.setup`, so a setup write never reaches its request. This is asked
+ * before the pass, so a stored value that is itself a bind token (`{{$guid}}`)
+ * still moves the run onto the copy path, where a setup write to the name it
+ * answered is lost.
  */
 bool template_resolves_at_start (const RunContext& context, vayu::Request& request) {
     return !vayu::http::routes::unresolved_token_names (request).empty () &&
@@ -1756,13 +1695,10 @@ bool template_resolves_at_start (const RunContext& context, vayu::Request& reque
     context, tokenize_bindable_fields (request, run_bound_columns (context)));
 }
 
-/**
- * The credentials the build held back for the start-of-run pass, resolved
- * against @p vars and split again for the bind: applied to the shared request
- * when no token the bind owns is left in them, so the run keeps its one shared
- * request, and otherwise left for the bind to apply per submission. Answers a
- * refusal's message.
- */
+/// The credentials the build held back for the start-of-run pass, resolved
+/// against @p vars and split again for the bind: applied to the shared request
+/// when no bind-owned token is left in them, so the run keeps its one shared
+/// request, else left for the bind per submission. Answers a refusal's message.
 std::optional<std::string> resolve_credentials_at_start (RunContext& context,
 vayu::Request& request,
 const vayu::http::VariableValues& vars) {
@@ -1791,9 +1727,8 @@ const vayu::http::VariableValues& vars) {
  * A single-request run that names stored scopes reads its `{{names}}` against
  * them as `POST /execute` does (#3253), in one pass at start over the template
  * every submission shares (`resolve_load_template_tokens`), before it is split,
- * when `template_resolves_at_start` says so. Nothing is read for a template
- * holding no token and credentials holding none, so a token-free run pays
- * nothing (#992).
+ * when `template_resolves_at_start` says so. A template and credentials holding
+ * no token read nothing, so a token-free run pays nothing (#992).
  *
  * Credentials the build held back (@p credentials_at_start, #3288) resolve
  * after the template, in the residual pass's order, so a basic pair or a
@@ -1837,13 +1772,11 @@ bool credentials_at_start) {
     return refusal;
 }
 
-/**
- * Starts one refresh watchdog per credential in @p credentials, publishing into
- * `context->auth_refresh_states` in the same order. Armed while the tokens the
- * run just resolved are still the ones in the cache. The user's
- * `oauth2Refresh*` settings are read once here, for every watchdog: a run's
- * schedule must not change under it half way through.
- */
+/// Starts one refresh watchdog per credential in @p credentials, publishing
+/// into `context->auth_refresh_states` in the same order, while the tokens just
+/// resolved are still the cache's. The user's `oauth2Refresh*` settings are
+/// read once here for every watchdog, so a run's schedule cannot change half
+/// way through.
 void arm_auth_refresh (vayu::db::Database& db,
 vayu::db::Database* db_ptr,
 const std::shared_ptr<RunContext>& context,
@@ -1864,16 +1797,16 @@ std::vector<vayu::http::AuthRefreshPlan> credentials) {
 } // namespace
 
 /**
- * The one request a single-request load run sends, built once - deserialize,
- * timeout, auth - because the event loop attaches its headers to every transfer.
+ * The one request a single-request load run sends, built once (deserialize,
+ * timeout, auth) because the event loop attaches its headers to every transfer.
  *
  * A scenario load run has none: every step was composed and auth-resolved at
- * plan time, before the run row existed, and a step that could not be authorized
- * already failed resolution with a 400. Building one here would compose the
- * payload's absent method and url. What it arms here is the refresh of the
- * OAuth 2.0 tokens its steps were planned with.
+ * plan time, before the run row existed, and a step that could not be
+ * authorized failed resolution with a 400; building here would compose the
+ * payload's absent method and url. It arms the refresh of the OAuth 2.0 tokens
+ * its steps were planned with.
  *
- * @return false when the payload cannot be built - the caller ends the run,
+ * @return false when the payload cannot be built; the caller ends the run,
  *         Stopped when a Stop decided it and Failed otherwise.
  */
 bool build_load_request (vayu::db::Database& db,
@@ -1888,26 +1821,21 @@ vayu::Request& request) {
         arm_auth_refresh (db, db_ptr, context, std::move (refresh.credentials));
         return true;
     }
-    // Build the request once: deserialize + timeout + auth. The event loop
-    // attaches request.headers to every transfer, so resolving auth here
-    // covers the whole run.
+    // Built once (deserialize + timeout + auth): the event loop attaches
+    // request.headers to every transfer, so auth resolved here covers the run.
     //
-    // Credentials carrying a token are the one case the build leaves alone: the
-    // value has to reach them before `apply_auth` base64s them out of reach
-    // (issue #591), so a run whose credentials carry one tells the build to
-    // defer and `bind_iteration` applies them per submission. So does a run
-    // whose credentials wait on its `requestElements` scripts (issue #2473),
-    // applied after each submission's residual pass, and a run whose
-    // credentials wait on the stored scopes it names (#3288), applied by the
-    // start-of-run pass below. Every other run resolves its auth here exactly
-    // as it always did.
+    // The build leaves credentials alone when they must be resolved first: a
+    // token must reach them before `apply_auth` base64s it out of reach (#591),
+    // so `bind_iteration` applies them per submission; credentials waiting on
+    // `requestElements` scripts (#2473) apply after each submission's residual
+    // pass; credentials waiting on named stored scopes (#3288) apply in the
+    // start-of-run pass below. Every other run resolves auth here.
     //
-    // Asked of the credentials rather than of the run's rows (issue #1055):
-    // `{{$vu}}` binds off the iteration, so a run sent without `data` at all
-    // defers for it too. Keying this on whether the run had rows is what used
-    // to send an identity token in a credential base64-encoded as written.
-    // The route's pre-flight judged the token endpoints already; judged again
-    // here so no caller of the run reaches one the policy refuses (#2521).
+    // Asked of the credentials, not of the run's rows (#1055): `{{$vu}}` binds
+    // off the iteration, so a run without `data` defers for it too, rather than
+    // sending an identity token base64-encoded as written. The route's
+    // pre-flight judged the token endpoints; judged again so no caller of the
+    // run reaches one the policy refuses (#2521).
     const auto& target_policy       = context->target_policy;
     const bool credentials_at_start = credentials_resolve_at_start (*context);
     // A Stop or shutdown ends a token request in flight here (#3371).
@@ -1937,30 +1865,27 @@ vayu::Request& request) {
     auto credential_refusal =
     resolve_against_stored_scopes (db, *context, request, credentials_at_start);
 
-    // Split once, here, so no submission re-scans the request's fields: a load
-    // run binds at its full rate, which is the same reason a plan step is split
-    // when the plan resolves (issue #993). The `{}` a row-free run keeps is
-    // what makes the join free for it - it has no set at all.
-    // Unconditionally, and not only for a run that has rows: the identity binds
-    // off the iteration rather than off a row, so a run sent without `data` at
-    // all still carries `{{$vu}}` / `{{$iteration}}` if its request spells them
-    // (issue #994). A request carrying no reserved token leaves this empty, and
-    // an empty template is what makes the per-submission join a single
+    // Split once so no submission re-scans the request: a load run binds at
+    // full rate, as a plan step is split when the plan resolves (#993). A
+    // row-free run's `{}` set makes the join free.
+    //
+    // Unconditionally, not only with rows: the identity binds off the
+    // iteration, so a run without `data` still carries `{{$vu}}` /
+    // `{{$iteration}}` if its request spells them (#994). A request with no
+    // reserved token leaves this empty, which makes the per-submission join one
     // `empty()` test.
     //
-    // The run's own columns are what let a bare `{{username}}` be split as a
-    // data token at all (issue #1007); a run with no set names none, so the
-    // scan is the reserved-only one it has always been.
+    // The run's own columns let a bare `{{username}}` split as a data token
+    // (#1007); a run with no set names none, so the scan is reserved-only.
     context->load_template =
     tokenize_bindable_fields (request, run_bound_columns (*context));
 
-    // Scanned here, while the request is still owned and about to become the
-    // shared template every fast-path submission sends unchanged (issue
-    // #1540): a bare `{{token}}` with no data set and no credential behind it
-    // splits nothing above, so `load_template` stays empty and the fast path
-    // in `submit_one_request` never copies the request to scan it itself. The
-    // scan is one-time because the fast path's bytes never change between
-    // submissions.
+    // Scanned here, while the request is owned and about to become the shared
+    // template every fast-path submission sends unchanged (#1540): a bare
+    // `{{token}}` with no data set and no credential splits nothing above, so
+    // `load_template` stays empty and `submit_one_request`'s fast path never
+    // copies the request to scan it. Once suffices: the fast path's bytes never
+    // change between submissions.
     context->load_unresolved_tokens = vayu::http::routes::unresolved_token_names (request);
     // Counted per submission as the residual pass counts a late credential's
     // refusal (`resolve_load_residuals`), never fatal (#1503).
@@ -1968,12 +1893,11 @@ vayu::Request& request) {
         context->load_unresolved_tokens.push_back (std::move (*credential_refusal));
     }
 
-    // A streaming run's caps ride on the request itself, because the
-    // event loop is what enforces them and the request is all it sees.
-    // Attached after `build_request` rather than inside it: the caps
-    // are a property of *this* run's execution model, and the same
-    // builder serves `POST /execute`, whose stream is managed by
-    // `SseStreamManager` and must not acquire load bounds (issue #576).
+    // A streaming run's caps ride on the request, the only thing the enforcing
+    // event loop sees. Attached after `build_request`, not inside: they belong
+    // to *this* run's execution model, and the same builder serves
+    // `POST /execute`, whose stream `SseStreamManager` manages and which must
+    // not acquire load bounds (#576).
     request.stream_bounds = context->stream_bounds;
 
     // The file rule (`http/file_ref.hpp`), once for the run: filled from the
@@ -2026,11 +1950,9 @@ struct RunTotals {
 };
 
 namespace {
-/**
- * The warning for @p replays requests libcurl re-sent on a new connection
- * (#2799). They stay counted as the one request each was, never as errors, so
- * this is the only place a reader learns the target saw more than the run did.
- */
+/// The warning for @p replays requests libcurl re-sent on a new connection
+/// (#2799). Each stays counted as one request, never an error, so this is the
+/// only place a reader learns the target saw more than the run did.
 nlohmann::json connection_replayed_warning (size_t replays) {
     const std::string count = std::to_string (replays);
     const bool one          = replays == 1;
@@ -2046,12 +1968,10 @@ nlohmann::json connection_replayed_warning (size_t replays) {
         { "count", replays } };
 }
 
-/**
- * The warning for @p headers `Set-Cookie` headers libcurl's cookie engine
- * discarded across the run (#3307). A count and never a name: a run is shared
- * as a report, and a name repeated per virtual user says nothing a count does
- * not.
- */
+/// The warning for @p headers `Set-Cookie` headers libcurl's cookie engine
+/// discarded across the run (#3307). A count, never a name: a run is shared as
+/// a report, and a name repeated per virtual user says nothing a count does
+/// not.
 nlohmann::json cookies_dropped_warning (size_t headers) {
     const bool one = headers == 1;
     return { { "code", "cookies_dropped" },
@@ -2069,13 +1989,13 @@ nlohmann::json cookies_dropped_warning (size_t headers) {
 
 /**
  * With `retryAfterBackoff` off, the warning for a run most of whose responses
- * (more than half of those carrying a status; a transport failure is none)
- * were 429 (#3782): its figures describe the target's rate limit. A
- * closed-loop run's message names the option that would have made it back off;
- * a constant-rate run's does not, because the option never applies there
+ * (more than half of those carrying a status; a transport failure carries none)
+ * were 429 (#3782): its figures describe the target's rate limit. A closed-loop
+ * run's message names the option that would have backed off; a constant-rate
+ * run's does not, since the option never applies there
  * (`RunContext::honour_retry_after`) and turning it on only raises
- * `retry_after_skipped_open_loop`. A run with responses has reached its
- * strategy, so `closed_loop` is meaningful here.
+ * `retry_after_skipped_open_loop`. A run with responses reached its strategy,
+ * so `closed_loop` is meaningful here.
  */
 std::optional<nlohmann::json> rate_limited_dominant_warning (const RunContext& context) {
     size_t responses = 0;
@@ -2135,23 +2055,19 @@ std::optional<nlohmann::json> retry_after_warning (const RunContext& context) {
     { "count", waits } });
 }
 
-/**
- * Whether @p config asks for virtual users: a `concurrency` it carries. A run
- * that sets none (every `constant_rps` run the app starts) is sized from the
- * `eventLoopMaxConcurrent` default, so its per-host raise covers no virtual
- * user and is not worth a warning (#2801).
- */
+/// Whether @p config asks for virtual users, by carrying a `concurrency`. A run
+/// without one (every `constant_rps` run the app starts) is sized from the
+/// `eventLoopMaxConcurrent` default, so its per-host raise covers no virtual
+/// user and needs no warning (#2801).
 bool declares_concurrency (const nlohmann::json& config) {
     const auto concurrency = config.find ("concurrency");
     return concurrency != config.end () && !concurrency->is_null ();
 }
 
-/**
- * How many of a single-request run's enabled `requestElements` its open-loop
- * pacer skipped (`RunContext::open_loop_timer_skip_reason`, #3541). A run that
- * sent nothing never reached its strategy, and `closed_loop` reads false there
- * whatever the mode, so it counts none.
- */
+/// How many of a single-request run's enabled `requestElements` its open-loop
+/// pacer skipped (`RunContext::open_loop_timer_skip_reason`, #3541). A run that
+/// sent nothing never reached its strategy, where `closed_loop` reads false
+/// whatever the mode, so it counts none.
 size_t open_loop_skipped_timers (const RunContext& context) {
     if (!context.step_elements || context.requests_sent.load () == 0) {
         return 0;
@@ -2166,23 +2082,21 @@ size_t open_loop_skipped_timers (const RunContext& context) {
 } // namespace
 
 /**
- * @brief What this run did not do, as the summary's `warnings` array (issue
- *        #1503).
+ * What this run did not do, as the summary's `warnings` array (#1503):
+ * - a `{{token}}` that never resolved (no mode runs a residual pass under load,
+ *   so this is all a caller learns of one), and for a scenario run a step whose
+ *   pre-request script did not run inline (#1938). Neither refuses the run: a
+ *   literal `{{` can be deliberate in a body, and a run that sent every request
+ *   must still be reported finished;
+ * - a per-host connection limit raised above `eventLoopMaxPerHost` (#2394) to
+ *   cover the virtual users asked for (#2801), so opening more connections than
+ *   the setting says is not silent;
+ * - requests libcurl re-sent on a new connection (#2799), `Set-Cookie` headers
+ *   its cookie engine discarded (#3307), the think timers a constant-rate run
+ *   skipped (#3541), and what Retry-After back-off did or would have done
+ *   (#3782).
  *
- * A request sent with a `{{token}}` composition never resolved - no mode
- * runs a residual pass under load, so this is the whole of what a caller
- * learns about one - and, for a scenario run, a step whose pre-request
- * script did not run inline (#1938). Neither refuses the run: a
- * literal `{{` can be deliberate in a body, and a run that already sent
- * every request must still be reported as finished. Also a per-host
- * connection limit the run raised above `eventLoopMaxPerHost` (#2394) to cover
- * the virtual users it asked for (#2801), so a run that opened more
- * connections than the setting says is not silent about it. And requests
- * libcurl re-sent on a new connection (#2799), `Set-Cookie` headers its
- * cookie engine discarded from a virtual user's responses (#3307), the
- * think timers a constant-rate run skipped (#3541), and what Retry-After
- * back-off did or would have done (#3782). Empty for a
- * run with nothing to say, which is what lets the caller omit the key entirely.
+ * Empty for a run with nothing to say, which lets the caller omit the key.
  */
 nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     nlohmann::json warnings = nlohmann::json::array ();
@@ -2364,10 +2278,10 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
             (*inputs.scenario)["assertions"] = { { "passed", exact.passed },
                 { "failed", exact.failed } };
         }
-        // Read on the same edge and for the same reason: a completion
-        // still in flight is a request this contract was exercised with
-        // (issue #629). Empty for a run of an unbound collection, which
-        // the payload builder treats as absent.
+        // Read on the same edge for the same reason: a completion still in
+        // flight is a request this contract was exercised with (#629). Empty
+        // for a run of an unbound collection, which the payload builder treats
+        // as absent.
         inputs.coverage = build_scenario_load_coverage (*scenario_state);
     } else if (context->step_elements && !context->step_elements->empty ()) {
         // A single-request run's own step-level elements (issue #1594) - the
@@ -2380,16 +2294,15 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     }
     inputs.assertions =
     assertion_populations (*context, validation, scenario_state.get ());
-    // Beside coverage, and deliberately not inside the `scenario_state`
-    // block above: this pass reads the sample reservoirs, which are the
-    // collector's, so it is available whether or not the executor left
-    // a state behind. An empty object is treated as absent.
+    // Beside coverage, deliberately not inside the `scenario_state` block: this
+    // pass reads the collector's sample reservoirs, there whether or not the
+    // executor left a state. An empty object is absent.
     inputs.schema_validation = build_sampled_validation_payload (schema_totals);
 
-    // Judged last, off the filled inputs rather than off the collector:
-    // the verdict has to be computed from the same numbers the summary
-    // is about to store, or a report could print a p99 its own verdict
-    // disagrees with. A run stopped early is judged on what it measured.
+    // Judged last, off the filled inputs rather than the collector, so the
+    // verdict comes from the numbers the summary stores and no report prints a
+    // p99 its own verdict disagrees with. A run stopped early is judged on what
+    // it measured.
     inputs.thresholds = evaluate_thresholds (context->config, inputs);
     // What the refresh watchdogs did, for a run that had any. Read after
     // the join above, so the tallies are final.
@@ -2399,13 +2312,12 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
 }
 
 /**
- * `script.setup` / `script.teardown` (#1499) share this run-level
- * `ScriptConfig` recipe with every other script the run executes - reading it
- * twice (once for each dispatch site) rather than once and threading it
- * through would be the same config keys read at two call sites instead of one.
- * No `record_script_requests`: a load run's scripts are excluded from the
- * `pm.sendRequest` records (#3633) whole, its setup and teardown with them,
- * though their `lifecycle` row could carry them. Opting in is that one call.
+ * The run-level `ScriptConfig` `script.setup` / `script.teardown` (#1499) share
+ * with every other script of the run, read once here rather than at each
+ * dispatch site. No `record_script_requests`: a load run's scripts are excluded
+ * from the `pm.sendRequest` records (#3633) whole, setup and teardown with
+ * them, though their `lifecycle` row could carry them; opting in is that one
+ * call.
  */
 vayu::runtime::ScriptConfig read_lifecycle_script_config (vayu::db::Database& db,
 const nlohmann::json& config) {
@@ -2414,35 +2326,31 @@ const nlohmann::json& config) {
     return script_config;
 }
 
-/** A single-request run's own `lifecycleElements` (issue #1573), compiled
- *  once - this run shape's ephemeral, uncollected equivalent of a
- *  collection's `elements` column, validated at the route
- *  (`validate_lifecycle_elements_run_override`) to hold only `script.setup`
- *  / `script.teardown`. Empty when the payload declared none. */
+/// A single-request run's own `lifecycleElements` (#1573), compiled once: this
+/// shape's ephemeral equivalent of a collection's `elements` column, validated
+/// at the route (`validate_lifecycle_elements_run_override`) to hold only
+/// `script.setup` / `script.teardown`. Empty when the payload declared none.
 std::vector<vayu::core::CompiledElement> compile_run_lifecycle_elements (
 const nlohmann::json& config) {
     auto lifecycle = config.find ("lifecycleElements");
     if (lifecycle == config.end () || !lifecycle->is_array ()) {
         return {};
     }
-    // Stamped the same way `validate_lifecycle_elements_run_override`
-    // validated it: a caller that named no id gets one here too, rather than
-    // dispatching with the empty `CompiledElement::id` `compile_elements`
-    // would otherwise default to - which the report's `lifecycle.setup` /
-    // `.teardown` outcomes would then carry verbatim.
+    // Stamped as `validate_lifecycle_elements_run_override` validated it, so an
+    // element with no id gets one rather than the empty `CompiledElement::id`
+    // default, which the report's `lifecycle.setup` / `.teardown` outcomes
+    // would carry verbatim.
     nlohmann::json stamped = *lifecycle;
     vayu::core::stamp_default_element_ids (stamped);
     return vayu::core::compile_elements (stamped);
 }
 
-/**
- * A scenario load run's `script.setup` (#1499, #3456): resolves the run's
- * lifecycle set once onto `context->lifecycle`, loads @p scopes for it and
- * every step (`scenario_load_scopes`) and runs each collection's setups bound
- * to that collection, through the same `run_scenario_setup` a sequential run
- * uses, so what a folder's setup writes reaches the bases of that folder's
- * steps and the folders below it.
- */
+/// A scenario load run's `script.setup` (#1499, #3456): resolves the lifecycle
+/// set once onto `context->lifecycle`, loads @p scopes for it and every step
+/// (`scenario_load_scopes`), and runs each collection's setups bound to that
+/// collection through the `run_scenario_setup` a sequential run uses, so a
+/// folder's setup writes reach the bases of that folder's steps and the folders
+/// below.
 std::optional<std::string> run_scenario_load_setup (vayu::db::Database& db,
 const std::shared_ptr<RunContext>& context,
 std::optional<vayu::http::routes::RunVariableScopes>& scopes) {
@@ -2466,14 +2374,12 @@ std::optional<vayu::http::routes::RunVariableScopes>& scopes) {
     return refusal;
 }
 
-/**
- * A single-request load run's `script.setup`: it has no collection to declare
- * one on, so it reads its own `lifecycleElements` instead (issue #1573). The
- * scopes it leaves are kept on `context->lifecycle_scopes`, since this run
- * shape has no `ScenarioLoadState` for `run_collection_teardown` to read them
- * back from, and flattened onto `context->step_base_vars` for a run whose
- * `requestElements` read them (issue #1594), after setup has written them.
- */
+/// A single-request load run's `script.setup`, read from its own
+/// `lifecycleElements` since it has no collection (#1573). The scopes it leaves
+/// are kept on `context->lifecycle_scopes` (this shape has no
+/// `ScenarioLoadState` for `run_collection_teardown` to read back), and
+/// flattened onto `context->step_base_vars` after setup for a run whose
+/// `requestElements` read them (#1594).
 std::optional<std::string> run_request_lifecycle_setup (vayu::db::Database& db,
 const std::shared_ptr<RunContext>& context) {
     const auto lifecycle_elements = compile_run_lifecycle_elements (context->config);
@@ -2506,19 +2412,17 @@ const std::shared_ptr<RunContext>& context) {
 }
 
 /**
- * `script.setup` (#1499): dispatched by `execute_load_test`, before it
- * captures `test_start`, so a setup script's own time is never folded into
- * the run's duration figures and a refusing setup fails the run before any
- * load is sent. A scenario run's @p scenario_scopes are loaded here and then
- * handed to `execute_scenario_load`, so a setup write is visible to the run's
- * very first submission, exactly as it is to a sequential run's first step;
- * a single-request run leaves them empty.
+ * `script.setup` (#1499), dispatched by `execute_load_test` before it captures
+ * `test_start`, so a setup script's time is never in the run's duration figures
+ * and a refusing setup fails the run before any load. A scenario run's
+ * @p scenario_scopes are loaded here and handed to `execute_scenario_load`, so
+ * a setup write reaches the run's first submission, as a sequential run's first
+ * step; a single-request run leaves them empty.
  *
- * @return `nullopt` on success; the refusing outcome's message otherwise.
- *         The caller's only remaining job on failure is to stop the run -
- *         this does not touch `context->is_running` or the run's status
- *         itself, since only the caller knows the rest of its own shutdown
- *         sequence.
+ * @return `nullopt` on success, else the refusing outcome's message. On failure
+ *         the caller only has to stop the run; this does not touch
+ *         `context->is_running` or the run's status, since only the caller
+ *         knows the rest of its shutdown.
  */
 std::optional<std::string> run_collection_setup (vayu::db::Database& db,
 const std::shared_ptr<RunContext>& context,
@@ -2530,16 +2434,15 @@ std::optional<vayu::http::routes::RunVariableScopes>& scenario_scopes) {
 }
 
 /**
- * `script.teardown` (#1499): dispatched by `finish_load_test` so
- * `pm.info.run` can carry @p run_summary_info. A scenario run tears down the
- * lifecycle set its setup resolved (`context->lifecycle`, #3456), in
- * reverse, on a copy of the scopes setup left (`ScenarioLoadState::
- * lifecycle_scopes`); a single-request run re-reads its own
- * `lifecycleElements` against `context->lifecycle_scopes` (issue #1573).
- * Never lets a throw reach the caller's `final_status`: `ElementPipeline::run`
- * already turns one into this element's own `"error"` outcome. Empty for a
- * scenario load run whose driver never started (no `scenario_state`), or a
- * run (either shape) that declared no `script.teardown`.
+ * `script.teardown` (#1499), dispatched by `finish_load_test` so `pm.info.run`
+ * can carry @p run_summary_info. A scenario run tears down the lifecycle set
+ * its setup resolved (`context->lifecycle`, #3456), in reverse, on a copy of
+ * setup's scopes (`ScenarioLoadState::lifecycle_scopes`); a single-request run
+ * re-reads its `lifecycleElements` against `context->lifecycle_scopes` (#1573).
+ * A throw never reaches the caller's `final_status`: `ElementPipeline::run`
+ * turns it into the element's `"error"` outcome. Empty for a scenario load run
+ * whose driver never started (no `scenario_state`) or a run that declared no
+ * `script.teardown`.
  */
 std::vector<vayu::core::ElementOutcome> run_collection_teardown (vayu::db::Database& db,
 const std::shared_ptr<RunContext>& context,
@@ -2581,11 +2484,11 @@ struct SendingWindow {
 /**
  * The window a run's send rate and rate fidelity divide by (#2392), and the
  * completions inside it (#2882): @p measured_s, load start to the executor's
- * return, and @p completed_at_send_end, both read before the drain that @p
- * total_duration_s includes. An `iterations` run that reached its own end gets
- * the whole run instead (`returns_at_send_deadline` says why); a stopped one
- * returned when it saw the Stop, so its measured window stands. A Stop that
- * landed after the strategy returned ended no sending, so it changes nothing.
+ * return, and @p completed_at_send_end, both read before the drain
+ * @p total_duration_s includes. An `iterations` run that reached its own end
+ * gets the whole run (`returns_at_send_deadline` says why); a stopped one
+ * returned on seeing the Stop, so its measured window stands. A Stop landing
+ * after the strategy returned ended no sending and changes nothing.
  */
 SendingWindow sending_window (const RunContext& context,
 double measured_s,
@@ -2597,13 +2500,10 @@ double total_duration_s) {
     return { total_duration_s, std::nullopt };
 }
 
-/**
- * What this run's worker left its deferred replay to start from, @p request
- * being the one `build_load_request` built. A single-request run's setup loads
- * its scopes whenever the run carries `requestElements`
- * (`run_request_lifecycle_setup`), which is where every replayed script comes
- * from.
- */
+/// What this run's worker left its deferred replay to start from, @p request
+/// being the one `build_load_request` built. A single-request run's setup loads
+/// its scopes whenever it carries `requestElements`
+/// (`run_request_lifecycle_setup`), the source of every replayed script.
 ReplayBase replay_base (const RunContext& context,
 const vayu::Request& request,
 const ScenarioLoadState* scenario_state) {
@@ -2622,12 +2522,10 @@ const ScenarioLoadState* scenario_state) {
 /**
  * Everything a finished run leaves behind: the flush, the two deferred passes,
  * the stored summary and the terminal status. @p request is the one a
- * single-request run's submissions copied, which the replay re-derives each
- * sample's from.
- *
- * Each step is guarded on its own, so one that fails costs only what it was
- * about to write - a run that measured something must still be reported as
- * finished.
+ * single-request run's submissions copied, from which the replay re-derives
+ * each sample's. Each step is guarded on its own, so a failing one costs only
+ * what it was about to write: a run that measured something must still be
+ * reported finished.
  */
 void finish_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
@@ -2673,10 +2571,10 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         { { "runId", context->run_id } });
     }
 
-    // The other deferred pass over the same reservoirs (issue #682): what
-    // the bound contract says about the responses that survived sampling.
-    // Here, beside the script replay, for its reason - the completion path
-    // refills concurrency, and neither pass may be on it.
+    // The other deferred pass over the same reservoirs (#682): what the bound
+    // contract says about the responses that survived sampling. Here, beside
+    // the script replay, for its reason: the completion path refills
+    // concurrency, and neither pass may be on it.
     SampledValidationTotals schema_totals;
     try {
         schema_totals = validate_sampled_responses (context);
@@ -2686,10 +2584,10 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         { { "runId", context->run_id } });
     }
 
-    // `script.teardown` (#1499): the same collection-level elements
-    // `script.setup` ran at the top of `execute_load_test`, dispatched here so
-    // `pm.info.run` can carry this pass's own totals - the reason it runs
-    // after schema validation rather than immediately once the drain ends.
+    // `script.teardown` (#1499): the collection-level elements `script.setup`
+    // ran at the top of `execute_load_test`, dispatched here so `pm.info.run`
+    // carries this pass's totals, which is why it runs after schema validation
+    // rather than straight after the drain.
     vayu::runtime::RunSummaryInfo run_summary_info;
     run_summary_info.requests_sent = completed;
     run_summary_info.error_rate    = failures.error_rate ();
@@ -2698,11 +2596,11 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     auto teardown_outcomes =
     run_collection_teardown (db, context, scenario_state, run_summary_info);
 
-    // Store the whole-run summary: everything the report would otherwise rebuild by
-    // scanning the run's metric rows, written once, here. Hoisted out of the
-    // try so the terminal-status decision below can read its verdict - the
-    // budgets this run just measured, never a second query for them (a core
-    // that reads, decides and writes holds one lock; engine/CLAUDE.md).
+    // The whole-run summary, written once here: everything the report would
+    // otherwise rebuild by scanning the run's metric rows. Hoisted out of the
+    // try so the terminal-status decision below reads its verdict, never a
+    // second query for the budgets (a core that reads, decides and writes holds
+    // one lock; engine/CLAUDE.md).
     RunSummaryInputs inputs;
     bool summary_stored = false;
     try {
@@ -2729,11 +2627,11 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         { { "runId", context->run_id } });
     }
 
-    // A stopped run keeps reporting Stopped regardless of verdict (issue
-    // #1497's failRun judges only a run that reached its own natural end);
-    // a completed run whose config asked `thresholds.failRun: true` and
-    // whose budgets it missed is judged too, a Stop during its drain
-    // included. The move keeps the end_time stamped before cleanup.
+    // A stopped run reports Stopped whatever the verdict (#1497's failRun
+    // judges only a run that reached its natural end); a completed run with
+    // `thresholds.failRun: true` that missed its budgets is judged too, a Stop
+    // during its drain included. The move keeps the end_time stamped before
+    // cleanup.
     const bool stopped = context->stop_decides_outcome ();
     vayu::RunStatus final_status =
     stopped ? vayu::RunStatus::Stopped : vayu::RunStatus::Completed;
@@ -2764,12 +2662,11 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
 namespace {
 
 /**
- * A failed run's summary, from whatever its collector holds. Without one the
- * report route takes the legacy path and finds nothing, reporting an empty run.
- *
- * Call it after `join_aux_threads` and before the status flips to Failed: the
- * terminal status is what tells a polling client the report is ready, so one
- * that fetches on seeing it must not race a summary still being written.
+ * A failed run's summary, from whatever its collector holds; without one the
+ * report route takes the legacy path and reports an empty run. Call after
+ * `join_aux_threads` and before the status flips to Failed: the terminal status
+ * tells a polling client the report is ready, so one fetching on it must not
+ * race a summary still being written.
  */
 void store_failed_run_summary (vayu::db::Database& db, const RunContext& context) {
     try {
@@ -2794,11 +2691,10 @@ RunManager& manager) {
     // Note: is_running is set in spawn_run() before threads spawn to avoid a
     // race with metrics_thread; the load-start stamp is set below.
 
-    // This is the pacing thread for every load strategy (constant_rps's
-    // wait_for_next_tick included) - never pinned, only nudged above the
-    // default priority, since it is the timing-sensitive one and its own
-    // work is negligible CPU (submission and sleeping, not the transfers
-    // themselves, which the event loop workers drive).
+    // The pacing thread for every load strategy (constant_rps's
+    // wait_for_next_tick included): never pinned, only nudged above default, as
+    // the timing-sensitive one whose own work is negligible CPU (submission and
+    // sleeping; the event loop workers drive the transfers).
     raise_pacing_thread_priority ();
 
     auto& db           = *db_ptr;
@@ -2806,9 +2702,9 @@ RunManager& manager) {
 
     try {
         // Only from Pending (#3340): a Stop that reached the row before this
-        // run registered found no context and left the row Stopped, and a
-        // deleted row is gone. Either way the run ends here, sending nothing
-        // and writing no status over the one that refused it.
+        // run registered found no context and left it Stopped, and a deleted
+        // row is gone. Either way the run ends here, sending nothing and
+        // writing no status over the one that refused it.
         if (!db
             .transition_run_status (context->run_id,
             { vayu::RunStatus::Pending }, vayu::RunStatus::Running)
@@ -2852,10 +2748,8 @@ RunManager& manager) {
         }
 
         // `script.setup` (#1499): the lifecycle set's once-per-run elements
-        // (#3456), run - and, on failure, refused - before `test_start` below
-        // is captured, so a setup script's own time is never folded into the
-        // run's duration figures and a refusing setup fails the run before any
-        // load is sent.
+        // (#3456), run (and on failure refused) before `test_start` is
+        // captured; `run_collection_setup` says why.
         std::optional<vayu::http::routes::RunVariableScopes> scenario_scopes;
         if (auto setup_failure = run_collection_setup (db, context, scenario_scopes)) {
             vayu::utils::log_error ("run", "script.setup failed",
@@ -2908,24 +2802,22 @@ RunManager& manager) {
 
         // How the run lets go of the event loop depends on why it is ending.
         //
-        // A Stop that latched while sending must stop *sending*: draining the
-        // queued backlog would keep the target under load after the stop was
-        // requested, and waiting on in-flight transfers hands the stop's
-        // latency to the upstream. stop(false) discards the backlog and
-        // cancels what is in flight.
+        // A Stop latched while sending must stop *sending*: draining the queued
+        // backlog would keep the target under load after the stop, and waiting
+        // on in-flight transfers hands the stop's latency to the upstream.
+        // stop(false) discards the backlog and cancels what is in flight.
         //
-        // The natural end of the duration still lets genuine in-flight requests
-        // settle, but not forever: a request that has outlived its own bound
-        // (`natural_end_drain_ms`) is never going to answer, and waiting on it
-        // pins the run in `running` with no way out. A Stop that lands during
-        // that drain cancels it (`request_stop`), whether it reaches the loop
-        // before this stop() or while it blocks.
+        // The natural end lets genuine in-flight requests settle, but not
+        // forever: one past its own bound (`natural_end_drain_ms`) will never
+        // answer, and waiting on it pins the run in `running` with no way out.
+        // A Stop during that drain cancels it (`request_stop`), whether it
+        // reaches the loop before this stop() or while it blocks.
         //
-        // Both reads are deliberately NOT under event_loop_mtx: this thread is
-        // the one that published the pointer, so they are ordered by program
-        // order, and stop() blocks for the whole drain - during which the
-        // metrics thread must keep ticking through active_transfer_count(),
-        // which takes that lock every tick.
+        // Neither read is under event_loop_mtx, deliberately: this thread
+        // published the pointer, so program order orders them, and stop()
+        // blocks for the whole drain, during which the metrics thread must keep
+        // ticking through active_transfer_count(), which takes that lock every
+        // tick.
         if (context->stop_decides_outcome ()) {
             context->event_loop->stop (false);
         } else {
@@ -2954,10 +2846,9 @@ RunManager& manager) {
         // Stop background collection and wait for the threads to finish
         context->is_running = false;
 
-        // Properly join the auxiliary threads to ensure the tick thread is
-        // done writing to the DB, the refresh watchdog has let go of it, and
-        // the scrape loop's `monitor_totals` is final before the summary below
-        // reads it.
+        // Joined so the tick thread has finished writing to the DB, the refresh
+        // watchdog has let go of it, and the scrape loop's `monitor_totals` is
+        // final before the summary below reads it.
         context->join_aux_threads ();
 
         const auto cleanup_end = std::chrono::steady_clock::now ();
@@ -3017,10 +2908,10 @@ nlohmann::json mean_or_null (const std::optional<double>& mean) {
     return mean ? nlohmann::json (*mean) : nlohmann::json (nullptr);
 }
 
-/// The summary's `phases`, keyed by wire name so a reader does not have to
-/// know the enum's order. Each phase's `mean` is what the report's `avg*Ms`
-/// read (#2782); a summary without it is an older run's, whose averages stay
-/// the trace sample's.
+/// The summary's `phases`, keyed by wire name so a reader need not know the
+/// enum's order. Each phase's `mean` is what the report's `avg*Ms` read
+/// (#2782); a summary without it is an older run's, whose averages stay the
+/// trace sample's.
 nlohmann::json build_phases_summary_payload (
 const std::array<MetricsCollector::Percentiles, TIMING_PHASE_COUNT>& measured,
 const std::optional<std::array<double, TIMING_PHASE_COUNT>>& means) {
@@ -3053,11 +2944,11 @@ size_t element_row_errors (const nlohmann::json& rows) {
     return errors;
 }
 
-/// The element executions that ended in error, read off the rows the summary
+/// The element executions that ended in error, from the rows the summary
 /// stores: a single-request run's top-level `elements`, a scenario load run's
 /// `scenario.steps[].elements`. Not `scenario.errored`, which also counts a
-/// step that got no response, the error rate's subject. A deferred script's
-/// throw is not here: the replay already counts it in `tests.failed`.
+/// step with no response (the error rate's subject). A deferred script's throw
+/// is not here: the replay counts it in `tests.failed`.
 size_t errored_element_runs (const RunSummaryInputs& inputs) {
     if (inputs.elements) {
         return element_row_errors (*inputs.elements);
@@ -3099,9 +2990,9 @@ nlohmann::json assertion_totals_payload (const AssertionTotals& totals) {
 }
 
 /// The summary's `assertions` block (#3537): everything a verdict reads as a
-/// failed check, for both load run kinds. Absent when the run made no
-/// assertion and nothing errored; once present every member is written, so a
-/// zero is a count, never a figure the run did not record.
+/// failed check, for both load run kinds. Absent when the run asserted nothing
+/// and nothing errored; once present every member is written, so a zero is a
+/// count, never an unrecorded figure.
 std::optional<nlohmann::json> build_run_assertions_payload (const RunSummaryInputs& inputs) {
     const size_t errored         = errored_element_runs (inputs);
     const size_t teardown_failed = failed_teardowns (inputs);
@@ -3189,9 +3080,9 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     summary["bytes_sent"]       = inputs.bytes_sent;
     summary["bytes_received"]   = inputs.bytes_received;
     // Always written, zeros included: the report reads an absent
-    // `sending_duration` as a run stored before #2392 and keeps that run's
-    // old rate-fidelity formula, and an absent `completed_while_sending` as
-    // one stored before #2882, whose report omits `completedWhileSending`.
+    // `sending_duration` as a run stored before #2392 (old rate-fidelity
+    // formula) and an absent `completed_while_sending` as one before #2882 (no
+    // `completedWhileSending`).
     summary["requests_sent"]           = inputs.requests_sent;
     summary["requests_expected"]       = inputs.requests_expected;
     summary["sending_duration"]        = inputs.sending_duration_s;
@@ -3228,17 +3119,16 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
         { "response_samples_dropped", inputs.retention.response_samples_dropped },
         { "exemplars_dropped", inputs.retention.exemplars_dropped },
         { "sample_bodies_dropped", inputs.retention.sample_bodies_dropped },
-        // The run's own record that it captured response data verbatim. Read
-        // by the Samples tab to warn about credentials, so it has to be
-        // persisted rather than re-derived - the tab renders from the report
-        // long after the collector is gone.
+        // The run's own record that it captured response data verbatim, which
+        // the Samples tab reads to warn about credentials. Persisted, not
+        // re-derived: the tab renders from the report long after the collector
+        // is gone.
         { "response_bodies_captured", inputs.retention.response_bodies_captured },
-        // Which of the two bounds on the response-sample store thinned it. The
-        // count above says how much went unvalidated; this says whether what
-        // was kept is still a uniform sample of the run, which is the sentence
-        // the app's retention note prints (issue #1192). Always written, so an
-        // absent key means an engine too old to have looked - not a run that
-        // kept its uniformity.
+        // Which of the response-sample store's two bounds thinned it. The count
+        // above says how much went unvalidated; this says whether what was kept
+        // is still a uniform sample, the sentence the app's retention note
+        // prints (#1192). Always written, so an absent key means an engine too
+        // old to have looked, not a run that stayed uniform.
         { "response_sample_budget_spent", inputs.retention.response_sample_budget_spent } };
     // Present with a 0 count for a run that measured and found nothing slow;
     // absent where nothing measured (threshold 0) or the run predates #2399,
@@ -3258,17 +3148,16 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     if (const auto& drain_cut = inputs.drain_cut) {
         summary["drainCut"] = { { "cancelled", *drain_cut } };
     }
-    // The run's verdict against the budgets it declared. Omitted when it
-    // declared none, for the same reason `tests` is: "no budget" and "a budget
-    // nothing was measured against" are different answers, and only the absent
-    // section can say the first.
+    // The verdict against the run's declared budgets. Omitted when it declared
+    // none, as `tests` is: "no budget" and "a budget nothing was measured
+    // against" differ, and only an absent section says the first.
     if (inputs.thresholds.has_value ()) {
         summary["thresholds"] = build_threshold_outcome_payload (*inputs.thresholds);
     }
-    // This run's `metric.record` / `pm.metrics` values (issue #1500), by
-    // name. Omitted for a run that recorded none, the same rule `tests` and
-    // `thresholds` follow - an empty object would read as "measured and
-    // found nothing" rather than "never declared".
+    // This run's `metric.record` / `pm.metrics` values (#1500), by name.
+    // Omitted for a run that recorded none, as `tests` and `thresholds` are: an
+    // empty object would read "measured and found nothing", not "never
+    // declared".
     if (inputs.custom_metrics.has_value ()) {
         summary["customMetrics"] = build_custom_metrics_payload (*inputs.custom_metrics);
     }
@@ -3291,29 +3180,28 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     if (inputs.scenario.has_value ()) {
         summary["scenario"] = *inputs.scenario;
     }
-    // A single-request run's own `requestElements` outcomes (issue #1594),
-    // the single-request sibling of `scenario` above - this run shape has no
-    // steps to hang a per-step breakdown off, so its elements land at the
-    // summary's top level instead. Omitted for every scenario run (its own
-    // elements are already inside `scenario.steps[].elements`) and for a
-    // single-request run that declared none.
+    // A single-request run's `requestElements` outcomes (#1594), the sibling of
+    // `scenario` above: this shape has no steps to hang them off, so they sit
+    // at the summary's top level. Omitted for every scenario run (whose
+    // elements are in `scenario.steps[].elements`) and a single-request run
+    // that declared none.
     if (inputs.elements.has_value () && !inputs.elements->empty ()) {
         summary["elements"] = *inputs.elements;
     }
-    // Which of the bound contract's operations this run exercised (issue #629),
-    // in the same shape the design-mode runner writes. Omitted for every run not
-    // measured against a contract - an unbound collection, a single-request load
-    // run, a document stored before the operation index existed - so an absent
-    // section reads as "not measured" rather than as a contract nothing covered.
+    // Which of the bound contract's operations this run exercised (#629), in
+    // the design-mode runner's shape. Omitted for every run not measured
+    // against a contract (an unbound collection, a single-request load run, a
+    // document stored before the operation index), so absence reads "not
+    // measured", not a contract nothing covered.
     if (inputs.coverage.has_value () && !inputs.coverage->empty ()) {
         summary["coverage"] = *inputs.coverage;
     }
-    // What the deferred pass over this run's *sampled* responses found against
-    // the bound contract (issue #682). Omitted, on the same empty-is-absent
-    // terms as `coverage`, for every run that validated nothing - so an absent
-    // section reads as "not checked" rather than as a contract nothing broke.
-    // Unlike `coverage` beside it, these numbers describe the samples: the
-    // block carries its own `sampled` denominator and the report says so.
+    // What the deferred pass over the *sampled* responses found against the
+    // bound contract (#682). Omitted on `coverage`'s empty-is-absent terms for
+    // every run that validated nothing, so absence reads "not checked", not a
+    // contract nothing broke. Unlike `coverage`, these numbers describe the
+    // samples: the block carries its own `sampled` denominator and the report
+    // says so.
     if (inputs.schema_validation.has_value () && !inputs.schema_validation->empty ()) {
         summary["schemaValidation"] = *inputs.schema_validation;
     }
@@ -3330,9 +3218,8 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
         summary["monitor"] = *inputs.monitor;
     }
     // Whether this run's OAuth 2.0 credential was kept current, and at what
-    // cost. Omitted for every run that could not refresh at all, so an absent
-    // section reads as "this run was never watching" rather than as a run that
-    // watched and saw nothing.
+    // cost. Omitted for every run that could not refresh, so absence reads
+    // "never watching", not "watched and saw nothing".
     if (inputs.auth.has_value ()) {
         summary["auth"] = *inputs.auth;
     }
@@ -3343,10 +3230,9 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
         summary["stream"] =
         build_stream_summary_payload (*inputs.stream, inputs.test_duration_s);
     }
-    // What this run did not do (issue #1503). Omitted entirely for a run
-    // with nothing to report, so the report's `warnings` key reads as "this
-    // run had nothing to say" rather than as an empty array every run would
-    // otherwise carry.
+    // What this run did not do (#1503). Omitted for a run with nothing to
+    // report, so the key's absence means "nothing to say" rather than every run
+    // carrying an empty array.
     if (!inputs.warnings.empty ()) {
         summary["warnings"] = inputs.warnings;
     }
@@ -3380,13 +3266,11 @@ cumulative_counters (const MetricsCollector& mc, int64_t steady_ms, size_t compl
     return counters;
 }
 
-/**
- * Push this tick's counters into @p window and put its reading on @p stats.
- * The completed and event counts are the frame's own (`totalRequests`,
- * `streamEvents`), so each rate is one reading with its total, and the
- * live-only `eventsPerSecond` (#3236) is on exactly the frames that carry
- * `streamEvents`.
- */
+/// Pushes this tick's counters into @p window and puts its reading on @p stats.
+/// The completed and event counts are the frame's own (`totalRequests`,
+/// `streamEvents`), so each rate is one reading with its total, and the
+/// live-only `eventsPerSecond` (#3236) is on exactly the frames carrying
+/// `streamEvents`.
 WindowReading put_trailing_window (TrailingWindow& window,
 const MetricsCollector& mc,
 nlohmann::json& stats,
@@ -3417,13 +3301,11 @@ struct GateReadings {
 };
 
 /**
- * One persisted metric tick: the 1 Hz row every chart is drawn from.
- *
- * Built here as one wide row rather than reassembled from ~18 EAV rows by every
- * reader. A dropped tick is a hole in the run's history series and nothing
- * downstream can tell a hole from a quiet second, so the reason is logged rather
- * than swallowed - it never fails the run, whose live stream and final report
- * are built from the collector, not from these rows.
+ * One persisted metric tick: the 1 Hz row every chart is drawn from, one wide
+ * row rather than ~18 EAV rows every reader reassembles. A dropped tick is a
+ * hole in the history series that nothing downstream can tell from a quiet
+ * second, so its reason is logged, not swallowed; it never fails the run, whose
+ * live stream and final report come from the collector.
  *
  * A tick read at or before load start stores nothing (#2881): the series counts
  * from load start, as the live frames do. The stamp is compared with the tick's
@@ -3459,17 +3341,15 @@ const GateReadings& gate) {
     // single-request run (a scenario's timer waits are not in it).
     size_t backpressure = context->in_flight ();
 
-    // One locked read shared by the debug line and the persisted
-    // row below, so both report the same instant. Unlike the
-    // direct dereference this replaces, a run whose loop is not
-    // published yet - the runner still in its config reads one
-    // second in - reports zero instead of dereferencing null.
+    // One locked read for the debug line and the persisted row below, so both
+    // report one instant. A run whose loop is not published yet (the runner
+    // still in its config reads one second in) reports zero.
     const size_t active_now = context->active_transfer_count ();
 
-    // Sample the in-flight high-water mark. Every load strategy updates it
-    // after each submission batch (`update_peak` in load_strategy.cpp); this
-    // 1 Hz sample is the backstop. CAS-max so the two writers don't clobber
-    // each other.
+    // The in-flight high-water mark: every load strategy updates it after each
+    // submission batch (`update_peak` in load_strategy.cpp) and this 1 Hz
+    // sample is the backstop. CAS-max so the two writers cannot clobber each
+    // other.
     {
         size_t pk = context->peak_in_flight.load (std::memory_order_relaxed);
         while (backpressure > pk &&
@@ -3515,11 +3395,11 @@ const GateReadings& gate) {
         sample.bytes_received           = mc.total_bytes_received ();
         // Reuse the snapshot already taken for the live tick above.
         sample.status_codes = status_snapshot;
-        // The whole second's percentiles, every window since the previous
-        // row merged (#2385): the history percentile chart, the
-        // response-time-vs-concurrency scatter and the breakpoint /
-        // saturation derivations read these. The gate frame of this tick
-        // carries the same figures as `second*`.
+        // The whole second's percentiles, every window since the previous row
+        // merged (#2385), read by the history percentile chart, the
+        // response-time-vs-concurrency scatter and the breakpoint / saturation
+        // derivations. This tick's gate frame carries the same figures as
+        // `second*`.
         sample.latency_samples = gate.second.count;
         sample.latency_p50_ms  = gate.second.p50;
         sample.latency_p95_ms  = gate.second.p95;
@@ -3530,12 +3410,8 @@ const GateReadings& gate) {
         db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
         build_metric_tick_payload (sample).dump () });
     } catch (const std::exception& e) {
-        // A dropped tick is a hole in the run's history series and
-        // nothing downstream can tell a hole from a quiet second,
-        // so the reason is logged rather than swallowed. It never
-        // fails the run: the live stream and the final report are
-        // built from the collector, not from these rows. At most
-        // one line per tick, and the tick gate is 1 Hz.
+        // Logged, never fatal (the docblock says why); at most one line per
+        // tick, and the tick gate is 1 Hz.
         vayu::utils::log_warning ("run",
         "Metric tick not persisted: " + std::string (e.what ()),
         { { "runId", context->run_id } });
@@ -3544,11 +3420,9 @@ const GateReadings& gate) {
 
 namespace {
 
-/**
- * A capacity run's live `capacity` block (#2928). Level 0 means no level has
- * opened yet, and its time in level is 0. Once the search has ended the time
- * stops at the end and `stopReason` appears; it is absent while the search runs.
- */
+/// A capacity run's live `capacity` block (#2928). Level 0 means no level has
+/// opened, with a time in level of 0. Once the search ends the time stops at
+/// the end and `stopReason` appears; it is absent while the search runs.
 nlohmann::json capacity_progress_json (const RunContext::CapacityProgress& progress,
 int64_t now_steady_ms) {
     int64_t level_elapsed_ms = 0;
@@ -3591,20 +3465,19 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // Declared here so it is in scope inside the try block below.
     int tick_interval_ms = 0;
 
-    // Build and append one SSE "metrics" event to the in-memory tick topic.
-    // Fields match the SSE handler (metrics.cpp) field-for-field. The wall-clock
-    // timestamp is passed in by the caller so that the SSE tick and any
-    // persisted enrichment for the same logical tick share one timestamp -
-    // re-sampling now_ms() inside drifts them into adjacent ms buckets and the
-    // dashboard sees status-codes shift left vs throughput on the same x-axis.
+    // Builds and appends one SSE "metrics" event to the in-memory tick topic,
+    // field-for-field the SSE handler's (metrics.cpp). The caller passes the
+    // wall-clock timestamp so the SSE tick and any persisted enrichment of the
+    // same tick share it: re-sampling now_ms() inside drifts them into adjacent
+    // ms buckets and the dashboard sees status codes shift left of throughput
+    // on one x-axis.
     //
     // A tick that `closes_second` is a gate: it takes the second's merged
-    // percentiles, puts them on its own frame and returns them, with the
-    // trailing window the frame carries, for the stored row, so the frame and
-    // the row of one tick cannot disagree. Only a gate frame carries the
-    // run-so-far distributions (#2782) and a scenario load's sequence so far
-    // (#2823), so the 100 ms frames stay their size.
-    // Every other tick returns nullopt and leaves the second open.
+    // percentiles, puts them on its frame and returns them, with the frame's
+    // trailing window, for the stored row, so a tick's frame and row cannot
+    // disagree. Only a gate frame carries the run-so-far distributions (#2782)
+    // and a scenario load's sequence so far (#2823), so the 100 ms frames stay
+    // their size. Every other tick returns nullopt and leaves the second open.
     auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot,
                           int64_t now_wall_ms, int64_t now_steady_ms,
                           bool closes_second) -> std::optional<GateReadings> {
@@ -3664,9 +3537,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             }
         }
 
-        // One definition with the persisted tick and peak_in_flight, a
+        // One definition with the persisted tick and peak_in_flight: a
         // single-request run's think-timer reservations included (#1921; a
-        // scenario's timer waits are not, #2821) and Stop-cancelled requests
+        // scenario's timer waits are not, #2821), Stop-cancelled requests
         // excluded (#2136), so it can differ from this frame's
         // `requestsSent - totalRequests`.
         const size_t backpressure = context->in_flight ();
@@ -3696,19 +3569,19 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         return gate;
     };
 
-    // Guard the entire body so that any exception (std::bad_alloc, json error,
-    // etc.) is caught here rather than escaping the thread function (which would
-    // call std::terminate).  `context->closed` is set unconditionally below the
-    // try/catch so that attached /runs/:id/live consumers always terminate cleanly.
+    // Any exception (std::bad_alloc, a json error) is caught here rather than
+    // escaping the thread function into std::terminate. `context->closed` is
+    // set unconditionally after the try/catch, so attached /runs/:id/live
+    // consumers always end cleanly.
     try {
         tick_interval_ms = db_ptr->get_config_int (
         "liveTickIntervalMs", vayu::core::constants::server::STATS_INTERVAL_MS);
 
-        // Size the replay ring from the configured window and this run's tick
-        // cadence, so what is retained is the *duration* the user asked for
-        // rather than a tick count that means a different span per cadence.
-        // Read once here: changing the window mid-run would make the ids the
-        // dashboard already holds refer to a differently-sized window.
+        // The replay ring sized from the configured window and this run's tick
+        // cadence, so it retains the *duration* the user asked for, not a tick
+        // count whose span varies by cadence. Read once: changing the window
+        // mid-run would make the ids the dashboard holds refer to a
+        // differently-sized window.
         context->set_max_live_ticks (
         live_ring_size (db_ptr->get_config_int ("liveReplayWindowMs",
                         vayu::core::constants::server::DEFAULT_LIVE_REPLAY_WINDOW_MS),
@@ -3719,28 +3592,28 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         // Tick 0: emit immediately so consumers see data before the first sleep.
         (void)emit_live_tick (nullptr, now_ms (), steady_now_ms (), false);
 
-        // Loop on is_running alone. should_stop is only the *request* to stop:
-        // the worker acts on it, then blocks in event_loop->stop (cancelling on
-        // a user stop, draining to a deadline at the natural end), and clears
-        // is_running afterwards. Exiting on should_stop emitted the "final
-        // settled tick" and set closed while hundreds of requests were still
-        // settling, so the live view froze at the moment of the stop click
-        // while the stored report - written after the worker returned -
-        // counted everything that landed in between.
+        // Loops on is_running alone. should_stop is only the *request*: the
+        // worker acts on it, blocks in event_loop->stop (cancelling on a user
+        // stop, draining to a deadline at the natural end) and clears
+        // is_running after. Exiting on should_stop would emit the "final
+        // settled tick" and set closed while hundreds of requests still
+        // settled, freezing the live view at the stop click while the stored
+        // report, written after the worker returned, counted everything that
+        // landed in between.
         while (context->is_running) {
             std::this_thread::sleep_for (std::chrono::milliseconds (tick_interval_ms));
 
-            // Single sample of each clock per tick - the wall one is shared by
-            // the SSE payload timestamp and (on DB-gated ticks) every persisted
-            // metric row below (see #27); the monotonic one carries every
-            // elapsed figure derived from the same tick, so the two stay one
-            // logical instant without a duration riding on wall time.
+            // One sample of each clock per tick: the wall one for the SSE
+            // payload timestamp and (on DB-gated ticks) every persisted metric
+            // row below (#27); the monotonic one for every elapsed figure of
+            // the tick, so both are one logical instant with no duration on
+            // wall time.
             int64_t tick_wall_ms   = now_ms ();
             int64_t tick_steady_ms = steady_now_ms ();
 
-            // Snapshot the status-code distribution once per tick and share it
-            // with both the SSE builder and (on DB-gated ticks) the persisted
-            // enrichment builder - avoids scanning/copying the map twice.
+            // One status-code snapshot per tick, shared by the SSE builder and
+            // (on DB-gated ticks) the persisted enrichment builder, so the map
+            // is scanned and copied once.
             auto status_snapshot = context->metrics_collector->status_code_distribution ();
 
             // The 1 Hz DB gate is decided before the live tick, so the gate
@@ -3748,10 +3621,10 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             auto now = std::chrono::steady_clock::now ();
             auto elapsed = std::chrono::duration<double> (now - last_update).count ();
 
-            // Emit a live tick every iteration; a gate tick also closes the
-            // second, whether or not the row below then persists. A gate that
-            // stores nothing (setup still running) still restarts the second,
-            // or every tick after it would be a gate.
+            // A live tick every iteration; a gate tick also closes the second,
+            // whether or not the row below persists. A gate storing nothing
+            // (setup still running) still restarts the second, or every later
+            // tick would be a gate.
             const auto gate = emit_live_tick (
             &status_snapshot, tick_wall_ms, tick_steady_ms, elapsed >= 1.0);
             if (gate) {
@@ -3761,12 +3634,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             }
         }
 
-        // Final settled tick before signalling closed - consumers use this ordering
-        // as the termination contract (last data before closed==true). It closes
-        // the partial second since the last gate on the live frame only: no
-        // row is stored for it, so the stored series keeps whole seconds. Its
-        // `statusSeconds` are the seconds closed since that gate, which only
-        // this frame carries; the still-open last second is emitted nowhere.
+        // The final settled tick before signalling closed: consumers rely on
+        // that order as the termination contract (last data, then
+        // closed==true). It closes the partial second since the last gate on
+        // the live frame only, storing no row, so the stored series keeps whole
+        // seconds. Its `statusSeconds` are the seconds closed since that gate,
+        // which only this frame carries; the still-open last second is emitted
+        // nowhere.
         (void)emit_live_tick (nullptr, now_ms (), steady_now_ms (), true);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run", "collect_metrics: " + std::string (e.what ()),
@@ -3781,11 +3655,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     context->closed.store (true, std::memory_order_release);
 }
 
-/**
- * A scrape that got no 2xx answer: the URL or the endpoint is at fault. Nothing
- * is stored, because a sample with no readings would draw a line through a
- * hole in the data. Logged once, on the failure that backs the loop off.
- */
+/// A scrape with no 2xx answer: the URL or the endpoint is at fault. Nothing is
+/// stored, since a sample with no readings would draw a line through a hole in
+/// the data. Logged once, on the failure that backs the loop off.
 void note_monitor_failure (const std::shared_ptr<RunContext>& context,
 const MonitorConfig& config,
 std::string cause,
@@ -3803,11 +3675,9 @@ MonitorBackoff& backoff) {
     }
 }
 
-/**
- * A 2xx scrape carrying none of the requested names: the endpoint is healthy
- * and the names are at fault (#3120), so it is counted apart from a failure and
- * does not back off. Like a failure it stores and publishes nothing.
- */
+/// A 2xx scrape carrying none of the requested names: the endpoint is healthy
+/// and the names are at fault (#3120), so it is counted apart from a failure
+/// and does not back off. Like a failure, it stores and publishes nothing.
 void note_monitor_no_match (const std::shared_ptr<RunContext>& context) {
     if (context->monitor_totals) {
         context->monitor_totals->record_no_match ();
@@ -3840,19 +3710,18 @@ vayu::db::Database* db_ptr,
 const MonitorConfig& config) {
     auto& db = *db_ptr;
 
-    // A scrape must not outlive its own cadence: the sample a late answer
-    // carries is no longer about the moment it was asked for, and the loop
-    // would spend the whole run behind itself. Derived from the interval unless
-    // `monitorScrapeTimeoutMs` says otherwise - an exposition that takes longer
-    // to render than the derivation allows would otherwise fail every scrape,
-    // and the only way out was slowing the cadence, which also thins the data.
+    // A scrape must not outlive its cadence: a late answer's sample is no
+    // longer about the moment asked for, and the loop would spend the run
+    // behind itself. Derived from the interval unless `monitorScrapeTimeoutMs`
+    // says otherwise, since an exposition slower to render than the derivation
+    // allows would fail every scrape, and slowing the cadence would thin the
+    // data.
     const int timeout_ms =
     resolve_scrape_timeout_ms (config.interval_ms, config.scrape_timeout_ms);
     if (config.scrape_timeout_ms > timeout_ms) {
-        // Said once, at the top: the setting is engine-wide but the cap is the
-        // interval of *this* block, so a value that is fine for a slow run is
-        // shortened on a fast one, and silence would look like the setting had
-        // not taken.
+        // Said once, at the top: the setting is engine-wide but the cap is
+        // *this* block's interval, so a value fine for a slow run is shortened
+        // on a fast one, and silence would look like the setting had not taken.
         vayu::utils::log_warning ("run",
         "Monitor scrape timeout capped at the scrape interval (" +
         std::to_string (timeout_ms) + "ms); 'monitorScrapeTimeoutMs' is " +
@@ -3861,12 +3730,11 @@ const MonitorConfig& config) {
         { { "runId", context->run_id } });
     }
 
-    // No cookie jar: this is the engine talking on its own behalf, like the
-    // OAuth token call and the update check (see ClientConfig::cookie_jar).
-    // The proxy is not the engine's own business though - a vitals endpoint
-    // inside a corporate network is reached the same way everything else is
-    // (issue #705). Resolved once, like the scrape cadence beside it, because
-    // the loop below runs for the length of the run.
+    // No cookie jar: the engine talks on its own behalf, like the OAuth token
+    // call and the update check (ClientConfig::cookie_jar). The proxy still
+    // applies: a vitals endpoint inside a corporate network is reached like
+    // everything else (#705). Resolved once, like the scrape cadence, because
+    // the loop runs for the length of the run.
     vayu::http::ClientConfig monitor_client_config;
     monitor_client_config.transport = vayu::http::resolve_transport_policy (db);
     monitor_client_config.cancel    = &context->aux_cancel;
