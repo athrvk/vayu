@@ -6,30 +6,22 @@
  */
 
 /**
- * FirstRunWelcome - first run, no collections and no runs.
+ * The first-run welcome: no collections and no runs. Not the shared `EmptyState` primitive: this is
+ * the app's one branded screen, not a "nothing here" placeholder.
  *
- * Distinct from the shared `EmptyState` primitive: this is the one branded
- * screen in the app, not a "nothing here" placeholder.
+ * Import leads: nobody adopts an API client from zero, they arrive carrying collections from
+ * somewhere else, so naming the formats is the useful thing to say here.
  *
- * Import leads. Nobody adopts an API client from zero; they arrive carrying
- * collections from somewhere else, so naming the formats is the useful thing to
- * say here. This is the only welcome state that carries branding.
- *
- * **`DemoApiTile` belongs here too, not just on the Launcher.** The
- * Launcher's own copy was scoped to "the Launcher is the end state" (issue
- * #1694), but a workspace this empty has no collection to hold a manually
- * created request either - `onNewRequest` already creates one behind the
- * scenes (see `WelcomeScreen.tsx`'s `useNewRequest`), so the demo tile's
- * "click, then press the chord" pitch is exactly as available on this screen
- * as it is once the Launcher takes over. Its own row for the same reason as
- * the Launcher's: the two-tile grid above is icon-and-label only, with no
+ * **`DemoApiTile` belongs here too, not only on the Launcher** (#1694). A workspace this empty has
+ * no collection to hold a request, but `onNewRequest` creates one behind the scenes
+ * (`WelcomeScreen.tsx`'s `useNewRequest`), so the tile's "click, then press the chord" works here
+ * as well. Its own row, as on the Launcher: the two-tile grid above is icon-and-label only, with no
  * room for a chord hint.
  *
- * **The agent-connect row is this screen's alone** (#2122). MCP is a feature
- * the user has to know to look for, and a fresh install is the one moment the
- * app has their attention; once a workspace has content the Launcher keeps
- * only the shared footer link. It opens Settings on the
- * "AI agents (MCP)" section rather than explaining anything here.
+ * **The agent-connect row is this screen's alone** (#2122): MCP is a feature the user has to know
+ * to look for, and a fresh install is the one moment the app has their attention; once a workspace
+ * has content the Launcher keeps only the shared footer link. It opens Settings on the "AI agents
+ * (MCP)" section rather than explaining anything here.
  */
 
 import { Download, Plug, Plus } from "lucide-react";
@@ -54,11 +46,9 @@ export function FirstRunWelcome({
 	onConnectAgent,
 }: FirstRunWelcomeProps) {
 	return (
-		// `enter-fade`: this replaces `LauncherSkeleton` on mount, a plain
-		// conditional swap with no Radix `data-state` to key off, the shape
-		// `.enter-fade` exists for. Without it the branded pitch popped in a
-		// frame after the skeleton's own bars, while `ErrorState` - the sibling
-		// branch for the same swap - already fades (it carries the class itself).
+		// `enter-fade`: this replaces `LauncherSkeleton` on mount in a plain conditional swap with
+		// no Radix `data-state` to key off, the shape `.enter-fade` exists for. `ErrorState`, the
+		// sibling branch of the same swap, carries the class itself.
 		<div className={`enter-fade flex flex-col gap-8 ${WELCOME_COLUMN}`}>
 			<div className="flex flex-col gap-2">
 				<div className="flex items-center gap-2">

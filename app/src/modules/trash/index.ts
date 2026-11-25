@@ -6,22 +6,18 @@
  */
 
 /**
- * Trash Module
+ * Where a deleted collection, request, environment, saved example or client certificate goes, and
+ * how it comes back.
  *
- * Where a deleted collection, request, environment, saved example or client certificate goes, and how it comes
- * back.
+ * The engine's delete is soft (#988): the row is stamped with a `deleted_at` and filtered out of
+ * every live read, not destroyed, and this module is the only surface that shows the stamped rows.
+ * Sidebar only, like `services/`: a trash entry has a name, an age and two buttons, nothing a
+ * detail pane would hold.
  *
- * The engine's delete has been soft since issue #988 - the row is stamped with
- * a `deleted_at` and filtered out of every live read, rather than destroyed -
- * and this module is the only surface that shows the stamped rows. Sidebar
- * only, like `services/`: a trash entry has a name, an age and two buttons, so
- * there is nothing a detail pane would hold.
- *
- * The undo toast a delete raises (`hooks/useTrashUndo.ts`, called by the
- * collections tree, the Variables view and the Examples panel) is the other half of the same
- * feature and deliberately lives with the deletes rather than here: it belongs
- * to the action, and its window is seconds. This view is the durable half - the
- * retention window is where a restore stays possible for days.
+ * The undo toast a delete raises (`hooks/useTrashUndo.ts`, called by the collections tree, the
+ * Variables view, the Examples panel and the client certificates card) is the other half of the
+ * feature and lives with the deletes, deliberately: it belongs to the action, and its window is
+ * seconds. This view is the durable half, where a restore stays possible for the retention window.
  */
 
 export * from "./sidebar";

@@ -6,15 +6,13 @@
  */
 
 /**
- * What a mock issuer's `failureMode` means, in one place.
+ * What a mock issuer's `failureMode` means, in one place: the row badge, the row's live switch and
+ * the start dialog all name these modes, and three copies of the mapping would be three chances to
+ * call `server_error` different things.
  *
- * The row badge, the row's live switch and the start dialog all name these
- * modes; three copies of the mapping would be three chances for the UI to call
- * `server_error` something the next surface calls something else.
- *
- * Bounds mirror the engine's own (`core/constants.hpp`, `mi::`): asking for a
- * value outside them is a `400 mock_issuer_invalid_config`, so the dialog
- * refuses it up front rather than turning a typo into a failed request.
+ * Bounds mirror the engine's (`core/constants.hpp`, `mi::`): a value outside them is a
+ * `400 mock_issuer_invalid_config`, so the dialog refuses it up front rather than turning a typo
+ * into a failed request.
  */
 
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -31,9 +29,8 @@ export const FAILURE_MODE_LABELS: Record<MockIssuerFailureMode, string> = {
 };
 
 /**
- * What each mode does, as the clause the expanded row's summary carries. A
- * `Record` over the union, so a mode added to the type fails to compile here
- * instead of reading as healthy in the summary.
+ * Each mode's clause in the expanded row's summary. A `Record` over the union, so a new mode fails
+ * to compile here instead of reading as healthy.
  */
 const FAILURE_MODE_EFFECTS: Record<MockIssuerFailureMode, (issuer: MockIssuer) => string | null> = {
 	none: () => null,

@@ -6,13 +6,11 @@
  */
 
 /**
- * Vayu's new-tab surface: rendered for the "welcome" tab (opened by "+"), when
- * no tab is open at all, and for a request tab with no entity. It is not a
- * resume screen - tabs are persisted and restored, so returning users land back
- * on their own tabs. Its job is to start something new.
- *
- * Two states: FirstRunWelcome on a fresh workspace, Launcher once there is anything
- * to show. See app/src/modules/welcome/README.md for what belongs on this screen.
+ * Vayu's new-tab surface, rendered for the "welcome" tab (opened by "+"), when no tab is open at
+ * all, and for a request tab with no entity. Not a resume screen: tabs are persisted and restored,
+ * so returning users land on their own tabs; its job is to start something new. FirstRunWelcome on
+ * a fresh workspace, Launcher once there is anything to show; `app/src/modules/welcome/README.md`
+ * says what belongs on this screen.
  */
 
 import { useTabsStore, useImportModalStore, useLayoutStore } from "@/stores";
@@ -51,22 +49,15 @@ export default function WelcomeScreen() {
 	// Flatten the loaded pages; the Launcher only shows the most recent handful.
 	const runs = flattenRunPages(runsData);
 
-	// Both queries start as [] while loading, which would read as an empty
-	// workspace and flash the first-run screen at returning users - hence the
-	// skeleton rather than rendering either real state early.
+	// Both queries start as [] while loading, which reads as an empty workspace and would flash the
+	// first-run screen at returning users: hence the skeleton.
 	const isLoading = collectionsLoading || runsLoading;
 	const isEmpty = collections.length === 0 && runs.length === 0;
 
-	// A failed load is not a fresh workspace. Neither query sets `throwOnError`
-	// and both are destructured with `= []`, so a failure used to land in
-	// `isEmpty` and render the branded first-run pitch - telling a user with
-	// collections and runs that they are brand new, and inviting them to import
-	// collections they already have.
-	//
-	// Gated on `isEmpty` on purpose: TanStack keeps the last good data through a
-	// failed background refetch, and swapping a working Launcher for an error
-	// pane would take away more than it tells. If either query returned
-	// anything, the Launcher still has something true to show.
+	// A failed load is not a fresh workspace: neither query sets `throwOnError` and both default to
+	// `= []`, so a failure would land in `isEmpty` and pitch import to a user who has collections
+	// and runs. Gated on `isEmpty`: TanStack keeps the last good data through a failed background
+	// refetch, and if either query returned anything the Launcher still has something true to show.
 	const hasFailed = collectionsFailed || runsFailed;
 	// One message is enough; whichever failed first answers "why".
 	const failure = collectionsError ?? runsError;

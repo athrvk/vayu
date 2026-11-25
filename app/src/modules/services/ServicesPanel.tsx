@@ -6,30 +6,21 @@
  */
 
 /**
- * Services drawer view (issue #502)
+ * The Services drawer view (#502): the one place that lists Vayu's *services* (listeners that keep
+ * going after you switch tabs), starts them and hands over the URLs they exist to give you.
  *
- * Vayu runs *services* - listeners that keep going after you switch tabs - and
- * until this view each one arrived with its own ad-hoc entry point: the webhook
- * inbox through a single welcome tile, the OAuth mock issuer through curl and
- * nothing else. This is the one place that lists them, starts them, and hands
- * over the URLs they exist to give you.
+ * A drawer view, not a tab: the Dock's left group switches drawer views, and a service is consulted
+ * while working in a request, not opened as a document. The inbox and the mock server (#481 phase
+ * 3) each keep a tab as their detail surface (a capture list or an activity log needs the width);
+ * an issuer has none, so a row that expands plus one dialog is its whole management, and no new
+ * TabType.
  *
- * It is a drawer view rather than a tab because that is what the shell already
- * says navigation is - the Dock's left group switches drawer views, and a
- * service is a thing you consult while working in a request, not a document you
- * open. The inbox and the mock server (#481 phase 3) each keep a tab as
- * their detail surface (a capture list or a growing activity log needs the
- * width); an issuer has no detail surface, so its whole management fits a row
- * that expands plus one dialog, and no new TabType.
- *
- * Mock servers (#481 phase 2) are the third group. Unlike the other two it has
- * no create affordance, and that is not an omission: a mock needs a collection
- * to serve, and this drawer has none selected. The collection header owns the
- * start (`CollectionDetail/MockServerControl`); this owns the list, so a mock
- * started from any collection - or from curl - can be found and stopped in the
- * one place every other running listener is. A row opens the mock-server tab
- * (`modules/mock-server/`) rather than expanding in place, the same shape the
- * inbox row already used.
+ * Mock servers (#481 phase 2) have no create affordance here: a mock needs a collection to serve,
+ * and this drawer has none selected. The collection header owns the start
+ * (`CollectionDetail/MockServerControl`); this owns the list, so a mock started from any
+ * collection, or from curl, is found and stopped where every other running listener is. A row opens
+ * the mock-server tab (`modules/mock-server/`) rather than expanding in place, as the inbox row
+ * does.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -97,13 +88,11 @@ import { FAILURE_MODE_LABELS, MAX_SLOW_MS, failureModeSummary } from "./failure-
 import { NewIssuerDialog } from "./NewIssuerDialog";
 
 /**
- * The running light, in the vocabulary the inbox header already uses.
- *
- * `status-success-text` rather than the bare status token for the same reason
- * the Dock's connection light uses it: as 12px text the indicator token misses
- * AA, and the dot inherits the accessible pair through `bg-current`. A service
- * that is listening is a run state, so it takes the `--status-*` family; this
- * dot moves with the Dock's light, since it exists to say the same thing.
+ * The running light, in the inbox header's vocabulary. `status-success-text`, not the bare status
+ * token, as the Dock's connection light: as 12px text the indicator token misses AA, and the dot
+ * inherits the accessible pair through `bg-current`. A listening service is a run state, so it
+ * takes the `--status-*` family, and the dot moves with the Dock's light, since it says the same
+ * thing.
  */
 function StatusDot({ running }: { running: boolean }) {
 	return (
@@ -125,10 +114,7 @@ interface ServiceRowProps {
 	/** Listening now; false paints the dot muted and ends the row on "Stopped". */
 	running: boolean;
 	children: React.ReactNode;
-	/**
-	 * The row's actions - copy, stop, delete - drawn as the one `⋯` menu every
-	 * other row in the app uses.
-	 */
+	/** Copy, stop, delete: the one `⋯` menu every other row in the app uses. */
 	actions?: RowAction[];
 	/** Names the `⋯` trigger, e.g. "More actions for inbox on port 41234". */
 	actionsLabel?: string;
@@ -140,28 +126,21 @@ interface ServiceRowProps {
 /**
  * One service, as a drawer row.
  *
- * The row paints the hover fill and the activator stretches into it
- * (`self-stretch`), and the row delegates clicks that land on its own box -
- * both halves of the hit-area rule in `app/CLAUDE.md`. A row carrying trailing
- * buttons cannot be one big button, so without the pair the responsive area is
- * the label's own bounding box and the padding around it is dead.
+ * The row paints the hover fill, the activator stretches into it (`self-stretch`), and the row
+ * delegates clicks on its own box: both halves of the hit-area rule in `app/CLAUDE.md`. A row with
+ * trailing buttons cannot be one big button, so without the pair only the label's own box responds
+ * and the padding around it is dead.
  *
- * **The verb is `sr-only` text, not an `aria-label`.** A label *replaces* the
- * element's content when the accessible name is computed, so "Open inbox on
- * port 41234" silenced everything the row actually says - the URL, "Stopped",
- * the reachable-beyond-this-machine badge, an issuer's failure mode. A screen
- * reader heard a row that could not be stopped and a row that could as the same
- * row. Prefixing instead composes the two: the verb, then the content, in the
- * order they are read on screen.
+ * **The verb is `sr-only` text, not an `aria-label`.** A label *replaces* the element's content in
+ * the accessible name, so "Open inbox on port 41234" would silence everything the row says (the
+ * URL, "Stopped", the reachable-beyond-this-machine badge, an issuer's failure mode), and a row
+ * that can be stopped and one that cannot would sound the same. The prefix composes the two: the
+ * verb, then the content, in screen order.
  *
- * **The actions are one hover-revealed `⋯` menu** (issue #1690). These were the
- * last rows in the app painting their actions as always-visible icon buttons,
- * two or three of them, on a 32px row whose own payload is a URL - so the URL
- * truncated to make room for controls the user had not come for, and Services
- * was the one surface where a row's actions neither looked nor behaved like a
- * row's actions anywhere else. The values those buttons carried in tooltips
- * ride the items' `hint` instead, which reads without hovering and reaches a
- * screen reader in the item's own name.
+ * **The actions are one hover-revealed `⋯` menu** (#1690), like every other row's: always-visible
+ * icon buttons on a 32px row whose payload is a URL truncated the URL for controls the user had not
+ * come for. The values those buttons carried in tooltips ride the items' `hint`, which reads
+ * without hovering and reaches a screen reader in the item's own name.
  */
 function ServiceRow({
 	onActivate,
@@ -179,8 +158,7 @@ function ServiceRow({
 			className={cn(
 				// `group`, for the hover reveal the `⋯` menu below takes.
 				"group flex h-8 cursor-pointer items-center gap-1 px-3 transition-colors hover:bg-muted/50",
-				// Not a selection - the drawer has none - so a background tint
-				// rather than the accent fill a selected row would carry.
+				// A tint, not the selected-row accent fill: the drawer has no selection.
 				flashed && "bg-primary-tint"
 			)}
 			onClick={(e) => {
@@ -213,16 +191,13 @@ function ServiceRow({
 const GROUP_NOTE_CLASS = "px-3 py-2 text-left text-xs";
 
 /**
- * Whether this inbox's `Notify` toggle is on and not currently in effect.
+ * Whether this inbox's `Notify` toggle is on and not in effect. Only an inbox that promised
+ * something counts: the toggle off promises nothing, and a stopped inbox captures nothing to notify
+ * about (#1412).
  *
- * Only for an inbox that promised something: the toggle off is not a broken
- * promise, and a stopped inbox captures nothing to notify about (issue #1412).
- *
- * The two causes the service reports - a stream that gave up, and one the cap
- * left out - read as one state here. They differ in what will fix them, which
- * is a paragraph (`docs/app/COMPONENTS/services.md`) rather than a chip: a row
- * is 32px and the cause spelled out took the whole of it, leaving the URL beside it
- * truncated to two characters.
+ * The service's two causes, a stream that gave up and one the cap left out, read as one state here.
+ * What fixes each is a paragraph (`docs/app/COMPONENTS/services.md`), not a chip: a row is 32px,
+ * and the cause spelled out truncated the URL beside it to two characters.
  */
 function isNotNotifying(
 	inbox: Inbox,
@@ -235,20 +210,16 @@ function isNotNotifying(
 }
 
 /**
- * The standing note that an inbox's captures are not being heard (issue #1412).
- *
- * Here rather than on the inbox tab because this drawer is on screen from any
- * tab, which is the whole difficulty: the toggle exists to speak while the user
- * is elsewhere, so the surface that says it is not speaking cannot be the one
- * they have to open to see it.
+ * The standing note that an inbox's captures are not being heard (#1412). On this drawer, not the
+ * inbox tab, because the drawer is on screen from any tab: the toggle exists to speak while the
+ * user is elsewhere, so the note cannot live on the surface they would have to open to see it.
  */
 function NotNotifyingBadge() {
 	return (
-		// `variant="chip"`, per the Badge note in `app/CLAUDE.md`: the other
-		// variants pair `bg-x` with a `hover:bg-x/80` that tailwind-merge does not
-		// replace, so this fill would win at rest and the variant's under the
-		// pointer. `shrink-0 whitespace-nowrap` because the row is a fixed 32px
-		// and a badge allowed to wrap takes a second line and spills out of it.
+		// `variant="chip"`, per the Badge note in `app/CLAUDE.md`: the other variants pair `bg-x`
+		// with a `hover:bg-x/80` that tailwind-merge does not replace, so this fill would win at
+		// rest and the variant's under the pointer. `shrink-0 whitespace-nowrap`: the row is a
+		// fixed 32px, and a badge allowed to wrap spills out of it.
 		<Badge
 			variant="chip"
 			className="shrink-0 whitespace-nowrap bg-status-warning-fill text-primary-foreground"
@@ -259,12 +230,10 @@ function NotNotifyingBadge() {
 }
 
 /**
- * A listener's origin policy on a drawer row, only when it is not the default.
- *
- * A row is 32px and its payload is a URL, so "Any origin" on every one of them
- * would cost the URL its width to repeat what the absence of a list already
- * says. A list is the unusual case worth a mark; the tab beside the drawer
- * spells the policy out either way (#2367).
+ * A listener's origin policy on a drawer row, only when it is not the default. A row is 32px and
+ * its payload is a URL, so "Any origin" on every row would cost the URL its width to repeat what
+ * the absence of a list already says; the tab beside the drawer spells the policy out either way
+ * (#2367).
  */
 function OriginPolicyNote({ allowedOrigins }: { allowedOrigins: readonly string[] }) {
 	if (allowedOrigins.length === 0) return null;
@@ -279,9 +248,8 @@ function OriginPolicyNote({ allowedOrigins }: { allowedOrigins: readonly string[
 }
 
 /**
- * `running` is the inbox's own flag gated on the engine being up
- * (`useEngineServing`): the record outlives its listener, and the cache
- * outlives the engine process that held both (#3493).
+ * `running` is the inbox's own flag gated on the engine being up (`useEngineServing`): the record
+ * outlives its listener, and the cache outlives the engine process that held both (#3493).
  */
 function InboxRow({
 	inbox,
@@ -309,9 +277,8 @@ function InboxRow({
 			<ServiceRow
 				running={running}
 				flashed={flashed}
-				// The tab is a singleton pointed at one inbox, so the row hands it the
-				// id it names - without it the tab showed whichever inbox it had last
-				// (in practice the first), and the row's label was a lie (issue #554).
+				// The tab is a singleton pointed at one inbox, so the row hands it this inbox's id,
+				// or the tab shows whichever inbox it had last (#554).
 				onActivate={() => {
 					openTab({ type: "inbox", entityId: inbox.inboxId });
 					onItemOpened();
@@ -320,11 +287,10 @@ function InboxRow({
 				actionsLabel={`More actions for inbox on port ${inbox.port}`}
 				actions={[
 					{
-						// The URL rides the hint rather than the label: the label is
-						// what a screen reader reads on every row, and three inboxes
-						// would be three near-identical 30-character strings. A
-						// stopped inbox says so here too - the URL copies fine and
-						// then refuses connections, a long way from the cause.
+						// The URL rides the hint, not the label: the label is what a screen reader
+						// reads on every row, and three inboxes would be three near-identical
+						// 30-character strings. A stopped inbox says so here too: its URL copies
+						// fine and then refuses connections, a long way from the cause.
 						label: "Copy inbox URL",
 						hint: running ? inbox.url : `${inbox.url} - stopped, not listening`,
 						icon: Copy,
@@ -359,10 +325,9 @@ function InboxRow({
 							]
 						: []),
 					{
-						// On every row, running or not. A stopped inbox had no way off
-						// this list at all before: it stayed until the engine process
-						// exited, while the group's affordance minted more of them
-						// (issue #553). Deleting a running one stops it on the way.
+						// On every row, running or not, so a stopped inbox can leave the list
+						// before the engine process exits (#553). Deleting a running one stops it
+						// on the way.
 						label: `Delete inbox on port ${inbox.port}`,
 						icon: Trash2,
 						destructive: true,
@@ -372,11 +337,10 @@ function InboxRow({
 					},
 				]}
 			>
-				{/* The port is what distinguishes one inbox from another and the
-				    only part of the URL that varies, so it leads. The URL stays
-				    visible but demoted - it is the value you copy, not the one you
-				    read a list by, and a column of `http://127.0.0.1:4123x/` in
-				    mono was three rows that looked identical. */}
+				{/*
+				 * The port leads: it is the only part of the URL that varies between inboxes. The
+				 * URL stays visible but demoted, the value you copy, not the one a list is read by.
+				 */}
 				<span className="shrink-0 text-xs">Port {inbox.port}</span>
 				<TruncatedText className="font-mono text-xs text-muted-foreground">
 					{inbox.url}
@@ -391,10 +355,9 @@ function InboxRow({
 }
 
 /**
- * One labelled URL inside an expanded issuer, with its copy control.
- *
- * Each copy button owns its hook, so a copy checks the glyph it came from and
- * not its siblings'. @p copyWhat names the value in a failure's toast.
+ * One labelled URL inside an expanded issuer, with its copy control. Each copy button owns its
+ * hook, so a copy checks its own glyph, not its siblings'. @p copyWhat names the value in a
+ * failure's toast.
  */
 function IssuerDetailRow({
 	label,
@@ -411,9 +374,8 @@ function IssuerDetailRow({
 	return (
 		<div className="flex items-center gap-1 py-0.5">
 			{/*
-			 * `w-16` rode `--spacing`: at the Default density it was 48px, and
-			 * "Authorize" clipped to "Authoriz". `w-[4rem]` is the fixed 64px the
-			 * column needs to hold the longest label, at both densities.
+			 * `w-[4rem]` is the fixed 64px that holds the longest label ("Authorize") at both
+			 * densities; `w-16` rode `--spacing` and was 48px at the Default density, clipping it.
 			 */}
 			<span className="w-[4rem] shrink-0 text-xs text-muted-foreground">{label}</span>
 			<TruncatedText className="min-w-0 flex-1 font-mono text-xs">{value}</TruncatedText>
@@ -440,9 +402,9 @@ function IssuerDetailRow({
 }
 
 /**
- * The issuer's HS256 secret: copied, never displayed. Its own row rather than
- * another `IssuerDetailRow` because there is no value to show beside the
- * button, only a description of what it copies.
+ * The issuer's HS256 secret: copied, never displayed, since a 32-character secret in a 260px drawer
+ * is noise and it is offered to paste, not to read. Not an `IssuerDetailRow`: there is no value to
+ * show beside the button, only a description of what it copies.
  */
 function SigningKeyRow({ signingKey }: { signingKey: string }) {
 	const { copy, copied } = useCopy({ feedback: "icon" });
@@ -513,9 +475,8 @@ function IssuerRow({
 	return (
 		<Collapsible open={expanded} onOpenChange={onToggle}>
 			<ServiceRow
-				// Every listed issuer is running while the engine is: stopping one
-				// drops it from the engine's list rather than leaving a stopped
-				// record behind, which is where this differs from an inbox.
+				// Every listed issuer is running while the engine is: stopping one drops it from
+				// the engine's list rather than leaving a stopped record behind, unlike an inbox.
 				running={running}
 				onActivate={onToggle}
 				actionLabel={`${expanded ? "Collapse" : "Expand"} issuer on port ${issuer.port}`}
@@ -545,9 +506,8 @@ function IssuerRow({
 					...(running
 						? [
 								{
-									// Destructive, unlike an inbox's Stop: stopping an issuer
-									// drops it from the engine's list rather than leaving a
-									// stopped record behind, so it is the delete of this group.
+									// Destructive, unlike an inbox's Stop: a stopped issuer leaves
+									// the engine's list, so this is the group's delete.
 									label: `Stop issuer on port ${issuer.port}`,
 									icon: Square,
 									destructive: true,
@@ -609,11 +569,10 @@ function IssuerRow({
 						copyLabel="Copy authorize URL"
 						copyWhat="Authorize URL"
 					/>
-					{/* The signing key is the whole point of the issuer being a mock:
-					    it is the HS256 secret the service under test verifies the
-					    minted tokens with. Copied, never displayed - a 32-character
-					    secret in a 260px drawer is noise, and this one is offered as
-					    a value to paste, not to read. */}
+					{/*
+					 * The HS256 secret the service under test verifies the minted tokens with: the
+					 * point of the issuer being a mock.
+					 */}
 					<SigningKeyRow signingKey={issuer.signingKey} />
 
 					<p className="py-1 text-xs text-muted-foreground">
@@ -647,18 +606,16 @@ function IssuerRow({
 						</Select>
 					</label>
 
-					{/* Slow is the one mode with a parameter, and the switch above
-					    offered no way to see or set it: the issuer answered after
-					    whatever `slowMs` it was *started* with, the summary line
-					    reported that number, and the engine's `PUT` had accepted a
-					    new one all along. Shown only in the mode that reads it -
-					    outside `slow` the value is one the issuer never consults. */}
+					{/*
+					 * Slow is the one mode with a parameter, and the engine's `PUT` accepts a new
+					 * `slowMs` on a running issuer, so it is set here. Shown only in the mode that
+					 * reads it: outside `slow` the issuer never consults the value.
+					 */}
 					{issuer.failureMode === "slow" && (
 						<IssuerDelayControl
-							// Keyed on what the engine is serving, so a value changed
-							// elsewhere (an MCP tool, a curl) re-seeds the draft by
-							// remount rather than by an effect - the same way
-							// `CannedResponseControls` is keyed in the inbox tab.
+							// Keyed on the value the engine serves, so a change made elsewhere (an
+							// MCP tool, curl) re-seeds the draft by remount rather than an effect,
+							// as `CannedResponseControls` is keyed in the inbox tab.
 							key={issuer.slowMs}
 							issuerId={issuer.issuerId}
 							slowMs={issuer.slowMs}
@@ -673,14 +630,10 @@ function IssuerRow({
 }
 
 /**
- * The delay `slow` mode answers after.
- *
- * Committed on blur and on Enter rather than per keystroke: every character of
- * "2000" is a valid number, so a live-committing field would send 2, then 20,
- * then 200 - three `PUT`s reconfiguring a running listener on the way to the
- * one the user meant. An out-of-range value is refused here with the bound
- * named, because the engine answers it with a `400 mock_issuer_invalid_config`
- * that says nothing about which field.
+ * The delay `slow` mode answers after. Committed on blur and Enter, not per keystroke: every prefix
+ * of "2000" is a valid number, so a live field would send 2, 20, 200, three `PUT`s reconfiguring a
+ * running listener on the way to the one meant. An out-of-range value is refused here with the
+ * bound named, because the engine's `400 mock_issuer_invalid_config` does not say which field.
  */
 function IssuerDelayControl({
 	issuerId,
@@ -736,10 +689,8 @@ function IssuerDelayControl({
 }
 
 /**
- * One running mock server. Opens the mock-server tab rather than expanding in
- * place (issue #481 phase 3) - once the tab existed to hold a live activity
- * feed, keeping a second, narrower route table here duplicated it for no
- * reason the inbox row's own history didn't already answer the same way.
+ * One running mock server. Opens the mock-server tab (#481 phase 3) rather than expanding in place:
+ * the tab holds the live activity feed, and a narrower route table here would duplicate it.
  */
 function MockServerRow({ mock, running }: { mock: MockServer; running: boolean }) {
 	const showToast = useToastStore((s) => s.showToast);
@@ -751,10 +702,9 @@ function MockServerRow({ mock, running }: { mock: MockServer; running: boolean }
 
 	return (
 		<ServiceRow
-			// Every listed mock is running while the engine is: stopping one
-			// drops it from the engine's list rather than leaving a stopped
-			// record, since a mock holds nothing that outlives its listener.
-			// Same as an issuer, unlike an inbox and its captures.
+			// Every listed mock is running while the engine is: stopping one drops it from the
+			// engine's list, since a mock holds nothing that outlives its listener. As with an
+			// issuer, unlike an inbox and its captures.
 			running={running}
 			onActivate={() => {
 				openTab({ type: "mock-server", entityId: mock.mockId });
@@ -812,13 +762,9 @@ function MockServerRow({ mock, running }: { mock: MockServer; running: boolean }
 }
 
 /**
- * Which row was just created, for as long as it takes to notice it.
- *
- * Creating an inbox reported nothing at all: the mutation carried an `onError`
- * and no `onSuccess`, and the new row landed wherever its ephemeral port sorted
- * rather than at the end, so the only evidence a click had done anything was a
- * row count nobody was counting. The timer is cleared on unmount and restarted
- * per flash, so switching drawer views mid-flash leaves nothing running.
+ * Which row was just created, for as long as it takes to notice it: a new row lands wherever its
+ * ephemeral port sorts, not at the end. The timer is cleared on unmount and restarted per flash, so
+ * switching drawer views mid-flash leaves nothing running.
  */
 function useRowFlash() {
 	const [flashedId, setFlashedId] = useState<string | null>(null);
@@ -856,23 +802,20 @@ export default function ServicesPanel() {
 	const mocks = mocksQuery.data ?? [];
 
 	/*
-	 * Per group, and only while that group has nothing to show. Each list is its
-	 * own query against its own engine routes, so one failing says nothing about
-	 * the other - and TanStack keeps the last good data through a failed
-	 * background refetch, which is worth more than an error replacing a list the
-	 * user can still act on. Same rule the variables tree follows.
+	 * Per group, and only while that group is empty: each list is its own query against its own
+	 * routes, so one failing says nothing about the others, and TanStack keeps the last good data
+	 * through a failed background refetch, which beats an error replacing a list the user can still
+	 * act on. The variables tree follows the same rule.
 	 */
 	const showInboxError = inboxesQuery.isError && inboxes.length === 0;
 	const showIssuerError = issuersQuery.isError && issuers.length === 0;
 	const showMockError = mocksQuery.isError && mocks.length === 0;
 
 	/*
-	 * By port. The engine lists inboxes in map order, which is not stable across
-	 * polls, so a row could move while being read and a new one arrived
-	 * anywhere. The record carries no creation stamp - checked, and #555's
-	 * decision is that it does not gain one (see the module doc) - and port is
-	 * the stable key it does have. Same ordering the inbox tab's switcher uses,
-	 * so the two lists cannot disagree about what order inboxes are in.
+	 * By port: the engine lists inboxes in map order, unstable across polls, so a row could move
+	 * while being read. The record carries no creation stamp and does not gain one (#555), and port
+	 * is the stable key it has. The inbox tab's switcher orders the same way, so the two lists
+	 * agree.
 	 */
 	const orderedInboxes = [...inboxes].sort((a, b) => a.port - b.port);
 	// Same rule, same reason: the engine lists mocks in map order too, and
@@ -1005,9 +948,7 @@ export default function ServicesPanel() {
 					)}
 				</DrawerSection>
 
-				{/* No create affordance: a mock needs a collection to serve, and
-				    this drawer has none selected. The collection header starts
-				    one; this is where every running mock can be found. */}
+				{/* No create control: a mock starts from its collection's header. */}
 				<DrawerSection title="Mock servers">
 					{showMockError ? (
 						<ErrorState

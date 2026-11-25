@@ -6,16 +6,13 @@
  */
 
 /**
- * Which inboxes are not hearing their captures, for the drawer (issue #1412).
+ * Which inboxes are not hearing their captures, for the drawer (#1412). One subscription for the
+ * whole list, not `inboxWatchService.subscribe` per row: the drawer needs one answer about all
+ * inboxes, including those with no stream at all, which a per-inbox subscription has nothing to
+ * report about.
  *
- * One subscription for the whole list rather than `inboxWatchService.subscribe`
- * per row: the drawer renders a row per inbox, and what it needs is one answer
- * about all of them - including the inboxes with no stream at all, which a
- * per-inbox subscription has nothing to report about.
- *
- * `useSyncExternalStore` rather than an effect and a `useState`: the service is
- * the store, and a snapshot read during render is what keeps a row from drawing
- * one paint of stale state after a stream gives up.
+ * `useSyncExternalStore`, not an effect and a `useState`: the service is the store, and a snapshot
+ * read during render keeps a row from painting one frame of stale state after a stream gives up.
  */
 
 import { useSyncExternalStore } from "react";
