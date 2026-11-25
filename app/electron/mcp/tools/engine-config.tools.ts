@@ -121,13 +121,12 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 ];
 
 /**
- * @p entries with each URL entry written back exactly as the read showed it
- * given its stored credentials again (`restoreConfigCredentials`, #3549), so a
- * batch that repeats the read-back `proxyUrl` does not strip them. Read only
- * while secrets are withheld and the batch names such an entry. `/config`
- * carries no version, so this read and the write are not one conditioned step:
- * a proxy edit the user saves between them is overwritten, as any concurrent
- * `POST /config` already is.
+ * @p entries with each URL entry written back exactly as the read showed it given its stored
+ * credentials again (`restoreConfigCredentials`, #3549), so a batch that repeats the read-back
+ * `proxyUrl` does not strip them. Read only while secrets are withheld and the batch names such an
+ * entry. `/config` carries no version, so this read and the write are not one conditioned step: a
+ * proxy edit the user saves between them is overwritten, as any concurrent `POST /config` already
+ * is.
  */
 async function restoreWithheldProxyCredentials(
 	ctx: ToolContext,

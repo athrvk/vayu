@@ -17,15 +17,11 @@ import { boundText, MAX_INLINE_BODY_BYTES } from "./inline-body-bounds.js";
 import { refuseRedactedHeaders } from "./redacted-input.js";
 
 /**
- * How much of a stored example body one result carries, and how much a whole
- * list may spend (issue #759, on the #767 / #769 precedent).
- *
- * An example body is capped engine-side at 1 MB and a request may hold 100 of
- * them, so an unbounded list is a 100 MB tool result - the same shape that made
- * `get_run_report` blow the token limit before #769 bounded its traces. The two
- * numbers are that fix's, not new ones: `MAX_INLINE_BODY_BYTES` per body, and
- * three times it across the list, which is the largest single row the per-body
- * bound can produce.
+ * How much of a stored example body one result carries, and how much a whole list may spend (issue
+ * #759, on the #767 / #769 precedent). An example body is capped engine-side at 1 MB and a request
+ * may hold 100, so an unbounded list is a 100 MB tool result, the shape that made `get_run_report`
+ * blow the token limit before #769. The numbers are that fix's: `MAX_INLINE_BODY_BYTES` per body,
+ * and three times it across the list, the largest single row the per-body bound can produce.
  */
 export const MAX_EXAMPLES_BODY_BYTES = MAX_INLINE_BODY_BYTES * 3;
 
@@ -38,15 +34,12 @@ interface BoundedExamples {
 }
 
 /**
- * Bound the bodies of one request's examples, disclosing every cut.
- *
- * The flags are deliberately **not** the engine's `bodyTruncated`: that field
- * already means something else on this row - the client that captured the
- * response stored only a prefix of it - and reusing the name would leave an
- * agent unable to tell a short capture from a short *read*. So a body cut to fit
- * this result is `bodyClipped` with the stored size in `bodyBytes`, and one that
- * did not fit at all is `bodyOmitted` with the same size, keeping every scalar
- * (id, name, status, headers, order, origin) that says what the row is.
+ * Bound the bodies of one request's examples, disclosing every cut. The flags are deliberately
+ * **not** the engine's `bodyTruncated`: that field already means the capturing client stored only a
+ * prefix of the response, and reusing the name would leave an agent unable to tell a short capture
+ * from a short *read*. So a body cut to fit this result is `bodyClipped` with the stored size in
+ * `bodyBytes`, and one that did not fit at all is `bodyOmitted` with the same size, keeping every
+ * scalar (id, name, status, headers, order, origin) that says what the row is.
  */
 export function boundExampleBodies(value: unknown): BoundedExamples {
 	const rows = Array.isArray(value) ? value : [];
@@ -69,17 +62,15 @@ export function boundExampleBodies(value: unknown): BoundedExamples {
 }
 
 /**
- * The fields an example write may state, in the engine's spelling
- * (`apply_request_example_fields`).
+ * The fields an example write may state, in the engine's spelling (`apply_request_example_fields`).
  *
- * **`origin` is not among them, and that is the point.** The column says who
- * wrote the row - `import` for an importer or a spec sync, `user` for what the
- * app saved from a live response - and the OpenAPI sync replaces the first kind
- * without touching the second (#588, #722). An agent that could claim `import`
- * could hand its own example to the next sync to overwrite; one that could claim
- * `user` could pin a stale imported row against the document it came from.
- * Neither is the agent's call, so the schema does not declare it and refuses it
- * as an unrecognized key, and the payload builder copies only the keys below.
+ * **`origin` is not among them, deliberately.** The column says who wrote the row (`import` for an
+ * importer or a spec sync, `user` for what the app saved from a live response) and the OpenAPI sync
+ * replaces the first kind without touching the second (#588, #722). An agent that could claim
+ * `import` could hand its own example to the next sync to overwrite; one that could claim `user`
+ * could pin a stale imported row against the document it came from. Neither is the agent's call, so
+ * the schema does not declare it and refuses it as an unrecognized key, and the payload builder
+ * copies only the keys below.
  */
 const EXAMPLE_WRITE_KEYS = ["name", "status", "contentType"] as const;
 
@@ -116,12 +107,10 @@ export function exampleWritePayload(
 }
 
 /**
- * What deleting this example leads to, as the delete prompt and preview say it.
- *
- * Differs by origin because the engine's delete does (#2971): a `user` example
- * goes to the Trash, an imported one becomes a spec-sync tombstone. Anything
- * but a known `user` origin gets the tombstone wording, the engine's own default
- * for a row that states none, so the prompt never promises a restore that
+ * What deleting this example leads to, as the delete prompt and preview say it. It differs by
+ * origin because the engine's delete does (#2971): a `user` example goes to the Trash, an imported
+ * one becomes a spec-sync tombstone. Anything but a known `user` origin gets the tombstone wording,
+ * the engine's default for a row that states none, so the prompt never promises a restore
  * `restore_trash_entry` could not keep.
  */
 export function describeExampleDeleteOutcome(example: Record<string, unknown>): string {
