@@ -42,9 +42,8 @@ ScenarioResolution invalid (std::string reason, std::string code = {}) {
     return resolution;
 }
 
-/// Why one step cannot be planned, and the code when the refusal has its own
-/// (a target policy's, #2521). A bare reason converts, so a refusal with no
-/// code is written as it always was.
+/// Why one step cannot be planned, and the code when the refusal has its own (a
+/// target policy's, #2521). A bare reason converts, for a refusal with no code.
 struct StepRefusal {
     std::string reason;
     std::string code;
@@ -55,9 +54,9 @@ struct StepRefusal {
 };
 
 /// The human-readable half of a compose error. `routes::error_message_of` is
-/// the shared reader for this shape, but it lives behind `routes.hpp`, which
-/// pulls in httplib - a dependency `vayu_core` deliberately does not carry. The
-/// shape itself is `error_body`'s and is pinned by `error_shape_route_test`.
+/// the shared reader, but it sits behind `routes.hpp`, which pulls in httplib,
+/// a dependency `vayu_core` deliberately does not carry. The shape is
+/// `error_body`'s, pinned by `error_shape_route_test`.
 std::string compose_error_message (const nlohmann::json& body) {
     if (auto error = body.find ("error"); error != body.end () && error->is_object ()) {
         if (auto message = error->find ("message");
@@ -77,15 +76,11 @@ std::string describe_step (size_t index, const vayu::db::Request& row) {
 
 /**
  * The tail the no-data refusal carries when the collection declares a data
- * contract (issue #599): ` (declared columns: id, email)`, or empty when it
- * declares none.
- *
- * The refusal already says "run the collection with a data file"; a user whose
- * collection has declared its columns can be told *which* file, which is the
- * difference between re-reading the request and picking one. Anything the
- * schema cannot be trusted to hold - it is a stored blob, and an older or
- * hand-edited row may hold anything - degrades to no tail rather than to a
- * message about column names that are not strings.
+ * contract (#599): ` (declared columns: id, email)`, or empty when it declares
+ * none. The refusal already says "run the collection with a data file"; naming
+ * the declared columns says *which* file. The schema is a stored blob an older
+ * or hand-edited row may fill with anything, so anything untrustworthy degrades
+ * to no tail rather than a message about column names that are not strings.
  */
 std::string declared_columns_hint (const vayu::db::Collection& collection) {
     nlohmann::json schema;
@@ -112,13 +107,12 @@ std::string declared_columns_hint (const vayu::db::Collection& collection) {
 }
 
 /**
- * The ordered request rows a scenario covers, before anything is composed.
- *
- * Split from composition so the plan-size cap can reject an oversized folder
- * for the cost of the row reads rather than after composing every step. A
- * recursive run walks the subtree in the order the sidebar shows it, each
- * sub-folder's subtree where the sub-folder sits among its parent's requests
- * (#431, #2535; `Database::get_requests_in_subtree`).
+ * The ordered request rows a scenario covers, before anything is composed:
+ * split from composition so the plan-size cap rejects an oversized folder for
+ * the cost of the row reads, not after composing every step. A recursive run
+ * walks the subtree in sidebar order, each sub-folder's subtree where the
+ * sub-folder sits among its parent's requests (#431, #2535;
+ * `Database::get_requests_in_subtree`).
  */
 std::vector<vayu::db::Request>
 collect_requests (vayu::db::Database& db, const std::string& root_id, bool recursive) {
@@ -127,12 +121,11 @@ collect_requests (vayu::db::Database& db, const std::string& root_id, bool recur
 }
 
 /**
- * The `data` rows a *scenario* binds, through the shared reader below.
- *
- * They reach the run's worker (as `pm.iterationData`) but never the plan or the
- * snapshot - the app owns parsing the file they came from, and only their count
- * (beside the file's name and hash) is persisted. A rejected set leaves no rows
- * behind, never the ones before the bad one, which would be a partial data set.
+ * The `data` rows a *scenario* binds, through the shared reader below. They
+ * reach the run's worker (as `pm.iterationData`) but never the plan or the
+ * snapshot: the app owns parsing their file, and only their count (beside the
+ * file's name and hash) is persisted. A rejected set leaves no rows, never the
+ * ones before the bad one, which would be a partial data set.
  */
 std::optional<std::string> read_scenario_data (const nlohmann::json& data,
 const ScenarioLimits& limits,
@@ -229,11 +222,10 @@ std::vector<nlohmann::json>& rows_out) {
         return reason;
     }
 
-    // Refused rather than ignored (issue #1503): a key this block does not
-    // read - a typo, or a knob from a version of the client ahead of this
-    // engine - would change nothing and answer 202 anyway, a silence every future
-    // scenario field would inherit. The refusal lists
-    // this set by hand, so the two change together.
+    // Refused rather than ignored (#1503): a key this block does not read (a
+    // typo, or a knob from a client ahead of this engine) would change nothing
+    // and answer 202 anyway, a silence every future scenario field would
+    // inherit. The refusal lists this set by hand, so the two change together.
     static const std::unordered_set<std::string> known_scenario_keys = {
         "source", "collectionId", "recursive", "data", "dataFileName",
         "dataFileHash", "dataFileCastNumbers", "iterations"
@@ -256,64 +248,56 @@ std::vector<nlohmann::json>& rows_out) {
 namespace {
 
 /**
- * The contract this run is measured against, and the schemas that go with it.
- *
- * Read once here and stamped into the snapshot by `build_scenario_manifest`
- * (issue #637). Any disagreement - no such document, no index on it, a hash
- * that does not match - leaves the operations empty, which is the engine's one
- * spelling of "not measured against a contract"; which disagreement it was is
- * recorded too (issue #681), and only the collection runner reads it.
+ * The contract this run is measured against, and its schemas, read once here
+ * and stamped into the snapshot by `build_scenario_manifest` (#637). Any
+ * disagreement (no such document, no index on it, a hash that does not match)
+ * leaves the operations empty, the engine's one spelling of "not measured
+ * against a contract"; which one it was is recorded too (#681), and only the
+ * collection runner reads it.
  */
 void resolve_bound_spec (vayu::db::Database& db,
 const std::string& collection_id,
 ScenarioResolution& resolution) {
-    // The spec this run is measured against, read once here and stamped into the
-    // snapshot by `build_scenario_manifest` (issue #637). Read from the
-    // collection chain rather than looked up in `spec_documents`: the hash *on
-    // the binding* is what the collection was last synced to, and that - not
-    // whatever the document says today - is what the run was planned against.
-    //
-    // Resolved through `nearest_spec_binding`, the same walk design-mode
-    // validation uses, because an import binds the root and files every request
-    // under tag sub-collections: reading only the named collection's own column
-    // left the natural "run this tag folder" measuring nothing at all, silently
-    // (issue #716).
+    // From the collection chain, not `spec_documents`: the hash *on the
+    // binding* is what the collection was last synced to, and that, not the
+    // document's current text, is what the run was planned against. Through
+    // `nearest_spec_binding`, the walk design-mode validation uses, because an
+    // import binds the root and files every request under tag sub-collections,
+    // and reading only the named collection's column would leave "run this tag
+    // folder" silently measuring nothing (#716).
     if (const auto bound = nearest_spec_binding (db, collection_id)) {
         resolution.spec.spec_id   = bound->spec_id;
         resolution.spec.spec_hash = bound->spec_hash;
         resolution.spec.inherited = bound->collection_id != collection_id;
     }
 
-    // The document's declared operations, read once here so contract coverage
-    // (#629) counts against the contract this run was planned against. The hash
-    // has to agree: the binding names a document *and a version of it*, and a
-    // row whose hash has moved under the binding is a state no run should report
-    // a contract from. Any disagreement - no such document, no index on it, a
-    // hash that does not match - leaves the operations empty, which is the
-    // engine's one spelling of "not measured against a contract".
+    // The declared operations, so contract coverage (#629) counts against the
+    // contract the run was planned against. The hash must agree: the binding
+    // names a document *and a version*, and a row whose hash moved under it is
+    // no state to report a contract from.
     //
-    // The response schemas ride the same read and the same hash check (issue
-    // #682): the deferred pass at run end validates against them, and looking
-    // them up then instead would be the one thing this read exists to prevent.
-    // They are taken as text and parsed only by an executor that will use them.
+    // The response schemas ride the same read and hash check (#682): the
+    // run-end deferred pass validates against them, and a lookup then is what
+    // this read prevents. Taken as text, parsed only by an executor that uses
+    // them.
     //
-    // Which of the two disagreements happened is recorded as well (issue #681),
-    // and only the collection runner reads it: that one emits a verdict per
-    // step, so its `checked: false` has to name a reason the reader can act on -
-    // "the document has moved under the binding" is fixed by a sync, and a
-    // per-step chip that silently never appears is how they never learn of it.
-    // The load pass needs none of that; an absent block is its whole answer.
+    // The collection runner reads the recorded disagreement (#681) because it
+    // emits a verdict per step, so its `checked: false` must name a reason the
+    // reader can act on: "the document has moved under the binding" is fixed by
+    // a sync, and a per-step chip that silently never appears is how they never
+    // learn of it. The load pass needs none; an absent block is its whole
+    // answer.
     if (resolution.spec.bound ()) {
         const auto document = db.get_spec_document (resolution.spec.spec_id);
         if (!document) {
             resolution.spec.schema_reason = UncheckedReason::NoIndex;
         } else if (resolution.spec.spec_hash.empty ()) {
             // A binding that names no version is not a document that moved
-            // (issue #709). Every write path stamps the version now and the
-            // startup pass repairs the rows written before they did, so this is
-            // a database edited from outside - and it is still worth its own
-            // reason, because "sync the collection" is the wrong instruction
-            // for it and a sync of an unchanged document would not repair it.
+            // (#709). Every write path stamps the version and the startup pass
+            // repairs older rows, so this is a database edited from outside,
+            // still worth its own reason: "sync the collection" is the wrong
+            // instruction, and a sync of an unchanged document would not repair
+            // it.
             resolution.spec.schema_reason = UncheckedReason::NeverStamped;
         } else if (document->hash != resolution.spec.spec_hash) {
             resolution.spec.schema_reason = UncheckedReason::HashMismatch;
@@ -328,14 +312,13 @@ ScenarioResolution& resolution) {
 
 /**
  * How every step of the plan over @p rows composes its scope names (#2521).
- *
  * `Always` when one step's composed `elements` hold a kind the registry marks
  * `writes_variables` (`script.pre`, `script.post`, `script.setup`, every
  * `extract.*`) at a phase before some send: an earlier step's test script or
- * extractor can then set the token a later step reads, after the plan was
- * composed and before that step is sent. `script.teardown` alone does not
- * count, because it runs after the last send. The lists are composition's
- * own, so a disabled, blank or `inherit.disable`d element is already gone.
+ * extractor can then set a token a later step reads, after composition and
+ * before that send. `script.teardown` alone does not count: it runs after the
+ * last send. The lists are composition's own, so disabled, blank and
+ * `inherit.disable`d elements are already gone.
  */
 vayu::http::VariableDeferral plan_variable_deferral (vayu::db::Database& db,
 const std::vector<vayu::db::Request>& rows) {
@@ -407,15 +390,13 @@ const vayu::StreamBounds& run_bounds) {
  *
  * @return the reason this scenario cannot run, or nothing.
  *
- * @param raw_elements_out This step's resolved `elements` array exactly as
- *        `POST /compose` returned it, uncompiled. Issue #1498's
- *        `timer.pacing` needs a second pass over every step's array before
- *        any of them can be compiled - it marks, per element id across the
- *        *whole* iteration, which single occurrence is that node's actual
- *        start - so compiling here (as every kind before `timer.pacing`
- *        could) would compile a pacing element before it knew whether this
- *        was its node's first occurrence. `resolve_scenario` compiles every
- *        step's array only after that pass, from this output.
+ * @param raw_elements_out This step's resolved `elements` array as
+ *        `POST /compose` returned it, uncompiled. #1498's `timer.pacing` needs
+ *        a pass over every step's array first, marking per element id across
+ *        the *whole* iteration which occurrence is that node's start, so
+ *        compiling here would compile a pacing element before knowing whether
+ *        this is its node's first occurrence. `resolve_scenario` compiles every
+ *        array after that pass.
  */
 std::optional<StepRefusal> resolve_step (vayu::db::Database& db,
 const ScenarioResolveOptions& options,
@@ -433,22 +414,20 @@ nlohmann::json& raw_elements_out) {
     if (!options.environment_id.empty ()) {
         compose_body["environmentId"] = options.environment_id;
     }
-    // The dataset's columns travel into composition rather than being applied
-    // after it (issue #1007): a bare `{{username}}` this run's rows answer must
-    // survive composition to be bound per iteration, and a same-named
-    // environment variable must not answer it first. Names only - the row is
-    // per iteration and composition happens once.
+    // The dataset's columns go into composition rather than being applied after
+    // it (#1007): a bare `{{username}}` the rows answer must survive
+    // composition to bind per iteration, and a same-named environment variable
+    // must not answer it first. Names only: the row is per iteration,
+    // composition once.
     if (!bound_columns.empty ()) {
         compose_body["dataColumns"] = bound_columns;
     }
-    // A plan step is composed once and *sent* per iteration, so the generator
-    // family belongs to the send rather than to this composition (issue #995):
-    // resolved here, `{{$randomUUID}}` would be one id repeated by every
-    // iteration of every virtual user. Unconditionally, not only for a load
-    // run - both executors join this step's template before every send, and a
-    // rule that depended on which one was running is one nobody could hold in
-    // their head. A step spelling no generator is unaffected: nothing survives
-    // composition, so nothing is split and nothing is joined.
+    // A plan step is composed once and *sent* per iteration, so generators
+    // belong to the send (#995): resolved here, `{{$randomUUID}}` would be one
+    // id repeated by every iteration of every virtual user. Unconditionally,
+    // not only for a load run: both executors join this template before every
+    // send, and a rule depending on the executor is one nobody could hold in
+    // their head. A step with no generator is unaffected.
     compose_body["deferDynamicVariables"] = true;
     auto [status, payload] = vayu::http::compose_request_core (db, compose_body,
     options.oauth2_after_scripts ? vayu::http::OAuth2Resolution::AfterTheScript :
@@ -464,27 +443,25 @@ nlohmann::json& raw_elements_out) {
         }
     }
 
-    // Auth is resolved into headers/url here, which is what makes the plan
-    // credential-grade and the snapshot manifest necessary - unless the
-    // credentials themselves come from the data file or wait on a script
-    // (below). `apply_auth` collapses basic auth into one base64
-    // `Authorization` value, so a `{{data.user}}` resolved into the plan is
-    // unreadable by the time
-    // anything scans the built request: it would go out as base64 of the literal
-    // token text, silently, and the refusal below could not see it either (issue
-    // #591). Such a step keeps its credentials typed and
-    // unbound and applies its auth per iteration instead - one base64 per
-    // iteration, and only for the steps that need it.
+    // Auth resolved into headers/url here is what makes the plan
+    // credential-grade and the snapshot manifest necessary, unless the
+    // credentials come from the data file or wait on a script (below).
+    // `apply_auth` collapses basic auth into one base64 `Authorization` value,
+    // so a `{{data.user}}` resolved into the plan is unreadable to any later
+    // scan: it would go out silently as base64 of the literal token, invisible
+    // to the refusal below too (#591). Such a step keeps its credentials typed
+    // and unbound and applies auth per iteration, one base64 per iteration, for
+    // only the steps that need it.
     const vayu::http::Auth parsed_auth =
     vayu::http::parse_auth (payload.value ("auth", nlohmann::json ()));
     StepDataTemplate auth_template = tokenize_auth_fields (parsed_auth, bound_columns);
 
     // OAuth 2.0 is the one mode the row bind cannot serve: its token is
-    // acquired against the token endpoint - here, once, for a load run, or at
-    // each sequential step's send - never bound per iteration, and a bind per
-    // virtual user per iteration would be a network round trip each. Refused
-    // by name in both directions, with or without a data set, rather than sent
-    // to the token endpoint as the literal token text.
+    // acquired against the token endpoint (here, once, for a load run, or at
+    // each sequential step's send), never per iteration, which would be a round
+    // trip per virtual user per iteration. Refused by name in both directions,
+    // with or without a data set, rather than sent to the token endpoint as the
+    // literal token text.
     if (auto token = first_oauth2_deferrable_token (parsed_auth, bound_columns)) {
         return (describe_step (index, row) + " carries " + *token +
         " in its OAuth 2.0 configuration. That token is acquired against "
@@ -505,11 +482,10 @@ nlohmann::json& raw_elements_out) {
         }
     }
 
-    // A name composition found no scope for is one a pre-request script, an
-    // inline element or a setup script may define before the send, and none
-    // of them can reach it once `apply_auth` has encoded it (issue #2473). So
-    // is any name composition deferred (#2521), OAuth 2.0 config included on
-    // a sequential plan.
+    // A name composition found no scope for may be defined by a pre-request
+    // script, an inline element or a setup script before the send, and none can
+    // reach it once `apply_auth` encoded it (#2473). So is any name composition
+    // deferred (#2521), OAuth 2.0 config included on a sequential plan.
     const bool auth_after_scripts =
     vayu::core::credentials_await_scripts (parsed_auth, bound_columns);
 
@@ -536,20 +512,17 @@ nlohmann::json& raw_elements_out) {
     // is a scan of every field of every step at the run's full rate.
     auto data_template = tokenize_bindable_fields (built.request, bound_columns);
 
-    // A `{{data.*}}` token with no data set behind it can never bind. The
-    // namespace is reserved, so composition deliberately left the token
-    // written as it stands, and a run without rows has nothing to
-    // substitute it from - it would reach the wire as the literal text
-    // `{{data.id}}`, which is not a request anyone meant to send. Refused
-    // here, beside every other unrunnable scenario and before a run row
-    // exists, rather than rediscovered per step per iteration once it has
-    // started (issue #415).
+    // A `{{data.*}}` token with no data set can never bind: the namespace is
+    // reserved, so composition left it written, and it would reach the wire as
+    // the literal `{{data.id}}`. Refused here with every other unrunnable
+    // scenario, before a run row exists, rather than rediscovered per step per
+    // iteration (#415).
     if (!has_data) {
         auto token = data_template.first_data_token ();
         if (!token) {
-            // The credentials are scanned too, and for the same reason: a
-            // data token in a basic-auth field is exactly as unbindable as
-            // one in the URL, which the base64 above would otherwise hide from this refusal.
+            // The credentials too: a data token in a basic-auth field is as
+            // unbindable as one in the URL, and the base64 above would hide it
+            // from this refusal.
             token = auth_template.first_data_token ();
         }
         if (token) {
@@ -571,25 +544,23 @@ nlohmann::json& raw_elements_out) {
     // A stored stream runs as one under either executor (#3235), ended by a
     // cap or by the server's close rather than by the step's timeout.
     step.request.stream_bounds = step_stream_bounds (row, options.stream_bounds);
-    // The only script source since issue #1514's cut-over: `elements`
-    // resolved the collection chain's and the request's own script.pre /
-    // script.post entries beside every declarative kind, the same list
-    // `POST /compose` returns. Left uncompiled here - see this function's
-    // doc comment - and compiled once by `resolve_scenario` after every
-    // step's array has been marked for #1498's `timer.pacing`; every
-    // executor then reuses that one compiled list.
+    // The only script source (#1514): `elements` resolves the collection
+    // chain's and the request's script.pre / script.post entries beside every
+    // declarative kind, the list `POST /compose` returns. Uncompiled here (see
+    // the docblock) and compiled once by `resolve_scenario` after every step's
+    // array is marked for #1498's `timer.pacing`; every executor reuses that
+    // list.
     raw_elements_out    = payload.value ("elements", nlohmann::json::array ());
     step.stored_url     = row.url;
     step.spec_operation = row.spec_operation.value_or (std::string ());
     step.data_template  = std::move (data_template);
     step.collection_id  = row.collection_id;
-    // A deferred step reaches an executor with a row behind it whenever it
-    // needs one: the refusal above returns for a credential carrying a *data*
-    // token in a run with no set. It does not for one carrying only the
-    // `{{$vu}}` / `{{$iteration}}` identity (issue #1055), which is deliberate
-    // and is why `first_data_token` is the scan there rather than the whole
-    // template - the identity binds off the iteration, so that step is
-    // perfectly runnable with no rows at all and must not be refused.
+    // A deferred step has a row behind it whenever it needs one: the refusal
+    // above returns for a credential carrying a *data* token in a run with no
+    // set. Not for one carrying only the `{{$vu}}` / `{{$iteration}}` identity
+    // (#1055), deliberately, which is why `first_data_token` scans there rather
+    // than the whole template: the identity binds off the iteration, so such a
+    // step runs with no rows and must not be refused.
     if (auth_resolution == vayu::http::AuthResolution::Defer) {
         step.auth               = parsed_auth;
         step.auth_template      = std::move (auth_template);
@@ -602,16 +573,15 @@ nlohmann::json& raw_elements_out) {
 }
 
 /**
- * Stamps `config._scopeEntry` onto every element, across every step, whose
- * kind the registry marks `tracks_scope_occurrence` (issue #1498's
- * `timer.pacing` only, today): `true` on the first occurrence of that
- * element's id in plan order, `false` on every later one - the folder- or
- * collection-scoped element compose_elements inherits into more than one
- * step is only ever *that node's own start* at the first of them.
+ * Stamps `config._scopeEntry` onto every element, across every step, whose kind
+ * the registry marks `tracks_scope_occurrence` (#1498's `timer.pacing` is the
+ * only one): `true` on the first occurrence of its id in plan order, `false` on
+ * every later one, since a folder- or collection-scoped element
+ * compose_elements inherits into several steps starts *that node* only at the
+ * first.
  *
- * A registry lookup, never a `kind ==` comparison (the extensibility
- * contract's rule 1): a future kind that needs the same tracking opts in
- * through the same registry field, with no change here.
+ * A registry lookup, never a `kind ==` comparison (the extensibility contract's
+ * rule 1), so a future kind opts in through the same field with no change here.
  */
 void mark_scope_entries (std::vector<nlohmann::json>& raw_elements_per_step) {
     std::unordered_map<std::string, size_t> first_seen_at_step;
@@ -720,10 +690,9 @@ std::vector<nlohmann::json>& rows_out) {
         " (raise the 'maxScenarioDataRows' setting to allow more)";
     }
     rows_out.reserve (data.size ());
-    // Accumulated row by row rather than dumping the whole array: an
-    // oversized set is refused as soon as it crosses the bound, so the
-    // check never materializes a second copy of a payload that is already
-    // too big to want one.
+    // Accumulated row by row, not by dumping the array: an oversized set is
+    // refused once it crosses the bound, never materializing a second copy of a
+    // payload already too big.
     size_t data_bytes = 0;
     for (size_t i = 0; i < data.size (); ++i) {
         if (!data[i].is_object ()) {
@@ -936,9 +905,8 @@ const ScenarioResolveOptions& options) {
     }
     const ScenarioRequest& request = resolution.request;
 
-    // Captured, not just probed: the collection carries the declared data
-    // contract, and the no-data refusal below is the reader that makes storing
-    // one worth anything.
+    // Kept, not just probed: the collection carries the declared data contract
+    // the no-data refusal below reads.
     const auto collection = db.get_collection (request.collection_id);
     if (!collection) {
         return invalid ("No collection with id '" + request.collection_id + "'");
@@ -959,10 +927,9 @@ const ScenarioResolveOptions& options) {
         " (raise the 'maxScenarioSteps' setting to allow more)");
     }
 
-    // A `data` array that is present and empty was already refused above, so an
-    // empty `data_rows` here means the payload carried no `data` block at all -
-    // and so an empty column set is exactly "this run binds no rows", which is
-    // what every step below composes and splits against (issue #1007).
+    // A present, empty `data` array was refused above, so empty `data_rows`
+    // means no `data` block, and an empty column set is exactly "this run binds
+    // no rows", what every step below composes and splits against (#1007).
     const bool has_data = !resolution.data_rows.empty ();
     const vayu::http::BoundColumnNames bound_columns =
     bound_columns_of (resolution.data_rows);
@@ -1104,11 +1071,10 @@ std::optional<vayu::http::Auth>& late_auth) {
     // throw names it instead of reading past the end.
     const IterationBinding binding{ row_index ? &rows.at (*row_index) : nullptr,
         row_index.value_or (0), identity };
-    // The fields-then-credentials order lives in one place, shared with the
-    // single-request load path that binds its own templates the same way
-    // (issue #993); this is the step-shaped caller of it. The step's auth is
-    // copied, by the callee or into @p late_auth, which is what a plan shared
-    // by every virtual user of the run requires.
+    // The fields-then-credentials order lives in `bind_iteration`, shared with
+    // the single-request load path (#993); this is its step-shaped caller. The
+    // step's auth is copied, by the callee or into @p late_auth, as a plan
+    // shared by every virtual user requires.
     if (!step.auth_after_scripts) {
         return bind_iteration (
         request, step.data_template, step.auth, step.auth_template, binding);

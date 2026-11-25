@@ -23,9 +23,9 @@
 // `describe_empty_header_name` - the wording every layer that can leave a
 // header nameless shares, this one included (issue #1095).
 #include "vayu/http/header_names.hpp"
-// `ends_a_header_line` - the same rule the composer and the pre-send gate
-// apply, so a bound cell and a substituted variable cannot drift apart on what
-// a header may hold.
+// `ends_a_header_line`: the rule the composer and the pre-send gate apply, so a
+// bound cell and a substituted variable cannot disagree on what a header may
+// hold.
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/utils/invariant.hpp"
@@ -55,9 +55,8 @@ std::string token_for (const std::string& name) {
 }
 
 /// The column a token names: the text after `data.` for the reserved spelling,
-/// and the whole name for a bare column a bound row answers (issue #1007).
-/// Never called for an identity token, whose value comes from the binding
-/// rather than from a row.
+/// the whole name for a bare column a bound row answers (#1007). Never called
+/// for an identity token, whose value comes from the binding, not a row.
 std::string column_of (const std::string& name) {
     return vayu::http::is_data_variable_name (name) ?
     name.substr (vayu::http::DATA_NAMESPACE_PREFIX.size ()) :
@@ -82,9 +81,9 @@ enum class FieldContext : std::uint8_t {
     /// @ref Plain in the scheme and authority.
     Url,
     /// A header name or value, or a credential `apply_auth` writes into a
-    /// header line. Plain text like @ref Plain - a header has no quoting rule -
-    /// except that a CR or LF in a bound value ends the line rather than
-    /// sitting in it, so the join refuses one (issue #732).
+    /// header line. Plain text like @ref Plain (a header has no quoting rule),
+    /// except that a CR or LF in a bound value would end the line, so the join
+    /// refuses one (#732).
     Header,
     /// A body whose text is a JSON document, so a token may land inside a
     /// string literal and has to be escaped when it does.
@@ -95,19 +94,15 @@ enum class FieldContext : std::uint8_t {
 };
 
 /**
- * What kind of document this request's body text is.
+ * What kind of document this request's body text is. `Json`, `JsonRpc` and
+ * `Mcp` always are JSON. A `graphql` body is either the JSON envelope or a bare
+ * GraphQL document, so it is asked through the classifier the envelope uses; a
+ * bare document is *not* JSON here, because `graphql_wire_body` escapes it
+ * wholesale when wrapping it and escaping first would double every quote.
  *
- * `Json`, `JsonRpc` and `Mcp` always are JSON. A `graphql` body is either shape - the
- * JSON envelope or a bare GraphQL document - so it is asked, through the same
- * classifier the envelope itself uses; a bare document is *not* a JSON document
- * here, because `graphql_wire_body` escapes it wholesale when it wraps it and
- * escaping first would double every quote.
- *
- * `Xml` (#580) is a document too, with quoting rules of its own
- * rather than JSON's - see `advance_xml_state` for what a bound value is
- * written as, and why it depends on the token's position.
- *
- * Every other mode is plain text as far as a bind is concerned.
+ * `Xml` (#580) is a document with quoting rules of its own; `advance_xml_state`
+ * says what a bound value is written as and why it depends on the token's
+ * position. Every other mode is plain text to a bind.
  */
 FieldContext body_context (const vayu::Body& body) {
     switch (body.mode) {
@@ -133,36 +128,29 @@ struct HeaderCollision {
     std::string taken;
 };
 
-/**
- * What a bind did to the header map that leaves it not a request.
- *
- * Both are the same shape of quiet wrong request - a header the author did not
- * write, under a name they cannot see - and both are the row's fault rather
- * than the request's, which is why the walk reports them and the caller, which
- * holds the row, words them.
- */
+/// What a bind did to the header map that leaves it not a request. Both faults
+/// are the same quiet wrong request (a header the author did not write, under a
+/// name they cannot see) and both are the row's fault, not the request's, so
+/// the walk reports them and the caller, which holds the row, words them.
 struct HeaderFaults {
-    /// A name a row bound to *nothing*, as the request carries it (issue
-    /// #1095). Held beside the collision rather than folded into it because it
-    /// is a different sentence, and reported ahead of it: two names that both
-    /// bind to nothing do collide, on a name neither of them has, and "they
-    /// bound alike" is not what the author needs to be told about them - the
-    /// order composition already answers these two in
-    /// (`http/request_composer.cpp`).
+    /// A name a row bound to *nothing*, as the request carries it (#1095). Kept
+    /// apart from the collision as a different sentence, and reported first:
+    /// two names both bound to nothing do collide, on a name neither has, but
+    /// "they bound alike" is not what the author needs to hear, and composition
+    /// answers the two in this order too (`http/request_composer.cpp`).
     std::optional<std::string> emptied;
-    /// A name a row bound that is not a token once trimmed, as the shared
-    /// refusal words it (issue #2467). Before the collision for the reason
-    /// `emptied` is: a name that is no name is the nearer fault.
+    /// A name a row bound that is not a token once trimmed, worded as the
+    /// shared refusal words it (#2467). Before the collision, as `emptied` is:
+    /// a name that is no name is the nearer fault.
     std::optional<std::string> invalid;
     /// Two names that became one (issue #732).
     std::optional<HeaderCollision> collision;
 };
 
-/**
- * Settle a header name a row has just been bound into (issue #2467): trim the
- * spaces and tabs a cell can carry, and record the first that is not a token.
- * A name no row touched is left alone - it is composition's, which judged it.
- */
+/// Settles a header name a row has just been bound into (#2467): trims the
+/// spaces and tabs a cell can carry and records the first that is not a token.
+/// A name no row touched is composition's, which judged it, so it is left
+/// alone.
 void settle_bound_header_name (std::string& bound, const std::string& written, HeaderFaults& faults) {
     if (bound == written) {
         return;
@@ -175,36 +163,9 @@ void settle_bound_header_name (std::string& bound, const std::string& written, H
     bound, vayu::http::trim_optional_whitespace (written));
 }
 
-/**
- * The one list of strings a data row binds: URL, header names and values, raw
- * body, both halves of every form field, and every file reference's path, name
- * and type.
- *
- * Splitting and joining both drive it, so neither can cover a field the other
- * does not - a field only the splitter walked would be a token nobody joins,
- * and one only the joiner walked would be addressed by an index the splitter
- * never handed out.
- *
- * Header *names* are substituted too, because composition substitutes them: the
- * payload carries headers as `[{key, value}]`, and `resolve_json_strings`
- * resolves every string value in that array, key included. A map cannot have
- * its keys rewritten in place, so this rebuilds it.
- *
- * Each field is visited with the context it sits in, so the splitter can decide
- * a token's encoding from the same walk that hands out its position.
- *
- * Returns the first fault of each kind the rebuild produced, for the caller to
- * refuse the bind over; an empty @ref HeaderFaults for the ordinary walk. Only
- * a *bind* can produce either, and that is why the split ignores what it
- * reports: a split rewrites no name, so every repeated name it walks is a
- * repeat as written, and a name that is empty before any row is bound into it
- * is one no row emptied - it is composition's to refuse, and composition does.
- */
-/**
- * A file reference's three strings. A path a row binds into is sent under the
- * same rule as any other (`http/file_ref.hpp`): under an allowed folder, or a
- * picked file, checked once per distinct path when the run is planned.
- */
+/// A file reference's three strings. A path a row binds into is sent under the
+/// same rule as any other (`http/file_ref.hpp`): under an allowed folder, or a
+/// picked file, checked once per distinct path at plan time.
 template <typename Visit>
 void visit_file_strings (std::string& src,
 std::string& file_name,
@@ -215,6 +176,26 @@ Visit& visit) {
     visit (content_type, FieldContext::Plain);
 }
 
+/**
+ * The one list of strings a data row binds: URL, header names and values, raw
+ * body, both halves of every form field, and every file reference's path, name
+ * and type. Splitting and joining both drive it, so neither covers a field the
+ * other does not: a field only the splitter walked would be a token nobody
+ * joins, one only the joiner walked an index the splitter never handed out.
+ *
+ * Header *names* are substituted too, because composition substitutes them: the
+ * payload carries headers as `[{key, value}]`, and `resolve_json_strings`
+ * resolves every string in that array, key included. A map's keys cannot be
+ * rewritten in place, so this rebuilds it. Each field is visited with its
+ * context, so the splitter decides a token's encoding from the walk that hands
+ * out its position.
+ *
+ * Returns the first fault of each kind the rebuild produced, for the caller to
+ * refuse the bind over; an empty @ref HeaderFaults for the ordinary walk. Only
+ * a *bind* can produce either, so the split ignores them: a split rewrites no
+ * name, so every repeated name it walks is a repeat as written, and a name
+ * empty before any bind is composition's to refuse, which it does.
+ */
 template <typename Visit>
 HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
     HeaderFaults faults;
@@ -222,8 +203,8 @@ HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
     visit (request.url,
     request.disable_url_encoding ? FieldContext::Plain : FieldContext::Url);
     // A path variable's value is joined raw and encoded (Postman's path set)
-    // when it is written into the URL (`settle_path_variables`), which is why it is a
-    // field of its own rather than text already in the URL (issue #1764).
+    // when `settle_path_variables` writes it into the URL, so it is a field of
+    // its own, not text already in the URL (#1764).
     for (auto& variable : request.path_variables) {
         visit (variable.value, FieldContext::Plain);
     }
@@ -237,26 +218,24 @@ HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
             visit (bound_name, FieldContext::Header);
             visit (bound_value, FieldContext::Header);
             settle_bound_header_name (bound_name, name, faults);
-            // Recorded before the collision below, on the reasoning in
-            // `HeaderFaults`. A name bound to nothing is still kept: what the
-            // walk owes its caller is the field count, and refusing here would
-            // make that depend on a row's contents exactly as an early return
-            // would.
+            // Before the collision, by `HeaderFaults`' reasoning. A name bound
+            // to nothing is still kept: the walk owes its caller the field
+            // count, and refusing here would make it depend on a row's contents
+            // as an early return would.
             if (bound_name.empty () && !faults.emptied) {
                 faults.emptied = name;
             }
             // Two names written differently that one row binds alike would go
-            // out as a repeated header no request row shows - and the collision
-            // belongs to the *row*: a file whose row 3 binds `authorization`
-            // beside a literal `Authorization` sends two good requests and then
-            // one carrying a second credential, with nothing said. Recorded and
-            // refused by the caller. Two names written alike are a repeat the
-            // author typed, and are kept (issue #2466).
+            // out as a repeated header no request row shows, and the fault is
+            // the *row's*: a file whose row 3 binds `authorization` beside a
+            // literal `Authorization` sends two good requests, then one with a
+            // second credential, silently. Recorded and refused by the caller.
+            // Two names written alike are a repeat the author typed, and are
+            // kept (#2466).
             //
-            // The walk still finishes: the field positions the joiner addresses
-            // are counted by it, so an early return would make the contract
-            // above ("neither can address a field the other does not") depend
-            // on a row's contents.
+            // The walk still finishes: it counts the field positions the joiner
+            // addresses, so an early return would make "neither can address a
+            // field the other does not" depend on a row's contents.
             auto collision = vayu::http::record_produced_name (produced, bound_name, name);
             if (collision && !faults.collision) {
                 faults.collision = HeaderCollision{ name, collision->produced };
@@ -290,19 +269,17 @@ HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
 }
 
 /**
- * The refusal a header name a row bound to nothing reads as (issue #1095).
+ * The refusal for a header name a row bound to nothing (#1095). The row goes
+ * first and the rule's own words follow, the shape `http/header_names.hpp` asks
+ * of every layer meeting this rule: a caller refused at composition and again
+ * at bind time is refused over one rule, and two spellings would read as two.
+ * This layer adds only what the shared wording cannot know, which row bound the
+ * name away; the column is inside the header as written, where that wording
+ * names it.
  *
- * The row goes in front and the rule's own words follow, which is the shape
- * `http/header_names.hpp` asks every layer that meets this rule for: a caller
- * refused at composition and again at bind time is being refused over one rule,
- * and two spellings of it would read as two. What this layer adds is the only
- * thing the shared wording cannot know - which row bound the name away - and
- * the column is inside the header as written, where that wording names it.
- *
- * The collision beside it words itself instead, and the difference is not an
- * inconsistency: that message has to name what the bound name *collided with*,
- * which is a fact about this request's other headers rather than about the
- * rule.
+ * The collision words itself instead, consistently: it must name what the bound
+ * name *collided with*, a fact about this request's other headers, not about
+ * the rule.
  */
 std::string describe_empty_bound_header_name (const std::string& written,
 const IterationBinding& binding) {
@@ -329,19 +306,17 @@ FieldContext credential_context (vayu::http::CredentialDestination destination) 
 }
 
 /**
- * The refusal a value that would end the header line it is bound into reads as.
+ * The refusal for a value that would end the header line it is bound into. A
+ * header line is `Key: value` ended by CRLF, so a cell carrying either byte
+ * ends the header, and what follows is read as a header of its own. JSON and
+ * JSONL rows reach the binder as native strings, with no CSV grammar to strip a
+ * newline, so this is an ordinary cell, not an exotic one.
  *
- * A header line is `Key: value` terminated by CRLF, so a cell carrying either
- * byte does not sit in the header - it ends it, and whatever follows is read as
- * a header of its own. JSON and JSONL rows reach the binder as native strings,
- * with no CSV grammar to have stripped a newline on the way in, so this is an
- * ordinary cell rather than an exotic one.
- *
- * A refusal rather than an encoding, for the reason an XML comment is one: a
- * header value has no escape for a line break, so every candidate encoding
- * either changes the value or leaves the line ended. Stripping the bytes would
- * be the quiet wrong request this namespace exists to remove - the header would
- * arrive holding something the file does not say.
+ * A refusal rather than an encoding, as for an XML comment: a header value has
+ * no escape for a line break, so every encoding either changes the value or
+ * leaves the line ended. Stripping the bytes would be the quiet wrong request
+ * this namespace exists to remove, a header holding something the file does not
+ * say.
  */
 std::string describe_header_line_break (const std::string& name,
 const IterationBinding& binding) {
@@ -351,14 +326,11 @@ const IterationBinding& binding) {
     "its own; the row is refused rather than sent forging a header";
 }
 
-/**
- * Whether the text so far has left us inside a JSON string literal.
- *
- * Only the literal chunks are scanned, never a bound value, and that is sound
- * precisely because of the encoding this decides: a value bound inside a string
- * is escaped, so it cannot close the string, and one bound outside is rendered
- * as balanced JSON. Either way the state after a token is the state before it.
- */
+/// Whether the text so far has left the scan inside a JSON string literal. Only
+/// literal chunks are scanned, never a bound value, which is sound because of
+/// the encoding this decides: a value bound inside a string is escaped and
+/// cannot close it, one bound outside is rendered as balanced JSON, so the
+/// state after a token is the state before it.
 bool advance_json_string_state (std::string_view literal, bool in_string) {
     bool escaped = false;
     for (const char c : literal) {
@@ -377,15 +349,10 @@ bool advance_json_string_state (std::string_view literal, bool in_string) {
     return in_string;
 }
 
-/**
- * Where in an XML document the text scanned so far has left us.
- *
- * JSON's question is one bit - inside a string literal or not - because a JSON
- * string has one quoting rule. XML has several, and which one applies is the
- * only thing that decides how a value may be written, so the scan has to say
- * which part of the document the next token sits in rather than whether it is
- * "in" something.
- */
+/// Where in an XML document the text scanned so far has left the scan. JSON's
+/// question is one bit, since a JSON string has one quoting rule; XML has
+/// several, and which applies decides how a value may be written, so the scan
+/// names the part of the document the next token sits in.
 enum class XmlPosition : std::uint8_t {
     /// Character data, between tags.
     Text,
@@ -407,10 +374,10 @@ enum class XmlPosition : std::uint8_t {
 /** How far into a delimiter the scan is, carried across literal chunks. */
 struct XmlScanState {
     XmlPosition position = XmlPosition::Text;
-    /// The characters of a delimiter matched so far and not yet resolved - the
-    /// `<![CDATA[` a chunk stopped halfway through, or the `]]` waiting for the
-    /// `>` that would end one. A token can sit anywhere, including between the
-    /// two halves of a delimiter, so this cannot live inside one chunk's scan.
+    /// The characters of a delimiter matched so far and not yet resolved: the
+    /// `<![CDATA[` a chunk stopped halfway through, or the `]]` awaiting the
+    /// `>` that would end one. A token can sit anywhere, between a delimiter's
+    /// two halves included, so this outlives one chunk's scan.
     std::string pending;
 };
 
@@ -443,18 +410,18 @@ struct XmlOpener {
     XmlPosition opens;
 };
 
-/// The three things a `<` in character data can open. Anything else it opens is
-/// a tag, and every tag is @ref XmlPosition::Markup - a `<!DOCTYPE` included,
-/// which ends at its `>` like a tag and carries nothing a row would bind into.
+/// The three things a `<` in character data can open. Anything else is a tag,
+/// and every tag is @ref XmlPosition::Markup, a `<!DOCTYPE` included: it ends
+/// at its `>` like a tag and carries nothing a row would bind into.
 constexpr auto XML_OPENERS = std::to_array<XmlOpener> ({
 { "<!--", XmlPosition::Comment },
 { "<![CDATA[", XmlPosition::Cdata },
 { "<?", XmlPosition::ProcessingInstruction },
 });
 
-/// Where @p c leaves a scan that is inside a tag but not inside an attribute
-/// value. Asked twice - once per ordinary character, once for the character
-/// that revealed the tag - and it is the same question both times.
+/// Where @p c leaves a scan inside a tag but not inside an attribute value;
+/// asked once per ordinary character and once for the character that revealed
+/// the tag, the same question both times.
 XmlPosition xml_position_after_markup_char (char c) {
     if (c == '"') {
         return XmlPosition::AttributeDouble;
@@ -468,33 +435,9 @@ XmlPosition xml_position_after_markup_char (char c) {
     return XmlPosition::Markup;
 }
 
-/**
- * Advance @p state over one literal chunk of an XML body.
- *
- * Only the literal chunks are scanned, never a bound value, and - as with
- * `advance_json_string_state` - that is sound because of the encodings this
- * decides. A value bound in character data has its `&` and `<` escaped, so it
- * cannot open markup; one bound in an attribute value has that attribute's
- * delimiter escaped, so it cannot close it; one bound in a CDATA section has
- * its `]]>` split across a reopened section, so it cannot end it and leaves the
- * scan inside CDATA either way; and one bound in a comment or a processing
- * instruction is refused outright, so nothing is written there at all. The
- * state after a token is therefore the state before it.
- *
- * @ref XmlPosition::Markup is the one exception, and it is the position where
- * no escape could help: a token there is a tag or attribute *name*, and a name
- * that legally contains `>` or a quote does not exist - so the value is written
- * verbatim, as it was before this rule, and the scan trusts it to contribute no
- * delimiter. That trust is the author's to keep; a name is not content, and a
- * data file is not where one comes from.
- */
-/**
- * One character of character data.
- *
- * A `<` is held until enough of what follows it has arrived to say which
- * construct it opened - which may be after the token that sits in the middle of
- * it, hence `pending`.
- */
+/// One character of character data. A `<` is held until enough of what follows
+/// has arrived to say which construct it opened, which may be after a token
+/// sitting in the middle of it, hence `pending`.
 void advance_xml_text (char c, XmlScanState& state) {
     if (state.pending.empty ()) {
         if (c == '<') {
@@ -519,8 +462,8 @@ void advance_xml_text (char c, XmlScanState& state) {
         return;
     }
     // It opened a tag after all. The character that settled that is part of the
-    // tag, so it is re-read in the position it actually sits in - `<>` would
-    // otherwise leave the scan inside markup that already closed.
+    // tag, so it is re-read in its real position; otherwise `<>` would leave
+    // the scan inside markup that already closed.
     state.pending.clear ();
     state.position = xml_position_after_markup_char (c);
 }
@@ -536,6 +479,22 @@ void advance_xml_closer (char c, std::string_view closer, XmlScanState& state) {
     state.pending = longest_partial_match (candidate, closer);
 }
 
+/**
+ * Advances @p state over one literal chunk of an XML body. As with
+ * `advance_json_string_state`, only literal chunks are scanned, which is sound
+ * because of the encodings this decides: a value bound in character data has
+ * its `&` and `<` escaped, so it cannot open markup; one in an attribute value
+ * has that attribute's delimiter escaped, so it cannot close it; one in a CDATA
+ * section has its `]]>` split across a reopened section, so the scan stays
+ * inside CDATA; and one in a comment or processing instruction is refused. The
+ * state after a token is therefore the state before it.
+ *
+ * @ref XmlPosition::Markup is the exception, where no escape could help: a
+ * token there is a tag or attribute *name*, and no legal name contains `>` or a
+ * quote, so the value is written verbatim and the scan trusts it to add no
+ * delimiter. That trust is the author's to keep; a name is not content, and a
+ * data file is not where one comes from.
+ */
 void advance_xml_state (std::string_view literal, XmlScanState& state) {
     for (const char c : literal) {
         if (const std::string_view closer = xml_closing_delimiter (state.position);
@@ -586,27 +545,25 @@ DataValueEncoding xml_encoding_at (XmlPosition position) {
 /// Every kind of token the request's own fields are split for: a field may
 /// carry one of each, and they bind together.
 ///
-/// A generator name is in here (issue #995) and reaches a split only when the
+/// A generator name is here (#995) and reaches a split only when the
 /// composition that produced this request deferred it
-/// (`http::DynamicResolution::Defer`) - a Send's composition generated it, so
-/// there is no token left to find. That is what keeps the two answers one
-/// answer: this predicate says what a *surviving* `{{$guid}}` means, and
-/// composition says whether one survives.
+/// (`http::DynamicResolution::Defer`); a Send's composition generated it,
+/// leaving no token. So the two answers stay one: this says what a *surviving*
+/// `{{$guid}}` means, composition whether one survives.
 bool keeps_reserved_namespace (const std::string& name) {
     return vayu::http::is_data_variable_name (name) ||
     vayu::http::is_identity_variable_name (name) ||
     vayu::http::is_generator_variable_name (name);
 }
 
-/// Every kind of token a *credential* is split for (issue #1055): the row's
-/// columns and the iteration identity, which are the two the bind can answer
-/// once the build has been deferred.
+/// Every kind of token a *credential* is split for (#1055): the row's columns
+/// and the iteration identity, the two the bind can answer once the build is
+/// deferred.
 ///
-/// A generator is deliberately not here, which is the one way this differs from
-/// `keeps_reserved_namespace`: composition generates a `{{$guid}}` inside the
-/// auth block rather than deferring it (issue #995), so no generator token
-/// survives into a credential for a split to find - and one kept here would
-/// defer a build for a token that is already a value.
+/// A generator is deliberately absent, the one difference from
+/// `keeps_reserved_namespace`: composition generates a `{{$guid}}` in the auth
+/// block rather than deferring it (#995), so none survives into a credential,
+/// and one kept here would defer a build for a token that is already a value.
 bool keeps_deferrable_credential_namespace (const std::string& name) {
     return vayu::http::is_data_variable_name (name) ||
     vayu::http::is_identity_variable_name (name);
@@ -643,24 +600,21 @@ first_kept_token_in (const nlohmann::json& value, const Keep& keep) {
 }
 
 /**
- * Split each visited field around the reserved tokens of one namespace, keeping
- * only the fields that carry one.
- *
- * @p keep says which namespaces this walk is splitting for: the request's own
- * fields take both, while the credential walk takes the data namespace alone
- * (see `tokenize_auth_fields`). One splitter rather than one per namespace,
- * because the split is where a token's encoding is decided and a second
- * splitter would be a second answer to "is this token inside a JSON string"
- * for tokens sitting in the same body.
+ * Splits each visited field around the reserved tokens of one namespace,
+ * keeping only fields that carry one. @p keep says which namespaces this walk
+ * splits for: the request's own fields take both, the credential walk the data
+ * namespace alone (`tokenize_auth_fields`). One splitter, not one per
+ * namespace, because the split decides a token's encoding, and a second
+ * splitter would be a second answer to "is this token inside a JSON string" for
+ * tokens in the same body.
  */
 class FieldSplitter {
     public:
     using Keep = bool (*) (const std::string&);
 
-    /// @p keep says which reserved names this walk splits on, and
-    /// @p bound_columns adds the bare names a bound row will substitute (issue
-    /// #1007) - empty for every run with no dataset behind it, which is what
-    /// keeps the split for those exactly the reserved-only scan it always was.
+    /// @p keep says which reserved names this walk splits on; @p bound_columns
+    /// adds the bare names a bound row substitutes (#1007), empty for every run
+    /// without a dataset, which keeps those runs' split reserved-only.
     FieldSplitter (Keep keep, const vayu::http::BoundColumnNames& bound_columns)
     : keep_ (keep), bound_columns_ (bound_columns) {
     }
@@ -718,13 +672,11 @@ class FieldSplitter {
 
 /**
  * @p text inside a `<![CDATA[…]]>` section: byte for byte, which is what the
- * section means and what an author picked it for, except for the one sequence
- * that would end it early.
- *
- * A `]]>` in the value is written `]]]]><![CDATA[>` - the section closes after
- * the `]]`, a new one opens, and the `>` sits inside it. A parser reads one
- * uninterrupted run of character data across the seam, so the value arrives
- * exactly as the cell wrote it and the document keeps the shape the author did.
+ * section means and why an author picked it, except for the one sequence that
+ * would end it early. A `]]>` in the value is written `]]]]><![CDATA[>`: the
+ * section closes after the `]]`, a new one opens, and the `>` sits inside it. A
+ * parser reads one run of character data across the seam, so the value arrives
+ * as the cell wrote it and the document keeps its shape.
  */
 std::string escape_xml_cdata (const std::string& text) {
     constexpr std::string_view CLOSER = "]]>";
@@ -767,15 +719,13 @@ std::string encode_data_value (const nlohmann::json& value, DataValueEncoding en
 }
 
 /**
- * The refusal a token placed where an XML body has no encoding for it reads as,
- * or `nullopt` for the placements that do have one.
- *
- * Both are markup addressed to something other than the server reading the
- * body: a comment is not sent as content at all, and a processing instruction
- * is an instruction to the parser. A value bound into either would either
- * vanish or, carrying `-->` or `?>`, end the construct and change the document
- * into one the author did not write - so the row is refused, in the same shape
- * as the missing-column and null-cell errors: the token's own text first.
+ * The refusal for a token placed where an XML body has no encoding for it, or
+ * `nullopt` for placements that have one. Both are markup addressed to
+ * something other than the server: a comment is not sent as content, and a
+ * processing instruction instructs the parser. A value bound into either would
+ * vanish or, carrying `-->` or `?>`, end the construct and change the document,
+ * so the row is refused, shaped like the missing-column and null-cell errors:
+ * the token's own text first.
  */
 std::optional<std::string> describe_unwritable_placement (const std::string& name,
 DataValueEncoding encoding) {
@@ -799,14 +749,10 @@ DataValueEncoding encoding) {
     return std::nullopt;
 }
 
-/**
- * Join the templated fields of one step against one iteration's row and
- * identity.
- *
- * Failure is recorded rather than thrown: the caller is a per-step path in a
- * run worker, and the first bad token is the one worth naming - later ones are
- * consequences of the same missing column.
- */
+/// Joins one step's templated fields against one iteration's row and identity.
+/// Failure is recorded, not thrown: the caller is a per-step path in a run
+/// worker, and the first bad token is the one worth naming, later ones being
+/// consequences of the same missing column.
 class TemplateJoiner {
     public:
     TemplateJoiner (const StepDataTemplate& tmpl, const IterationBinding& binding)
@@ -859,18 +805,16 @@ class TemplateJoiner {
 
     private:
     /// The text token @p index of @p entry contributes, or `nullopt` with
-    /// @ref result_ carrying the refusal.
-    ///
-    /// Split out of the loop above rather than inlined: it holds the whole
-    /// decision - which namespace answers, what the value is written as, and
-    /// the three ways a data token can have no value to write.
+    /// @ref result_ carrying the refusal. Out of the loop because it holds the
+    /// whole decision: which namespace answers, what the value is written as,
+    /// and the three ways a data token can have no value.
     std::optional<std::string>
     encode_token (const DataFieldTemplate& entry, size_t index, FieldContext context) {
         const std::string& name = entry.tokens[index];
         // Checked before anything is consulted: a placement no encoding fits is
-        // the template's fault and fails identically for every row, so naming a
-        // missing column instead would send the reader after the file when the
-        // request is what needs moving.
+        // the template's fault and fails for every row, so naming a missing
+        // column instead would send the reader after the file when the request
+        // needs moving.
         if (auto refusal = describe_unwritable_placement (name, entry.encodings[index])) {
             return refuse (std::move (*refusal));
         }
@@ -882,23 +826,21 @@ class TemplateJoiner {
         std::string encoded = entry.encodings[index] == DataValueEncoding::Url ?
         encode_at_url_component (vayu::http::render_data_value (*value), url_component_) :
         encode_data_value (*value, entry.encodings[index]);
-        // Checked on the encoded text rather than the value, because that is
-        // what the field ends up holding - and only in a header, where a line
-        // break is a line terminator. Everywhere else the same bytes are
-        // ordinary content: a JSON body escapes them, and a URL, a form field
-        // or a text body carries them as they were written.
+        // Checked on the encoded text, which is what the field holds, and only
+        // in a header, where a line break ends the line. Elsewhere the same
+        // bytes are content: a JSON body escapes them, and a URL, a form field
+        // or a text body carries them as written.
         if (context == FieldContext::Header && vayu::http::ends_a_header_line (encoded)) {
             return refuse (describe_header_line_break (name, binding_));
         }
         return encoded;
     }
 
-    /// What @p name substitutes, or null with @ref result_ carrying the refusal.
-    ///
-    /// A pointer rather than a value: a cell is the row's own JSON and a copy of
-    /// it per token per iteration is what the split exists to avoid. The two
-    /// identity numbers are held beside it for the same reason - built once per
-    /// join rather than once per token.
+    /// What @p name substitutes, or null with @ref result_ carrying the
+    /// refusal. A pointer, not a value: a cell is the row's own JSON, and a
+    /// copy per token per iteration is what the split exists to avoid; the two
+    /// identity numbers are held beside it for the same reason, built once per
+    /// join.
     const nlohmann::json* value_of (const std::string& name) {
         if (name == vayu::http::IDENTITY_VU_NAME) {
             return &vu_;
@@ -906,14 +848,13 @@ class TemplateJoiner {
         if (name == vayu::http::IDENTITY_ITERATION_NAME) {
             return &iteration_;
         }
-        // The one arm that *computes* rather than reads (issue #995), which is
-        // why it needs storage of its own: the two identity numbers and the
-        // row's cells are values this bind already holds, and a generated one
-        // exists only once it is asked for. Fresh per occurrence, matching what
-        // composition does with the same table - two `{{$guid}}` in one field
-        // are two ids, here as there. The previous occurrence's text has
-        // already been copied into the field by the time the next overwrites
-        // this, which is the whole lifetime the caller needs.
+        // The one arm that *computes* rather than reads (#995), so it needs its
+        // own storage: the identity numbers and the row's cells already exist,
+        // a generated value only once asked for. Fresh per occurrence, as
+        // composition does with the same table: two `{{$guid}}` in one field
+        // are two ids. The previous occurrence's text is already copied into
+        // the field when the next overwrites this, the whole lifetime the
+        // caller needs.
         if (vayu::http::is_generator_variable_name (name)) {
             generated_ =
             vayu::utils::invariant_value (vayu::http::resolve_dynamic_variable (name),
@@ -921,12 +862,11 @@ class TemplateJoiner {
             return &generated_;
         }
         if (binding_.row == nullptr) {
-            // A data token in a run with no set at all. Refused here rather
-            // than resolved to nothing, for the reason every other arm is: the
-            // token says the value came from the file, and there is no file.
-            // Plan resolution refuses this before a run row exists (issue
-            // #415); this is the same rule at the bind, for a caller that
-            // reached it another way.
+            // A data token in a run with no set: refused, not resolved to
+            // nothing, like every other arm, since the token says the value
+            // came from a file and there is none. Plan resolution refuses this
+            // before a run row exists (#415); this is the same rule at the
+            // bind, for a caller that got here another way.
             return refuse_value (
             token_for (name) + " names a data column, but this run has no data set to bind it from");
         }
@@ -936,11 +876,10 @@ class TemplateJoiner {
             bound_subject (binding_) +
             " does not have (columns: " + describe_columns (*binding_.row) + ")");
         }
-        // Same rule as a missing column, one type down: the token says the
-        // value comes from the file, and a null cell has none to give. Writing
-        // "" here is the quiet wrong request the namespace exists to remove -
-        // `{"n": }` for a typed placement, a blank field for a quoted one
-        // (issue #593).
+        // A missing column's rule, one type down: a null cell has no value to
+        // give. Writing "" is the quiet wrong request the namespace exists to
+        // remove: `{"n": }` for a typed placement, a blank field for a quoted
+        // one (#593).
         if (cell->is_null ()) {
             return refuse_value (token_for (name) + " names a column that is null in " +
             bound_subject (binding_) + " - a data token substitutes a value, and this row has none for it");
@@ -965,10 +904,10 @@ class TemplateJoiner {
     /// the join reads them exactly as it reads a cell.
     const nlohmann::json vu_;
     const nlohmann::json iteration_;
-    /// The last generated value, alive until the next generator token needs it
-    /// (issue #995). Held here rather than returned by value because
-    /// @ref value_of answers a pointer for the row's cells, which are the
-    /// row's own JSON and must not be copied per token per iteration.
+    /// The last generated value, alive until the next generator token (#995).
+    /// Held here, not returned by value, because @ref value_of answers a
+    /// pointer for the row's cells, which must not be copied per token per
+    /// iteration.
     nlohmann::json generated_;
     size_t next_field_ = 0;
     size_t cursor_     = 0;
@@ -992,15 +931,14 @@ std::optional<std::string> StepDataTemplate::first_data_token () const {
 
 StepDataTemplate tokenize_bindable_fields (const vayu::Request& request,
 const vayu::http::BoundColumnNames& bound_columns) {
-    // Copied because the walk rewrites in place; nothing is actually rewritten
-    // here, since a split substitutes no token. Sharing the walk is what the
-    // copy buys - see the header for why a second field list would be the wrong
-    // trade.
+    // Copied because the walk rewrites in place, though a split substitutes no
+    // token; the copy buys sharing the walk (the header says why a second field
+    // list is the wrong trade).
     vayu::Request scratch = request;
     FieldSplitter splitter (keeps_reserved_namespace, bound_columns);
-    // The faults the walk can report are bind-time ones only: a split rewrites
-    // nothing, so the header map is rebuilt from its own keys - which are
-    // unique, and empty only if they already were.
+    // The walk's faults are bind-time only: a split rewrites nothing, so the
+    // header map is rebuilt from its own keys, unique, and empty only if they
+    // already were.
     (void)walk_bindable_fields (
     scratch, [&splitter] (const std::string& field, FieldContext context) {
         splitter (field, context);
@@ -1028,10 +966,10 @@ const IterationBinding& binding) {
         return DataBindResult{ true, {} };
     }
     TemplateJoiner joiner (tmpl, binding);
-    // A bearer token and an api key sent in a header are header text, so a line
-    // break in the cell behind one forges a header exactly as it would in
-    // `request.headers` - the walk says which credential is which so this does
-    // not have to re-read the mode (issue #732).
+    // A bearer token or an api key sent in a header is header text, so a line
+    // break in its cell forges a header as it would in `request.headers`; the
+    // walk says which credential is which, so this need not re-read the mode
+    // (#732).
     vayu::http::walk_auth_credentials (auth,
     [&joiner] (std::string& field, vayu::http::CredentialDestination destination) {
         joiner (field, credential_context (destination));
@@ -1050,11 +988,10 @@ const IterationBinding& binding) {
     if (credentials.empty ()) {
         return DataBindResult{ true, {} };
     }
-    // The credentials second, which is the whole reason this order lives in one
-    // place - see the header. A run with no set at all reaches this with a null
-    // row and is not refused here: the credentials may carry the identity
-    // alone, which needs no row (issue #1055), and a data token that does need
-    // one is refused by the join itself, naming the token the way it names one
+    // Credentials second, the reason this order lives in one place (see the
+    // header). A run with no set reaches this with a null row and is not
+    // refused here: the credentials may carry only the identity, which needs no
+    // row (#1055), and a data token that does is refused by the join, named as
     // in a request field.
     return bind_auth_row (request, auth, credentials, binding);
 }
@@ -1153,10 +1090,9 @@ const IterationBinding& binding) {
         joiner (field, context);
     });
     DataBindResult result = joiner.result ();
-    // A join failure is checked first because it is the earlier and more
-    // specific fault: the joiner stops rewriting once it records one, so a
-    // header fault seen after it is an artefact of a half-bound walk rather
-    // than anything the request actually says.
+    // A join failure first, as the earlier and more specific fault: the joiner
+    // stops rewriting once it records one, so a header fault after it is an
+    // artefact of a half-bound walk.
     if (!result.ok) {
         return result;
     }
@@ -1199,10 +1135,9 @@ vayu::http::BoundColumnNames bound_columns_of (const std::vector<nlohmann::json>
 }
 
 DataBindResult bind_data_row (vayu::Request& request, const nlohmann::json& row, size_t row_index) {
-    // The row itself says which bare names it can bind (issue #1007), which is
-    // the whole set for a caller that holds one row: a name it does not carry
-    // is an ordinary variable, left for the residual pass to resolve rather
-    // than split here only to fail as a column no row has.
+    // The row itself says which bare names it binds (#1007), the whole set for
+    // a one-row caller: a name it lacks is an ordinary variable, left for the
+    // residual pass rather than split only to fail as a column no row has.
     const IterationBinding binding{ &row, row_index, IterationIdentity{} };
     return apply_iteration_template (request,
     tokenize_bindable_fields (request, bound_columns_of (row)), binding);
