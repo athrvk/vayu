@@ -8,12 +8,10 @@
  */
 
 /**
- * @file core/query_encoding.hpp
  * @brief How a query row's key and value are written into a URL, by Postman's
- *        own rule (issue #1771), how a query is read back into pairs, and how
- *        URL text is encoded by the component it lands in (issues #1773,
- *        #2465), and how a URL's query is read into a request's Params rows
- *        (issue #3551).
+ *        own rule (#1771); how a query is read back into pairs; how URL text is
+ *        encoded by the component it lands in (#1773, #2465); and how a URL's
+ *        query is read into a request's Params rows (#3551).
  *
  * Pinned to the app's copy (`request-builder/utils/query-encoding.ts`) by
  * `tests/fixtures/query-encoding-conformance.json`, read by

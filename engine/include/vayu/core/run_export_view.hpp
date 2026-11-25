@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/run_export_view.hpp
  * @brief What a run-report document says, read once for every text renderer
  *        (#2131, #2135).
  *

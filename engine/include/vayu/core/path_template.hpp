@@ -8,14 +8,12 @@
  */
 
 /**
- * @file core/path_template.hpp
  * @brief The one engine-side copy of `normalizeVars`, in both of the shapes the
  *        renderer calls it in.
  *
- * It lived inside `http/routes/mock_server.cpp` while the mock server was its
- * only reader, and moved here when a second one arrived: the request drafts an
- * import would build (`core/openapi_drafts` under issue #865) write their URL
- * through exactly this rewrite, which is *why* the mock server can route them.
+ * It has two readers: `http/routes/mock_server.cpp`, and the request drafts an
+ * import would build (`core/openapi_drafts`, #865), which write their URL
+ * through exactly this rewrite - which is *why* the mock server can route them.
  * Two copies of it would be two answers to "what does `{petId}` become", and
  * the failure that produces - an imported request the mock silently cannot
  * route - is invisible until a 404 nobody can explain.
@@ -24,12 +22,12 @@
  * read by `mock_server_routes_test.cpp` and by the app's
  * `path-template.conformance.test.ts`.
  *
- * It also holds the one engine-side reading of Postman's `:name` path
- * variables (issue #1764): which segments of a URL are one, and what a
- * request's `in: "path"` Params rows put in their place at send time. The
- * app's copy of that reading (`request-builder/utils/path-variables.ts`) is
- * pinned to this one by `tests/fixtures/path-variable-conformance.json`, read
- * by `path_variables_test.cpp` and `path-variables.conformance.test.ts`.
+ * It also holds the one engine-side reading of Postman's `:name` path variables
+ * (#1764): which segments of a URL are one, and what a request's `in: "path"`
+ * Params rows put in their place at send time. The app's copy of that reading
+ * (`request-builder/utils/path-variables.ts`) is pinned to this one by
+ * `tests/fixtures/path-variable-conformance.json`, read by
+ * `path_variables_test.cpp` and `path-variables.conformance.test.ts`.
  */
 
 #include <cstddef>
