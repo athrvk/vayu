@@ -8,24 +8,23 @@
  */
 
 /**
- * @file elements.hpp
- * @brief The element registry (issue #1513) and the pipeline that runs a
- *        compiled element at a phase of a step (issue #1514): the kind a
- *        behaviour attached to a request or collection at a phase of a step
- *        is, never a column (issue #1512).
+ * @brief The element registry (#1513) and the pipeline that runs a compiled
+ *        element at a phase of a step (#1514): the kind a behaviour attached to
+ *        a request or collection at a phase of a step is, never a column
+ *        (#1512).
  *
  * A kind is one translation unit under `engine/src/core/elements/`, whose
  * `make_*_kind()` names it, its config schema and (once a kind runs one) its
  * behaviour; `Registry::instance()` holds the fixed, explicit list of them
  * (`engine/src/core/elements/registry.cpp`), the one place a kind name maps to
- * code (the extensibility contract's rule 1 in issue #1512). A namespace-scope
- * self-registering static initialiser - the issue's own wording - is declined:
+ * code (the extensibility contract's rule 1 in #1512). A namespace-scope
+ * self-registering static initialiser - #1512's own wording - is declined:
  * `engine/CLAUDE.md` requires nothing at namespace scope be built at run time,
  * because a throwing initialiser before `main` has no frame to catch it and no
  * defined order against another translation unit's. An explicit call list
- * inside `Registry::instance()`'s function-local static keeps the same "one
- * new file, one new line" cost the issue asks for, on the same "explicit list,
- * never a glob" precedent `engine/tests/CMakeLists.txt` already uses.
+ * inside `Registry::instance()`'s function-local static keeps the same "one new
+ * file, one new line" cost #1512 asks for, on the same "explicit list, never a
+ * glob" precedent `engine/tests/CMakeLists.txt` uses.
  */
 
 #include <array>
@@ -55,25 +54,24 @@ struct ScenarioPlan;
 struct TimersOverride;
 
 /**
- * @brief Cross-instance shared clocks, one atomic per name (issue #1570) -
- *        `timer.pacing(perUser: false)`'s coordination for one cadence
- *        shared across every virtual user under a scenario load run, kept
- *        generic over what a "name" is so a future kind holding one *fixed
- *        interval* per name never needs a second one. A kind coordinating a
- *        fractional *rate* wants `SharedThroughputBudgets` below instead
- *        (issue #1571 expected to reuse this type and could not: a token
+ * @brief Cross-instance shared clocks, one atomic per name (#1570) -
+ *        `timer.pacing(perUser: false)`'s coordination for one cadence shared
+ *        across every virtual user under a scenario load run, kept generic over
+ *        what a "name" is so a future kind holding one *fixed interval* per
+ *        name never needs a second one. A kind coordinating a fractional *rate*
+ *        wants `SharedThroughputBudgets` below instead (#1571): a token
  *        bucket's debt is a `double` beside a timestamp, and no single
- *        compare-exchange swaps both).
+ *        compare-exchange swaps both.
  *
  * Sized once at construction from an explicit name list the caller already
  * knows - `std::atomic` is neither copyable nor movable, so growing this
  * afterwards is not an option - which keeps this type decoupled from
  * `ScenarioPlan` / `CompiledElement`: the scan for which names need a clock
  * lives with whoever builds that list (`ScenarioLoadState`'s constructor,
- * `scenario_load.cpp`), not here. `advance` is a compare-exchange retry
- * loop, never a mutex: the load path's completion callback runs on every
- * event-loop worker at once, and per `engine/CLAUDE.md`'s hot-path
- * discipline nothing on it blocks for a lock.
+ * `scenario_load.cpp`), not here. `advance` is a compare-exchange retry loop,
+ * never a mutex: the load path's completion callback runs on every event-loop
+ * worker at once, and per `engine/CLAUDE.md`'s hot-path discipline nothing on
+ * it blocks for a lock.
  */
 class SharedPacingClocks {
     public:
@@ -314,10 +312,9 @@ struct ElementContext {
     /// Null in `step.before`; set once the send has answered.
     vayu::Response* response = nullptr;
 
-    /// Runs @p script as this step's pre-request script, exactly as
-    /// `execute_exchange` always has, and returns its result. Unset only in a
-    /// context with no script slot at all (there is none today - both callers
-    /// always bind this).
+    /// Runs @p script as this step's pre-request script, as `execute_exchange`
+    /// does, and returns its result. Unset only in a context with no script
+    /// slot at all (there is none today - both callers always bind this).
     std::function<vayu::ScriptResult (const std::string& script)> run_pre_script;
     std::function<vayu::ScriptResult (const std::string& script)> run_post_script;
     /// Where `script.pre` / `script.post` fold the result of the callbacks
@@ -392,17 +389,15 @@ struct ElementContext {
     /// any plan that resolved no scope-spanning kind - neither needs one.
     const std::unordered_map<std::string, ElementSpan>* element_spans = nullptr;
     /// Where a kind's state must outlive one `apply` call and must not be
-    /// shared between an inherited element's several independent
-    /// occurrences (`control.once`'s fire-once flag, `control.throughput`'s
-    /// producer-side counter, `control.transaction`'s running sum) - a
-    /// fresh, empty map for a design send, one map for the whole sequential
-    /// run (issue #1515's single implicit user), one map per virtual user
-    /// under load, so one VU's count is never another's. Keyed by
-    /// `element_id`, optionally folded with `iteration`. Null only where a
-    /// caller resolves no element that reads it. A sibling of `pacing_state`
-    /// below (issue #1498's identical shape for `timer.pacing`) rather than
-    /// unified with it - kept separate rather than merged in this PR to
-    /// avoid widening either issue's own change.
+    /// shared between an inherited element's several independent occurrences
+    /// (`control.once`'s fire-once flag, `control.throughput`'s producer-side
+    /// counter, `control.transaction`'s running sum) - a fresh, empty map for a
+    /// design send, one map for the whole sequential run (#1515's single
+    /// implicit user), one map per virtual user under load, so one VU's count
+    /// is never another's. Keyed by `element_id`, optionally folded with
+    /// `iteration`. Null only where a caller resolves no element that reads it.
+    /// A sibling of `pacing_state` below (#1498's identical shape for
+    /// `timer.pacing`), kept separate rather than unified with it.
     std::unordered_map<std::string, int64_t>* controller_state = nullptr;
     /// Cross-VU counters for a kind whose config asked to share state across
     /// every virtual user of a scenario load run (issue #1569's
@@ -414,18 +409,17 @@ struct ElementContext {
     SharedThroughputCounters* shared_controller_state = nullptr;
 
     /// True for the design send and the sequential run, where a `timer.*`
-    /// kind's wait blocks the calling thread exactly as it always has; false
-    /// on a scenario load run's own producer/completion hooks, where blocking
-    /// would stall the shared event loop and a kind must instead report its
-    /// intended wait through `Element::scheduled_ready_delay_ms` for the
-    /// caller to apply through `VirtualUser::ready_at_ms` (issue #1498).
+    /// kind's wait blocks the calling thread; false on a scenario load run's
+    /// own producer/completion hooks, where blocking would stall the shared
+    /// event loop and a kind must instead report its intended wait through
+    /// `Element::scheduled_ready_delay_ms` for the caller to apply through
+    /// `VirtualUser::ready_at_ms` (#1498).
     bool blocking_allowed = true;
 
-    /// A run's seeded generator (issue #1498), for a `timer.*` kind whose
-    /// wait is randomised and wants to be reproducible with the run's
-    /// `elements.seed`. Null for a design send, which has no run and no seed
-    /// to be reproducible against - a kind falls back to its own unseeded
-    /// generator there, exactly as before this field existed.
+    /// A run's seeded generator (#1498), for a `timer.*` kind whose wait is
+    /// randomised and wants to be reproducible with the run's `elements.seed`.
+    /// Null for a design send, which has no run and no seed to be reproducible
+    /// against - a kind falls back to its own unseeded generator there.
     std::mt19937_64* rng = nullptr;
 
     /// Per-node "when did this node last start" state for `timer.pacing`
@@ -455,10 +449,9 @@ struct ElementContext {
     /// `script.setup` / `script.teardown` (#1499): runs @p script once, at
     /// `run.start` / `run.end`, against the run's own scopes rather than any
     /// step's. Trailing, like the `outcome_*` fields below, and for the same
-    /// reason: every step-phase dispatch site predates #1499 and so skips both
-    /// - only the two run-boundary dispatch sites bind either. `{}` is
-    /// load-bearing on the same `Variable::created_at` precedent those fields
-    /// cite.
+    /// reason: no step-phase dispatch site sets either - only the two
+    /// run-boundary dispatch sites bind them. `{}` is load-bearing on the same
+    /// `Variable::created_at` precedent those fields cite.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::function<vayu::ScriptResult (const std::string& script)> run_setup_script{};
     // NOLINTNEXTLINE(readability-redundant-member-init)
@@ -545,15 +538,14 @@ enum class Phase : std::uint8_t {
 /**
  * Whether a compiled element is cheap enough to run inline on the load hot
  * path, or costly enough (a `script.*` kind) that the load paths defer it to
- * the replay by default (#1495). Phase 0 declares the split; nothing reads it
- * yet - no kind executes before #1514.
+ * the replay by default (#1495).
  */
 enum class HotPathClass : std::uint8_t {
     Declarative,
     Script,
 };
 
-/** A compiled, runnable behaviour. No kind overrides `apply` before #1514. */
+/** A compiled, runnable behaviour. */
 class Element {
     public:
     virtual ~Element ()                 = default;
@@ -625,14 +617,14 @@ struct ElementKind {
     /// comparison outside `core/elements` (#1512's extensibility contract,
     /// rule 1).
     bool needs_span = false;
-    /// Whether this kind can redirect the plan walk to a step other than
-    /// the next one (issue #1515's `control.loop` / `control.switch`). A
-    /// scenario load run's virtual users only ever advance forward
-    /// (`VirtualUser::step`), so `find_load_incompatible_controller`
-    /// (`scenario_load.cpp`) reads this - through the registry, never a
-    /// `kind ==` comparison outside `core/elements` (#1512's extensibility
-    /// contract, rule 1) - to refuse a load run carrying one rather than
-    /// silently running it once and ignoring what it asked for.
+    /// Whether this kind redirects the plan walk in a way a scenario load run
+    /// cannot follow. No kind sets it: `control.loop` and `control.switch`
+    /// (#1515) jump on the load path's own mechanism (#1569).
+    /// `find_load_incompatible_controller` (`scenario_load.cpp`) reads this -
+    /// through the registry, never a `kind ==` comparison outside
+    /// `core/elements` (#1512's extensibility contract, rule 1) - to refuse a
+    /// load run carrying such a kind rather than silently running it once and
+    /// ignoring what it asked for.
     bool jumps_or_repeats = false;
     /// Whether the plan compiler must track, across a whole iteration's step
     /// sequence, which occurrence of this kind's element id comes first
@@ -1040,13 +1032,12 @@ is_blank_script_element (const std::string& kind, const nlohmann::json& config);
 
 /**
  * Assigns an `el_` id to every object entry of @p elements missing one - the
- * same default the engine has always given a caller who names no id
- * (`apply_elements_field`, `routes.hpp`). Shared rather than copied a third
- * time (issue #1573): a validator that skips this and hands the raw,
- * possibly id-less array straight to `Registry::validate` refuses a payload
- * this default was meant to accept, so validating and compiling must stamp
- * ids the same way `apply_elements_field` already does for a stored
- * request/collection. A non-array or non-object entry is left alone -
+ * default a caller who names no id gets (`apply_elements_field`, `routes.hpp`).
+ * Shared rather than copied a third time (#1573): a validator that skips this
+ * and hands the raw, possibly id-less array straight to `Registry::validate`
+ * refuses a payload this default was meant to accept, so validating and
+ * compiling must stamp ids the same way `apply_elements_field` does for a
+ * stored request/collection. A non-array or non-object entry is left alone -
  * `Registry::validate` / `compile_elements` are what name that refusal.
  */
 void stamp_default_element_ids (nlohmann::json& elements);
