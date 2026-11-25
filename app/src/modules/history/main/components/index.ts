@@ -5,9 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Components barrel export
- */
+/** The history run views' shared components. */
 
 export { default as BaselineComparison } from "./BaselineComparison";
 export { default as RunComparisonView } from "./RunComparisonView";

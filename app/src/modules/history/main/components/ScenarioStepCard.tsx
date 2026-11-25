@@ -8,42 +8,34 @@
 /**
  * One step execution of a collection run, expandable into its exchange.
  *
- * The row is the shared `SampledExchange` - the same shell the dashboard's
- * live samples and the history Samples tab render - so a fix to the row, the
- * expansion chrome or the timing tiles reaches the step list too. What this
- * component adds is the two things a step has and a load-run sample does not:
- * a name, and an outcome that is not derivable from the status code.
+ * The row is the shared `SampledExchange`, the shell the dashboard's live samples and the history
+ * Samples tab render, so a fix to the row, the expansion chrome or the timing tiles reaches the
+ * step list too. This component adds the two things a step has and a load-run sample lacks: a name,
+ * and an outcome not derivable from the status code.
  *
- * The response comes back through `responseFromRunResult`, the same path a
- * design run's response pane restores from, rather than a second reading of
- * `trace_data` - a copy of that mapping would not receive its fixes
+ * The response comes back through `responseFromRunResult`, the path a design run's response pane
+ * restores from, not a second reading of `trace_data`: a copy of that mapping would miss its fixes
  * (`bodyTruncated`/`bodyBytes`, the `httpVersion` fallback).
  *
- * A row streamed live has no stored result yet and therefore no exchange to
- * show. Inventing a response for it would be a claim the run has not made - so
- * it expands onto the reason instead. An accordion that opens onto nothing at
- * all reads as a bug in the app rather than as a step whose exchange has not
- * been written yet, which is what it is: the engine batches every step row to
- * SQLite when the run ends.
+ * A row streamed live has no stored result and so no exchange; inventing a response would be a
+ * claim the run has not made, so it expands onto the reason. An accordion opening onto nothing
+ * reads as an app bug rather than a step whose exchange is not written yet, which it is: the engine
+ * batches every step row to SQLite when the run ends.
  *
- * ## The way back to the request (issue #730)
+ * ## The way back to the request (#730)
  *
- * A step that failed used to be a dead end: the trace named the request it came
- * from and nothing read it, so reproducing "iteration 501 row 501 failed" meant
- * finding the request in the tree by name and then discovering the row was out
- * of the picker's reach. The action beside the summary is that path - it opens
- * the request and hands the builder the row this iteration bound, so the repro
- * is the step's own action and then one click on the row.
+ * The trace names the request a step came from. The action beside the summary opens that request
+ * and hands the builder the row this iteration bound, so reproducing "iteration 501 row 501 failed"
+ * is the step's own action and one click on the row, not a search of the tree by name and a picker
+ * that cannot reach the row.
  *
- * It is on a live row too (issue #831): the `step` frame names the request, so
- * the reader watching iteration 12 of 500 fail can go straight to it instead of
- * waiting the run out. The expansion below is still the thing that arrives
- * later - a live row has no stored exchange.
+ * It is on a live row too (#831): the `step` frame names the request, so a reader watching
+ * iteration 12 of 500 fail can go straight to it rather than wait the run out. The expansion is
+ * still what arrives later, as a live row has no stored exchange.
  *
- * It is absent, not disabled, on a row that has no `requestId`: a step whose
- * plan entry names no stored request, and a row written before the runner
- * stamped one. A control offering to open a request the row cannot name would
- * be a promise this card cannot keep.
+ * Absent, not disabled, on a row with no `requestId` (a step whose plan entry names no stored
+ * request, or a row written before the runner stamped one): a control offering a request the row
+ * cannot name is a promise this card cannot keep.
  */
 
 import { memo, useMemo } from "react";
@@ -84,11 +76,9 @@ export interface ScenarioStepCardProps {
 	showIteration: boolean;
 	isExpanded: boolean;
 	/**
-	 * Told which step it was, rather than closing over it at the call site.
-	 *
-	 * The list holds one handler for all of its rows (issue #1153): a
-	 * per-row arrow would be a new prop on every render of the list, and the
-	 * memo below would never once hold.
+	 * Told which step it was rather than closing over it at the call site: the list holds one
+	 * handler for all its rows (#1153), as a per-row arrow would be a new prop every render and the
+	 * memo below would never hold.
 	 */
 	onToggle: (step: ScenarioStepRow) => void;
 	runId: string;
@@ -114,18 +104,16 @@ function ScenarioStepCard({
 	const sentFile = sentBodyFileOf(step.result?.trace?.request?.bodyFile);
 	const phases = phasesFromTrace(step.result?.trace);
 
-	// The schema verdict from whichever source this row has (issue #681): the
-	// live `step` event before the run ends, and the restored response after -
-	// through the same funnel the response itself comes from, so nothing here
-	// re-reads `trace.validation` and the two cannot drift. They are one object
-	// either way: the engine publishes and stores the same node.
+	// The schema verdict from whichever source this row has (#681): the live `step` event before
+	// the run ends, the restored response after, through the funnel the response comes from, so
+	// nothing here re-reads `trace.validation`. They are one object either way: the engine
+	// publishes and stores the same node.
 	const validation = step.validation ?? response?.validation;
 
-	// The assertions this step made (issue #724). The stored list wins the
-	// moment there is one - it is the same assertions the live tally counted,
-	// and the row below renders from it - so a step does not change its numbers
-	// when its stored row arrives. A live row keeps the frame's tally, which is
-	// all a run being watched has.
+	// The assertions this step made (#724). The stored list wins once there is one (the same
+	// assertions the live tally counted, and what the row below renders), so a step's numbers do
+	// not change when its stored row arrives; a live row keeps the frame's tally, all a watched run
+	// has.
 	const testResults = response?.testResults;
 	const tests = tallyTests(testResults) ?? step.tests;
 
@@ -161,12 +149,11 @@ function ScenarioStepCard({
 		.join(" · ");
 
 	/*
-	 * The row's own number is carried only when the run bound one, and only when
-	 * it is a row. A step of a collection with no data set has nothing to select
-	 * - pointing the picker at row 0 there would select a row out of a file the
-	 * run never read - and a stored index that is not a whole row is a malformed
-	 * trace, which `openRequestWithDataRow` refuses outright. The link stays,
-	 * without the row: the request is still where the reader was going.
+	 * The row's number is carried only when the run bound one, and only when it is a whole row. A
+	 * step of a collection with no data set has nothing to select (row 0 would be a row of a file
+	 * the run never read), and a non-integer stored index is a malformed trace, which
+	 * `openRequestWithDataRow` refuses. The link stays without the row: the request is still where
+	 * the reader was going.
 	 */
 	const requestId = step.requestId;
 	const rowIndex =
@@ -193,20 +180,17 @@ function ScenarioStepCard({
 						{step.outcome}
 					</Badge>
 					{/*
-					 * Beside the outcome and not folded into it: with
-					 * `failOnSchemaError` off - the default - a step can pass
-					 * every assertion while its response does not match what the
-					 * document declares, and those are two separate facts. The
-					 * shared chip, so the three-state wording is the one the
-					 * response pane already uses.
+					 * Beside the outcome, not folded into it: with `failOnSchemaError` off (the
+					 * default) a step can pass every assertion while its response does not match
+					 * the document, two separate facts. The shared chip, so the three-state wording
+					 * is the response pane's.
 					 */}
 					{validation && <ValidationChip validation={validation} className="shrink-0" />}
 					{/*
-					 * Beside the verdict and not folded into the outcome either:
-					 * a step is `failed` whether one assertion did not hold or
-					 * twelve did not, and the row is where that difference is
-					 * cheap to show. Present live, from the frame's tally, so a
-					 * run being watched says more than "failed".
+					 * Beside the verdict and not folded into the outcome: a step is `failed`
+					 * whether one assertion or twelve did not hold, and the row is where that
+					 * difference is cheap to show. Present live, from the frame's tally, so a
+					 * watched run says more than "failed".
 					 */}
 					{tests && <TestsChip tests={tests} className="shrink-0" />}
 					{/*
@@ -264,15 +248,12 @@ function ScenarioStepCard({
 			scriptMs={step.result?.trace?.scriptMs}
 			isExpanded={isExpanded}
 			onToggle={() => onToggle(step)}
-			// No per-row border: `ScenarioRunView` wraps the step list in a
-			// `divide-y`, matching `SampleRequestCard`'s row - a flat hairline
-			// list, not a boxed card per step. No `border-b last:border-b-0`
-			// here either, unlike that sibling: each step sits inside its own
-			// `skip-offscreen` virtualization wrapper, so this row is always the
-			// sole (and therefore always "last") child of *that* div - the
-			// divide-y border between steps has to come from the shared parent,
-			// where `:last-child` means the actual last step. Status rides the
-			// icon tint alone, the same call `SampleRequestCard` made.
+			// No per-row border: `ScenarioRunView` wraps the list in a `divide-y`, matching
+			// `SampleRequestCard`'s flat hairline row. Unlike that sibling, no
+			// `border-b last:border-b-0` either: each step sits in its own `skip-offscreen`
+			// wrapper, so this row is always that div's sole (so "last") child, and the border
+			// between steps has to come from the shared parent, where `:last-child` is the actual
+			// last step. Status rides the icon tint alone, as in `SampleRequestCard`.
 		>
 			{!response && (
 				<p className="text-xs text-muted-foreground">
@@ -286,49 +267,39 @@ function ScenarioStepCard({
 			)}
 
 			{/*
-			 * The verdict in full, inside the expansion. The same section the
-			 * response pane's Tests tab renders, rather than a second layout of
-			 * one verdict - the failure list and the unevaluated-keyword
-			 * disclosure are the parts that make the chip above honest, and a
-			 * copy of them here would not receive that section's fixes.
+			 * The verdict in full, inside the expansion: the response pane's Tests-tab section, not
+			 * a second layout. Its failure list and unevaluated-keyword disclosure are what make
+			 * the chip above honest, and a copy would miss that section's fixes.
 			 */}
 			{validation && <SchemaValidation validation={validation} />}
 
 			{/*
-			 * Every assertion the step's scripts made (issue #724), from the
-			 * stored trace - both phases, grouped by script (issue #810). The
-			 * same component the response pane's Tests tab
-			 * renders, stacked under the schema verdict the way that tab stacks
-			 * them - `inset={false}` because this expansion owns the padding,
-			 * exactly as the tab does for the pair.
-			 *
-			 * A live row has none: the list rides the stored trace, so what the
-			 * chip above shows from the frame's tally is all there is until the
-			 * run ends and the row is written.
+			 * Every assertion the step's scripts made (#724), from the stored trace, both phases,
+			 * grouped by script (#810): the response pane's Tests-tab component, stacked under the
+			 * schema verdict as that tab stacks them, `inset={false}` because this expansion owns
+			 * the padding, as the tab does. A live row has none: the list rides the stored trace,
+			 * so the chip's frame tally is all there is until the row is written.
 			 */}
 			{testResults && testResults.length > 0 && (
 				<TestResults results={testResults} inset={false} />
 			)}
 
 			{/*
-			 * The step's typed elements (issue #1512) - extractors, assertions and
-			 * timers - beside the script results above. Same stored-trace source,
-			 * so a live row shows none until the run ends and the row is written,
-			 * exactly like `testResults`.
+			 * The step's typed elements (#1512): extractors, assertions and timers, beside the
+			 * script results above, from the same stored trace, so a live row shows none until the
+			 * row is written.
 			 */}
 			{response?.elements && response.elements.length > 0 && (
 				<ElementOutcomes outcomes={response.elements} inset={false} />
 			)}
 
 			{/*
-			 * The step's console lines and script errors (issue #3126), under the
-			 * Tests they belong with. The response pane's own `ConsoleOutput`, so
-			 * the level labels, the filter and the progressive window are the one
-			 * implementation. It fills a parent of definite height in the Console
-			 * tab; here the expansion has none, so the box is bounded to the
-			 * response viewer's own 400px and scrolls inside it. Rendered only when
-			 * there is something to show, so a scriptless step gains no "No
-			 * console output" block per row.
+			 * The step's console lines and script errors (#3126), under the Tests they belong with:
+			 * the response pane's own `ConsoleOutput`, so the level labels, the filter and the
+			 * progressive window are one implementation. It fills a parent of definite height in
+			 * the Console tab; the expansion has none, so the box is bounded to the response
+			 * viewer's 400px and scrolls. Rendered only with something to show, so a scriptless
+			 * step gains no "No console output" block.
 			 */}
 			{hasConsole && (
 				<div className="max-h-[400px] overflow-auto">
@@ -380,15 +351,11 @@ function ScenarioStepCard({
 }
 
 /**
- * Memoized, because a live run re-renders the list around it (issue #1153).
- *
- * Up to 200 of these are mounted at once and a run streaming its steps
- * re-renders the list several times a second, where all but the newest cards
- * are rendering exactly what they rendered before. Every prop holds its
- * identity across such a render: `step` rows are replaced only by an event for
- * that same step, `onToggle` is one handler for the whole list, and the rest
- * are primitives. The default shallow comparison is therefore the whole
- * requirement - a custom comparator here would be a second copy of that fact,
- * free to disagree with it.
+ * Memoized, as a live run re-renders the list around it (#1153): up to 200 cards are mounted and a
+ * streaming run re-renders the list several times a second, all but the newest card rendering what
+ * it did before. Every prop keeps its identity across such a render (`step` rows are replaced only
+ * by an event for that step, `onToggle` is one handler for the list, the rest are primitives), so
+ * the default shallow comparison is the whole requirement; a custom comparator would be a second
+ * copy of that fact, free to disagree.
  */
 export default memo(ScenarioStepCard);
