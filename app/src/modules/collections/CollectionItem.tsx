@@ -23,31 +23,27 @@ import { useInlineRename } from "@/hooks/useInlineRename";
 import { rowInsetPx } from "@/constants/layout";
 
 /**
- * What differs per row. Everything shared - the expanded set, the selection,
- * the rename and delete state, every handler - comes from the collection tree
- * contexts. The row renders itself only: its children are rows of their own in
- * the tree's flat list (`flattenVisibleRows`).
- *
- * Every prop is a primitive or an object from the query cache, so the `memo`
- * below skips a row whose entity did not change (#2543).
+ * What differs per row. Everything shared (the expanded set, the selection, the rename and delete
+ * state, every handler) comes from the collection tree contexts. The row renders itself only: its
+ * children are rows of their own in the tree's flat list (`flattenVisibleRows`). Every prop is a
+ * primitive or a query-cache object, so the `memo` below skips a row whose entity did not change
+ * (#2543).
  */
 export interface CollectionItemProps {
 	collection: Collection;
 	depth: number;
 	/**
-	 * 1-based position among the rows this one shares a parent with, and how
-	 * many there are - child folders and requests together, one set of
-	 * treeitems per parent. Required rather than defaulted: only the flattening
-	 * that lists the siblings knows them, and a default would announce a
-	 * plausible lie ("1 of 1") rather than fail.
+	 * 1-based position among the rows sharing this one's parent, and their count (child folders and
+	 * requests together, one treeitem set per parent). Required: only the flattening that lists the
+	 * siblings knows them, and a default would announce a plausible lie ("1 of 1") rather than
+	 * fail.
 	 */
 	posInSet: number;
 	setSize: number;
 	/**
-	 * The "Empty collection" line below an expanded, empty folder. The line is
-	 * not a treeitem, so a screen reader walking the tree never reaches it and
-	 * the emptiness would be silent; the row names it in `aria-describedby`, so
-	 * it is said the moment the row is focused.
+	 * The "Empty collection" line below an expanded, empty folder. It is not a treeitem, so a
+	 * screen reader walking the tree never reaches it; the row names it in `aria-describedby`, so
+	 * it is said when the row is focused.
 	 */
 	emptyPlaceholderId?: string | null;
 	/** The row's `activeGuideLevel`: which indent guide is drawn in the accent. */
@@ -126,10 +122,9 @@ function CollectionItemRow({
 
 	const handleClick = (e: React.MouseEvent) => {
 		if (isDeleting || isRenaming) return;
-		// The second click of a double-click also fires `click`; ignore it so the
-		// double-click starts a rename. The first click already opened the
-		// collection (opening is idempotent), so there is nothing to defer - and
-		// none of the 80ms delay that made a single click to open feel laggy.
+		// The second click of a double-click also fires `click`; ignoring it lets the double-click
+		// start a rename. The first click already opened the collection (opening is idempotent), so
+		// nothing is deferred and a single click opens without delay.
 		if (e.detail > 1) return;
 		onCollectionClick(collection);
 	};
@@ -148,20 +143,17 @@ function CollectionItemRow({
 	};
 
 	/**
-	 * The row's own box delegates to the label button - see RequestItem for the
-	 * rule and why the check is what it is. This is the row where the indent
-	 * *cannot* move onto that button even in principle: the chevron sits between
-	 * them, so padding on the button would push the label away from the chevron
-	 * rather than indent the row.
+	 * The row's own box delegates to the label button (see RequestItem for the rule and the check).
+	 * Here the indent *cannot* move onto that button even in principle: the chevron sits between
+	 * them, so padding on the button would push the label away from the chevron rather than indent
+	 * the row.
 	 */
 	const isRowSurface = (e: React.MouseEvent) => e.target === e.currentTarget;
 
 	/**
-	 * Indentation is padding *inside* the row, never margin around it. A margin
-	 * would push the row's background in too, so a nested row's hover and
-	 * selection fill would stop short of the panel edge while a top-level row's
-	 * reached it. Depth is shown by where the content sits, not where the row
-	 * starts.
+	 * Indentation is padding *inside* the row, never margin: a margin would push the row's
+	 * background in too, so a nested row's hover and selection fill would stop short of the panel
+	 * edge while a top-level row's reaches it.
 	 */
 	const indentPx = rowInsetPx(depth);
 
@@ -205,14 +197,11 @@ function CollectionItemRow({
 			onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 			data-drop-blocked={dnd.isBlocked || undefined}
 			className={cn(
-				// focus-row: this row is the perceived target, not the narrower
-				// label button inside it - it paints the keyboard focus ring.
-				// The transition deliberately omits outline-color (which
-				// `transition-colors` includes in Tailwind v4): a focus ring must
-				// appear instantly, otherwise it visibly fades between rows as
-				// Tab moves. Hover may ease; focus may not.
-				// h-8: the shared drawer row height, so the rhythm holds when you switch
-				// drawer view.
+				// focus-row: this row is the perceived target, not the narrower label button, so it
+				// paints the focus ring. The transition omits outline-color (which
+				// `transition-colors` includes in Tailwind v4): a focus ring must appear instantly,
+				// not fade between rows as Tab moves. h-8: the shared drawer row height, so the
+				// rhythm holds when the drawer view switches.
 				"focus-row flex h-8 items-center gap-1 pr-2 group transition-[color,background-color,border-color] cursor-pointer",
 				// The rows inside a folder being deleted are dimmed by the
 				// list (`CollectionTreeRows`), which knows which they are.
@@ -232,11 +221,10 @@ function CollectionItemRow({
 				tabIndex={-1}
 				data-tree-toggle
 				className={cn(
-					// focus-self: this toggles expansion rather than opening the
-					// collection, so it keeps its own ring instead of lighting
-					// up the whole row.
-					// size-target (24px at Default) so the chevron fits the row. Still an
-					// adequate pointer target, and the row itself remains clickable.
+					// focus-self: this toggles expansion rather than opening the collection, so it
+					// keeps its own ring instead of lighting the whole row. size-target (24px at
+					// Default) fits the chevron in the row; still an adequate pointer target, and
+					// the row itself stays clickable.
 					"focus-self flex items-center justify-center size-target rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 					isSelected
 						? "text-primary/90 hover:text-primary"
@@ -258,11 +246,10 @@ function CollectionItemRow({
 				onDoubleClick={handleDoubleClick}
 				tabIndex={-1}
 				data-tree-activate
-				// self-stretch: see RequestItem. The row is `items-center`, so
-				// this button - the only thing wired to onCollectionClick - was
-				// as tall as its 18px label inside a 32px row, leaving ~7px of
-				// dead space above and below that still showed the hover fill
-				// and the pointer cursor.
+				// self-stretch: see RequestItem. The row is `items-center`, so without it this
+				// button, the only thing wired to onCollectionClick, is as tall as its 18px label
+				// in a 32px row, leaving ~7px of dead space above and below that still shows the
+				// hover fill and the pointer cursor.
 				className="flex min-w-0 self-stretch items-center gap-2 flex-1 text-left cursor-pointer"
 				disabled={isDeleting || isRenaming}
 			>
@@ -302,11 +289,11 @@ function CollectionItemRow({
 						>
 							{collection.name}
 						</TruncatedText>
-						{/* The drawer's one count idiom, shared with the section
-								    headers in Services and Variables so a row and its
-								    section cannot drift into two idioms again (issue
-								    #1688 - Variables drew the same fact as a filled
-								    Badge one click away from this). */}
+						{/*
+						 * The drawer's one count idiom, shared with the section headers in Services
+						 * and Variables so a row and its section cannot drift into two idioms
+						 * (issue #1688).
+						 */}
 						<DrawerSectionCount value={badgeCount} />
 					</>
 				)}
@@ -325,12 +312,12 @@ function CollectionItemRow({
 					actions={menu.actions}
 				/>
 			)}
-			{/* Keyboard-only rename and delete targets: F2 and Delete click them
-				    (see useRovingTreeFocus). Never shown; the same actions live in
-				    the row's menu. The delete one used to exist on request rows
-				    only, so Delete on a folder was swallowed silently - the hook
-				    preventDefaults the key either way. It is the same delete the
-				    menu starts, dialog or no dialog. */}
+			{/*
+			 * Keyboard-only rename and delete targets that F2 and Delete click (see
+			 * useRovingTreeFocus); never shown, as the row's menu holds the same actions. The hook
+			 * preventDefaults the key either way, so without the delete target Delete on a folder
+			 * is swallowed silently. It is the menu's delete, dialog or no dialog.
+			 */}
 			<button
 				type="button"
 				className="hidden"

@@ -22,16 +22,14 @@ interface CollectionTreeContextMenuProps {
 }
 
 /**
- * Right-click on a collection tree row (#1360), as one menu for the whole tree
- * (#2543) rather than a `RowContextMenu` per row: the row is resolved from the
- * click and its actions built from the flat rows model, the same builders the
- * row's `⋯` menu uses (`tree-row-menu.ts`).
+ * Right-click on a collection tree row (#1360), as one menu for the whole tree (#2543), not a
+ * `RowContextMenu` per row: the row is resolved from the click and its actions built from the flat
+ * rows model, with the builders the row's `⋯` menu uses (`tree-row-menu.ts`).
  *
- * What a right-click does is `RowContextMenu`'s, row for row: it focuses the
- * row so Escape has somewhere of ours to return to, it does not select it, and
- * a row mid-rename or mid-delete opens nothing. The `own-menu` marker that keeps
- * the main process's menu away stays on each row, which is where
- * `electron/context-menu.ts` reads it from the click's own target.
+ * The behaviour is `RowContextMenu`'s, row for row: it focuses the row so Escape has somewhere of
+ * ours to return to, does not select it, and opens nothing on a row mid-rename or mid-delete. The
+ * `own-menu` marker that keeps the main process's menu away stays on each row, where
+ * `electron/context-menu.ts` reads it off the click's own target.
  */
 export function CollectionTreeContextMenu({ rowAt, children }: CollectionTreeContextMenuProps) {
 	const state = useCollectionTreeState();
@@ -47,13 +45,12 @@ export function CollectionTreeContextMenu({ rowAt, children }: CollectionTreeCon
 	if (open && menu === null) setOpen(false);
 
 	/*
-	 * Capture, so the decision is made before the trigger's own handler, which
-	 * opens and calls `preventDefault`. A click with no menu under it - a
-	 * spacer, the "Empty collection" line, the new-folder field, a busy row's
-	 * rename field - is stopped short of that handler instead, so the platform
-	 * keeps its default: the rename field its Cut/Copy/Paste. Stopping here
-	 * costs nothing else, since the one other listener (`installContextMenuBridge`)
-	 * captures on `window`, ahead of this.
+	 * Capture, so the decision precedes the trigger's own handler, which opens and calls
+	 * `preventDefault`. A click with no menu under it (a spacer, the "Empty collection" line, the
+	 * new-folder field, a busy row's rename field) is stopped short of that handler, so the
+	 * platform keeps its default (the rename field its Cut/Copy/Paste). The one other listener
+	 * (`installContextMenuBridge`) captures on `window`, ahead of this, so stopping here costs
+	 * nothing else.
 	 */
 	const onContextMenuCapture = (event: React.MouseEvent<HTMLElement>) => {
 		const target = event.target instanceof Element ? event.target : null;

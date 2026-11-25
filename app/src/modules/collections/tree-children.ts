@@ -6,14 +6,11 @@
  */
 
 /**
- * A parent's children as the one list the tree shows them in.
- *
- * A collection's sub-folders and its requests share one `order` space (#2535),
- * so a request can sit between two folders and every consumer that asks "what
- * comes next under this parent" - the render, a drop, Alt+Arrow, "Move to…",
- * the menu's Move up / Move down gating - has to read the same merged list. This
- * is that list, built once; a consumer that merged the two itself would be the
- * second copy of the sibling rule that #360 and #431 removed.
+ * A parent's children as the one list the tree shows. Sub-folders and requests share one `order`
+ * space (#2535), so a request can sit between two folders, and every consumer asking "what comes
+ * next under this parent" (the render, a drop, Alt+Arrow, "Move to…", the menu's Move up / Move
+ * down gating) must read the same merged list. This is that list, built once; a consumer merging
+ * the two itself would be a second copy of the one sibling rule (#360, #431).
  */
 
 import { compareTreeOrder, type Collection, type RequestSummary } from "@/types";
@@ -36,12 +33,10 @@ export type TreeChild =
 	  };
 
 /**
- * The children of `parentId` in sibling order (`compareTreeOrder`).
- *
- * `null` is the top level, which holds collections only: a request always
- * belongs to one. Unlike the tree's root list this does not adopt orphans (a
- * collection whose parent is not loaded); a reorder scope is a stored parent,
- * and an orphan's stored parent is its own id, not the root.
+ * The children of `parentId` in sibling order (`compareTreeOrder`). `null` is the top level, which
+ * holds collections only (a request always belongs to one). Unlike the tree's root list this adopts
+ * no orphans (a collection whose parent is not loaded): a reorder scope is a stored parent, and an
+ * orphan's stored parent is its own id, not the root.
  */
 export function childrenOf(
 	parentId: string | null,

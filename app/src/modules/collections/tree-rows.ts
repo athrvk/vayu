@@ -6,18 +6,15 @@
  */
 
 /**
- * The collection tree as the list of rows a user can see (#2543).
+ * The collection tree as the list of rows a user can see (#2543). The tree renders this array top
+ * to bottom as one flat list under `role="tree"`: no row renders another, so the tree's shape lives
+ * here and in each row's `aria-level`, not in the DOM's nesting. One pure function answers "what is
+ * on screen, in what order, at what depth and position", which a windowed list must ask before it
+ * mounts anything.
  *
- * The tree renders this array, top to bottom, as one flat list under
- * `role="tree"`: no row renders another, so the shape of the tree lives here
- * and in each row's `aria-level`, not in the DOM's nesting. One pure function
- * answers "what is on screen, in what order, at what depth and position", which
- * is what a windowed list needs to ask before it mounts anything.
- *
- * Order: the roots, then under each expanded folder its new-folder form when
- * open, the "Empty collection" line when it holds nothing, and its children -
- * sub-folders and requests in one sibling list (`mergeSiblings`, #2535), so a
- * request can sit above or between folders.
+ * Order: the roots, then under each expanded folder its new-folder form when open, the "Empty
+ * collection" line when it holds nothing, and its children, sub-folders and requests in one sibling
+ * list (`mergeSiblings`, #2535), so a request can sit above or between folders.
  */
 
 import type { Collection, RequestSummary } from "@/types";
@@ -63,10 +60,9 @@ export interface FolderRow extends RowBase, SetPosition {
 	kind: "folder";
 	collection: Collection;
 	/**
-	 * The "Empty collection" line that follows this row, which the row points
-	 * `aria-describedby` at: that line is not a treeitem, so a screen reader
-	 * walking the tree never lands on it. `null` unless the folder is expanded
-	 * and holds nothing.
+	 * The "Empty collection" line after this row, which the row names in `aria-describedby`, as a
+	 * screen reader walking the tree never lands on that non-treeitem line. `null` unless the
+	 * folder is expanded and holds nothing.
 	 */
 	emptyPlaceholderId: string | null;
 }
@@ -159,11 +155,10 @@ export function emptyPlaceholderId(collectionId: string): string {
 }
 
 /**
- * The tree's top level: collections with no parent *and* those whose parent is
- * not loaded. An orphan used to match neither the roots filter nor any parent's
- * children, so it rendered nowhere - the shape a bad or half-applied reparent
- * leaves behind, and the user saw a collection silently disappear. Listed at the
- * root it is reachable, so it can be moved or deleted.
+ * The tree's top level: collections with no parent *and* those whose parent is not loaded. An
+ * orphan matches neither the roots filter nor any parent's children, so without this it renders
+ * nowhere (the shape a bad or half-applied reparent leaves behind), a collection silently gone.
+ * Listed at the root it is reachable, so it can be moved or deleted.
  */
 function treeRoots(collections: readonly Collection[]): Collection[] {
 	const loadedIds = new Set(collections.map((c) => c.id));
@@ -189,10 +184,9 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 	const { expandedCollectionIds, creatingSubfolder, getRequestsByCollection } = input;
 	const childFolders = childFoldersByParent(input.collections);
 	const rows: TreeRow[] = [];
-	// A folder already expanded into is never entered again. The data cannot
-	// reach one twice through `parentId` alone, but a duplicated id in the list
-	// would, and an unguarded walk is a hung window rather than a wrong answer
-	// (see tree-utils).
+	// A folder already expanded into is never entered again: `parentId` alone cannot reach one
+	// twice, but a duplicated id in the list can, and an unguarded walk is a hung window, not a
+	// wrong answer (see tree-utils).
 	const entered = new Set<string>();
 
 	const appendFolder = (
@@ -274,10 +268,9 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 }
 
 /**
- * Sets `activeGuideLevel` on the rows of the selected request's parent
- * folder's subtree: the rows after the folder, up to the next row at its depth
- * or shallower. A request that is not in `rows` (no selection, or hidden in a
- * collapsed folder) leaves every row `null`.
+ * Sets `activeGuideLevel` on the rows of the selected request's parent folder's subtree: the rows
+ * after the folder, up to the next row at its depth or shallower. A request not in `rows` (none
+ * selected, or hidden in a collapsed folder) leaves every row `null`.
  */
 function markActiveGuide(rows: TreeRow[], selectedRequestId: string | null): void {
 	if (selectedRequestId === null) return;
@@ -298,14 +291,10 @@ function markActiveGuide(rows: TreeRow[], selectedRequestId: string | null): voi
 }
 
 /**
- * The space above `rows[index]`, in Tailwind spacing units (`--spacing`, so it
- * follows the density setting the way the rows' `h-8` does).
- *
- * Half a unit between rows, and a whole unit above the first row inside an
- * expanded folder - the `space-y-0.5` between siblings and the `mt-1` above a
- * nested group that the tree drew when it was nested. A row starts a group
- * exactly when it is deeper than the row before it, because depth only ever
- * steps down one level at a time, into the folder just above.
+ * The space above `rows[index]`, in Tailwind spacing units (`--spacing`, so it follows the density
+ * setting as the rows' `h-8` does): half a unit between rows, and a whole unit above the first row
+ * inside an expanded folder. A row starts a group exactly when it is deeper than the row before it,
+ * as depth only steps down one level at a time, into the folder just above.
  */
 export function rowSpacingAbove(rows: readonly TreeRow[], index: number): 0 | 0.5 | 1 {
 	if (index <= 0) return 0;
@@ -345,13 +334,11 @@ export interface DropLine {
 }
 
 /**
- * Where the line for a drop beside the row `key` names is drawn (#3447).
- *
- * Before a row, on its top edge. After a row, under the last row of its
- * visible subtree: a row dropped after an open folder lands after everything
- * in it, so the folder row's own bottom edge, above its first child, would show
- * a different drop. An open folder's form and "Empty collection" line are rows
- * of that subtree too. `null` when no visible row has the key.
+ * Where the line for a drop beside the row `key` names is drawn (#3447). Before a row: on its top
+ * edge. After a row: under the last row of its visible subtree, as a row dropped after an open
+ * folder lands after everything in it, and the folder row's own bottom edge (above its first child)
+ * would show a different drop. An open folder's form and "Empty collection" line are rows of that
+ * subtree too. `null` when no visible row has the key.
  */
 export function dropLineBeside(
 	rows: readonly TreeRow[],
@@ -366,11 +353,10 @@ export function dropLineBeside(
 }
 
 /**
- * A row's height in spacing units, which its wrapper in `CollectionTreeRows`
- * is given as a class: the window's arithmetic and the layout read the one
- * number, so they cannot disagree. A folder and a request row are `h-8`, and so
- * is the "Empty collection" line; the new-folder form is its `control-sm` field
- * plus `py-1`, which is ten units at both densities.
+ * A row's height in spacing units, given to its wrapper in `CollectionTreeRows` as a class: the
+ * window's arithmetic and the layout read one number, so they cannot disagree. Folder, request and
+ * "Empty collection" rows are `h-8`; the new-folder form is its `control-sm` field plus `py-1`, ten
+ * units at both densities.
  */
 export function rowHeightUnits(row: TreeRow): 8 | 10 {
 	return row.kind === "new-folder-form" ? 10 : 8;
@@ -406,13 +392,10 @@ export function navigableRows(
 }
 
 /**
- * The rows that must stay mounted beside the one holding the tree's tab stop.
- *
- * The treeitems on either side of `rows[index]`, its ancestors, and the first
- * row past its subtree. The row before it, its parent and the row past its
- * subtree are the three places a delete hands focus to (`rowAfterRemoving`),
- * which reads only the mounted rows: with these pinned it gives the answer the
- * whole list would.
+ * The rows that must stay mounted beside the one holding the tree's tab stop: the treeitems either
+ * side of `rows[index]`, its ancestors, and the first row past its subtree. The row before it, its
+ * parent and the row past its subtree are where a delete hands focus (`rowAfterRemoving`), which
+ * reads only mounted rows; with these pinned it answers as the whole list would.
  */
 export function rowsAroundFocus(rows: readonly TreeRow[], index: number): number[] {
 	const row = rows[index];
