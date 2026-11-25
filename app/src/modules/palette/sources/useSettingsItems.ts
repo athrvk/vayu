@@ -11,16 +11,16 @@
  * five engine categories owns the request timeout, and `dbCacheSize` (the name every doc, log line
  * and MCP call uses) finds its row though the screen labels it "Cache Size".
  *
- * Two things it deliberately does not do:
+ * Two deliberate limits:
  *
- * - **Index panels.** `SettingsIndexEntry` has a `panel` kind, and the command registry already
- *   makes a command per panel from the same registry; indexing them here would list every settings
- *   screen twice, as two rows doing one thing.
- * - **Own a matcher.** `searchSettings` is the sidebar's ranking, and matching settings differently
- *   from the sidebar would be two answers to one question, so which rows are settings results is
- *   decided once, here. Their order is not: `ranking.ts` re-sorts every section by its own score,
- *   so the palette may order them unlike the sidebar, deliberately, since it scores every kind by
- *   one measure while the sidebar ranks settings among themselves.
+ * - **Not an index of panels.** `SettingsIndexEntry` has a `panel` kind, but the command registry
+ *   already makes a command per panel from the same registry; indexing them here would list every
+ *   settings screen twice, as two rows doing one thing.
+ * - **Not its own matcher.** Which rows are settings results comes from `searchSettings`, the
+ *   sidebar's ranking, since matching settings differently from the sidebar would be two answers to
+ *   one question. Their order does not: `ranking.ts` re-sorts every section by its own score, so
+ *   the palette may order them unlike the sidebar, deliberately, since it scores every kind by one
+ *   measure while the sidebar ranks settings among themselves.
  */
 
 import { useMemo } from "react";
