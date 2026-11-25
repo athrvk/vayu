@@ -6,19 +6,17 @@
  */
 
 /**
- * "Save to request" for a run an agent started that no saved request stands
- * behind (issue #1817). It is the header's primary action there: the run is the
- * only record of what was sent, and Save is how it stops being disposable.
+ * "Save to request" for a run an agent started with no saved request behind it (#1817). It is the
+ * header's primary action there: the run is the only record of what was sent, and Save is how it
+ * stops being disposable.
  *
- * The flow is `useNewRequest`'s, not a copy of it: the last-used collection
- * when there is one, a new collection when there are none, the picker when it
- * would be a guess - and the new request opens in its own tab, which is the
- * confirmation. The run itself is an immutable record and keeps its null
- * `requestId`, so the button stays: a second press saves a second copy, which
- * is what pressing it twice asks for.
+ * The flow is `useNewRequest`'s, not a copy: the last-used collection when there is one, a new
+ * collection when there is none, the picker when it would be a guess, and the new request opens in
+ * its own tab as the confirmation. The run is an immutable record and keeps its null `requestId`,
+ * so the button stays and a second press saves a second copy, which is what pressing twice asks
+ * for.
  *
- * Mounted only for such a run, so no other run view pays for the hook's
- * collections query.
+ * Mounted only for such a run, so no other run view pays for the hook's collections query.
  */
 
 import { Save } from "lucide-react";

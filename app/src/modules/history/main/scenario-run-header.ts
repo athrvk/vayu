@@ -18,18 +18,15 @@ import { NOT_RECORDED, unrecordedFiguresOf } from "./components/unrecorded-figur
 import type { ScenarioStepRow } from "./scenario-steps";
 
 /**
- * "Iteration 3 of 40 - 17 of 240 steps" for a run whose `plan` frame has
- * arrived, `null` before it (an older engine, or a client attached past the
- * frame's eviction), when the header has nothing to say beyond "Running".
+ * "Iteration 3 of 40 - 17 of 240 steps" once the run's `plan` frame has arrived; `null` before it
+ * (an older engine, or a client attached past the frame's eviction), when the header says only
+ * "Running".
  *
- * The iteration is the one the latest step belongs to, read off the step
- * itself rather than derived from `stepsRun / stepsPerIteration`: an errored
- * step ends its iteration early and `setNextRequest` walks one in more or fewer
- * steps than the plan holds, so the division drifts from the run it describes.
- * Before the first step has landed the run is in iteration 1. Both counts are
- * clamped to the plan: `stepsExpected` is an upper bound on paper only
- * (`ScenarioRunPlanEvent`), and "250 of 240" would contradict itself, so a run
- * past its plan drops the denominator.
+ * The iteration is the latest step's own, not `stepsRun / stepsPerIteration`: an errored step ends
+ * its iteration early and `setNextRequest` walks one in more or fewer steps than the plan, so the
+ * division drifts. Before the first step the run is in iteration 1. Both counts are clamped to the
+ * plan: `stepsExpected` is an upper bound on paper only (`ScenarioRunPlanEvent`), and "250 of 240"
+ * contradicts itself, so a run past its plan drops the denominator.
  */
 export function liveRunProgressText(
 	plan: ScenarioRunPlanEvent | null,
@@ -46,13 +43,10 @@ export function liveRunProgressText(
 }
 
 /**
- * "4.20s - 83 requests sent - 16.9% error rate" for a run that has ended, from
- * the report's `summary`.
- *
- * `totalRequests` is the steps that sent (#2822), so the error rate is over the
- * same population and is left out when none did: "0.0%" over nothing is not a
- * rate. A summary the engine did not record (#2895) says so once instead of
- * printing zeros as measurements.
+ * "4.20s - 83 requests sent - 16.9% error rate" for an ended run, from the report's `summary`.
+ * `totalRequests` is the steps that sent (#2822), so the error rate is over the same population and
+ * left out when none did ("0.0%" over nothing is no rate). A summary the engine did not record
+ * (#2895) says so once rather than printing zeros as measurements.
  */
 export function finishedRunFiguresText(summary: RunReport["summary"]): string {
 	if (unrecordedFiguresOf({ summary }).counts) {

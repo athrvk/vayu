@@ -8,20 +8,18 @@
  */
 
 /**
- * @file core/openapi_export.hpp
- * @brief A collection back out as an OpenAPI document (issue #630, moved
- *        engine-side by #855 - #761's phase B, move 3).
+ * @brief A collection back out as an OpenAPI document (#630; engine-owned per
+ *        #855, move 3 of #761's phase B).
  *
- * The assembly was the renderer's until the engine could read a document at all
- * (#853). It moved for the reason every other half of phase B moved: an agent
- * cannot reach a function in the renderer, so `export_spec` could not be an MCP
- * tool while the ~900 lines that build the document lived there. Now the
- * document is put together beside the bytes it is built from - `spec_documents`
- * holds the stored text and `requests.spec_operation` says which operation each
- * request is - and `POST /specs/export` is the one way to ask for it.
+ * Built engine-side because an agent cannot reach a function in the renderer:
+ * `export_spec` can be an MCP tool only because the document is put together
+ * here, beside the bytes it is built from - `spec_documents` holds the stored
+ * text and `requests.spec_operation` says which operation each request is - on
+ * the engine's own document reader (#853). `POST /specs/export` is the one way
+ * to ask for it.
  *
- * **Two directions, and which one runs is not a setting.** A collection bound to
- * a spec exports *its own document*, updated: the stored bytes read, the
+ * **Two directions, and which one runs is not a setting.** A collection bound
+ * to a spec exports *its own document*, updated: the stored bytes read, the
  * operations Vayu still has kept, the ones it no longer has removed, examples
  * written back, and every member Vayu does not model left exactly where it was.
  * A free-form collection has no document to update, so it exports a skeleton -
@@ -145,7 +143,7 @@ struct ExportExample {
      * declares no example at all is one the import sampled. Writing that sample
      * back would document a value the API never stated. `false` is the safe
      * default - an example nobody attributed to the import is new information,
-     * which is what this export has always written.
+     * and is written.
      */
     bool from_import = false;
     /// Whether the stored response carried a header besides `Content-Type`
@@ -156,13 +154,13 @@ struct ExportExample {
     bool has_extra_headers = false;
     /**
      * The map key the import took this example from, if any
-     * (`request_examples.spec_example_key`, issue #1457).
+     * (`request_examples.spec_example_key`, #1457).
      *
      * A value comparison alone cannot tell an edited example from a new one:
-     * once the body has changed it no longer equals the entry it came from,
-     * so it read as news to the document and was added beside that entry
-     * rather than replacing it. This key, when the document still names it,
-     * says which entry to write into instead of adding a new one.
+     * once the body has changed it no longer equals the entry it came from, so
+     * it would read as news to the document and be added beside that entry
+     * rather than replace it. This key, when the document still names it, says
+     * which entry to write into instead.
      */
     std::optional<std::string> spec_example_key = std::nullopt;
     /// The stored headers verbatim - carried in `x-vayu-request.examples`,
