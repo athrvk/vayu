@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/transaction_histograms.hpp
  * @brief One HdrHistogram per declared `control.transaction` name (issue
  *        #1515), shared by the sequential run and a scenario load run.
  */
@@ -29,15 +28,15 @@ namespace vayu::core {
 
 /**
  * Every `control.transaction` name a plan declares gets one histogram,
- * allocated up front from a scan of the plan - never discovered mid-run - so
- * recording is index-into-a-fixed-vector-then-atomic-op, the same shape
- * `StepHistograms` uses and, like it, taking **no lock**: issue #1515's own
- * bar for a controller on the load hot path.
+ * allocated up front from a scan of the plan, never discovered mid-run, so
+ * recording is an index into a fixed vector and then an atomic op: the shape
+ * `StepHistograms` uses and, like it, taking **no lock**, issue #1515's own bar
+ * for a controller on the load hot path.
  *
- * A `record` naming a transaction the scan never found (there is none today
- * - every occurrence's name comes from the same config the scan reads) is
- * silently ignored rather than growing the map, which is what keeps the
- * no-lock guarantee true after construction.
+ * A `record` naming a transaction the scan never found (none can: every
+ * occurrence's name comes from the config the scan reads) is ignored rather
+ * than growing the map, which keeps the no-lock guarantee true after
+ * construction.
  */
 class TransactionHistograms {
     public:
