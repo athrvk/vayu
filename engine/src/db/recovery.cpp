@@ -5,11 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief Reading and writing the startup recovery marker (issue #922), the
- *        quarantined file sets it points at (issue #984), and the sorting of a
- *        SQLite failure into what a caller can do about it (#2420, #2423).
- */
+/// Reading and writing the startup recovery marker (#922), the quarantined file
+/// sets it points at (#984), and sorting a SQLite failure into what a caller
+/// can do about it (#2420, #2423).
 
 #include "vayu/db/recovery.hpp"
 
@@ -46,8 +44,8 @@ int64_t now_ms () {
 }
 
 // The system_error behind @p error when it is a SQLite failure. The category
-// check is what makes the code a SQLite code: a filesystem or socket error
-// carries an errno in the same field, and errno 13 (EACCES) is not SQLITE_FULL.
+// check makes the code a SQLite code: a filesystem or socket error carries an
+// errno in the same field, and errno 13 (EACCES) is not SQLITE_FULL.
 const std::system_error* as_sqlite_error (const std::exception& error) {
     const auto* system_error = dynamic_cast<const std::system_error*> (&error);
     if (system_error == nullptr ||
@@ -153,9 +151,9 @@ std::vector<std::string> quarantined_database_paths (const std::string& db_path)
     const std::string prefix =
     db_file.filename ().string () + std::string (QUARANTINE_INFIX);
 
-    // Keyed by set rather than by file: one quarantined database is up to three
-    // entries in this directory, and a caller that saw them separately would
-    // prune two sets while thinking it pruned three.
+    // Keyed by set, not by file: one quarantined database is up to three
+    // entries here, and a caller seeing them separately would prune two sets
+    // thinking it pruned three.
     std::vector<std::pair<int64_t, std::string>> sets;
     std::error_code ec;
     for (const auto& entry : fs::directory_iterator (directory, ec)) {
@@ -185,10 +183,10 @@ std::vector<std::string> quarantined_database_paths (const std::string& db_path)
                 stamp = 0;
             }
         }
-        // Spelled the way `db_path` was, not the way the directory walk found
-        // it: the quarantined name is the database path with a suffix, so a
-        // bare relative `vayu.db` must not come back as `./vayu.db` - the
-        // marker records one of those strings and a caller compares it against
+        // Spelled as `db_path` was, not as the directory walk found it: the
+        // quarantined name is the database path plus a suffix, so a bare
+        // relative `vayu.db` must not come back as `./vayu.db`, since the
+        // marker records one of those strings and a caller compares it with
         // this list.
         std::string base = db_file.has_parent_path () ? (directory / name).string () : name;
         if (std::find_if (sets.begin (), sets.end (), [&base] (const auto& known) {
@@ -232,9 +230,9 @@ const std::optional<std::string>& quarantined_path) {
     nlohmann::json document;
     document["outcome"] = to_string (outcome);
     document["at"]      = now_ms ();
-    // Absent rather than null when there is nothing quarantined, for the same
-    // reason `/health` omits the whole node on a clean start: a reader that
-    // finds the key can render it without first testing it for emptiness.
+    // Absent, not null, when nothing is quarantined, as `/health` omits the
+    // whole node on a clean start: a reader finding the key can render it
+    // without testing it for emptiness.
     if (quarantined_path) {
         document[QUARANTINED_PATH_FIELD] = *quarantined_path;
     }
@@ -289,9 +287,9 @@ std::optional<RecoveryRecord> read_recovery_marker (const std::string& db_path) 
         return std::nullopt;
     }
 
-    // Optional, but not lenient: a marker that carries the key with something
-    // other than a path in it is a half-parsed document, and the rule above is
-    // that those read as no record at all rather than as a partial one.
+    // Optional, not lenient: a marker carrying the key with something other
+    // than a path is half-parsed, and by the rule above that reads as no
+    // record, not a partial one.
     std::optional<std::string> quarantined_path;
     if (const auto field = document.find (QUARANTINED_PATH_FIELD);
     field != document.end ()) {

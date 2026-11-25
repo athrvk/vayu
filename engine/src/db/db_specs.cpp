@@ -5,10 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief OpenAPI documents (issue #637): storage, the orphan sweep (issue
- * #718), and the OpenAPI-sync transaction (issue #655) (issue #1614).
- */
+/// OpenAPI documents (#637): storage, the orphan sweep (#718) and the
+/// OpenAPI-sync transaction (#655) (#1614).
 
 #include "database_impl.hpp"
 
@@ -57,13 +55,12 @@ std::vector<Collection> Database::get_collections_bound_to_spec (const std::stri
     if (spec_id.empty ()) {
         return bound;
     }
-    // The binding is a JSON blob, so the match is made here rather than in SQL.
-    // An unparseable blob binds nothing - the same reading every serializer
-    // gives it - and must not make the spec undeletable.
+    // The binding is a JSON blob, so the match is made here, not in SQL. An
+    // unparseable blob binds nothing (every serializer's reading) and must not
+    // make the spec undeletable.
     //
     // Trashed collections count (#3446): a restore brings the binding back,
-    // so a document deleted under one would come back named by a collection
-    // whose document is gone.
+    // which would then name a deleted document.
     for (auto& col : impl_->storage.get_all<Collection> ()) {
         try {
             const auto parsed = nlohmann::json::parse (col.openapi);
@@ -85,16 +82,12 @@ void Database::delete_spec_document (const std::string& id) {
 
 namespace {
 
-/**
- * The `specId` a JSON blob names at @p path, or "" when it names none.
- *
- * One reader for both halves of the sweep's reference set, because the two
- * blobs disagree about where the id sits and about nothing else: a collection
- * writes `{specId, specHash, syncedAt}` at the root, a run's snapshot writes
- * the same identity under `scenario.openapi`. Unparseable text references
- * nothing - the reading every other reader of these two columns gives it, and
- * the one that cannot make a corrupt row pin a document forever.
- */
+/// The `specId` a JSON blob names at @p path, or "" for none. One reader for
+/// both halves of the sweep's reference set, since the two blobs differ only in
+/// where the id sits: a collection writes `{specId, specHash, syncedAt}` at the
+/// root, a run's snapshot the same identity under `scenario.openapi`.
+/// Unparseable text references nothing, every other reader's reading, and the
+/// one that cannot let a corrupt row pin a document forever.
 std::string spec_id_at (const std::string& blob, std::initializer_list<const char*> path) {
     try {
         auto node = nlohmann::json::parse (blob);
@@ -123,15 +116,15 @@ size_t Database::sweep_orphaned_spec_documents () {
     try {
         std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
 
-        // Cheapest question first, and each of the three below is asked only
-        // when the one before it left something at stake. This pass rides on
-        // every run completion, so what it costs when there is nothing to
-        // reclaim - the ordinary case - is what it costs.
+        // Cheapest question first, each of the three asked only when the one
+        // before left something at stake: this pass rides every run completion,
+        // so its cost when there is nothing to reclaim, the ordinary case, is
+        // its cost.
         //
-        // 1. Which documents are even old enough to consider? Two columns and
-        //    never `content`: that is the one column here that reaches
-        //    `maxSpecDocumentBytes` (10 MiB by default), and this pass reads no
-        //    byte of a document whose fate it is only deciding.
+        // 1. Which documents are old enough to consider? Two columns and never
+        //    `content`, the one column here reaching `maxSpecDocumentBytes` (10
+        //    MiB by default): this pass reads no byte of a document whose fate
+        //    it is only deciding.
         const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
         std::chrono::system_clock::now ().time_since_epoch ())
                             .count ();
@@ -140,9 +133,9 @@ size_t Database::sweep_orphaned_spec_documents () {
         std::vector<std::string> candidates;
         for (const auto& [id, fetched_at] : impl_->storage.select (
              columns (&SpecDocument::id, &SpecDocument::fetched_at))) {
-            // A bind stores the document before the binding that names it, so a
-            // document inside the window is a bind in flight - see the grace
-            // constant.
+            // A bind stores the document before the binding naming it, so a
+            // document inside the window is a bind in flight (the grace
+            // constant).
             if (fetched_at <= cutoff) {
                 candidates.push_back (id);
             }
@@ -151,13 +144,13 @@ size_t Database::sweep_orphaned_spec_documents () {
             return 0;
         }
 
-        // 2. Which of those does a collection still bind? The same parse
-        //    `get_collections_bound_to_spec` makes, once over the sidebar-sized
-        //    table rather than once per candidate.
+        // 2. Which does a collection still bind?
+        //    `get_collections_bound_to_spec`'s parse, once over the
+        //    sidebar-sized table, not once per candidate.
         //
-        //    Unfiltered by `deleted_at`, as that reader is (#988, #3446): a
-        //    collection in the trash still binds its document, and reclaiming
-        //    the document now would leave the restore pointing at nothing.
+        // Unfiltered by `deleted_at`, as that reader is (#988, #3446): a
+        // trashed collection still binds its document, and reclaiming it would
+        // leave the restore pointing at nothing.
         std::unordered_set<std::string> referenced;
         for (const auto& binding : impl_->storage.select (&Collection::openapi)) {
             auto spec_id = spec_id_at (binding, {});
@@ -171,9 +164,9 @@ size_t Database::sweep_orphaned_spec_documents () {
             return 0;
         }
 
-        // 3. And which does a retained run still name? Last, because it is the
-        //    expensive read: `config_snapshot` is wide and there are up to
-        //    `maxRunsRetained` plus `maxDesignRunsRetained` of them.
+        // 3. Which does a retained run still name? Last, as the expensive read:
+        //    `config_snapshot` is wide, and there are up to `maxRunsRetained`
+        //    plus `maxDesignRunsRetained` of them.
         std::unordered_set<std::string> pinned;
         for (const auto& snapshot : impl_->storage.select (&Run::config_snapshot)) {
             auto spec_id = spec_id_at (snapshot, { "scenario", "openapi" });
@@ -213,20 +206,19 @@ size_t Database::sweep_orphaned_spec_documents () {
 // Spec sync - the write half of an OpenAPI sync, in one transaction (#655)
 // ============================================================================
 
-// Write order is owner-before-referrer, exactly like import_apply, with one
-// addition the other two batches do not need: the document lands before the
-// binding that names it, so no reader can observe a collection pointing at a
-// `spec_documents` row that is not there yet.
+// Owner-before-referrer write order, as import_apply, plus one rule the other
+// two batches do not need: the document lands before the binding naming it, so
+// no reader sees a collection pointing at a `spec_documents` row not there yet.
 //
-// The deletes run *before* the inserts. A sync that removes one operation's
-// request and adds another cannot be allowed to depend on which order the
-// caller listed them in, and an example refresh is expressed as "drop these
-// imported rows, write these" - two halves of one replacement, where writing
-// first would briefly double the list and, on a re-used id, lose the new row.
+// Deletes run *before* inserts. A sync removing one operation's request and
+// adding another must not depend on the caller's listing order, and an example
+// refresh is "drop these imported rows, write these", two halves of one
+// replacement, where writing first would briefly double the list and, on a
+// reused id, lose the new row.
 void Database::verify_spec_sync_rows_locked (const SpecSyncBatch& batch) {
-    // Deleted rows are absent here too - same rule as `apply_reorder`, and the
-    // same reason: an `update` carrying the caller's struct would clear the
-    // stamp along with everything else (issue #988).
+    // Deleted rows are absent here too, as in `apply_reorder` and for its
+    // reason: an `update` carrying the caller's struct would clear the stamp
+    // with everything else (#988).
     if (impl_->storage.count<Collection> (where (
         c (&Collection::id) == batch.binding.id && is_null (&Collection::deleted_at))) == 0) {
         throw MissingRowError ("Collection", batch.binding.id);
@@ -241,18 +233,17 @@ void Database::verify_spec_sync_rows_locked (const SpecSyncBatch& batch) {
 
 std::vector<Change> Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
     std::vector<Change> written;
-    // These deletes are **hard**, and stay hard now that every delete a person
-    // makes is soft (issues #988, #1046 - owner decision). A sync is a
-    // reconciliation to a document, not somebody removing a request, and it is
-    // the one delete path whose removals are shown before they land: `POST
-    // /specs/diff` reports each one, the app renders them as ticks to untick,
-    // and `policy: "safe"` refuses deletions outright. Stamping them would fill
-    // the trash with operations a document dropped, where restoring one puts
-    // back a request the current document cannot explain. A caller that wants
-    // them recoverable omits them here and calls `DELETE /requests/:id`. For
-    // the same reason they record no declined operation (#3031): the document
-    // dropped the operation, nobody declined it.
-    // A named row that is already gone publishes nothing: nothing changed.
+    // These deletes are **hard**, while every delete a person makes is soft
+    // (#988, #1046, owner decision). A sync reconciles to a document rather
+    // than removing a request, and its removals are the only ones shown before
+    // they land: `POST /specs/diff` reports each, the app renders them as ticks
+    // to untick, and `policy: "safe"` refuses deletions. Stamping them would
+    // fill the trash with operations a document dropped, where a restore puts
+    // back a request the current document cannot explain. A caller wanting them
+    // recoverable omits them and calls `DELETE /requests/:id`. For the same
+    // reason they record no declined operation (#3031): the document dropped
+    // it, nobody declined it. A named row already gone publishes nothing:
+    // nothing changed.
     for (const auto& id : batch.deleted) {
         for (auto& owner : impl_->storage.select (
              &Request::collection_id, where (c (&Request::id) == id))) {
@@ -320,12 +311,11 @@ void Database::spec_sync_apply (const SpecSyncBatch& batch) {
         changes_.publish (std::move (written));
     });
 
-    // The binding moved off whatever it named before, and a sync is the one
-    // operation that does that on a schedule - weekly, for a document that may
-    // be 12 MB (issue #718). Reclaimed here rather than left to the next
-    // startup, and outside the retried transaction because the sync has already
-    // succeeded and must not be undone by housekeeping. Never throws; see the
-    // declaration.
+    // The binding moved off what it named, and a sync is the one operation that
+    // does so on a schedule (weekly, for a document that may be 12 MB, #718).
+    // Reclaimed here, not at the next startup, and outside the retried
+    // transaction, because the sync has succeeded and housekeeping must not
+    // undo it. Never throws; see the declaration.
     sweep_orphaned_spec_documents ();
 }
 

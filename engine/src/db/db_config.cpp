@@ -5,10 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @brief Structured config entries: CRUD, the typed getters, and the call
- * into the per-category seeders #1611 split out (issue #1614).
- */
+/// Structured config entries: CRUD, the typed getters, and the call into the
+/// per-category seeders #1611 split out (#1614).
 
 #include "database_impl.hpp"
 
@@ -42,13 +40,12 @@ void Database::save_config_entry (const ConfigEntry& entry) {
     impl_->storage.replace (entry);
 }
 
-// Same shape as apply_reorder and spec_sync_apply: retry_on_busy holds the
-// recursive mutex while the transaction runs, so a row an earlier call in the
-// batch just wrote is visible to the check or write after it. Unlike those two
-// there is no existence check - config entries are seeded once at startup and
-// never deleted through any route - so a mid-batch failure here is a genuine
-// SQLITE_BUSY-past-retry or disk error, which `impl_->storage.transaction`
-// rolls back in full rather than leaving the rows written before it landed.
+// As apply_reorder and spec_sync_apply: retry_on_busy holds the recursive mutex
+// while the transaction runs, so a row written earlier in the batch is visible
+// to the next check or write. Unlike them there is no existence check (entries
+// are seeded at startup and no route deletes one), so a mid-batch failure is a
+// real SQLITE_BUSY past retry or a disk error, which
+// `impl_->storage.transaction` rolls back in full.
 void Database::save_config_entries (const std::vector<ConfigEntry>& entries) {
     if (entries.empty ()) {
         return;
@@ -135,9 +132,9 @@ double Database::get_config_double (const std::string& key, double default_value
 void Database::seed_default_config () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
 
-    // One transaction for the whole seed (issue #838): a throw partway would leave the
-    // table half-seeded, and one commit in place of ~66 keeps a scratch database's
-    // test-suite wall time down.
+    // One transaction for the whole seed (#838): a throw partway would leave
+    // the table half-seeded, and one commit instead of ~66 keeps a scratch
+    // database's test-suite wall time down.
     auto seed_transaction = impl_->storage.transaction_guard ();
 
     auto existing               = impl_->storage.get_all<ConfigEntry> ();
