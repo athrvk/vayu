@@ -98,6 +98,7 @@ nav:
       - vs Bruno: compare/vayu-vs-bruno.md
       - vs k6: compare/vayu-vs-k6.md
       - vs JMeter: compare/vayu-vs-jmeter.md
+      - vs MCP Inspector: compare/vayu-vs-mcp-inspector.md
   - Engine:
       - Overview: engine/architecture.md
       - HTTP API:

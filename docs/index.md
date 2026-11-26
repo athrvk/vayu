@@ -27,7 +27,8 @@ Coming from another tool? Read the honest comparison:
 [Postman](compare/vayu-vs-postman.md) &middot;
 [Bruno](compare/vayu-vs-bruno.md) &middot;
 [k6](compare/vayu-vs-k6.md) &middot;
-[JMeter](compare/vayu-vs-jmeter.md)
+[JMeter](compare/vayu-vs-jmeter.md) &middot;
+[MCP Inspector](compare/vayu-vs-mcp-inspector.md)
 
 ![The load-test run view: rate fidelity, throughput, error counters and the pass/fail budget verdict, with the run in the history sidebar.](images/vayu-loadtest2.png){ .shot }
 
@@ -424,7 +425,8 @@ persists.
     [vs Postman](compare/vayu-vs-postman.md),
     [vs Bruno](compare/vayu-vs-bruno.md),
     [vs k6](compare/vayu-vs-k6.md),
-    [vs JMeter](compare/vayu-vs-jmeter.md).
+    [vs JMeter](compare/vayu-vs-jmeter.md),
+    [vs MCP Inspector](compare/vayu-vs-mcp-inspector.md).
 
 ??? question "Does Vayu support SSE / streaming endpoints?"
 
