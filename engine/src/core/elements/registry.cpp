@@ -21,8 +21,8 @@
 
 namespace vayu::core {
 
-// Declared here rather than in a public header: each kind's factory is used
-// exactly once, by registry.cpp's own explicit call list below.
+// Not in a public header: each factory is called once, by this file's call list
+// below.
 ElementKind make_inherit_disable_kind ();
 ElementKind make_script_pre_kind ();
 ElementKind make_script_post_kind ();
@@ -146,16 +146,13 @@ const std::string& kind_name) {
 }
 
 /**
- * One `elements[index]` entry's whole validation, extracted out of
- * `Registry::validate`'s own loop (#1499's placement check pushed that
- * function's cognitive complexity over the linter's threshold - the fix is
- * un-nesting these checks into their own top-level function, not paring any
- * of them back).
+ * One `elements[index]` entry's whole validation, split from
+ * `Registry::validate`'s loop to keep its cognitive complexity under the
+ * linter's threshold (#1499).
  *
- * @param kind_name_out,config_out Filled on success, for the caller's own
- *        cross-entry metric-name bookkeeping (issue #1500) - split out so
- *        `validate` itself does not re-parse `entry["kind"]` /
- *        `entry["config"]` a second time.
+ * @param kind_name_out,config_out Filled on success for the caller's
+ *        cross-entry metric-name bookkeeping (#1500), so `validate` does not
+ *        parse `entry["kind"]` / `entry["config"]` twice.
  */
 std::optional<std::string> validate_one_element (const Registry& registry,
 const nlohmann::json& entry,
@@ -212,10 +209,9 @@ nlohmann::json& config_out) {
     return std::nullopt;
 }
 
-/// The one cross-entry rule `validate_one_element` cannot check on its own:
-/// the collector's cap on distinct `metric.record` names (issue #1500),
-/// scoped to this one array - see `Registry::validate`'s own comment on why
-/// that scope is correct.
+/// The one cross-entry rule `validate_one_element` cannot check alone: the
+/// collector's cap on distinct `metric.record` names (#1500), scoped to this
+/// array (`Registry::validate` says why that scope is right).
 std::optional<std::string> check_metric_record_cap (const std::string& kind_name,
 const nlohmann::json& config,
 size_t index,
@@ -238,10 +234,9 @@ std::unordered_set<std::string>& metric_names) {
 
 Registry& Registry::instance () {
     static Registry registry;
-    // Registry deletes copy and move (it holds no state worth duplicating and
-    // there is exactly one), so the built-in list is populated in place rather
-    // than assigned from a temporary an initialiser lambda would have to
-    // return by value.
+    // Registry deletes copy and move (one instance, no state worth
+    // duplicating), so the built-in list is filled in place, not assigned from
+    // a temporary an initialiser lambda would return by value.
     static const bool registered = [] {
         registry.register_kind (make_inherit_disable_kind ());
         registry.register_kind (make_script_pre_kind ());
@@ -303,15 +298,14 @@ Registry::validate (const nlohmann::json& elements, ElementOwner owner) const {
     }
 
     std::unordered_set<std::string> seen_ids;
-    // Every distinct `metric.record` name this one array declares (issue
-    // #1500), so a client learns it has spent the collector's cap before a
-    // run ever starts rather than discovering it mid-flight - the same
-    // "refuse loudly, before the locked write" rule every other bound in
-    // this engine follows. Scoped to this one array: a name repeated by
-    // inheriting the same element onto several levels is one declaration,
-    // and it appears here once because `validate` is called with exactly
-    // this collection's or request's own stored `elements` field, never the
-    // chain-merged list `compose_elements` builds for a run.
+    // Every distinct `metric.record` name this array declares (#1500), so a
+    // client learns it spent the collector's cap before a run starts, not
+    // mid-flight: the "refuse loudly, before the locked write" rule every
+    // engine bound follows. Scoped to this array: a name repeated by inheriting
+    // one element onto several levels is one declaration, and appears once here
+    // because `validate` gets this collection's or request's own stored
+    // `elements`, never the chain-merged list `compose_elements` builds for a
+    // run.
     std::unordered_set<std::string> metric_names;
     for (size_t i = 0; i < elements.size (); ++i) {
         std::string kind_name;

@@ -6,15 +6,11 @@
  */
 
 /**
- * The elements a single-request load test cannot run (#3050), found before
- * Start so the engine's refusal is not the first the user hears of them.
- *
- * `GET /elements/kinds` carries no flag for this: the engine decides it with a
- * whitelist in `load_strategy.cpp` (`REQUEST_ELEMENTS_SUPPORTED_KINDS`), so the
- * names are repeated here. `scenario-only.conformance.test.ts` pins them to the
- * engine's catalogue fixture, so a new `control.*` or `metric.*` kind is a red
- * test rather than a refusal at Start, and pins the accepted names against the
- * whitelist in `load_strategy.cpp` itself.
+ * The elements a single-request load test cannot run (#3050), found before Start so the engine's
+ * refusal is not the first the user hears. `GET /elements/kinds` has no flag for this: the engine
+ * uses a whitelist in `load_strategy.cpp` (`REQUEST_ELEMENTS_SUPPORTED_KINDS`), so the names are
+ * repeated here. `scenario-only.conformance.test.ts` pins them to the engine's catalogue fixture (a
+ * new `control.*` or `metric.*` kind is a red test, not a refusal at Start) and to the whitelist.
  */
 
 import { pickByCount } from "@/modules/dashboard/utils/format";
@@ -29,8 +25,7 @@ export function isScenarioOnlyKind(kind: string): boolean {
 }
 
 /**
- * The enabled scenario-only elements in a resolved list. A disabled one is
- * left out: the engine skips it too, and the run sends no disabled element
+ * The enabled scenario-only elements; a disabled one is skipped, as the engine and the send do
  * (`withoutDisabled`).
  */
 export function scenarioOnlyElements(parts: readonly ResolvedElement[] | undefined) {
@@ -38,9 +33,8 @@ export function scenarioOnlyElements(parts: readonly ResolvedElement[] | undefin
 }
 
 /**
- * Where an element was declared: this request, or the collection it is
- * inherited from. A folder is a collection to the user (`docs/ux-writing.md`),
- * so both inherited levels read "collection".
+ * Where an element was declared: this request, or the collection it is inherited from. A nested
+ * collection is a collection to the user (`docs/ux-writing.md`), so both inherited levels say so.
  */
 function describeOrigin({ origin }: ResolvedElement): string {
 	if (!origin || origin.kind === "request") return "set on this request";
@@ -51,10 +45,8 @@ function describeOrigin({ origin }: ResolvedElement): string {
 }
 
 /**
- * The sentence that stops Start, or null when nothing needs a scenario. It
- * names each element and its origin: a request inherits elements the user may
- * never have opened, so "remove the pacing" is not actionable without the
- * place to remove it from.
+ * The sentence that stops Start, or null. It names each element and its origin: a request inherits
+ * elements the user may never have opened, so "remove the pacing" needs the place to remove it.
  */
 export function scenarioOnlyError(elements: readonly ResolvedElement[]): string | null {
 	if (elements.length === 0) return null;

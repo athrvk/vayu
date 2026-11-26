@@ -6,11 +6,9 @@
  */
 
 /**
- * Why a capacity search stopped, in words. The Capacity summary and the
- * dashboard's Saturation card both read this one table (#2816), so the two
- * cannot word the same stop differently. The label and the finding are fixed
- * per reason; the detail line depends on the report's own figures, so it is
- * `stopDetail` and not a field here.
+ * Why a capacity search stopped, in words: the Capacity summary and the dashboard's Saturation card
+ * read this one table (#2816), so the same stop is worded once. Label and finding are fixed per
+ * reason; the detail depends on the report's figures, so it is `stopDetail`, not a field here.
  */
 
 import { formatLatency, formatNumber } from "@/lib/format-number";
@@ -19,10 +17,9 @@ import type { RunReport } from "@/types/domain";
 export type CapacityResult = NonNullable<RunReport["capacity"]>;
 
 /**
- * What a stop says about the target. `degrading`: the search watched latency or
- * errors give out. `saturated`: throughput stopped growing. `none`: the search
- * ended on a bound the caller set (ceiling, deadline, a hand stop), which is a
- * floor and not a limit.
+ * What a stop says about the target: `degrading` (latency or errors gave out), `saturated`
+ * (throughput stopped growing), `none` (a bound the caller set ended it: ceiling, deadline, a hand
+ * stop), a floor and not a limit.
  */
 export type StopFinding = "degrading" | "saturated" | "none";
 
@@ -32,9 +29,8 @@ export interface StopReason {
 }
 
 /**
- * Unknown reasons are absent from the table and render under their raw key
- * rather than vanishing: a newer sidecar may stop for a reason this build has no
- * words for, and the levels still say what happened.
+ * An unknown reason is absent here and renders under its raw key rather than vanishing: a newer
+ * sidecar may stop for a reason this build cannot word, and the levels still say what happened.
  */
 export const STOP_REASONS: Record<string, StopReason> = {
 	slo_exceeded: { label: "Latency budget exceeded", finding: "degrading" },
@@ -53,9 +49,8 @@ const FIXED_DETAILS: Record<string, string> = {
 };
 
 /**
- * A breach is a verdict only once the search has measured the level twice. Each
- * measurement is one step of the level, not a window of time, so the step length
- * is the only duration the sentence can name.
+ * A breach is a verdict only once the level is measured twice; each measurement is one step, not a
+ * time window, so the step length is the one duration the sentence can name.
  */
 function consecutiveMeasurements(stepDuration: string | undefined): string {
 	const each = stepDuration ? ` (each ${stepDuration} long)` : "";
@@ -71,10 +66,9 @@ function errorsDetail(capacity: CapacityResult, stepDuration: string | undefined
 }
 
 /**
- * Quotes the p99 rise only when the report proves one: the saturation level's
- * p99 against the last level tried. A run stored before `saturation*` existed,
- * or one whose p99 did not rise, gets the plain sentence rather than a claim
- * about latency the report cannot back.
+ * Quotes the p99 rise only when the report proves one (the saturation level's p99 against the last
+ * level tried); a run predating `saturation*`, or whose p99 did not rise, gets the plain sentence
+ * rather than a claim about latency the report cannot back.
  */
 function plateauDetail(capacity: CapacityResult): string {
 	const lead = "More virtual users stopped buying more throughput";
@@ -87,10 +81,9 @@ function plateauDetail(capacity: CapacityResult): string {
 }
 
 /**
- * The line under the Capacity headline: why the search stopped, in the report's
- * own figures. `stepDuration` is `metadata.configuration.stepDuration` as the
- * engine sent it ("5s"); absent for a run that left the step at its default.
- * Undefined for a reason this build has no words for.
+ * The line under the Capacity headline: why the search stopped, in the report's figures.
+ * `stepDuration` is `metadata.configuration.stepDuration` as sent ("5s"), absent for the default
+ * step. Undefined for a reason this build cannot word.
  */
 export function stopDetail(capacity: CapacityResult, stepDuration?: string): string | undefined {
 	switch (capacity.stopReason) {

@@ -6,12 +6,10 @@
  */
 
 /**
- * The key above a chart card, built from the roles its series are drawn with.
- *
- * A swatch resolves through `ROLE_TOKEN`, the table the canvas resolves its
- * strokes through, so a legend cannot disagree with its chart. A hand-written
- * `hsl(var(--x))` here is what #2311 removed: thirteen of them had drifted
- * from the roles the series used.
+ * The key above a chart card, built from the roles its series are drawn with. A swatch resolves
+ * through `ROLE_TOKEN`, the table the canvas resolves its strokes through, so a legend cannot
+ * disagree with its chart; a hand-written `hsl(var(--x))` drifts from the roles the series use
+ * (#2311).
  */
 
 import { BAND_FILL_ALPHA } from "./uplot/UPlotChart";

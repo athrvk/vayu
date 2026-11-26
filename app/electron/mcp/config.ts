@@ -6,30 +6,25 @@
  */
 
 /**
- * @file config.ts
- * @brief MCP safety configuration - the guardrails that keep an LLM-driven
- *        client from generating unbounded real traffic. See docs/engine/mcp.md
- *        ("Safety model"). Enforced entirely in this MCP layer; the engine is
- *        never modified.
+ * @brief MCP safety configuration: the guardrails that keep an LLM-driven client from generating
+ *        unbounded real traffic. See docs/engine/mcp/safety.md ("Safety model"). Enforced entirely
+ *        in this MCP layer; the engine is never modified.
  */
 
 /** Safety policy applied to every network-touching MCP tool. */
 export interface McpSafetyConfig {
 	/**
-	 * Hosts an agent is permitted to send traffic to (hostnames, no scheme or
-	 * port), e.g. `["api.example.com", "localhost"]`. An IPv6 target is stored in
-	 * the bracketed form `URL.hostname` produces, e.g. `["[::1]"]` - see
-	 * `normalizeHost`. **Empty by default** - an empty allowlist denies all
-	 * outbound requests, so a fresh install cannot be used to hit arbitrary
-	 * targets. The agent receives an actionable error and asks the user to add
-	 * the host.
+	 * Hosts an agent is permitted to send traffic to (hostnames, no scheme or port), e.g.
+	 * `["api.example.com", "localhost"]`. An IPv6 target is stored in the bracketed form
+	 * `URL.hostname` produces, e.g. `["[::1]"]` (see `normalizeHost`). **Empty by default**: an
+	 * empty allowlist denies all outbound requests, so a fresh install cannot be used to hit
+	 * arbitrary targets. The agent receives an actionable error and asks the user to add the host.
 	 */
 	allowlist: string[];
 	/**
-	 * When true, the allowlist is bypassed and an agent may target **any**
-	 * resolvable host. Off by default - this trades the safe-by-default posture
-	 * for convenience, so it is an explicit opt-in. Unresolved `{{variables}}` are
-	 * still rejected.
+	 * When true, the allowlist is bypassed and an agent may target **any** resolvable host. Off by
+	 * default: this trades the safe-by-default posture for convenience, so it is an explicit
+	 * opt-in. Unresolved `{{variables}}` are still rejected.
 	 */
 	allowAll: boolean;
 	/** Hard ceiling on `targetRps` for `start_load_run` (constant_rps mode). */
@@ -48,28 +43,25 @@ export interface McpSafetyConfig {
 	 */
 	maxIterations: number;
 	/**
-	 * Hard ceiling on `maxResponseSamples` for a load run: how many full
-	 * response bodies the engine keeps in memory for the sampled script and
-	 * schema replay, until it has run. An omitted `maxResponseSamples` is judged
-	 * as the engine's default of 1000.
+	 * Hard ceiling on `maxResponseSamples` for a load run: how many full response bodies the engine
+	 * keeps in memory for the sampled script and schema replay, until it has run. An omitted
+	 * `maxResponseSamples` is judged as the engine's default of 1000.
 	 */
 	maxResponseSamples: number;
 	/**
-	 * Gates every tool in the `write` category - the collection and saved-request
-	 * CRUD verbs, `update_environment` and `update_engine_config`. When false
-	 * (default), those tools refuse; the two deletes additionally require
-	 * confirmation even with it on, and the network keys of
-	 * `update_engine_config` additionally require `allowNetworkSettings`. It does **not** gate traffic-sending tools
-	 * (`run_request`, `run_collection_smoke`, `run_collection`) or load runs -
-	 * those are governed by the allowlist, the hard caps, and the load-run
-	 * confirmation gate independently.
+	 * Gates every tool in the `write` category: the collection and saved-request CRUD verbs,
+	 * `update_environment` and `update_engine_config`. When false (default), those tools refuse;
+	 * the two deletes additionally require confirmation even with it on, and the network keys of
+	 * `update_engine_config` additionally require `allowNetworkSettings`. It does **not** gate
+	 * traffic-sending tools (`run_request`, `run_collection_smoke`, `run_collection`) or load runs:
+	 * those are governed by the allowlist, the hard caps, and the load-run confirmation gate
+	 * independently.
 	 */
 	allowWrites: boolean;
 	/**
-	 * The second key `update_engine_config` needs for the entries that decide
-	 * where traffic goes and whom it trusts: every `proxy*` key and
-	 * `customCaCertificates` (#1805). Off by default, because the allowlist
-	 * gates the host a request names, not the proxy every request passes
+	 * The second key `update_engine_config` needs for the entries that decide where traffic goes
+	 * and whom it trusts: every `proxy*` key and `customCaCertificates` (#1805). Off by default,
+	 * because the allowlist gates the host a request names, not the proxy every request passes
 	 * through, and a trusted CA is what lets that proxy read TLS.
 	 */
 	allowNetworkSettings: boolean;
@@ -126,11 +118,10 @@ function isIpv6Candidate(host: string): boolean {
 }
 
 /**
- * The bracketed IPv6 literal `host` denotes, canonicalized the way WHATWG
- * `URL.hostname` serializes it (`[0:0:0:0:0:0:0:1]` → `[::1]`) - which is what
- * `extractHost` compares against, so a stored entry has to be in that exact
- * form to ever match. `""` for anything unparseable, which the sanitizer's
- * empty filter then drops rather than persisting garbage.
+ * The bracketed IPv6 literal `host` denotes, canonicalized the way WHATWG `URL.hostname` serializes
+ * it (`[0:0:0:0:0:0:0:1]` → `[::1]`), which is what `extractHost` compares against, so a stored
+ * entry has to be in that exact form to ever match. `""` for anything unparseable, which the
+ * sanitizer's empty filter then drops rather than persisting garbage.
  */
 function normalizeIpv6(host: string): string {
 	let literal = host;
@@ -201,23 +192,21 @@ const MCP_SWITCH_KEYS: readonly McpSwitchKey[] = [
 ];
 
 /**
- * The highest value each cap may hold - the maxima of the renderer's
- * `LOAD_TEST_CEILING_BOUNDS`, which are the engine's own guards where the engine
- * has one (`concurrency` at 10x `event_loop::MAX_CONCURRENT`, `durationSeconds`
- * at the per-transfer timeout guard) and the point past which a single desktop
- * engine is the wrong tool where it does not.
+ * The highest value each cap may hold: the maxima of the renderer's `LOAD_TEST_CEILING_BOUNDS`,
+ * which are the engine's own guards where the engine has one (`concurrency` at 10x
+ * `event_loop::MAX_CONCURRENT`, `durationSeconds` at the per-transfer timeout guard) and the point
+ * past which a single desktop engine is the wrong tool where it does not.
  *
- * A cap above its ceiling is not a looser policy, it is an absent one: the value
- * it would admit is refused by the engine or beyond anything Vayu will compose
- * anyway, and the user is left believing a guardrail exists where none does. So
- * the sanitizer holds each cap at its ceiling rather than storing it.
+ * A cap above its ceiling is not a looser policy, it is an absent one: the value it would admit is
+ * refused by the engine or beyond anything Vayu will compose anyway, and the user is left believing
+ * a guardrail exists where none does. So the sanitizer holds each cap at its ceiling rather than
+ * storing it.
  *
- * Literals rather than an import because production code in `electron/` may not
- * reach into `src/` - `tsconfig.node.json` withholds the `@/*` mapping on
- * purpose - the same reason `MAX_IN_FLIGHT_BOUND` in `tools/compose.ts` is a literal.
- * The copies are kept honest from the test side: `config.test.ts` ties these to
- * the renderer constant, and `load-test.engine-parity.test.ts` ties that to the
- * engine header.
+ * Literals rather than an import because production code in `electron/` may not reach into `src/`
+ * (`tsconfig.node.json` withholds the `@/*` mapping on purpose), the same reason
+ * `MAX_IN_FLIGHT_BOUND` in `tools/compose.ts` is a literal. The copies are kept honest from the
+ * test side: `config.test.ts` ties these to the renderer constant, and
+ * `load-test.engine-parity.test.ts` ties that to the engine header.
  */
 export const MCP_CAP_CEILINGS = {
 	maxRps: 1_000_000,
@@ -238,11 +227,10 @@ function clampCap(key: McpCapKey, value: unknown): number | undefined {
 }
 
 /**
- * Sanitize a partial safety override arriving from the (untrusted) renderer
- * before it is applied or persisted: normalize + de-duplicate allowlist hosts,
- * hold caps to whole numbers between 1 and their ceiling, and drop anything
- * malformed. Only recognized, well-formed fields survive - every other input is
- * ignored rather than trusted.
+ * Sanitize a partial safety override arriving from the (untrusted) renderer before it is applied or
+ * persisted: normalize + de-duplicate allowlist hosts, hold caps to whole numbers between 1 and
+ * their ceiling, and drop anything malformed. Only recognized, well-formed fields survive; every
+ * other input is ignored rather than trusted.
  */
 export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<McpSafetyConfig> {
 	const out: Partial<McpSafetyConfig> = {};
@@ -272,10 +260,9 @@ export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<Mc
 }
 
 /**
- * The environment variable each safety field is read from by the stdio CLI.
- * Lives beside the sanitizer so a value it drops can be named back to the
- * operator without re-parsing the environment, and is what `remedy.ts` names
- * to a CLI user whose call a guard refused.
+ * The environment variable each safety field is read from by the stdio CLI. Lives beside the
+ * sanitizer so a value it drops can be named back to the operator without re-parsing the
+ * environment, and is what `remedy.ts` names to a CLI user whose call a guard refused.
  */
 export const SAFETY_ENV_VARS = {
 	allowlist: "VAYU_MCP_ALLOWLIST",
@@ -316,11 +303,10 @@ export interface ClampedSafetyEnvVar {
 }
 
 /**
- * A safety config built from the environment, plus every way it differs from
- * what was asked for: `ignored` for variables that fell back to their default,
- * `clamped` for caps that are in force at a lower value than requested. The two
- * are separate channels because they are separate outcomes - a reader that
- * merged them could not tell an operator which of the two happened.
+ * A safety config built from the environment, plus every way it differs from what was asked for:
+ * `ignored` for variables that fell back to their default, `clamped` for caps that are in force at
+ * a lower value than requested. The two are separate channels because they are separate outcomes: a
+ * reader that merged them could not tell an operator which of the two happened.
  */
 export interface EnvSafetyConfig {
 	config: McpSafetyConfig;
@@ -355,19 +341,17 @@ function readSafetyFromEnv(env: NodeJS.ProcessEnv): Partial<McpSafetyConfig> {
 }
 
 /**
- * Build the stdio CLI's safety config from environment variables. The env is an
- * untrusted source exactly like the renderer and the persisted config file, so
- * it passes through `sanitizeSafetyInput` for the same reason they do: without
- * it, `Number("1,000")` is `NaN` and every `checkLoadCaps` comparison against
- * that cap is `false`, i.e. the cap silently stops existing rather than falling
- * back to its default.
+ * Build the stdio CLI's safety config from environment variables. The env is an untrusted source
+ * exactly like the renderer and the persisted config file, so it passes through
+ * `sanitizeSafetyInput` for the same reason they do: without it, `Number("1,000")` is `NaN` and
+ * every `checkLoadCaps` comparison against that cap is `false`, i.e. the cap silently stops
+ * existing rather than falling back to its default.
  *
- * Anything the sanitizer rejects is reported in `ignored` so the CLI can tell a
- * headless operator which default applied, rather than leaving them to discover
- * it from an uncapped run. A cap held at its ceiling is reported in `clamped`
- * for the same reason one step further along: the run is bounded at a value the
- * operator did not type, and without a line saying so the first evidence is a
- * refused run.
+ * Anything the sanitizer rejects is reported in `ignored` so the CLI can tell a headless operator
+ * which default applied, rather than leaving them to discover it from an uncapped run. A cap held
+ * at its ceiling is reported in `clamped` for the same reason one step further along: the run is
+ * bounded at a value the operator did not type, and without a line saying so the first evidence is
+ * a refused run.
  */
 export function buildSafetyConfigFromEnv(env: NodeJS.ProcessEnv): EnvSafetyConfig {
 	const raw = readSafetyFromEnv(env);
@@ -387,11 +371,10 @@ export function buildSafetyConfigFromEnv(env: NodeJS.ProcessEnv): EnvSafetyConfi
 		const requested = raw[key];
 		const applied = sanitized[key];
 		if (applied === undefined || !isFiniteNumber(requested)) continue;
-		// Against the *floored* request, not the raw one: flooring `1000.7` to
-		// `1000` is not a ceiling being applied, and reporting it as one would
-		// name a maximum the value never came near. Derived from the sanitizer's
-		// own output rather than re-compared against `MCP_CAP_CEILINGS`, so the
-		// ceilings keep exactly one definition.
+		// Against the *floored* request, not the raw one: flooring `1000.7` to `1000` is not a
+		// ceiling being applied, and reporting it as one would name a maximum the value never came
+		// near. Derived from the sanitizer's own output rather than re-compared against
+		// `MCP_CAP_CEILINGS`, so the ceilings keep exactly one definition.
 		if (applied >= Math.floor(requested)) continue;
 		const variable = SAFETY_ENV_VARS[key];
 		clamped.push({ variable, value: env[variable] ?? "", applied });

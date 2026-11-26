@@ -8,7 +8,7 @@
 /**
  * The `mcp:data-changed` emit at the dispatch chokepoint.
  *
- * `tools.test.ts` owns what each tool sends to the engine; this owns the one
+ * the `tools.*.test.ts` and `tools/*.tools.test.ts` files own what each tool sends to the engine; this owns the one
  * thing that happens *after* a call succeeds - the renderer being told what
  * went stale. Kept in its own file because every test here needs the notifier
  * in the context, which none of the tests over there want.

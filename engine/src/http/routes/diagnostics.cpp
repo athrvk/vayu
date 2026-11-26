@@ -6,22 +6,16 @@
  */
 
 /**
- * @file http/routes/diagnostics.cpp
- * @brief The transport connection test (`POST /diagnostics/connection`, issue
- *        #708) - one policy-honouring fetch that reports how it went and
- *        nothing about what came back.
+ * The transport connection test (`POST /diagnostics/connection`, #708): one
+ * policy-honouring fetch reporting how it went and nothing of what came back. A
+ * wrong proxy URL or missing CA should be caught when configured: proxy modes,
+ * custom trust anchors and the client-certificate registry otherwise fail at
+ * the first real request, whose message names the endpoint, not the setting.
  *
- * The moment a wrong proxy URL or a missing CA is meant to be caught is when it
- * is configured, not in the middle of a demo. Everything the epic added -
- * proxy modes, custom trust anchors, the client-certificate registry - fails at
- * the *first real request* otherwise, and the message a user sees there names
- * the endpoint rather than the setting.
- *
- * **It is a diagnostics surface, not a fetch proxy.** The response carries an
- * outcome, the status line when there was one, and libcurl's own message; it
- * never carries a body, headers or a redirect chain. `/import/fetch` is the
- * route that returns content, behind its own bound, and this one must not
- * become a second copy of it that any caller can point anywhere.
+ * **A diagnostics surface, not a fetch proxy.** The answer carries an outcome,
+ * the status line when there was one and libcurl's message, never a body,
+ * headers or redirect chain. `/import/fetch` returns content, behind its own
+ * bound; this must not become a second copy any caller can point anywhere.
  */
 
 #include "vayu/core/constants.hpp"
@@ -40,35 +34,28 @@ namespace vayu::http::routes {
 namespace {
 
 /**
- * How long one test may take.
- *
- * Short on purpose, and shorter than a request's own default: this is a person
- * waiting on a button, and a proxy that black-holes a connection would
- * otherwise leave the card spinning for the full 30 seconds a real send is
- * allowed. Long enough that a slow corporate hop is not reported as a timeout
- * it would not really hit.
+ * How long one test may take: shorter than a request's default, since a person
+ * waits on a button and a black-holing proxy would spin the card for a send's
+ * full 30 seconds, yet long enough that a slow corporate hop is not reported as
+ * a timeout it would not hit.
  */
 constexpr int CONNECTION_TEST_TIMEOUT_MS = 10000;
 
 /**
- * The body cap for the test transfer.
- *
- * Not zero (unbounded): nothing here reads the body, so a URL that answers with
- * a gigabyte would be a gigabyte buffered to be thrown away. Small enough to be
- * free and large enough that no ordinary endpoint reaches it - and if one does,
- * `ErrorCode::ResponseTooLarge` is reported as a reachable endpoint below,
- * because the bytes came back and that is the whole question this route asks.
+ * The test transfer's body cap. Not zero (unbounded): nothing reads the body,
+ * so a gigabyte answer would be buffered to be thrown away. Free, yet past any
+ * ordinary endpoint; one reaching it is reported reachable below
+ * (`ErrorCode::ResponseTooLarge`), since bytes came back, the route's whole
+ * question.
  */
 constexpr size_t CONNECTION_TEST_MAX_BYTES = size_t{ 64 } * 1024;
 
 /**
- * The outcome word for @p code - the distinction the whole route exists for.
- *
- * Deliberately coarser than `ErrorCode`: a caller is choosing which setting to
- * point the user at, and "the proxy hop failed" / "the TLS handshake failed" /
- * "nothing answered in time" are the three answers that lead anywhere
- * different. Everything else is `failed`, carrying libcurl's message, rather
- * than a fourth word that suggests a fourth remedy.
+ * The outcome word for @p code, the distinction the route exists for, coarser
+ * than `ErrorCode`: a caller picks which setting to point at, and the proxy
+ * hop, the TLS handshake and nothing answering in time are the three answers
+ * leading anywhere different. Everything else is `failed` with libcurl's
+ * message, not a fourth word suggesting a fourth remedy.
  */
 const char* outcome_for (ErrorCode code) {
     switch (code) {
@@ -79,20 +66,18 @@ const char* outcome_for (ErrorCode code) {
     }
 }
 
-/// What the test routed through, so the card can say where the bytes went
-/// without re-deriving the mode's rules for itself.
-///
-/// A proxy URL carries `user:pass@` and this body reaches a person's screen and
-/// an agent's context alike, so every `url` leaves with its userinfo removed.
-/// The policy's own URL (`manual`, or `system` once the app resolved one) is
-/// reported as configured, unless the probe finished without a proxy
-/// (`bypassed`: a `proxyBypass` entry sent it direct). A probe that failed is
-/// not judged, since a failure at the proxy hop may leave `proxy_used` unset.
-/// With none, `environment` and an unresolved `system`
-/// leave `CURLOPT_PROXY` null and libcurl picks from the environment: a proxy is
-/// named then only when it carried the probe (`proxy_used`,
+/// What the test routed through, so the card says where the bytes went without
+/// re-deriving the mode's rules. The body reaches a person's screen and an
+/// agent's context alike, so every `url` leaves without its `user:pass@`. The
+/// policy's own URL (`manual`, or a resolved `system`) is reported as
+/// configured, unless the probe went direct (`bypassed`, a `proxyBypass`
+/// entry); a failed probe is not judged, as a failure at the proxy hop may
+/// leave `proxy_used` unset. With none, `environment` and an unresolved
+/// `system` leave `CURLOPT_PROXY` null and libcurl picks from the environment:
+/// a proxy is named then only when it carried the probe (`proxy_used`,
 /// `CURLINFO_USED_PROXY`, so a `no_proxy` exemption reads as direct), marked
-/// `source: "environment"`. Absent `source` means `url` is the setting in force.
+/// `source: "environment"`. Absent `source` means `url` is the setting in
+/// force.
 nlohmann::json proxy_node (const TransportPolicy& policy,
 std::string_view target_url,
 bool proxy_used,
@@ -119,21 +104,19 @@ bool completed) {
 } // namespace
 
 /**
- * Testable core of POST /diagnostics/connection - one send through the live
+ * Testable core of POST /diagnostics/connection: one send through the live
  * transport policy, reported as an outcome.
  *
  * @param request_body `{"url": "https://..."}`.
- * @param transport How to reach the network. Passed in rather than resolved
- *                  here for the reason `import_fetch`'s is: this function is
- *                  deliberately `Database`-free so it can be tested against a
- *                  policy a test constructs, and required rather than defaulted
- *                  so no future caller can test a direct connection while
+ * @param transport How to reach the network. Passed in for `import_fetch`'s
+ *                  reason: `Database`-free so a test can hand it a policy,
+ *                  and required so no caller tests a direct connection
  *                  believing it tested the configured one.
- * @param cancel    `ClientConfig::cancel`, as `import_fetch`'s (issue #2683).
- * @return {http_status, json_body}. The status is `200` for every *answered*
- *         question, failures included - a proxy that refused the tunnel is a
- *         successful test with a `proxy_failed` outcome, not a `502`. Only a
- *         malformed request is a `400`.
+ * @param cancel    `ClientConfig::cancel`, as `import_fetch`'s (#2683).
+ * @return {http_status, json_body}. `200` for every answered question,
+ *         failures included (a proxy refusing the tunnel is a successful
+ *         test with a `proxy_failed` outcome, not a `502`); only a malformed
+ *         request is a `400`.
  */
 std::pair<int, nlohmann::json> connection_test (const std::string& request_body,
 const TransportPolicy& transport,
@@ -160,19 +143,17 @@ const std::atomic<bool>* cancel) {
 
     Request probe;
     probe.url = url;
-    // HEAD, so a healthy endpoint costs a request line and a status line. A
-    // server that refuses HEAD answers 405, which is still an answer and still
-    // proves every hop this route is asking about - the status travels back
-    // rather than being judged here for that reason.
+    // HEAD, so a healthy endpoint costs a request and a status line. A server
+    // refusing HEAD answers 405, still an answer proving every hop this asks
+    // about, so the status travels back unjudged.
     probe.method     = HttpMethod::HEAD;
     probe.timeout_ms = CONNECTION_TEST_TIMEOUT_MS;
-    // The proxy hop, the trust anchors and the certificate are the subject of
-    // the test, so verification stays on: a test that passed with verification
-    // off would answer a question nobody asked.
+    // Trust anchors and the certificate are the subject, so verification stays
+    // on: a pass with it off would answer a question nobody asked.
     probe.verify_ssl = true;
-    // Redirects off. A 3xx is a reachable endpoint, which is the answer; a
-    // redirect chain would move the test to a host the user never named and
-    // report *that* host's proxy and certificate as this one's.
+    // Redirects off: a 3xx is a reachable endpoint, the answer, and following
+    // one would test a host the user never named and report its proxy and
+    // certificate as this one's.
     probe.follow_redirects = false;
 
     auto result = client.send (probe);
@@ -183,19 +164,18 @@ const std::atomic<bool>* cancel) {
         { "proxy", proxy_node (transport, url, proxy_used, completed) } };
 
     if (!result.is_ok ()) {
-        // The client could not even start - a URL libcurl refuses, a handle it
-        // could not build. Reported in the same shape as a wire failure rather
-        // than as a 500: nothing about it is the engine being broken.
+        // The client could not start (a URL libcurl refuses, a handle it could
+        // not build): reported as a wire failure, not a 500, since the engine
+        // is not broken.
         body["outcome"] = "failed";
         body["detail"]  = client.last_error ();
         return { 200, body };
     }
 
     const auto& resp = result.value ();
-    // The entry that answered for this host, "" when none did or the URL is
-    // not https (issues #707, #3260).
-    // Sent always, the same way `POST /execute` sends it: a caller can then
-    // tell "no certificate was used" from "this engine cannot say", and the
+    // The entry that answered for this host, "" when none did or the URL is not
+    // https (#707, #3260). Always sent, as `POST /execute` sends it, so a
+    // caller tells "no certificate used" from "this engine cannot say", and the
     // card can name the registry row a handshake failure belongs to.
     body["clientCertificate"] = resp.client_certificate;
 

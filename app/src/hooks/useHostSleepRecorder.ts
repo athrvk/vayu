@@ -6,18 +6,15 @@
  */
 
 /**
- * Turn the main process's suspend / resume pair into one annotation on the run
- * that was streaming when the host went down (issue #1357).
+ * Turn the main process's suspend / resume pair into one annotation on the run that was streaming
+ * when the host went down (#1357). Two events because each carries half the answer: the suspend is
+ * the last moment the renderer can read where the run had got to, and the resume is the only thing
+ * that knows how long the machine was gone; between them the renderer is frozen, so the anchor is
+ * taken on the way down.
  *
- * Two events rather than one because each carries half the answer: the suspend
- * is the last moment the renderer can read where the run had got to, and the
- * resume is the only thing that knows how long the machine was gone. Between
- * them the renderer is frozen, so the anchor has to be taken on the way down.
- *
- * A collection run holds the wake lock too, but records nothing: its tab is a
- * list of steps with no time axis and no Events surface, so there is nowhere to
- * put a marker that a reader would find. The lock is the part that matters
- * there.
+ * A collection run holds the wake lock too, but records nothing: its tab is a list of steps with no
+ * time axis and no Events surface, so a marker would have nowhere a reader would find it. The lock
+ * is the part that matters there.
  */
 
 import { useEffect, useRef } from "react";

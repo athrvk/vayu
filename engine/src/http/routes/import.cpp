@@ -6,7 +6,6 @@
  */
 
 /**
- * @file http/routes/import.cpp
  * @brief Import endpoints - the URL proxy (`/import/fetch`) that fetches a
  *        remote collection/spec past browser CORS, and the atomic bulk write
  *        (`/import/apply`) that persists a parsed import in one call.
@@ -69,8 +68,7 @@ httplib::Response& res) {
 }
 
 
-// Defined in client_certificates.cpp; returns {http_status, json_body} - the
-// same pair the HTTP handler writes out.
+// Defined in client_certificates.cpp; answers {http_status, json_body}.
 std::pair<int, nlohmann::json>
 create_client_certificate_response (vayu::db::Database& db, const nlohmann::json& json);
 
@@ -81,26 +79,20 @@ const vayu::http::TransportPolicy& transport,
 const std::atomic<bool>* cancel);
 
 /**
- * @brief One event of a streamed `/import/fetch` (issue #882).
- *
- * Returns false once the listener has gone. Declared here rather than in
- * `routes.hpp` for the same reason `import_fetch` is: these two are the route's
- * own testable seam, and every caller is either in this file or a test that
- * names them.
+ * One event of a streamed `/import/fetch` (#882); returns false once the
+ * listener has gone. Declared here, not in `routes.hpp`, as `import_fetch` is:
+ * the route's own testable seam, called only from this file and its tests.
  */
 using ImportFetchEmitter =
 std::function<bool (const std::string& event, const nlohmann::json& data)>;
 
 /**
- * @brief The client config both fetch forms build for @p request_body, for
- *        the wiring test; nullopt when the body is refused.
- *
- * The bounds a fetch runs under are not observable from its result on any test
- * short enough to keep - a stall window is 30 seconds - so the assertion is on
- * the config itself. What that catches is the line going missing: drop the stall
- * bound and every behavioural test stays green while a 10 MB import goes back to
- * failing at 30 seconds. Taking the body rather than its parts is what lets
- * the same test see a `reference` reach the client (#2364).
+ * The client config both fetch forms build for @p request_body, for the wiring
+ * test; nullopt when the body is refused. A fetch's bounds are not observable
+ * from a test short enough to keep (a stall window is 30 seconds), so the test
+ * asserts the config: drop the stall bound and every behavioural test stays
+ * green while a 10 MB import fails at 30 seconds again. Taking the body lets
+ * the test see a `reference` reach the client (#2364).
  */
 std::optional<vayu::http::ClientConfig> import_fetch_client_config (const std::string& request_body,
 const vayu::http::TransportPolicy& transport,
@@ -139,11 +131,9 @@ bool names_sendable_scheme (const std::string& url) {
 }
 
 /**
- * The caller's bound, clamped to the transport ceiling. Absent or null is the
- * ceiling; anything that is not a positive integer is refused rather than
- * rounded into one, because a client that sent `0` or `-1` meant something,
- * and guessing which would be the silent bound this whole change exists to
- * remove.
+ * The caller's bound, clamped to the transport ceiling; absent or null is the
+ * ceiling. Anything but a positive integer is refused, not rounded: a client
+ * sending `0` or `-1` meant something, and guessing would be a silent bound.
  */
 std::variant<size_t, FetchRefusal> read_max_bytes (const nlohmann::json& req) {
     const size_t ceiling = vayu::core::constants::import_fetch::MAX_BYTES;
@@ -194,13 +184,10 @@ std::variant<ReferenceRule, FetchRefusal> read_reference (const nlohmann::json& 
 }
 
 /**
- * Read and validate the body both fetch routes share.
- *
- * Split out because the streaming route has to make exactly the same judgement
- * about exactly the same body, and a second copy of it would be a second
- * opinion about what a valid request is. A refusal is returned rather than
- * thrown because both routes can still answer it with a status: nothing has
- * been fetched, and on the streaming path nothing has been written.
+ * Reads and validates the body both fetch routes share, so the streaming route
+ * judges it exactly as the buffered one does. A refusal is returned, not
+ * thrown: both routes can still answer it with a status, as nothing has been
+ * fetched or, when streaming, written.
  */
 std::variant<FetchTarget, FetchRefusal> read_fetch_target (const std::string& request_body) {
     const auto parsed = parse_request_json (request_body);
@@ -237,12 +224,10 @@ std::variant<FetchTarget, FetchRefusal> read_fetch_target (const std::string& re
 }
 
 /**
- * Turn one finished fetch into the `{status, body}` both routes carry.
- *
- * Shared for the same reason the validator is: the buffered route answers this
- * with a status and the streaming one with an event, but *what* it says - a 413
- * for a refused body, a 502 for a failed hop or a non-2xx upstream answer, the
- * content and its type for a good one - must be the one answer.
+ * One finished fetch as the `{status, body}` both routes carry, the buffered
+ * one as a status and the streaming one as an event: a 413 for a refused body,
+ * a 502 for a failed hop or a non-2xx upstream answer, else the content and its
+ * type.
  */
 std::pair<int, nlohmann::json> fetch_outcome (const vayu::http::Client& client,
 const Result<Response>& result) {
@@ -253,10 +238,9 @@ const Result<Response>& result) {
 
     const auto& resp = result.value ();
     if (resp.error_code == ErrorCode::ResponseTooLarge) {
-        // Not a 502: the upstream answered fine, this engine refused what it
-        // was answering with. The message carries the bound that was applied -
-        // the clamped one, not the one the caller asked for - so a client whose
-        // request was narrowed reads the number that actually stopped it.
+        // Not a 502: the upstream answered, this engine refused its answer. The
+        // message carries the clamped bound that applied, not the one asked
+        // for, so a narrowed request reads the number that stopped it.
         return { 413, error_body (413, "Refused to fetch: " + resp.error_message) };
     }
     if (resp.has_error ()) {
@@ -265,16 +249,15 @@ const Result<Response>& result) {
         return { 502, error_body (502, "Couldn't fetch the document: " + detail) };
     }
     // The upstream answered, but not with the document: a 404 or 500 page
-    // handed on as `content` reaches a JSON/YAML reader and is reported as an
-    // unrecognised format, which blames the file for the server's answer. The
-    // status is named so the caller can say whose answer it was.
+    // passed on as `content` would be reported as an unrecognised format,
+    // blaming the file for the server's answer. The status names whose answer
+    // it was.
     if (resp.status_code < 200 || resp.status_code >= 300) {
         return { 502,
             error_body (502, "The server answered HTTP " + std::to_string (resp.status_code)) };
     }
-    // `Headers` compares without case, so one lookup covers every casing the
-    // upstream can have spelled the name in, and the map holds one value per
-    // name - there is no earlier duplicate this could be shadowing.
+    // `Headers` compares without case and holds one value per name, so one
+    // lookup covers every casing and shadows no duplicate.
     const auto declared            = resp.headers.find ("content-type");
     const std::string content_type = declared == resp.headers.end () ?
     std::string ("application/octet-stream") :
@@ -284,12 +267,10 @@ const Result<Response>& result) {
 }
 
 /**
- * The client both fetch routes run their transfer on.
- *
- * Extracted because the two must not differ: `$ref` bundling and spec re-fetch
- * ride the buffered form while the import dialog rides the streamed one, and a
- * document that arrives on one and times out on the other would be the same
- * import succeeding or failing depending on which surface asked for it.
+ * The client both fetch routes transfer on. They must not differ: `$ref`
+ * bundling and spec re-fetch ride the buffered form and the import dialog the
+ * streamed one, and a document timing out on only one would make the same
+ * import depend on which surface asked.
  */
 vayu::http::ClientConfig fetch_client_config (const FetchTarget& fetch,
 const vayu::http::TransportPolicy& transport,
@@ -299,13 +280,10 @@ const std::atomic<bool>* cancel) {
     config.max_response_bytes = fetch.max_bytes;
     config.local_peer_rule    = fetch.reference;
     config.cancel             = cancel;
-    // A stall bound in place of the total (issue #882). This route inherited
-    // `Request::timeout_ms` - 30 seconds for the whole transfer - which bounds a
-    // download's size rather than its health: 10 MB needed better than 340 KB/s
-    // just to arrive, and the failure read "Operation timed out ... with 4177920
-    // out of 6296254 bytes received" for a download that had never once stopped.
-    // What bounds a transfer that truly never ends is `max_response_bytes`, set
-    // just above.
+    // A stall bound in place of the total (#882): a 30-second whole-transfer
+    // timeout bounds a download's size, not its health (10 MB needs 340 KB/s
+    // just to arrive). `max_response_bytes`, set above, bounds a transfer that
+    // never ends.
     config.stall_timeout_ms = vayu::core::constants::import_fetch::STALL_TIMEOUT_MS;
     return config;
 }
@@ -320,11 +298,10 @@ vayu::Request fetch_request (const FetchTarget& fetch) {
 }
 
 /**
- * The refusal this body earns before anything is fetched, or none.
- *
- * Only the streaming route needs it, and only because `set_content_provider`
- * commits a 200 the moment it is installed - so a malformed request has to be
- * recognized before that, while a status is still something this route can say.
+ * The refusal this body earns before anything is fetched, or none. Only the
+ * streaming route needs it: `set_content_provider` commits a 200 the moment it
+ * is installed, so a malformed request is caught while a status can still be
+ * said.
  */
 std::optional<FetchRefusal> import_fetch_refusal (const std::string& request_body) {
     auto target = read_fetch_target (request_body);
@@ -348,36 +325,32 @@ const std::atomic<bool>* cancel) {
 }
 
 /**
- * Fetch the URL in `request_body` ({"url": "...", "maxBytes": 12345,
- * "reference": true, "sourceUrl": "..."}) via libcurl.
+ * Fetches the URL in @p request_body (`{url, maxBytes, reference,
+ * sourceUrl}`) through libcurl.
  *
- * The caller states the bound (issue #784). This route is one shared proxy for
- * every URL import - a Postman or Insomnia export comes through it exactly as an
- * OpenAPI document does - so it has no format to derive a cap from, and
- * `maxSpecDocumentBytes` governs nothing about an export that is never stored as
- * a `spec_documents` row. The callers that *are* fetching a spec pass that live
- * cap themselves; a stated bound over
- * `constants::import_fetch::MAX_BYTES` is clamped to it, and an absent one is
- * that ceiling, because a bound the caller chooses is not a bound against a
- * hostile URL. An over-bound response is a `413` naming what was refused,
- * without the whole body ever being buffered - see `ClientConfig::max_response_bytes`.
+ * The caller states the bound (#784): this is one proxy for every URL import
+ * (a Postman or Insomnia export as much as an OpenAPI document), so it has no
+ * format to derive a cap from, and `maxSpecDocumentBytes` means nothing for
+ * an export never stored as a `spec_documents` row; a spec fetcher passes
+ * that cap itself. A bound over `constants::import_fetch::MAX_BYTES` is
+ * clamped to it and an absent one is that ceiling, since a caller's bound is
+ * no defence against a hostile URL. An over-bound response is a 413 naming
+ * what was refused, never buffered whole (`ClientConfig::max_response_bytes`).
  *
  * `reference: true` marks a fetch a document asked for (a `$ref`, #2364): it
- * follows no redirect, so a 3xx is the 502 every non-2xx answer gets, and it
- * refuses a loopback or link-local peer that is not `sourceUrl`'s own host and
- * port (`vayu::http::LocalPeerRule`) with a 502 naming that rule.
+ * follows no redirect, so a 3xx gets any non-2xx answer's 502, and it refuses
+ * a loopback or link-local peer other than `sourceUrl`'s own host and port
+ * (`vayu::http::LocalPeerRule`) with a 502 naming that rule.
  *
- * @param transport How to reach the network. Passed in rather than resolved
- *                  here because this function is deliberately `Database`-free
- *                  so it can be unit tested - and required rather than
- *                  defaulted, so a future caller cannot acquire a direct
- *                  connection by forgetting an argument. Spec re-fetch and
- *                  `$ref` bundling ride this path, so it is what makes
- *                  importing a spec by URL work behind a proxy (issue #705).
+ * @param transport How to reach the network: passed in so this stays
+ *                  `Database`-free for unit tests, and required so no caller
+ *                  gets a direct connection by forgetting it. Spec re-fetch
+ *                  and `$ref` bundling ride this path, so it is what makes a
+ *                  spec import by URL work behind a proxy (#705).
  * @param cancel    `ClientConfig::cancel`: the route's
- *                  `RouteContext::server_stopping` (issue #2683). Required for
- *                  the reason @p transport is.
- * @return {http_status, json_body}. Separated from the route for unit testing.
+ *                  `RouteContext::server_stopping` (#2683), required for the
+ *                  reason @p transport is.
+ * @return {http_status, json_body}.
  */
 std::pair<int, nlohmann::json> import_fetch (const std::string& request_body,
 const vayu::http::TransportPolicy& transport,
@@ -393,28 +366,23 @@ const std::atomic<bool>* cancel) {
 }
 
 /**
- * The same fetch, reporting the download as it arrives (issue #882).
+ * The same fetch, reporting the download as it arrives (#882). The buffered
+ * route says nothing until libcurl has the whole body, and the wait is the
+ * upstream download, so the report starts where the bytes do: the client's
+ * write callback.
  *
- * Why this exists: an 8 MB spec behind a URL was a frozen import dialog. The
- * buffered route above cannot say anything until libcurl has the whole body, and
- * the wait is on the *upstream* download - so no amount of streaming between
- * engine and renderer would have helped. The report has to start where the bytes
- * do, which is the client's write callback.
- *
- * Three events, and the last one is always terminal: `progress`
- * (`{received, total}`, `total` null when the upstream declared no length),
- * then either `result` (`{content, contentType}`) or `error`
- * (`{error: {code, message}}`) carrying exactly what `import_fetch` would have
- * answered with.
+ * Three events, the last always terminal: `progress` (`{received, total}`,
+ * `total` null when the upstream declared no length), then `result`
+ * (`{content, contentType}`) or `error` (`{error: {code, message}}`)
+ * carrying what `import_fetch` would have answered.
  *
  * @param cancel as `import_fetch`'s.
- * @param emit one event. Returns false once its listener has gone, which
- *             abandons the transfer rather than reading the rest of a download
- *             for nobody - and stops anything further being emitted, including
- *             the outcome.
- * @return `{400, body}` for a request refused before the fetch began; nothing
- *         has been emitted in that case, so a caller that has not yet committed
- *         a status can still send one. `{200, null}` otherwise: the outcome went
+ * @param emit one event; false once its listener has gone, which abandons the
+ *             transfer rather than reading a download for nobody, and stops
+ *             any further event, the outcome included.
+ * @return `{400, body}` for a request refused before the fetch began, with
+ *         nothing emitted, so a caller that has not committed a status can
+ *         still send one; `{200, null}` otherwise, the outcome having gone
  *         out as an event.
  */
 std::pair<int, nlohmann::json> import_fetch_stream (const std::string& request_body,
@@ -440,9 +408,8 @@ const ImportFetchEmitter& emit) {
         const auto since =
         std::chrono::duration_cast<std::chrono::milliseconds> (now - reported_at)
         .count ();
-        // The first report always goes out: it is what tells the dialog the
-        // download has started and how large it is, and holding it back for a
-        // throttle window is holding back the only thing worth saying early.
+        // The first report always goes out: it tells the dialog the download
+        // started and its size, the one thing worth saying early.
         const bool due = !reported_once ||
         received - reported_at_bytes >= vayu::core::constants::import_fetch::PROGRESS_EVERY_BYTES ||
         since >= vayu::core::constants::import_fetch::PROGRESS_EVERY_MS;
@@ -462,19 +429,17 @@ const ImportFetchEmitter& emit) {
     const auto [status, body] =
     fetch_outcome (client, client.send (fetch_request (fetch)));
 
-    // Nothing is said to a listener that has already gone - which includes the
-    // failure its own departure caused, since the client reports an abandoned
-    // transfer as the write error it is.
+    // Nothing to a listener that has gone, including the failure its departure
+    // caused (the client reports an abandoned transfer as a write error).
     if (listening) {
         if (status == 200) {
             emit (vayu::core::constants::import_fetch::EVENT_RESULT, body);
         } else {
-            // The numeric status rides *inside* the event, because the status
-            // line was spent on the 200 that opened the stream. The standard
-            // error body alone would not carry it: its `code` is a slug, and
-            // `default_error_code` has nothing but "error" for a 413 - so a
-            // client could not tell a refused-for-size document from any other
-            // failure, which is the one distinction it acts on.
+            // The status rides inside the event, the status line having been
+            // spent on the stream's 200. The error body alone would not carry
+            // it (its `code` is a slug, and `default_error_code` has only
+            // "error" for a 413), so a client could not tell a refused-for-size
+            // document, the one distinction it acts on.
             nlohmann::json failure = body;
             failure["status"]      = status;
             emit (vayu::core::constants::import_fetch::EVENT_ERROR, failure);
@@ -499,10 +464,9 @@ RouteError body_error (const std::string& message) {
 }
 
 /**
- * A 400 that names the offending item by its temp id, so a client importing
- * hundreds of items can point at the one that failed. `item` is part of the
- * endpoint's documented error shape and sits *inside* the error object, next to
- * the code and message, so a client reads one place for the whole failure.
+ * A 400 naming the offending item by its temp id, so a client importing
+ * hundreds can point at the one that failed. `item` is part of the documented
+ * error shape, inside the error object beside the code and message.
  */
 RouteError item_error (const std::string& message, const std::string& temp_id) {
     auto body             = error_body (400, message);
@@ -511,18 +475,16 @@ RouteError item_error (const std::string& message, const std::string& temp_id) {
 }
 
 /**
- * Reads one of the three optional top-level arrays. Absent or null means an
- * empty list (the null-vs-absent rule's "use the default"); anything else that
- * is not an array is a 400 naming the field rather than a silently skipped
- * section.
+ * One of the optional top-level arrays. Absent or null is an empty list (the
+ * null-vs-absent rule's default); any other non-array is a 400 naming the
+ * field, not a skipped section.
  */
 RouteResult
 read_items (const nlohmann::json& body, const char* key, const nlohmann::json*& out) {
-    // The absent-section answer, built once on the first call rather than
-    // before `main`: a namespace-scope `nlohmann::json` allocates during
-    // dynamic initialisation, where the throw cannot be caught
-    // (`cert-err58-cpp`). Its address is what `out` hands back, so it has to
-    // outlive the call - a local would not.
+    // Built on first call, not before `main`: a namespace-scope
+    // `nlohmann::json` allocates during dynamic initialisation, where a throw
+    // cannot be caught (`cert-err58-cpp`). Its address is what `out` hands
+    // back, so it must outlive the call.
     static const nlohmann::json empty_items = nlohmann::json::array ();
     out                                     = &empty_items;
     if (!body.contains (key) || body[key].is_null ()) {
@@ -537,14 +499,12 @@ read_items (const nlohmann::json& body, const char* key, const nlohmann::json*& 
 }
 
 /**
- * Validates one item's `tempId` and reserves a freshly generated real id for it.
- *
- * Temp ids share a single namespace across the three arrays, because the
- * response's `idMap` is one flat map - a tempId reused between a collection and
- * a request would make the map ambiguous, so it is a 400 rather than a
- * last-writer-wins surprise. A supplied `id` is rejected outright: the engine
- * owns ids here (that is the point of the endpoint), and silently ignoring the
- * field would leave a client believing its id was honoured.
+ * Validates one item's `tempId` and reserves a fresh real id for it. Temp ids
+ * share one namespace across the sections because the response's `idMap` is one
+ * flat map: a tempId reused between a collection and a request would make it
+ * ambiguous, so it is a 400, not last-writer-wins. A supplied `id` is refused:
+ * the engine owns ids here, and ignoring the field would leave a client
+ * believing it was honoured.
  */
 RouteResult claim_temp_id (const nlohmann::json& item,
 const char* kind,
@@ -587,9 +547,8 @@ struct TempIds {
     std::vector<std::string> specs;
     std::unordered_set<std::string> is_collection;
     std::unordered_set<std::string> is_spec;
-    /// The engine ids the payload's own spec section claimed. A collection may
-    /// bind one of these even though no row exists yet, which is exactly what
-    /// `reject_unbindable_spec`'s `pending` argument is for.
+    /// The engine ids the payload's spec section claimed: a collection may bind
+    /// one before its row exists (`reject_unbindable_spec`'s `pending`).
     std::unordered_set<std::string> pending_spec_ids;
     std::unordered_map<std::string, std::string> parent_of; // collection -> its parent
 };
@@ -672,14 +631,11 @@ RouteResult resolve_parents (const nlohmann::json& collections, TempIds& temps) 
 }
 
 /**
- * Pass 2b - reject a cycle (including a self-parent) in the payload's own parent
- * graph. `apply_collection_fields`' stored-tree walk cannot see one, because none
- * of these rows exist yet - and a cycle is what makes cascade delete loop forever
- * under the global mutex (issue #79).
- *
- * Each chain is walked once: a node already proven to reach a root cannot start a
- * cycle, so `acyclic` keeps this linear rather than quadratic on a deeply nested
- * import.
+ * Pass 2b - rejects a cycle (a self-parent included) in the payload's own
+ * parent graph, which `apply_collection_fields`' stored-tree walk cannot see
+ * before these rows exist; a cycle makes cascade delete loop forever under the
+ * global mutex (#79). Each chain is walked once: a node proven to reach a root
+ * cannot start a cycle, so `acyclic` keeps this linear, not quadratic.
  */
 RouteResult detect_parent_cycles (const TempIds& temps) {
     std::unordered_set<std::string> acyclic;
@@ -705,10 +661,10 @@ RouteResult detect_parent_cycles (const TempIds& temps) {
 }
 
 /**
- * Runs a field applier and turns either failure mode into a per-item 400: the
- * applier's own error body (with `item` added), or a json type error thrown by a
- * wrong-typed value - which must not escape as a 500, since the whole payload is
- * one transaction and the client would be told nothing about why it was lost.
+ * Runs a field applier and turns either failure into a per-item 400: the
+ * applier's error body (with `item` added), or a json type error from a
+ * wrong-typed value, which must not escape as a 500: the payload is one
+ * transaction, and the client would learn nothing of why it was lost.
  */
 template <typename Apply>
 RouteResult apply_item_fields (Apply apply, const char* kind, const std::string& temp_id) {
@@ -720,8 +676,8 @@ RouteResult apply_item_fields (Apply apply, const char* kind, const std::string&
         item_error (std::string ("Invalid ") + kind + ": " + e.what (), temp_id));
     }
     if (!outcome) {
-        // Inside the error object, next to the code and message the shared
-        // applier already built - the same place `item_error` puts it.
+        // Inside the error object beside the applier's code and message, where
+        // `item_error` puts it.
         RouteError refused            = outcome.error ();
         refused.body["error"]["item"] = temp_id;
         return std::unexpected (refused);
@@ -730,18 +686,14 @@ RouteResult apply_item_fields (Apply apply, const char* kind, const std::string&
 }
 
 /**
- * Resolves one collection item's `openapi` binding into the shape the shared
- * applier stores.
- *
- * A payload-local spec is named by `openapi.specTempId`, exactly as a request
- * names its owner with `collectionTempId`, and is rewritten here into the
- * `specId` the applier and every reader expect. `specId` is also accepted
- * directly, for a collection binding a document that is *already* stored - an
- * incremental import into an existing spec - and that id is checked against the
- * store by `reject_unbindable_spec` alongside the payload's own.
- *
- * Both at once is a 400: they are two answers to one question, and picking one
- * would leave the caller believing the other was honoured.
+ * Resolves a collection item's `openapi` binding into the shape the shared
+ * applier stores. A payload-local spec is named by `openapi.specTempId`, as a
+ * request names its owner by `collectionTempId`, and rewritten into the
+ * `specId` the applier and readers expect. `specId` itself is accepted for a
+ * document already stored (an incremental import), checked against the store by
+ * `reject_unbindable_spec` with the payload's own. Both at once is a 400: two
+ * answers to one question, and picking one would leave the caller believing the
+ * other was honoured.
  */
 RouteResult resolve_spec_binding (nlohmann::json& fields,
 const TempIds& temps,
@@ -776,10 +728,10 @@ const std::string& temp) {
 }
 
 /**
- * Refuses a collection item's `specFile` / `dataFile` (issue #2765). The shared
- * applier would store either, but a payload describes a document from
- * elsewhere and a binding is a path on this machine, which only
- * `PUT /collections/:id` sets. `null` is the default and passes.
+ * Refuses a collection item's `specFile` / `dataFile` (#2765): the applier
+ * would store either, but a payload describes a document from elsewhere and a
+ * binding is a path on this machine, which only `PUT /collections/:id` sets.
+ * `null` is the default and passes.
  */
 RouteResult refuse_file_bindings (const nlohmann::json& item, const std::string& temp) {
     for (const char* field : { "specFile", "dataFile" }) {
@@ -846,17 +798,12 @@ std::vector<vayu::db::Collection>& out) {
 }
 
 /**
- * The examples nested on one request item (issue #481).
- *
- * Examples carry no tempId and are not a top-level section: nothing references
- * them, they exist only under the request they answer, and giving them ids in
- * the shared namespace would put entries in the response's `idMap` that no
- * client asked for. So they ride on their owner, and get engine-generated ids
- * like every other row here.
- *
- * The rows go through `apply_request_example_fields` - the same applier
- * `POST /requests/:id/examples` uses - so an imported example and a created one
- * cannot disagree about a default, a required field or the body cap.
+ * The examples nested on one request item (#481). They carry no tempId and are
+ * no section: nothing references them, and ids in the shared namespace would
+ * put `idMap` entries nobody asked for, so they ride their owner with engine
+ * ids. They go through `apply_request_example_fields`, as
+ * `POST /requests/:id/examples` does, so an imported and a created example
+ * agree on defaults, required fields and the body cap.
  */
 RouteResult build_example_rows (const nlohmann::json& item,
 const std::string& request_id,
@@ -903,9 +850,8 @@ std::vector<vayu::db::RequestExample>& out) {
         !outcome) {
             return outcome;
         }
-        // Payload order, unless the payload states its own. The create route's
-        // append-scan cannot help here: none of these rows are stored yet, so
-        // every one of them would compute the same slot - the same reason
+        // Payload order unless the payload states one: the create route's
+        // append-scan would give every unstored row the same slot, the reason
         // `SiblingSlots` exists for collections and requests.
         if (!example.contains ("order") || example["order"].is_null ()) {
             x.order = static_cast<int> (i);
@@ -967,11 +913,11 @@ std::vector<vayu::db::RequestExample>& examples_out) {
         if (auto outcome = build_example_rows (item, r.id, temp, now, examples_out); !outcome) {
             return outcome;
         }
-        // `mockExampleIndex` (issue #1649): a transient wire field naming, by
-        // position among this item's own examples, an OpenAPI import's
-        // `x-vayu-mock` `"fixed"` target - never a stored column, and
-        // resolved only now that `build_example_rows` just minted the real
-        // ids no id existed for when the parser wrote this field.
+        // `mockExampleIndex` (#1649): a transient wire field naming, by
+        // position among this item's examples, an OpenAPI import's
+        // `x-vayu-mock` `"fixed"` target. Never stored, and resolved only now
+        // that `build_example_rows` has minted the ids the parser could not
+        // name.
         if (const auto index_field = item.find ("mockExampleIndex");
         index_field != item.end () && index_field->is_number_unsigned ()) {
             const size_t index = examples_start + index_field->get<size_t> ();
@@ -985,14 +931,12 @@ std::vector<vayu::db::RequestExample>& examples_out) {
 }
 
 /**
- * Pass 3c - spec rows (issue #637). They reference nobody; collections reference
- * *them*, which is why they are claimed in pass 1 like everything else.
- *
- * Deliberately not through a shared applier, because there is no field applier
- * to share: `POST /specs` is create-only with two settable fields, and the two
- * decisions that matter - the hash is computed here, never taken from the
- * caller, and the size cap is the live `maxSpecDocumentBytes` - are made by the
- * same two helpers the route core uses, so the paths cannot drift on either.
+ * Pass 3c - spec rows (#637). They reference nobody; collections reference
+ * them, so they are claimed in pass 1 like the rest. No shared applier exists
+ * (`POST /specs` is create-only with two settable fields), and the two
+ * decisions that matter (the hash is computed here, never the caller's; the cap
+ * is the live `maxSpecDocumentBytes`) go through the route core's helpers, so
+ * the paths cannot drift.
  */
 RouteResult build_spec_rows (vayu::db::Database& db,
 const nlohmann::json& specs,
@@ -1079,15 +1023,12 @@ std::vector<vayu::db::Environment>& out) {
 } // namespace
 
 /**
- * The existence check the shared applier cannot make, then the write.
- *
- * A binding may name a spec this payload is about to write, or one already
- * stored, and nothing else - and the check is the last thing before the write,
- * under the same lock as the write. A binding validated outside the lock could
- * be committed just after a concurrent `DELETE /specs/:id` removed the document
- * it named, which is the dangling state the check exists to prevent. Bounded:
- * one JSON parse per collection row, then the transaction `import_apply` was
- * going to take the lock for anyway.
+ * The existence check the shared applier cannot make, then the write: a binding
+ * may name a spec this payload writes or one already stored, nothing else.
+ * Checked last, under the write's lock: outside it, a binding could commit just
+ * after a concurrent `DELETE /specs/:id` removed its document, the dangling
+ * state the check prevents. Bounded: one JSON parse per collection row, inside
+ * the transaction `import_apply` locks for anyway.
  */
 RouteResult bind_and_apply_import (vayu::db::Database& db,
 const TempIds& temps,
@@ -1108,10 +1049,9 @@ const std::vector<vayu::db::SpecDocument>& spec_rows) {
         !outcome) {
             return outcome;
         }
-        // Stamped here rather than in `resolve_spec_binding`, so that the
-        // version a binding records is read under the same lock that proves
-        // the document exists - and so import shares the rule with
-        // `POST /collections` instead of keeping a second copy of it.
+        // Stamped here, not in `resolve_spec_binding`, so the recorded version
+        // is read under the lock that proves the document exists, by the rule
+        // `POST /collections` uses.
         if (auto stamped = vayu::core::stamp_spec_binding (collection_rows[i].openapi,
             [&] (const std::string& spec_id) -> std::optional<vayu::core::SpecStamp> {
                 auto pending = pending_hashes.find (spec_id);
@@ -1132,27 +1072,22 @@ const std::vector<vayu::db::SpecDocument>& spec_rows) {
 }
 
 /**
- * The `clientCertificates` section of a `POST /import/apply` payload,
- * applied best-effort after the tree's own transaction commits (issue #1656).
- *
- * `create_client_certificate_response` takes its own lock (#1455), so calling
- * it from inside `import_apply_response`'s `db.with_lock` would be a
- * reentrant deadlock - it has to run after that scope closes, which means a
- * candidate this call cannot register (a `(host, port)` another row claimed
- * since the preview, or a file that stopped being readable) is silently
- * skipped rather than undoing the tree that already landed and does not
- * reference it - the same trade `POST /globals` makes as the one write
- * outside this payload (`engine/CLAUDE.md`).
+ * A `POST /import/apply` payload's `clientCertificates`, applied best-effort
+ * after the tree's transaction commits (#1656).
+ * `create_client_certificate_response` takes its own lock (#1455), so inside
+ * `import_apply_response`'s `db.with_lock` it would deadlock. A candidate it
+ * cannot register (a `(host, port)` claimed since the preview, an unreadable
+ * file) is skipped rather than undoing a tree that does not reference it, the
+ * trade `POST /globals` makes as the one write outside this payload
+ * (`engine/CLAUDE.md`).
  */
 void apply_client_certificate_candidates (vayu::db::Database& db,
 const nlohmann::json& candidates) {
     for (const auto& candidate : candidates) {
         const auto [status, registered] = create_client_certificate_response (db, candidate);
         if (status == 200) {
-            // The stored row's own members, never the candidate's: the
-            // response carries `hasPassphrase` where the candidate carries
-            // the passphrase, and the key path is not needed to tell which
-            // certificate was registered.
+            // The stored row's members, not the candidate's: the row carries
+            // `hasPassphrase` where the candidate carries the passphrase.
             vayu::utils::log_info ("http",
             "POST /import/apply - registered an imported client certificate",
             { { "host", registered["host"] }, { "port", registered["port"] },
@@ -1171,27 +1106,14 @@ const nlohmann::json& candidates) {
 }
 
 /**
- * Testable core of POST /import/apply - persist a whole parsed import in one
- * atomic call, returning {http_status, json_body} (issue #96).
- *
- * The app used to POST every collection, request and environment individually,
- * which is why `POST /<resource>` had to accept a client-supplied id at all: the
- * orchestrator pre-assigned ids so it could wire `parentId` / `collectionId`
- * across a tree before any of it was persisted. Here the client sends opaque
- * temp ids instead, the engine assigns every real id via `generate_id`, and the
- * response's `idMap` translates one to the other. Nothing partial can survive: a
- * single bad item is a 400 with zero rows written, so the client-side
- * best-effort rollback is gone too.
- *
- * The passes below are separate because references may point forward - a child
- * collection is allowed to appear before its parent - and because every row must
- * be built and validated before the first one is written. The rows themselves go
- * through the same per-resource field appliers the single-item POST handlers use,
- * so the two paths cannot drift on what a field means or which value is a field's
- * default.
- *
- * Extracted for import_apply_route_test.cpp, following the suite's route-test
- * convention (no in-process HTTP server).
+ * Testable core of POST /import/apply: a whole parsed import in one atomic
+ * call, {http_status, json_body} (#96). The client sends opaque temp ids, the
+ * engine assigns every real id through `generate_id`, and `idMap` translates;
+ * one bad item is a 400 with zero rows written. The passes are separate because
+ * references may point forward (a child collection before its parent) and every
+ * row is built and validated before the first write. Rows go through the
+ * single-item POST handlers' field appliers, so the paths agree on what a field
+ * means and its default.
  */
 std::pair<int, nlohmann::json>
 import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
@@ -1203,10 +1125,9 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
     const nlohmann::json* requests     = nullptr;
     const nlohmann::json* environments = nullptr;
     const nlohmann::json* specs        = nullptr;
-    // Not one of the temp-id tree's sections - a certificate candidate names
-    // no parent and nothing else references it - so it rides the same
-    // shape-only `read_items` check without joining `claim_all`/`TempIds`
-    // (issue #1656).
+    // No section of the temp-id tree (a candidate names no parent and nothing
+    // references it), so it gets `read_items`' shape check without joining
+    // `claim_all` / `TempIds` (#1656).
     const nlohmann::json* client_certificates = nullptr;
     if (auto outcome = read_items (body, "collections", collections); !outcome) {
         return as_response (outcome.error ());
@@ -1224,10 +1145,9 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
         return as_response (outcome.error ());
     }
 
-    // Examples count toward the cap even though they are nested rather than a
-    // section of their own: they are rows this call allocates and writes, and
-    // 10000 requests each carrying their per-request maximum is exactly the
-    // unbounded payload the cap exists to refuse.
+    // Nested examples count toward the cap: they are rows this call allocates
+    // and writes, and 10000 requests each at its example maximum is the
+    // unbounded payload the cap refuses.
     size_t nested_examples = 0;
     for (const auto& item : *requests) {
         if (item.is_object () && item.contains ("examples") && item["examples"].is_array ()) {
@@ -1282,24 +1202,17 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
         return as_response (outcome.error ());
     }
 
-    // The hash of every spec this payload is about to write, by the id it will
-    // be written under - the half of a binding the engine owns (issue #709),
-    // for the documents `stamp_binding_from_store` cannot look up yet because
-    // this transaction has not committed them.
+    // The hash of every spec this payload writes, by its future id: the half of
+    // a binding the engine owns (#709), for documents
+    // `stamp_binding_from_store` cannot look up before this transaction
+    // commits.
     std::unordered_map<std::string, std::string> pending_hashes;
     pending_hashes.reserve (spec_rows.size ());
     for (const auto& row : spec_rows) {
         pending_hashes.emplace (row.id, row.hash);
     }
 
-    // The one existence check the shared applier cannot make - a binding may
-    // name a spec this payload is about to write, or one already stored, and
-    // nothing else - and the last thing before the write, under the same lock
-    // as the write. A binding validated outside the lock could be committed
-    // just after a concurrent `DELETE /specs/:id` removed the document it
-    // named, which is the dangling state the check exists to prevent. Bounded:
-    // one JSON parse per collection row, then the transaction `import_apply`
-    // was going to take the lock for anyway.
+    // `bind_and_apply_import`'s check, under the write's lock.
     std::pair<int, nlohmann::json> result{ 200, nlohmann::json{ { "idMap", temps.real } } };
     db.with_lock ([&] {
         if (auto outcome = bind_and_apply_import (db, temps, pending_hashes, now,
@@ -1375,12 +1288,9 @@ RouteResult read_import_source (const nlohmann::json& body, vayu::core::ImportSo
 }
 
 /**
- * Testable core of POST /import/parse - the parse, answered, nothing written.
- *
- * Separated from the route for the reason every core here is: it takes a
- * `Database` for the live cap and for the allowed folders and picked files the
- * bodies' `unresolved` is derived from (#2356), and a test can then hand it a
- * document rather than a socket.
+ * Testable core of POST /import/parse: the parse, answered, nothing written. It
+ * takes a `Database` for the live cap and for the allowed folders and picked
+ * files the bodies' `unresolved` is derived from (#2356).
  */
 std::pair<int, nlohmann::json>
 import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
@@ -1398,11 +1308,10 @@ import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
         body_error ("Invalid 'content': an empty document is not an import"));
     }
 
-    // The same cap a stored spec document is held to, because an OpenAPI import
-    // stores exactly these bytes and the whole document is read into memory
-    // before anything is answered. A Postman or Insomnia export is never
-    // stored, but it is read the same way, and one bound is easier to explain
-    // than two.
+    // A stored spec document's cap: an OpenAPI import stores these bytes and
+    // the whole document is read into memory before anything is answered. A
+    // Postman or Insomnia export is never stored but is read the same way, and
+    // one bound is easier to explain than two.
     const size_t cap = spec_size_cap (db);
     if (content.size () > cap) {
         return { 413,
@@ -1423,10 +1332,9 @@ import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
 
     vayu::core::ImportParse parsed = vayu::core::parse_import (content, options, source);
     if (!parsed.ok ()) {
-        // "Unrecognised format" is kept as its own sentence rather than folded
-        // into a parse failure: the two are different answers to the user - one
-        // says "Vayu does not read this kind of file", the other "this file is
-        // broken" - and the import dialog says different things about them.
+        // Not folded into a parse failure: "Vayu does not read this kind of
+        // file" and "this file is broken" are different answers, and the import
+        // dialog says different things about them.
         return as_response (body_error (parsed.error));
     }
     // A copy: `ordered_json` to `json` is a conversion, never a move.
@@ -1437,21 +1345,15 @@ import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
 }
 
 /**
- * Testable core of POST /import/document - a document's bytes as a JSON DOM.
- *
- * The narrowest possible route, and it exists for one caller: the renderer's
- * `ref-bundler.ts`, which inlines the files a multi-file OpenAPI document
- * references *before* the document is parsed or stored (issue #649). Finding
- * and rewriting those `$ref`s needs the document as a tree, and a YAML reader
- * in the renderer to get one is the last thing that kept `js-yaml` in
- * production `src/` after #877 moved every parse here.
- *
- * So the bundler reads through the engine's reader - the same
- * `core::read_document` behind `POST /specs`, `POST /specs/describe` and
- * `POST /import/parse` - which is what makes "exactly one parser has an
- * opinion" true rather than nearly true. It stores nothing and interprets
- * nothing: what a document *declares* is `POST /specs/describe`, and this is
- * only what its bytes *are*.
+ * Testable core of POST /import/document: a document's bytes as a JSON DOM, for
+ * one caller, the renderer's `ref-bundler.ts`, which inlines the files a
+ * multi-file OpenAPI document references before it is parsed or stored (#649).
+ * That needs the document as a tree, and a renderer YAML reader would keep
+ * `js-yaml` in production `src/` (#877). So the bundler reads through
+ * `core::read_document`, the reader behind `POST /specs`,
+ * `POST /specs/describe` and `POST /import/parse`: exactly one parser has an
+ * opinion. It stores and interprets nothing: what a document declares is
+ * `POST /specs/describe`'s; this is what its bytes are.
  */
 std::pair<int, nlohmann::json>
 import_document_response (vayu::db::Database& db, const nlohmann::json& body) {
@@ -1483,10 +1385,10 @@ import_document_response (vayu::db::Database& db, const nlohmann::json& body) {
 namespace {
 
 /**
- * @p imported as it replaces @p stored, a global of the same name: the
- * import stamped a fresh `createdAt`, and an existing variable is never
- * restamped (`docs/engine/db-schema.md`, VariableValue shape), so the stored
- * row's stamp is kept - or its absence, for a row that never had one.
+ * @p imported as it replaces @p stored, a global of the same name: an existing
+ * variable is never restamped (`docs/engine/db-schema/indexes.md`,
+ * VariableValue shape), so the stored `createdAt` (or its absence) wins over
+ * the import's fresh one.
  */
 nlohmann::json keep_stored_created_at (const nlohmann::json& stored, nlohmann::json imported) {
     if (!stored.is_object () || !imported.is_object ()) {
@@ -1500,12 +1402,10 @@ nlohmann::json keep_stored_created_at (const nlohmann::json& stored, nlohmann::j
 }
 
 /**
- * Merge @p imported over the stored globals and write the result. The caller
- * holds the DB mutex across the whole call.
- *
- * Merged from a fresh read rather than written over: the engine has no merge
- * verb, and writing the import's globals alone would silently delete every
- * global the user already had.
+ * Merges @p imported over a fresh read of the stored globals and writes the
+ * result; the caller holds the DB mutex across the call. There is no merge
+ * verb, and writing the import's globals alone would delete every global the
+ * user had.
  *
  * @param before_write Test seam, invoked with the merged row staged and
  *        immediately before it is written.
@@ -1528,9 +1428,8 @@ const std::function<void ()>& before_write) {
         keep_stored_created_at (*stored, entry.value ());
     }
     vayu::db::Globals row;
-    // The singleton's id, always - a row saved without it is a row
-    // `get_globals` will never find, which is the silent write this whole
-    // resource has a history of (see `save_globals_response`).
+    // Always the singleton's id: a row saved without it is one `get_globals`
+    // never finds, a silent write (see `save_globals_response`).
     row.id         = "globals";
     row.variables  = merged.dump ();
     row.updated_at = now_ms ();
@@ -1543,34 +1442,26 @@ const std::function<void ()>& before_write) {
 } // namespace
 
 /**
- * Testable core of POST /import - parse a document and persist it.
+ * Testable core of POST /import: parse a document and persist it, the verb
+ * an agent wants (#877), since `POST /import/apply` takes a tree only a
+ * renderer could build. It is `import_parse_response` and
+ * `import_apply_response` with the flattening between them, not a
+ * replacement: the app keeps both halves so a person gets a preview (which
+ * files of a batch, what the two toggles do).
  *
- * The verb an agent wants and the one thing MCP could not do about a spec
- * (issue #877): bind, describe, diff, sync, export and unbind were all
- * reachable, and *import a document* was not, because `POST /import/apply` took
- * a tree only a renderer could build. This is `import_parse_response` and
- * `import_apply_response` with the flattening between them.
- *
- * Not a replacement for either half. The app still parses and applies
- * separately, because a person gets a preview in between - which files of a
- * batch to include, what the two option toggles do to them - and this has none.
- *
- * **Globals are written last, and deliberately so** (the rule
- * `ImportOrchestrator` states): `POST /globals` replaces the whole set, so it is
- * the one write here that can destroy data the import did not create. Running it
- * after the apply means nothing can fail behind it, so a failed import never
- * leaves the user's globals half-rewritten. On a key collision the imported
- * value wins - the caller asked for this file's variables, and skipping them
- * would be the silent no-op.
+ * **Globals are written last** (`ImportOrchestrator`'s rule): `POST /globals`
+ * replaces the whole set, the one write here that can destroy data the import
+ * did not create, so nothing can fail behind it and a failed import never
+ * leaves globals half-rewritten. On a key collision the import wins: the
+ * caller asked for this file's variables.
  *
  * **The globals read, merge and write are one lock scope** (#1906): a
- * `POST /globals` landing between the read and the write would be overwritten
- * by a merge computed without it. The client-certificate candidates are not
- * inside it; `import_apply_response` has already applied them under their own
- * lock.
+ * `POST /globals` landing between read and write would be overwritten by a
+ * merge computed without it. The client-certificate candidates are outside
+ * it, applied by `import_apply_response` under their own lock.
  *
- * @param before_write Test seam, invoked inside the lock scope with the merged
- *        globals staged and immediately before they are written; see
+ * @param before_write Test seam, invoked inside the lock scope with the
+ *        merged globals staged and immediately before they are written; see
  *        `update_request_response` for why it is an overload.
  */
 std::pair<int, nlohmann::json> import_response (vayu::db::Database& db,
@@ -1622,12 +1513,10 @@ void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httpli
         return;
     }
 
-    // Validated before the provider is installed, while a status is still
-    // available to answer with: `set_content_provider` commits a 200, and a
-    // client that sent a malformed body should read the same 400 on both
-    // forms of this route. `import_fetch_stream` reads the body again for
-    // itself - one parse of a four-field object - rather than the two of them
-    // holding separate opinions about what a valid request is.
+    // Validated before the provider is installed, which commits a 200, so a
+    // malformed body reads the same 400 on both forms. `import_fetch_stream`
+    // re-reads the body (one parse of a four-field object) rather than the two
+    // holding separate opinions of a valid request.
     if (const auto refusal = import_fetch_refusal (req.body)) {
         res.status = refusal->first;
         res.set_content (
@@ -1816,15 +1705,12 @@ void register_import_routes (RouteContext& ctx) {
      * reference or sourceUrl, 413 when the response is over the bound, 502
      * when the fetch itself failed or a reference's peer was refused.
      *
-     * With `Accept: text/event-stream` the same fetch answers as a stream
-     * instead (issue #882), reporting the download as it arrives so a client
-     * can draw a progress bar for an 8 MB spec rather than freeze on it:
-     * `progress` (`{received, total}`, `total` null when the upstream declared
-     * no length), then one terminal `result` (`{content, contentType}`) or
-     * `error` (`{error: {code, message}}`) carrying what the buffered form
-     * would have answered with. A malformed *request* is still the 400 above,
-     * because that is decided before any of the response has gone out. Every
-     * existing caller sends no `Accept` and gets the buffered JSON unchanged.
+     * With `Accept: text/event-stream` the same fetch streams (#882),
+     * reporting the download as it arrives so a client can draw progress for
+     * an 8 MB spec: `progress`, then one terminal `result` or `error`, as
+     * `import_fetch_stream` describes. A malformed request is still the 400
+     * above, decided before any response goes out; a caller sending no
+     * `Accept` gets the buffered JSON.
      */
     ctx.server.Post ("/import/fetch",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
@@ -1833,20 +1719,21 @@ void register_import_routes (RouteContext& ctx) {
 
     /**
      * POST /import/apply
-     * Persists an entire parsed import atomically: collections, their requests
-     * and environments in one transaction, with every real id generated
-     * engine-side and returned in an `idMap` keyed by the client's temp ids.
-     * Body params: collections / requests / environments / specs (arrays; absent
-     * or null means none). Each item carries a `tempId`; a collection may carry
-     * `parentTempId` and may bind a spec with `openapi.specTempId` (a spec in
-     * this payload) or `openapi.specId` (one already stored), a request must
-     * carry `collectionTempId`, and a request may carry `examples` (an array of
-     * saved example responses, written with engine-generated ids and absent from
-     * the `idMap` - nothing references them). A spec item carries `content` and
-     * an optional `sourceUrl`; its `hash` and `fetchedAt` are engine-computed
-     * and rejected if sent. All other fields are the ones the matching
-     * POST /<resource> accepts, minus `id` and a collection's `specFile` /
-     * `dataFile`, which are refused (#2765).
+     * Persists an entire parsed import atomically: collections, requests,
+     * environments and specs in one transaction, every real id generated
+     * engine-side and returned in an `idMap` keyed by the client's temp ids;
+     * client-certificate candidates are registered after it commits.
+     * Body params: collections / requests / environments / specs /
+     * clientCertificates (arrays; absent or null means none). Each tree item
+     * carries a `tempId`; a collection may carry `parentTempId` and may bind a
+     * spec with `openapi.specTempId` (a spec in this payload) or
+     * `openapi.specId` (one already stored), a request must carry
+     * `collectionTempId`, and a request may carry `examples` (written with
+     * engine ids, absent from the `idMap`: nothing references them). A spec
+     * item carries `content` and an optional `sourceUrl`; its `hash` and
+     * `fetchedAt` are engine-computed and refused if sent. All other fields
+     * are the matching POST /<resource>'s, minus `id` and a collection's
+     * `specFile` / `dataFile`, refused (#2765).
      * Returns: 200 `{"idMap": {...}}`, or 400 with `error.item` naming the
      * item that failed - in which case nothing at all was written.
      */

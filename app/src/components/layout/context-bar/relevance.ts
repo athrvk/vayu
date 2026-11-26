@@ -6,28 +6,19 @@
  */
 
 /**
- * What each request-tab section has to say about the request in front of it.
+ * What each request-tab section has to say about the request in front of it. `useRelevance` answers
+ * the data-level question `appliesTo` cannot ask (see `types.ts` for the contract and `registry.ts`
+ * for why it is a second function rather than a wider `appliesTo`).
  *
- * The bar used to decide what to draw from the tab alone, so a plain REST
- * request opened seven sections of which three existed only to say they did not
- * apply ("This request does not send a GraphQL body", "No cookies held for this
- * host", "This request has not been sent yet"). `useRelevance` is the answer to
- * the data-level question `appliesTo` structurally cannot ask - see `types.ts`
- * for the contract and `registry.ts` for why it is a second function rather than
- * a wider `appliesTo`.
+ * One module rather than a hook beside each section, for two reasons: the lint rule that keeps a
+ * `.tsx` exporting components alone would scatter them into a file each anyway, and the GraphQL one
+ * *must* live away from its section, because `registry.ts` names it eagerly and importing it from
+ * `GraphQLSection.tsx` would drag the ~320KB `graphql` package into the startup chunk #1146 took it
+ * out of. Collected here, the bar's whole quiet-versus-loud policy reads in one screen.
  *
- * One module rather than a hook beside each section, for two reasons. The lint
- * rule that keeps a `.tsx` exporting components and nothing else would scatter
- * them into a file each anyway; and the GraphQL one *must* live away from its
- * section, because `registry.ts` names it eagerly and importing it from
- * `GraphQLSection.tsx` would drag the ~320KB `graphql` package into the startup
- * chunk that #1146 took it out of. Collected here, the bar's whole
- * quiet-versus-loud policy reads in one screen.
- *
- * The derivations a section shares with its own relevance (`useRequestVariables`,
- * `useHostCookies`) live here too, and the section imports them back: one answer
- * to "what does this request reference" and "which host is this", not two that
- * can disagree.
+ * The derivations a section shares with its relevance (`useRequestVariables`, `useHostCookies`)
+ * live here too, and the section imports them back: one answer to "what does this request
+ * reference" and "which host is this", not two that can disagree.
  */
 
 import { useMemo } from "react";
@@ -45,17 +36,13 @@ import type { SectionRelevance } from "./types";
 /* ── Variables ───────────────────────────────────────────────────────────── */
 
 /**
- * What this request references, what resolves it, and what else is in scope.
- *
- * Memoized because the relevance hook runs whenever the bar is open, expanded or
- * not, and `getAllVariables` copies the whole resolved map: without this the
- * reference walk and the copy would run on every render of the bar rather than
- * when their inputs change. Its three inputs are all stable references
- * (`useCollectionAncestors` memoizes, the resolver's getters are `useCallback`),
- * so the memo actually holds.
- *
- * `null` while the request has not arrived - the caller decides whether that is
- * a loading line or a "wait and see".
+ * What this request references, what resolves it, and what else is in scope. Memoized because the
+ * relevance hook runs whenever its section applies, expanded or not and with the bar closed too
+ * (the ContextRail calls it), and `getAllVariables` copies the whole resolved map: without the memo
+ * the reference walk and the copy would run on every render rather than when their inputs change.
+ * Its three inputs are stable references (`useCollectionAncestors` memoizes, the resolver's getters
+ * are `useCallback`), so the memo holds. `null` while the request has not arrived: the caller
+ * decides whether that is a loading line or a "wait and see".
  */
 export function useRequestVariables(tab: Tab) {
 	const { data: request } = useRequestQuery(tab.entityId);
@@ -84,9 +71,8 @@ export function useRequestVariables(tab: Tab) {
 		);
 		const undefinedRefs = classified.filter((r) => r.resolved === null).map((r) => r.name);
 
-		// The disclosure is "everything else in scope": the full resolved set minus
-		// the referenced names already shown above it, so a name is never listed
-		// twice.
+		// The disclosure is "everything else in scope": the full resolved set minus the referenced
+		// names above it, so no name is listed twice.
 		const shownAtTop = new Set(resolvedRefs.map((r) => r.name));
 		const rest = Object.entries(getAllVariables()).filter(([name]) => !shownAtTop.has(name));
 
@@ -95,10 +81,9 @@ export function useRequestVariables(tab: Tab) {
 }
 
 /**
- * Quiet only when the request references nothing *and* nothing is in scope - the
- * "No variables in scope" body, which was a section explaining that it had no
- * reason to be there. A request that references none while the workspace defines
- * some still has content: the disclosure over everything in scope is the
+ * Quiet only when the request references nothing *and* nothing is in scope, where the body would be
+ * a section explaining it has no reason to be there. A request that references none while the
+ * workspace defines some still has content: the disclosure over everything in scope is the
  * quick-edit path, and a dimmed header would take it away.
  */
 export function useVariablesRelevance(tab: Tab): SectionRelevance {
@@ -112,22 +97,17 @@ export function useVariablesRelevance(tab: Tab): SectionRelevance {
 /* ── Cookies ─────────────────────────────────────────────────────────────── */
 
 /**
- * The host this request resolves to, and the jar entries that match it.
+ * The host this request resolves to, and the jar entries that match it. The host is a resolved
+ * template, not `request.url`, the part worth having in one place: a second copy of that resolution
+ * would be a second answer to "which host is this" for the section's two halves to disagree about.
  *
- * The host is a resolved template, not `request.url`, which is the part worth
- * having in one place: a second copy of that resolution would be a second answer
- * to "which host is this" for the two halves of one section to disagree about.
- *
- * **Deliberately a `useMemo` and not `lib/dynamic-variable-cache.ts`'s
- * module-scope cache**, unlike the request builder's previews. That cache
- * validates an entry by the identity of the `resolveString` that filled it, and
- * this hook *creates its own resolver* - two of them, because
- * `useCookiesRelevance` and `CookiesSection` both call it for the same tab at
- * the same time. One cache entry per request id shared between two resolvers
- * would be invalidated by whichever of the pair rendered last, rerolling on
- * every render instead of none. The memo below is per hook instance, so the two
- * cannot fight; what it does not survive is the bar's own unmount, which
- * re-creates the resolver anyway and so would miss the cache regardless.
+ * **A `useMemo`, not `lib/dynamic-variable-cache.ts`'s module-scope cache**, unlike the request
+ * builder's previews. That cache validates an entry by the identity of the `resolveString` that
+ * filled it, and this hook *creates its own resolver*, two of them, as `useCookiesRelevance` and
+ * `CookiesSection` both call it for the same tab at once: one entry per request id shared by two
+ * resolvers would be invalidated by whichever rendered last, rerolling on every render. The memo is
+ * per hook instance, so the two cannot fight; it does not survive the bar's own unmount, which
+ * re-creates the resolver and would miss the cache regardless.
  */
 export function useHostCookies(tab: Tab) {
 	const { data: request } = useRequestQuery(tab.entityId);
@@ -137,11 +117,10 @@ export function useHostCookies(tab: Tab) {
 	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const { data, isLoading } = useCookiesQuery();
 
-	// Memoized on the URL text, not called inline: a dynamic variable like
-	// `{{$randomInt}}` generates a fresh value on every call
-	// (`lib/dynamic-variables.ts`'s own contract), and this hook re-renders on
-	// far more than a URL edit - an unmemoized call could flip which host the
-	// cookie jar matches against on a render the URL never changed.
+	// Memoized on the URL text, not called inline: a dynamic variable like `{{$randomInt}}`
+	// generates a fresh value on every call (`lib/dynamic-variables.ts`'s contract), and this hook
+	// re-renders on far more than a URL edit, so an unmemoized call could flip which host the jar
+	// matches on a render where the URL never changed.
 	const host = useMemo(
 		() => (request ? hostOf(resolveString(request.url)) : null),
 		[request, resolveString]
@@ -153,10 +132,9 @@ export function useHostCookies(tab: Tab) {
 }
 
 /**
- * No host yet is `"hidden"`: a URL still being typed has nothing to hold cookies
- * for, and "This request has no host yet" was a header explaining its own
- * irrelevance. A host with an empty jar is the state worth a word, because "no
- * cookies are riding along" is an answer to a question people ask.
+ * No host yet is `"hidden"`: a URL still being typed has nothing to hold cookies for, and a header
+ * saying so explains its own irrelevance. A host with an empty jar is worth a word, because "no
+ * cookies are riding along" answers a question people ask.
  */
 export function useCookiesRelevance(tab: Tab): SectionRelevance {
 	const { isLoading, host, matches } = useHostCookies(tab);
@@ -168,14 +146,10 @@ export function useCookiesRelevance(tab: Tab): SectionRelevance {
 /* ── GraphQL ─────────────────────────────────────────────────────────────── */
 
 /**
- * Unknown means `"hidden"` here, against the standing rule in `types.ts` that a
- * hook says `"content"` until it knows.
- *
- * The flicker that rule prevents would cost a 320KB chunk download here, and a
- * section that appears once the request lands reads better than one that appears
- * and then leaves. The section is `lazy` for the same reason, and the two now
- * agree: a REST tab never requests the chunk at all, where it used to arrive the
- * moment the expanded section mounted to say the request was not GraphQL.
+ * Unknown means `"hidden"` here, against `types.ts`'s rule that a hook says `"content"` until it
+ * knows: the flicker that rule prevents would cost a 320KB chunk download here, and a section that
+ * appears once the request lands reads better than one that appears and then leaves. The section is
+ * `lazy` for the same reason: a REST tab never requests the chunk.
  */
 export function useGraphQLRelevance(tab: Tab): SectionRelevance {
 	const { data: request } = useRequestQuery(tab.entityId);
@@ -185,15 +159,11 @@ export function useGraphQLRelevance(tab: Tab): SectionRelevance {
 /* ── Recent sends ────────────────────────────────────────────────────────── */
 
 /**
- * A request nobody has sent yet is the common case for a request being written,
- * and "This request has not been sent yet" was a whole expanded section saying
- * so. It stays visible as a header rather than hiding: the section reappearing
- * on the first send is worth less than the reader knowing the trend is there to
- * come back to.
- *
- * The list query is the section's own - one page of `GET /runs` it would have
- * made on expansion anyway - so this costs an expanded section nothing extra,
- * and a collapsed one a single list call.
+ * A request nobody has sent yet is the common case for a request being written, and an expanded
+ * section saying so is noise. It stays a header rather than hiding: the section reappearing on the
+ * first send is worth less than the reader knowing the trend is there to come back to. The list
+ * query is the section's own (one page of `GET /runs` it would make on expansion anyway), so this
+ * costs an expanded section nothing extra and a collapsed one a single list call.
  */
 export function useRecentSendsRelevance(tab: Tab): SectionRelevance {
 	const { data, isLoading } = useRecentDesignRunsQuery(tab.entityId);

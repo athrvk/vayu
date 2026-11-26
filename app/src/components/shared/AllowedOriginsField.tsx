@@ -6,13 +6,10 @@
  */
 
 /**
- * The "Allowed origins" box on a mock server's and an inbox's start form
- * (#2367): one origin per line, parsed by `parseAllowedOrigins`.
- *
- * Shared because the two forms ask the same question in the same words - which
- * pages in a browser may read this listener - and as two copies the helper text
- * would drift. The parent owns the text and the parse, since it also needs the
- * result to decide whether Start is enabled.
+ * The "Allowed origins" box on a mock server's and an inbox's start form (#2367), one origin per
+ * line, parsed by `parseAllowedOrigins`. Shared so the two forms ask which browser pages may read
+ * the listener in one wording. The parent owns the text and the parse, needing the result to enable
+ * Start.
  */
 
 import { Label, Textarea } from "@/components/ui";

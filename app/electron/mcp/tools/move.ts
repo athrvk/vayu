@@ -6,7 +6,6 @@
  */
 
 /**
- * @file move.ts
  * @brief Moving an item to another parent: where it lands among its new
  *        siblings.
  */
@@ -15,42 +14,36 @@ import { collectionParent, type CollectionRow } from "./cascade.js";
 import { mergeSiblings, type OrderedRow, type SiblingKind } from "./sibling-order.js";
 
 /**
- * Where a moved row lands among its new siblings.
- *
- * Two positions, not an index: `POST /reorder` writes dense positions and a
- * drag computes them from a pointer, which an agent has none of. Naming a slot
- * in the middle would mean an agent maintaining the app's ordering arithmetic
- * (`modules/collections/reorder-math.ts`) from the outside, and getting it wrong
- * is a folder that visibly reshuffles. First and last are the two an agent can
- * mean unambiguously; anything finer stays a UI gesture.
+ * Where a moved row lands among its new siblings. Two positions, not an index: `POST /reorder`
+ * writes dense positions and a drag computes them from a pointer, which an agent has none of.
+ * Naming a slot in the middle would make an agent maintain the app's ordering arithmetic
+ * (`modules/collections/reorder-math.ts`) from the outside, and getting it wrong is a folder that
+ * visibly reshuffles. First and last are the two an agent can mean unambiguously; anything finer
+ * stays a UI gesture.
  */
 export const MOVE_POSITIONS = ["first", "last"] as const;
 
 /**
  * The reorder batch that lands `movedId` at either end of its destination.
  *
- * `siblings` is the destination parent's children **of both kinds**, in
- * sibling order (`mergeSiblings`), with the moved row itself removed: a
- * collection's sub-collections and its requests share one `order` space
- * (#2535), so the end of a parent is past every child it has, and an end
- * computed over one kind lands the row among the other's slots. The
- * arrangement this produces is that list with the row put on one end. Every
- * position in it is then stated outright rather than left to the engine's
- * `normalize` pass, because the two would have to agree about a list the moved
- * row is still inside while it runs: normalizing `[A, B, C]` and then writing
- * `A` at `2` puts it level with `C`, and the tie goes to the rank and creation
- * time rather than to the move. Stating the whole arrangement cannot tie.
+ * `siblings` is the destination parent's children **of both kinds**, in sibling order
+ * (`mergeSiblings`), with the moved row removed: a collection's sub-collections and its requests
+ * share one `order` space (#2535), so the end of a parent is past every child it has, and an end
+ * computed over one kind lands the row among the other's slots. The arrangement is that list with
+ * the row put on one end. Every position in it is stated outright rather than left to the engine's
+ * `normalize` pass, because the two would have to agree about a list the moved row is still inside
+ * while it runs: normalizing `[A, B, C]` and then writing `A` at `2` puts it level with `C`, and
+ * the tie goes to the rank and creation time rather than to the move. Stating the whole arrangement
+ * cannot tie.
  *
- * Only rows whose stored `order` actually changes get an entry, each under its
- * own `type` - the rule `reorder-math.ts` follows for a drag, and what keeps a
- * move inside a large collection from rewriting every row in it. The moved row
- * is always written: it is the one carrying the destination owner, which is the
+ * Only rows whose stored `order` changes get an entry, each under its own `type` (the rule
+ * `reorder-math.ts` follows for a drag, which keeps a move inside a large collection from rewriting
+ * every row in it). The moved row is always written: it carries the destination owner, which is the
  * move.
  *
- * The parent it *left* keeps a gap where it was (the rows after it are not
- * renumbered). That is invisible - display order reads the column's relative
- * values, never its density - and closing it would double the batch for
- * nothing.
+ * The parent it *left* keeps a gap where it was (the rows after it are not renumbered). That is
+ * invisible, since display order reads the column's relative values, never its density, and closing
+ * it would double the batch for nothing.
  */
 export function moveBatch(params: {
 	type: SiblingKind;

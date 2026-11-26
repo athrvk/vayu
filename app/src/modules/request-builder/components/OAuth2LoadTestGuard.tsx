@@ -6,31 +6,22 @@
  */
 
 /**
- * OAuth2LoadTestGuard - says whether a duration-based load test will stay
- * authorized for its whole length.
- *
- * The engine now refreshes a header-placed OAuth 2.0 token *during* the run
- * (#478), a collection load run's steps included (#3199), so most long runs
- * need no warning at all. What is left is the set of credentials it cannot
- * renew - a query-placed token, `autoRefreshToken: false`, an authorization_code
- * grant with no refresh token - where a run longer than the token still starts
- * failing partway through:
+ * Says whether a duration-based load test stays authorized for its whole length. The engine
+ * refreshes a header-placed OAuth 2.0 token during the run (#478), a collection load run's steps
+ * included (#3199), so most long runs need no warning. Left are the credentials it cannot renew (a
+ * query-placed token, `autoRefreshToken: false`, an authorization_code grant with no refresh
+ * token), where a run longer than the token fails partway:
  *
  *   - covered              → nothing to do (including "the engine will renew it")
  *   - stale-but-coverable  → offer Refresh (a fresh token gives a full window)
  *   - longer-than-lifetime → block, with an explicit "start anyway" override
  *
- * Which case applies is `isMidRunRefreshable`, whose docstring holds the exact
- * rule and how far it mirrors the engine's; see oauth2-load-test-coverage.ts.
- *
- * A run fetches its token once, before any script, from the stored values
- * (#2742), so that is the token judged here. Where a pre-request script may
- * change a name the config uses, a Send could judge another token, so each
- * verdict says which one it is about (`scriptMayChangeSettings`).
- *
- * Reports whether the Start button should be gated via onGateChange. The
- * request's load dialog renders one; the collection run dialog renders one per
- * distinct token its requests send, and gates Run while any of them gates.
+ * `isMidRunRefreshable` (oauth2-load-test-coverage.ts) holds the exact rule and how far it mirrors
+ * the engine. A run fetches its token once, before any script, from stored values (#2742), so that
+ * token is judged; where a pre-request script may change a config name, each verdict says which
+ * token it means (`scriptMayChangeSettings`). Gating goes out through `onGateChange`: the load
+ * dialog renders one guard, the collection run dialog one per distinct token, gating Run while any
+ * gates.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -56,15 +47,20 @@ import { useNow } from "@/hooks/useNow";
 interface OAuth2LoadTestGuardProps {
 	/** Variable-resolved OAuth 2.0 config for the pending request. */
 	config: OAuth2Config;
-	/** Total test duration in seconds, or null when the test has no fixed
-	 *  duration (iterations mode) - in which case the guard is inert. */
+	/**
+	 * Test length in seconds, or null without a fixed duration (iterations mode): the guard is
+	 * inert.
+	 */
 	durationSeconds: number | null;
-	/** A pre-request script may change a name in `config` (the dialog's deferred
-	 *  names are not empty): the verdicts then name the token as fetched before
-	 *  scripts. */
+	/**
+	 * A pre-request script may change a `config` name (deferred names exist): verdicts name the
+	 * pre-script token.
+	 */
 	scriptMayChangeSettings?: boolean;
-	/** The collection a refresh names to the engine, beside the active
-	 *  environment, to resolve a `jwt_bearer` key reference (#3632). */
+	/**
+	 * Named to the engine on a refresh, beside the active environment, for a `jwt_bearer` key
+	 * reference (#3632).
+	 */
 	collectionId?: string;
 	onGateChange: (gated: boolean) => void;
 }
@@ -86,9 +82,8 @@ export default function OAuth2LoadTestGuard({
 	const fetchMutation = useFetchOAuth2TokenMutation();
 
 	const status = statusQuery.data;
-	// A token the engine flags expired has lapsed whatever its `expiresAt` says, so
-	// the same phase the token row shows decides it; the clock flips it at the
-	// expiry without waiting for the next poll.
+	// A token the engine flags expired has lapsed whatever `expiresAt` says, so the token row's
+	// phase decides it, and the clock flips it at expiry without waiting for a poll.
 	const now = useNow(lapseInstant(status));
 	const lapsed = tokenPhase(status, now).expiry?.word === "expired";
 	const cachedToken = status?.found ? status.token : undefined;
@@ -100,7 +95,7 @@ export default function OAuth2LoadTestGuard({
 		[cachedToken, lapsed, now]
 	);
 
-	// Compute the coverage state (pure decision - see coverageState).
+	// Pure decision: see coverageState.
 	const state = useMemo(
 		() =>
 			coverageState(
@@ -112,13 +107,12 @@ export default function OAuth2LoadTestGuard({
 		[durationSeconds, cacheKey, token, config]
 	);
 
-	// With an answer on screen a failed refetch changes nothing: the stale verdict
-	// stands. Only an absent answer can be pending or unreachable (#3388).
+	// With an answer on screen a failed refetch changes nothing; only an absent answer can be
+	// pending or unreachable (#3388).
 	const noToken = status ? "none-cached" : noTokenState(false, statusQuery);
 
-	// Reset the override whenever the situation changes. This is the render-phase
-	// "adjust state when a prop changes" pattern - cheaper and more correct than a
-	// reset effect (no extra commit, no stale-frame flash).
+	// Reset the override when the situation changes, in render ("adjust state when a prop
+	// changes"): no extra commit and no stale-frame flash, unlike a reset effect.
 	const situation = `${durationSeconds}${cacheKey ?? ""}${state.kind}`;
 	const [prevSituation, setPrevSituation] = useState(situation);
 	if (situation !== prevSituation) {
@@ -126,16 +120,16 @@ export default function OAuth2LoadTestGuard({
 		setAcknowledged(false);
 	}
 
-	// A test is gated when it would outlive the token and the user hasn't
-	// resolved it (refreshed into coverage, or explicitly acknowledged).
+	// Gated when the test would outlive the token and the user has not refreshed into coverage or
+	// acknowledged it.
 	const gated = (state.kind === "refresh" || state.kind === "too-long") && !acknowledged;
 
 	useEffect(() => {
 		onGateChange(gated);
 	}, [gated, onGateChange]);
 
-	// Whatever the run's length: a config whose endpoints only a sign-in can
-	// find (#3766) has no token a run could fetch headless.
+	// Whatever the length: a config whose endpoints only a sign-in finds (#3766) has no token a
+	// headless run could fetch.
 	if (awaitsDiscovery(config)) {
 		return (
 			<Callout severity="warning" title="Sign in before running">
@@ -225,10 +219,8 @@ export default function OAuth2LoadTestGuard({
 		);
 	}
 
-	// refresh or too-long → a real warning with an override. `blocking`, not
-	// `warning`: both of these disable Start, and with a pre-request-script
-	// notice possibly sitting beside them the severity is what says which one is
-	// actually stopping the run.
+	// refresh or too-long: a real warning with an override, `blocking` not `warning`, since both
+	// disable Start and, beside a pre-request-script notice, severity says which one stops the run.
 	const isRefreshable = state.kind === "refresh";
 	return (
 		<Callout

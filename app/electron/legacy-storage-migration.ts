@@ -6,25 +6,22 @@
  */
 
 /**
- * The one-time hand-off of what a `file:` build persisted to the
- * `vayu-app://app` origin (#2380).
+ * The one-time hand-off of what a `file:` build persisted to the `vayu-app://app` origin (#2380).
  *
- * localStorage is keyed by origin, so a build that loads its renderer from the
- * app scheme starts with none of what the `file:` builds saved: the theme and
- * appearance keys `index.html` reads before first paint, every zustand
- * `persist` store, and the spec and data-file bindings that cost the user a
- * re-pick each. On the first packaged launch that finds the old store, main
- * reads every entry from a hidden view on the `file://` origin and holds the
- * `vayu*` ones until the new window's preload, which runs before any page
- * script, asks for them and writes each key the new origin does not have yet.
+ * localStorage is keyed by origin, so a build that loads its renderer from the app scheme starts
+ * with none of what the `file:` builds saved: the theme and appearance keys `index.html` reads
+ * before first paint, every zustand `persist` store, and the spec and data-file bindings that each
+ * cost the user a re-pick. On the first packaged launch that finds the old store, main reads every
+ * entry from a hidden view on the `file://` origin and holds the `vayu*` ones until the new
+ * window's preload, which runs before any page script, asks for them and writes each key the new
+ * origin does not have yet.
  *
- * Retirement: this module, its two channels, the preload's
- * `adoptLegacyStorage` and the wiring in main.ts go together, in the first
- * release cut six months after the one that ships them (0.46.0 is expected).
- * It is the one place the app loads a `file:` URL. Retired by #2763.
+ * Retirement: this module, its two channels, the preload's `adoptLegacyStorage` and the wiring in
+ * main.ts go together, in the first release cut six months after the one that ships them (0.46.0 is
+ * expected). It is the one place the app loads a `file:` URL. Retired by #2763.
  *
- * Kept free of Electron so the decisions are tested directly; main.ts hands in
- * the hidden view, the record and the logger.
+ * Kept free of Electron so the decisions are tested directly; main.ts hands in the hidden view, the
+ * record and the logger.
  */
 
 import { promises as fs } from "node:fs";
@@ -32,11 +29,10 @@ import { pathToFileURL } from "node:url";
 import type { IpcSenderLike } from "./ipc-sender.js";
 
 /**
- * Appended to the window's command line while a hand-off is pending, so the
- * preload asks only then rather than blocking every launch's first script on
- * a synchronous round trip. The preload spells all three again (it is a
- * CommonJS script with no imports); `legacy-storage-migration.test.ts` holds
- * the spellings together.
+ * Appended to the window's command line while a hand-off is pending, so the preload asks only then
+ * rather than blocking every launch's first script on a synchronous round trip. The preload spells
+ * all three again (it is a CommonJS script with no imports); `legacy-storage-migration.test.ts`
+ * holds the spellings together.
  */
 export const LEGACY_STORAGE_ARG = "--vayu-legacy-storage";
 /** `sendSync`: the preload asks for the held entries, or null. */
@@ -45,10 +41,9 @@ export const LEGACY_STORAGE_TAKE_CHANNEL = "legacy-storage:take";
 export const LEGACY_STORAGE_TAKEN_CHANNEL = "legacy-storage:taken";
 
 /**
- * Launches that may start a hand-off before it is given up. A launch counts
- * when it starts, so a read that fails, a window that crashes before it
- * reports and a write the new origin refuses all use one up. The old origin
- * is never written again, so a retry loses nothing, and the cap keeps a
+ * Launches that may start a hand-off before it is given up. A launch counts when it starts, so a
+ * read that fails, a window that crashes before it reports and a write the new origin refuses each
+ * use one up. The old origin is never written again, so a retry loses nothing, and the cap keeps a
  * failure that repeats from costing every launch a hidden page load.
  */
 export const LEGACY_STORAGE_MAX_ATTEMPTS = 3;
@@ -74,9 +69,8 @@ export const READ_ALL_LOCAL_STORAGE = `(() => {
 })()`;
 
 /**
- * A document with no script and no subresource, and a policy that refuses
- * both: only an origin to read from. `executeJavaScript` is not page script and
- * is not subject to it.
+ * A document with no script and no subresource, and a policy that refuses both: only an origin to
+ * read from. `executeJavaScript` is not page script and is not subject to it.
  */
 const STUB_HTML =
 	'<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'none\'"><title></title>';
@@ -102,19 +96,16 @@ export function vayuEntries(answer: unknown): LegacyEntries {
 }
 
 /**
- * The stub's view: a `WebContentsView` that is never attached to a window, so
- * nothing can appear on screen and no window is created or closed (a hidden
- * `BrowserWindow` destroyed with no other window up raises
- * `window-all-closed`, which quits the app on Windows and Linux). No preload,
- * sandboxed, on the default session (no `partition`), which is where the
- * `file:` builds' window kept its storage.
+ * The stub's view: a `WebContentsView` never attached to a window, so nothing can appear on screen
+ * and no window is created or closed (a hidden `BrowserWindow` destroyed with no other window up
+ * raises `window-all-closed`, which quits the app on Windows and Linux). No preload, sandboxed, on
+ * the default session (no `partition`), which is where the `file:` builds' window kept its storage.
  *
- * `webSecurity: false` is not optional. With the GrantFileProtocolExtraPrivileges
- * fuse off, Electron 44 refuses localStorage to a `file:` document ("Access is
- * denied for this document") unless web security is off for it; measured
- * against a fused 44.7.2 binary. The page has no script of its own and makes no
- * request, it only answers `READ_ALL_LOCAL_STORAGE`, and it is closed as soon
- * as it has.
+ * `webSecurity: false` is not optional: with the GrantFileProtocolExtraPrivileges fuse off,
+ * Electron 44 refuses localStorage to a `file:` document ("Access is denied for this document")
+ * unless web security is off for it, as measured against a fused 44.7.2 binary. The page has no
+ * script of its own and makes no request; it only answers `READ_ALL_LOCAL_STORAGE`, and it is
+ * closed as soon as it has.
  */
 export const STUB_VIEW_OPTIONS = {
 	webPreferences: {
@@ -149,11 +140,10 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * Every localStorage entry on the `file://` origin, read by writing a stub
- * page to @p stubFile, loading it in the view @p openView returns and asking
- * it. Chromium keys every local `file:` document to the one `file://` origin,
- * so the stub reads what the old `dist/index.html` wrote wherever it lives.
- * The view is closed and the stub deleted before this settles, either way.
+ * Every localStorage entry on the `file://` origin, read by writing a stub page to @p stubFile,
+ * loading it in the view @p openView returns and asking it. Chromium keys every local `file:`
+ * document to the one `file://` origin, so the stub reads what the old `dist/index.html` wrote
+ * wherever it lives. The view is closed and the stub deleted before this settles, either way.
  */
 export async function readFileOriginStorage(
 	openView: () => StubView,
@@ -302,10 +292,9 @@ interface IpcOnLike {
 }
 
 /**
- * The two channels, answered only for the app window's main frame: the
- * entries are the user's whole saved state. `returnValue` is set on every
- * path, because a `sendSync` whose handler leaves it unset blocks the renderer
- * for good.
+ * The two channels, answered only for the app window's main frame: the entries are the user's whole
+ * saved state. `returnValue` is set on every path, because a `sendSync` whose handler leaves it
+ * unset blocks the renderer for good.
  */
 export function registerLegacyStorageIpc(
 	ipc: IpcOnLike,

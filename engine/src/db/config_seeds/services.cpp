@@ -22,11 +22,11 @@ namespace vayu::db::config_seeds {
 // tree.
 // =============================================================================
 void seed_services (ConfigSeeder& seed, int64_t now) {
-    // SSE requests (issue #573). All six - these five and `sseMaxStoredEvents`,
-    // which #703 moved to Data & retention as the per-run storage budget it is -
-    // are read once when a stream starts, so a change applies to the next
-    // stream - no restart - and one run's events are all bounded by a single
-    // rule rather than by whatever the setting happened to be at each arrival.
+    // SSE requests (#573). All six (these five and `sseMaxStoredEvents`, in
+    // Data & retention as the per-run storage budget it is, #703) are read once
+    // when a stream starts, so a change applies to the next stream with no
+    // restart, and one run's events are all bounded by one rule rather than the
+    // setting at each arrival.
     seed (keywords ({ "eventsource", "server-sent", "event stream" }) (ConfigEntry{ "sseMaxRetainedEvents",
     std::to_string (vayu::core::constants::sse::MAX_RETAINED_EVENTS), "integer", "Stream events retained",
     "How many of a streaming request's events are held in memory for the "
@@ -87,10 +87,9 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS_CEILING), std::nullopt, now }))));
 
     // Webhook inbox. All three are read once when an inbox starts, so a change
-    // applies to the next inbox started - no restart. The running listener keeps
-    // what it was started with, which is what makes one inbox's captures a set
-    // truncated and retained by a single rule rather than by whatever the
-    // setting happened to be at each arrival.
+    // applies to the next inbox with no restart; the running listener keeps
+    // what it started with, so one inbox's captures are truncated and retained
+    // by one rule rather than the setting at each arrival.
     seed (unit ("bytes") (ConfigEntry{ "inboxMaxBodyBytes",
     std::to_string (vayu::core::constants::inbox::MAX_BODY_BYTES), "integer", "Inbox capture body limit",
     "How much of an inbound webhook body an inbox stores. A larger "
@@ -124,13 +123,11 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     std::to_string (vayu::core::constants::inbox::MAX_LIVE_POLL_INTERVAL_MS),
     std::nullopt, now })));
 
-    // Mid-run OAuth 2.0 refresh. A load run renews a header-placed access token
-    // before it expires, so a run longer than its token does not turn into a
-    // 401 storm. All five are read once when the run arms its watchdog, so a
-    // change applies to the next run started - no restart. They sat in Network
-    // & connectivity until #703, where they were five of its eight entries; a
-    // user tuning token renewal arrives at Services, which is where the Dock
-    // files the OAuth issuer itself.
+    // Mid-run OAuth 2.0 refresh: a load run renews a header-placed access token
+    // before it expires, so a run longer than its token does not become a 401
+    // storm. All five are read once when the run arms its watchdog, so a change
+    // applies to the next run, with no restart. Token renewal sits in Services
+    // (#703), where the Dock files the OAuth issuer.
     seed (unit ("ms") (ConfigEntry{ "oauth2RefreshLeadMs",
     std::to_string (vayu::core::constants::server::OAUTH2_REFRESH_LEAD_MS),
     "integer", "OAuth 2.0 refresh lead time",

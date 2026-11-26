@@ -5,10 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-// UI State Types
-// Cross-cutting UI types shared across components, hooks, and the Electron
-// preload contract. View/navigation state now lives with its owning store
-// (DrawerView in layout-store, TabType in tabs-store).
+// Cross-cutting UI types for components, hooks and the preload contract. View state lives with its
+// store: `DrawerView` in layout-store, `TabType` in tabs-store.
 
 import type { ReactNode } from "react";
 import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
@@ -24,37 +22,19 @@ import type {
 /** App theme preference. `system` follows the OS via Electron's nativeTheme. */
 export type ThemeSource = "system" | "light" | "dark";
 
-/**
- * Accent color scheme, applied via the `data-color-scheme` attribute.
- * Re-exported from the single source of truth in `@/constants/color-schemes`.
- */
+/** Accent scheme, applied as the `data-color-scheme` attribute. */
 export type { ColorScheme } from "@/constants/color-schemes";
 
 /**
- * The variable scope a variable-aware input is editing inside, handed in rather
- * than reached for.
- *
- * `VariableInput` and the key/value table used to call
- * `useRequestBuilderContext()` in their bodies, and that hook *throws* with no
- * `RequestBuilderProvider` above it - so the app's densest table could not
- * render anywhere but the request builder, and every other surface that wanted
- * key/value rows hand-rolled its own (issue #564). A hand-rolled copy never
- * receives the primitive's fixes.
- *
- * Optional at every consumer, and its absence is a real state rather than a
- * degraded one: a surface with no variable scope - an inbox's canned reply
- * headers, say - has nothing to resolve, nothing to autocomplete and no
- * definition to edit, so the field is a plain text field. The members travel
- * together because they are one concept - the variable scope - and each is
- * meaningless without the rest: without `getAllVariables` there are no tokens
- * to render, and a token with no `updateVariable` offers an edit that goes
- * nowhere.
+ * The variable scope a variable-aware input edits inside, handed in rather than reached for.
+ * Optional at every consumer, and absent is a real state: a surface with no scope (an inbox's
+ * canned reply headers) is a plain text field, with nothing to resolve, autocomplete or edit. The
+ * members are one concept and travel together; each is meaningless without the rest.
  */
 export interface VariableSupport {
 	/**
-	 * `{{name}}` substituted, for a preview of what will actually be sent: a
-	 * picked row's cell written for the field's @p context as the send's bind
-	 * writes it, and why the send would refuse the row (issue #2639).
+	 * `{{name}}` substituted to preview what is sent: a picked row's cell bound for @p context the
+	 * way the send's bind writes it, plus why the send would refuse the row (#2639).
 	 */
 	resolveField: (input: string, context?: DataFieldContext) => BoundField;
 	/** Every name in scope, for token rendering and the `{{` autocomplete. */
@@ -62,10 +42,9 @@ export interface VariableSupport {
 	/** Every definition of a name, winner and losers alike. Display-only. */
 	getVariableOrigins: (name: string) => VariableOrigin[];
 	/**
-	 * Write a new value for a name, from a token's edit popover. An edit passes
-	 * the `sourceId` of the definition it displayed so the write lands there, not
-	 * in the field's own collection; a create passes none (#3683) and may carry
-	 * `options`, which an edit never does.
+	 * Writes a name's value from a token's edit popover. An edit passes the `sourceId` of the
+	 * definition it showed, so the write lands there and not in the field's own collection; a
+	 * create passes none (#3683) and may carry `options`, which an edit never does.
 	 */
 	updateVariable: (
 		name: string,
@@ -74,61 +53,39 @@ export interface VariableSupport {
 		sourceId?: string,
 		options?: VariableCreateOptions
 	) => void;
-	/**
-	 * The scopes `updateVariable` can actually write to right now, so the
-	 * popover's scope picker cannot offer a target that does not exist.
-	 */
+	/** Scopes `updateVariable` can write now, so the picker never offers a missing target. */
 	writableScopes: VariableScope[];
 	/**
-	 * The data contract in scope, when the chain declares one (issue #600).
-	 *
-	 * Optional, and unlike the members above it is optional *within* a scope
-	 * rather than with it: most collections declare no contract, and a field in
-	 * one is still fully variable-aware. Absent therefore means "nothing
-	 * declared", which is the state phase 1 left every `{{data.*}}` token in -
-	 * so a consumer that never sets it behaves exactly as it did (the #564
-	 * prop-thread contract holds).
-	 *
-	 * It sits here rather than being looked up per token because the lookup is a
-	 * chain walk against the collections cache, and the tokens are rendered
-	 * inside a `memo`-wrapped row that must not re-run one per keystroke.
+	 * The data contract the chain declares (#600). Optional within a scope, not with it: most
+	 * collections declare none. Absent means "nothing declared" for every `{{data.*}}` token, so a
+	 * consumer that never sets it keeps the #564 prop-thread contract. Resolved once here, not per
+	 * token: the lookup walks the chain against the collections cache, and tokens render inside a
+	 * `memo` row that must not repeat it per keystroke.
 	 */
 	dataColumns?: DataContractScope;
 	/**
-	 * Hides every secret variable's value in a text a surface displays, so the
-	 * key/value Σ peek can show resolved text without printing a secret. Applied
-	 * to what is drawn, never to what is cached or sent.
-	 *
-	 * Optional: absent means the scope marks nothing secret (every consumer built
-	 * before this member, and surfaces with no scope), and the text is shown as is.
+	 * Hides every secret value in displayed text, so the key/value Σ peek shows resolved text
+	 * without printing a secret. Applied to what is drawn, never to what is cached or sent. Absent:
+	 * nothing is marked secret (no scope, or a consumer that sets none).
 	 */
 	maskSecrets?: (text: string) => string;
 	/**
-	 * The names `POST /compose` left written because a pre-request script runs
-	 * before the send (`deferredVariables`, #2521, #2741). A token naming one is
-	 * not painted as the stored value it holds: that is not what will be sent.
-	 *
-	 * Only ever the engine's answer; the renderer has no rule of its own for
-	 * which requests are scripted. Optional: absent (every scope with no request
-	 * to compose, and every consumer built before this member) paints as it did.
+	 * Names `POST /compose` left written because a pre-request script runs first
+	 * (`deferredVariables`, #2521, #2741). A token naming one is not painted with its stored value:
+	 * that is not what is sent. Only the engine's answer; the renderer has no rule for which
+	 * requests are scripted. Absent (nothing to compose, or a consumer that sets none) paints
+	 * stored values.
 	 */
 	deferredVariables?: readonly string[];
 }
 
 /**
- * UI-layer extension of KeyValueEntry with a stable React key (`id`).
- * The `id` is ephemeral - it is NOT persisted to the backend.
- * Strip it with `toKeyValueEntries()` before sending to the API.
- *
- * It extends `FormFieldEntry` rather than `KeyValueEntry` because one table
- * serves params, headers and both form modes, and only `form-data` rows carry
- * the file members - all optional, so a header row is unchanged. The editor
- * only offers them where `allowFiles` says it may.
- *
- * It lives here, beside {@link VariableSupport}, rather than in
- * `modules/request-builder/types.ts`: it is the row model of a shared
- * primitive, and a primitive under `components/shared/` cannot take its own
- * props type from a feature module (issue #567).
+ * A table row with an ephemeral React key `id`, never persisted: strip it with
+ * `toKeyValueEntries()` before an API call. It extends `FormFieldEntry`, not `KeyValueEntry`,
+ * because one table serves params, headers and both form modes; the file members are optional and
+ * offered only under `allowFiles`. It lives here, beside {@link VariableSupport}, and not in
+ * `modules/request-builder/types.ts`: a `components/shared/` primitive cannot take its props type
+ * from a feature module (#567).
  */
 export interface KeyValueItem extends FormFieldEntry {
 	id: string;
@@ -137,10 +94,9 @@ export interface KeyValueItem extends FormFieldEntry {
 /** What a {@link KeyValueRowExtra} control is handed besides its row. */
 export interface KeyValueRowExtraContext {
 	/**
-	 * Replaces the row with `next` (its `id` is kept). The table's own edits
-	 * leave members it does not know about untouched, so a control that owns
-	 * one writes the whole row: spread the row it was given, then set or drop
-	 * its member.
+	 * Replaces the row with `next`, keeping its `id`. The table's edits leave members it does not
+	 * know untouched, so a control owning one writes the whole row: spread it, then set or drop the
+	 * member.
 	 */
 	replaceItem: (next: KeyValueItem) => void;
 	/** The row is off or the table read-only: the control should not take input. */
@@ -148,12 +104,9 @@ export interface KeyValueRowExtraContext {
 }
 
 /**
- * A caller's own control in every row of the table, under a column of its own.
- *
- * `render` is a prop of the memo'd `KeyValueRow` (#1716), so the caller keeps
- * its identity stable (`useCallback`). The trailing spare row gets an empty
- * cell, not the control: it is dropped on save while blank, so a choice made
- * there would be lost.
+ * A caller's control in every row, under a column of its own. `render` is a prop of the memo'd
+ * `KeyValueRow` (#1716): keep its identity stable (`useCallback`). The trailing spare row gets an
+ * empty cell, because it is dropped on save while blank and a choice made there would be lost.
  */
 export interface KeyValueRowExtra {
 	/** The column's header-band label. */
@@ -172,33 +125,22 @@ export interface KeyValueEditorProps {
 	readOnly?: boolean;
 	keySuggestions?: string[];
 	/**
-	 * Offer each row a file part (`form-data` only). Off everywhere else,
-	 * because a header, a query param and a urlencoded field have no file form
-	 * on the wire - the engine refuses one - so the affordance would promise
-	 * something that cannot be sent.
+	 * Offer each row a file part, `form-data` only: a header, query param or urlencoded field has
+	 * no file form on the wire and the engine refuses one.
 	 */
 	allowFiles?: boolean;
-	/**
-	 * A per-row control of the caller's own, with a column of its own. Omitted by
-	 * every other table, which keeps the track it always had.
-	 */
+	/** A caller's per-row control in its own column; absent leaves the grid unchanged. */
 	rowExtra?: KeyValueRowExtra;
 	/**
-	 * The variable scope the table edits inside, handed in by whoever mounts it.
-	 *
-	 * Omitted where there is none - the inbox's canned reply headers, say - and
-	 * the table then resolves nothing, shows no `ResolvedPeek` and offers no
-	 * `{{` autocomplete. That is the correct reading of a surface with no
-	 * variables, not a degraded one. It is a prop rather than a context read
-	 * because the hook that used to supply it *throws* outside
-	 * `RequestBuilderProvider`, which made this table structurally unusable
-	 * anywhere else (#564).
+	 * The variable scope, handed in by whoever mounts the table. Omitted where there is none (the
+	 * inbox's canned reply headers): nothing resolves, no `ResolvedPeek`, no `{{` autocomplete,
+	 * which is the correct reading of such a surface. A prop, not a context read, because
+	 * `useRequestBuilderContext()` throws outside `RequestBuilderProvider` (#564).
 	 */
 	variables?: VariableSupport;
 	/**
-	 * What kind of field every key and value is, for the bind a picked row's
-	 * preview shows: `header` for the Headers table, `plain` (the default) for
-	 * the rest, as the engine's bind treats them.
+	 * Field kind of every key and value, for a picked row's bind preview: `header` for the Headers
+	 * table, `plain` (the default) elsewhere, as the engine's bind treats them.
 	 */
 	fieldContext?: DataFieldContext;
 	canEdit?: (item: KeyValueItem, field: keyof KeyValueItem) => boolean;

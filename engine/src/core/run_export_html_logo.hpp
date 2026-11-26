@@ -8,17 +8,15 @@
  */
 
 /**
- * @file core/run_export_html_logo.hpp
- * @brief The Vayu mark the HTML run report shows beside its wordmark (#2135).
+ * The Vayu mark beside the HTML run report's wordmark (#2135):
+ * `shared/icon_png/vayu_icon_64x64.png` as base64 for a `data:image/png` URI,
+ * so the page stays one file and fetches nothing. The mark exists only as a
+ * raster, so it is embedded, not drawn. Regenerate with
  *
- * `shared/icon_png/vayu_icon_64x64.png` as base64, for a `data:image/png`
- * URI: the page stays one file and fetches nothing. The mark exists only as a
- * raster, so it is embedded rather than drawn. Regenerate the literal with
+ * base64 -w0 shared/icon_png/vayu_icon_64x64.png
  *
- *     base64 -w0 shared/icon_png/vayu_icon_64x64.png
- *
- * `run_export_html_test.cpp` decodes it and compares it with that file byte for
- * byte, so a changed icon fails until this is regenerated.
+ * `run_export_html_test.cpp` compares the decoded literal with that file byte
+ * for byte, so a changed icon fails until this is regenerated.
  */
 
 #include <string_view>

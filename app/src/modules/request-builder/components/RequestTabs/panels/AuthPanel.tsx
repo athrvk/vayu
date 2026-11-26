@@ -6,13 +6,9 @@
  */
 
 /**
- * AuthPanel - the request's auth source.
- *
- * The picker and the surrounding banners are this host's business; the fields
- * themselves are the shared `AuthFields`, the same component the collection
- * `AuthTab` renders. Only two things here are request-specific: `inherit` is
- * offered (a collection is always a source, never an inheritor), and the
- * injected text input is variable-aware.
+ * The request's auth source. The picker and banners are this host's; the fields are the shared
+ * `AuthFields`, as the collection `AuthTab` renders. Only two things are request-specific:
+ * `inherit` is offered (a collection is always a source), and the text input is variable-aware.
  */
 
 import { Key, Lock, User, KeyRound, ShieldCheck } from "lucide-react";
@@ -49,13 +45,11 @@ const AUTH_MODE_ICONS: Record<PickerMode, typeof Key> = {
 	oauth2: ShieldCheck,
 };
 
-// Variable-aware text input for the auth fields (so {{variables}} work in every
-// field). Secret fields (client secret / password) instead use the masked
-// SecretInput with a reveal toggle - masking and {{variable}} token highlighting
-// can't coexist, and hiding the secret at rest wins for those fields.
-// Always mounted inside `RequestBuilderProvider`, so it reads the scope here
-// rather than threading it through every auth field - `VariableInput` itself no
-// longer knows the context exists (#564).
+// Variable-aware text input, so {{variables}} work in every auth field. Secret fields (client
+// secret, password) use the masked SecretInput with a reveal toggle instead: masking and token
+// highlighting cannot coexist, and hiding a secret at rest wins. Always inside
+// `RequestBuilderProvider`, so it reads the scope here rather than threading it through every
+// field; `VariableInput` does not know the context (#564).
 const VariableTextInput: AuthTextInput = ({ id, label, value, onChange, placeholder, type }) => {
 	const variables = useVariableSupport();
 	return type === "password" ? (
@@ -104,15 +98,13 @@ export default function AuthPanel() {
 		updateField("auth", defaultsFor(mode as PickerMode));
 	};
 
-	// digest/aws/ntlm are stored but not editable here (the engine can't resolve
-	// them). Name the real mode and warn instead of showing the "No Auth" empty
-	// state, which is what the picker would fall back to - the same treatment the
-	// collection AuthTab gives them. Selecting any type below replaces it.
+	// digest/aws/ntlm are stored but not editable (the engine cannot resolve them): name the real
+	// mode and warn, as the collection AuthTab does, instead of the picker's "No Auth" fallback.
+	// Picking any type replaces it.
 	const uneditableLabel = uneditableAuthLabel(auth.mode);
 
 	return (
 		<div className="space-y-6">
-			{/* Auth Type Selector */}
 			<LabelledField label="Authentication type">
 				{(c) => (
 					<Select
@@ -145,7 +137,6 @@ export default function AuthPanel() {
 				)}
 			</LabelledField>
 
-			{/* Inherit resolution */}
 			{auth.mode === "inherit" && <AuthInheritBanner collectionId={request.collectionId} />}
 
 			{/* Stored-but-not-editable mode (imported digest/aws/ntlm) */}
@@ -167,11 +158,10 @@ export default function AuthPanel() {
 					deferredNames={deferredNames}
 					collectionId={request.collectionId}
 					/*
-					 * Names the fields whose resolved values have to hold still
-					 * across this panel's unmount - Auth is not force-mounted, so
-					 * Auth → Headers → Auth is a new form. A request with no id
-					 * yet shares one entry, the same trade `ParamsPanel` makes:
-					 * an unsaved draft has nothing else stable to key on.
+					 * Names the fields whose resolved values must hold across this panel's unmount,
+					 * as Auth is not force-mounted (Auth, then Headers, then Auth is a new form). A
+					 * request with no id shares one entry, as `ParamsPanel` does: an unsaved draft
+					 * has nothing else stable.
 					 */
 					resolveKey={request.id ?? "new"}
 				/>

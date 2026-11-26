@@ -6,28 +6,22 @@
  */
 
 /**
- * @file compare.ts
- * @brief Pure server-side diff of two run reports (the `compare_runs` tool's
- *        core). Answers "did my change regress?" by comparing latency
- *        percentiles, error rate, throughput, and status-code mix, each
- *        labelled with which direction counts as an improvement, and
- *        reports in `comparability` where the two runs were not the same
- *        experiment (mode, virtual users, duration, status, ...). Defensive
- *        against missing fields so it works across run types, and a figure the
- *        report flags as unrecorded (`summary.summaryMissing`,
- *        `summary.partial`, #2904) is `null` on that side, never a zero.
+ * @brief Pure server-side diff of two run reports (the `compare_runs` tool's core). Answers "did my
+ *        change regress?" by comparing latency percentiles, error rate, throughput, and status-code
+ *        mix, each labelled with which direction counts as an improvement, and reports in
+ *        `comparability` where the two runs were not the same experiment (mode, virtual users,
+ *        duration, status, ...). Defensive against missing fields so it works across run types, and
+ *        a figure the report flags as unrecorded (`summary.summaryMissing`, `summary.partial`,
+ *        #2904) is `null` on that side, never a zero.
  *
- * **Mirrored by `app/src/lib/run-compare.ts`, which the history view's
- * vs-baseline strip uses.** Neither process can import the other's source:
- * this project emits with `rootDir: "electron"` and so cannot compile a file
- * from `src/` (TS6059), and the renderer cannot import one from here either,
- * because this is a referenced composite project (TS6305 - and excluding a
- * file from it to dodge that is TS6307). So the copy is deliberate, and
- * `compare.conformance.test.ts` runs both implementations over
- * `engine/tests/fixtures/run-compare-conformance.json` and fails on any
- * divergence. The engine's run-report export is a third copy
- * (`engine/src/core/run_compare.cpp`) replaying the same fixture. Change this
- * file and change the other two.
+ * **Mirrored by `app/src/lib/run-compare.ts`, which the history view's vs-baseline strip uses.**
+ * Neither process can import the other's source: this project emits with `rootDir: "electron"` and
+ * so cannot compile a file from `src/` (TS6059), and the renderer cannot import one from here
+ * either, because this is a referenced composite project (TS6305, and excluding a file from it to
+ * dodge that is TS6307). So the copy is deliberate, and `compare.conformance.test.ts` runs both
+ * implementations over `engine/tests/fixtures/run-compare-conformance.json` and fails on any
+ * divergence. The engine's run-report export is a third copy (`engine/src/core/run_compare.cpp`)
+ * replaying the same fixture. Change this file and change the other two.
  */
 
 type Report = Record<string, unknown>;
@@ -42,11 +36,10 @@ function num(obj: unknown, ...path: string[]): number | null {
 }
 
 /**
- * Like {@link num}, but for a flag whose absence is itself meaningful
- * (issues #1488, #2516): a report from before
- * `metadata.configuration.acceptEncoding` or `expectContinue` existed carries
- * no such key, and reads as `false` here - which is what every such run
- * actually sent, not an unknown value defaulted away.
+ * Like {@link num}, but for a flag whose absence is itself meaningful (#1488, #2516): a report from
+ * before `metadata.configuration.acceptEncoding` or `expectContinue` existed carries no such key,
+ * and reads as `false` here, which is what every such run actually sent, not an unknown value
+ * defaulted away.
  */
 function bool(obj: unknown, ...path: string[]): boolean {
 	let cur: unknown = obj;
@@ -68,10 +61,9 @@ function str(obj: unknown, ...path: string[]): string | null {
 }
 
 /**
- * Which way is better for a metric - the half of a delta a number cannot
- * carry. `neutral` is not a hedge: `summary.totalRequests` moves with how long
- * a run was told to run, so calling either direction an improvement would
- * paint a shorter run as a regression.
+ * Which way is better for a metric: the half of a delta a number cannot carry. `neutral` is not a
+ * hedge: `summary.totalRequests` moves with how long a run was told to run, so calling either
+ * direction an improvement would paint a shorter run as a regression.
  */
 export type MetricDirection = "lower-is-better" | "higher-is-better" | "neutral";
 
@@ -101,12 +93,11 @@ function delta(
 }
 
 /**
- * What a delta means, for a reader or a colour. Kept beside the diff so the
- * renderer and an agent reading `direction` cannot come to disagree about
- * which way is up.
+ * What a delta means, for a reader or a colour. Kept beside the diff so the renderer and an agent
+ * reading `direction` cannot come to disagree about which way is up.
  *
- * `unknown` is a metric one of the two runs did not record - which is not the
- * same claim as "it did not move", and must not be painted as one.
+ * `unknown` is a metric one of the two runs did not record, which is not the same claim as "it did
+ * not move", and must not be painted as one.
  */
 export type DeltaVerdict = "improved" | "regressed" | "unchanged" | "unknown";
 
@@ -118,10 +109,9 @@ export function deltaVerdict(metric: MetricDelta): DeltaVerdict {
 }
 
 /**
- * One reason the two runs are not the same experiment, so the deltas beside it
- * are not a clean "did it regress" (issue #2162). `base` and `target` are the
- * two values as a reader should see them, already formatted ("20 s" against
- * "3 s, stopped"), and `code` is the stable key a consumer switches on.
+ * One reason the two runs are not the same experiment, so the deltas beside it are not a clean "did
+ * it regress" (#2162). `base` and `target` are the two values as a reader should see them, already
+ * formatted ("20 s" against "3 s, stopped"), and `code` is the stable key a consumer switches on.
  */
 export interface ComparabilityWarning {
 	code: string;
@@ -138,26 +128,28 @@ export interface RunComparison {
 	reliability: MetricDelta[];
 	statusCodes: Record<string, { base: number; target: number }>;
 	/**
-	 * Whether the two runs negotiated a compressed response differently
-	 * (issue #1488) - a run recorded before `loadNegotiateCompression`'s
-	 * default flipped in 0.26 reads as `false`, so an older baseline against
-	 * a newer run reports a difference exactly when the newer one negotiated
-	 * and the older did not. `true` means the byte and latency deltas above
-	 * are not measuring the same thing. The same fact is the `compression`
-	 * entry of {@link RunComparison.comparability}, which is what a reader
-	 * renders; this flag stays for a consumer that wants only the one answer.
+	 * The mcp failure classes (#3828) of two runs that both recorded them, `{}` when either did
+	 * not: a run stored before the engine counted them has no figure, and reading it as 0 would
+	 * show a regression that never happened. `protocolCodes` is not compared.
+	 */
+	errorClasses: ErrorClassDeltas;
+	/**
+	 * Whether the two runs negotiated a compressed response differently (#1488): a run recorded
+	 * before `loadNegotiateCompression`'s default flipped in 0.26 reads as `false`, so an older
+	 * baseline against a newer run reports a difference exactly when the newer one negotiated and
+	 * the older did not. `true` means the byte and latency deltas above are not measuring the same
+	 * thing. The same fact is the `compression` entry of {@link RunComparison.comparability}, which
+	 * is what a reader renders; this flag stays for a consumer that wants only the one answer.
 	 */
 	compressionNegotiationDiffers: boolean;
 	/**
-	 * Every way the two runs differ in what they measured, in a fixed order
-	 * (`run_type`, `mode`, `concurrency`, `target_rps`, `duration`, `status`,
-	 * `http_version`, `data_file`, `request`, `compression`, `expect_continue`).
-	 * Empty for a like-for-like pair. When both reports carry
-	 * `metadata.runType`, a `mode`, `concurrency` or `target_rps` only one of
-	 * them recorded is a difference, its missing side `not recorded`; otherwise
-	 * a field a report does not carry is unknown, not a difference, except a
-	 * data file, where none against one is a real difference. Read this before
-	 * the deltas: a short stopped run against a long one always looks like a
+	 * Every way the two runs differ in what they measured, in a fixed order (`run_type`, `mode`,
+	 * `concurrency`, `target_rps`, `duration`, `status`, `http_version`, `data_file`, `request`,
+	 * `compression`, `expect_continue`). Empty for a like-for-like pair. When both reports carry
+	 * `metadata.runType`, a `mode`, `concurrency` or `target_rps` only one of them recorded is a
+	 * difference, its missing side `not recorded`; otherwise a field a report does not carry is
+	 * unknown, not a difference, except a data file, where none against one is a real difference.
+	 * Read this before the deltas: a short stopped run against a long one always looks like a
 	 * throughput and tail-latency regression.
 	 */
 	comparability: ComparabilityWarning[];
@@ -166,17 +158,15 @@ export interface RunComparison {
 /**
  * The status-code mix as `[code, count]` pairs, from either wire shape.
  *
- * The engine's report carries `std::map<int, size_t> status_codes`, and a map
- * whose keys are not strings cannot be a JSON object - nlohmann renders it as
- * an **array of `[code, count]` pairs**. The renderer never sees that form
- * (`RunReportTransformer.toFrontend` folds it into a record before any query
- * cache holds it), but this file's caller - the MCP `compare_runs` tool - reads
- * `GET /runs/:id/report` raw, so the array is exactly what arrives there.
- * Reading only the record form scored every code as absent and reported an
- * empty mix with no error.
+ * The engine's report carries `std::map<int, size_t> status_codes`, and a map whose keys are not
+ * strings cannot be a JSON object: nlohmann renders it as an **array of `[code, count]` pairs**.
+ * The renderer never sees that form (`RunReportTransformer.toFrontend` folds it into a record
+ * before any query cache holds it), but this file's caller, the MCP `compare_runs` tool, reads
+ * `GET /runs/:id/report` raw, so the array is exactly what arrives there. Reading only the record
+ * form scored every code as absent and reported an empty mix with no error.
  *
- * Both shapes therefore have to be read here, and the array check has to come
- * first: an array is an object too.
+ * Both shapes therefore have to be read here, and the array check has to come first: an array is an
+ * object too.
  */
 function statusCodeEntries(codes: unknown): [string, unknown][] {
 	if (Array.isArray(codes)) {
@@ -234,11 +224,10 @@ function runTypeLabel(type: string): string {
 const NOT_RECORDED = "not recorded";
 
 /**
- * {@link warnIfDiffer} for a field of the run's configuration (#2438).
- * `metadata.runType` marks a report from an engine that records each field a
- * run was given, so once both reports carry it, a field only one recorded is
- * one the other run was not given: a real difference, not an older engine's
- * silence.
+ * {@link warnIfDiffer} for a field of the run's configuration (#2438). `metadata.runType` marks a
+ * report from an engine that records each field a run was given, so once both reports carry it, a
+ * field only one recorded is one the other run was not given: a real difference, not an older
+ * engine's silence.
  */
 function warnIfConfigDiffers<T>(
 	code: string,
@@ -261,9 +250,8 @@ function warnIfConfigDiffers<T>(
 const capitalize = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
 
 /**
- * What a run was told to vary: its concurrency, and for a ramp the start level
- * and the ramp time too, since a 1-to-50 ramp and a flat 50 are not the same
- * load.
+ * What a run was told to vary: its concurrency, and for a ramp the start level and the ramp time
+ * too, since a 1-to-50 ramp and a flat 50 are not the same load.
  */
 function virtualUsers(report: Report): string | null {
 	const peak = num(report, ...CONFIG, "concurrency");
@@ -332,11 +320,10 @@ function dataFileWarning(base: Report, target: Report): ComparabilityWarning | n
 const requestMethod = (report: Report): string | null => str(report, "metadata", "requestMethod");
 
 /**
- * The URL with its userinfo, query and fragment dropped. A comparison is
- * embedded verbatim in an agent's context, and unlike `get_run_report` it is
- * not masked, so a credential in `?token=` must never reach `comparability`.
- * The cost is that two runs differing only in a query string read as the same
- * request, which is the right call for a comparison of "which endpoint".
+ * The URL with its userinfo, query and fragment dropped. A comparison is embedded verbatim in an
+ * agent's context, and unlike `get_run_report` it is not masked, so a credential in `?token=` must
+ * never reach `comparability`. The cost is that two runs differing only in a query string read as
+ * the same request, which is the right call for a comparison of "which endpoint".
  */
 function requestUrl(report: Report): string | null {
 	const url = str(report, "metadata", "requestUrl");
@@ -441,20 +428,63 @@ const COMPARABILITY_RULES: ((base: Report, target: Report) => ComparabilityWarni
 ];
 
 /**
- * A figure of the report's `latency` or `summary` block, or `null` where the
- * engine did not record it (#2904): `summary.summaryMissing` (a failed run
- * with no summary) leaves the counts and the latency block unreliable, and
- * `summary.partial` (reconciled after a crash) leaves the latency block out
- * (#2938); the flag is still checked, for an export that predates the omission
- * and carries zeros. A 0 read through here would be a measurement no run made,
- * and a delta against it a regression no run showed. Read per side, so one
- * unrecorded run nulls only its own column. Mirrors `unrecordedFiguresOf`
- * (`modules/history/main/components/unrecorded-figures.ts`).
+ * A figure of the report's `latency` or `summary` block, or `null` where the engine did not record
+ * it (#2904): `summary.summaryMissing` (a failed run with no summary) leaves the counts and the
+ * latency block unreliable, and `summary.partial` (reconciled after a crash) leaves the latency
+ * block out (#2938); the flag is still checked, for an export that predates the omission and
+ * carries zeros. A 0 read through here would be a measurement no run made, and a delta against it a
+ * regression no run showed. Read per side, so one unrecorded run nulls only its own column. Mirrors
+ * `unrecordedFiguresOf` (`modules/history/main/components/unrecorded-figures.ts`).
  */
 function recordedNum(report: Report, section: "latency" | "summary", key: string): number | null {
 	if (bool(report, "summary", "summaryMissing")) return null;
 	if (section === "latency" && bool(report, "summary", "partial")) return null;
 	return num(report, section, key);
+}
+
+/**
+ * The classes `summary.errorClasses` counts (#3828), in the order every reader shows them.
+ * `protocolCodes` is the engine's finer split of `protocol` and is not compared.
+ */
+export const ERROR_CLASS_KEYS = ["transport", "protocol", "tool"] as const;
+
+export type ErrorClassKey = (typeof ERROR_CLASS_KEYS)[number];
+
+/** Each class a run counted, `{ base, target }`; a class neither run counted is absent. */
+export type ErrorClassDeltas = Partial<Record<ErrorClassKey, { base: number; target: number }>>;
+
+/**
+ * `summary.errorClasses` as the report carries it, or `null` for a run that never recorded one
+ * (stored before #3828). `{}` is a recording: nothing failed. Told apart here because an unrecorded
+ * side read as 0 would fake a regression against it.
+ */
+function recordedErrorClasses(report: Report): Record<string, unknown> | null {
+	const summary = report.summary;
+	if (summary === null || typeof summary !== "object") return null;
+	const classes = (summary as Report).errorClasses;
+	if (classes === null || typeof classes !== "object" || Array.isArray(classes)) return null;
+	return classes as Record<string, unknown>;
+}
+
+/**
+ * Per-class counts of the two runs, only when both recorded them. A class
+ * either side counted as a finite number is listed, the other side's missing
+ * count being 0; any other value reads as not counted.
+ */
+function errorClassDeltas(base: Report, target: Report): ErrorClassDeltas {
+	const baseCounts = recordedErrorClasses(base);
+	const targetCounts = recordedErrorClasses(target);
+	const deltas: ErrorClassDeltas = {};
+	if (baseCounts === null || targetCounts === null) return deltas;
+	const counted = (value: unknown) =>
+		typeof value === "number" && Number.isFinite(value) ? value : null;
+	for (const key of ERROR_CLASS_KEYS) {
+		const from = counted(baseCounts[key]);
+		const to = counted(targetCounts[key]);
+		if (from === null && to === null) continue;
+		deltas[key] = { base: from ?? 0, target: to ?? 0 };
+	}
+	return deltas;
 }
 
 /** Compare two engine run reports and return a structured delta. */
@@ -521,6 +551,7 @@ export function compareReports(
 		throughput,
 		reliability,
 		statusCodes,
+		errorClasses: errorClassDeltas(base, target),
 		compressionNegotiationDiffers,
 		comparability,
 	};

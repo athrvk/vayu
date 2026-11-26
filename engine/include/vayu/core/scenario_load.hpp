@@ -8,17 +8,16 @@
  */
 
 /**
- * @file core/scenario_load.hpp
  * @brief Load-mode scenarios: a per-virtual-user state machine over the shared
- *        plan, per-VU cookies and per-step histograms (issue #357).
+ *        plan, per-VU cookies and per-step histograms (#357).
  *
  * The plan is shared with the design-mode runner; the executor is not, and that
  * divergence is the design. `scenario_runner.cpp` walks one sequence through
  * `http::Client` because a design-mode step needs the environment jar and an
  * inline script. Neither is available - or wanted - at 60k RPS, so a load-mode
  * scenario runs on the event loop instead, and the *only* substitution it makes
- * to the existing closed-loop controller is what `submit_one` submits: "the
- * next step of virtual user *k*" rather than "another copy of the one request".
+ * to the closed-loop controller is what `submit_one` submits: "the next step of
+ * virtual user *k*" rather than "another copy of the one request".
  * `maintain_concurrency`, `compute_refill_deficit`, the SPSC submission path
  * and the single-producer discipline are shared verbatim.
  *
@@ -41,43 +40,39 @@
  *
  * A run sent with `data` claims a row per VU iteration from a single run-wide
  * cursor (`ScenarioLoadState::data_cursor`), wrapping when the rows run out,
- * and every step of that iteration binds the same row (issue #449). Shared
- * rather than per-VU is what makes distinct credentials per user work: two VUs
- * must not both be handed row 0. The substitution itself is a join over the
- * step's `data_template`, split once at plan resolution - a step with no
- * `{{data.*}}` token has an empty template and does no per-iteration work at
- * all.
+ * and every step of that iteration binds the same row (#449). Shared rather
+ * than per-VU is what makes distinct credentials per user work: two VUs must
+ * not both be handed row 0. The substitution itself is a join over the step's
+ * `data_template`, split once at plan resolution - a step with no `{{data.*}}`
+ * token has an empty template and does no per-iteration work at all.
  *
- * ## The element pipeline runs here too, per VU (issue #1495)
+ * ## The element pipeline runs here too, per VU (#1495)
  *
- * `submit_one` runs `ElementPipeline::run(StepBefore, ...)` plus the residual-
- * token pass before binding the request, and the completion runs
+ * `submit_one` runs `ElementPipeline::run(StepBefore, ...)` plus the
+ * residual-token pass before binding the request, and the completion runs
  * `ElementPipeline::run(StepAfter, ...)` before `finish_step`. Declarative
  * kinds (`extract.*`, `assert.*`) always run; a `script.*` kind runs here only
  * when its own `config.inline` is set or the run's `elements.scripts` override
  * forces it, read through `HotPathClass` rather than a `kind ==` comparison -
- * otherwise the step keeps the pre-#1495 behaviour, deferred to
- * `validate_scripts`' replay after the run, keyed per step index as before. A
- * VU's writes (`extract.json` into a variable, an inline `script.pre`'s
- * `pm.environment.set`) land in its own `VirtualUser::scope_overlay`
- * (`vayu::http::routes::ScopeOverlay`), never the run's shared scopes - two
- * users writing the same name is exactly the cross-contamination this rule
- * exists to prevent, on the same reasoning `cookies` above is per-VU. The
- * overlay is written on the completion path *before* `finish_step` releases
- * `busy`, so the same acquire/release pairing that makes `cookies` visible to
- * this VU's next step makes the overlay visible too, with no extra lock.
+ * otherwise it is deferred to `validate_scripts`' replay after the run, keyed
+ * per step index. A VU's writes (`extract.json` into a variable, an inline
+ * `script.pre`'s `pm.environment.set`) land in its own
+ * `VirtualUser::scope_overlay` (`vayu::http::routes::ScopeOverlay`), never the
+ * run's shared scopes - two users writing the same name is exactly the
+ * cross-contamination this rule exists to prevent, on the same reasoning
+ * `cookies` above is per-VU. The overlay is written on the completion path
+ * *before* `finish_step` releases `busy`, so the same acquire/release pairing
+ * that makes `cookies` visible to this VU's next step makes the overlay visible
+ * too, with no extra lock.
  *
- * An inline script still cannot redirect the plan (`pm.execution` throws
- * exactly as before, `in_scenario == false`): flow control only ever comes
- * from a `control.*` element or the deferred replay's own script, neither of
- * which exists on this path yet. What changed is only whether `script.pre` /
- * `script.post` run now or later - each event-loop worker and the strategy
- * thread get their own `ScriptEngine`
+ * An inline script still cannot redirect the plan (`pm.execution` throws,
+ * `in_scenario == false`): flow control only ever comes from a `control.*`
+ * element (#1569) or the deferred replay's own script. Each event-loop worker
+ * and the strategy thread get their own `ScriptEngine`
  * (`vayu::http::routes::script_engine_for_this_thread`), never a pool behind
  * one mutex, because a run's worker threads are spawned fresh for that run and
- * joined before it retains - the same lifetime the event loop itself already
- * relies on - so a thread-local instance is never stale and never shared
- * across two runs.
+ * joined before it retains - the same lifetime the event loop itself relies on
+ * - so a thread-local instance is never stale and never shared across two runs.
  */
 
 #include <atomic>
@@ -109,9 +104,9 @@ struct RunContext;
  * @brief Does this `POST /runs` payload ask for a scenario *load* run?
  *
  * A `scenario` block with a load `mode` beside it. Without a mode the block is
- * a design-mode collection run, which is what every caller sent before this
- * phase existed - so the absence of `mode` cannot start meaning something new,
- * and the presence of one cannot be mistaken for the design-mode default.
+ * a design-mode collection run, the shape callers sent before load mode existed
+ * - so the absence of `mode` cannot start meaning something new, and the
+ * presence of one cannot be mistaken for the design-mode default.
  */
 [[nodiscard]] bool is_scenario_load_run (const nlohmann::json& config);
 
@@ -135,14 +130,13 @@ const nlohmann::json& config);
  * @brief The first element kind in @p plan that a scenario load run cannot
  *        honour, or `nullopt` when it carries none.
  *
- * `control.switch` and `control.loop` (issue #1515) needed this refusal
- * until #1569 gave the load path its own jump/repeat mechanism
- * (`ScenarioLoadState::step_index`, `VirtualUser::steps_this_iteration`);
- * neither kind sets the registry's `jumps_or_repeats` flag any more, so this
- * reads as "nothing today" and exists for a future kind that jumps in a way
- * the load path genuinely cannot support yet - refusing such a plan with a
- * `400` naming the kind, before its row exists, rather than silently running
- * it once and ignoring what it asked for.
+ * No kind answers today: `control.switch` and `control.loop` (#1515) run on the
+ * load path's own jump/repeat mechanism (#1569:
+ * `ScenarioLoadState::step_index`, `VirtualUser::steps_this_iteration`), and
+ * neither sets the registry's `jumps_or_repeats` flag. The check stands for a
+ * kind that jumps in a way the load path cannot support: such a plan is refused
+ * with a `400` naming the kind, before its row exists, rather than silently run
+ * once with what it asked for ignored.
  */
 [[nodiscard]] std::optional<std::string> find_load_incompatible_controller (
 const ScenarioPlan& plan);
@@ -561,8 +555,8 @@ struct ScenarioLoadState {
     /// can name the steps without the plan, which retention releases.
     const std::vector<ScenarioStepLabel> step_labels;
     /// The plan-wide first/last position of every scope-spanning element
-    /// (issue #1515's `control.transaction` and, since #1569, `control.loop`
-    /// too), computed once here.
+    /// (`control.transaction`, #1515, and `control.loop`, #1569), computed once
+    /// here.
     std::unordered_map<std::string, ElementSpan> element_spans;
     /// One histogram per declared `control.transaction` name (issue #1515),
     /// allocated up front from the same plan scan `element_spans` is, so
@@ -575,12 +569,10 @@ struct ScenarioLoadState {
     /// `iterations_abandoned`, and a pass cut short is not a pass time.
     PassDurationRecorder pass_durations;
     /// Steps a `control.if` / `control.once` / `control.throughput` element
-    /// skipped before they reached the wire (issue #1515), less those whose
-    /// inline `script.pre` threw or whose jump the run could not honour,
-    /// which are `errored` (#2947, #2974) - the load
-    /// path's own `StepOutcome::Skipped`, read into the summary's
-    /// `skipped` key in place of the constant `0` every scenario load run
-    /// reported before this.
+    /// skipped before they reached the wire (#1515), less those whose inline
+    /// `script.pre` threw or whose jump the run could not honour, which are
+    /// `errored` (#2947, #2974) - the load path's own `StepOutcome::Skipped`,
+    /// read into the summary's `skipped` key.
     std::atomic<size_t> steps_skipped{ 0 };
     /// Step executions whose response arrived and at least one of whose
     /// inline assertions did not hold (#2824): the summary's `failed`, the
@@ -723,9 +715,9 @@ build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan&
  * Built while the workers still write, so it reads only relaxed atomics and the
  * immutable `step_labels`, never a histogram (a step's `percentiles` and
  * `latency_samples`, the pass durations' percentiles), whose plain hdr reads
- * would race the workers. The counts
- * are the same counters `build_scenario_load_summary` reads, so a frame built
- * after the drain says what the summary does.
+ * would race the workers. The counts are the same counters
+ * `build_scenario_load_summary` reads, so a frame built after the drain says
+ * what the summary does.
  */
 [[nodiscard]] nlohmann::json build_scenario_live_progress (const ScenarioLoadState& state);
 
@@ -743,18 +735,18 @@ build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan&
  * @brief Run the VU state machine to completion. Called by `execute_load_test`
  *        in place of a `LoadStrategy`, inside the same lifecycle.
  *
- * Every path leaves the run drainable: a step that got no response ends its VU's
- * iteration and the VU starts the next one rather than being stranded - a stranded VU
- * permanently shrinks effective concurrency, the same failure `handle_result`'s
- * error branch already guards against.
+ * Every path leaves the run drainable: a step that got no response ends its
+ * VU's iteration and the VU starts the next one rather than being stranded - a
+ * stranded VU permanently shrinks effective concurrency, the same failure
+ * `handle_result`'s error branch already guards against.
  *
- * @param run_scopes The run's scopes (@ref scenario_load_scopes), already
- *        run through every `script.setup` (#1499, #3456) by
- *        `execute_load_test` - there rather than here so a setup script's own
- *        time is spent before `test_start` is captured, never inside the
- *        run's own duration figures. Each step's own folder base is built
- *        from them here (@ref LoadScopeBases), before the first submission,
- *        and they are kept on the state for teardown.
+ * @param run_scopes The run's scopes (@ref scenario_load_scopes), already run
+ *        through every `script.setup` (#1499, #3456) by `execute_load_test` -
+ *        there rather than here so a setup script's own time is spent before
+ *        `test_start` is captured, never inside the run's own duration figures.
+ *        Each step's own folder base is built from them here
+ *        (@ref LoadScopeBases), before the first submission, and they are kept
+ *        on the state for teardown.
  */
 [[nodiscard]] std::shared_ptr<ScenarioLoadState> execute_scenario_load (
 const std::shared_ptr<RunContext>& context,

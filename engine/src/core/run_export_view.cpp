@@ -6,18 +6,17 @@
  */
 
 /**
- * @file core/run_export_view.cpp
- * @brief The run-report document read into the sections every text renderer
- *        shares (#2131, #2135): a verdict, the run, the headline numbers,
- *        latency against budgets, a streaming run's events (#3240), a capacity
- *        search's result, the contract coverage and schema checks (#3036), a
- *        scenario's sequence and transactions, errors, the comparison and the
- *        warnings (#2819).
+ * The run-report document read into the sections every text renderer shares
+ * (#2131, #2135): a verdict, the run, the headline numbers, latency against
+ * budgets, a streaming run's events (#3240), a capacity search's result, the
+ * contract coverage and schema checks (#3036), a scenario's sequence and
+ * transactions, errors, the comparison and the warnings (#2819).
  */
 
 #include "vayu/core/run_export_view.hpp"
 
 #include "vayu/core/load_pacing.hpp"
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/run_compare.hpp"
 #include "vayu/utils/reentrant.hpp"
 
@@ -162,7 +161,7 @@ bool is_zero_text (std::string_view text) {
 /// `Intl.NumberFormat` rounds it away from zero ("13"), and so do we: a
 /// @p magnitude exactly halfway at @p decimals is nudged one step up. The
 /// product is tested with `fma`, which keeps 2.675 (a hair under halfway as a
-/// double) out of it.
+/// double) out.
 double round_tie_away (double magnitude, int decimals) {
     double scale = 2;
     for (int place = 0; place < decimals; ++place) {
@@ -824,7 +823,7 @@ std::optional<double> responses_per_second_while_sending (const ordered& summary
 /// `625 requests skipped: the load generator stalled for 2.5 s` (#2911), the
 /// app's dropped-requests card in words. Nothing when the summary holds no skip
 /// (a run stored before the field, or one the pacer kept up with), so an older
-/// document renders as it always did.
+/// document renders unchanged.
 std::optional<ReportText> skipped_requests_text (const ordered& summary) {
     const auto skipped = number_at (summary, { "skippedRequests" });
     if (!skipped || *skipped <= 0) {
@@ -1046,10 +1045,10 @@ ReportText status_code_label (const std::string& code) {
 }
 
 /// Settles code 0 against the type rows so each no-response request is listed
-/// once: the remainder the types do not account for stays as the code row, and
-/// the row goes when the types cover it (#2400). A run stored before the
-/// per-type counts has types that stop at the error store's cap, so the
-/// remainder is the requests no type row can name.
+/// once: the remainder the types do not cover stays as the code row, which goes
+/// when they cover it all (#2400). A run stored before the per-type counts has
+/// types that stop at the error store's cap, so the remainder is the requests
+/// no type row can name.
 void settle_no_response (std::vector<CountedLabel>& codes,
 const std::vector<CountedLabel>& types) {
     double typed = 0;
@@ -1065,9 +1064,26 @@ const std::vector<CountedLabel>& types) {
     codes, [] (const CountedLabel& code) { return code.count <= 0; });
 }
 
+/// One row per `summary.errorClasses` class the run counted (#3828), in
+/// document order, labelled `MCP <class> failures`. A class is a view of the
+/// same failures, not a further population (a failed reply is also under its
+/// HTTP status or its `mcp_*` type), so these rows are never added to the ones
+/// above. A document without the key adds none.
+void append_error_class_rows (std::vector<Row>& rows, const ordered& document) {
+    for (const std::string_view name : MCP_ERROR_CLASS_NAMES) {
+        const double count =
+        number_at (document, { "report", "summary", "errorClasses", name }).value_or (0);
+        if (count > 0) {
+            rows.push_back ({ cell (words ("MCP " + std::string (name) + " failures")),
+            plain_cell (format_run_count (count)) });
+        }
+    }
+}
+
 /// Empty rows when the run recorded no error. Never an `HTTP 0` row: the
 /// requests that got no response appear under their types, plus one
-/// @ref NO_RESPONSE_LABEL row for any the types do not cover.
+/// @ref NO_RESPONSE_LABEL row for any the types do not cover. The MCP class
+/// rows close the table.
 Table errors_table (const ordered& document) {
     Table table{ { "Error", "Requests" }, {} };
     auto codes =
@@ -1077,6 +1093,7 @@ Table errors_table (const ordered& document) {
     settle_no_response (codes, types);
     append_capped (table.rows, std::move (codes), "codes");
     append_capped (table.rows, std::move (types), "types");
+    append_error_class_rows (table.rows, document);
     return table;
 }
 
@@ -1089,10 +1106,9 @@ struct ComparedFormat {
     std::string_view unit;
 };
 
-/// The app's `METRIC_LABELS` and `formatValue`
-/// (`run-comparison-format.ts`), keyed by the metric names of `COMPARED_METRICS`.
-/// The two rates name their window because both divide by `testDuration`,
-/// drain included (#2882).
+/// The app's `METRIC_LABELS` and `formatValue` (`run-comparison-format.ts`),
+/// keyed by `COMPARED_METRICS`' metric names. The two rates name their window
+/// because both divide by `testDuration`, drain included (#2882).
 constexpr auto COMPARED_FORMATS = std::to_array<ComparedFormat> ({
 { "latency.p50", "P50 latency", format_run_figure, " ms" },
 { "latency.p90", "P90 latency", format_run_figure, " ms" },
@@ -1107,12 +1123,12 @@ constexpr auto COMPARED_FORMATS = std::to_array<ComparedFormat> ({
 });
 
 /// `improved` or `regressed` by the direction the delta carries
-/// (`COMPARED_METRICS`, the app's `deltaVerdict`); `unchanged` only for a change
-/// of exactly zero; a metric one run lacks is `not compared`, which is not a
-/// claim that nothing moved. A neutral metric that did move (the request count)
-/// is `-`: it is neither better nor worse, and `unchanged` would contradict the
-/// Change column beside it. This differs on purpose from `deltaVerdict`, which
-/// folds that case into `unchanged` for a colour, not for a sentence.
+/// (`COMPARED_METRICS`, the app's `deltaVerdict`); `unchanged` only for a
+/// change of exactly zero; `not compared` for a metric one run lacks, which is
+/// no claim that nothing moved. A neutral metric that moved (the request count)
+/// is `-`: neither better nor worse, and `unchanged` would contradict the
+/// Change column beside it. `deltaVerdict` folds that case into `unchanged` on
+/// purpose, for a colour rather than a sentence.
 std::string delta_word (const ordered& delta) {
     const auto change = number_at (delta, { "delta" });
     if (!change) {
@@ -1226,9 +1242,10 @@ struct StopReason {
     std::string_view fixed_detail;
 };
 
-/// The app's `STOP_REASONS` and `FIXED_DETAILS` (`components/shared/capacityStop.ts`):
-/// this list and that one word the same stops, so a change to either is a
-/// change to both. A reason not here keeps its raw key, as in the app.
+/// The app's `STOP_REASONS` and `FIXED_DETAILS`
+/// (`components/shared/capacityStop.ts`): both lists word the same stops, so a
+/// change to one is a change to the other. A reason not here keeps its raw key,
+/// as in the app.
 constexpr auto STOP_REASONS = std::to_array<StopReason> ({
 { "slo_exceeded", "Latency budget exceeded", "" },
 { "errors_exceeded", "Errors exceeded the limit", "" },
@@ -1587,11 +1604,10 @@ ReportText iterations_text (const ordered& scenario) {
     return words (std::move (out));
 }
 
-/// The inline assertion outcomes of one step: `assert.*` elements, the
-/// `script.*` ones whose `pm.test` calls ran inline, and a required
-/// extractor's misses, each of which failed the step as a failed assertion
-/// does. A script the engine only replays afterwards is `deferred` and
-/// carries no pass or fail count here.
+/// The inline assertion outcomes of one step: `assert.*` elements, `script.*`
+/// ones whose `pm.test` calls ran inline, and a required extractor's misses,
+/// each failing the step as a failed assertion does. A script the engine only
+/// replays afterwards is `deferred`, with no pass or fail count here.
 struct AssertionTally {
     bool counted    = false;
     double passed   = 0;
@@ -1922,10 +1938,9 @@ ReportText warning_names (const ordered& names) {
 }
 
 /// Whether @p message already ends with `: ` and every name joined by `, `, as
-/// the engine writes an unresolved-variable warning (`run_manager.cpp`,
-/// `build_run_warnings`). The raw strings are compared, before any escaping, and
-/// only the exact tail counts: a name that merely occurs inside the message does
-/// not, so a message that cites one in passing still gets the list.
+/// `build_run_warnings` (`run_manager.cpp`) writes an unresolved-variable
+/// warning. Raw strings are compared, before any escaping, and only the exact
+/// tail counts, so a message that cites a name in passing still gets the list.
 bool message_ends_with_names (const std::string& message, const ordered& names) {
     std::string tail = ": ";
     for (std::size_t at = 0; at < names.size (); ++at) {

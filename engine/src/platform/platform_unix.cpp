@@ -5,11 +5,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file platform_unix.cpp
- * @brief Unix/macOS/Linux platform implementations
- */
-
 #include "vayu/platform/platform.hpp"
 
 #if !VAYU_PLATFORM_WINDOWS
@@ -163,7 +158,6 @@ bool write_pid_to_lock (LockHandle handle) {
         return false;
     }
 
-    // Write PID
     std::string pid = std::to_string (get_process_id ()) + "\n";
     ssize_t written = write (handle.file, pid.c_str (), pid.length ());
 
@@ -420,12 +414,12 @@ void setup_signal_handlers (ShutdownCallback callback) {
     g_shutdown_callback = std::move (callback);
     g_shutdown_requested.store (false);
 
-    // Two returns discarded on purpose (`cert-err33-c`), and they are different
-    // discards. The previous handler goes because the daemon owns both signals
-    // for the process lifetime and has nothing to chain to. `SIG_ERR` goes
-    // because POSIX only produces it here for a signal that cannot be caught -
-    // `SIGKILL` and `SIGSTOP` - and neither of these is one; there is also
-    // nowhere to report it to, since this layer deliberately has no logger.
+    // Two returns discarded on purpose (`cert-err33-c`), for different reasons.
+    // The previous handler, because the daemon owns both signals for the
+    // process lifetime and has nothing to chain to. `SIG_ERR`, because POSIX
+    // produces it here only for a signal that cannot be caught (`SIGKILL`,
+    // `SIGSTOP`) and neither of these is one; and this layer has no logger to
+    // report it to, deliberately.
     static_cast<void> (std::signal (SIGINT, unix_signal_handler));
     static_cast<void> (std::signal (SIGTERM, unix_signal_handler));
 }
@@ -552,10 +546,9 @@ void sleep_until_precise (std::chrono::steady_clock::time_point deadline) {
     if (deadline <= now) {
         return;
     }
-    // mach_absolute_time() ticks are not nanoseconds; the timebase is the
-    // fixed numer/denom fraction that converts between them, queried once
-    // (function-local static, never at namespace scope) and reused for every
-    // call after.
+    // mach_absolute_time() ticks are not nanoseconds; the timebase is the fixed
+    // numer/denom fraction that converts them, queried once (a function-local
+    // static, never at namespace scope) and reused.
     static const mach_timebase_info_data_t timebase = [] {
         mach_timebase_info_data_t info{};
         mach_timebase_info (&info);
@@ -577,10 +570,9 @@ bool pin_current_thread (unsigned cpu_index) {
     }
     cpu_set_t set{};
     CPU_ZERO (&set);
-    // CPU_SET's own macro expansion indexes with size_t, so an int argument
-    // (the parameter type its glibc prototype comment describes) still
-    // converts under -Wsign-conversion; give it the size_t the expansion
-    // wants directly.
+    // CPU_SET's own expansion indexes with size_t, so an int argument (the type
+    // its glibc prototype comment describes) still converts under
+    // -Wsign-conversion; it gets the size_t directly.
     CPU_SET (static_cast<size_t> (cpu_index), &set);
     return sched_setaffinity (0, sizeof (set), &set) == 0;
 }
@@ -602,11 +594,10 @@ void sleep_until_precise (std::chrono::steady_clock::time_point deadline) {
     ts.tv_sec  = static_cast<time_t> (ns / 1'000'000'000LL);
     ts.tv_nsec = static_cast<long> (ns % 1'000'000'000LL);
     // Absolute against CLOCK_MONOTONIC, not sleep_for's relative form: a
-    // relative sleep's duration is computed before the call and does not
-    // account for the time spent computing it, so it always oversleeps by a
-    // little; TIMER_ABSTIME sleeps to a timestamp instead. Retried on EINTR -
-    // a delivered signal must not shorten the wait to whatever elapsed before
-    // it arrived.
+    // relative duration is computed before the call and does not count the time
+    // spent computing it, so it always oversleeps a little. Retried on EINTR: a
+    // delivered signal must not shorten the wait to whatever elapsed before it
+    // arrived.
     while (clock_nanosleep (CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr) == EINTR) {
     }
 }

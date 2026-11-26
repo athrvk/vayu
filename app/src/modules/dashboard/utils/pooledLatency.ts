@@ -6,14 +6,11 @@
  */
 
 /**
- * What a scenario load run's latency figures pool (#2823).
- *
- * The run's `latency` block, the live percentile card and the percentile charts
- * all fold every step's requests into one histogram, so a p99 over a sequence is
- * the tail of the whole mix, not any one request's. A reader who sees a bare
- * "P99 latency" cannot tell that the slowest step sets it; these helpers say so
- * wherever the pooled figure is shown. A single-request run pools nothing and
- * none of this applies to it.
+ * What a scenario load run's latency figures pool (#2823). The run's `latency` block, the live
+ * percentile card and the percentile charts fold every step's requests into one histogram, so a
+ * sequence's p99 is the tail of the whole mix, not any one request's, and a bare "P99 latency"
+ * hides that the slowest step sets it; these helpers say so wherever a pooled figure is shown. A
+ * single-request run pools nothing, and none of this applies to it.
  */
 
 import { formatLatency } from "@/lib/format-number";

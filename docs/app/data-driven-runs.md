@@ -215,12 +215,12 @@ Both read the same row. They differ in _when_:
 - **`{{data.column}}`** is substituted into the request - URL, headers, body,
   form fields - immediately before the send. Use it to make each iteration hit a
   different endpoint or send a different payload. See the
-  [`{{data.column}}` contract](../engine/api-reference.md#post-runs) in the
+  [`{{data.column}}` contract](../engine/api-reference/load-runs.md#post-runs) in the
   engine's HTTP API reference.
 - **`pm.iterationData`** is read by scripts, _after_ the step's request was
   composed, so it cannot change where the request goes. Use it for assertions
   and for values a script derives. See
-  [Data rows](../engine/scripting.md#data-rows-pmiterationdata).
+  [Data rows](../engine/scripting/execution-metrics-data.md#data-rows-pmiterationdata).
 
 `{{data.id}}` is a **reserved namespace, not a variable tier**: it and `{{id}}`
 are different names, so the *prefixed* spelling can neither shadow nor be
@@ -526,7 +526,7 @@ run:
   request's own and the collection chain's, which run around every step - and
   the panel says so: a column name a script computes at run time cannot be seen
   from here.
-- **An agent can read them too.** Over [MCP](../engine/mcp.md),
+- **An agent can read them too.** Over [MCP](../engine/mcp/index.md),
   `list_collections` (asked for `fields: "full"`) and `vayu://collections`
   carry a declaring collection's `dataSchema` (columns, file name, when it was
   declared), so an agent building the `data` rows for `run_collection` or `start_load_run` knows which columns
@@ -580,7 +580,7 @@ outgrew the cap says so here rather than at the next run.
 
 Everything above is about a _run_. One thing is worth doing without one: a
 pre-request script that reads `pm.iterationData`, or a URL carrying
-`{{data.id}}`, used to be testable only by starting a collection run and digging
+`{{data.id}}`, is otherwise testable only by starting a collection run and digging
 the step out of the result - a run per line of script.
 
 With a contract declared and its file still in place, the request builder grows

@@ -33,14 +33,14 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { join, dirname, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { DOC_READING_GUARDS, entryCovers, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
 // This file sits in `src/components/ui`, so `src/` is two levels up.
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /**
  * The arbitrary sizes that are part of the scale, per
- * `docs/design-system.md` -> Type Scale Conventions. Everything else must use a
+ * `docs/design-system/typography.md` -> Type Scale Conventions. Everything else must use a
  * named utility so it carries a line-height.
  */
 const ALLOWED_ARBITRARY = new Set<string>([
@@ -99,7 +99,7 @@ describe("type scale", () => {
 /**
  * The weight half of the same table, which nothing checked until #1199.
  *
- * `docs/design-system.md` said the micro/badge step was `font-mono font-bold`
+ * `docs/design-system/typography.md` said the micro/badge step was `font-mono font-bold`
  * and the primitive that owns the step - `MethodBadge` - had always rendered
  * `font-semibold`, so the row was a claim about a component that did not match
  * it. Four other chips had copied the documented bold.
@@ -130,9 +130,11 @@ const WEIGHT_CLASS = /font-(semibold|extrabold|bold|medium|normal|light|thin|bla
 /** The weights above 600, which no code face but Space Mono can draw. */
 const HEAVIER_THAN_SEMIBOLD = new Set(["font-bold", "font-extrabold", "font-black"]);
 
+/** The page whose Type Scale Conventions table this reads. */
+const TYPOGRAPHY_PAGE = "docs/design-system/typography.md";
+
 describe("the micro/badge step's weight", () => {
-	const docPath = fromRepoRoot(DOC_READING_GUARDS.typeScale.paths[0]);
-	const doc = readFileSync(docPath, "utf8");
+	const doc = readFileSync(fromRepoRoot(TYPOGRAPHY_PAGE), "utf8");
 
 	/**
 	 * The Type Scale Conventions table, as `| Use | Size | Weight | Class |`
@@ -140,7 +142,7 @@ describe("the micro/badge step's weight", () => {
 	 * so the count below is a real proof the table was located.
 	 */
 	const rows = doc
-		.slice(doc.indexOf("### Type Scale Conventions"))
+		.slice(doc.indexOf("\n## Type Scale Conventions\n"))
 		.split("\n")
 		.filter((line) => line.startsWith("|") && !/^\|[-|\s]+\|$/.test(line))
 		.map((line) =>
@@ -156,6 +158,10 @@ describe("the micro/badge step's weight", () => {
 		// rewritten into another shape, must fail here rather than pass by
 		// matching nothing.
 		expect(doc.length).toBeGreaterThan(1000);
+		expect(
+			DOC_READING_GUARDS.typeScale.paths.some((entry) => entryCovers(entry, TYPOGRAPHY_PAGE)),
+			`${TYPOGRAPHY_PAGE} is not routed by the registry`
+		).toBe(true);
 		expect(rows.length).toBeGreaterThanOrEqual(8);
 	});
 
@@ -329,6 +335,8 @@ const TILE_READOUTS = [
 	// Three run-summary numbers that were 20px until #1409, in the same shape as
 	// the ones above: a bold number in a muted tile.
 	"modules/history/main/components/RunKeyMetrics.tsx",
+	// The Error classes card's count tiles (#3828), the same shape.
+	"modules/history/main/components/ErrorClassesCard.tsx",
 ] as const;
 
 /**

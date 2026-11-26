@@ -6,64 +6,39 @@
  */
 
 /**
- * The markdown pipeline itself - react-markdown plus the remark/rehype chain.
+ * The markdown pipeline: react-markdown and the remark/rehype chain, its own chunk because the
+ * parsers were ~300KB of the entry chunk for a panel most sessions never open (#1146).
+ * `MarkdownView` is the lazy boundary and the only importer; import nothing from here directly.
  *
- * Split out of `markdown-view.tsx` so that chain is its own chunk: descriptions
- * are a panel most sessions never open, and the parsers were ~300KB of the
- * entry chunk parsed before the window could appear (#1146). `MarkdownView` is
- * the lazy boundary in front of it and the only importer; nothing else should
- * import this module directly.
+ * **The content is not all hand-typed**: descriptions arrive from imported Postman, Insomnia and
+ * OpenAPI files off the internet. Four decisions are load-bearing:
  *
- * **The content here is not all hand-typed.** Descriptions arrive from imported
- * Postman, Insomnia and OpenAPI files - third-party documents off the internet -
- * and until now Vayu stored that markdown and displayed none of it, which is the
- * only reason it never mattered. Rendering it changes that, so four decisions
- * are load-bearing rather than stylistic:
+ * **1. No navigating anchors, ever.** A clicked `<a href>` navigates the renderer, and the preload
+ * reruns on the new origin, handing it `window.electronAPI`. So the `a` renderer emits a
+ * `<button>`: no `href` reaches the DOM, and the click goes to the scheme-validated
+ * `openExternalUrl`, which refuses all but http(s). Not the only layer (#822): beside
+ * `contextIsolation: true` and `nodeIntegration: false`, `electron/main.ts` installs
+ * `electron/window-navigation.ts`, refusing a navigation off the app's document and denying
+ * `window.open`, and the document carries a CSP (`electron/renderer-csp.ts`). Keep this anyway: a
+ * refused navigation is a link that silently does nothing, where the button reaches the user's
+ * browser.
  *
- * **1. No navigating anchors, ever.** A clicked `<a href>` navigates the whole
- * renderer, and the preload re-runs on the new origin, handing
- * `window.electronAPI` to it. So the `a` renderer below emits a `<button>`: no
- * `href` reaches the DOM, and the click goes to the scheme-validated
- * `openExternalUrl` path, which refuses anything that is not http(s).
+ * **2. `react-markdown`, not `marked`.** It builds React elements from an AST, not an HTML string,
+ * so there is no `dangerouslySetInnerHTML` and no sanitizer to forget.
  *
- * This is no longer the only layer. #822 put the refusal underneath it that this
- * note used to say was missing: beside `contextIsolation: true` and
- * `nodeIntegration: false`, `electron/main.ts` now installs
- * `electron/window-navigation.ts` on the main window, which refuses a navigation
- * that is not the app's own document and denies `window.open`; the app document
- * also carries a Content-Security-Policy (`electron/renderer-csp.ts`). Keep this
- * override anyway - a refused navigation is a link that silently does nothing,
- * where a button reaches the user's browser, which is what they meant.
+ * **3. Raw HTML is rendered and sanitized in the same pipeline.** Vendor documents write HTML
+ * descriptions (Stripe's OpenAPI writes every operation's as `<p>...</p>`), which is spec-legal, as
+ * CommonMark admits inline HTML, and inert HTML put the tags on screen as text. `rehype-raw` parses
+ * it and **`rehype-sanitize` immediately prunes the result** against the allow-list below. The
+ * order is load-bearing: sanitizing first sanitizes a tree the payload is not in, and every hostile
+ * case renders. `markdown-view.test.tsx`'s hostile tests go red if the two swap. Sanitizing prunes
+ * hast *nodes*, so decision 2 holds; `allowedElements` is a second gate on the same list, after the
+ * plugins.
  *
- * **2. `react-markdown`, not `marked`.** It builds React elements from an AST
- * rather than an HTML string, so there is no `dangerouslySetInnerHTML` and no
- * sanitizer for anyone to forget.
- *
- * **3. Raw HTML is rendered, and it is sanitized in the same pipeline.** This
- * decision changed, and the reason is worth keeping. `rehype-raw` used to be
- * deliberately absent, which made raw HTML inert - correct while nothing shipped
- * HTML descriptions. Stripe's official OpenAPI document writes *every* operation
- * description as HTML (`<p>Retrieves the details of an account.</p>`), which is
- * spec-legal - OpenAPI `description` fields are CommonMark, and CommonMark
- * admits inline HTML - so the tags were on screen as literal text. `rehype-raw`
- * now parses them and **`rehype-sanitize` immediately prunes the result**
- * against the allow-list below.
- *
- * That order is load-bearing, not stylistic: sanitizing before the raw HTML is
- * parsed sanitizes a tree the payload is not in yet, and every hostile case
- * below would render. The hostile tests in `markdown-view.test.tsx` are what
- * hold the order - swap the two plugins and they go red.
- *
- * Sanitizing prunes hast *nodes*; react-markdown still emits React elements
- * from the pruned tree, so decision 2's real property - no HTML string, no
- * `dangerouslySetInnerHTML` - is unchanged. `allowedElements` below is a second
- * gate over the same list, applied after the plugins.
- *
- * **4. The default `urlTransform` stays.** Overriding it disables
- * react-markdown's own URL sanitising, which has a published advisory against
- * exactly that mistake. `remark-gfm` is on for tables (imported Postman
- * descriptions use them), and it also turns bare URLs into autolinks - the `a`
- * override covers those too, since they arrive as the same node type.
+ * **4. The default `urlTransform` stays.** Overriding it disables react-markdown's URL sanitising,
+ * the mistake a published advisory names. `remark-gfm` is on for tables (imported Postman
+ * descriptions use them) and also autolinks bare URLs, which the `a` override covers as the same
+ * node type.
  */
 
 import { useMemo } from "react";
@@ -71,18 +46,13 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { type Options as SanitizeSchema } from "rehype-sanitize";
+import { openExternal } from "@/lib/open-external";
 
 /**
- * Elements a description has any business containing.
- *
- * An allow-list rather than a deny-list: a deny-list has to be updated every
- * time the markdown spec or a plugin grows a node type, and the failure mode of
- * forgetting is that the new one renders.
- *
- * `b` and `i` earn their place now that raw HTML is parsed: they are what a
- * hand-written or generator-emitted description uses where markdown would have
- * produced the `strong` and `em` already here, and dropping them would unwrap
- * emphasis a vendor did write.
+ * Elements a description has any business containing. An allow-list: a deny-list must grow with
+ * every new node type, and forgetting lets the new one render. `b` and `i` are here because raw
+ * HTML is parsed: a hand-written or generated description uses them where markdown yields `strong`
+ * and `em`, and dropping them would unwrap a vendor's emphasis.
  */
 const ALLOWED = [
 	"p",
@@ -115,62 +85,34 @@ const ALLOWED = [
 ];
 
 /**
- * What survives sanitisation. Derived from `ALLOWED` rather than re-typed, so
- * the two gates cannot drift into disagreeing about the same question.
- *
- * `href` on an anchor is the only attribute anything below reads, so it is the
- * only one kept. **`class` in particular is never kept**: a description off the
- * internet has no business naming this app's stylesheet, and the cheapest
- * attack on a renderer that keeps it is not a script but
- * `<p class="fixed inset-0 z-50">` - an invisible sheet over the whole window.
- *
- * `protocols` is narrower than the default (which also passes `irc`, `ircs`,
- * `mailto` and `xmpp`) because a link here can do exactly one thing: go to
- * `openExternalUrl`, which refuses any scheme but http(s). An `href` that
- * survives sanitisation only to be refused at the other end is a button that
- * lies about being clickable.
- *
- * Every key left unspecified falls back to `defaultSchema` - `hast-util-sanitize`
- * merges shallowly (`{...defaultSchema, ...options}`) - so GitHub's clobber
- * prefix and the required-ancestor map for table parts stay in force instead of
- * being restated here and drifting.
+ * What survives sanitisation, derived from `ALLOWED` so the two gates cannot disagree. `href` on an
+ * anchor is the only attribute anything reads, so the only one kept. **`class` is never kept**: an
+ * internet description has no business naming the app's stylesheet, and the cheapest attack is not
+ * a script but `<p class="fixed inset-0 z-50">`, an invisible sheet over the window. `protocols` is
+ * narrower than the default (which passes `irc`, `ircs`, `mailto`, `xmpp`): a link here only
+ * reaches `openExternalUrl`, which refuses all but http(s), so another scheme would be a button
+ * lying about being clickable. Unspecified keys fall back to `defaultSchema` (`hast-util-sanitize`
+ * merges shallowly), so GitHub's clobber prefix and the table parts' ancestor map stay in force.
  */
 const SANITIZE_SCHEMA: SanitizeSchema = {
 	tagNames: ALLOWED,
 	attributes: { a: ["href"] },
 	protocols: { href: ["http", "https"] },
 	/*
-	 * An element outside `tagNames` is *unwrapped* by default: it goes, its
-	 * children stay. That is right for prose in a `<div>` or a `<span>` and
-	 * wrong where the content is not prose - an unwrapped `<style>` puts its CSS
-	 * on screen as words. The default schema strips `script` for that reason;
-	 * `style` needs saying.
+	 * An element outside `tagNames` is *unwrapped* (it goes, its children stay), right for prose in
+	 * a `<div>` and wrong for non-prose: an unwrapped `<style>` puts its CSS on screen. The default
+	 * schema strips `script` for that reason; `style` needs saying.
 	 */
 	strip: ["script", "style"],
 };
-
-/**
- * Open in the system browser, never in this window. The main process refuses a
- * window that is not focused and a second open within a second (#2378); a click
- * has nothing more to say about that, so the rejection ends here rather than
- * surfacing as an unhandled one.
- */
-async function openExternal(url: string): Promise<void> {
-	try {
-		await window.electronAPI?.openExternalUrl?.(url);
-	} catch {
-		// Refused by the main process; the link simply does not open.
-	}
-}
 
 export default function MarkdownRenderer({ children }: { children: string }) {
 	const components = useMemo(
 		() => ({
 			/*
-			 * A link is a button, not an anchor - see the note at the top. It still
-			 * looks and reads like a link; it simply cannot navigate this window.
-			 * The destination goes in `title` so it is inspectable before clicking,
-			 * which a real anchor would have given via the status bar.
+			 * A link is a button, not an anchor (see the header): it looks and reads like a link
+			 * and cannot navigate this window. The destination is its `title`, inspectable before a
+			 * click, as an anchor's status bar would give.
 			 */
 			a: ({ href, children: label }: { href?: string; children?: React.ReactNode }) => (
 				<button
@@ -178,11 +120,9 @@ export default function MarkdownRenderer({ children }: { children: string }) {
 					title={href}
 					onClick={(e) => {
 						/*
-						 * The render is often itself inside a click-to-edit block
-						 * (`MarkdownEditor`), and without this the same click both
-						 * follows the link and drops the reader into the source. That
-						 * is not hypothetical - it is what happened until a test
-						 * caught it.
+						 * The render often sits inside a click-to-edit block (`MarkdownEditor`),
+						 * where the same click would follow the link and open the source; a test
+						 * holds it.
 						 */
 						e.stopPropagation();
 						if (href) void openExternal(href);
@@ -192,9 +132,8 @@ export default function MarkdownRenderer({ children }: { children: string }) {
 					{label}
 				</button>
 			),
-			// Headings in a description are section markers inside a small panel,
-			// not page titles - they all render at the title step, distinguished by
-			// weight rather than by six sizes nobody chose.
+			// Headings in a description mark sections in a small panel, not page titles: all at the
+			// title step, told apart by weight, not six sizes nobody chose.
 			h1: Heading,
 			h2: Heading,
 			h3: Heading,
@@ -202,13 +141,10 @@ export default function MarkdownRenderer({ children }: { children: string }) {
 			h5: Heading,
 			h6: Heading,
 			/*
-			 * Inline code, and only inline code. A fenced block used to be told apart
-			 * by the `language-*` class react-markdown puts on it - which no longer
-			 * survives sanitisation, and never existed on a raw `<pre><code>` a vendor
-			 * pasted in, so that one was already painted as a pill inside its own box.
-			 * Position answers it for both: this paints the pill, and the container
-			 * in `MarkdownView` flattens it back out for any `code` sitting inside a
-			 * `pre`.
+			 * Inline code only, told apart by position: the `language-*` class react-markdown puts
+			 * on a fence does not survive sanitisation and never exists on a vendor's raw
+			 * `<pre><code>`. This paints the pill, and `MarkdownView`'s container flattens it for
+			 * any `code` inside a `pre`.
 			 */
 			code: ({ children: c }: { children?: React.ReactNode }) => (
 				<code className="rounded-md bg-muted px-1 py-0.5 font-mono text-xs">{c}</code>
@@ -217,8 +153,7 @@ export default function MarkdownRenderer({ children }: { children: string }) {
 				<pre className="overflow-x-auto rounded-md bg-muted p-2.5 text-xs">{c}</pre>
 			),
 			table: ({ children: c }: { children?: React.ReactNode }) => (
-				// Its own scroller: a wide table from an imported collection must not
-				// make the whole panel scroll sideways.
+				// Its own scroller, so a wide imported table does not scroll the panel sideways.
 				<div className="overflow-x-auto">
 					<table className="w-full border-collapse text-xs">{c}</table>
 				</div>
@@ -236,16 +171,14 @@ export default function MarkdownRenderer({ children }: { children: string }) {
 	return (
 		<ReactMarkdown
 			remarkPlugins={[remarkGfm]}
-			// Raw first, sanitise immediately after. Reversing these two sanitises
-			// a tree the raw HTML has not been parsed into yet, which is the one
-			// way to have both plugins installed and no protection at all.
+			// Raw first, then sanitise: reversed, the sanitiser runs on a tree the raw HTML is not
+			// yet parsed into, both plugins installed and no protection.
 			rehypePlugins={[rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]]}
 			allowedElements={ALLOWED}
 			unwrapDisallowed
-			// `components` is what replaces anchors with non-navigating buttons.
-			// Omitting it is not a styling regression - it is the security
-			// property silently gone, which is why a test renders a link and
-			// asserts no `href` reaches the DOM.
+			// `components` replaces anchors with non-navigating buttons: omitted, the security
+			// property is silently gone, so a test renders a link and asserts no `href` reaches the
+			// DOM.
 			components={components}
 		>
 			{children}

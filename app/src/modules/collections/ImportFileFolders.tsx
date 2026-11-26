@@ -6,24 +6,18 @@
  */
 
 /**
- * What an import's file references need, with the one action that settles
- * most of them.
+ * What an import's file references need, with the one action that settles most of them. The parse
+ * answers `unresolved` for every imported path the engine would refuse here (neither picked on this
+ * machine nor under a folder allowed in Settings > Files). A collection exported on this same
+ * machine names files that are right here, and relinking them one request at a time is the chore
+ * this removes, so the preview lists each distinct folder the paths sit in with an "Allow folder…"
+ * beside it. It opens the system picker at that folder to confirm, because a folder is allowed only
+ * when a person chose it there (#2356, `useAllowFolder`); outside Electron there is no picker and
+ * no action. A folder that does not exist here cannot be chosen, the honest answer for a collection
+ * from another computer: relink those in the request instead.
  *
- * The parse answers `unresolved` for every imported path the engine would
- * refuse here - neither picked on this machine nor under a folder allowed in
- * Settings > Files. A collection exported on this same machine names files
- * that are right here, and relinking them one request at a time is the chore
- * this exists to remove - so the preview lists each distinct folder the paths
- * sit in, with an "Allow folder…" beside it. It opens the system picker at
- * that folder for the user to confirm, because a folder is allowed only when a
- * person chose it there (#2356, `useAllowFolder`); outside Electron there is no
- * picker and no action. A folder that does not exist here cannot be chosen,
- * which is the honest answer for a collection from another computer: relink
- * those in the request instead.
- *
- * Shared by the single-file preview and the batch ledger (across every file
- * the batch will import), so a folder is offered once however many files
- * reference it.
+ * Shared by the single-file preview and the batch ledger (across every file the batch imports), so
+ * a folder is offered once however many files reference it.
  */
 
 import { Check, FolderOpen } from "lucide-react";

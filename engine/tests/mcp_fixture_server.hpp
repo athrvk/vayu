@@ -25,6 +25,8 @@
  * result, a tool error, a JSON-RPC error, a `-32022` version refusal, or the
  * plain `400` a legacy-era server answers a modern request with, or a `403`
  * naming the scope the token lacks.
+ * `reply_in_turn` gives each call its own outcome from a list, for a run that
+ * has to mix them.
  *
  * The tool it knows is `execute_sql`, whose `region` argument the schema
  * mirrors as `Mcp-Param-Region` (`execute_sql_tool_json`).
@@ -121,9 +123,15 @@ class McpFixtureServer {
     public:
     McpFixtureServer () {
         svr_.new_task_queue = pooled_task_queue (2);
+        // One call per connection: a load run's event loop keeps a connection
+        // per worker (one per core), and an idle kept-alive one holds a pool
+        // thread until httplib's keep-alive timeout, which starves the next
+        // worker's call into its request timeout on a box with more cores
+        // than threads.
+        svr_.set_keep_alive_max_count (1);
         svr_.Post ("/mcp", [this] (const httplib::Request& req, httplib::Response& res) {
-            const Settings settings = record (req);
-            ++requests_;
+            const std::size_t call  = requests_++;
+            const Settings settings = record (req, call);
             answer (req, res, settings);
         });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -154,6 +162,7 @@ class McpFixtureServer {
         std::lock_guard<std::mutex> lock (mutex_);
         settings_.shape   = shape;
         settings_.outcome = outcome;
+        settings_.turns.clear ();
     }
 
     /// How `server/discover` is answered; a modern result by default.
@@ -204,6 +213,15 @@ class McpFixtureServer {
         settings_.prompts = std::move (prompts);
     }
 
+    /// The n-th call from now on answered with @p turns `[n % size]`, so a
+    /// run's mix of outcomes is exact whatever order its calls arrive in.
+    void reply_in_turn (McpReplyShape shape, std::vector<McpReplyOutcome> turns) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.shape      = shape;
+        settings_.turns      = std::move (turns);
+        settings_.turns_from = requests_.load ();
+    }
+
     /// Calls answered so far.
     std::size_t requests () const {
         return requests_.load ();
@@ -250,8 +268,10 @@ class McpFixtureServer {
     /// What a test configured, copied out per request so an answer reads one
     /// consistent set while the test may reconfigure.
     struct Settings {
-        McpReplyShape shape               = McpReplyShape::Json;
-        McpReplyOutcome outcome           = McpReplyOutcome::Result;
+        McpReplyShape shape     = McpReplyShape::Json;
+        McpReplyOutcome outcome = McpReplyOutcome::Result;
+        std::vector<McpReplyOutcome> turns;
+        std::size_t turns_from            = 0; // the call turns[0] answers
         McpDiscovery discovery            = McpDiscovery::Modern;
         nlohmann::json tools              = nlohmann::json::array ();
         std::size_t tools_page_size       = 0;
@@ -560,11 +580,16 @@ class McpFixtureServer {
     }
 
     /// Notes the request and answers the settings it is to be answered by.
-    Settings record (const httplib::Request& req) {
+    Settings record (const httplib::Request& req, std::size_t call) {
         std::lock_guard<std::mutex> lock (mutex_);
         headers_ = req.headers;
         calls_.push_back (recorded_call (req));
-        return settings_;
+        Settings settings = settings_;
+        if (!settings.turns.empty ()) {
+            settings.outcome = settings.turns.at (
+            (call - settings.turns_from) % settings.turns.size ());
+        }
+        return settings;
     }
 
     static void

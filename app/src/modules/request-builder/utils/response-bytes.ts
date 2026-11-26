@@ -6,14 +6,11 @@
  */
 
 /**
- * A response body as the engine sent it, turned into what the pane shows
- * (issue #2458).
- *
- * `POST /execute` answers a body that is not UTF-8 text as base64
- * (`bodyEncoding: "base64"`), and the stored trace marks the same body the same
- * way. The engine decodes no declared charset, so this is where one is
- * honoured. Both response funnels call `decodeResponseBody`, so a restored
- * response shows the text and holds the bytes the live one did.
+ * A response body as the engine sent it, turned into what the pane shows (#2458). `POST /execute`
+ * answers a body that is not UTF-8 text as base64 (`bodyEncoding: "base64"`), and the stored trace
+ * marks it the same way. The engine decodes no declared charset, so this is where one is honoured.
+ * Both response funnels call `decodeResponseBody`, so a restored response shows the text and holds
+ * the bytes the live one did.
  */
 
 import { SSE_ACCEPT } from "@/constants/request";
@@ -37,8 +34,8 @@ export interface DecodeNotice {
 export interface ResponseBytes {
 	data: Uint8Array<ArrayBuffer>;
 	/**
-	 * The content type is text, so the body's text is a decoding of `data`.
-	 * False means there is no text view at all: an image, a PDF, an archive.
+	 * The content type is text, so the text is a decoding of `data`; false means no text view at
+	 * all (an image, a PDF, an archive).
 	 */
 	isText: boolean;
 	notice?: DecodeNotice;
@@ -76,8 +73,7 @@ export interface MediaType {
 }
 
 /**
- * The parts of a Content-Type, so a decision compares whole tokens. A
- * substring test answers for the wrong type: `xml` occurs inside
+ * The parts of a Content-Type, so a decision compares whole tokens: a substring test finds `xml` in
  * `vnd.openxmlformats-officedocument.spreadsheetml.sheet`, which is a zip.
  */
 export function mediaTypeOf(contentType: string): MediaType {
@@ -117,10 +113,9 @@ const TEXT_SUBTYPE_NAMES: ReadonlySet<string> = new Set([
 const TEXT_SUFFIXES: ReadonlySet<string> = new Set(["json", "xml", "yaml"]);
 
 /**
- * Whether a body of this type is text to read rather than bytes to keep. A
- * declared charset counts on its own: the parameter means nothing on anything
- * else. An absent type does not: the engine already said the bytes are not
- * UTF-8, and guessing a charset for an unlabelled body would show noise.
+ * Whether a body of this type is text to read rather than bytes to keep. A declared charset counts
+ * on its own (the parameter means nothing otherwise). An absent type does not: the engine already
+ * said the bytes are not UTF-8, and a guessed charset would show noise.
  */
 function isTextContentType(contentType: string): boolean {
 	const { type, name, suffix } = mediaTypeOf(contentType);
@@ -170,7 +165,8 @@ function decodeText(
 	}
 }
 
-function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
+/** Throws when the text is not base64. */
+export function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
 	let binary: string;
 	try {
 		binary = atob(base64);
@@ -185,12 +181,9 @@ function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * The body the pane shows, from the engine's spelling of it.
- *
- * A `"utf8"` (or absent) body is its own text. A `"base64"` one is decoded to
- * bytes, and a text type is then read through `TextDecoder` with the BOM's
- * charset, else the declared one, else UTF-8; a label the platform does not
- * know falls back to UTF-8 and says so in `notice`.
+ * The body the pane shows. A `"utf8"` (or absent) body is its own text. A `"base64"` one is decoded
+ * to bytes, and a text type read through `TextDecoder` with the BOM's charset, else the declared
+ * one, else UTF-8; a label the platform does not know falls back to UTF-8 and says so in `notice`.
  */
 export function decodeResponseBody({
 	bodyRaw,
@@ -217,12 +210,10 @@ export function decodeResponseBody({
 }
 
 /**
- * The body text exactly as it was received, for everything that takes the body
- * out of the pane: Copy, Download, Save as example and the Raw tab.
- *
- * `bodyRaw`, not `body`, which is that text with indentation added for Pretty
- * (issue #2459). `body` only stands in where no `bodyRaw` was recorded - the
- * error response a failed send restores, which holds its message there.
+ * The body text as received, for everything that takes the body out of the pane: Copy, Download,
+ * Save as example and the Raw tab. `bodyRaw`, not `body`, which is indented for Pretty (#2459);
+ * `body` stands in only where no `bodyRaw` was recorded, the error response a failed send restores,
+ * which holds its message there.
  */
 export function receivedBody(response: Pick<ResponseState, "body" | "bodyRaw">): string {
 	return response.bodyRaw || response.body;
@@ -233,14 +224,11 @@ const isHighSurrogate = (unit: number) => unit >= 0xd800 && unit <= 0xdbff;
 const isLowSurrogate = (unit: number) => unit >= 0xdc00 && unit <= 0xdfff;
 
 /**
- * The bytes `text` takes in UTF-8, which is what the engine counts for a body
- * (`bodyBytes`, #3423) and what `string.length` is not: it counts UTF-16 code
- * units, so a multibyte body reads smaller than it is.
- *
- * Counted in place rather than through `TextEncoder`, which would allocate a
- * copy of a multi-megabyte body on every render of the pane that shows this.
- * A lone surrogate counts as the three bytes of the U+FFFD an encoder writes
- * for it, so this agrees with `Buffer.byteLength` on any string.
+ * The bytes `text` takes in UTF-8, what the engine counts for a body (`bodyBytes`, #3423); not
+ * `string.length`, which counts UTF-16 units so a multibyte body reads smaller. Counted in place,
+ * as `TextEncoder` would copy a multi-megabyte body on every render of the pane. A lone surrogate
+ * counts as the three bytes of the U+FFFD an encoder writes, so this agrees with
+ * `Buffer.byteLength` on any string.
  */
 export function utf8ByteLength(text: string): number {
 	let bytes = 0;
@@ -261,11 +249,10 @@ export function utf8ByteLength(text: string): number {
 }
 
 /**
- * How much body this response holds, for a notice that says "the first N".
- * The bytes when there are some: a base64 body's text is a decoding, or empty.
- * Otherwise the received text's UTF-8 byte count, the unit every other size
- * on the response is in. A stored row that predates `trace.response.bodyBytes`
- * has no recorded size, so this is also what its restored `size` falls back to.
+ * How much body this response holds, for a notice that says "the first N": the bytes when there are
+ * some (a base64 body's text is a decoding, or empty), else the received text's UTF-8 byte count,
+ * the unit of every other size on the response. Also the restored `size` of a stored row that
+ * predates `trace.response.bodyBytes`.
  */
 export function heldBodySize(
 	response: Pick<ResponseState, "body" | "bodyRaw" | "rawBytes">
@@ -274,14 +261,11 @@ export function heldBodySize(
 }
 
 /**
- * How much of a `bodyCapped` response the engine read, as the notice words it:
- * "the first 32.0 MB", or "the start" when the figure is not recorded.
- *
- * A buffered send's `size` is that prefix. A stream keeps reading past the cap
- * so its events still count every one (#3770), which makes its `size` the bytes
- * the server delivered, past what was read. The prefix is then the held body -
- * until storage shortened that too (`bodyTruncated`), when nothing records how
- * much was read.
+ * How much of a `bodyCapped` response the engine read, as the notice words it: "the first 32.0 MB",
+ * or "the start" when not recorded. A buffered send's `size` is that prefix. A stream reads past
+ * the cap so its events still count (#3770), so its `size` is what the server delivered; the prefix
+ * is then the held body, until storage shortened that too (`bodyTruncated`), when nothing records
+ * it.
  */
 export function cappedReadExtent(
 	response: Pick<
@@ -309,10 +293,9 @@ const EXTENSION_BY_SUBTYPE: Record<string, string> = {
 };
 
 /**
- * A file extension for a downloaded body of this type: the subtype when it is
- * a plausible extension (`png`, `pdf`, `zip`), the few that are not mapped,
- * then the structured-syntax suffix (`problem+json` saves as `json`), and
- * `bin` for anything else.
+ * A download's file extension: the mapped one for a subtype that is not its own (`plain` saves as
+ * `txt`), else the subtype less any `x-` when it is a plausible extension (`png`, `pdf`, `zip`),
+ * else the structured-syntax suffix (`problem+json` saves as `json`), else `bin`.
  */
 export function extensionForContentType(contentType: string): string {
 	const { subtype, suffix } = mediaTypeOf(contentType);

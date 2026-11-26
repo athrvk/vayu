@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/retry_after.hpp
  * @brief The wait a `Retry-After` header value asks for (RFC 9110 section
  *        10.2.3), read by a load run's back-off (#3782).
  *

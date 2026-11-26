@@ -71,7 +71,6 @@ std::string read_environment (const char* name) {
 #endif
 }
 
-/// Remove @p name from this process's environment.
 void remove_from_environment (const char* name) {
 #ifdef _WIN32
     // An empty value removes the variable, from the CRT's copy and the

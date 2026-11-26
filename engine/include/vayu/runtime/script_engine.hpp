@@ -8,7 +8,6 @@
  */
 
 /**
- * @file script_engine.hpp
  * @brief JavaScript scripting engine using QuickJS
  *
  * Provides Postman-compatible scripting with pm.test(), pm.expect(),
@@ -33,9 +32,6 @@
 
 namespace vayu::runtime {
 
-/**
- * @brief Configuration for script execution
- */
 struct ScriptConfig {
     size_t memory_limit = vayu::core::constants::script_engine::MEMORY_LIMIT;
     uint64_t timeout_ms = vayu::core::constants::script_engine::TIMEOUT_MS;
@@ -45,22 +41,21 @@ struct ScriptConfig {
     /**
      * @brief Whether scripts may issue requests through `pm.sendRequest`.
      *
-     * **Defaults to false, and that default is the security control** (issue
-     * #302). The MCP target allowlist is enforced client-side, in the MCP
-     * server, against the composed URL before it calls `POST /execute` - a
-     * request issued from inside a script never passes that gate, because it
-     * never goes through the MCP server at all. So an agent that can write a
-     * script would otherwise reach any host, defeating a control the user
-     * configured in Settings.
+     * **Defaults to false, and that default is the security control** (#302).
+     * The MCP target allowlist is enforced client-side, in the MCP server,
+     * against the composed URL before it calls `POST /execute`; a request
+     * issued from inside a script never passes that gate, so an agent that can
+     * write a script would otherwise reach any host, defeating a control the
+     * user configured in Settings.
      *
      * Denying by default puts the failure on the safe side: a client that
-     * forgets to ask - a new MCP tool, a future caller, a bare `curl` against
-     * the daemon - gets a script that cannot send, not silent egress. The
-     * app's own execute/run paths ask for it explicitly, exactly the way they
-     * send `followRedirects` rather than leaning on an engine default.
+     * forgets to ask (a new MCP tool, a future caller, a bare `curl` against
+     * the daemon) gets a script that cannot send, not silent egress. The app's
+     * own execute/run paths ask for it explicitly, as they send
+     * `followRedirects` rather than lean on an engine default.
      *
      * `pm.sendRequest` is bound either way: when this is false it throws a
-     * message that names why, which is a better answer than a missing global.
+     * message naming why, a better answer than a missing global.
      */
     bool allow_send_request = false;
 
@@ -109,9 +104,6 @@ struct RunSummaryInfo {
     size_t assertions_failed = 0;
 };
 
-/**
- * @brief Script execution context with request/response data
- */
 struct ScriptContext {
     const Request* request           = nullptr;
     const Response* response         = nullptr;
@@ -122,18 +114,17 @@ struct ScriptContext {
     /**
      * @brief The collection scopes above `collectionVariables`, root first.
      *
-     * The request's collection ancestors - `collection_chain` without its leaf
-     * - so a script reads a name an ancestor collection defines exactly as
-     * `{{name}}` in the URL does (issue #234). Collection reads walk leaf ->
-     * root and take the nearest enabled definition; `set`, `unset` and `clear`
-     * still touch `collectionVariables` alone, so the leaf shadows an ancestor
-     * but can never delete it.
+     * The request's collection ancestors (`collection_chain` without its leaf),
+     * so a script reads a name an ancestor collection defines exactly as
+     * `{{name}}` in the URL does (#234). Reads walk leaf to root and take the
+     * nearest enabled definition; `set`, `unset` and `clear` touch
+     * `collectionVariables` alone, so the leaf shadows an ancestor but can
+     * never delete it.
      *
-     * The `const` is the design rather than politeness:
-     * `persist_script_variables` writes every name the leaf's map holds that
-     * it did not hold when loaded, so an ancestor merged into it would let one
-     * `set()` copy every inherited variable down into the leaf collection
-     * permanently. Ancestors that cannot be written cannot be copied down.
+     * The `const` is the design, not politeness: `persist_script_variables`
+     * writes every name the leaf's map holds that it did not hold when loaded,
+     * so an ancestor merged into it would let one `set()` copy every inherited
+     * variable down into the leaf collection permanently.
      */
     const std::vector<Environment>* collectionAncestors = nullptr;
 
@@ -141,9 +132,9 @@ struct ScriptContext {
      * @brief The run-local scope `pm.variables.set` writes (#2564).
      *
      * `ScriptVariableScopes::local`, bound by `bind_variable_scopes`, so it
-     * outlives one script exactly as long as the run that owns it. Null gives
-     * the script a scope of its own that ends with it, rather than a set that
-     * reports success and lands nowhere.
+     * lives as long as the run that owns it. Null gives the script a scope of
+     * its own that ends with it, rather than a set that reports success and
+     * lands nowhere.
      */
     Environment* local = nullptr;
 
@@ -161,37 +152,33 @@ struct ScriptContext {
     /**
      * @brief What the script reads as `pm.info` - identity, not data.
      *
-     * All three are optional because absence is the honest answer for each:
-     * an ad-hoc request has no id, an unsaved one may have a name no row
-     * carries, and a context built by hand (a test, a future caller) has
-     * declared no hook. A field with no value must reach the script as
-     * `undefined` rather than `""`, so `typeof pm.info.requestName` answers
-     * what a Postman user expects.
+     * All three are optional because absence is the honest answer for each: an
+     * ad-hoc request has no id, an unsaved one may have a name no row carries,
+     * and a context built by hand (a test, a future caller) has declared no
+     * hook. A field with no value reaches the script as `undefined`, not `""`,
+     * so `typeof pm.info.requestName` answers what a Postman user expects.
      *
-     * `event` is never assigned by a caller: it is set by the two factories
-     * below, so `pm.info.eventName` cannot disagree with the hook that is
-     * actually running.
+     * `event` is never assigned by a caller: the two factories below set it, so
+     * `pm.info.eventName` cannot disagree with the hook that is running.
      *
      * `iteration` / `vu` are set **only where the executor claimed one before
-     * the send**, which is what keeps issue #300's ruling intact rather than
-     * reopening it: what that ruling refuses is reporting a *reservoir
+     * the send**, which keeps #300's ruling: it refuses reporting a *reservoir
      * position* as an iteration number, a binding that cannot fail. A load
-     * run's deferred `tests` script runs once per sampled response, and since
-     * issue #994 each sample carries the iteration and the virtual user it was
-     * actually sent as - facts claimed on the submission path - so reporting
-     * them is honest rather than invented. An ordinary Send reads `undefined`
-     * for both, as it always did; a `POST /execute` naming a `data` row reports
-     * iteration 0 of 1 (issue #601).
+     * run's deferred `tests` script runs once per sampled response, and each
+     * sample carries the iteration and virtual user it was sent as (#994),
+     * facts claimed on the submission path, so reporting them is honest. An
+     * ordinary Send reads `undefined` for both; a `POST /execute` naming a
+     * `data` row reports iteration 0 of 1 (#601).
      *
-     * `iterationCount` stays narrower than either: a duration-bounded run has
-     * no total to report, and a field readable from one mode and not another is
-     * worse than one that is never readable at all. The collection runner sets
-     * it, and so does the `data` row send above - `1`, the total that send's
-     * row 0 of 1 belongs to.
+     * `iterationCount` is narrower than either: a duration-bounded run has no
+     * total to report, and a field readable in one mode and not another is
+     * worse than one never readable. The collection runner sets it, and so does
+     * the `data` row send above: `1`, the total that send's row 0 of 1 belongs
+     * to.
      *
      * `iteration` is 0-based (Postman's convention); `vu` is 1-based, because
-     * it is a name for a user rather than an index into anything;
-     * `iterationCount` is the total the run will perform.
+     * it names a user rather than indexing anything; `iterationCount` is the
+     * total the run will perform.
      */
     std::optional<std::string> request_id;
     std::optional<std::string> request_name;
@@ -204,22 +191,19 @@ struct ScriptContext {
 
     /**
      * @brief The data row this iteration is bound to, read as
-     *        `pm.iterationData`, or null where the run has no data (issue
-     *        #356).
+     *        `pm.iterationData`, or null where the run has no data (#356).
      *
      * Points into the run's `ScenarioExecution::data_rows`, which outlives
-     * every script of the run - or, for a `POST /execute` naming a `data` row
-     * (issue #601), into the row the handler read off that payload. The object
-     * is always a JSON object, because anything else is a `400` before the run
-     * row exists.
+     * every script of the run, or, for a `POST /execute` naming a `data` row
+     * (#601), into the row the handler read off that payload. Always a JSON
+     * object: anything else is a `400` before the run row exists.
      *
-     * Null is the ordinary case and reaches the script as **`undefined`**
-     * rather than as an empty scope that answers `undefined` to every key.
-     * That is deliberate, and it is not the `pm.execution` / `pm.cookies`
-     * treatment: those are capabilities, and a capability that silently does
-     * nothing is #188's false success. This is *data*, and "this run has no
-     * data" is a fact a script may legitimately branch on -
-     * `if (pm.iterationData)` is the guard, and it can only work if absence is
+     * Null is the ordinary case and reaches the script as **`undefined`**, not
+     * as an empty scope answering `undefined` to every key. That is not the
+     * `pm.execution` / `pm.cookies` treatment: those are capabilities, and a
+     * capability that silently does nothing is #188's false success. This is
+     * *data*, and "this run has no data" is a fact a script may branch on:
+     * `if (pm.iterationData)` is the guard, and it works only if absence is
      * visible. A `POST /execute` send carrying no `data` row and a load run's
      * deferred `tests` script therefore see `undefined`, as they do for
      * `pm.info.iteration`.
@@ -228,81 +212,79 @@ struct ScriptContext {
 
     /**
      * @brief The completed stream's events, read as `pm.response.events`, or
-     *        null where the run was not a stream (issue #575).
+     *        null where the run was not a stream (#575).
      *
      * An `events` node: `items`, `totalEvents` and `eventsTruncated`. A design
-     * stream points at one `vayu::http::stream_events_node` built from its
-     * body and the sidecar its trace stores, the builder every reader of that
-     * trace applies (#3770); every buffered stream (a collection
-     * run's step, a load run's inline or replayed script) points at one
+     * stream points at one `vayu::http::stream_events_node` built from its body
+     * and the sidecar its trace stores, the builder every reader of that trace
+     * applies (#3770); every buffered stream (a collection run's step, a load
+     * run's inline or replayed script) points at one
      * `vayu::http::bind_buffered_stream_events` built from the body with the
-     * function its stored trace or sample is built with (issue #3769). Either
-     * way the markers come from the stored node's own builder rather than a
-     * second cap applied here - a script that refuses to assert over a partial
-     * list and a reader looking at the stored record must never disagree about
-     * whether the list is partial.
+     * function its stored trace or sample is built with (#3769). Either way the
+     * markers come from the stored node's own builder, not a second cap applied
+     * here, so a script that refuses to assert over a partial list and a reader
+     * of the stored record never disagree about whether the list is partial.
      *
      * Null is the ordinary case and reaches the script as an **absent**
-     * `pm.response.events`, not an empty array - the same rule
-     * `iteration_data` follows, for the same reason: "this response was not a
-     * stream" is a fact a script may branch on, and an empty array would make
-     * it indistinguishable from a stream that produced nothing.
+     * `pm.response.events`, not an empty array, for `iteration_data`'s reason:
+     * "this response was not a stream" is a fact a script may branch on, and an
+     * empty array would make it indistinguishable from a stream that produced
+     * nothing.
      *
      * Only a post-request script over a streamed response sets it: it runs
-     * once, after the stream has terminated, over the bounded stored list. A
-     * live per-event callback is not a feature that was skipped: the transfer
-     * has ended before any script runs, so there is nothing to hand one.
+     * once, after the stream has terminated, over the bounded stored list.
+     * There is no live per-event callback because the transfer has ended before
+     * any script runs.
      */
     const nlohmann::json* response_events = nullptr;
 
     /**
      * @brief The redirect hops `response` was reached through, read as
-     *        `pm.response.redirects`, or null where the producer does not record
-     *        them (issue #2949).
+     *        `pm.response.redirects`, or null where the producer does not
+     *        record them (#2949).
      *
-     * Points at `Response::redirect_hops`, which only `Client::send` fills.
-     * The load path follows redirects without recording the chain, so a
-     * deferred `tests` script and a streamed run's script get null - an
-     * **absent** `pm.response.redirects`, not an empty array: `[]` there would
-     * read as "nothing was redirected", a claim no one measured. A non-null
-     * pointer to an empty vector is the recorded "no redirect".
+     * Points at `Response::redirect_hops`, which only `Client::send` fills. The
+     * load path follows redirects without recording the chain, so a deferred
+     * `tests` script and a streamed run's script get null - an **absent**
+     * `pm.response.redirects`, not an empty array: `[]` there would read as
+     * "nothing was redirected", a claim no one measured. A non-null pointer to
+     * an empty vector is the recorded "no redirect".
      */
     const std::vector<RedirectHop>* redirect_hops = nullptr;
 
     /**
      * @brief Whether this script runs inside an ordered sequence, and may
-     *        therefore redirect it (issue #355).
+     *        therefore redirect it (#355).
      *
-     * Set by the scenario runner and by nothing else. With it false -
-     * a `POST /execute` send, a load run's deferred `tests` script, a context
-     * built by hand - `pm.execution.setNextRequest` and
-     * `pm.execution.skipRequest` throw a sentence naming why, rather than
-     * accepting a call and doing nothing.
+     * Set by the scenario runner and by nothing else. With it false (a
+     * `POST /execute` send, a load run's deferred `tests` script, a context
+     * built by hand), `pm.execution.setNextRequest` and
+     * `pm.execution.skipRequest` throw a sentence naming why rather than accept
+     * a call and do nothing.
      *
-     * That is issue #188's standing rule, not caution:
-     * `setNextRequest("checkout")` silently ignored in a single send is exactly
-     * the false success it exists to prevent. It is also what keeps the load
-     * path honest - a deferred script has already run against a recorded
-     * response and cannot redirect a sequence that already happened.
+     * That is #188's standing rule: `setNextRequest("checkout")` silently
+     * ignored in a single send is the false success it exists to prevent. It
+     * also keeps the load path honest: a deferred script has run against a
+     * recorded response and cannot redirect a sequence that already happened.
      */
     bool in_scenario = false;
 
     /**
-     * @brief The jar `pm.cookies` reads and `pm.sendRequest` sends through,
-     *        or null where there is no jar (issue #301).
+     * @brief The jar `pm.cookies` reads and `pm.sendRequest` sends through, or
+     *        null where there is no jar (#301).
      *
      * Null is not "an empty jar": a load run's test scripts have no jar at all
-     * (see cookie_jar.hpp for why the load path stays out of it), and so does
+     * (cookie_jar.hpp says why the load path stays out of it), and neither does
      * a context built by hand. `pm.cookies` throws a sentence saying so rather
-     * than answering `undefined` for every name - a binding that cannot fail
-     * is worse than a missing one, and "the cookie you set is not here" is
-     * exactly the answer that would send someone hunting the wrong bug.
+     * than answer `undefined` for every name: a binding that cannot fail is
+     * worse than a missing one, and "the cookie you set is not here" would send
+     * someone hunting the wrong bug.
      *
-     * `pm.sendRequest` **shares** it, deliberately: the flow the jar exists
-     * for is "log in with sendRequest in a pre-request script, then let the
-     * real request carry the session", which an isolated auxiliary jar would
-     * break. A cookie the auxiliary request collects is therefore visible to
-     * the main one, and to the next request in the same environment.
+     * `pm.sendRequest` **shares** it, deliberately: the flow the jar exists for
+     * is "log in with sendRequest in a pre-request script, then let the real
+     * request carry the session", which an isolated auxiliary jar would break.
+     * A cookie the auxiliary request collects is therefore visible to the main
+     * one, and to the next request in the same environment.
      */
     vayu::http::CookieJar* cookie_jar = nullptr;
 
@@ -312,67 +294,63 @@ struct ScriptContext {
 
     /**
      * @brief Where `pm.cookies.jar()`'s writes are staged, or null to refuse
-     *        them (issue #337).
+     *        them (#337).
      *
-     * The caller owns the vector for the same reason it owns `environment`:
-     * the write has to outlive the script and be applied where the ordering is
+     * The caller owns the vector for the same reason it owns `environment`: the
+     * write has to outlive the script and be applied where the ordering is
      * known - by the transfer that follows (`ClientConfig::cookie_writes`), or
      * by the route through `CookieJar::apply` when no transfer follows. See
      * cookie_jar.hpp for why a script cannot simply write into the map.
      *
-     * Null is refused loudly rather than silently dropped: a context that
-     * never applies what a script wrote would report success for a cookie that
-     * went nowhere.
+     * Null is refused loudly rather than silently dropped: a context that never
+     * applies what a script wrote would report success for a cookie that went
+     * nowhere.
      */
     std::vector<vayu::http::CookieWrite>* cookie_writes = nullptr;
 
     /**
-     * @brief A read-only view of the cookies one virtual user carries into
-     *        this step of a scenario load run, or null (issue #1501).
+     * @brief A read-only view of the cookies one virtual user carries into this
+     *        step of a scenario load run, or null (#1501).
      *
      * Set only by the inline `step.before`/`step.after` hooks a scenario load
-     * run's own producer and completion callbacks run for a `script.*`
-     * element marked to run inline (#1495): `scenario_load.cpp` points this
-     * at `VirtualUser::cookies` - lines already materialized on the VU, with
-     * that VU's own completion the only reader, so no lock and no `CookieJar`
-     * object are needed. `pm.cookies`'s flat reads answer from this when
-     * `cookie_jar` above is null; `pm.cookies.jar()` (staging a *write*)
-     * stays gated on `cookie_jar` alone, unchanged - a load run's cookie
-     * state advances through `VirtualUser::cookies` itself, never through a
-     * script.
+     * run's own producer and completion callbacks run for a `script.*` element
+     * marked to run inline (#1495): `scenario_load.cpp` points it at
+     * `VirtualUser::cookies`, lines already materialized on the VU with that
+     * VU's own completion the only reader, so no lock and no `CookieJar` object
+     * are needed. `pm.cookies`'s flat reads answer from this when `cookie_jar`
+     * is null; `pm.cookies.jar()` (staging a *write*) stays gated on
+     * `cookie_jar` alone, because a load run's cookie state advances through
+     * `VirtualUser::cookies` itself, never through a script.
      */
     const std::vector<std::string>* cookie_read_lines = nullptr;
 
     /**
-     * @brief What a flat `pm.cookies` read throws when neither `cookie_jar`
-     *        nor `cookie_read_lines` is set, or null for the default
-     *        design-mode-feature sentence (issue #1501).
+     * @brief What a flat `pm.cookies` read throws when neither `cookie_jar` nor
+     *        `cookie_read_lines` is set, or null for the default
+     *        design-mode-feature sentence (#1501).
      *
      * Two load-path contexts have a truer thing to say than the default: a
-     * deferred script replay once had a per-user cookie view during the run,
-     * but runs afterward against a recorded sample with that state gone; a
-     * single-request load run never had one, because it has no scenario and
-     * no virtual user. `%s` is the member name, exactly as the default
-     * message takes it.
+     * deferred script replay runs after the run, against a recorded sample
+     * whose per-user cookie view is gone; a single-request load run never had
+     * one, having no scenario and no virtual user. `%s` is the member name,
+     * exactly as the default message takes it.
      */
     const char* cookie_read_refusal = nullptr;
 
     /**
-     * @brief How `pm.sendRequest` reaches the network (issue #705).
+     * @brief How `pm.sendRequest` reaches the network (#705).
      *
      * The same policy the enclosing exchange's own send uses, for the same
-     * reason the jar is shared: a script that logs in through `sendRequest`
-     * and then lets the real request carry the session must take the same
-     * route out of the machine, or one of the two is unreachable behind a
-     * corporate proxy. A context built by hand keeps the default (the
-     * environment pickup), which is what every script send did before the
-     * policy existed.
+     * reason the jar is shared: a script that logs in through `sendRequest` and
+     * then lets the real request carry the session must take the same route out
+     * of the machine, or one of the two is unreachable behind a corporate
+     * proxy. A context built by hand keeps the default, the environment pickup.
      */
     vayu::http::TransportPolicy transport;
 
     /**
      * @brief What the engine adds to a `pm.sendRequest` the script did not
-     *        write itself (issue #1229).
+     *        write itself (#1229).
      *
      * The same set the enclosing exchange's own send adds, carried in for the
      * reason `transport` is: the script engine holds no `Database`, and a
@@ -383,55 +361,52 @@ struct ScriptContext {
 
     /**
      * @brief How much of a `pm.sendRequest` response body the engine will read
-     *        before refusing the transfer (issue #1188).
+     *        before refusing the transfer (#1188).
      *
-     * Carried in rather than read here for the reason `transport` is: the
-     * script engine holds no `Database`, and the caller has already resolved
-     * the bound its own send reads. Which bound that is differs by path, and
-     * the difference is deliberate - a design-mode send's scripts take
-     * `maxDesignResponseBodyBytes`, every script of a load run (the deferred
-     * `tests` replay, an inline step script, `script.setup` and
+     * Carried in for `transport`'s reason: the script engine holds no
+     * `Database`, and the caller has already resolved the bound its own send
+     * reads. The bound differs by path, deliberately: a design-mode send's
+     * scripts take `maxDesignResponseBodyBytes`; every script of a load run
+     * (the deferred `tests` replay, an inline step script, `script.setup` and
      * `script.teardown`) takes `maxResponseBodyBytes`, because a script that
      * runs once per submission or per sampled response belongs to the load
-     * path's memory budget and not to the one sized for a body a person is
-     * about to look at. A run's scripts outside an exchange (a load run's,
-     * a collection run's `script.setup` and `script.teardown`) get this
-     * field and the three beside it through one `ScriptSendInputs` (issue
-     * #2841).
+     * path's memory budget, not to the one sized for a body a person is about
+     * to look at. A run's scripts outside an exchange (a load run's, a
+     * collection run's `script.setup` and `script.teardown`) get this field
+     * with the rest of one `ScriptSendInputs` (#2841).
      *
-     * Reaching it **refuses** the transfer - `ErrorCode::ResponseTooLarge`
-     * reaches the callback as its `err` - rather than handing the script a
-     * prefix: `pm.sendRequest`'s response object exposes no truncation flag
-     * (nor does `pm.response`), so a cut body would reach `JSON.parse` as
-     * corrupt input with nothing to say why. `/import/fetch` refuses for the
-     * same reason.
+     * Reaching it **refuses** the transfer (`ErrorCode::ResponseTooLarge`
+     * reaches the callback as its `err`) rather than hand the script a prefix:
+     * neither `pm.sendRequest`'s response object nor `pm.response` exposes a
+     * truncation flag, so a cut body would reach `JSON.parse` as corrupt input
+     * with nothing to say why. `/import/fetch` refuses for the same reason.
      *
-     * The default is the compiled-in design bound rather than `0`, so a
-     * context built by hand is bounded by construction; `0` would be
-     * unbounded, which is the state issue #1188 exists to end.
+     * The default is the compiled-in design bound, not `0`, so a context built
+     * by hand is bounded by construction; `0` would be unbounded, the state
+     * #1188 exists to end.
      */
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
 
     /**
      * @brief The timeout a `pm.sendRequest` takes when its options name none
-     *        (issue #2833): the enclosing exchange's or run's resolved request
+     *        (#2833): the enclosing exchange's or run's resolved request
      *        timeout, the payload's `timeout` else the `defaultTimeout`
      *        setting.
      *
      * Carried in for the reason @ref max_response_bytes is. The script's own
-     * `timeout` option replaces it, and the script's remaining budget can
-     * only lower whichever applies. The default is the compiled-in one, so a
-     * context built by hand is bounded by construction.
+     * `timeout` option replaces it, and the script's remaining budget can only
+     * lower whichever applies. The default is the compiled-in one, so a context
+     * built by hand is bounded by construction.
      */
     int request_timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
 
     /**
      * @brief `ClientConfig::cancel` for every `pm.sendRequest` this script
-     *        makes (issue #2683), or null when nothing ends one early.
+     *        makes (#2683), or null when nothing ends one early.
      *
-     * The enclosing exchange's own (`ExchangeInputs::cancel`), so a script
-     * send inside `POST /execute` ends with the server the way the request's
-     * own send does; in a run, the run's `should_stop`, through
+     * The enclosing exchange's own (`ExchangeInputs::cancel`), so a script send
+     * inside `POST /execute` ends with the server the way the request's own
+     * send does; in a run, the run's `should_stop`, through
      * @ref ScriptSendInputs (#3371). A send it ends sets
      * `ScriptResult::send_cancelled`.
      */
@@ -454,15 +429,14 @@ struct ScriptContext {
     const std::atomic<bool>* stop = nullptr;
 
     /**
-     * @brief `pm.metrics`'s write destination (issue #1500), or null to
-     *        refuse it.
+     * @brief `pm.metrics`'s write destination (#1500), or null to refuse it.
      *
      * Null is the ordinary case for a context built by hand and for the
-     * deferred `tests` replay - a replayed sample is not the run, the same
-     * "not available here" reasoning `in_scenario` documents for
-     * `pm.execution`. Bound by the scenario runner and by the load path's
-     * inline `step.before` / `step.after` hooks (`scenario_load.cpp`), both
-     * to the run's own `MetricsCollector::record_custom_metric`.
+     * deferred `tests` replay - a replayed sample is not the run, the same "not
+     * available here" reasoning `in_scenario` documents for `pm.execution`.
+     * Bound by the scenario runner and by the load path's inline `step.before`
+     * / `step.after` hooks (`scenario_load.cpp`), both to the run's own
+     * `MetricsCollector::record_custom_metric`.
      */
     std::function<void (const std::string& name, vayu::core::CustomMetricType type, double value)> record_metric;
 
@@ -512,8 +486,8 @@ struct ScriptContext {
     }
 
     /**
-     * @brief A `script.teardown` context, carrying @p summary as `pm.info.run`
-     *        - the one context that can report a run summary, because it is
+     * @brief A `script.teardown` context, carrying @p summary as `pm.info.run`:
+     *        the one context that can report a run summary, because it is
      *        the one that runs after there is one.
      */
     [[nodiscard]] static ScriptContext for_teardown (const RunSummaryInfo& summary) {
@@ -525,14 +499,14 @@ struct ScriptContext {
 };
 
 /**
- * @brief What a `pm.sendRequest` inherits from the run it runs inside
- *        (issue #2841): the `ScriptContext` fields a script cannot set for
- *        itself, resolved once by the run and applied together.
+ * @brief What a `pm.sendRequest` inherits from the run it runs inside (#2841):
+ *        the `ScriptContext` fields a script cannot set for itself, resolved
+ *        once by the run and applied together.
  *
- * One value rather than an assignment per field per call site, because every
- * site that left one out sent with the compiled-in default for it: a script
- * that waited 30 s on a run whose `timeout` was 500 ms, left by another route
- * than the run's own transfers, or held Stop and shutdown open for its whole
+ * One value rather than an assignment per field per call site, because a site
+ * that leaves one out sends with the compiled-in default for it: a script that
+ * waits 30 s on a run whose `timeout` is 500 ms, leaves by another route than
+ * the run's own transfers, or holds Stop and shutdown open for its whole
  * timeout (#3371).
  *
  * Default-constructed it holds a fresh `ScriptContext`'s own values, so
@@ -592,12 +566,8 @@ class ScriptEngine {
      */
     explicit ScriptEngine (const ScriptConfig& config = {});
 
-    /**
-     * @brief Destructor - cleans up QuickJS runtime
-     */
     ~ScriptEngine ();
 
-    // Non-copyable, movable
     ScriptEngine (const ScriptEngine&)            = delete;
     ScriptEngine& operator= (const ScriptEngine&) = delete;
     ScriptEngine (ScriptEngine&&) noexcept;

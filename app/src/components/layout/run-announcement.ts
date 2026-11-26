@@ -6,22 +6,20 @@
  */
 
 /**
- * What `RunAnnouncer` says when a run moves (#3498): the sentence for one
- * transition of the dashboard's load test or the streamed collection run, or
- * `null` when the move is not one worth speaking.
+ * What `RunAnnouncer` says when a run moves (#3498): the sentence for one transition of the
+ * dashboard's load test or the streamed collection run, or `null` when the move is not worth
+ * speaking.
  *
- * Transitions only - started, then how it ended - never a figure that moves
- * while the run does: a polite region re-announces on every change, and a
- * load test's ticks arrive several times a second. A lost stream and the wait
- * for the report are not transitions either; the run is still going, or its
- * ending is about to be said. The engine's process ending under a load test
- * is one (#3605): the run ended, and nothing says how until a restarted engine
- * serves its report, so that is said then, as the run's ending. So is a
- * collection run's (#3621): the stop is said once, a later ending still
- * speaks, and a stop is never said over an ending already heard.
+ * Transitions only, started and then how it ended, never a figure that moves with the run: a polite
+ * region re-announces on every change, and a load test ticks several times a second. A lost stream
+ * and the wait for the report are not transitions; the run is still going, or its ending is about
+ * to be said. The engine's process ending under a load test is one (#3605): nothing says how the
+ * run ended until a restarted engine serves its report, so it is said then, as the ending. So is a
+ * collection run's engine stop (#3621): said once, a later ending still speaks, and a stop is never
+ * said over an ending already heard.
  *
- * The verdict is the banner's (`reportOutcome`), so the spoken line and the one
- * on screen cannot disagree.
+ * The verdict is the banner's (`reportOutcome`), so the spoken line and the one on screen cannot
+ * disagree.
  */
 
 import { OUTCOME_TITLE, reportOutcome } from "@/components/shared/run-outcome";

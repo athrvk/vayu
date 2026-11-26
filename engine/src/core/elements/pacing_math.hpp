@@ -8,20 +8,15 @@
  */
 
 /**
- * @file pacing_math.hpp
- * @brief The start-to-start interval arithmetic `timer.pacing` (issue #1498)
- *        and `timer.throughput` (issue #1571) share: a node's next entry is
- *        its previous entry plus a fixed interval, whatever the node's own
- *        duration was.
+ * The start-to-start interval arithmetic `timer.pacing` (#1498) and
+ * `timer.throughput` (#1571) share: a node's next entry is its previous entry
+ * plus a fixed interval, whatever the node's own duration was.
  *
- * The two kinds differ only in where that interval comes from - stated
- * directly as `everyMs`, or derived from a rate as `60000 / targetPerMinute`
- * - and in what each one's `perUser: false` case means. Everything below the
- * interval is therefore one implementation rather than two copies that can
- * come to disagree about the same wait.
+ * The kinds differ only in where the interval comes from (`everyMs`, or
+ * `60000 / targetPerMinute`) and in what `perUser: false` means, so the rest is
+ * one implementation, not two copies that can disagree about a wait.
  *
- * Source-tree-local (not under `include/vayu/`): nothing outside
- * `engine/src/core/elements/` needs it.
+ * Source-tree-local: nothing outside `engine/src/core/elements/` needs it.
  */
 
 #include "vayu/core/elements.hpp"
@@ -45,9 +40,8 @@ constexpr auto PACING_POLL_INTERVAL = std::chrono::milliseconds (50);
     .count ();
 }
 
-/// `deadline - now`, clamped to never negative and never below @p every_ms
-/// having elapsed - "a step longer than the interval continues at once"
-/// (issue #1498's acceptance criteria), not with a negative wait.
+/// `deadline - now`, never negative: "a step longer than the interval continues
+/// at once" (#1498's acceptance criteria).
 [[nodiscard]] inline int64_t
 remaining_wait_ms (int64_t last_started_ms, int64_t every_ms, int64_t now_ms) {
     if (last_started_ms <= 0) {
@@ -56,11 +50,11 @@ remaining_wait_ms (int64_t last_started_ms, int64_t every_ms, int64_t now_ms) {
     return std::max<int64_t> (0, last_started_ms + every_ms - now_ms);
 }
 
-/// The per-VU half of `Element::scheduled_ready_delay_ms`: books this VU's
-/// next entry at its previous entry plus @p every_ms and returns the wait
-/// that implies. Writes the deadline back, so the *next* call books from it
-/// rather than from whenever the step actually ran - which is what keeps a
-/// cadence steady across a step whose own duration varies.
+/// The per-VU half of `Element::scheduled_ready_delay_ms`: books this VU's next
+/// entry at its previous entry plus @p every_ms and returns the wait that
+/// implies. The deadline is written back so the next call books from it, not
+/// from when the step actually ran, which keeps the cadence steady when a
+/// step's duration varies.
 [[nodiscard]] inline int64_t advance_per_user_pacing (
 std::unordered_map<std::string, int64_t>& pacing_state,
 const std::string& element_id,
@@ -73,12 +67,12 @@ int64_t now_ms) {
 }
 
 /**
- * The blocking `step.before` wait an interval timer performs on the design
- * send and the sequential run, and the outcome it reports - the whole body of
- * such a kind's `apply` once it has decided it is this node's scope entry.
+ * The blocking `step.before` wait an interval timer performs on the design send
+ * and the sequential run, and the outcome it reports: the whole of such a
+ * kind's `apply` once it has decided it is this node's scope entry.
  *
- * @p every_ms is that kind's own computed interval, before the run-level
- * `elements.timers` override is applied to it here.
+ * @p every_ms is the kind's computed interval; the run-level `elements.timers`
+ * override is applied to it here.
  */
 inline void apply_paced_wait (ElementContext& ctx, const std::string& element_id, int64_t every_ms) {
     const auto overridden =
@@ -91,10 +85,9 @@ inline void apply_paced_wait (ElementContext& ctx, const std::string& element_id
     const int64_t interval_ms = *overridden;
 
     if (!ctx.blocking_allowed) {
-        // The wait already happened through `scheduled_ready_delay_ms`
-        // deferring the VU before this step was ever dispatched - this call
-        // only confirms the outcome, and must not re-touch `pacing_state` or
-        // it would double-book the next pass's wait.
+        // `scheduled_ready_delay_ms` already deferred the VU before dispatch,
+        // so this only confirms the outcome. Touching `pacing_state` here would
+        // double-book the next pass's wait.
         ctx.outcome_status    = "ok";
         ctx.outcome_waited_ms = 0;
         return;

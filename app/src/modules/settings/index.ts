@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Settings Module
- *
- * Exports for the settings module.
- */
+/** The settings module's two surfaces: the editor and the category tree. */
 
 export { default as SettingsMain } from "./main/SettingsMain";
 export { default as SettingsCategoryTree } from "./sidebar/SettingsCategoryTree";

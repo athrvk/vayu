@@ -111,7 +111,7 @@ describe("accent colour schemes", () => {
 		 * an inactive 4-5% carries it.
 		 *
 		 * Graphite is S=12%/15% - it is the only desaturated scheme, which
-		 * `docs/design-system.md` notes as what makes it distinct in the picker.
+		 * `docs/design-system/color-schemes.md` notes as what makes it distinct in the picker.
 		 * It therefore has neither a lightness gap nor a saturation gap, and must
 		 * separate by lightness instead.
 		 *

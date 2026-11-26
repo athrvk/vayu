@@ -6,17 +6,13 @@
  */
 
 /**
- * What every caller of the inbox receives.
+ * What every caller of the inbox receives: all four fields the engine serves (#556), so a reply
+ * body or header set an agent or a bare curl configured is visible and authorable here, not a
+ * partial view claiming to be the whole one.
  *
- * All four fields the engine serves, not the two this used to show (issue
- * #556): a reply body or header set that an agent or a bare curl configured was
- * invisible here and could not be authored here, which made the panel a partial
- * view claiming to be the whole one.
- *
- * Its own component so every field can be a *draft* - typing "50" on the way to
- * "500" must not push a 50 at the next caller - and so re-seeding them from the
- * engine is a remount (the caller keys this on the served values) rather than a
- * setState inside an effect.
+ * Its own component so every field can be a *draft* (typing "50" on the way to "500" must not push
+ * a 50 at the next caller), and so re-seeding from the engine is a remount (the caller keys this on
+ * the served values) rather than a setState inside an effect.
  */
 
 import { useState } from "react";
@@ -41,31 +37,24 @@ import { cn } from "@/lib/utils";
 import { STANDARD_HEADERS } from "@/constants/http";
 
 /**
- * One inbox tab exists at a time (see the file this exports into), so one
- * static id names the reply's save context - there is never a second canned
- * response registered under it to collide with.
+ * One inbox tab exists at a time (see `index.tsx`, which renders this), so one static id names the
+ * reply's save context; no second canned response can register under it.
  */
 const INBOX_REPLY_SAVE_CONTEXT = "inbox-reply";
 
 /**
- * The engine's cap on the artificial delay (`MAX_RESPONSE_DELAY_MS`).
- *
- * Mirrored rather than fetched: it is a rail, not a setting - the delay holds a
- * listener thread for its whole duration and the teardown join waits on it - so
- * there is no per-engine value to read. Checked here as well as engine-side so
- * an over-long delay names the bound instead of arriving as a bare 400.
+ * The engine's cap on the artificial delay (`MAX_RESPONSE_DELAY_MS`), mirrored, not fetched: it is
+ * a rail, not a setting (the delay holds a listener thread for its whole duration and the teardown
+ * join waits on it), so there is no per-engine value to read. Checked here as well as engine-side
+ * so an over-long delay names the bound instead of arriving as a bare 400.
  */
 const MAX_RESPONSE_DELAY_MS = 30000;
 
 /**
- * The served header set as editor rows, with the trailing blank row the table
- * always keeps.
- *
- * `KeyValueEditor` is the app's key/value table and these rows used to be a
- * hand-rolled pair of `Input`s, because `KeyValueRow` threw outside
- * `RequestBuilderProvider` (#564). No `variables` is passed: a canned reply has
- * no variable scope, so nothing resolves and no `{{` autocomplete opens - which
- * is what a header set the engine echoes verbatim actually is.
+ * The served header set as editor rows, with the trailing blank row the table always keeps.
+ * `KeyValueEditor` is the app's key/value table (#564). No `variables`: a canned reply has no
+ * variable scope, so nothing resolves and no `{{` autocomplete opens, which matches a header set
+ * the engine echoes verbatim.
  */
 function toHeaderRows(headers: Record<string, string>): KeyValueItem[] {
 	return toKeyValueItems(
@@ -74,11 +63,10 @@ function toHeaderRows(headers: Record<string, string>): KeyValueItem[] {
 }
 
 /**
- * The header rows as a plain object, for comparing a draft against what the
- * engine last served - not for applying, which is `collect`'s job and
- * additionally refuses a blank name or a name set twice. A row with either of
- * those problems still counts toward dirtiness: the point is "does this
- * differ from what was served", not "is this valid to send".
+ * The header rows as a plain object, for comparing a draft with what the engine last served, not
+ * for applying (that is `collect`, which also refuses a blank name or a name set twice). A row with
+ * either problem still counts toward dirtiness: the question is "does this differ from what was
+ * served", not "is this valid to send".
  */
 function draftHeaders(rows: KeyValueItem[]): Record<string, string> {
 	const headers: Record<string, string> = {};
@@ -99,9 +87,8 @@ interface CannedResponseControlsProps {
 	response: InboxCannedResponse;
 	pending: boolean;
 	/**
-	 * The listener is gone. `PUT /inbox/:id` still merge-patches a stopped
-	 * record, so every control here would accept an edit that nothing will ever
-	 * serve - the panel says so and takes no input rather than lying twice.
+	 * The listener is gone. `PUT /inbox/:id` still merge-patches a stopped record, so every control
+	 * would accept an edit nothing will serve; the panel says so and takes no input.
 	 */
 	stopped: boolean;
 	/** Rejecting is how a failed apply is reported - see `persist` below. */
@@ -121,9 +108,8 @@ export function CannedResponseControls({
 	const [headerRows, setHeaderRows] = useState<KeyValueItem[]>(() =>
 		toHeaderRows(response.headers)
 	);
-	// Open when there is something to see: a configured body or header set is
-	// part of what the inbox answers with, and a reader who has to go looking
-	// for it is the defect this fixes.
+	// Open when there is something to see: a configured body or header set is part of the answer,
+	// and a reader who has to go looking for it is the defect this fixes.
 	const [detailsOpen, setDetailsOpen] = useState(
 		response.body !== "" || Object.keys(response.headers).length > 0
 	);
@@ -134,11 +120,9 @@ export function CannedResponseControls({
 
 	const disabled = stopped || pending;
 
-	// The visible "applied" state: true the moment any field diverges from what
-	// the engine last served, false once it matches again - which happens on its
-	// own after a successful apply, since the parent remounts this component on
-	// the served response (see the file comment on why that is a remount and not
-	// an effect).
+	// The visible "applied" state: true once any field diverges from what the engine last served,
+	// false when it matches again, which happens by itself after a successful apply since the
+	// parent remounts this on the served response (the file header says why a remount).
 	const isDirty =
 		statusDraft !== String(response.status) ||
 		delayDraft !== String(response.delayMs) ||
@@ -146,11 +130,9 @@ export function CannedResponseControls({
 		!headersEqual(draftHeaders(headerRows), response.headers);
 
 	/**
-	 * Read the four drafts back, or say which one is wrong.
-	 *
-	 * Every check here is also an engine check. The duplication is deliberate:
-	 * the engine's 400 arrives as a toast with no field to point at, and all
-	 * four of these are typed by hand.
+	 * Read the four drafts back, or say which one is wrong. Every check is also an engine check,
+	 * deliberately: the engine's 400 arrives as a toast with no field to point at, and all four are
+	 * typed by hand.
 	 */
 	const collect = (): Partial<InboxCannedResponse> | null => {
 		const status = Number(statusDraft);
@@ -194,14 +176,12 @@ export function CannedResponseControls({
 	};
 
 	/**
-	 * Reports under the reply's own id rather than as a bare toast (issue
-	 * #1450): a refused apply is `reportFailed`, which toasts and holds the Dock
-	 * on "Not saved" while the draft stays on screen unsaved. Registered below as
-	 * this reply's save, so this same function is what a quit flush or
-	 * Ctrl/Cmd+S runs - `useDraftSaveContext` wraps it in its own catch, which
-	 * never fires here since this resolves instead of throwing. It resolves with
-	 * the verdict for that reason: a bare resolution counts as saved, which a
-	 * refused apply is not, and neither is a draft `collect` refused.
+	 * Reports under the reply's own id rather than as a bare toast (#1450): a refused apply is
+	 * `reportFailed`, which toasts and holds the Dock on "Not saved" while the draft stays on
+	 * screen unsaved. Registered below as this reply's save, so a quit flush or Ctrl/Cmd+S runs
+	 * this too; `useDraftSaveContext`'s own catch never fires, since this resolves instead of
+	 * throwing, with the verdict: a bare resolution counts as saved, which neither a refused apply
+	 * nor a draft `collect` refused is.
 	 */
 	const persist = async (): Promise<SaveOutcome> => {
 		const next = collect();
@@ -296,7 +276,7 @@ export function CannedResponseControls({
 					</Button>
 				</div>
 
-				{/* Stacked under the row, not sharing it (docs/design-system.md's
+				{/* Stacked under the row, not sharing it (docs/design-system/feedback-and-dashboard.md's
 				    hint rule): a wrapping row would hand its width to this text and
 				    pin the shorter control wherever the wrap put it. The set exists
 				    to test a sender's retry and error handling; saying so is cheaper

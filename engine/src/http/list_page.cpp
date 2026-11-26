@@ -5,10 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file http/list_page.cpp
- * @brief The paging the whole-list routes share (issue #2443).
- */
+/** The paging the whole-list routes share (issue #2443). */
 
 #include "vayu/http/list_page.hpp"
 

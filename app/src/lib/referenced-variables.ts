@@ -8,32 +8,27 @@
 /**
  * Which variable names a script mentions, and by which syntax.
  *
- * Two syntaxes, because a script can *name* a variable either way - but only
- * one of them reads it. `pm.environment.get("token")` resolves at run time;
- * `{{token}}` inside script text is literal characters, because the engine
- * never interpolates a script (`request_composer.cpp`, decision D16 - rewriting
- * `{{...}}` there cannot tell a string literal from code). Authors write it
- * anyway, out of habit from URLs and bodies, which is exactly why the surfaces
- * that chip these names have to keep the two apart (issue #659 item 3).
+ * Two syntaxes, because a script can *name* a variable either way, but only one of them reads it.
+ * `pm.environment.get("token")` resolves at run time; `{{token}}` inside script text is literal
+ * characters, because the engine never interpolates a script (`request_composer.cpp`, decision D16:
+ * rewriting `{{...}}` there cannot tell a string literal from code). Authors write it anyway, out
+ * of habit from URLs and bodies, which is why the surfaces that chip these names have to keep the
+ * two apart (#659 item 3).
  *
- * Pulled out of the panel so it can be tested as logic. It was inline in both
- * script panels, twice over, with the regexes rebuilt on every render - and a
- * *third* time in the collection's script tab, which is why this now lives in
- * `lib/` rather than under `request-builder/`: it is read by two modules, and
- * a copy under one of them is what let the collection tab keep its own.
+ * In `lib/` rather than under `request-builder/` because two modules read it (both request script
+ * panels and the collection's script tab), and a copy under one of them is how the collection tab
+ * kept its own.
  *
- * The template matcher is the app's one `VARIABLE_PATTERN`; only `PM_GET` is
- * local, because nothing else looks for that syntax. Inner braces are excluded
- * by that pattern, so `{{a}}{{b}}` is two names and not one.
+ * The template matcher is the app's one `VARIABLE_PATTERN`; only `PM_GET` is local, because nothing
+ * else looks for that syntax. Inner braces are excluded by that pattern, so `{{a}}{{b}}` is two
+ * names and not one.
  *
- * **A reference carries what its accessor can see, not only how it was
- * spelled** (issue #1063). `PM_GET` matched three accessors and left
- * `pm.variables` and `pm.iterationData` out entirely, so a name read through
- * either was not merely painted wrong - it was chipped nowhere at all, the
- * quiet half of this repo's written-but-never-read defect. Since issue #1007 a
- * bound row answers bare column names through `pm.variables`, which makes the
- * accessor the difference between a column read and a variable read of the same
- * name, so the syntax alone can no longer decide what a chip may claim.
+ * **A reference carries what its accessor can see, not only how it was spelled** (#1063). A bound
+ * row answers bare column names through `pm.variables` (#1007), which makes the accessor the
+ * difference between a column read and a variable read of the same name, so the syntax alone cannot
+ * decide what a chip may claim. Every accessor whose first argument is a name is matched: one left
+ * out would leave a name read through it chipped nowhere at all, the quiet half of this repo's
+ * written-but-never-read defect.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -50,12 +45,10 @@ import type {
 } from "@/types/domain";
 
 /**
- * `pm.<accessor>.get("x")`, for every accessor whose first argument is a name.
- *
- * Optional chaining counts as the dot it is, the same way `ACCESSOR_CALL` in
- * `script-variable-completion.ts` reads it: `pm.iterationData` is `undefined`
- * outside a data-driven run and its own documentation says to guard before
- * calling, so `pm.iterationData?.get("x")` is how the call is actually written.
+ * `pm.<accessor>.get("x")`, for every accessor whose first argument is a name. Optional chaining
+ * counts as the dot it is, as `ACCESSOR_CALL` in `script-variable-completion.ts` reads it:
+ * `pm.iterationData` is `undefined` outside a data-driven run and its own documentation says to
+ * guard before calling, so `pm.iterationData?.get("x")` is how the call is actually written.
  */
 const PM_GET =
 	/pm\??\.(environment|globals|collectionVariables|variables|iterationData)\??\.get\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
@@ -72,36 +65,29 @@ const PM_GET =
 export type ReferenceSyntax = "pm" | "template";
 
 /**
- * What the accessor that named it can actually see (issue #1063).
+ * What the accessor that named it can actually see (#1063). A bound data row answers bare column
+ * names (#1007), so `pm.environment.get("email")` and `pm.variables.get("email")` are the same
+ * syntax about the same name, and only the second can be reading a column; a surface that paints
+ * them alike is guessing.
  *
- * The syntax alone stopped being enough once a bound data row began answering
- * bare column names (issue #1007): `pm.environment.get("email")` and
- * `pm.variables.get("email")` are the same syntax about the same name, and only
- * the second one can be reading a column. A surface that paints them alike is
- * guessing.
- *
- * - `scope` - `environment` / `globals` / `collectionVariables`. One scope, and
- *   never the row, whatever the collection declares.
- * - `merged` - `pm.variables`. The bound row's bare column names first, then the
- *   three scopes (issue #1007), so this one is a column read *or* a variable
- *   read and the name decides which.
- * - `row` - `pm.iterationData`. The row and nothing but the row, so no answer
- *   about the scopes says anything true about it.
+ * - `scope`: `environment` / `globals` / `collectionVariables`. One scope, and never the row,
+ *   whatever the collection declares.
+ * - `merged`: `pm.variables`. The bound row's bare column names first, then the three scopes
+ *   (#1007), so this one is a column read *or* a variable read and the name decides which.
+ * - `row`: `pm.iterationData`. The row and nothing but the row, so no answer about the scopes says
+ *   anything true about it.
  */
 export type PmRead = "scope" | "merged" | "row";
 
 /**
- * What each accessor reads, and - for the single-scope three - which scope.
+ * What each accessor reads, and, for the single-scope three, which scope. One table rather than two
+ * *here*, because both facts are answers about the same accessor and a second table keyed by the
+ * same five names is how they come to disagree. `scope` is null exactly where `reads` is not
+ * `"scope"`: the merged read has no single scope to name, and the row is not a scope at all.
  *
- * One table rather than two *here*, because both facts are answers about the
- * same accessor and a second table keyed by the same five names is how they come
- * to disagree. `scope` is null exactly where `reads` is not `"scope"`: the merged
- * read has no single scope to name, and the row is not a scope at all.
- *
- * `SCOPE_BY_ACCESSOR` in `script-variable-completion.ts` does key the same five
- * names, and predates this. The two have not diverged; folding them together is
- * worth doing on the next change that touches both, rather than widening a paint
- * fix into that file.
+ * `SCOPE_BY_ACCESSOR` in `script-variable-completion.ts` does key the same five names. The two
+ * agree; folding them together is worth doing on the next change that touches both, rather than
+ * widening a paint fix into that file.
  */
 export interface PmAccessor {
 	reads: PmRead;
@@ -110,10 +96,9 @@ export interface PmAccessor {
 }
 
 /**
- * Exported so `lib/script-variable-tokens.ts` can build its `pm.<accessor>.get(...)`
- * spans off the same five names and the same `reads`/`scope` table, rather than
- * a second list that can drift from this one (issue #1063 is exactly that class
- * of drift, one surface at a time).
+ * Exported so `lib/script-variable-tokens.ts` builds its `pm.<accessor>.get(...)` spans off the
+ * same five names and the same `reads`/`scope` table, rather than a second list that can drift from
+ * this one (#1063 is that class of drift, one surface at a time).
  */
 export const PM_ACCESSORS: Record<string, PmAccessor> = {
 	environment: { reads: "scope", scope: "environment" },
@@ -124,25 +109,21 @@ export const PM_ACCESSORS: Record<string, PmAccessor> = {
 };
 
 /**
- * Which mention of a name outranks which, when a script writes it more than one
- * way. Ascending, and the existing `pm`-beats-`template` rule is the bottom two
- * rungs of it.
+ * Which mention of a name outranks which, when a script writes it more than one way. Ascending; the
+ * `pm`-beats-`template` rule is the bottom two rungs.
  *
- * Above them, an accessor that can see the row outranks one that cannot, for
- * the same reason `pm` outranks `template`: it is the stronger claim about what
- * the script reads, and the row shadowing a same-named variable is the fact an
- * author most needs the chip to show. `row` tops `merged` because it reads
- * nothing else, so the column reading is the only one it can have.
+ * Above them, an accessor that can see the row outranks one that cannot, for the reason `pm`
+ * outranks `template`: it is the stronger claim about what the script reads, and the row shadowing
+ * a same-named variable is the fact an author most needs the chip to show. `row` tops `merged`
+ * because it reads nothing else, so the column reading is the only one it can have.
  */
 const CLAIM_RANK: Record<string, number> = { template: 0, scope: 1, merged: 2, row: 3 };
 
 /**
- * What a `template` chip has to say for itself, in both script surfaces.
- *
- * Here rather than in either panel because the two would otherwise each own a
- * sentence about the same engine rule, and the repo has been bitten by exactly
- * that: a copy does not receive the original's corrections. It is the one string
- * in this module, and it belongs to the syntax the module distinguishes.
+ * What a `template` chip has to say for itself, in both script surfaces. Here rather than in either
+ * panel because the two would otherwise each own a sentence about the same engine rule, and a copy
+ * does not receive the original's corrections. It is the one string in this module, and it belongs
+ * to the syntax the module distinguishes.
  */
 export const TEMPLATE_IN_SCRIPT_NOTE =
 	"Scripts are not interpolated: these characters reach the script verbatim. " +
@@ -154,29 +135,25 @@ export interface VariableReference {
 	/** What the accessor that named it reads; `null` for a `template` mention. */
 	reads: PmRead | null;
 	/**
-	 * The one scope a single-scope accessor reads, or `null` when the reference
-	 * does not name one (a `template` mention, `pm.variables`, `pm.iterationData`).
-	 *
-	 * Carried because `reads: "scope"` says only *that* one scope answers, never
-	 * *which* - and which is the whole of the question in issue #1196, where a
-	 * collection row that is enabled and empty answers `pm.collectionVariables`
-	 * while the environment holds the value the author is looking at.
+	 * The one scope a single-scope accessor reads, or `null` when the reference does not name one
+	 * (a `template` mention, `pm.variables`, `pm.iterationData`). Carried because `reads: "scope"`
+	 * says only *that* one scope answers, never *which*, and which is the whole question in #1196,
+	 * where a collection row that is enabled and empty answers `pm.collectionVariables` while the
+	 * environment holds the value the author is looking at.
 	 */
 	scope: VariableScope | null;
 }
 
 /**
- * Names, deduplicated, each with the syntax that earns it the stronger claim.
+ * Names, deduplicated, each with the syntax that earns it the stronger claim. A name written both
+ * ways is `pm`: the script does read it, and the `{{}}` beside the call is decoration. That
+ * asymmetry is the point of carrying the syntax: the weaker claim must never overwrite the stronger
+ * one.
  *
- * A name written both ways is `pm`: the script does read it, and the `{{}}`
- * beside the call is decoration. That asymmetry is the whole point of carrying
- * the syntax - the weaker claim must never overwrite the stronger one.
- *
- * Grouped by syntax rather than by position in the script - which is what the
- * two panels did, and is kept deliberately so this stays a refactor. It is
- * worth knowing rather than assuming: the panel chips the first five and
- * counts the rest, so adding a `pm.globals.get()` below an existing `{{name}}`
- * pushes that name down the list even though it comes first in the file.
+ * Grouped by syntax rather than by position in the script, which is worth knowing rather than
+ * assuming: the panel chips the first five and counts the rest, so adding a `pm.globals.get()`
+ * below an existing `{{name}}` pushes that name down the list even though it comes first in the
+ * file.
  */
 export function referencedVariables(script: string): VariableReference[] {
 	const byName = new Map<string, VariableReference>();
@@ -211,14 +188,12 @@ export function referencedVariables(script: string): VariableReference[] {
 }
 
 /**
- * What a reference says about itself *as a data column*, or null when it is not
- * a column read and the caller's ordinary variable painting applies (#1063).
- *
- * Here rather than in the panels for the same reason `TEMPLATE_IN_SCRIPT_NOTE`
- * is: the rule is one engine fact, and a surface holding its own copy is how
- * two chips of the same name come to disagree. It takes a predicate rather than
- * the resolver's map so it stays a pure join of "what did the script write" and
- * "what does the contract declare".
+ * What a reference says about itself *as a data column*, or null when it is not a column read and
+ * the caller's ordinary variable painting applies (#1063). Here rather than in the panels for the
+ * reason `TEMPLATE_IN_SCRIPT_NOTE` is: the rule is one engine fact, and a surface holding its own
+ * copy is how two chips of the same name come to disagree. It takes a predicate rather than the
+ * resolver's map so it stays a pure join of "what did the script write" and "what does the contract
+ * declare".
  *
  * @param definesVariable whether any scope defines a variable of that name
  */
@@ -234,16 +209,15 @@ export function describeColumnReference(
 	 * be in is a column state - including "no contract declared". Falling
 	 * through would hand it the resolved/unresolved pair, and a column can never
 	 * be in `allVariables`, so the answer would always be the destructive red
-	 * issue #604 removed from exactly this row.
+	 * this row must not wear (issue #604).
 	 */
 	if (reads === "row") return describeColumnToken(name, contract);
 
 	/*
-	 * `pm.variables` reads the row first and the scopes after, so it is a column
-	 * read only while the name is a declared column that no scope answers -
-	 * the same line `VariableInput` draws for a bare `{{name}}` (issue #1007).
-	 * Where a scope does define it, the variable painting is still true and the
-	 * question of which one wins on screen belongs to #1064, not here.
+	 * `pm.variables` reads the row first and the scopes after, so it is a column read only while
+	 * the name is a declared column that no scope answers, the line `VariableInput` draws for a
+	 * bare `{{name}}` (#1007). Where a scope does define it, the variable painting is still true,
+	 * and which one wins on screen is #1064's question, not this one's.
 	 */
 	if (reads !== "merged" || !contract) return null;
 	if (!contract.columns.includes(name) || definesVariable(name)) return null;
@@ -251,21 +225,18 @@ export function describeColumnReference(
 }
 
 /**
- * The definition a single-scope accessor would actually return, or null.
+ * The definition a single-scope accessor would actually return, or null. Last enabled wins,
+ * matching the engine's `lookup_variable` (which walks its scope's chain leaf-first and stops at
+ * the first enabled row) and `useVariableResolver` (which pushes the collection chain root-first
+ * and marks the last enabled definition the winner). A disabled row is looked past here for the
+ * reason it is there (D17).
  *
- * Last enabled wins, matching the engine's `lookup_variable`, which walks its
- * scope's chain leaf-first and stops at the first enabled row - and matching
- * `useVariableResolver`, which pushes the collection chain root-first and marks
- * the last enabled definition the winner. A disabled row is looked past here for
- * the same reason it is there (D17).
+ * Exported because the completion list asks the same question of the same origins (#1302):
+ * `getScopeVariables` builds one entry per name from this, so what `pm.collectionVariables.get` is
+ * offered and what the chip beside it says come from one rule rather than two that can drift.
  *
- * Exported because the completion list asks the same question of the same
- * origins (#1302): `getScopeVariables` builds one entry per name from this, so
- * what `pm.collectionVariables.get` is offered and what the chip beside it says
- * come from one rule rather than two that can drift.
- *
- * Generic in the origin so a caller holding `ScopeVariableOrigin`s gets one
- * back, rather than widening to a `"row"` scope this can never return.
+ * Generic in the origin so a caller holding `ScopeVariableOrigin`s gets one back, rather than
+ * widening to a `"row"` scope this can never return.
  */
 export function scopeAnswer<T extends VariableOrigin>(
 	origins: readonly T[],
@@ -279,22 +250,19 @@ export function scopeAnswer<T extends VariableOrigin>(
 }
 
 /**
- * The definition that wins the whole ladder - what `{{name}}` substitutes and
- * what `pm.variables.get` returns.
+ * The definition that wins the whole ladder: what `{{name}}` substitutes and what
+ * `pm.variables.get` returns. Last enabled again, over every scope this time, which is how
+ * `useVariableResolver` derives `variableMap`.
  *
- * Last enabled again, over every scope this time, which is exactly how
- * `useVariableResolver` derives `variableMap`. **Precedence has to be read off
- * the ladder rather than inferred from "some other scope has a value"**: an
- * enabled row wins even when its value is empty, so a lower scope holding
- * something is masked by the empty winner rather than masking it. Reading it as
- * the latter warns on healthy scripts - an empty collection row beside a
- * non-empty global is the collection's answer *and* the merged answer, with
- * nothing to warn about.
+ * **Precedence has to be read off the ladder rather than inferred from "some other scope has a
+ * value"**: an enabled row wins even when its value is empty, so a lower scope holding something is
+ * masked by the empty winner rather than masking it. Read the other way, it warns on healthy
+ * scripts: an empty collection row beside a non-empty global is the collection's answer *and* the
+ * merged answer, with nothing to warn about.
  *
- * The row is skipped because it is not a scope. `pm.iterationData` is its
- * accessor and `describeColumnReference` already paints reads of it; a bound row
- * changing what a scoped read should say about itself is #1064's question, not
- * this one's.
+ * The row is skipped because it is not a scope: `pm.iterationData` is its accessor and
+ * `describeColumnReference` already paints reads of it; a bound row changing what a scoped read
+ * should say about itself is #1064's question, not this one's.
  */
 function ladderWinner(origins: readonly VariableOrigin[]): VariableOrigin | null {
 	for (let i = origins.length - 1; i >= 0; i--) {
@@ -305,16 +273,13 @@ function ladderWinner(origins: readonly VariableOrigin[]): VariableOrigin | null
 }
 
 /**
- * How the tooltip names a definition - `environment - Staging`, the spelling
- * `monaco-variable-tokens` and the popover already use, so a reader meets one
- * vocabulary and not a second.
- *
- * The value is never printed, only the source: the definition may be a secret,
- * and the popover's rule is that a secret shows a mask and never a value.
- *
- * Takes the two fields it reads rather than a whole origin, because the
- * completion list names the same definition from a `ResolvedVariable` (#1302)
- * and a second spelling of one vocabulary is what this exists to prevent.
+ * How the tooltip names a definition: `environment - Staging`, the spelling
+ * `monaco-variable-tokens` and the popover already use, so a reader meets one vocabulary and not a
+ * second. The value is never printed, only the source: the definition may be a secret, and the
+ * popover's rule is that a secret shows a mask and never a value. Takes the two fields it reads
+ * rather than a whole origin, because the completion list names the same definition from a
+ * `ResolvedVariable` (#1302), and a second spelling of one vocabulary is what this exists to
+ * prevent.
  */
 export function sourceLabel(origin: { scope: VariableOriginScope; sourceName?: string }): string {
 	return origin.sourceName ? `${origin.scope} - ${origin.sourceName}` : origin.scope;
@@ -335,44 +300,38 @@ const SCOPED_READ_WORDS = {
 };
 
 /**
- * What a **single-scope read** says about itself when its own scope answers
- * emptily and another scope does not (issue #1196), or null when there is
- * nothing to warn about.
+ * What a **single-scope read** says about itself when its own scope answers emptily and another
+ * scope does not (#1196), or null when there is nothing to warn about.
  *
- * The trap this paints is invisible at every other surface: an enabled,
- * empty `shop_domain` at collection scope makes `pm.collectionVariables.get`
- * honestly return `''`, while `{{shop_domain}}` in the URL bar resolves the
- * environment's real value through the full ladder. Both are correct - the
- * engine was verified right and is untouched here - so the author sees a healthy
- * token, a healthy chip, and a failing assertion, with nothing connecting them.
- * A leftover empty row from a Postman import is the usual way in.
+ * The trap this paints is invisible at every other surface: an enabled, empty `shop_domain` at
+ * collection scope makes `pm.collectionVariables.get` honestly return `''`, while `{{shop_domain}}`
+ * in the URL bar resolves the environment's real value through the full ladder. Both are correct
+ * (the engine is right, and nothing here changes it), so the author sees a healthy token, a healthy
+ * chip, and a failing assertion, with nothing connecting them. A leftover empty row from a Postman
+ * import is the usual way in.
  *
- * Warning, never destructive: the read works and the name resolves, so this is
- * "check this" rather than "nothing can ever answer this" - the same line
- * `describeColumnToken` draws for an undeclared column, and the reason #604 took
- * destructive off this row in the first place.
+ * Warning, never destructive: the read works and the name resolves, so this is "check this" rather
+ * than "nothing can ever answer this", the line `describeColumnToken` draws for an undeclared
+ * column, and the reason #604 took destructive off this row.
  *
- * **The contradiction is against the ladder's winner, not against "some other
- * scope".** Those are different questions wherever the read's own scope is the
- * one that wins: an empty collection row beside a non-empty global is the
- * collection's answer and the merged answer alike, and an enabled environment
- * row is unconditionally the winner, so neither can be shadowed by anything. A
- * warning that fired on them would be amber on healthy scripts, which is the way
- * this kind of paint stops being read at all.
+ * **The contradiction is against the ladder's winner, not against "some other scope".** Those
+ * differ wherever the read's own scope is the one that wins: an empty collection row beside a
+ * non-empty global is the collection's answer and the merged answer alike, and an enabled
+ * environment row is unconditionally the winner, so neither can be shadowed by anything. A warning
+ * that fired on them would be amber on healthy scripts, which is how this kind of paint stops being
+ * read at all.
  *
- * Only the accessor's own scope is checked. `pm.variables` is the merged read
- * and returns the winning value, so it is correct by construction and must never
- * warn; a name written through two different single-scope accessors keeps the
- * first, by the same equal-claim rule that orders the row - so the second
- * accessor's read of that name carries no chip of its own.
+ * Only the accessor's own scope is checked. `pm.variables` is the merged read and returns the
+ * winning value, so it is correct by construction and must never warn; a name written through two
+ * different single-scope accessors keeps the first, by the equal-claim rule that orders the row, so
+ * the second accessor's read of that name carries no chip of its own.
  *
- * `mode` is how the caller spells the read: a `replaceIn` template substitutes
- * or leaves `{{name}}` written rather than returning, and names the merged form
- * to reach for as `pm.variables.replaceIn("{{name}}")`, not `get`.
+ * `mode` is how the caller spells the read: a `replaceIn` template substitutes or leaves `{{name}}`
+ * written rather than returning, and names the merged form to reach for as
+ * `pm.variables.replaceIn("{{name}}")`, not `get`.
  *
- * Takes the origins rather than the resolver so it stays a pure join of "what
- * did the script write" and "what is defined", the way `describeColumnReference`
- * takes a predicate rather than the map.
+ * Takes the origins rather than the resolver so it stays a pure join of "what did the script write"
+ * and "what is defined", as `describeColumnReference` takes a predicate rather than the map.
  */
 export function describeScopedRead(
 	reference: VariableReference,

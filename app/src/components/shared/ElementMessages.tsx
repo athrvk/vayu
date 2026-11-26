@@ -6,20 +6,14 @@
  */
 
 /**
- * What an inline script element said under load: the error it threw, each
- * failing `pm.test`, and its console lines (#3127). A load run keeps no trace
- * per request, so the tally row is the only place this text can reach.
- *
- * The engine keeps a bounded, distinct sample: the first 10 entries of each
- * list, each with how many times it was seen (`x3` beside it, as on a failure
- * under Test validation; no `count` means once), and a count of what a full
- * list turned away. The dropped count is said out loud ("37 more console line
- * occurrences not shown") for the reason the failure list under Test
- * validation says "Showing 10 of 14": ten lines read as the whole set unless
- * they say otherwise. It is occurrences, not distinct entries: one extra error
- * thrown on 480 iterations is 480, so the cue must not read as 480 more
- * messages. All four keys are absent when empty, and on a row from an engine
- * before the field, so a row with none renders nothing.
+ * What an inline script element said under load: its thrown error, each failing `pm.test`, and its
+ * console lines (#3127). A load run keeps no per-request trace, so the tally row is the only place
+ * this reaches. The engine keeps a bounded distinct sample: the first 10 of each list, each with
+ * how often it was seen (`x3`, as under Test validation; no `count` is once), and a count of what a
+ * full list turned away. The dropped count is said aloud ("37 more console line occurrences not
+ * shown"), as Test validation says "Showing 10 of 14", or ten lines read as the set. Occurrences,
+ * not entries: one error thrown on 480 iterations is 480, so the cue must not read as 480 messages.
+ * All four keys are absent when empty and on older engines' rows, which render nothing.
  */
 
 import { formatNumber } from "@/lib/format-number";
@@ -78,8 +72,8 @@ export function ElementMessages({
 }) {
 	const messages = element.messages ?? [];
 	const consoleLines = element.console ?? [];
-	// A dropped count is only ever written beside a list that filled, but a row
-	// is read as stored, so the cue does not depend on that.
+	// A dropped count is written only beside a full list, but a row is read as stored, so the cue
+	// does not rely on that.
 	const hasMessageCue = (element.messagesDropped ?? 0) > 0;
 	const hasConsoleCue = (element.consoleDropped ?? 0) > 0;
 	if (messages.length === 0 && consoleLines.length === 0 && !hasMessageCue && !hasConsoleCue) {

@@ -10,23 +10,12 @@ import { Input, Label } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 /**
- * A labelled number input with its unit inside the field.
- *
- * The unit used to live in the label - "Duration (seconds)", "Target RPS
- * (Requests per second)" - which made labels long and repeated the mode name
- * back at the user. `htmlFor`/`id` are wired because these were bare `<Label>`s
- * next to inputs, associated by proximity only.
- *
- * Shared rather than owned by one dialog (issue #1564): `RunCollectionDialog`
- * reuses it for the same pass/fail budget fields `LoadTestConfigDialog`
- * introduced it for, and a hand-rolled copy would not receive this one's
- * fixes.
- *
- * A numeric `value` makes the field a number field: the typed text is held here
- * while the field is focused and `onChange` hears only non-empty text, so
- * clearing the field to type a new value never writes `Number("")` (0) back into
- * it. On blur an empty field returns to `value`. A string `value` is
- * passed through untouched, because the budget fields treat "" as "no budget".
+ * A labelled number input with its unit inside the field, `htmlFor`/`id` tying label and input.
+ * Shared (#1564): `RunCollectionDialog` reuses it for the budget fields `LoadTestConfigDialog`
+ * introduced it for. A numeric `value` makes it a number field: the typed text is held here while
+ * focused and `onChange` hears only non-empty text, so clearing it to retype never writes
+ * `Number("")` (0); on blur an empty field returns to `value`. A string `value` passes through, as
+ * the budget fields read "" as "no budget".
  */
 export function NumberField({
 	id,

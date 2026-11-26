@@ -5,12 +5,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file http/routes/runs.cpp
- * @brief Run management and reporting routes
- */
+/** Run management and reporting routes. */
 
 #include "vayu/core/load_strategy.hpp"
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/run_result_summary.hpp"
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/http/file_access_policy.hpp"
@@ -45,8 +43,7 @@ namespace {
 constexpr int STOP_GRACE_SECONDS = 5;
 
 // How long DELETE /runs/:id waits for an active run's worker to settle before
-// refusing the delete. The stop's budget, so a client that stops and then
-// deletes sees one budget, not two different ones.
+// refusing: the stop's budget, so stop-then-delete sees one budget.
 constexpr int64_t DELETE_STOP_WAIT_MS = int64_t{ STOP_GRACE_SECONDS } * 1000;
 
 // Copy src[key] to dst[key] when present and not null. Shared by the list-row
@@ -75,20 +72,13 @@ void add_target_rps (nlohmann::json& dst, const nlohmann::json& src) {
         dst["targetRps"] = *rate;
 }
 
-// httpVersion is handled separately from add_if_present, and always ends up
-// present: a raw POST /runs body of `"httpVersion": null` (a request for no
-// explicit protocol) lands in config_snapshot verbatim, because config_snapshot is
-// built from the raw request body *before* normalize_run_http_version
-// erases the key from the executed request (see execution.cpp) - and a run
-// predating this field has no key at all. Neither case recorded a protocol, so
-// both normalize to the literal string "auto" instead of being omitted, which
-// would misrepresent "nothing was recorded" as "we lost it".
-//
-// Do not read that as "the run executed at auto". A load run stored before this
-// branch hardcoded CURL_HTTP_VERSION_2TLS, and every run before it went out as
-// HTTP/1.1 regardless because nghttp2 was not linked. "auto" here means the
-// snapshot names no protocol, not that one was chosen. Never call src["httpVersion"].get<std::string>() here -
-// an explicit null throws.
+// Always present, unlike `add_if_present`'s keys: a POST /runs body's
+// `"httpVersion": null` lands in config_snapshot verbatim (the snapshot is
+// built from the raw body before `normalize_run_http_version` erases the key),
+// and an older run has no key. Neither recorded a protocol, so both read "auto"
+// rather than an omission that would say the value was lost. "auto" means the
+// snapshot names none, not that auto was chosen. Never
+// `src["httpVersion"].get<std::string> ()` here: an explicit null throws.
 void add_http_version (nlohmann::json& dst, const nlohmann::json& src) {
     if (src.contains ("httpVersion") && !src["httpVersion"].is_null ()) {
         dst["httpVersion"] = src["httpVersion"];
@@ -97,18 +87,12 @@ void add_http_version (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
-// One run-scoped default-header decision (`acceptEncoding`, issue #1488, or
-// `expectContinue`, issue #2516), read out of the nested `defaultHeaders`
-// object the snapshot gains at run start. Nested rather than flat so it cannot
-// collide with a client-controlled top-level key `add_if_present` would
-// otherwise copy verbatim.
-//
-// Omitted, not defaulted, when the snapshot predates the field - unlike
-// httpVersion, an absent key here does not mean "the engine's own default
-// applied at read time", it means "no run-scoped decision was ever
-// recorded". The baseline comparison (app side) is the one place that reads
-// an absent key as false, because that is what every earlier run actually
-// sent.
+// One run-scoped default-header decision (`acceptEncoding`, #1488;
+// `expectContinue`, #2516) from the snapshot's nested `defaultHeaders`, nested
+// so it cannot collide with a client-controlled top-level key `add_if_present`
+// copies. Omitted, not defaulted, when the snapshot predates it: unlike
+// httpVersion, absent means no decision was recorded. Only the app's baseline
+// comparison reads absent as false, which is what every earlier run sent.
 void add_default_header_flag (nlohmann::json& dst, const nlohmann::json& src, const char* key) {
     if (!src.contains ("defaultHeaders") || !src["defaultHeaders"].is_object ()) {
         return;
@@ -119,18 +103,12 @@ void add_default_header_flag (nlohmann::json& dst, const nlohmann::json& src, co
     }
 }
 
-// A scenario run's list-row descriptor, or an absent key when the snapshot is
-// not a scenario's.
-//
-// A collection run has no `url` and no `method` - its work is a sequence, not a
-// request - so without this a list row carries nothing that identifies it at
-// all, and the history sidebar draws a scenario run as a bare status and a
-// timestamp. What a row needs is which collection ran, how big the run was, and
-// which data file drove it (issue #2051).
-//
-// `stepCount`, not the manifest's `steps` array: the array carries a name, a
-// method and a URL per step, and a list row that shipped it would undo the
-// reason `summary` exists. The array stays on `GET /runs/:id`.
+// A scenario run's list-row descriptor; absent for another snapshot. A
+// collection run has no `url` or `method`, so without it the history sidebar
+// draws a bare status and timestamp; a row needs which collection ran, how big
+// the run was and which data file drove it (#2051). `stepCount`, not the
+// manifest's `steps` (a name, method and URL per step), which would undo the
+// reason `summary` exists; the array stays on `GET /runs/:id`.
 void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
     if (!src.contains ("scenario") || !src["scenario"].is_object ()) {
         return;
@@ -150,35 +128,27 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
-// The compact list-row summary: exactly the seventeen keys the history/dashboard
-// list UIs read (`targetRps` is `rps` renamed, see add_target_rps), each
-// omitted when absent from the snapshot (httpVersion excepted - see
-// add_http_version), plus `acceptEncoding` (issue #1488) and
-// `scenario` on a collection run only, both omitted rather than defaulted
-// when the snapshot carries neither. `dataFileName` / `dataFileHash` (issue
-// #2051) and `dataFileCastNumbers` (issue #2540) are a single-request run's; a
-// collection run's ride `scenario`. The ramp-up knobs `startConcurrency` /
-// `rampUpDuration` (issue #1935) are in the list so a row agrees with the
-// report's `configuration`
-// (build_run_report_config). A malformed config_snapshot yields an empty
-// object, never an error. This builds the list rows and the
-// PUT /runs/:id/baseline row; GET /runs/:id does not use it and returns the
-// full snapshot. `hasWarnings` (issue #1527) is not built
-// here and never cached with the rest of this object - it is a completion-time
-// fact, not part of the immutable config_snapshot this function reads, so it
-// is merged into the row by `get_runs_response` after this (possibly cached)
-// object is retrieved.
+// The compact list-row summary: the seventeen keys the history and dashboard
+// lists read (`targetRps` is `rps` renamed, see `add_target_rps`), each omitted
+// when absent from the snapshot except httpVersion (`add_http_version`), plus
+// `acceptEncoding` (#1488) and a collection run's `scenario`, both omitted
+// rather than defaulted. `dataFileName` / `dataFileHash` (#2051) and
+// `dataFileCastNumbers` (#2540) are a single-request run's; a collection run's
+// ride `scenario`. `startConcurrency` / `rampUpDuration` (#1935) are listed so
+// a row agrees with the report's `configuration` (`build_run_report_config`). A
+// malformed snapshot yields an empty object, never an error. Builds the list
+// rows and the PUT /runs/:id/baseline row; GET /runs/:id returns the full
+// snapshot. `hasWarnings` (#1527) is a completion-time fact, not part of the
+// immutable snapshot, so it is never built or cached here: `get_runs_response`
+// merges it into the (possibly cached) row.
 //
-// `requestName` is the request's name *as the client sent it*, never
-// re-read from the requests table: the same trust model `url` and
-// `method` already have here (this function never joins against
-// `vayu::db::Request`, so an edited-since-run name would disagree with a
-// DB read anyway) and the reason the field has to come from the client at
-// all - Send executes editor state, which may be an unsaved name, or belong
-// to a request deleted since. `execIdentity` (app's `execute-mapping.ts`) is
-// the one place that reads it off the editor and threads it through
-// composition; a name is what a history row falls back to a bare URL
-// without.
+// `requestName` is the name as the client sent it, never re-read from the
+// requests table: the trust model of `url` and `method` (this function joins
+// nothing, so an edited name would disagree anyway), and why it comes from the
+// client at all: Send executes editor state, whose name may be unsaved or
+// belong to a since-deleted request. `execIdentity` (the app's
+// `execute-mapping.ts`) threads it through composition; without a name a
+// history row falls back to a bare URL.
 nlohmann::json build_run_summary (const std::string& config_snapshot) {
     nlohmann::json summary = nlohmann::json::object ();
     try {
@@ -224,9 +194,8 @@ struct SendingTotals {
     size_t requests_sent      = 0;
     size_t requests_expected  = 0;
     double sending_duration_s = 0.0;
-    // Completions inside that window (#2882). Empty for a summary stored
-    // before it, which leaves `summary.completedWhileSending` out rather than
-    // reporting that nothing completed.
+    // Completions inside that window (#2882); empty for an older summary, which
+    // leaves `summary.completedWhileSending` out rather than reporting none.
     std::optional<size_t> completed_while_sending;
 };
 
@@ -268,14 +237,13 @@ struct ReportExtras {
     // load-only figures, and its stored `status_codes` is authoritative even
     // when empty (#2822).
     bool sequential_run = false;
-    // False when the stored summary says nothing was timed (`latency.count`
-    // of 0 - a collection run in which no step sent), for a live load run,
-    // whose percentiles cannot be read yet, and for a run whose summary is
-    // `partial` or missing (#2938), whose rows were never flushed or are only
-    // a sample. The report then leaves `latency` out: its fields default to 0,
-    // which would read as steps that answered instantly. A summary with no
-    // `count` (every load run, and runs stored before collection runs wrote
-    // one) keeps the block.
+    // False when the stored summary timed nothing (`latency.count` of 0: a
+    // collection run where no step sent), for a live load run, whose
+    // percentiles cannot be read yet, and for a `partial` or missing summary
+    // (#2938), whose rows were never flushed or are a sample. The report then
+    // leaves `latency` out: its zero defaults would read as instant answers. A
+    // summary with no `count` (every load run, and older collection runs) keeps
+    // the block.
     bool latency_measured = true;
     // Script-validation tallies; `has_tests` false leaves the report's
     // testValidation section out entirely.
@@ -287,42 +255,36 @@ struct ReportExtras {
     // Empty leaves `console` out of the section.
     nlohmann::json tests_console = nlohmann::json::array ();
     size_t tests_console_dropped = 0;
-    // The run's verdict against its declared budgets. Empty is a run that
-    // declared none (or one recorded before budgets existed), which leaves
-    // thresholdValidation out entirely - a run that declared nothing did not
-    // pass zero checks, it was never judged.
+    // The verdict against the run's declared budgets. Empty for a run that
+    // declared none (or predates budgets) leaves thresholdValidation out: it
+    // was never judged, not zero checks passed.
     std::optional<StoredThresholds> thresholds;
-    // This run's `metric.record` / `pm.metrics` values (issue #1500).
-    // `has_custom_metrics` false is a run that recorded none, which leaves
-    // the report's `customMetrics` section out entirely rather than an
-    // empty object.
+    // This run's `metric.record` / `pm.metrics` values (#1500); false for none
+    // leaves `customMetrics` out rather than an empty object.
     bool has_custom_metrics       = false;
     nlohmann::json custom_metrics = nlohmann::json::object ();
-    // Whether the run's OAuth 2.0 credential was refreshed while it ran.
-    // `has_auth` false is a run that could not refresh at all (no oauth2 auth,
-    // a non-expiring or query-placed token, or an engine older than mid-run
-    // refresh), which is not the same as a run that watched and never needed to
-    // - so the section is left out rather than reported as zero refreshes.
+    // Whether the run's OAuth 2.0 credential was refreshed while it ran. False
+    // is a run that could not refresh (no oauth2, a non-expiring or
+    // query-placed token, an engine older than mid-run refresh), not one that
+    // never needed to, so the section is left out rather than reporting zero
+    // refreshes.
     bool has_auth                 = false;
     nlohmann::json auth_refreshes = nlohmann::json::array ();
     size_t auth_refresh_failures  = 0;
     std::string auth_last_error;
-    // What a capacity run's search found, already translated into the report's
-    // camelCase shape. `has_capacity` false is every other mode - a run with a
-    // fixed target measured a point, not a curve, and reporting a knee of zero
-    // would name a limit nothing observed.
+    // A capacity run's search result, in the report's camelCase shape. False
+    // for every other mode: a fixed target measured a point, not a curve, and a
+    // knee of zero would name a limit nothing observed.
     bool has_capacity       = false;
     nlohmann::json capacity = nlohmann::json::object ();
-    // What a streaming run's completions delivered, passed through verbatim -
-    // the producer already writes the report's camelCase names, so re-keying
-    // here would be a second place to keep them (issue #576). Empty is every
-    // non-streaming run, which leaves the section out rather than reporting an
-    // ordinary load run an event rate of zero.
+    // What a streaming run's completions delivered, verbatim: the producer
+    // writes the report's names, and re-keying would be a second place to keep
+    // them (#576). Empty for a non-streaming run, which leaves the section out
+    // rather than reporting an event rate of zero.
     nlohmann::json stream = nlohmann::json::object ();
-    // What the run's bounded stores thinned away. `has_sampling` false is a
-    // run recorded before retention was reported, which is not the same as a
-    // run that dropped nothing - so the section is left out rather than shown
-    // as all zeros.
+    // What the run's bounded stores thinned away. False is a run recorded
+    // before retention was reported, not one that dropped nothing, so the
+    // section is left out rather than shown as zeros.
     bool has_sampling               = false;
     size_t errors_dropped           = 0;
     size_t success_traces_dropped   = 0;
@@ -330,16 +292,13 @@ struct ReportExtras {
     size_t response_samples_dropped = 0;
     size_t exemplars_dropped        = 0;
     size_t sample_bodies_dropped    = 0;
-    // Whether the response-sample byte budget ended a sample, which is what
-    // separates a still-uniform tested set from one drawn from the part of the
-    // run whose bodies fit (issue #1192). Empty is a summary written before the
-    // marker existed: the app cannot tell that run's case either way, so the
-    // key is left out rather than reported as `false` - "not spent" is a claim,
-    // and this one would be made about a run nothing looked at.
+    // Whether the response-sample byte budget ended a sample, separating a
+    // still-uniform tested set from one drawn from where bodies fit (#1192).
+    // Empty for an older summary, which leaves the key out: "not spent" would
+    // be a claim about a run nothing looked at.
     std::optional<bool> response_sample_budget_spent;
-    // A scenario run's own tallies, read from the summary's `scenario` object.
-    // `has_scenario` false leaves the section out entirely rather than showing
-    // a load run four zeros - the section exists to say what a sequence did.
+    // A scenario run's tallies, from the summary's `scenario`. False leaves the
+    // section out rather than showing a load run four zeros.
     bool has_scenario           = false;
     size_t iterations           = 0;
     size_t iterations_completed = 0;
@@ -353,143 +312,130 @@ struct ReportExtras {
     // first, so a non-zero count here means successes are missing from
     // `results[]`, never a failure.
     size_t steps_dropped = 0;
-    // Design-mode scenario runs only, and only from a summary written since
-    // issue #2526: absent stays absent rather than reading as "nothing was
-    // lost" about a run nothing counted, or as a setting an older run never had.
+    // Design-mode scenario runs only, from a summary that records them (#2526):
+    // absent stays absent, not "nothing lost" about a run nothing counted, nor
+    // a setting an older run never had.
     std::optional<size_t> steps_not_run;
     std::optional<bool> stop_on_error;
-    // Design-mode scenario runs only, and only from a summary written since
-    // #3397: the steps a Stop cut short, the fifth outcome beside the four.
+    // Design-mode scenario runs only, from a summary that records them (#3397):
+    // the steps a Stop cut short, the fifth outcome beside the four.
     std::optional<size_t> steps_stopped;
-    // Load-mode scenario runs only. `virtual_users` is what `concurrency` meant
-    // for this run; `iterations_abandoned` is how many a step with no response
-    // (or a jump the run could not honour) ended before the plan's last step,
-    // which is what explains a breakdown that thins towards the end of the
-    // sequence.
+    // Load-mode scenario runs only. `virtual_users` is what `concurrency`
+    // meant; `iterations_abandoned` counts iterations a step with no response
+    // (or an unhonourable jump) ended before the plan's last step, which
+    // explains a breakdown thinning towards the end.
     size_t virtual_users        = 0;
     size_t iterations_abandoned = 0;
     // Per-step latency and counts, verbatim from the summary. Empty for a
     // design-mode run, which reports its steps as `results[]` rows instead.
     nlohmann::json step_breakdown = nlohmann::json::array ();
-    // Every `control.transaction` name that closed at least once this run
-    // (issue #1515), `{ name, count, errors, latency }` per entry - verbatim
-    // from the summary, which both run modes already write it into
-    // (`scenario_runner.cpp`, `scenario_load.cpp`). Empty for a run with no
-    // `control.transaction` element, or one whose folder never closed.
+    // Every `control.transaction` that closed at least once (#1515),
+    // `{ name, count, errors, latency }`, verbatim from the summary both run
+    // modes write (`scenario_runner.cpp`, `scenario_load.cpp`). Empty when no
+    // transaction element ran or its folder never closed.
     nlohmann::json transactions = nlohmann::json::array ();
     // A scenario load run's completed passes (#3570), `{count, mean, min, p50,
     // p95, p99, max}` in ms, verbatim from the summary. Empty for a design-mode
     // run, a load run with no completed pass, and one stored before #3570.
     nlohmann::json pass_duration = nlohmann::json::object ();
-    // The load run's assertion block (#3537), the report's top-level
-    // `assertions`; its `exact` is also a scenario load run's
-    // `scenario.assertions` (#2820). Empty for a run that asserted nothing and
-    // errored nowhere, a sequential collection run, and a run stored before
-    // either figure, which leaves both out rather than reading "0 failed".
+    // The load run's assertion block (#3537), the report's `assertions`; its
+    // `exact` is also a scenario load run's `scenario.assertions` (#2820).
+    // Empty for a run that asserted nothing and errored nowhere, a sequential
+    // collection run, or an older run, which leaves both out rather than
+    // reading "0 failed".
     std::optional<RunAssertions> assertions;
     // Non-zero means this run stored response headers and bodies verbatim.
     // Capture does not redact, by decision, so the Samples tab reads this to
     // warn rather than leaving the reader to infer it.
     size_t response_bodies_captured = 0;
-    // What the run's server-vitals scrape recorded, verbatim from the summary
-    // (per-series min/max/avg plus the sample and gap counts). `has_monitor`
-    // false leaves the section out entirely - a run that configured no monitor
-    // did not measure a target reporting zeros.
+    // The server-vitals scrape's record, verbatim (per-series min/max/avg,
+    // sample and gap counts). False leaves the section out: a run with no
+    // monitor did not measure a target reporting zeros.
     bool has_monitor       = false;
     nlohmann::json monitor = nlohmann::json::object ();
-    // How many of this run's transfers asked for HTTP/2 and negotiated
-    // something older. Not a performance number - it is what tells the reader
-    // whether the protocol the report is labelled with is the one the numbers
-    // were measured over (issue #215).
+    // Transfers that asked for HTTP/2 and negotiated something older: not a
+    // performance number, it tells whether the report's protocol label is the
+    // one the numbers were measured over (#215).
     double http_version_downgraded = 0.0;
     // Requests libcurl re-sent on a new connection after a reused one was
-    // dropped or refused (#2799). Empty for a summary stored before the key
-    // existed, which leaves `summary.connectionReplays` out rather than
-    // claiming an older engine looked and saw none.
+    // dropped or refused (#2799). Empty for an older summary:
+    // `summary.connectionReplays` is left out, not reported as none.
     std::optional<size_t> connection_replays;
     // Mean requests in flight over the run (#2821). Empty for a summary stored
     // before the key existed, which leaves `summary.avgInFlight` out rather
     // than reporting an older run as one that sent nothing.
     std::optional<double> avg_in_flight;
-    // Requests a user Stop cancelled (#2136): sent, never answered, and in
-    // neither `totalRequests` nor any error count. Only the stored summary
-    // knows it - the status distribution never held them - so a run stored
-    // before the key existed reads 0.
+    // Requests a user Stop cancelled (#2136): sent, never answered, in neither
+    // `totalRequests` nor an error count. Only the stored summary knows it (the
+    // status distribution never held them); an older run reads 0.
     size_t cancelled_requests = 0;
     // The part of `cancelled_requests` a Stop cut from the drain of a run
     // that ended on its own (#3538), the report's `summary.drainCut`. Empty
     // for every other run, which leaves the key out.
     std::optional<size_t> drain_cut;
-    // Per-phase latency distributions, verbatim from the summary and already in
-    // the report's shape. Empty for a run that recorded none - the toggle off,
-    // nothing successful completed, or an engine older than the phase bank -
-    // which leaves `timingBreakdown.phases` out. Each phase's `mean` is also
-    // what the averages beside it read (apply_summary_phase_means), so where
-    // it is stored the two describe the same completions.
+    // The run's failed `mcp` replies by class (#3828), already in the
+    // report's `summary.errorClasses` shape. Empty for a summary stored before
+    // the key existed, which leaves it out rather than claiming none failed.
+    std::optional<nlohmann::json> error_classes;
+    // Per-phase latency distributions, verbatim in the report's shape. Empty
+    // for a run that recorded none (the toggle off, nothing successful, an
+    // engine older than the phase bank) leaves `timingBreakdown.phases` out.
+    // Each phase's `mean` also feeds the averages beside it
+    // (`apply_summary_phase_means`), so where stored the two describe the same
+    // completions.
     nlohmann::json phases = nlohmann::json::object ();
-    // Which of the bound contract's operations the run exercised (issue #629),
-    // passed through verbatim: the producer writes the report's own camelCase,
-    // the `stream`/`monitor` rule. Empty is every run not measured against a
-    // contract - an unbound collection, a single-request run, or a document
-    // stored before the operation index existed - and leaves the section out,
-    // because a run that was never judged against a contract did not fail one.
+    // Which bound-contract operations the run exercised (#629), verbatim (the
+    // producer writes the report's camelCase, as for `stream` / `monitor`).
+    // Empty for a run measured against no contract (an unbound collection, a
+    // single-request run, a document predating the operation index) leaves the
+    // section out: a run never judged did not fail one.
     nlohmann::json coverage = nlohmann::json::object ();
-    // What checking the run's *sampled* responses against that same contract
-    // found (issue #682), passed through verbatim on the `coverage` terms.
-    // Empty is every run that validated nothing - an unbound collection, a
-    // single-request run, a document carrying no response schemas - and leaves
-    // the section out, because a run whose responses were never checked did not
-    // pass a contract. Sampled where `coverage` is exact; the block says so.
+    // What checking the sampled responses against that contract found (#682),
+    // verbatim on `coverage`'s terms. Empty for a run that validated nothing
+    // (an unbound collection, a single-request run, a document with no response
+    // schemas) leaves the section out: unchecked responses did not pass.
+    // Sampled where `coverage` is exact; the block says so.
     nlohmann::json schema_validation = nlohmann::json::object ();
     // `script.setup` / `script.teardown` outcomes (issue #1499), passed
     // through verbatim on the same terms as `coverage`. Empty for a run whose
     // collection declared neither, or a single-request run, which has no
     // collection to declare them on.
     nlohmann::json lifecycle = nlohmann::json::object ();
-    // A single-request run's own `requestElements` outcomes (issue #1594),
-    // passed through verbatim - the summary already writes them in the
-    // report's `{id, kind, passed, failed, skipped, deferred}` shape, the exact
-    // sibling of a scenario run's per-step `scenario.steps[].elements`
-    // (`step_breakdown` above). The two never coexist: `run_manager.cpp`
-    // writes this key only on the branch that has no `scenario_state`.
-    // Empty is every scenario run and every single-request run that
-    // declared no `requestElements`, or one whose elements never ran.
+    // A single-request run's `requestElements` outcomes (#1594), verbatim in
+    // the report's `{id, kind, passed, failed, skipped, deferred}` shape, the
+    // sibling of a scenario's `scenario.steps[].elements` (`step_breakdown`).
+    // Never both: `run_manager.cpp` writes this key only on the branch with no
+    // `scenario_state`. Empty for every scenario run and every single-request
+    // run that declared or ran none.
     nlohmann::json elements = nlohmann::json::array ();
-    // What the run did not do (issue #1503): a request sent with an
-    // unresolved `{{token}}`, a step whose pre-request script this mode
-    // never ran. Verbatim from the summary - the producer already writes the
-    // report's shape. Empty is every run that had nothing to report, which
-    // leaves the key out entirely rather than an empty array every run would
-    // otherwise carry.
+    // What the run did not do (#1503): a request sent with an unresolved
+    // `{{token}}`, a step whose pre-request script this mode never ran.
+    // Verbatim in the report's shape; empty leaves the key out rather than an
+    // empty array on every run.
     nlohmann::json warnings = nlohmann::json::array ();
-    // Empty for a summary stored before #2392, which keeps the old
-    // rate-fidelity formula and leaves `summary.sendingDurationSeconds` and
-    // `rateControl`'s two counts out rather than reporting them as zero.
+    // Empty for a summary predating #2392, which keeps the old rate-fidelity
+    // formula and leaves `summary.sendingDurationSeconds` and `rateControl`'s
+    // two counts out rather than zero.
     std::optional<SendingTotals> sending;
 };
 
-// Read a boolean out of a JSON object as an optional, so a key an older engine
-// never wrote stays *absent* rather than becoming `false`. A number reads as
-// nothing on purpose: the report says what the summary recorded, and a
-// malformed value is not a recording.
+// An optional boolean, so a key an older engine never wrote stays absent rather
+// than `false`. A number reads as nothing on purpose: a malformed value is not
+// a recording.
 void read_optional_bool (const nlohmann::json& obj, const char* key, std::optional<bool>& out) {
     if (obj.contains (key) && obj[key].is_boolean ()) {
         out = obj[key].get<bool> ();
     }
 }
 
-// Translate a stored `capacity` section (snake_case, like every stored section)
-// into the report's camelCase shape.
-//
-// Every field is optional on the way in: `max_healthy_*` is absent when the
-// very first level already breached, `knee_*` when the search ended for a
+// A stored `capacity` section (snake_case, like every stored section) in the
+// report's camelCase shape. Every field is optional: `max_healthy_*` is absent
+// when the first level already breached, `knee_*` when the search ended for a
 // reason other than latency or errors, `saturation_*` when it did not end on a
-// plateau, and a summary written by an older engine has none of them (nor the
-// error share, before #2815, nor a level's `samples`, before #2926: absent
-// there, never 0, because 0 says p99 measured nothing). Only a section that
-// carries at least the levels it measured is reported at all - an empty one
-// says nothing a reader can act on, the same rule the thresholds section
-// follows.
+// plateau, and an older summary has none of them (nor the error share, #2815,
+// nor a level's `samples`, #2926: absent there, never 0, as 0 says p99 measured
+// nothing). Only a section carrying the levels it measured is reported, the
+// thresholds rule: an empty one says nothing actionable.
 void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) {
     auto headline = read_capacity_headline (stored);
     if (!headline) {
@@ -627,7 +573,7 @@ ReportExtras& extras) {
     summary["connection_replays"].is_number ()) {
         extras.connection_replays = summary["connection_replays"].get<size_t> ();
     }
-    // Written together since #2392, so one key stands for the three.
+    // Written together (#2392), so one key stands for the three.
     if (summary.contains ("sending_duration") && summary["sending_duration"].is_number ()) {
         SendingTotals sending;
         read_number (summary, "sending_duration", sending.sending_duration_s);
@@ -718,6 +664,44 @@ void apply_summary_error_types (const nlohmann::json& summary, vayu::DetailedRep
     }
 }
 
+/// The positive counts of @p from, by key; anything else in it is skipped.
+nlohmann::json positive_counts (const nlohmann::json& from) {
+    nlohmann::json counts = nlohmann::json::object ();
+    for (const auto& [key, count] : from.items ()) {
+        if (count.is_number_unsigned () && count.get<size_t> () > 0) {
+            counts[key] = count;
+        }
+    }
+    return counts;
+}
+
+/**
+ * The run's failed `mcp` replies by class (#3828), as `McpErrorCounts::to_json`
+ * stored them: the three classes and `protocolCodes`, each kept only as a
+ * positive count. Key-absent is a run stored before the counts existed, which
+ * leaves `summary.errorClasses` out.
+ */
+void apply_summary_error_classes (const nlohmann::json& summary, ReportExtras& extras) {
+    const auto stored = summary.find ("error_classes");
+    if (stored == summary.end () || !stored->is_object ()) {
+        return;
+    }
+    nlohmann::json classes = nlohmann::json::object ();
+    for (const std::string_view name : core::MCP_ERROR_CLASS_NAMES) {
+        if (const auto count = stored->find (name); count != stored->end () &&
+        count->is_number_unsigned () && count->get<size_t> () > 0) {
+            classes[std::string (name)] = *count;
+        }
+    }
+    if (const auto codes = stored->find ("protocolCodes");
+    codes != stored->end () && codes->is_object ()) {
+        if (auto counted = positive_counts (*codes); !counted.empty ()) {
+            classes["protocolCodes"] = std::move (counted);
+        }
+    }
+    extras.error_classes = std::move (classes);
+}
+
 /**
  * The status-code map, which replaces the sampled one wholesale when stored.
  * An empty map keeps the sampled one, except on a sequential collection run:
@@ -778,8 +762,8 @@ void apply_summary_scenario (const nlohmann::json& summary, ReportExtras& extras
         }
         read_optional_bool (scenario, "stop_on_error", extras.stop_on_error);
         // Load-mode only: the design-mode runner writes neither, and a load run
-        // stores no per-step `results` rows at all - the breakdown *is* how a
-        // scenario load run says what each step did.
+        // stores no per-step `results` rows, so the breakdown is its only
+        // per-step record.
         read_number (scenario, "virtual_users", extras.virtual_users);
         read_number (scenario, "iterations_abandoned", extras.iterations_abandoned);
         if (scenario.contains ("steps") && scenario["steps"].is_array ()) {
@@ -832,16 +816,13 @@ void apply_summary_observations (const nlohmann::json& summary, ReportExtras& ex
 }
 
 /**
- * The sections stored in the report's own wire shape and passed through rather
- * than re-keyed: the producer writes the report's names, so a translation table
- * here would be a second place to keep them. An empty section is treated as
- * absent - it names nothing a reader can act on.
+ * The sections stored in the report's wire shape and passed through, not
+ * re-keyed: the producer writes the report's names, so a translation table
+ * would be a second place to keep them. An empty section is absent: it names
+ * nothing a reader can act on.
  */
 void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras) {
-    // Per-phase distributions, passed through rather than re-keyed: the
-    // producer writes the report's own wire names (TIMING_PHASE_KEYS), so a
-    // translation table here would be a second place to keep them. An empty
-    // object is treated as absent - it names no phase a reader can act on.
+    // Per-phase distributions (`TIMING_PHASE_KEYS`).
     if (summary.contains ("phases") && summary["phases"].is_object () &&
     !summary["phases"].empty ()) {
         extras.phases = summary["phases"];
@@ -853,9 +834,8 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
         extras.stream = summary["stream"];
     }
 
-    // Same again for contract coverage (issue #629). An object with no
-    // `operations` array says nothing a reader can act on and is treated as
-    // absent, the rule `thresholds` follows for its `checks`.
+    // Contract coverage (#629): an object with no `operations` array is absent,
+    // as `thresholds` treats one with no `checks`.
     if (summary.contains ("coverage") && summary["coverage"].is_object () &&
     summary["coverage"].contains ("operations") &&
     summary["coverage"]["operations"].is_array () &&
@@ -863,27 +843,25 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
         extras.coverage = summary["coverage"];
     }
 
-    // Same again for sampled schema validation (issue #682). A block with no
-    // `sampled` count says nothing a reader can act on - and cannot be labelled
-    // honestly as a sample - so it is treated as absent.
-    // Same pass-through again for `script.setup` / `script.teardown` (issue
-    // #1499): the producer already writes `{setup?, teardown?}`, each present
-    // only when that phase ran at least one element, so an empty object here
-    // is every run whose collection declared neither.
+    // `script.setup` / `script.teardown` (#1499): the producer writes
+    // `{setup?, teardown?}`, each only when that phase ran an element, so an
+    // empty object is a run whose collection declared neither.
     if (summary.contains ("lifecycle") && summary["lifecycle"].is_object () &&
     !summary["lifecycle"].empty ()) {
         extras.lifecycle = summary["lifecycle"];
     }
 
-    // Same pass-through again for a single-request run's own step-level
-    // elements (issue #1594/#1641): the array is the section, an absent or
-    // empty one is a run that declared none or a scenario run, which reports
-    // its own per-step elements under `scenario.steps[].elements` instead.
+    // A single-request run's step-level elements (#1594, #1641): the array is
+    // the section; absent or empty is a run that declared none, or a scenario
+    // run, which reports them under `scenario.steps[].elements`.
     if (summary.contains ("elements") && summary["elements"].is_array () &&
     !summary["elements"].empty ()) {
         extras.elements = summary["elements"];
     }
 
+    // Sampled schema validation (#682): a block with no `sampled` count says
+    // nothing actionable and cannot honestly be labelled a sample, so it is
+    // absent.
     if (summary.contains ("schemaValidation") && summary["schemaValidation"].is_object () &&
     summary["schemaValidation"].contains ("sampled") &&
     summary["schemaValidation"]["sampled"].is_number () &&
@@ -891,9 +869,8 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
         extras.schema_validation = summary["schemaValidation"];
     }
 
-    // Same pass-through again (issue #1503): the array is the section, so an
-    // empty or absent one is a run that had nothing to report rather than
-    // one shown with a warning nobody wrote.
+    // #1503: absent or empty is a run with nothing to report, not one shown a
+    // warning nobody wrote.
     if (summary.contains ("warnings") && summary["warnings"].is_array () &&
     !summary["warnings"].empty ()) {
         extras.warnings = summary["warnings"];
@@ -901,10 +878,9 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
 
     extras.thresholds = read_threshold_outcome (summary);
 
-    // Pass-through, same shape both run modes wrote it in
-    // (`build_custom_metrics_payload`, issue #1500). An empty object is a
-    // run that recorded no custom metric, treated as absent the same way
-    // `coverage` is.
+    // In the shape both run modes write (`build_custom_metrics_payload`,
+    // #1500); an empty object is a run with no custom metric, absent as for
+    // `coverage`.
     if (summary.contains ("customMetrics") &&
     summary["customMetrics"].is_object () && !summary["customMetrics"].empty ()) {
         extras.has_custom_metrics = true;
@@ -913,14 +889,12 @@ void apply_summary_sections (const nlohmann::json& summary, ReportExtras& extras
 }
 
 /**
- * Apply the run's stored `summary` (the whole-run results, written once at
- * terminal status) over the report calculated from the sampled `results`.
- *
- * An absent or unreadable summary leaves the report exactly as the sampled
- * results computed it - there is no second source to fall back to. Keys here
- * are the ones `vayu::core::build_run_summary_payload` writes;
- * runs_route_test.cpp round-trips the pair so the two sides cannot drift apart
- * silently.
+ * Applies the run's stored `summary` (the whole-run results, written once at
+ * terminal status) over the report computed from the sampled `results`. An
+ * absent or unreadable summary leaves the sampled report as it is: there is no
+ * second source. Keys are `vayu::core::build_run_summary_payload`'s, and
+ * `runs_route_report_summary_test.cpp` round-trips the pair so they cannot
+ * drift.
  */
 void apply_run_summary (const std::string& summary_json,
 vayu::DetailedReport& report,
@@ -951,6 +925,7 @@ ReportExtras& extras) {
     apply_summary_slow_requests (summary, report);
     apply_summary_phase_means (summary, report);
     apply_summary_error_types (summary, report);
+    apply_summary_error_classes (summary, extras);
     apply_summary_status_codes (summary, report, extras);
     apply_summary_sampling (summary, extras);
     apply_summary_scenario (summary, extras);
@@ -958,13 +933,11 @@ ReportExtras& extras) {
     apply_summary_sections (summary, extras);
 }
 
-// Serialize one run into a list row: identity + status + the compact summary,
-// deliberately *without* the full config_snapshot (that is what makes the list
-// cheap). Mirrors the camelCase keys vayu::json::serialize(Run) emits.
-//
-// The summary is passed in rather than built here, so each caller decides where
-// it comes from: the polled list takes it from the run-summary cache, and the
-// one-row baseline response - which no client polls - builds it directly.
+// One run as a list row: identity, status and the compact summary, never the
+// full config_snapshot (that keeps the list cheap), in the camelCase keys
+// `vayu::json::serialize (Run)` emits. The caller supplies the summary: the
+// polled list from the run-summary cache, the unpolled one-row baseline
+// response built directly.
 nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summary) {
     nlohmann::json row;
     row["id"]        = run.id;
@@ -1032,41 +1005,31 @@ const std::optional<std::string>& before) {
 } // namespace
 
 /**
- * Testable core of the paginated GET /runs list, returning {http_status,
- * json_body}. A list of zero rows is a valid list, not a 404; the one refusal
- * is a `before` that is malformed (`invalid_before`) or sent beside a non-zero
- * offset (`before_with_offset`), both 400.
+ * Testable core of the paginated GET /runs list, {http_status, json_body}. No
+ * rows is a valid list, not a 404; the one refusal is a `before` that is
+ * malformed (`invalid_before`) or beside a non-zero offset
+ * (`before_with_offset`), both 400.
  *
- * `limit`/`offset` arrive already parsed and clamped by the caller (limit
- * default 50, capped at 500; offset floored at 0); `filter` holds the already
- * validated type/status/requestId/q constraints. `before` is the raw query
- * value, a keyset cursor (#2978): the page starts after the row it names, and
- * `pagination.nextBefore` names this page's last row whenever `hasMore`.
- * Rows carry the compact
- * `summary` (see build_run_summary for its keys) instead of the full
- * `config_snapshot`, wrapped in the
- * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86). A
- * design run's row also carries `resultSummary` (statusCode + latencyMs), a
- * terminal load run's carries its own (rps, p95Ms, errorRate, verdict, the
- * assertion counts or a single-request run's failed count, capacity, each only
- * when recorded; #2130, #3458) and a terminal
- * collection run's carries its step counts and verdict (#2954) - what a reader
- * would otherwise fetch a report per row to learn. A row whose run finished
- * with warnings carries `summary.hasWarnings: true` (#1527), read fresh off
- * this page's own `Run` rows rather than through `summaries` - see the comment
- * at its call site below for why.
+ * `limit` / `offset` arrive parsed and clamped (limit default 50, capped at
+ * 500; offset floored at 0), `filter` validated. `before` is the raw keyset
+ * cursor (#2978): the page starts after the row it names, and
+ * `pagination.nextBefore` names this page's last row whenever `hasMore`. Rows
+ * carry the compact `summary` (`build_run_summary`) instead of
+ * `config_snapshot`, in GET /runs/:id/metrics' `{data, pagination}` envelope
+ * (#86). A design run's row also carries `resultSummary` (statusCode,
+ * latencyMs), a terminal load run's its own (rps, p95Ms, errorRate, verdict,
+ * the assertion counts or a single-request run's failed count, capacity, each
+ * when recorded; #2130, #3458), a terminal collection run's its step counts and
+ * verdict (#2954): what a reader would otherwise fetch a report per row for. A
+ * run that finished with warnings carries `summary.hasWarnings: true` (#1527),
+ * read off this page's `Run` rows, not through `summaries` (see the call site).
  *
- * `summaries` spares the poll the work it would otherwise repeat: this is the
- * endpoint a visible history surface re-asks every 5s, and each call used to
- * re-parse every row's immutable `config_snapshot` to rebuild the summary the
- * previous call had already built (#1150), and a terminal load run's stored
- * summary is just as fixed. It is a parameter rather than a detail of this
- * function so a caller - a test included - owns the cache's lifetime and two
- * of them never share one.
- *
- * Extracted so the envelope shape, clamping and filtering are covered without
- * an in-process HTTP server - see runs_route_test.cpp. Exceptions propagate to
- * the route's try/catch (500).
+ * `summaries` spares the 5s history poll from re-parsing every row's immutable
+ * `config_snapshot` to rebuild what the last call built (#1150); a terminal
+ * load run's stored summary is as fixed. It is a parameter so the caller (a
+ * test included) owns the cache's lifetime and two never share one. Exceptions
+ * propagate to the route's try/catch (500); `runs_route_test.cpp` covers the
+ * envelope, clamping and filtering.
  */
 std::pair<int, nlohmann::json> get_runs_response (vayu::db::Database& db,
 const vayu::db::RunFilter& filter,
@@ -1085,11 +1048,10 @@ const std::optional<std::string>& before) {
     }
     const int64_t total = db.count_runs (filter);
 
-    // A design run is one exchange, so its outcome fits on its row and the page
-    // pays one extra query for all of them (get_design_result_outcomes). A load
-    // run's results are many and unbounded, so they are never read here; a load
-    // or collection row's `resultSummary` comes from the whole-run summary
-    // already on the `Run` row instead.
+    // A design run is one exchange, so its outcome fits on its row for one
+    // extra query per page (`get_design_result_outcomes`). A load run's results
+    // are unbounded and never read here; a load or collection row's
+    // `resultSummary` comes from the whole-run summary on the `Run` row.
     std::vector<std::string> design_run_ids;
     for (const auto& run : runs) {
         if (run.type == vayu::RunType::Design) {
@@ -1103,13 +1065,12 @@ const std::optional<std::string>& before) {
         auto row = serialize_run_row (run, summaries.summary_for (run.id, [&run] {
             return build_run_summary (run.config_snapshot);
         }));
-        // `hasWarnings` (issue #1527) is read straight off the `Run` row this
-        // page already fetched, never through `summaries` - `has_warnings` is
-        // a completion-time fact (`Database::update_run_summary` stamps it),
-        // and the summary table keys on the immutable `config_snapshot`
-        // alone. Merged into this call's own copy of the cached summary, never
-        // back into the cache entry, so a row polled while still running is
-        // never stuck reporting no warnings once the run finishes.
+        // `has_warnings` is a completion-time fact
+        // (`Database::update_run_summary` stamps it) and the summary cache keys
+        // on the immutable `config_snapshot`, so it is read off this page's
+        // `Run` row and merged into this call's copy, never the cache entry: a
+        // row polled while running is not stuck without warnings once it
+        // finishes (#1527).
         if (run.has_warnings) {
             row["summary"]["hasWarnings"] = true;
         }
@@ -1207,20 +1168,16 @@ const std::optional<std::string>& source) {
 } // namespace
 
 /**
- * Testable core of GET /runs/:id/samples, returning {http_status, json_body}.
- * A missing run is a 404 in the shared error shape; a run that captured
- * nothing is an empty page, not an error.
+ * Testable core of GET /runs/:id/samples, {http_status, json_body}. A missing
+ * run is a 404 in the shared error shape; a run that captured nothing is an
+ * empty page.
  *
- * Deliberately **not** an extension of the report's `results[]` array. That
- * path loads every result row for a run and JSON-parses each `trace_data` to
- * accumulate aggregates that never look at a body, and the dashboard polls it;
- * bodies travelling on it would turn a ~200-byte-per-row read into a megabytes
- * one on every poll. So the exchanges live in their own tables and are fetched
- * here, per page, only when a reader actually expands a sample.
- *
- * `limit`/`offset` arrive already parsed and clamped by the caller. The
- * envelope is the `{data, pagination}` shape GET /runs and GET /runs/:id/metrics
- * already use.
+ * Not an extension of the report's `results[]`: that path parses every row's
+ * `trace_data` for aggregates that never read a body, and the dashboard polls
+ * it, so bodies there would turn a ~200-byte row read into megabytes per poll.
+ * The exchanges live in their own tables, fetched per page only when a reader
+ * expands a sample. `limit` / `offset` arrive parsed and clamped; the envelope
+ * is GET /runs' `{data, pagination}`.
  */
 std::pair<int, nlohmann::json> run_samples_response (vayu::db::Database& db,
 const std::string& run_id,
@@ -1234,9 +1191,9 @@ int64_t offset) {
     const int64_t total = db.count_result_bodies (run_id);
     auto rows = db.get_result_bodies_paginated (run_id, limit, offset);
 
-    // Read once for the page, not once per streamed row: the caps are what the
-    // reader's own settings say now, and a page whose rows were bounded by two
-    // different rules would be a page nobody could describe.
+    // Once per page, not per streamed row: the caps are the reader's settings
+    // now, and rows bounded by two rules would make a page nobody could
+    // describe.
     const vayu::http::SseLimits sse_limits = vayu::http::read_sse_limits (db);
 
     SampleBodyCache body_cache;
@@ -1273,12 +1230,11 @@ int64_t offset) {
                 // a reader has one rule for "this is a slice".
                 response["bodyTruncated"] = true;
             }
-            // A streamed sample's events, parsed back from the body it stored
-            // (issue #657). Absent unless the row recorded a wire event count,
-            // so a non-stream sample - and every row written before the column
-            // existed - carries no `events` node at all rather than an empty
-            // one. Derived here rather than stored a second time: the body is
-            // the event list, and two copies of one fact drift.
+            // A streamed sample's events, parsed back from its stored body
+            // (#657). Absent unless the row recorded a wire event count, so a
+            // non-stream or older row carries no `events` node, not an empty
+            // one. Derived, not stored twice: the body is the event list, and
+            // two copies of one fact drift.
             if (row.stream_events) {
                 const auto text_path =
                 stream_text_path_of (text_paths, row.stream_text_path);
@@ -1308,11 +1264,10 @@ int64_t offset) {
     return { 200, body };
 }
 
-// A capacity run's own two knobs (issue #2925), as the run was started with
-// them: `stepDuration` the string (or number) the parser read, `sloMs` the
-// budget. Gated on the mode rather than on presence, so a run of another mode
-// never reports a knob it ignores. Absent when a capacity run left one at its
-// default - the effective SLO is the report's `capacity.sloMs`.
+// A capacity run's two knobs as started (#2925): `stepDuration` as the parser
+// read it (string or number), `sloMs` the budget. Gated on the mode, not
+// presence, so another mode never reports a knob it ignores; absent when left
+// at its default (the effective SLO is the report's `capacity.sloMs`).
 void add_capacity_config (nlohmann::json& dst, const nlohmann::json& src) {
     const auto mode = src.find ("mode");
     if (mode == src.end () || *mode != "capacity") {
@@ -1323,31 +1278,24 @@ void add_capacity_config (nlohmann::json& dst, const nlohmann::json& src) {
 }
 
 /**
- * The GET /runs/:runId/report `configuration` object: the load-test tuning
- * knobs, httpVersion/followRedirects/maxRedirects and what a data-driven run
- * bound and the budgets it carried (fifteen keys total), a capacity run's
- * `stepDuration` and `sloMs` (issue #2925) and, when the
- * snapshot carries them, `acceptEncoding` (issue #1488) and `expectContinue`
- * (issue #2516), built from an already-parsed config_snapshot. `rps`/
- * `targetRps` is the one rename (add_target_rps), so the caller applies it
- * rather than this key list. `expectContinue` is not in the list-row summary
- * (build_run_summary): only the report's comparison reads it.
- *
- * Extracted (like get_runs_response above) so this is covered directly - see
- * runs_route_test.cpp - without the full report handler's DB/metrics reads.
+ * The GET /runs/:runId/report `configuration` object, from a parsed
+ * config_snapshot: the load-test knobs, httpVersion / followRedirects /
+ * maxRedirects, what a data-driven run bound and the budgets it carried, a
+ * capacity run's `stepDuration` and `sloMs` (#2925) and, when stored,
+ * `acceptEncoding` (#1488) and `expectContinue` (#2516). `rps` / `targetRps` is
+ * the one rename (`add_target_rps`), applied by the caller. `expectContinue` is
+ * not in the list row (`build_run_summary`): only the report's comparison reads
+ * it. Covered directly by `runs_route_report_test.cpp`.
  */
 nlohmann::json build_run_report_config (const nlohmann::json& config) {
     nlohmann::json config_obj = nlohmann::json::object ();
     for (const char* key : { "mode", "duration", "concurrency", "iterations", "startConcurrency",
          "rampUpDuration", "timeout", "comment", "followRedirects", "maxRedirects",
-         // The size of the data set a run bound (issue #993). The snapshot
-         // carries the count in the rows' place - they are never persisted -
-         // and this is what carries it to the reader: the dashboard's run
-         // metadata prints it, so "this run was data-driven, over N rows" is
-         // recoverable from the report rather than only from the payload the
-         // caller no longer has. The file's name and content hash beside it
-         // (issue #2051), never its path, and whether its numbers were read
-         // as numbers (issue #2540), which the hash cannot tell apart.
+         // The bound data set's size (#993): the snapshot keeps the count in
+         // place of the never-persisted rows, and the dashboard's run metadata
+         // prints it, so "data-driven, over N rows" survives the payload. The
+         // file's name and content hash (#2051), never its path, and whether
+         // numbers were cast (#2540), which the hash cannot tell.
          "dataRowCount", "dataFileName", "dataFileHash", "dataFileCastNumbers",
          // The metric keys whose budgets were carried over from an earlier
          // run rather than set for this one (issue #2195): the thresholds
@@ -1363,20 +1311,14 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
 }
 
 /**
- * Testable core of PUT /runs/:id/baseline, returning {http_status, json_body}.
- *
- * PUT rather than POST because this updates an existing run (the repo's
- * create-vs-update rule, issue #95), and a whole endpoint rather than a field
- * on a general run update because a run has no general update: everything else
- * on the row is written by the engine as the run executes.
- *
- * `baseline` is required and must be a real boolean. The merge-patch helper
- * `apply_bool_field` ignores a non-boolean instead, which is right for an
- * optional field among many and wrong here - this body has exactly one field,
- * so ignoring it would answer 200 to a request that changed nothing.
- *
- * 200 carries the updated row in the same shape `GET /runs` lists, so a client
- * can patch its cached row from the response instead of re-listing.
+ * Testable core of PUT /runs/:id/baseline, {http_status, json_body}. PUT
+ * because it updates an existing run (#95), and its own endpoint because a run
+ * has no general update: the engine writes the rest of the row as it runs.
+ * `baseline` is required and must be a boolean; `apply_bool_field` ignores a
+ * non-boolean, right among many optional fields and wrong here, where ignoring
+ * the one field would answer 200 to a request that changed nothing. 200 carries
+ * the row in `GET /runs`' shape, so a client patches its cache rather than
+ * re-listing.
  */
 std::pair<int, nlohmann::json> set_run_baseline_response (vayu::db::Database& db,
 const std::string& run_id,
@@ -1407,23 +1349,16 @@ const std::string& body) {
 }
 
 /**
- * Testable core of DELETE /runs/:id, returning {http_status, json_body}.
+ * Testable core of DELETE /runs/:id, {http_status, json_body}. An active run is
+ * stopped first, or its detached worker would keep writing against the id
+ * (orphaned rows, a run partly "un-deleting" itself as it finishes): signalled
+ * as POST /runs/:id/stop does, then awaited until the worker hands the run to
+ * the retained map, which it does after its last database write.
  *
- * Deleting a run that is still executing used to remove its rows while its
- * detached worker kept writing new metrics and results against the same id -
- * permanently orphaned rows, and a run that partially "un-deleted" itself as it
- * finished. So an active run is stopped first: the stop is signalled the same
- * way POST /runs/:id/stop signals it, and the delete waits for the worker to
- * hand the run over to the retained map, which it only does after its last
- * database write.
- *
- * If the worker has not settled within `stop_wait_ms` the run is *not* deleted
- * and the caller gets a 409 - a partial delete racing a live writer is the one
- * outcome worth refusing outright. The stop still stands, so a retry a moment
- * later succeeds.
- *
- * A run whose stored status is `running` but which has no context (the daemon
- * restarted under it) has no writer to race and is deleted directly.
+ * A worker unsettled after `stop_wait_ms` gets a 409 and the run stays: a
+ * partial delete racing a live writer is the outcome worth refusing. The stop
+ * stands, so a retry moments later succeeds. A `running` row with no context
+ * (the daemon restarted under it) has no writer and is deleted directly.
  */
 std::pair<int, nlohmann::json> delete_run_response (vayu::db::Database& db,
 vayu::core::RunManager& run_manager,
@@ -1624,9 +1559,8 @@ double reconcile_report_rates (const std::string& config_snapshot,
 double duration_s,
 const ReportExtras& extras,
 vayu::DetailedReport& report) {
-    // Recount the success/failure split from whichever distribution won, so
-    // transport errors (status code 0) are counted. Runs with no stored
-    // distribution keep the figures derived from the sampled results.
+    // Recounted from the winning distribution, so transport errors (status 0)
+    // count; runs with no stored distribution keep the sampled figures.
     if (extras.status_codes_overridden) {
         const auto tally = vayu::count_status_failures (report.status_codes);
         report.successful_requests = tally.total - tally.failed;
@@ -1639,9 +1573,8 @@ vayu::DetailedReport& report) {
         }
     }
 
-    // Recompute the error rate from the reconciled successful/failed split:
-    // the one calculate_detailed_report derived describes the sampled results,
-    // whose successes are thinned and whose errors are capped.
+    // From the reconciled split: `calculate_detailed_report`'s rate describes
+    // the sampled results, whose successes are thinned and errors capped.
     report.error_rate = report.total_requests > 0 ?
     static_cast<double> (report.failed_requests) * 100.0 /
     static_cast<double> (report.total_requests) :
@@ -1679,7 +1612,6 @@ vayu::DetailedReport& report) {
 
 /** What the report says the run *was* - identity, status, and what was asked for. */
 nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db::Run& run) {
-    // Build response
     nlohmann::json metadata;
     metadata["runId"]     = run_id;
     metadata["runType"]   = vayu::to_string (run.type);
@@ -1689,7 +1621,6 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
 
     try {
         auto config = nlohmann::json::parse (run.config_snapshot);
-        // HTTP request fields are at root level (unified structure)
         if (config.contains ("url")) {
             metadata["requestUrl"] = config["url"];
         }
@@ -1704,8 +1635,7 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
             metadata["bodyFile"] = *file;
         }
 
-        // Built by build_run_report_config above; `rps` is the one rename
-        // (-> targetRps), shared with the list-row summary.
+        // `rps` -> `targetRps` is the one rename, shared with the list row.
         nlohmann::json config_obj = build_run_report_config (config);
         add_target_rps (config_obj, config);
 
@@ -1713,19 +1643,16 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
             metadata["configuration"] = config_obj;
         }
 
-        // Which collection ran, the snapshot's own identity (#3569): the
-        // top-level `scenario` breakdown exists only once a summary was
-        // stored, which a run the engine did not finish never gets. The same
-        // object the list row carries, so the two cannot name a run
-        // differently.
+        // Which collection ran, from the snapshot itself (#3569): the top-level
+        // `scenario` breakdown needs a stored summary, which a run the engine
+        // did not finish never gets. The list row's object, so the two name a
+        // run alike.
         add_scenario (metadata, config);
 
-        // The spec this run was planned against (issue #637), echoed from the
-        // snapshot the scenario manifest stamped it into. Echoed rather than
-        // re-read from the collection: the binding is free to have moved since,
-        // and a report has to say what the run was measured against, not what
-        // the collection points at today. Absent for an unbound run, which is
-        // how the manifest stores it - #629's coverage block reads this.
+        // The spec the run was planned against (#637), echoed from the
+        // manifest's stamp rather than re-read from the collection, whose
+        // binding may have moved: a report says what the run was measured
+        // against. Absent for an unbound run; #629's coverage block reads it.
         if (auto scenario = config.find ("scenario");
         scenario != config.end () && scenario->is_object ()) {
             if (auto openapi = scenario->find ("openapi");
@@ -1771,8 +1698,8 @@ nlohmann::json build_scenario_report_section (const ReportExtras& extras) {
     if (extras.steps_stopped) {
         section["stopped"] = *extras.steps_stopped;
     }
-    // Added only when the run actually has them, so a design-mode run's
-    // section keeps the exact shape the app already renders.
+    // Only when present, so a design-mode run's section keeps the shape the app
+    // renders.
     if (extras.virtual_users > 0) {
         section["virtualUsers"]        = extras.virtual_users;
         section["iterationsAbandoned"] = extras.iterations_abandoned;
@@ -1783,11 +1710,9 @@ nlohmann::json build_scenario_report_section (const ReportExtras& extras) {
     if (!extras.step_breakdown.empty ()) {
         section["steps"] = extras.step_breakdown;
     }
-    // A sibling of `steps` rather than a member of it - a
-    // `control.transaction` spans a folder, not one step (issue #1515).
-    // Omitted, never `[]`, for a run with no transaction that closed - the
-    // same "absent, not zeros" rule `coverage` and `customMetrics` already
-    // follow.
+    // Beside `steps`, not in them: a `control.transaction` spans a folder
+    // (#1515). Omitted, never `[]`, when none closed, the absent-not-zeros rule
+    // of `coverage` and `customMetrics`.
     if (!extras.transactions.empty ()) {
         section["transactions"] = extras.transactions;
     }
@@ -1808,11 +1733,10 @@ nlohmann::json build_scenario_report_section (const ReportExtras& extras) {
  * credential that was renewed under it.
  */
 void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& json_report) {
-    // What the run did not do (issue #1503) - above the sections it judges,
-    // for the same reason `RunEvents` sits above the status/error totals in
-    // the app's Overview: a green run and one that sent every request with
-    // an unresolved `{{token}}` must not read the same. Absent for a run
-    // with nothing to report.
+    // What the run did not do (#1503), above the sections it judges, as
+    // `RunEvents` sits above the totals in the app's Overview: a green run and
+    // one that sent every request with an unresolved `{{token}}` must not read
+    // the same. Absent when there is nothing to report.
     if (!extras.warnings.empty ()) {
         json_report["warnings"] = extras.warnings;
     }
@@ -1821,9 +1745,8 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
         json_report["scenario"] = build_scenario_report_section (extras);
     }
 
-    // Server vitals beside the run's own numbers. Passed through as stored:
-    // the totals are written in the report's own shape, so there is one
-    // description of the section rather than a writer and a translator.
+    // Server vitals, as stored: written in the report's shape, so the section
+    // has one description, not a writer and a translator.
     if (extras.has_monitor) {
         json_report["monitor"] = extras.monitor;
     }
@@ -1845,29 +1768,25 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
         }
     }
 
-    // What the capacity search found. Present only for a capacity run, so every
-    // other report renders exactly as it did before the mode existed.
+    // The capacity search's result; only a capacity run has it.
     if (extras.has_capacity) {
         json_report["capacity"] = extras.capacity;
     }
 
-    // Which operations of the bound contract this run exercised, and which of
-    // their declared responses it saw (issue #629). Computed against the
-    // document `metadata.openapi` names - the one the run was *planned* with -
-    // and stored at run end, so a binding that has since synced to a newer spec
-    // cannot rewrite what an old report says was covered. Absent for every run
-    // that was not measured against a contract; see ReportExtras::coverage.
+    // Which bound-contract operations ran and which declared responses came
+    // back (#629), computed against the document `metadata.openapi` names (the
+    // one the run was planned with) and stored at run end, so a later sync
+    // cannot rewrite an old report. Absent for a run measured against no
+    // contract.
     if (!extras.coverage.empty ()) {
         json_report["coverage"] = extras.coverage;
     }
 
-    // Whether the responses this run kept matched the schemas that same
-    // document declares (issue #682). Beside `coverage` because they answer
-    // halves of one question - which of the contract was exercised, and whether
-    // what came back honoured it - but on different evidence: coverage counts
-    // every send, this checks the bounded reservoir the run stored. The
-    // `sampled` count rides along so a reader cannot mistake one for the other.
-    // Absent for every run that checked nothing; see ReportExtras.
+    // Whether the kept responses matched that document's schemas (#682). Beside
+    // `coverage` as the other half of one question (what of the contract ran,
+    // and whether the answers honoured it), on other evidence: coverage counts
+    // every send, this checks the stored reservoir, and its `sampled` count
+    // keeps the two apart. Absent for a run that checked nothing.
     if (!extras.schema_validation.empty ()) {
         json_report["schemaValidation"] = extras.schema_validation;
     }
@@ -1878,10 +1797,9 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
         json_report["lifecycle"] = extras.lifecycle;
     }
 
-    // A single-request run's own step-level element outcomes (issue
-    // #1594/#1641). Absent for a scenario run (its per-step elements live
-    // under `scenario.steps[].elements` instead) and for a single-request
-    // run that declared no `requestElements`; see ReportExtras::elements.
+    // A single-request run's step-level element outcomes (#1594, #1641); absent
+    // for a scenario run (`scenario.steps[].elements`) and a run that declared
+    // no `requestElements`.
     if (!extras.elements.empty ()) {
         json_report["elements"] = extras.elements;
     }
@@ -1966,11 +1884,10 @@ double target_rps) {
         { "errorRate", report.error_rate },
         { "totalDurationSeconds", report.total_duration_s },
         { "avgRps", report.avg_rps }, { "testDuration", report.total_duration_s },
-        // Sits in `summary` rather than `metadata.configuration` on purpose:
-        // configuration is what was asked for, and this is what happened.
-        // LoadTestDetail reads both and only trusts the requested-protocol
-        // label when this is 0, which the app documents as "none recorded"
-        // and so is kept for a sequential run too.
+        // In `summary`, not `metadata.configuration`: configuration is what was
+        // asked, this what happened. LoadTestDetail trusts the
+        // requested-protocol label only when this is 0, the app's "none
+        // recorded", so a sequential run keeps it too.
         { "httpVersionDowngraded", static_cast<size_t> (extras.http_version_downgraded) } };
     if (!extras.sequential_run) {
         add_load_summary_fields (report, extras, json_report["summary"]);
@@ -1989,6 +1906,9 @@ double target_rps) {
     }
     if (const auto& drain_cut = extras.drain_cut) {
         json_report["summary"]["drainCut"] = drain_cut_json (*drain_cut);
+    }
+    if (const auto& error_classes = extras.error_classes) {
+        json_report["summary"]["errorClasses"] = *error_classes;
     }
     if (extras.summary_partial) {
         json_report["summary"]["partial"] = true;
@@ -2024,13 +1944,11 @@ double target_rps) {
     }
     json_report["errors"] = errors_obj;
 
-    // Two halves under one key. Where the summary stored phase means, both
-    // describe every successful completion (#2782); otherwise - the bank off,
-    // or a run stored before the means - the averages fall back to the
-    // retained trace sample and are absent for a run that stored no traces,
-    // while `phases` is absent for a run recorded before the bank existed.
-    // Clients read each half by its own key rather than treating the object's
-    // presence as proof of either.
+    // Two halves under one key. With stored phase means, both describe every
+    // successful completion (#2782); otherwise (the bank off, an older run) the
+    // averages fall back to the trace sample and are absent with no traces, and
+    // `phases` is absent for a run predating the bank. Clients read each half
+    // by its key, never by the object's presence.
     nlohmann::json timing_breakdown = nlohmann::json::object ();
     if (report.has_timing_data) {
         timing_breakdown["avgDnsMs"]       = report.avg_dns_ms;
@@ -2053,9 +1971,9 @@ double target_rps) {
         json_report["stream"] = extras.stream;
     }
 
-    // `count` is exact for a run stored since #2399 and `tracesStored` is the
-    // sample of it the run kept. `percentage` divides by every completion,
-    // failed ones included, though only a success can be slow.
+    // `count` is exact for a run stored after #2399 and `tracesStored` is the
+    // sample the run kept. `percentage` divides by every completion, failed
+    // ones included, though only a success can be slow.
     if (report.slow_threshold_ms > 0) {
         json_report["slowRequests"] = { { "count", report.slow_requests_count },
             { "thresholdMs", report.slow_threshold_ms },
@@ -2067,14 +1985,13 @@ double target_rps) {
             0.0 } };
     }
 
-    // How much each bounded store thinned away. All zeros means the sampled
-    // sets below are complete; non-zero means they are a uniform sample of the
-    // run (reservoir retention), not its opening - except where
-    // `responseSampleBudgetSpent` says the byte budget stopped admitting, which
-    // is the one bound that leaves the tested set drawn from the part of the
-    // run whose bodies fit. This describes the error, trace and response
-    // stores, not `results`: that array is a failures-first selection and says
-    // so through `resultsStored` / `resultsCap` (#2210).
+    // What each bounded store thinned away. All zeros: the sampled sets are
+    // complete; otherwise a uniform reservoir sample of the run, not its
+    // opening, except where `responseSampleBudgetSpent` says the byte budget
+    // stopped admitting, leaving the tested set drawn from where bodies fit.
+    // Covers the error, trace and response stores; `results` is a
+    // failures-first selection that says so through `resultsStored` /
+    // `resultsCap` (#2210).
     if (extras.has_sampling) {
         json_report["sampling"] = { { "errorsDropped", extras.errors_dropped },
             { "successTracesDropped", extras.success_traces_dropped },
@@ -2083,10 +2000,8 @@ double target_rps) {
             { "exemplarsDropped", extras.exemplars_dropped },
             { "sampleBodiesDropped", extras.sample_bodies_dropped },
             { "responseBodiesCaptured", extras.response_bodies_captured } };
-        // Only when the summary recorded it. Absent is a run written before the
-        // marker existed, which the app must be able to tell from a run that
-        // kept its uniformity - the same absent-vs-zero rule the section itself
-        // follows one level up.
+        // Only when recorded: absent is a run predating the marker, which the
+        // app must tell from one that kept its uniformity.
         if (extras.response_sample_budget_spent.has_value ()) {
             json_report["sampling"]["responseSampleBudgetSpent"] =
             *extras.response_sample_budget_spent;
@@ -2101,11 +2016,9 @@ double target_rps) {
 constexpr size_t REPORT_RESULTS_CAP = 100;
 
 /// How many of @p stored rows the report returns. A `Scenario` run's rows are
-/// the steps `ScenarioRunView` renders one row per, already bounded at write
-/// time by `maxScenarioStoredSteps` (`scenario_runner.cpp`); a second, smaller
-/// cap here silently dropped every step past the 100th, which read as a run
-/// that executed only 100 steps to a reader just told (by the same report)
-/// that it ran more.
+/// the steps `ScenarioRunView` renders, bounded at write time by
+/// `maxScenarioStoredSteps` (`scenario_runner.cpp`); a second cap here would
+/// drop every step past the 100th from a run the same report says ran more.
 size_t report_results_cap (size_t stored, bool is_scenario_run) {
     return is_scenario_run ? stored : REPORT_RESULTS_CAP;
 }
@@ -2180,6 +2093,7 @@ ReportExtras& extras) {
     extras.http_version_downgraded =
     static_cast<double> (collector.http_version_downgraded ());
     extras.connection_replays = collector.connection_replays ();
+    extras.error_classes      = collector.error_class_counts ().to_json ();
 }
 
 namespace {
@@ -2231,19 +2145,15 @@ nlohmann::json build_report_results (const std::vector<vayu::db::Result>& result
 }
 
 /**
- * Testable core of GET /runs/:id/report, returning {http_status, json_body}. A
- * missing run is a definitive 404 in the shared `{"error": {"code", "message"}}`
- * shape.
- *
- * The whole-run aggregates come from `runs.summary` - the values the run itself
- * computed at completion - laid over a report calculated from the run's sampled
- * `results`. A run with no summary is still pending or running, or failed
- * without writing one, and reports without one rather than erroring; a run
- * the engine died under carries its last tick's totals as a partial summary
- * (#2895). `summary.partial` and `summary.summaryMissing` say which.
- *
- * Extracted so the wiring is covered without an in-process HTTP server - see
- * runs_route_test.cpp. Exceptions propagate to the route's try/catch (500).
+ * Testable core of GET /runs/:id/report, {http_status, json_body}; a missing
+ * run is a 404 in the shared `{"error": {"code", "message"}}` shape. The
+ * whole-run aggregates come from `runs.summary`, computed by the run at
+ * completion, laid over a report from its sampled `results`. A run with no
+ * summary (pending, running, or failed without writing one) reports without one
+ * rather than erroring, and one the engine died under carries its last tick's
+ * totals as a partial summary (#2895); `summary.partial` and
+ * `summary.summaryMissing` say which. Exceptions propagate to the route's
+ * try/catch (500); `runs_route_report_test.cpp` covers the wiring.
  */
 std::pair<int, nlohmann::json> run_report_response (vayu::db::Database& db,
 const std::string& run_id,
@@ -2257,15 +2167,14 @@ vayu::core::RunManager* live_runs) {
         return { 404, error_body (404, "Run not found") };
     }
 
-    // A load run that is not terminal reads no row (#2659): a client re-reads
-    // this report on a timer until the run ends, and the run writes its rows
-    // only as it finishes, so a report built from them is all zeros and then a
-    // growing prefix of the flush. Its counts come from the collector instead
-    // (apply_live_counters below).
-    // Decided from the same row `metadata.status` reports. Design and scenario
-    // runs store their rows just before the status flips, and their one-shot
-    // readers (response restore, the step list) need them, `trace` included,
-    // from a report fetched in that gap, so they always read them.
+    // A non-terminal load run reads no row (#2659): a client re-reads this
+    // report until the run ends, and the run writes its rows as it finishes, so
+    // they would read as zeros, then a growing prefix of the flush; its counts
+    // come from the collector (`apply_live_counters`). Decided from the row
+    // `metadata.status` reports. Design and scenario runs store their rows just
+    // before the status flips, and their one-shot readers (response restore,
+    // the step list) need them, `trace` included, from a report fetched in that
+    // gap.
     const bool live_load =
     run->type == vayu::RunType::Load && !vayu::is_terminal (run->status);
     const auto results =
@@ -2280,13 +2189,11 @@ vayu::core::RunManager* live_runs) {
     auto report =
     vayu::utils::MetricsHelper::calculate_detailed_report (results, duration_s);
 
-    // `summary` is written as the run finishes (#2436), so no usable one means
-    // the run is still pending/running or failed without one (see
-    // `summary_missing` below). The report then stands on the sampled
-    // `results` alone - `calculate_detailed_report` above - or, for a live
-    // load run, on its collector; `metadata.status` is how a reader tells them
-    // apart. Once a live load run's summary is stored it is the whole-run
-    // answer, as it is for a finished run.
+    // `summary` is written as the run finishes (#2436), so none usable means
+    // the run is pending, running, or failed without one (`summary_missing`
+    // below): the report stands on the sampled `results` or, for a live load
+    // run, its collector, and `metadata.status` tells them apart. A live load
+    // run's stored summary is the whole-run answer, as for a finished run.
     ReportExtras extras;
     extras.sequential_run = run->type == vayu::RunType::Scenario;
     if (live_load && run->summary.empty ()) {
@@ -2336,11 +2243,9 @@ std::string_view result_id) {
 
 /**
  * The `GET /runs` filters off the query string. An invalid value for an
- * enumerated filter (`type`, `status`, `baseline`, `origin`, `outcome`) leaves that filter
- * unset rather than answering 400, so a client on a newer vocabulary than the
- * engine gets a wider list, never an error.
- *
- * Non-static so runs_route_test.cpp can drive it with a built request.
+ * enumerated filter (`type`, `status`, `baseline`, `origin`, `outcome`) leaves
+ * it unset, not a 400, so a client on a newer vocabulary gets a wider list.
+ * Non-static for `runs_route_rows_test.cpp`.
  */
 vayu::db::RunFilter run_filter_from_query (const httplib::Request& req) {
     vayu::db::RunFilter filter;
@@ -2373,20 +2278,16 @@ vayu::db::RunFilter run_filter_from_query (const httplib::Request& req) {
 }
 
 /**
- * Testable core of GET /runs/:id, returning {http_status, json_body}.
+ * Testable core of GET /runs/:id, {http_status, json_body}. A design run's one
+ * exchange travels with the run; a load run's stay in the report (the sampled
+ * subset), guarded before fetching because they are unbounded (one row per
+ * error) and must never be pulled to be discarded.
  *
- * A design run is one exchange, so it travels with the run. Load runs keep
- * theirs in the report, where `results` means the sampled subset - guarded
- * here, before fetching, because a load run's results are not bounded (one row
- * per error, uncapped) and must never be pulled just to be discarded.
- *
- * The snapshot's body is the payload a history entry is re-opened into the
- * editor from, so its file references carry the `unresolved` the allowed
- * folders and picked files derive now, never what was sent (#2356).
- *
- * A run @p live_runs holds active carries its worker's `phase` (#3568). The
- * phase is never stored, so a retained or stored run, and any run with a null
- * @p live_runs, has no `phase` key.
+ * The snapshot's body is what a history entry re-opens into the editor, so its
+ * file references carry the `unresolved` the allowed folders and picked files
+ * derive now, never what was sent (#2356). A run @p live_runs holds active
+ * carries its worker's `phase` (#3568); never stored, so a retained or stored
+ * run, or a null @p live_runs, has none.
  */
 std::pair<int, nlohmann::json> get_run_response (vayu::db::Database& db,
 const std::string& run_id,
@@ -2597,29 +2498,23 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
             return;
         }
 
-        // A streaming design run is stopped by asking its consumer worker
-        // to end the transfer (issue #573). Checked before the load-run
-        // path because a design run has no `RunContext` at all: without
-        // this it fell through to the not-active branch, which flips the
-        // row to Stopped while the worker keeps consuming - a run reported
-        // finished that is still holding a socket.
-        //
-        // The worker owns the terminal write, so the row is left alone
-        // here: `record_design_result` stores the status when it settles,
-        // which is also when the trace and the true event count land.
+        // A streaming design run stops by asking its consumer worker to end the
+        // transfer (#573), checked before the load path because a design run
+        // has no `RunContext`: the not-active branch would mark the row Stopped
+        // while the worker still holds a socket. The worker owns the terminal
+        // write (`record_design_result`, when it settles, with the trace and
+        // the true event count), so the row is left alone here.
         if (ctx.sse_manager.request_stop (run_id)) {
             vayu::utils::log_info (
             "run", "POST /runs/:id/stop - Signaling stop for stream: " + run_id);
-            // Waited on rather than answered immediately, so the caller is
-            // told what actually happened - the same budget the load path
-            // gives a graceful stop.
+            // Awaited, not answered at once, so the caller hears what happened,
+            // on the load path's graceful-stop budget.
             const auto response = stream_stop_response (
             ctx.db, ctx.sse_manager.get (run_id), run_id, STOP_GRACE_SECONDS);
             res.set_content (response.dump (), "application/json");
             return;
         }
 
-        // Try to find active run context
         auto context = ctx.run_manager.get_run (run_id);
         if (context) {
             const auto response =
@@ -2723,20 +2618,11 @@ httplib::Response& res) {
 void register_run_routes (RouteContext& ctx) {
     /**
      * GET /runs?limit=&offset=&before=&type=&status=&requestId=&collectionId=&q=
-     * Lists test runs (both "design" single requests and "load" tests), newest
-     * first (start_time DESC, ties by id DESC). Rows carry a compact `summary`
-     * (url/method/mode/duration/concurrency/iterations/targetRps/
-     * startConcurrency/rampUpDuration/comment/httpVersion/followRedirects/
-     * maxRedirects/requestName/dataFileName/dataFileHash/dataFileCastNumbers,
-     * plus acceptEncoding and scenario when
-     * recorded) instead of the full config_snapshot, wrapped in the
-     * `{data, pagination}` envelope.
-     * See build_run_summary for the authoritative key list - keep this in step
-     * with it. A design run's row also carries `resultSummary`
-     * (statusCode + latencyMs), a terminal load run's carries
-     * `resultSummary` (rps + p95Ms + errorRate + verdict, each only when
-     * recorded) and a terminal collection run's carries passed/failed/
-     * skipped/errored + verdict; see get_runs_response.
+     *          &baseline=&origin=&outcome=
+     * Lists runs newest first (start_time DESC, ties by id DESC). Rows carry the
+     * compact `summary` (`build_run_summary` holds the key list) instead of the
+     * full config_snapshot, in the `{data, pagination}` envelope, plus each run
+     * type's `resultSummary` (`get_runs_response`).
      *
      * Query params:
      * - limit: page size, default 50, capped at 500
@@ -2746,17 +2632,19 @@ void register_run_routes (RouteContext& ctx) {
      *   `limit` rows however deep it is. Malformed -> 400 invalid_before;
      *   beside a non-zero offset -> 400 before_with_offset. Filters still apply
      *   and `total` still counts the whole filter.
-     * - type: "design" | "load" (invalid -> ignored)
-     * - status: RunStatus string (invalid -> ignored)
+     * - type: "design" | "load" | "scenario"
+     * - status: a RunStatus string
      * - requestId: exact match
      * - collectionId: exact match against a run's stored
-     *   `scenario.collectionId`. A collection run records one, and so does a
-     *   load run driven over a collection (#3544); a single-request design or
-     *   load run never matches. An id nothing ran is an empty page, not an
-     *   error.
+     *   `scenario.collectionId`, which collection runs and load runs over a
+     *   collection record (#3544); a single-request run never matches, and an
+     *   id nothing ran is an empty page
      * - q: case-insensitive substring over the stored config_snapshot text
-     * - baseline: "true" lists only pinned baselines, "false" only unpinned
-     *   ones; any other value is ignored, like an invalid type/status
+     * - baseline: "true" pinned baselines only, "false" unpinned only
+     * - origin: exact match on the recorded origin kind (#1817)
+     * - outcome: the stored verdict; a run with none never matches
+     * An invalid type, status, baseline, origin or outcome is ignored
+     * (`run_filter_from_query`).
      */
     ctx.server.Get ("/runs", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_list_runs (ctx, req, res);
@@ -2836,16 +2724,11 @@ void register_run_routes (RouteContext& ctx) {
     });
 
     /**
-     * GET /runs/:runId/samples?limit=&offset=
-     * The response headers and body captured for this run's retained samples -
-     * every error, the slow outliers, and the first few of each status code.
-     *
-     * Its own endpoint rather than more fields on the report: the report loads
-     * and parses every result row for a run on each fetch, and the dashboard
-     * polls it. This is fetched only when a reader expands a sample.
-     *
-     * No deprecated `/run/...` alias - the endpoint is new, so there is no
-     * pre-consolidation spelling for it to keep working.
+     * GET /runs/:runId/samples?limit=&offset= The captured response headers and
+     * bodies of the run's retained samples: every error, the slow outliers, the
+     * first few of each status code. Its own endpoint because the report parses
+     * every result row per fetch and the dashboard polls it; this is fetched
+     * only when a reader expands a sample.
      */
     ctx.server.Get (R"(/runs/([^/]+)/samples)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

@@ -6,22 +6,15 @@
  */
 
 /**
- * @file http/routes/trash.cpp
- * @brief `GET /trash`, `POST /trash/:id/restore`, `DELETE /trash/:id` - what
- *        soft delete left recoverable (issue #988).
- *
- * Deleting a collection used to be irreversible, with the confirm dialog as the
- * entire safety net: one misclick destroyed a subtree and nothing in the engine
- * could give it back. `Database::delete_collection`, `delete_request`,
- * `delete_environment` (#2970), `delete_request_example` (a user's own
- * example, #2971) and `delete_client_certificate` (#2973) now stamp rows
- * instead of removing them, and these three routes are the whole of what that
- * stamp is for - the list of what is recoverable, the undo, and the one
- * deliberate way to make a delete permanent before retention does.
- *
- * The trash lists *roots* - the rows a user asked to delete - and never what a
- * cascade took with them, because "restore this" is a question about the thing
- * that was deleted and the counts answer the rest of it.
+ * `GET /trash`, `POST /trash/:id/restore`, `DELETE /trash/:id`: what soft
+ * delete left recoverable (#988). `Database::delete_collection`,
+ * `delete_request`, `delete_environment` (#2970), `delete_request_example` (a
+ * user's own example, #2971) and `delete_client_certificate` (#2973) stamp rows
+ * instead of removing them, and these routes are what the stamp is for: the
+ * list, the undo, and the one deliberate way to make a delete permanent before
+ * retention does. The trash lists roots (the rows a user asked to delete),
+ * never what a cascade took: "restore this" is about the deleted thing, and the
+ * counts answer the rest.
  */
 
 #include "vayu/http/list_page.hpp"
@@ -100,17 +93,14 @@ trash_list_response (vayu::db::Database& db, const ListPageQuery& page_query) {
 }
 
 /**
- * Testable core of POST /trash/:id/restore.
- *
- * Two statuses, deliberately different. **404** is an id the trash does not
- * hold - a live row, or one already purged. **409** is a shape a restore cannot
- * express: a request whose collection, or an example whose request, is itself
- * deleted or gone, which has no root to come back to the way a collection
- * does; an example whose request is already at its example cap (#2971); or a
- * client certificate whose host and port a live entry now claims (#2973). The
+ * Testable core of POST /trash/:id/restore. Two statuses, deliberately
+ * different. **404** is an id the trash does not hold (live, or purged).
+ * **409** is a shape a restore cannot express: a request whose collection, or
+ * an example whose request, is itself deleted or gone, with no root to come
+ * back to as a collection has; an example whose request is at its cap (#2971);
+ * a client certificate whose host and port a live entry now claims (#2973). The
  * message names the way forward (the trash root holding the owner, by name and
- * id, #3449; an example or the live entry to delete) rather than reporting
- * only that this failed.
+ * id, #3449; an example or the live entry to delete).
  */
 std::pair<int, nlohmann::json>
 trash_restore_response (vayu::db::Database& db, const std::string& id) {
@@ -127,16 +117,12 @@ trash_restore_response (vayu::db::Database& db, const std::string& id) {
 }
 
 /**
- * Testable core of DELETE /trash/:id - the hard cascade soft delete replaced,
- * asked for on purpose.
- *
- * 404 on anything the trash does not hold, which is also what makes this
- * unable to destroy a live collection by a mistyped id.
- *
- * A purged environment takes its cookie jar with it (#3349); trash only hid
- * the jar so a restore could bring the session back. The startup retention
- * sweep needs no counterpart: it runs inside `Database::init`, before the
- * in-memory jar can hold anything.
+ * Testable core of DELETE /trash/:id: the hard cascade soft delete replaced,
+ * asked for on purpose. 404 on anything the trash does not hold, so a mistyped
+ * id cannot destroy a live collection. A purged environment takes its cookie
+ * jar (#3349), which trash only hid so a restore brings the session back. The
+ * startup retention sweep needs no counterpart: it runs in `Database::init`,
+ * before the in-memory jar holds anything.
  */
 std::pair<int, nlohmann::json> trash_purge_response (vayu::db::Database& db,
 vayu::http::CookieJar& jar,

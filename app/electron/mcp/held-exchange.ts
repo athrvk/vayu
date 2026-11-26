@@ -6,21 +6,17 @@
  */
 
 /**
- * @file held-exchange.ts
- * @brief One exchange the MCP HTTP host is serving, and the answer it is owed
- *        when the host cuts it (#3598).
+ * @brief One exchange the MCP HTTP host is serving, and the answer it is owed when the host cuts it
+ *        (#3598).
  *
- * A cut is a stop (MCP switched off, the app quitting) or a 2025-era client's
- * cancel. Either way the SDK ends the response stream with no answer, and what
- * that costs the client depends on how far the response got. Before any of it
- * is out, a stop drops a 2025-era connection (a 2026-07-28 call gets the SDK's
- * bare `499`) and a cancel lets the empty stream end: the client's fetch fails
- * at once, or the client that cancelled has stopped waiting. Once a byte is
- * out, an SDK client is reading a stream and acts on nothing but a JSON-RPC
- * response for its request id, so a stream that just ends holds the call until
- * the client's own request timeout. So a cut stream that is already under way
- * ends with an error frame for each request id it has not answered, naming the
- * cause.
+ * A cut is a stop (MCP switched off, the app quitting) or a 2025-era client's cancel. Either way
+ * the SDK ends the response stream with no answer, and what that costs the client depends on how
+ * far the response got. Before any of it is out, a stop drops a 2025-era connection (a 2026-07-28
+ * call gets the SDK's bare `499`) and a cancel lets the empty stream end: the client's fetch fails
+ * at once, or the client that cancelled has stopped waiting. Once a byte is out, an SDK client is
+ * reading a stream and acts on nothing but a JSON-RPC response for its request id, so a stream that
+ * just ends holds the call until the client's own request timeout. So a cut stream that is already
+ * under way ends with an error frame for each request id it has not answered, naming the cause.
  */
 
 import type http from "node:http";

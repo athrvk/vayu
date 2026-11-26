@@ -6,11 +6,10 @@
  */
 
 /**
- * Client settings - option lists, defaults, and guards for the renderer-only
- * preferences held in the client-settings store (editor behavior, chart
- * granularity, p99 threshold, live refresh rate, auto-save). These arrays are
- * the single source of truth: the store defaults, the settings pickers, and the
- * runtime clamps all derive from them.
+ * Option lists, defaults and guards for the renderer-only preferences in the client-settings store
+ * (editor behavior, chart granularity, p99 threshold, live refresh rate, auto-save). These arrays
+ * are the single source of truth: the store defaults, the settings pickers and the runtime clamps
+ * all derive from them.
  */
 
 export interface LabeledOption<T> {
@@ -23,13 +22,12 @@ export interface LabeledOption<T> {
 
 export const EDITOR_FONT_SIZES = [11, 12, 13, 14, 16] as const;
 /**
- * 12px, decided on the face rather than on the number (#1202). JetBrains Mono,
- * the default code face, has an x-height ratio of 0.550 - the largest of the
- * six bundled faces - so 13px rendered a 7.15px x-height where a code editor
- * shipping Menlo or Consolas at its own default sits between 6.3 and 6.6px. At
- * 12px the same face measures 6.60px and lands inside that band.
- * `appearance.font-metrics.test.ts` holds this to the measurement; Settings ->
- * Editor still offers 11 through 16 for a user who wants another register.
+ * 12px, decided on the face rather than on the number (#1202). JetBrains Mono, the default code
+ * face, has an x-height ratio of 0.550, the largest of the six bundled faces, so 13px rendered a
+ * 7.15px x-height where a code editor shipping Menlo or Consolas at its own default sits between
+ * 6.3 and 6.6px; at 12px the same face measures 6.60px and lands inside that band.
+ * `appearance.font-metrics.test.ts` holds this to the measurement; Settings -> Editor still offers
+ * 11 through 16 for a user who wants another register.
  */
 export const DEFAULT_EDITOR_FONT_SIZE = 12;
 
@@ -86,16 +84,11 @@ export const DEFAULT_AUTO_SAVE_ENABLED = true;
 export const DEFAULT_AUTO_SAVE_DELAY_MS = 5_000;
 
 /**
- * Snap a persisted delay onto the nearest offered option.
- *
- * The options were 1s/3s/5s and are now 5s/30s/1m, so anyone who had chosen 1s
- * or 3s holds a value that no longer appears in the picker. Without this the
- * setting renders with nothing selected while auto-save quietly keeps using the
- * old interval - the control and the behaviour disagreeing, which is worse than
- * either being wrong on its own.
- *
- * Nearest rather than reset-to-default, because 3s should land on 5s rather
- * than jumping to a minute.
+ * Snap a persisted delay onto the nearest offered option. The options are 5s/30s/1m and an older
+ * build offered 1s and 3s, so a stored 1s or 3s no longer appears in the picker; without this the
+ * setting renders with nothing selected while auto-save quietly keeps the old interval, the control
+ * and the behaviour disagreeing, which is worse than either being wrong on its own. Nearest rather
+ * than reset-to-default, so 3s lands on 5s instead of jumping to a minute.
  */
 export function nearestAutoSaveDelay(ms: number): number {
 	return AUTO_SAVE_DELAY_OPTIONS.reduce((best, o) =>

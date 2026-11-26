@@ -6,28 +6,23 @@
  */
 
 /**
- * The renderer's half of the right-click menu (#1359).
+ * The renderer's half of the right-click menu (#1359). The main process composes the menu and
+ * already knows the editing state Chromium hands it: whether the field is editable, what is
+ * selected, which of Cut / Copy / Paste can act, the link under the pointer. What it cannot see is
+ * what the element *means here*: that this field is the URL bar, which imports a pasted curl
+ * command; that the pointer is on a `{{token}}`, which has a popover; that this is a Monaco editor,
+ * which draws its own menu and wants no second one. That is what this announces.
  *
- * The menu itself is composed in the main process, which already knows the
- * editing state Chromium hands it: whether the field is editable, what is
- * selected, which of Cut / Copy / Paste can act, the link under the pointer.
- * What it cannot see is what the element *means here* - that this field is the
- * URL bar, which imports a pasted curl command; that the pointer is on a
- * `{{token}}`, which has a popover; that this is a Monaco editor, which draws
- * its own menu and wants no second one. That is what this announces.
+ * **Marked, not guessed.** A main-process handler cannot read the DOM, and a coordinate round trip
+ * would have to undo the page zoom to hit-test a point. The surfaces that mean something carry an
+ * attribute instead, spread from `contextProps` so the name is spelled once, and the announcement
+ * is taken from the `contextmenu` event's own target: the element the user actually hit, with no
+ * geometry in the middle.
  *
- * **Marked, not guessed.** A main-process handler cannot read the DOM, and a
- * coordinate round trip would have to undo the page zoom to hit-test a point.
- * The surfaces that mean something carry an attribute instead, spread from
- * `contextProps` so the name is spelled once, and the announcement is taken
- * from the `contextmenu` event's own target - the element the user actually
- * hit, with no geometry in the middle.
- *
- * **Announced synchronously, on the way past.** The listener runs before
- * Chromium asks the browser process for a menu, so a blocking `setContextTarget`
- * is what makes the announcement and the `context-menu` event a matched pair.
- * The listener captures, because Monaco stops the event from propagating: the
- * marker on its container is what keeps a second menu from opening over the
+ * **Announced synchronously, on the way past.** The listener runs before Chromium asks the browser
+ * process for a menu, so a blocking `setContextTarget` is what makes the announcement and the
+ * `context-menu` event a matched pair. The listener captures because Monaco stops the event from
+ * propagating: the marker on its container is what keeps a second menu from opening over the
  * editor's own, and a bubble-phase listener would never see it to say so.
  */
 
@@ -40,29 +35,23 @@ export const CONTEXT_ATTRIBUTE = "data-context";
 export const VARIABLE_ATTRIBUTE = "data-context-variable";
 
 /**
- * The surfaces that mean something to the menu.
+ * The surfaces that mean something to the menu. Short by design: a read-only pane needs no marker,
+ * because the selection already says Copy is the only offer, and a plain editable field needs none
+ * either, because `isEditable` says the rest. Only these carry an offer, or a refusal, the params
+ * cannot imply. Mirrors `ContextKind` in `electron/context-menu.ts`.
  *
- * Short by design: a read-only pane needs no marker, because the selection
- * already says Copy is the only offer, and a plain editable field needs none
- * either, because `isEditable` says the rest. Only these carry an offer, or a
- * refusal, the params cannot imply. Mirrors `ContextKind` in
- * `electron/context-menu.ts`.
- *
- * `own-menu` is that refusal: a surface that draws its own right-click menu -
- * a collection row, a tab (#1360) - and wants no second one over it. Monaco
- * keeps its own name because it is not one of ours; the two are answered the
- * same way.
+ * `own-menu` is that refusal: a surface that draws its own right-click menu (a collection row, a
+ * tab, #1360) and wants no second one over it. Monaco keeps its own name because it is not one of
+ * ours; the two are answered the same way.
  */
 export type ContextKind = "url-bar" | "monaco" | "own-menu";
 
 /**
- * The props that mark a surface, spread onto it:
- * `<div {...contextProps("monaco")}>`.
- *
- * Spread rather than written out, and typed by the parameter, for the reasons
- * `regionProps` is (`components/layout/region-focus.ts`): a JSX attribute name
- * has to be a literal, so writing it by hand puts the one name in as many
- * places as there are markers, none of which a rename would carry.
+ * The props that mark a surface, spread onto it: `<div {...contextProps("monaco")}>`. Spread rather
+ * than written out, and typed by the parameter, for `regionProps`' reasons
+ * (`components/layout/region-focus.ts`): a JSX attribute name has to be a literal, so writing it by
+ * hand puts the one name in as many places as there are markers, none of which a rename would
+ * carry.
  */
 export function contextProps(kind: ContextKind): Record<typeof CONTEXT_ATTRIBUTE, ContextKind> {
 	return { [CONTEXT_ATTRIBUTE]: kind };
@@ -99,27 +88,22 @@ export function resolveContext(eventTarget: EventTarget | null): ResolvedContext
 }
 
 /**
- * A `MouseEvent.detail` a real click never carries - it is a click count and
- * never negative - so `openVariablePopover` can mark the click it dispatches
- * as the menu's own rather than a pointer gesture. Needed because an ordinary
- * click on an editable token now places a caret instead of opening anything
- * (issue #1220 hover redesign): the menu item's whole point is opening the
- * popover, so its click has to say so.
+ * A `MouseEvent.detail` a real click never carries (it is a click count, never negative), so
+ * `openVariablePopover` can mark the click it dispatches as the menu's own rather than a pointer
+ * gesture. Needed because an ordinary click on an editable token places a caret rather than opening
+ * anything (#1220): the menu item's whole point is opening the popover, so its click has to say so.
  */
 export const MENU_TRIGGERED_CLICK_DETAIL = -1;
 
 /**
- * Open the popover for a token the menu was opened on.
+ * Open the popover for a token the menu was opened on. A click, because that is the popover's one
+ * way in: `VariablePopover` holds its own open state and offers no prop to force it
+ * (`components/ui/variable-popover.tsx`), and the token is a `role="button"` whose click handler
+ * opens it. Going through that handler also keeps the menu item honest: it opens the popover an
+ * ordinary open opens, not a second path to it that could drift.
  *
- * A click, because that is the popover's one way in: `VariablePopover` holds its
- * own open state and offers no prop to force it (`components/ui/variable-popover.tsx`),
- * and the token is a `role="button"` whose click handler opens it. Going through
- * that handler is also what makes the menu item honest - it opens the same
- * popover an ordinary open opens, rather than a second path to the same
- * component that could drift from it.
- *
- * The element is re-checked rather than trusted: a menu is modal, and a render
- * in the meantime can have replaced or removed the token it was opened over.
+ * The element is re-checked rather than trusted: a menu is modal, and a render in the meantime can
+ * have replaced or removed the token it was opened over.
  */
 export function openVariablePopover(token: HTMLElement | null, name: string): boolean {
 	if (!token || !token.isConnected) return false;
@@ -141,11 +125,9 @@ export interface ContextMenuBridgeHost {
 }
 
 /**
- * Announce every right-click, and answer the commands the renderer owns.
- *
- * Returns the teardown. Outside Electron there is no bridge to talk to and this
- * does nothing at all, which is also what makes it safe to call from a test that
- * never stubs `electronAPI`.
+ * Announce every right-click, and answer the commands the renderer owns. Returns the teardown.
+ * Outside Electron there is no bridge, so this does nothing at all, which also makes it safe to
+ * call from a test that never stubs `electronAPI`.
  */
 export function installContextMenuBridge(
 	host: ContextMenuBridgeHost | undefined,

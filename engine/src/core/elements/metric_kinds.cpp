@@ -6,25 +6,19 @@
  */
 
 /**
- * @file metric_kinds.cpp
- * @brief `metric.record` (issue #1500): a custom trend, counter or rate,
- *        recorded in `step.after` and reported beside the built-in phases -
- *        `customMetrics.<name>` in the run report, `custom.<name>.<stat>` in
- *        the thresholds block.
+ * `metric.record` (#1500): a custom trend, counter or rate, recorded in
+ * `step.after` and reported beside the built-in phases, as
+ * `customMetrics.<name>` in the run report and `custom.<name>.<stat>` in the
+ * thresholds block.
  *
- * A trend or counter reads a number off the response (`jsonpath`, `header`,
- * `latency`, `status` or `size` - the shared JSONPath subset for the first,
- * everything else read straight off `ElementContext::response` the way
- * `assert.size` / `assert.duration` already do), or off a stream's events
- * (`eventJsonpath`, #3780: the last event whose JSON data the path matches,
- * one value per stream). A rate reads a boolean from
- * a small, self-contained comparison (`condition`) rather than the full
- * `control.if` grammar issue #1515 defines: that kind is not yet part of
- * this tree, and a rate's condition needs nothing beyond "does this one field
- * compare true" - inventing a dependency on an unlanded kind for a feature
- * that does not need its full expressiveness would be exactly the kind of
- * complexity CLAUDE.md's "no config knob the issue didn't ask for" rule
- * exists to refuse.
+ * A trend or counter reads a number off the response (`jsonpath` through the
+ * shared JSONPath subset; `header`, `latency`, `status` and `size` straight off
+ * `ElementContext::response`, as `assert.size` / `assert.duration` do) or off a
+ * stream's events (`eventJsonpath`, #3780: the last event whose JSON data the
+ * path matches, one value per stream). A rate reads a boolean from a small
+ * `condition` comparison, not `control.if`'s grammar (#1515): a rate needs only
+ * "does this one field compare true", and depending on the full grammar buys
+ * expressiveness it never uses.
  */
 
 #include "vayu/core/elements.hpp"
@@ -41,13 +35,11 @@ namespace vayu::core {
 
 namespace {
 
-/// The one response-derived value @p field names, or `nullopt` for a field
-/// this kind does not know (already refused by the config schema's `enum`)
-/// or a response that is not there yet (`step.after` runs after the send, so
-/// this is only reachable when the pipeline was asked to run this kind
-/// before a response exists, which the caller guards against separately).
-/// `eventJsonpath` is not a field: it reads the events rather than the
-/// response, and `condition`'s `field` enum does not offer it.
+/// The response-derived value @p field names, or `nullopt` for a field this
+/// kind does not know (the config schema's `enum` refuses it) or a response
+/// that is not there yet (reachable only if the pipeline ran this kind before
+/// the send, which the caller guards against). `eventJsonpath` is not a field:
+/// it reads the events, and `condition`'s `field` enum does not offer it.
 std::optional<nlohmann::json>
 read_field (ElementContext& ctx, const std::string& field, const nlohmann::json& config) {
     if (ctx.response == nullptr) {
@@ -154,9 +146,9 @@ read_source (ElementContext& ctx, const std::string& kind, const nlohmann::json&
     return read_nothing (no_numeric_value (kind));
 }
 
-/// @p value coerced to a double for a trend or counter - a string is parsed
-/// (a header's value, or a jsonpath match that landed on a numeric string),
-/// anything else that is not already a JSON number fails the coercion.
+/// @p value as a double for a trend or counter: a string is parsed (a header's
+/// value, or a jsonpath match on a numeric string); anything else that is not a
+/// JSON number fails.
 std::optional<double> coerce_number (const nlohmann::json& value) {
     if (value.is_number ()) {
         return value.get<double> ();
@@ -176,11 +168,10 @@ std::optional<double> coerce_number (const nlohmann::json& value) {
     return std::nullopt;
 }
 
-/// One `{field, operator, value}` comparison, `condition`'s whole grammar -
-/// deliberately narrower than `control.if` (see the file header). `nullopt`
-/// means the comparison could not be made (the named field is missing, or an
-/// order comparison was asked of two things that do not order); the caller
-/// reports that as this element's "error" outcome.
+/// One `{field, operator, value}` comparison, `condition`'s whole grammar,
+/// narrower than `control.if`'s (see the file header). `nullopt` when it cannot
+/// be made (the field is missing, or an order comparison of two things that do
+/// not order), which the caller reports as this element's "error" outcome.
 std::optional<bool> evaluate_condition (ElementContext& ctx, const nlohmann::json& condition) {
     const std::string field = condition.value ("field", "");
     const auto actual       = read_field (ctx, field, condition);
@@ -357,11 +348,10 @@ nlohmann::json condition_schema () {
     };
 }
 
-/// The three places a JSONPath can be read from (`source.jsonpath`,
-/// `source.eventJsonpath` and, for a rate, the `condition`'s own), checked
-/// once the schema has accepted the shape.
-/// A condition's path is only read when its `field` is `jsonpath`, so a stale
-/// one beside another field is not refused.
+/// Checks the three JSONPaths (`source.jsonpath`, `source.eventJsonpath` and a
+/// rate's `condition` path) once the schema has accepted the shape. A
+/// condition's path is read only when its `field` is `jsonpath`, so a stale one
+/// beside another field is not refused.
 std::optional<std::string> validate_metric_paths (const nlohmann::json& config) {
     const auto source = config.find ("source");
     if (source == config.end () || !source->is_object ()) {
@@ -401,12 +391,11 @@ ElementKind make_metric_record_kind () {
     };
     kind.validate_config = validate_metric_paths;
     // Not a strict `oneOf` across `source`'s seven shapes: valijson's `oneOf`
-    // failure reports "matched N schemas", which names none of the seven
-    // by name, where `MetricRecordElement::apply`'s own checks report
-    // exactly which source is missing what. The schema's job here is the
-    // shape (an object, from a closed set of keys, each of the right type);
-    // which single key is actually required by which `type` is a runtime
-    // decision the schema alone cannot express without losing that message.
+    // failure says "matched N schemas" and names none of them, where
+    // `MetricRecordElement::apply`'s checks name which source lacks what. The
+    // schema holds the shape (an object, a closed key set, each of the right
+    // type); which key a `type` requires is decided at run time to keep that
+    // message.
     kind.config_schema = {
         { "type", "object" },
         { "properties",

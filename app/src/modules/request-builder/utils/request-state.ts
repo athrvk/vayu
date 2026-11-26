@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Request State Utilities
- *
- * Utilities for creating and managing RequestState
- */
+/** Creating and inspecting `RequestState`. */
 
 import type { RequestState } from "../types";
 import {
@@ -28,16 +24,11 @@ import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-valu
 import { noFile } from "@/lib/file-trust";
 
 /**
- * Create a default RequestState with empty values.
- *
- * `httpVersion` defaults to {@link DEFAULT_HTTP_VERSION} ("auto"). The
- * parameter exists as a seam and **no production caller passes it** - do not
- * take it as an invitation to wire one up. A new request is created
- * server-side immediately (`CollectionTree`) with no `httpVersion` in the
- * payload, so the *engine* applies its configured `defaultHttpVersion` seed
- * and the app loads the result straight back. There is no unsaved-draft phase
- * to pre-fill, and reading the global here would duplicate the engine for
- * nothing.
+ * A default `RequestState`. `httpVersion` defaults to {@link DEFAULT_HTTP_VERSION} ("auto"); the
+ * parameter is a seam **no production caller passes**, and should not be wired: a new request is
+ * created server-side at once (`CollectionTree`) without `httpVersion`, so the engine applies its
+ * `defaultHttpVersion` seed and the app loads the result. There is no draft phase to pre-fill, and
+ * reading the global here would duplicate the engine.
  */
 export const createDefaultRequestState = (
 	httpVersion: HttpVersion = DEFAULT_HTTP_VERSION
@@ -49,9 +40,8 @@ export const createDefaultRequestState = (
 		method: "GET",
 		url: "",
 		params: [createEmptyKeyValue()],
-		// No Vayu row is seeded here any more (issue #1229): the engine adds its
-		// own headers at send time, so a new request starts with nothing but the
-		// blank row to type into.
+		// No Vayu row is seeded (#1229): the engine adds its headers at send time, so a new request
+		// starts with only the blank row.
 		headers: [createEmptyKeyValue()],
 		disabledDefaultHeaders: [],
 		bodyMode: "none",
@@ -76,20 +66,13 @@ export const createDefaultRequestState = (
 };
 
 /**
- * True when the request's settings depart from the engine defaults - the
- * rule the Settings tab badges on. It deliberately compares against the
- * defaults rather than tracking "the user opened the tab", so a request that is
- * toggled off and back on stops badging again.
- *
- * Covers the redirect policy, the timeout (any number badges; `null` is the
- * default), the protocol, the event-stream flag with its text path and first content marker *and*
- * Postman's protocol switches (issue #1765): a
- * request that only changes `httpVersion` (redirects left at their defaults)
- * must still badge, which is why this checks every field the tab owns rather
- * than being named (and scoped) after redirects alone.
- *
- * Lives here rather than in `SettingsPanel` so that file only exports its
- * component (`react-refresh/only-export-components`).
+ * Whether the settings depart from the engine defaults, the rule the Settings tab badges on,
+ * compared against defaults rather than "opened the tab", so toggling off and on stops the badge.
+ * Covers redirects, the timeout (any number badges; `null` is default), protocol, the event-stream
+ * flag with its text path and first content marker, and Postman's protocol switches (#1765): a
+ * request changing only `httpVersion` must badge, so every field the tab owns is checked. Here, not
+ * in `SettingsPanel`, so that file exports only its component
+ * (`react-refresh/only-export-components`).
  */
 export function isRequestSettingsNonDefault(
 	state: Pick<

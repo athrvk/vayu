@@ -9,12 +9,10 @@ import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { pathLabel } from "@/lib/path-label";
 
 /**
- * Title for a request tab: the user-set name when there is one, otherwise the
- * request path. A blank or still-default placeholder name counts as "not set".
- *
- * Lives here rather than in `tab-descriptors.ts` because the History run tab's
- * editable copy is named by the same rule (`design-run-seed.ts`), and a pure
- * module cannot import a hook file.
+ * Title for a request tab: the user-set name when there is one, otherwise the request path; a blank
+ * or still-default placeholder name counts as "not set". Lives here rather than in
+ * `tab-descriptors.ts` because the History run tab's editable copy is named by the same rule
+ * (`design-run-seed.ts`), and a pure module cannot import a hook file.
  */
 export function requestTabTitle(name: string, resolvedUrl: string): string {
 	const trimmed = name.trim();

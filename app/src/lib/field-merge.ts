@@ -6,26 +6,21 @@
  */
 
 /**
- * The three-way merge behind #1437 and #1436, generalized past one caller.
+ * The three-way merge behind #1437 and #1436, for any draft.
  *
- * `InfoTab`'s `mergeField` proved the shape for a two-key draft compared by
- * `===` (both keys are plain strings, where that is value equality). The
- * request builder's draft has array- and object-valued fields (`headers`,
- * `params`, `auth`), which are rebuilt into fresh references on every fetch
- * regardless of content - `===` there would read every refetch as an external
- * change. `sameValue` compares by JSON content instead, the same rule
- * `useEntityDraft` already uses for its single-value case. A field whose
- * content carries more than its stored value (a table's ephemeral row ids,
- * #3663) names its own rule in `MergeOptions.equals`.
+ * Fields compare by JSON content (`sameValue`), the rule `useEntityDraft` uses for its single
+ * value. `InfoTab`'s own `mergeField` compares by `===`, which is value equality for its two
+ * plain-string keys, but the request builder's array- and object-valued fields (`headers`,
+ * `params`, `auth`) are rebuilt into fresh references on every fetch, so `===` would read every
+ * refetch as an external change. A field whose content carries more than its stored value (a
+ * table's ephemeral row ids, #3663) names its own rule in `MergeOptions.equals`.
  *
- * A field with no external change is left alone. A changed field the caller
- * has not touched since the last known-good value is adopted silently. A
- * changed field the caller has touched, to the *same* value the fetch now
- * reports, is resolved with no conflict, and so is one whose incoming value is
- * what one of the caller's own saves sent (`MergeOptions.sent`, #3664). Only a
- * changed field the caller has touched to a value neither it nor its saves
- * hold is a real conflict: the caller's value is kept, and the incoming one is
- * reported for the UI to offer.
+ * A field with no external change is left alone. A changed field the caller has not touched since
+ * the last known-good value is adopted silently. A touched field the fetch now reports at the
+ * draft's own value, or at a value one of the caller's saves sent (`MergeOptions.sent`, #3664),
+ * resolves with no conflict. Only a touched field whose incoming value neither the draft nor its
+ * saves hold is a real conflict: the caller's value is kept, and the incoming one is reported for
+ * the UI to offer.
  */
 
 function sameValue<V>(a: V, b: V): boolean {
@@ -44,13 +39,12 @@ export interface MergeOptions<T, K extends keyof T> {
 	/** Per-field equality, used in place of `sameValue` for every compare of that field. */
 	equals?: { [P in K]?: (a: T[P], b: T[P]) => boolean };
 	/**
-	 * What the caller's recent saves sent, one patch per save holding the
-	 * fields it sent. An incoming value equal to any of them is that save's
-	 * echo: a keystroke made during the round trip leaves the draft ahead of
-	 * it, and without this the echo would read as someone else's write. Keyed
-	 * on the value, not on a save being in flight, so an outside write in the
-	 * same window still conflicts - unless it writes a value one of these
-	 * saves sent, which is indistinguishable from that save's echo.
+	 * What the caller's recent saves sent, one patch per save holding the fields it sent. An
+	 * incoming value equal to any of them is that save's echo: a keystroke during the round trip
+	 * leaves the draft ahead of it, and without this the echo would read as someone else's write.
+	 * Keyed on the value, not on a save being in flight, so an outside write in the same window
+	 * still conflicts, unless it writes a value one of these saves sent, which is indistinguishable
+	 * from that save's echo.
 	 */
 	sent?: readonly FieldPatch<T, K>[];
 }
@@ -67,18 +61,14 @@ export interface FieldMergeOutcome<T, K extends keyof T> {
 }
 
 /**
- * Diff `incoming` against `baseline` over `fields`, adopting what the caller
- * has not touched and flagging the rest as conflicts.
+ * Diff `incoming` against `baseline` over `fields`, adopting what the caller has not touched and
+ * flagging the rest as conflicts. `baseline` is the value the draft last agreed with the server on,
+ * not necessarily what is on screen (`current`), the distinction `useEntityDraft` draws. A field
+ * the caller touched and then set back to the baseline's value is not touched for this call:
+ * `touched` should reflect that, not "was ever edited".
  *
- * `baseline` is the value the draft last agreed with the server on, not
- * necessarily what is on screen now (`current`) - the same distinction
- * `useEntityDraft` draws. A field the caller touched and then set back to the
- * baseline's own value is not "touched" for this call: `touched` should
- * reflect that, not just "was ever edited".
- *
- * `options.equals` replaces the JSON compare for the fields it names, in both
- * the "did the fetch change it", the "does the draft already agree" and the
- * "is it our save's echo" tests.
+ * `options.equals` replaces the JSON compare for the fields it names in all three tests: did the
+ * fetch change it, does the draft already agree, is it our save's echo.
  */
 export function mergeExternalWrite<T, K extends keyof T>(
 	fields: readonly K[],
@@ -105,10 +95,9 @@ export function mergeExternalWrite<T, K extends keyof T>(
 			patch[field] = next;
 			nextBaseline[field] = next;
 		} else if (same(next, current[field]) || isEcho) {
-			// Touched, but the fetch agrees with the draft (our own save landed,
-			// or a coincidence) or with what our save sent while the draft moved
-			// on: nothing to adopt, just catch baseline up. The field stays
-			// touched, so the next save still sends the newer draft.
+			// Touched, but the fetch agrees with the draft (our own save landed, or a coincidence)
+			// or with what our save sent while the draft moved on: nothing to adopt, just catch
+			// baseline up. The field stays touched, so the next save still sends the newer draft.
 			nextBaseline[field] = next;
 		} else {
 			// Touched, and the fetch disagrees with the draft: a real conflict.

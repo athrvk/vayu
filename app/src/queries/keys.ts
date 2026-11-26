@@ -5,12 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Query Keys
- *
- * Centralized query key factory for type-safe, consistent cache keys.
- * Following TanStack Query best practices for query key management.
- */
+/** The central query key factory, for type-safe, consistent cache keys. */
 
 import type { RequestDefaultsScope } from "@/types";
 
@@ -31,11 +26,10 @@ export const queryKeys = {
 		// A collection's `RequestSummary` rows, the tree's list (#2546).
 		listByCollection: (collectionId: string) =>
 			[...queryKeys.requests.lists(), { collectionId }] as const,
-		// The same collection's whole rows, for the one reader that needs every
-		// column of every request (the column audit). Under the summary list's
-		// key on purpose: each invalidation of that list reaches this one too,
-		// and a `Request` is a `RequestSummary`, so a scan of `lists()` still
-		// reads summaries whichever of the two it lands on.
+		// The same collection's whole rows, for the one reader that needs every column of every
+		// request (the column audit). Under the summary list's key on purpose: each invalidation of
+		// that list reaches this one too, and a `Request` is a `RequestSummary`, so a scan of
+		// `lists()` still reads summaries whichever of the two it lands on.
 		fullListByCollection: (collectionId: string) =>
 			[...queryKeys.requests.listByCollection(collectionId), "full"] as const,
 		details: () => [...queryKeys.requests.all, "detail"] as const,
@@ -46,16 +40,14 @@ export const queryKeys = {
 		examples: (id: string) => [...queryKeys.requests.detail(id), "examples"] as const,
 	},
 
-	// Deleted collections, requests (issue #988), environments (#2970), examples
-	// (#2971) and client certificates (#2973). One key: the engine reports every
-	// deleted root in one call and there is no per-entry read - restoring or
-	// purging one changes that same list.
+	// Deleted collections, requests (#988), environments (#2970), examples (#2971) and client
+	// certificates (#2973). One key: the engine reports every deleted root in one call and there is
+	// no per-entry read, so restoring or purging one changes that same list.
 	//
 	// A sibling of the live caches (`collections`, `requests`, `environments`,
-	// `clientCertificates`) rather than a branch of them, because it is their
-	// complement: what those list is exactly what this one does not, so a delete
-	// invalidates across the boundary in one direction and a restore in the
-	// other.
+	// `clientCertificates`), not a branch of them, because it is their complement: what those list
+	// is exactly what this one does not, so a delete invalidates across the boundary in one
+	// direction and a restore in the other.
 	trash: {
 		all: ["trash"] as const,
 		list: () => [...queryKeys.trash.all, "list"] as const,
@@ -70,68 +62,56 @@ export const queryKeys = {
 		// invalidate/patch every variant at once.
 		list: (filters: Record<string, unknown> = {}) =>
 			[...queryKeys.runs.lists(), filters] as const,
-		// The last completed design run for a request is one row cached as a
-		// plain `RunListResponse`, so it must NOT sit under `lists()`: the
-		// delete-run patch walks every cache under that prefix as `InfiniteData`
-		// and threw on this shape (`old.pages` undefined) for any open request
-		// tab. Its own family keeps the two apart at the root. `lastDesigns()`
-		// is the prefix to invalidate when the run set changes without a known
-		// request (a delete, a history clear): a run id gives no way back to the
-		// request the run belonged to, and `RequestBuilderProvider` mounts this
-		// query for every open request tab, so without the prefix a deleted run
-		// goes on being restored into one.
+		// The last completed design run for a request: one row cached as a plain `RunListResponse`,
+		// so it must NOT sit under `lists()`, where the delete-run patch walks every cache as
+		// `InfiniteData` and would throw on this shape (`old.pages` undefined) for any open request
+		// tab. Its own family keeps the two apart at the root. `lastDesigns()` is the prefix to
+		// invalidate when the run set changes without a known request (a delete, a history clear):
+		// a run id gives no way back to the request the run belonged to, and
+		// `RequestBuilderProvider` mounts this query for every open request tab, so without the
+		// prefix a deleted run goes on being restored into one.
 		lastDesigns: () => [...queryKeys.runs.all, "lastDesign"] as const,
 		lastDesign: (requestId: string) => [...queryKeys.runs.lastDesigns(), requestId] as const,
-		// The last N design runs of one request, for the context bar's Recent
-		// sends section. Its own family for the same reason `lastDesign` has
-		// one: it caches a plain `RunListResponse`, and the delete-run patch
-		// walks everything under `lists()` as `InfiniteData`. `recentDesigns()`
-		// is the prefix to invalidate when the run set changes without a known
-		// request (a delete, a history clear).
+		// The last N design runs of one request, for the context bar's Recent sends section. Its
+		// own family for `lastDesign`'s reason: it caches a plain `RunListResponse`, and the
+		// delete-run patch walks everything under `lists()` as `InfiniteData`. `recentDesigns()` is
+		// the prefix to invalidate when the run set changes without a known request (a delete, a
+		// history clear).
 		recentDesigns: () => [...queryKeys.runs.all, "recentDesign"] as const,
 		recentDesign: (requestId: string) =>
 			[...queryKeys.runs.recentDesigns(), requestId] as const,
-		// The most recent collection run of one collection, for the context
-		// bar's Last run section. Its own family for the third time and the same
-		// reason as the two above: it caches a plain `RunListResponse`, and the
-		// delete-run patch walks everything under `lists()` as `InfiniteData`.
-		// `lastCollectionRuns()` is the prefix to invalidate when the run set
+		// The most recent collection run of one collection, for the context bar's Last run section.
+		// Its own family for `lastDesign`'s reason (a plain `RunListResponse`, which the delete-run
+		// patch must not walk). `lastCollectionRuns()` is the prefix to invalidate when the run set
 		// changes without a known collection (a delete, a history clear).
 		lastCollectionRuns: () => [...queryKeys.runs.all, "lastCollectionRun"] as const,
 		lastCollectionRun: (collectionId: string) =>
 			[...queryKeys.runs.lastCollectionRuns(), collectionId] as const,
-		// The run pinned as baseline for one request or one collection, for the
-		// history view's vs-baseline strip. Its own family for the fourth time
-		// and the same reason as the three above: it caches a plain
-		// `RunListResponse`, and the delete-run patch walks everything under
-		// `lists()` as `InfiniteData`. `baselines()` is the prefix to invalidate
-		// when a pin moves, or when the run set changes without a known
-		// request. `baseline` takes a request id or the free-form "METHOD url"
-		// of an unsaved request; a collection's key has a segment of its own, so
-		// no id can read as one.
+		// The run pinned as baseline for one request or one collection, for the history view's
+		// vs-baseline strip. Its own family for `lastDesign`'s reason (a plain `RunListResponse`,
+		// which the delete-run patch must not walk). `baselines()` is the prefix to invalidate when
+		// a pin moves, or when the run set changes without a known request. `baseline` takes a
+		// request id or the free-form "METHOD url" of an unsaved request; a collection's key has a
+		// segment of its own, so no id can read as one.
 		baselines: () => [...queryKeys.runs.all, "baseline"] as const,
 		baseline: (requestId: string) => [...queryKeys.runs.baselines(), requestId] as const,
 		collectionBaseline: (collectionId: string) =>
 			[...queryKeys.runs.baselines(), "collection", collectionId] as const,
-		// The load runs of one request or one collection, for the compare picker
-		// and the trend. Its own family: it caches a plain `RunListResponse`,
-		// and the delete-run patch walks everything under `lists()` as
-		// `InfiniteData`. `requestRuns()` is the prefix to invalidate when a run
-		// ends, is deleted or is pinned; a collection's list sits under it with
-		// a segment of its own, so every such invalidation reaches it too.
+		// The load runs of one request or one collection, for the compare picker and the trend. Its
+		// own family for `lastDesign`'s reason (a plain `RunListResponse`, which the delete-run
+		// patch must not walk). `requestRuns()` is the prefix to invalidate when a run ends, is
+		// deleted or is pinned; a collection's list sits under it with a segment of its own, so
+		// every such invalidation reaches it too.
 		requestRuns: () => [...queryKeys.runs.all, "requestRun"] as const,
 		requestRun: (requestId: string) => [...queryKeys.runs.requestRuns(), requestId] as const,
 		collectionRun: (collectionId: string) =>
 			[...queryKeys.runs.requestRuns(), "collection", collectionId] as const,
-		// One small page of runs matching a palette query. Its own family for the
-		// fifth time and the same reason as the four above: it caches a plain
-		// `RunListResponse`, and the delete-run patch walks everything under
-		// `lists()` as `InfiniteData`.
+		// One small page of runs matching a palette query. Its own family for `lastDesign`'s
+		// reason.
 		searches: () => [...queryKeys.runs.all, "search"] as const,
 		search: (q: string) => [...queryKeys.runs.searches(), q] as const,
-		// How many runs are stored (#2979), a bare number off a `limit=1` read.
-		// Its own family for the sixth time and the same reason as the five above:
-		// the delete-run patch walks everything under `lists()` as `InfiniteData`.
+		// How many runs are stored (#2979), a bare number off a `limit=1` read. Its own family for
+		// `lastDesign`'s reason.
 		count: () => [...queryKeys.runs.all, "count"] as const,
 		details: () => [...queryKeys.runs.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,
@@ -155,10 +135,9 @@ export const queryKeys = {
 		samples: (id: string) => [...queryKeys.runs.all, "samples", id] as const,
 	},
 
-	// Webhook inboxes (issue #480). Engine-process state, not stored records -
-	// `list` is every inbox this engine has started, `captures` is one inbox's
-	// recorded requests, kept apart because the live stream invalidates only
-	// the second.
+	// Webhook inboxes (#480). Engine-process state, not stored records: `list` is every inbox this
+	// engine has started, `captures` one inbox's recorded requests, kept apart because the live
+	// stream invalidates only the second.
 	inbox: {
 		all: ["inbox"] as const,
 		list: () => [...queryKeys.inbox.all, "list"] as const,
@@ -173,10 +152,9 @@ export const queryKeys = {
 		list: () => [...queryKeys.mockIssuer.all, "list"] as const,
 	},
 
-	// Collection mock servers (issue #481 phase 2). `list` is every running
-	// mock; `routes` is one mock's table, kept apart because the table is a
-	// start-time snapshot that never changes under a running mock - so it is
-	// fetched once per mock rather than riding on the list's poll.
+	// Collection mock servers (#481 phase 2). `list` is every running mock; `routes` is one mock's
+	// table, kept apart because it polls on its own cadence: its shape is a start-time snapshot,
+	// but its hit counts change live (`useMockServerRoutesQuery`).
 	mockServer: {
 		all: ["mockServer"] as const,
 		list: () => [...queryKeys.mockServer.all, "list"] as const,
@@ -184,10 +162,9 @@ export const queryKeys = {
 		activity: (mockId: string) => [...queryKeys.mockServer.all, "activity", mockId] as const,
 	},
 
-	// Warm-cache pass over every collection's requests, one `GET /requests`
-	// (see usePrefetchCollectionsAndRequests). Keyed here rather than inline so a
-	// write that can change any collection's requests re-runs it as that one call
-	// (`invalidateAllRequestLists`).
+	// Warm-cache pass over every collection's requests, one `GET /requests` (see
+	// usePrefetchCollectionsAndRequests). Keyed here, not inline, so a write that can change any
+	// collection's requests re-runs it as that one call (`invalidateAllRequestLists`).
 	prefetch: {
 		all: ["prefetch"] as const,
 		allRequests: () => [...queryKeys.prefetch.all, "all-requests"] as const,
@@ -198,44 +175,35 @@ export const queryKeys = {
 	specs: {
 		all: ["specs"] as const,
 		detail: (id: string) => [...queryKeys.specs.all, "detail", id] as const,
-		// The same document described rather than transferred (issue #712), under
-		// its own key because it is a different shape of answer: a cached `meta`
-		// must never satisfy a reader that needs `content`, and one document in
-		// two caches is safe precisely because both are immutable - a changed
-		// document is a new id.
+		// The same document described rather than transferred (#712), under its own key as a
+		// different shape of answer: a cached `meta` must never satisfy a reader that needs
+		// `content`, and one document in two caches is safe because both are immutable (a changed
+		// document is a new id).
 		meta: (id: string) => [...queryKeys.specs.all, "meta", id] as const,
 		/**
-		 * One match of a collection's requests against a document's operations
-		 * (issue #761).
-		 *
-		 * Keyed by a fingerprint of **both** inputs rather than by a document id,
-		 * because the document being matched has not been stored yet - the Spec
-		 * tab asks before the user commits to the bind. With both inputs in the
-		 * key the answer cannot go stale under it, which is what lets this be
-		 * cached indefinitely like the immutable document reads above.
+		 * One match of a collection's requests against a document's operations (#761). Keyed by a
+		 * fingerprint of **both** inputs, not a document id, because the document being matched has
+		 * not been stored yet (the Spec tab asks before the user commits to the bind). With both
+		 * inputs in the key the answer cannot go stale under it, which lets it be cached
+		 * indefinitely like the immutable document reads above.
 		 */
 		match: (collectionId: string, fingerprint: string) =>
 			[...queryKeys.specs.all, "match", collectionId, fingerprint] as const,
 		/**
-		 * One picked document, described (issue #869).
-		 *
-		 * Keyed by the pick rather than by the bytes: the document has not been
-		 * stored, so it has no id, and a 12 MB string is not a cache key. The
-		 * Spec tab holds one picked document at a time and stamps each pick with
-		 * a token, so the token *is* the identity of "the document on screen".
+		 * One picked document, described (#869). Keyed by the pick, not by the bytes: the document
+		 * has not been stored, so it has no id, and a 12 MB string is not a cache key. The Spec tab
+		 * holds one picked document at a time and stamps each pick with a token, so the token is
+		 * the identity of "the document on screen".
 		 */
 		describe: (token: string) => [...queryKeys.specs.all, "describe", token] as const,
 		/**
-		 * One collection assembled into a document (issue #855).
-		 *
-		 * Keyed by format as well as collection, because the two serializations
-		 * are two answers and the dialog toggles between them - a shared key
-		 * would re-assemble the document on every toggle. `opened` is what the
-		 * document reads above do not need: a spec cannot change under its id,
-		 * but a collection changes under its whenever a request is edited, so
-		 * the reading is pinned to *when it was asked for* rather than cached
-		 * indefinitely. See `useSpecExportQuery` for why that is a key rather
-		 * than a `staleTime`.
+		 * One collection assembled into a document (#855). Keyed by format as well as collection,
+		 * because the two serializations are two answers and the dialog toggles between them: a
+		 * shared key would re-assemble the document on every toggle. `opened` is what the document
+		 * reads above do not need: a spec cannot change under its id, but a collection changes
+		 * under its whenever a request is edited, so the reading is pinned to when it was asked
+		 * for, not cached indefinitely. See `useSpecExportQuery` for why that is a key rather than
+		 * a `staleTime`.
 		 */
 		export: (collectionId: string, format: string, mode: string, opened: number) =>
 			[...queryKeys.specs.all, "export", collectionId, format, mode, opened] as const,
@@ -295,14 +263,12 @@ export const queryKeys = {
 		all: ["config"] as const,
 	},
 
-	// What a send would add on its own (issue #1229). Its own key rather than a
-	// slice of `config`: it is a different endpoint, and invalidating one must
-	// not refetch the other.
+	// What a send would add on its own (#1229). Its own key, not a slice of `config`: it is a
+	// different endpoint, and invalidating one must not refetch the other.
 	//
-	// Scoped by `scope` (issue #1338): design and load can disagree
-	// (`negotiateCompression` vs `loadNegotiateCompression`), so the two answers
-	// must not collide in one cache entry. `all` stays the invalidation root -
-	// a prefix key invalidates every descendant, so `useUpdateConfigMutation`
+	// Scoped by `scope` (#1338): design and load can disagree (`negotiateCompression` vs
+	// `loadNegotiateCompression`), so the two answers must not share a cache entry. `all` stays the
+	// invalidation root: a prefix key invalidates every descendant, so `useUpdateConfigMutation`
 	// still drops both scopes at once.
 	requestDefaults: {
 		all: ["requestDefaults"] as const,
@@ -324,21 +290,19 @@ export const queryKeys = {
 		all: ["elementKinds"] as const,
 	},
 
-	// `POST /compose` for a stored request - what will actually be sent, with
-	// variables substituted and `inherit` auth walked. Keyed by environment as
-	// well as request: the same request composes differently per environment,
-	// and one key for both would serve the wrong snippet after a switch.
+	// `POST /compose` for a stored request: what will actually be sent, with variables substituted
+	// and `inherit` auth walked. Keyed by environment as well as request: the same request composes
+	// differently per environment, and one key for both would serve the wrong snippet after a
+	// switch.
 	//
-	// `allForRequest` is the per-request invalidation root, and `forRequest` is
-	// built from it rather than beside it so the prefix relationship holds by
-	// construction: a write that names one request drops that request's
-	// compositions under every environment, and no other request's (issue
-	// #1438).
+	// `allForRequest` is the per-request invalidation root, and `forRequest` is built from it, not
+	// beside it, so the prefix relationship holds by construction: a write that names one request
+	// drops that request's compositions under every environment, and no other request's (#1438).
 	//
-	// `source` is what the composition was asked to read (#2638): the mounted
-	// builder's editor state or the saved row. A builder appearing for the
-	// request is then a new key and a fresh compose, not the saved row's answer
-	// held under `staleTime: Infinity` after the draft became reachable.
+	// `source` is what the composition was asked to read (#2638): the mounted builder's editor
+	// state or the saved row. A builder appearing for the request is then a new key and a fresh
+	// compose, not the saved row's answer held under `staleTime: Infinity` after the draft became
+	// reachable.
 	compose: {
 		all: ["compose"] as const,
 		allForRequest: (requestId: string) => [...queryKeys.compose.all, requestId] as const,

@@ -8,26 +8,25 @@
  */
 
 /**
- * @file core/script_api_scan.hpp
  * @brief Which Postman script APIs an imported script uses that Vayu does not
  *        run (issues #2576, #2527).
  *
  * A Postman script that leans on a bundled library or a module imports with a
- * clean preview and throws at first use - and a signing pre-request that throws
+ * clean preview and throws at first use, and a signing pre-request that throws
  * still lets the request go out unsigned. This is the notice's source: a fixed,
  * table-driven list of names, found by reading the script as tokens rather than
  * as text.
  *
  * It is a notice, so it errs toward naming too much: a `cheerio` the script
  * reads from somewhere unusual may be named. What it must not do is miss one of
- * the listed names, and the two
- * places a plain text search would miss or invent one - a name that only
- * appears in a comment or a string, and a name the script declares itself - are
- * why the text is stripped first and a declared name is not counted.
+ * the listed names, and the two places a plain text search would miss or invent
+ * one (a name that only appears in a comment or a string, and a name the script
+ * declares itself) are why the text is stripped first and a declared name is
+ * not counted.
  *
  * A row of the table is retired in the commit that makes Vayu run the API
- * (#2527 phases b and c, #2528 for the chai spellings), not before: a name
- * Vayu now runs would otherwise be reported as one it does not.
+ * (#2527, #2528), not before: a name Vayu runs would otherwise be reported as
+ * one it does not.
  */
 
 #include <cstddef>

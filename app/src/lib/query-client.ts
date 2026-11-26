@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * TanStack Query Client Configuration
- *
- * Centralized QueryClient setup with sensible defaults for Vayu.
- */
+/** The app's TanStack QueryClient and its defaults. */
 
 import { QueryClient } from "@tanstack/react-query";
 import { QUERY_CACHE } from "@/config/cache";
@@ -17,12 +13,10 @@ import { ApiError, EngineUnreachableError } from "@/services/http-client";
 import { engineStarting } from "./engine-start-window";
 
 /**
- * A 4xx from the engine is a verdict, not a hiccup: a 404 for a deleted row
- * answers the same way three times in a row, and retrying it only delays the
- * error the caller is waiting for. Anything else - a 5xx, a timeout, an
- * unreachable engine - keeps the default budget, because those do recover.
- *
- * Exported for the autosave retry (#1889), which draws the same line.
+ * A 4xx from the engine is a verdict, not a hiccup: a 404 for a deleted row answers the same way
+ * three times in a row, and retrying it only delays the error the caller is waiting for. Anything
+ * else (a 5xx, a timeout, an unreachable engine) keeps the default budget, because those do
+ * recover. Exported for the autosave retry (#1889), which draws the same line.
  */
 export function isFinalError(error: unknown): boolean {
 	return error instanceof ApiError && error.statusCode >= 400 && error.statusCode < 500;
@@ -31,52 +25,45 @@ export function isFinalError(error: unknown): boolean {
 /**
  * An engine that has not arrived yet, rather than one that failed.
  *
- * The window paints while the engine is still starting (#1144), and every query
- * mounted at first paint - collections, runs, a restored tab's request - fires
- * into a port nothing is listening on yet. Spending the retry budget there turns
- * an ordinary launch into error panes ("Couldn't load this request") beside a
- * Dock that correctly says "Starting…", until the health poll's reconnect
- * refetch replaces them. So while a start is in flight a refused connection is
- * not counted against the budget: the query stays loading, and it is the start
- * window's own expiry (`engine-start-window.ts`) that lets the failure through,
- * the same moment the Dock turns `unreachable`. An `ApiError` is never this: an
- * engine answered.
+ * The window paints while the engine is still starting (#1144), and every query mounted at first
+ * paint (collections, runs, a restored tab's request) fires into a port nothing is listening on
+ * yet. Spending the retry budget there turns an ordinary launch into error panes ("Couldn't load
+ * this request") beside a Dock that correctly says "Starting…", until the health poll's reconnect
+ * refetch replaces them. So while a start is in flight a refused connection is not counted against
+ * the budget: the query stays loading, and the start window's own expiry (`engine-start-window.ts`)
+ * lets the failure through, the moment the Dock turns `unreachable`. An `ApiError` is never this:
+ * an engine answered.
  *
- * Exported for the queries that bring their own `retry` predicate, which do not
- * inherit this from `shouldRetryQuery`.
+ * Exported for the queries that bring their own `retry` predicate, which do not inherit this from
+ * `shouldRetryQuery`.
  */
 export function isEngineStartFailure(error: unknown): boolean {
 	return error instanceof EngineUnreachableError && engineStarting();
 }
 
 /**
- * A retry budget of @p budget attempts that, like the default predicate, does
- * not spend it on an engine that is still starting. A query that states a
- * bare number for `retry` replaces `shouldRetryQuery` outright, and with it
- * the start-window rule, so a launch-time query with its own budget states it
- * through this instead.
+ * A retry budget of @p budget attempts that, like the default predicate, does not spend it on an
+ * engine that is still starting. A bare number for `retry` replaces `shouldRetryQuery` outright,
+ * and with it the start-window rule, so a launch-time query with its own budget states it through
+ * this instead.
  */
 export function retryWithin(budget: number) {
 	return (failureCount: number, error: unknown): boolean =>
 		isEngineStartFailure(error) || failureCount < budget;
 }
 
-/**
- * Exported so a query with its own retry rule can be checked against this one.
- */
+/** Exported so a query with its own retry rule can be checked against this one. */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
 	if (isFinalError(error)) return false;
 	return isEngineStartFailure(error) || failureCount < QUERY_CACHE.DEFAULT_QUERY_RETRY;
 }
 
 /**
- * How long a query waits before the next attempt.
- *
- * While the engine is starting, the short fixed `ENGINE_START_RETRY_DELAY_MS`:
- * `invalidateQueries` does not cut short a retry that is already sleeping for a
- * query with no data yet, so this delay is how long data lags an engine that has
- * just started listening. Otherwise TanStack's own default, restated because the
- * library does not export it: doubling from one second, capped at thirty.
+ * How long a query waits before the next attempt. While the engine is starting, the short fixed
+ * `ENGINE_START_RETRY_DELAY_MS`: `invalidateQueries` does not cut short a retry already sleeping
+ * for a query with no data yet, so this delay is how long data lags an engine that has just started
+ * listening. Otherwise TanStack's own default, restated because the library does not export it:
+ * doubling from one second, capped at thirty.
  */
 export function queryRetryDelay(failureCount: number, error: unknown): number {
 	if (isEngineStartFailure(error)) return QUERY_CACHE.ENGINE_START_RETRY_DELAY_MS;
@@ -84,10 +71,9 @@ export function queryRetryDelay(failureCount: number, error: unknown): number {
 }
 
 /**
- * The mutation default used to be a bare count with no error-type awareness,
- * unlike `shouldRetryQuery` - so a 413 (a save whose body the engine refused)
- * or a 400 was retried once, re-sending the same oversized or malformed
- * payload for the same rejection. A 4xx is as final for a write as for a read.
+ * Mutations stop on a 4xx, as `shouldRetryQuery` does: a 413 (a save whose body the engine refused)
+ * or a 400, retried, re-sends the same oversized or malformed payload for the same rejection. A 4xx
+ * is as final for a write as for a read.
  */
 export function shouldRetryMutation(failureCount: number, error: unknown): boolean {
 	return !isFinalError(error) && failureCount < QUERY_CACHE.DEFAULT_MUTATION_RETRY;
@@ -102,7 +88,6 @@ export const queryClient = new QueryClient({
 			retryDelay: queryRetryDelay,
 			// Don't refetch on window focus for desktop app
 			refetchOnWindowFocus: false,
-			// Refetch on reconnect
 			refetchOnReconnect: true,
 		},
 		mutations: {

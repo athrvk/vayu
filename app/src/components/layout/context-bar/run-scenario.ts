@@ -6,22 +6,18 @@
  */
 
 /**
- * A collection run's `scenario` block, read out of the run's stored snapshot.
+ * A collection run's `scenario` block, read out of the run's stored snapshot. `RunConfigSnapshot`
+ * is typed for a load run's flat keys with an index signature for the rest, so the block arrives as
+ * `unknown`; narrowing it once, here, keeps two context-bar sections from each writing their own
+ * cast, and makes "which parts are present" answerable in a unit test rather than by opening the
+ * bar.
  *
- * `RunConfigSnapshot` is typed for a load run's flat keys and carries an index
- * signature for everything else, so the block arrives as `unknown`. Narrowing
- * it once, here, is what keeps two context-bar sections from each writing their
- * own cast - and what makes the "which parts are actually present" question
- * answerable in a unit test rather than by opening the bar.
- *
- * What the engine writes is `build_scenario_manifest`
- * (`engine/src/core/scenario_plan.cpp`), placed on the snapshot by
- * `scenario_snapshot` (`engine/src/http/routes/execution.cpp`) - the raw
- * `scenario` block the client sent is *replaced* by the resolved manifest, so
- * what is read back is the plan that ran, not the request for one. Every field
- * is optional here for the same reason the app never trusts a shape it did not
- * validate: a run stored by an older engine, or a snapshot that failed to
- * sanitize, must render as "nothing recorded" rather than throw.
+ * The engine writes it with `build_scenario_manifest` (`engine/src/core/scenario_plan.cpp`), placed
+ * on the snapshot by `scenario_snapshot` (`engine/src/http/routes/execution.cpp`): the client's raw
+ * `scenario` block is *replaced* by the resolved manifest, so what is read back is the plan that
+ * ran, not the request for one. Every field is optional because the app never trusts a shape it did
+ * not validate: a run stored by an older engine, or a snapshot that failed to sanitize, must render
+ * as "nothing recorded" rather than throw.
  */
 
 import type { Run, RunConfigSnapshot } from "@/types";
@@ -63,12 +59,10 @@ function num(value: unknown): number | undefined {
 }
 
 /**
- * The scenario block of a run, or `null` for a run that has none.
- *
- * Gated on `run.type` as well as the key: `type` is what every other surface
- * branches on, and a load run whose snapshot happened to carry a `scenario` key
- * (a hand-rolled `POST /runs` body the engine ignored) is not a collection run
- * and must not render as one.
+ * The scenario block of a run, or `null` for a run that has none. Gated on `run.type` as well as
+ * the key: `type` is what every other surface branches on, and a load run whose snapshot carries a
+ * `scenario` key (a hand-rolled `POST /runs` body the engine ignored) is not a collection run and
+ * must not render as one.
  */
 export function scenarioFromSnapshot(run: Run | undefined): ScenarioSnapshot | null {
 	if (run?.type !== "scenario") return null;

@@ -8,7 +8,6 @@
  */
 
 /**
- * @file list_snapshot.hpp
  * @brief What `assert.snapshot` compares: the items an MCP list method
  *        answers (`tools/list`, `resources/list`, `prompts/list`) against a
  *        recorded baseline (#3807).

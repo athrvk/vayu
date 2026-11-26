@@ -6,11 +6,10 @@
  */
 
 /**
- * The reconnect backoff every hand-reconnected `EventSource` uses: the inbox
- * capture stream, a streaming send's events, and the change feed. Each one
- * reconnects on its own because an `EventSource` treats a non-200 as fatal;
- * what differs between them is only where the ladder starts and where it
- * stops, which each states beside the reason for its numbers.
+ * The reconnect backoff every hand-reconnected `EventSource` uses: the inbox capture stream, a
+ * streaming send's events, and the change feed. Each reconnects on its own because an `EventSource`
+ * treats a non-200 as fatal; they differ only in where the ladder starts and where it stops, which
+ * each states beside the reason for its numbers.
  */
 
 /**

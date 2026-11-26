@@ -6,29 +6,15 @@
  */
 
 /**
- * RowActionsMenu
- *
- * The "⋯" menu for a list row (a request, an environment). One component so
- * every row exposes its actions the same way, instead of each surface growing
- * its own inline delete button with its own hover treatment.
- *
- * Built on the DropdownMenu primitive rather than a hand-rolled popover so it
- * gets focus management, Escape-to-close and arrow-key navigation for free.
- *
- * **The open state is held here so a keyboard-dispatched click can open it**
- * (#1212). Radix's trigger listens on `pointerdown` and on its own `keydown`,
- * and neither hears `HTMLElement.click()` - which is exactly what the
- * collection tree's Shift+F10 / Menu / Shift+Enter keys dispatch at
- * `[data-tree-menu]` (`useRovingTreeFocus`). Every menu-only row action was
- * mouse-only for as long as that went unnoticed. The `detail === 0` test below
- * is what separates that click from a real one; see the handler.
- *
- * **The trigger shows its label on focus, but not on the focus the menu hands
- * back** (#3498). It is icon-only, so it takes the app's `Tooltip` like every
- * other icon button. A menu closing returns focus to its trigger, and a tooltip
- * opening on that focus would cover the row the user just acted on, every time;
- * so the close marks the hand-back and the trigger's focus handler declines to
- * open the tooltip for it.
+ * The "⋯" menu for a list row (a request, an environment), so every row exposes actions one way, on
+ * the DropdownMenu primitive for focus management, Escape and arrow keys. **The open state is held
+ * here so a keyboard-dispatched click can open it** (#1212): Radix's trigger listens on
+ * `pointerdown` and its own `keydown`, and neither hears `HTMLElement.click()`, which the
+ * collection tree's Shift+F10 / Menu / Shift+Enter dispatch at `[data-tree-menu]`
+ * (`useRovingTreeFocus`); the `detail === 0` test below tells that click from a real one. **The
+ * trigger shows its label on focus, but not on the focus the menu hands back** (#3498): icon-only,
+ * it takes the app's `Tooltip`, and a tooltip on a closing menu's returned focus would cover the
+ * row just acted on, so the close marks the hand-back and the focus handler declines it.
  */
 
 import { Fragment, useRef, useState, type FocusEvent } from "react";
@@ -46,9 +32,8 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useAfterMenuClose } from "./useAfterMenuClose";
-// The list, its grouping rule and what an item draws live beside this file:
-// right-click offers the same actions through a different Radix family
-// (`RowContextMenu`), and one of the two would otherwise drift.
+// The list, grouping rule and item drawing live beside this file: right-click offers the same
+// actions through another Radix family (`RowContextMenu`), and one would drift.
 import { rowActionRows, rowActionItemClass, type RowAction } from "./row-actions";
 import { RowActionBody } from "./RowActionBody";
 
@@ -59,21 +44,16 @@ interface RowActionsMenuProps {
 	/** Extra classes for the trigger (sizing lives with the calling row). */
 	className?: string;
 	/**
-	 * Tab stop of the trigger. `0` by default, so an ordinary row's menu is
-	 * reachable by Tab like any other control. A roving-tabindex tree passes
-	 * `-1`: there the whole tree is one tab stop and the row's keys are the
-	 * path in.
+	 * The trigger's tab stop: `0` by default, reachable by Tab; a roving-tabindex tree passes `-1`,
+	 * as the whole tree is one stop and the row's keys are the way in.
 	 */
 	tabIndex?: number;
 	/**
-	 * Runs after the roving-tabindex-tree focus return above, when the menu
-	 * has one (issue #1608's element-card Rename). This is the same signal
-	 * Radix uses to hand focus back to the trigger - firing once the closing
-	 * content's own cleanup (its `FocusScope` trap, and the `aria-hidden` it
-	 * places on the rest of the page while open) has actually finished, not
-	 * a guessed delay. A caller that wants to autofocus something of its own
-	 * on close (an inline rename input) calls `event.preventDefault()` here
-	 * the same way the tree-row branch above does.
+	 * Runs after the roving-tree focus return, when the menu has one (#1608's element-card Rename):
+	 * the signal Radix uses to return focus, fired once the closing content's cleanup (its
+	 * `FocusScope` trap, the `aria-hidden` on the page) is done, not after a guessed delay. A
+	 * caller autofocusing its own target on close (an inline rename input) calls
+	 * `event.preventDefault()` here, as the tree-row branch does.
 	 */
 	onCloseAutoFocus?: (event: Event) => void;
 }
@@ -87,17 +67,15 @@ export function RowActionsMenu({
 }: RowActionsMenuProps) {
 	const [open, setOpen] = useState(false);
 	const trigger = useRef<HTMLButtonElement>(null);
-	// True only while the closing menu hands focus back to the trigger. Radix
-	// focuses it synchronously inside the close's `onCloseAutoFocus`, so the
-	// flag is cleared on a microtask: a close that sends focus elsewhere (a
-	// field, a tree row, a click outside) leaves no stale flag behind.
+	// True only while the closing menu returns focus to the trigger. Radix focuses it synchronously
+	// in `onCloseAutoFocus`, so the flag clears on a microtask: a close sending focus elsewhere (a
+	// field, a tree row, a click outside) leaves no stale flag.
 	const focusReturning = useRef(false);
 	const { onSelectOf, runDeferred } = useAfterMenuClose();
 
 	if (actions.length === 0) return null;
 
-	// Runs before Radix's own focus handler, which opens the tooltip only when
-	// the event is not default-prevented.
+	// Runs before Radix's focus handler, which opens the tooltip only when not default-prevented.
 	const declineReturnedFocus = (e: FocusEvent) => {
 		if (focusReturning.current) e.preventDefault();
 	};
@@ -117,14 +95,11 @@ export function RowActionsMenu({
 							className={cn("size-target shrink-0", className)}
 							onClick={(e) => {
 								e.stopPropagation();
-								// A click with no pointer behind it - `.click()` from the
-								// tree's key handler, or an assistive-tech activation -
-								// reports `detail === 0`. A mouse click reports 1, and Radix
-								// has already toggled on its pointerdown by the time it
-								// arrives, so opening again here would close it on the way
-								// down. Keyboard focus on the trigger itself is Radix's
-								// keydown path, which preventDefaults and so never reaches
-								// this handler at all.
+								// A click with no pointer (`.click()` from the tree's keys, an
+								// assistive-tech activation) reports `detail === 0`. A mouse click
+								// reports 1 after Radix toggled on pointerdown, so opening here
+								// would close it. Keyboard focus on the trigger is Radix's keydown
+								// path, which preventDefaults and never reaches this.
 								if (e.detail === 0) setOpen(true);
 							}}
 						>
@@ -132,30 +107,28 @@ export function RowActionsMenu({
 						</Button>
 					</DropdownMenuTrigger>
 				</TooltipTrigger>
-				{/* The verb alone: the name carries the row ("More actions for Get
-				    users"), as `TooltipIconButton`'s `tooltip` does for row buttons. */}
+				{/*
+				 * The verb alone: the name carries the row ("More actions for Get users"), as
+				 * `TooltipIconButton`'s `tooltip` does.
+				 */}
 				<TooltipContent>More actions</TooltipContent>
 			</Tooltip>
 			<DropdownMenuContent
 				align="end"
-				// `min-w-[10rem]`, not `min-w-40`: the floor exists to hold the
-				// action labels ("Move up", "Duplicate", …), a text measure, and
-				// `min-w-40` rides `--spacing` - at the Default density it resolved
-				// under the primitive's own fixed `min-w-[8rem]` default
-				// (dropdown-menu.tsx), overriding a deliberately density-independent
-				// floor with a smaller, density-scaled one.
+				// `min-w-[10rem]`, not `min-w-40`: the floor holds action labels, a text measure,
+				// and `min-w-40` rides `--spacing`, falling under the primitive's fixed
+				// `min-w-[8rem]` (dropdown-menu.tsx) at Default.
 				className="min-w-[10rem]"
 				onCloseAutoFocus={(e) => {
 					focusReturning.current = true;
 					queueMicrotask(() => {
 						focusReturning.current = false;
 					});
-					// A field the action opens takes the focus; the row must not.
+					// A field the action opens takes focus; the row must not.
 					const handedToField = runDeferred(e);
-					// Radix hands focus back to the trigger. In a roving-tabindex
-					// tree that control is deliberately not a tab stop, so the row
-					// it belongs to is where focus has to land - otherwise Escape
-					// leaves the tree's one stop on something Tab cannot return to.
+					// Radix returns focus to the trigger, which in a roving-tabindex tree is not a
+					// tab stop, so focus lands on its row, or Escape leaves the tree's one stop
+					// where Tab cannot return.
 					const row = handedToField
 						? null
 						: trigger.current?.closest<HTMLElement>('[role="treeitem"]');

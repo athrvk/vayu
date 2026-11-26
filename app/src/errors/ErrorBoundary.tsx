@@ -6,9 +6,8 @@
  */
 
 /**
- * Error Boundary
- *
- * React Error Boundary component to catch and display errors in the component tree.
+ * Catches a render error in the tree below it, logs it, and shows a fallback: by default, a report
+ * the user can copy.
  */
 
 import { Component, ErrorInfo, ReactNode } from "react";
@@ -17,18 +16,16 @@ import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/u
 import { logError } from "./error-logger";
 
 /**
- * The main process replaces a record's whole `fields` with `{ truncated: true }`
- * once they serialise past 4000 characters (`electron/log-ipc.ts`), and a deep
- * component stack alone can reach that, taking severity and component with it.
+ * The main process replaces a record's whole `fields` with `{ truncated: true }` past 4000
+ * serialised characters (`electron/log-ipc.ts`), and a deep component stack alone can reach that,
+ * taking severity and component with it.
  */
 const COMPONENT_STACK_LOG_CHARS = 2000;
 
-// App version from package.json (injected by Vite via vite.config.ts)
+// From package.json, injected by Vite (vite.config.ts `define`).
 const APP_VERSION = typeof __VAYU_VERSION__ !== "undefined" ? __VAYU_VERSION__ : "0.1.1";
 
-/**
- * Extract Electron/Chrome versions from user agent
- */
+/** Electron and Chrome versions, read from the user agent. */
 function getElectronInfo(): { electron: string; chrome: string } {
 	const ua = navigator.userAgent;
 	const electronMatch = ua.match(/Electron\/(\d+\.\d+\.\d+)/);
@@ -71,10 +68,8 @@ export class ErrorBoundary extends Component<Props, State> {
 	}
 
 	componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-		// Store errorInfo for later use
 		this.setState({ errorInfo });
 
-		// Log error
 		logError(error, "high", {
 			component: "ErrorBoundary",
 			action: "componentDidCatch",
@@ -83,7 +78,6 @@ export class ErrorBoundary extends Component<Props, State> {
 			},
 		});
 
-		// Call custom error handler if provided
 		if (this.props.onError) {
 			this.props.onError(error, errorInfo);
 		}
@@ -102,15 +96,12 @@ export class ErrorBoundary extends Component<Props, State> {
 		window.location.reload();
 	};
 
-	/**
-	 * Generate comprehensive error report for copying
-	 */
+	/** The report "Copy error info" puts on the clipboard. */
 	generateErrorReport = (): string => {
 		const { error, errorInfo } = this.state;
 		const timestamp = new Date().toISOString();
 		const electronInfo = getElectronInfo();
 
-		// Gather system info
 		const systemInfo = {
 			appVersion: APP_VERSION,
 			platform: navigator.platform,
@@ -118,7 +109,6 @@ export class ErrorBoundary extends Component<Props, State> {
 			language: navigator.language,
 			url: window.location.href,
 			timestamp,
-			// Electron info extracted from user agent
 			...electronInfo,
 		};
 
@@ -179,14 +169,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
 	render() {
 		if (this.state.hasError) {
-			// Use custom fallback if provided
 			if (this.props.fallback) {
 				return this.props.fallback;
 			}
 
 			const { copied } = this.state;
 
-			// Default error UI
 			return (
 				<div className="flex items-center justify-center min-h-screen p-4 bg-background">
 					<Card className="w-full max-w-lg">

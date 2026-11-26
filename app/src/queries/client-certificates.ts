@@ -6,11 +6,9 @@
  */
 
 /**
- * Client-certificate registry queries (issue #707)
- *
- * The engine maps host patterns to certificates and presents the matching one
- * on every outbound path - design sends, load runs, SSE streams, scripts and
- * the OAuth token fetch. These back the Settings card that manages the map.
+ * Client-certificate registry queries (#707), backing the Settings card that manages the map. The
+ * engine maps host patterns to certificates and presents the matching one on every outbound path:
+ * design sends, load runs, SSE streams, scripts and the OAuth token fetch.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -60,10 +58,9 @@ export function useDeleteClientCertificateMutation() {
 	return useMutation({
 		mutationFn: (id: string) => apiService.deleteClientCertificate(id),
 		onSuccess: () => {
-			// Refetched rather than patched out of the cache: the engine refuses
-			// a duplicate host+port pair, so the list is the authority on what a
-			// new entry may claim and a hand-patched one could offer a target
-			// that is still taken.
+			// Refetched, not patched out of the cache: the engine refuses a duplicate host+port
+			// pair, so the list is the authority on what a new entry may claim, and a hand-patched
+			// one could offer a target that is still taken.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.clientCertificates.all });
 			void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 		},

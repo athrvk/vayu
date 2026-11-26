@@ -6,13 +6,10 @@
  */
 
 /**
- * Postman-style path variables (issue #1764): a `:name` segment in the URL,
- * with its value in a params row marked `in: "path"`.
- *
- * The URL keeps `:name` verbatim; the engine substitutes the enabled rows at
- * compose time. This file is the app's one statement of which segments count,
- * and of the substitution the snippets (`services/codegen`) and the Params
- * tab's "Sends" line need to agree with the engine on, pinned to it by
+ * Postman-style path variables (#1764): a `:name` URL segment, valued by a params row marked
+ * `in: "path"`. The URL keeps `:name` verbatim and the engine substitutes enabled rows at compose
+ * time. This is the app's one statement of which segments count and of the substitution the
+ * snippets (`services/codegen`) and the Params "Sends" line must match the engine on, pinned by
  * `engine/tests/fixtures/path-variable-conformance.json`.
  */
 
@@ -95,14 +92,11 @@ export function maskTokens(text: string): string {
 const isSlash = (c: string | undefined) => c === "/" || c === "\\";
 
 /**
- * Every `:name` segment of the URL's path, in order, repeats included - the
- * engine's `path_variable_segments`, step for step.
- *
- * Leading whitespace is skipped; a `{{variable}}` token is opaque; the fragment
- * (from the first `#`) and then the query (from the first `?`) are cut off; a
- * backslash is a `/`; `scheme://` and the slashes after it are skipped (`file:`
- * keeps one); and the path is what follows the first `/` after that. So a port
- * (`host:8080`) and a `:` in the query or the fragment are never variables.
+ * Every `:name` segment of the URL's path, in order, repeats included: the engine's
+ * `path_variable_segments` step for step. Leading whitespace is skipped; a `{{variable}}` token is
+ * opaque; the fragment (first `#`), then the query (first `?`) are cut; a backslash is a `/`;
+ * `scheme://` and its slashes are skipped (`file:` keeps one); the path follows the next `/`. So a
+ * port (`host:8080`) or a `:` in query or fragment is never a variable.
  */
 export function pathVariableSegments(url: string): PathVariableSegment[] {
 	const found: PathVariableSegment[] = [];
@@ -169,11 +163,10 @@ export function pathRowsFromUrl(url: string): KeyValueItem[] {
 }
 
 /**
- * The path row that answers `name`: the last enabled one with that key, as the
- * engine's `find_path_variable_row` picks it. Postman's `VariableList` answers
- * with the last entry whatever its `disabled` flag (its UI has no toggle for a
- * path variable); Vayu has one, so a disabled row answers nothing. An
- * `enabled` that is absent (or not a boolean) counts as enabled.
+ * The path row answering `name`: the last enabled one with that key, as the engine's
+ * `find_path_variable_row` picks. Postman answers with the last entry whatever its `disabled` flag
+ * (it has no toggle); Vayu has one, so a disabled row answers nothing. An absent or non-boolean
+ * `enabled` counts as enabled.
  */
 function answeringRow<T extends KeyValueEntry>(rows: readonly T[], name: string): T | undefined {
 	for (let i = rows.length - 1; i >= 0; i--) {
@@ -184,9 +177,8 @@ function answeringRow<T extends KeyValueEntry>(rows: readonly T[], name: string)
 }
 
 /**
- * The rows `substitutePathVariables` can write into `url`: for each `:name` the
- * URL holds, the one row that answers it. A row for a name the URL does not
- * hold, a disabled row and a shadowed duplicate are not among them.
+ * The rows `substitutePathVariables` can write into `url`: per `:name` in it, the one answering
+ * row; rows for absent names, disabled rows and shadowed duplicates excluded.
  */
 export function answeringPathRows<T extends KeyValueEntry>(url: string, rows: readonly T[]): T[] {
 	return pathVariableNames(url).flatMap((name) => answeringRow(rows, name) ?? []);
@@ -198,28 +190,17 @@ function sameNames(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * The path rows after the URL changed from `previousUrl` to `url`, carried
- * over from `existing`.
- *
- * An edit that leaves the URL's `:name` segments as they were - the query, the
- * host, a literal path segment - changes no row: a declared row whose segment
- * is not in the URL (a Postman `url.variable` entry nothing uses) is data the
- * edit did not touch, and it is still exported.
- *
- * An edit that changes them makes the rows follow the URL, as Postman's own
- * editor does: a name still in the URL keeps its row (value, description,
- * enabled, id, and any member an import carried), a name new to it gets an
- * empty row, and a row whose name is not in it is dropped. One exception keeps
- * a value across a rename: when exactly one name left and exactly one arrived
- * (typing `:userId` over `:id` one keystroke at a time), the row that left is
- * renamed rather than replaced. Any other combination pairs nothing, since a
- * row matched to a name by position alone would send one variable's value
- * (a secret, say) as another's. The result follows the URL's order.
- *
- * Unlike a query row, a disabled path row is still in the URL (the segment is
- * there whether or not the value is sent), so it is matched like any other.
- * Several rows with one key collapse to the one that answers it at send time
- * (the last enabled, else the last), so the value that was sent survives.
+ * The path rows after the URL changed from `previousUrl` to `url`, carried from `existing`. An edit
+ * leaving the `:name` segments as they were (the query, the host, a literal segment) changes no
+ * row: a declared row the URL does not use (an unused Postman `url.variable`) is untouched data,
+ * still exported. An edit that changes them makes the rows follow the URL, as Postman's editor
+ * does: a kept name keeps its row (value, description, enabled, id, any imported member), a new
+ * name gets an empty row, a gone name's row is dropped. One exception keeps a value across a
+ * rename: exactly one name left and one arrived (typing `:userId` over `:id`) renames the row.
+ * Nothing else pairs, as matching by position could send one variable's value (a secret) as
+ * another's. Result in URL order. A disabled path row is still in the URL (the segment is there
+ * either way), so it matches like any. Several rows with one key collapse to the one answering at
+ * send time (last enabled, else last), so the sent value survives.
  */
 export function syncPathRows(
 	existing: readonly KeyValueItem[],
@@ -248,14 +229,10 @@ export function syncPathRows(
 }
 
 /**
- * The rows the Path variables table shows: every stored path row as it is,
- * then an empty row for each `:name` of the URL that has none.
- *
- * Derived on every render and never written by rendering, so opening a
- * request whose URL names a variable its rows do not (one stored before
- * #1764, or imported with no `url.variable` entry) shows the row without
- * marking the request edited; the first edit in the table writes it back. The
- * derived row's id is its name, so it keeps its identity across renders.
+ * The Path variables table's rows: every stored path row, then an empty row for each `:name`
+ * without one. Derived every render, never written by rendering, so a request whose URL names a
+ * variable its rows lack (stored before #1764, or imported without `url.variable`) shows the row
+ * unedited; the first table edit writes it. A derived row's id is its name, stable across renders.
  */
 export function displayPathRows(existing: readonly KeyValueItem[], url: string): KeyValueItem[] {
 	const held = new Set(existing.map((row) => row.key));
@@ -292,33 +269,23 @@ function percentEncodePath(text: string): string {
 }
 
 /**
- * `value` percent-encoded as Postman writes a path variable's value into the
- * path, with every `{{variable}}` token in it kept verbatim - the engine's
- * `encode_path_variable_value`. Postman joins the raw value and encodes the
- * path with `PATH_ENCODE_SET`, so a `/` makes more segments, `@ : , ; = & + %`
- * and the rest of the reserved set are sent as typed (a `%XX` is not encoded
- * twice), and `?` / `#` are `%3F` / `%23`, so a value never ends the path. A
- * token is kept whole, so a snippet shows the name a run answers rather than
- * `%7B%7B`.
+ * `value` percent-encoded as Postman writes a path variable's value, `{{variable}}` tokens kept:
+ * the engine's `encode_path_variable_value`. Postman joins the raw value and encodes the path with
+ * `PATH_ENCODE_SET`, so `/` makes more segments, `@ : , ; = & + %` and the rest of the reserved set
+ * go as typed (a `%XX` is not encoded twice), and `?` / `#` become `%3F` / `%23`, never ending the
+ * path. A token is kept whole, so a snippet shows the name a run answers, not `%7B%7B`.
  */
 export function encodePathVariableValue(value: string): string {
 	return mapOutsideTokens(value, percentEncodePath);
 }
 
 /**
- * The URL with each `:name` segment replaced by its row's value - what the
- * engine sends (`substitute_path_variables`).
- *
- * Only an enabled path row answers, and among several with one key the last
- * enabled one does. `resolve` turns its value into send-time text (`{{var}}`
- * resolution; the identity where the snippet stays templated); a value that
- * resolves to nothing leaves the segment literal (`:id` goes out as written,
- * as Postman sends it). Otherwise the resolved value is written through
- * `encodePathVariableValue` in place of `:name`, and a `.suffix` stays.
- *
- * `encode: false` is a request's `disableUrlEncoding` (issue #1765): the value
- * goes in as written, skipping Postman's path encode set entirely, exactly as
- * the engine's `substitute_path_variables` does with the flag set.
+ * The URL with each `:name` replaced by its row's value, as the engine sends it
+ * (`substitute_path_variables`). Only an enabled row answers, the last of several. `resolve` makes
+ * its value send-time text (`{{var}}` resolution, or identity where a snippet stays templated); a
+ * value resolving to nothing leaves `:id` literal, as Postman sends it; otherwise it goes through
+ * `encodePathVariableValue`, and a `.suffix` stays. `encode: false` is `disableUrlEncoding`
+ * (#1765): the value goes as written, as the engine does with the flag.
  */
 export function substitutePathVariables(
 	url: string,
@@ -343,14 +310,11 @@ export function substitutePathVariables(
 }
 
 /**
- * The `params` member an inline `POST /compose` request carries: the path rows
- * alone, in the stored shape (no editor `id`; every other member, `type` and
- * `description` included, kept), so the engine fills the `:name` segments of
- * the editor's URL, which may be ahead of the saved row. The query rows are
- * not sent - the URL already holds them.
- *
- * Always sent, `[]` included: the engine falls back to the *stored* rows when
- * the key is absent, and a row the editor removed must not answer from there.
+ * The `params` an inline `POST /compose` carries: the path rows alone, in stored shape (no editor
+ * `id`; `type`, `description` and all else kept), so the engine fills the editor URL's `:name`
+ * segments, which may be ahead of the saved row. Query rows are not sent: the URL holds them.
+ * Always sent, `[]` included: absent, the engine falls back to the *stored* rows, where a removed
+ * row would answer.
  */
 export function composePathParams(rows: readonly KeyValueEntry[]): KeyValueEntry[] {
 	return pathRowsOf(rows).map((row) => {

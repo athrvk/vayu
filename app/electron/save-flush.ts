@@ -6,30 +6,27 @@
  */
 
 /**
- * What a flush of the renderer's pending saves reports, and what the app says
- * when it did not land (#1489).
+ * What a flush of the renderer's pending saves reports, and what the app says when it did not land
+ * (#1489).
  *
- * Two different events destroy the renderer, and both must flush first. Cmd-Q,
- * the menu and every quit signal arrive as `before-quit`; the window's X
- * arrives as `close`, which destroys the WebContents before `window-all-closed`
- * can reach `before-quit` - and on macOS does not quit at all. The round trip
- * itself, and the one state machine both paths share, is `quit-flow.ts`.
+ * Two different events destroy the renderer, and both must flush first. Cmd-Q, the menu and every
+ * quit signal arrive as `before-quit`; the window's X arrives as `close`, which destroys the
+ * WebContents before `window-all-closed` can reach `before-quit`, and on macOS does not quit at
+ * all. The round trip itself, and the one state machine both paths share, is `quit-flow.ts`.
  *
- * Kept out of main.ts so it can be tested - main.ts creates windows and starts
- * the engine at import time, which no unit test can do.
+ * Kept out of main.ts so it can be tested: main.ts creates windows and starts the engine at import
+ * time, which no unit test can do.
  */
 
 /** How long to wait for the renderer's ACK before giving up and proceeding. */
 export const FLUSH_TIMEOUT_MS = 2000;
 
 /**
- * What a settled flush actually did, so the window can stop deciding to close
- * on faith (#1489). `failed` is a save that was attempted and errored;
- * `pending` is one that settled without persisting its edit (a save the editor
- * declined to send, an edit that landed mid-flight). `null` (the 2s ceiling
- * fired before the renderer answered, or its report was unreadable) is read
- * the same as a result with either nonzero by `flushNeedsConfirmation`
- * below. `reason` names the cause when one explains every failure (#2423);
+ * What a settled flush did, so the window stops deciding to close on faith (#1489). `failed` is a
+ * save that was attempted and errored; `pending` is one that settled without persisting its edit (a
+ * save the editor declined to send, an edit that landed mid-flight). `null` (the 2s ceiling fired
+ * before the renderer answered, or its report was unreadable) reads the same as either nonzero to
+ * `flushNeedsConfirmation` below. `reason` names the cause when one explains every failure (#2423);
  * absent otherwise.
  */
 export interface FlushResult {
@@ -40,9 +37,8 @@ export interface FlushResult {
 }
 
 /**
- * Read the renderer's report off the ACK, or `null` for anything that is not
- * one. `null` is what an unanswered flush reports too, so a report main cannot
- * read is asked about rather than taken as clean.
+ * Read the renderer's report off the ACK, or `null` for anything that is not one. An unanswered
+ * flush reports `null` too, so a report main cannot read is asked about rather than taken as clean.
  */
 export function parseFlushResult(raw: unknown): FlushResult | null {
 	if (typeof raw !== "object" || raw === null) return null;
@@ -67,11 +63,10 @@ export function flushNeedsConfirmation(result: FlushResult | null): boolean {
 }
 
 /**
- * What to put in front of the user, phrased for `gesture`, when a flush did not
- * land cleanly. A failed save blames the engine; a save that merely stayed
- * pending does not, because nothing is wrong with the engine and "keep working
- * until it answers" would send the user to wait for something that is not
- * coming. A failure the renderer traced to a full disk says so instead, because
+ * What to put in front of the user, phrased for `gesture`, when a flush did not land cleanly. A
+ * failed save blames the engine; a save that merely stayed pending does not, because nothing is
+ * wrong with the engine and "keep working until it answers" would send the user to wait for
+ * something that is not coming. A failure the renderer traced to a full disk says so instead, since
  * the engine is answering and waiting would not help either (#2423).
  */
 export function buildFlushFailurePrompt(

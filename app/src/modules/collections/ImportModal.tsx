@@ -91,15 +91,13 @@ type Phase = "idle" | "detecting" | "preview" | "error";
 /**
  * What one tab is showing and doing (issue #893).
  *
- * `entries` is one row per picked document, in pick order (issue #666). A single
- * file is this same list with one entry, so the URL and Paste tabs - single by
- * construction - travel the batch path rather than a second one beside it. Each
- * entry carries its own bundled text, its own parse and its own apply outcome;
- * nothing about a batch is derived from another file's.
+ * `entries`: one row per picked document, in pick order (issue #666). A single file is a list of
+ * one, so the URL and Paste tabs (single by construction) take the batch path, not a second one
+ * beside it. Each entry carries its own bundled text, parse and apply outcome; nothing is derived
+ * from another file's.
  *
- * `progress` is what this tab is doing right now, or null when it waits on the
- * user (issue #882). `phase` alone could not carry it: `detecting` covers a
- * download, a `$ref` walk and N engine parses alike.
+ * `progress`: what this tab is doing now, or null while it waits on the user (issue #882). `phase`
+ * cannot carry it: `detecting` covers a download, a `$ref` walk and N engine parses alike.
  */
 interface TabState {
 	phase: Phase;
@@ -136,18 +134,10 @@ export function ImportModal() {
 
 	const [tab, setTab] = useState<Tab>("file");
 	/**
-	 * Every tab's state, side by side (issue #893).
-	 *
-	 * These four used to be one `phase`, one `entries`, one `error` and one
-	 * `progress` for the whole dialog, and switching tab called a `reset()` over
-	 * them - which cleared the *display* and did nothing at all to the work. A URL
-	 * fetch went on running, and when it landed it wrote its preview into that
-	 * shared state: the document appeared under whichever tab the user had
-	 * switched to, and the URL they had typed was gone.
-	 *
-	 * So a tab's work belongs to the tab, and every async writer patches the tab
-	 * it *started on* rather than the one that happens to be active when it
-	 * finishes - see `patchTab`.
+	 * Every tab's state, side by side (issue #893). A tab's work belongs to the tab: one shared
+	 * state cleared on a tab switch clears the display, not the work, so a URL fetch landing later
+	 * writes its preview under whichever tab is showing. Every async writer patches the tab it
+	 * *started on*, not the active one (see `patchTab`).
 	 */
 	const [tabs, setTabs] = useState<Record<Tab, TabState>>(() => ({
 		file: IDLE_TAB,
@@ -166,23 +156,17 @@ export function ImportModal() {
 	 */
 	const [reimports, setReimports] = useState<SpecReimportMatch[] | null>(null);
 	/**
-	 * The bound-document lookup is a round trip - see `handleImport`.
-	 *
-	 * Dialog-wide rather than per-tab, and deliberately: it gates the *apply*,
-	 * only one of which can be in flight, and the fork it leads to is a modal over
-	 * this dialog - so there is no tab to switch to while it runs.
+	 * The bound-document lookup is a round trip (see `handleImport`). Dialog-wide, not per tab: it
+	 * gates the apply, of which only one can be in flight, and the fork it leads to is a modal over
+	 * this dialog, so no tab can be switched to while it runs.
 	 */
 	const [checkingBindings, setCheckingBindings] = useState(false);
 	/**
-	 * An apply is under way - the bound-document lookup or the writes themselves.
-	 *
-	 * One name for what the close, the apply guard and the Import button already
-	 * spelled out, because the option toggles now join them (issue #895): a
-	 * toggle supersedes the tab, and the
-	 * apply holds a generation captured before its first file went out, so a
-	 * toggle mid-apply would drop the outcome write that reports which files
-	 * failed. It is also the one moment the options cannot change anything -
-	 * `runImport` sends each file with the values it started with.
+	 * An apply is under way: the bound-document lookup or the writes. Read by the close, the apply
+	 * guard, the Import button and the option toggles (issue #895). A toggle supersedes the tab
+	 * while the apply holds a generation captured before its first file went out, so a toggle
+	 * mid-apply would drop the outcome write that reports which files failed. Nor could a toggle
+	 * change anything then: `runImport` sends each file with the values it started with.
 	 */
 	const applying = importMutation.isPending || checkingBindings;
 	const fileInputRef = useRef<HTMLInputElement>(null);
@@ -190,27 +174,19 @@ export function ImportModal() {
 	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
 
 	/**
-	 * Which run of each tab is current (issue #893).
+	 * Which run of each tab is current (issue #893). A generation rather than an abort path per
+	 * stage, because the writes are what must stop and there are four kinds: the fetch, the detect,
+	 * an option re-parse and the apply's outcomes. Each captures its tab's number at the start and
+	 * drops its patch if the number has moved (the dialog closed or the tab was reset), so a parse
+	 * finishing after a close cannot write a preview into the state the dialog next opens with.
 	 *
-	 * A generation rather than an abort path per stage, because the writes are
-	 * what must stop and there are four kinds of them - the fetch, the detect, an
-	 * option re-parse and the apply's outcomes. Each captures its tab's number at
-	 * the start and drops its patch if the number has moved, which happens when
-	 * the dialog closes or the tab is reset. `handleClose` never blocked on
-	 * `detecting`, so closing mid-detect used to let the parse finish and write a
-	 * preview into the state the dialog next opened with.
-	 *
-	 * A ref, not state: it is read inside async work that must see the current
-	 * value, not the one captured when its closure was made.
+	 * A ref, not state: async work must read the current value, not the one its closure captured.
 	 */
 	const generation = useRef<Record<Tab, number>>({ file: 0, url: 0, paste: 0 });
 	/**
-	 * The in-flight URL download's cancel, or null.
-	 *
-	 * The generation guard above stops the *writes*; this stops the *work*. Only
-	 * the fetch has one, because it is the only stage that goes on costing
-	 * something after nobody is listening - the engine reads the rest of a 10 MB
-	 * document either way.
+	 * The in-flight URL download's cancel, or null. The generation stops the writes; this stops the
+	 * work. Only the fetch has one: it is the only stage that goes on costing after nobody is
+	 * listening (the engine reads the rest of a 10 MB document either way).
 	 */
 	const fetchAbort = useRef<AbortController | null>(null);
 
@@ -218,12 +194,10 @@ export function ImportModal() {
 	const { phase, error, entries, progress } = active;
 
 	/**
-	 * Write into one tab's slice, unless that tab has moved on.
-	 *
-	 * Functional, always. Two tabs are sibling keys of one record and their
-	 * writers genuinely overlap - a URL download's progress tick lands while a
-	 * File pick is mid-parse - so a spread over a captured snapshot would drop
-	 * whichever landed first.
+	 * Write into one tab's slice, unless that tab has moved on. Always functional: the tabs are
+	 * sibling keys of one record and their writers overlap (a URL download's progress tick lands
+	 * while a File pick is mid-parse), so a spread over a captured snapshot would drop whichever
+	 * landed first.
 	 */
 	const patchTab = (t: Tab, at: number, patch: Partial<TabState>): void => {
 		if (generation.current[t] !== at) return;
@@ -246,11 +220,8 @@ export function ImportModal() {
 	const applicable = applicableEntries(entries);
 
 	/**
-	 * Put one tab back to empty, and abandon whatever it was doing.
-	 *
-	 * The Dismiss button on a preview, and the whole dialog closing. **Not** a tab
-	 * switch: that used to call this, which is how a running fetch lost the URL it
-	 * was fetching while going on fetching it.
+	 * Put one tab back to empty and abandon its work: the preview's Dismiss and the dialog closing.
+	 * **Not** a tab switch, which must leave a running fetch and the URL it is fetching in place.
 	 */
 	const resetTab = (t: Tab) => {
 		const at = supersede(t);
@@ -264,24 +235,20 @@ export function ImportModal() {
 
 	const handleClose = () => {
 		if (applying) return;
-		// Every tab, not just the visible one: another may be mid-download, and a
-		// dialog that reopens showing work the user closed is the same leak this
-		// change is about.
+		// Every tab, not just the visible one: another may be mid-download, and a reopened dialog
+		// must not show work the user closed.
 		(["file", "url", "paste"] as Tab[]).forEach(resetTab);
 		setReimports(null);
 		close();
 	};
 
 	/**
-	 * Bundle, detect and parse everything the user just handed over (issue #649
-	 * for the bundling, #666 for the "everything").
-	 *
-	 * A multi-file OpenAPI spec is only itself once its `$ref`s are followed, and
-	 * bundling is async while parsing is not - so it happens here rather than
-	 * inside `parseImport`, and what each parser (and the engine) then sees is one
-	 * self-contained document. Both intakes are handed over and the batch layer
-	 * uses whichever a given ref needs: a file already in this batch, a sibling on
-	 * disk through the gated IPC, or an absolute URL through the engine proxy.
+	 * Bundle, detect and parse everything the user just handed over (issue #649 for the bundling,
+	 * #666 for the "everything"). A multi-file OpenAPI spec is only itself once its `$ref`s are
+	 * followed, and bundling is async while parsing is not, so it happens here rather than in
+	 * `parseImport`, and each parser (and the engine) sees one self-contained document. Both
+	 * intakes are passed and the batch layer uses whichever a ref needs: a file already in this
+	 * batch, a sibling on disk through the gated IPC, or an absolute URL through the engine proxy.
 	 */
 	const runBatch = async (t: Tab, at: number, documents: BatchDocument[]): Promise<void> => {
 		if (documents.length === 0) return;
@@ -292,11 +259,9 @@ export function ImportModal() {
 			{ importEnvironments, importScripts },
 			{
 				maxBytes: specMaxBytes,
-				// A `$ref` target is part of the document being bundled, so the
-				// bound is the same one the bundle has to fit - and stating it
-				// moves the refusal to where the bytes arrive, instead of after
-				// a file the engine was never going to store has been buffered
-				// whole (issue #784).
+				// A `$ref` target is part of the document being bundled, so it has the bundle's
+				// bound; stating it refuses where the bytes arrive, not after buffering whole a
+				// file the engine would never store (issue #784).
 				fetchUrl: async (target, options) =>
 					(
 						await apiService.importFetch(
@@ -311,10 +276,9 @@ export function ImportModal() {
 					? {
 							readSibling: async (specPath, refPath) => {
 								const { bytes } = await readSpecFile(specPath, refPath);
-								// UTF-8, exactly as `FileReader.readAsText` decoded the
-								// document these bytes sit beside. A sibling that is not
-								// UTF-8 fails to parse and is reported as an unresolved
-								// ref, which is what it is.
+								// UTF-8, as `FileReader.readAsText` decoded the document beside it.
+								// A non-UTF-8 sibling fails to parse and is reported as an
+								// unresolved ref, which it is.
 								return new TextDecoder("utf-8").decode(bytes);
 							},
 						}
@@ -322,10 +286,9 @@ export function ImportModal() {
 			},
 			(reported) => patchTab(t, at, { progress: reported })
 		);
-		// One document that failed is the whole import failing, and says so where
-		// it always did. Several is a ledger: the failures are rows in it, beside
-		// the files that did parse, which is the only way a batch can report a
-		// mixed outcome at all.
+		// One failed document is the whole import failing, reported where it always is. Several is
+		// a ledger, the failures rows beside the files that parsed: the only way a batch can report
+		// a mixed outcome.
 		const failedAlone = next.length === 1 && next[0].error;
 		patchTab(t, at, {
 			progress: null,
@@ -337,12 +300,10 @@ export function ImportModal() {
 	};
 
 	/**
-	 * Read and preview a file the OS handed Vayu (issue #1364): dropped on the
-	 * Dock or taskbar icon, or a file path on the command line.
-	 *
-	 * Goes through the File tab's own path - `setTab`, `supersede`, `runBatch` -
-	 * so this is a fourth *source* of a `BatchDocument`, not a fourth way to
-	 * apply one.
+	 * Read and preview a file the OS handed Vayu (issue #1364): dropped on the Dock or taskbar
+	 * icon, or a path on the command line. Takes the File tab's own path (`setTab`, `supersede`,
+	 * `runBatch`), so this is a fourth *source* of a `BatchDocument`, not a fourth way to apply
+	 * one.
 	 */
 	const importPendingFile = async (path: string): Promise<void> => {
 		setTab("file");
@@ -359,12 +320,10 @@ export function ImportModal() {
 			return;
 		}
 		try {
-			// `readSpecFile(specPath, refPath)` resolves `refPath` against
-			// `dirname(specPath)` - the same channel a `$ref` inside a spec reads
-			// a sibling document through. Passing the file's own base name back
-			// as the "reference" reads exactly that file, and inherits the
-			// extension allowlist and byte cap that channel already enforces,
-			// rather than this dialog opening a second door onto the filesystem.
+			// `readSpecFile(specPath, refPath)` resolves `refPath` against `dirname(specPath)`, the
+			// channel a spec's `$ref` reads a sibling through. Passing the file's own base name
+			// reads that file and inherits the channel's extension allowlist and byte cap, instead
+			// of opening a second door onto the filesystem.
 			const name = fileBaseName(path);
 			const { bytes, fileName } = await readSpecFile(path, name);
 			// UTF-8, matching every other document this dialog reads.
@@ -373,9 +332,8 @@ export function ImportModal() {
 				{ fileName, relativePath: fileName, specPath: path, text },
 			]);
 		} catch (e) {
-			// Missing file, over the byte cap, or an extension `readSpecFile`
-			// refuses - whichever it is, the message it rejected with already
-			// names it in words a user can act on.
+			// Missing, over the byte cap or an extension `readSpecFile` refuses: its rejection
+			// message already names which, in words a user can act on.
 			patchTab("file", at, {
 				error: e instanceof Error ? e.message : "Couldn't read this file.",
 				phase: "error",
@@ -384,16 +342,13 @@ export function ImportModal() {
 	};
 
 	/**
-	 * A path the OS handed Vayu while the dialog is up (issue #2275), which is the
-	 * File tab's own pick arriving from outside.
-	 *
-	 * An apply in flight refuses it: `importPendingFile` supersedes the File tab,
-	 * and the apply's outcome write - the one that reports which files failed - is
-	 * guarded by that same generation. A preview or a read in progress is replaced,
-	 * because a ledger cannot take a document in after the fact (`detectBatch` is
-	 * all-or-nothing over its documents), and says so rather than swapping quietly.
-	 * Neither is silent; neither leaves the path queued, since a successful apply
-	 * closes the dialog and `close` clears the store.
+	 * A path the OS handed Vayu while the dialog is up (issue #2275): the File tab's own pick,
+	 * arriving from outside. An apply in flight refuses it: `importPendingFile` supersedes the File
+	 * tab, and the apply's outcome write (which reports the failed files) is guarded by that
+	 * generation. A preview or a read in progress is replaced, with a notice, because a ledger
+	 * cannot take a document in after the fact (`detectBatch` is all-or-nothing over its
+	 * documents). Neither leaves the path queued: a successful apply closes the dialog and `close`
+	 * clears the store.
 	 */
 	const openOsPath = (path: string): void => {
 		const name = fileBaseName(path);
@@ -408,65 +363,53 @@ export function ImportModal() {
 		void importPendingFile(path);
 	};
 
-	// A path the OS handed Vayu (issue #1364): waiting for the dialog to open, or
-	// arriving while it already is (issue #2275). Keyed on the pending path as well
-	// as `isOpen`, as the pending-files effect below is, because an open dialog
-	// changes nothing but the path. `takePendingPath` stays the one read, and clears
-	// it in the same step, so the re-run that clearing causes finds nothing and
-	// cannot import the same file twice.
+	// A path the OS handed Vayu (issue #1364), waiting for the dialog to open or arriving while it
+	// is open (issue #2275). Keyed on the pending path as well as `isOpen`, like the pending-files
+	// effect below, since an open dialog changes only the path. `takePendingPath` is the one read
+	// and clears the path in the same step, so the re-run the clearing causes finds nothing and
+	// cannot import a file twice.
 	const pendingPath = useImportModalStore((s) => s.pendingPath);
 	useEffect(() => {
 		if (!isOpen || !pendingPath) return;
 		const path = useImportModalStore.getState().takePendingPath();
 		if (!path) return;
-		// `importPendingFile` sets `tab` and this tab's phase as its first act,
-		// synchronously - a one-shot handoff of state the store is handing this
-		// dialog, which is the shape `McpSettingsPanel` and `VariableTableEditor`
-		// suppress this rule for rather than restructuring around it.
+		// `importPendingFile` sets `tab` and this tab's phase synchronously as its first act: a
+		// one-shot handoff of store state, the shape `McpSettingsPanel` and `VariableTableEditor`
+		// suppress this rule for rather than restructure around.
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
 		openOsPath(path);
-		// `openOsPath` closes over this render's tab state and is rebuilt every
-		// render, so naming it here would re-run the effect continuously. The take
-		// above has already cleared the path, so every run past the first finds
-		// nothing regardless.
+		// `openOsPath` closes over this render's tab state and is rebuilt every render, so naming
+		// it would re-run the effect continuously; the take above has cleared the path, so every
+		// later run finds nothing.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isOpen, pendingPath]);
 
 	/**
-	 * Re-parse when an option toggle changes, from the text already bundled -
-	 * nothing is re-fetched, and each file keeps the source it was read from. A
-	 * re-parse that dropped the fetched URL would store a spec with nothing to
-	 * re-fetch from, and the toggles say nothing about where any of the bytes came
-	 * from.
+	 * Re-parse when an option toggle changes, from the text already bundled: nothing is re-fetched
+	 * and each file keeps the source it was read from, since a spec stored without its fetched URL
+	 * has nothing to re-fetch from, and the toggles do not touch where the bytes came from.
 	 *
-	 * **Every tab holding a parse, not just the one on screen** (issue #893). The
-	 * two options are dialog-wide while the entries are per-tab, so re-parsing
-	 * only the visible tab leaves the other one holding a parse made under the old
-	 * options - and importing it later would apply a setting the checkbox says is
-	 * off. The alternative was per-tab options, which would mean the same two
-	 * checkboxes answering differently depending on which tab was showing.
+	 * **Every tab holding a parse, not only the visible one** (issue #893): the options are
+	 * dialog-wide and the entries per tab, so a hidden tab would keep a parse made under the old
+	 * options, and importing it later would apply a setting the checkbox says is off. Per-tab
+	 * options would make the same two checkboxes answer differently by tab.
 	 */
 	const redetect = (next: { importEnvironments: boolean; importScripts: boolean }) => {
 		for (const t of ["file", "url", "paste"] as Tab[]) {
 			const state = tabs[t];
 			if (state.phase !== "preview" || state.entries.length === 0) continue;
-			// Supersede, not merely capture (issue #895). A re-parse is a real
-			// engine round trip per file and nothing disables the checkboxes while
-			// one runs, so two toggles inside one round trip would otherwise hold
-			// the *same* generation: both patches pass `patchTab`'s check and
-			// whichever resolves last wins the entries. Bumping first drops the
-			// earlier toggle's late patch, which is what keeps the entries and the
-			// checkboxes describing the same parse - and they must, because
-			// `importScripts` is baked in at parse time and ignored at apply
-			// (`orchestrator.ts`), so a stale parse imports a setting the checkbox
-			// says is off.
+			// Supersede, not merely capture (issue #895). A re-parse is an engine round trip per
+			// file and nothing disables the checkboxes meanwhile, so two toggles inside one round
+			// trip would share a generation, both patches would pass `patchTab`'s check, and the
+			// last to resolve would win. Bumping first drops the earlier toggle's late patch, so
+			// the entries and the checkboxes describe one parse; they must, because `importScripts`
+			// is baked in at parse time and ignored at apply (`orchestrator.ts`).
 			//
-			// Nothing is aborted by this: only a tab in `preview` reaches here, and
-			// the URL tab's fetch is long finished by then.
+			// Nothing is aborted: only a tab in `preview` reaches here, and the URL tab's fetch has
+			// finished.
 			const at = supersede(t);
-			// Reported like the first parse, because it *is* the first parse again -
-			// one engine round trip per file, which on a folder pick is a wait a
-			// checkbox click should not make look instant.
+			// Reported like the first parse, which it is again: one engine round trip per file, a
+			// wait on a folder pick that a checkbox click must not make look instant.
 			void reparseBatch(state.entries, next, (reported) =>
 				patchTab(t, at, { progress: reported })
 			).then((reparsed) => patchTab(t, at, { progress: null, entries: reparsed }));
@@ -474,25 +417,20 @@ export function ImportModal() {
 	};
 
 	/**
-	 * Read one picked file into a batch document.
-	 *
-	 * A file that cannot be read at all - a directory in a drop, a file that moved
-	 * between the pick and the read - becomes a document carrying that failure
-	 * rather than nothing, because a picked file with no row anywhere is exactly
-	 * the silent discard this flow exists to end.
+	 * Read one picked file into a batch document. An unreadable file (a directory in a drop, a file
+	 * moved between pick and read) becomes a document carrying the failure, not nothing: a picked
+	 * file with no row is the silent discard this flow exists to end.
 	 */
 	const readDocument = (file: File): Promise<BatchDocument> =>
 		new Promise((resolve) => {
-			// The path at pick time, while there is still a `File` to take it from -
-			// `getFilePath` reads the path off the object and reports it to main as a
-			// picked file; the renderer cannot name a path itself. Empty outside Electron and for a
-			// drag-and-drop of remote content, which is the state "no remembered
-			// file" already means. It is also what a `$ref` to a sibling file on
-			// disk is resolved against, in the main process - see `readSpecFile`.
+			// The path at pick time, while a `File` exists to take it from: `getFilePath` reads it
+			// off the object and reports it to main as picked, as the renderer cannot name a path
+			// itself. Empty outside Electron and for a drag of remote content, which already means
+			// "no remembered file". Main also resolves a sibling-file `$ref` against it (see
+			// `readSpecFile`).
 			const specPath = window.electronAPI?.getFilePath(file) ?? "";
-			// `webkitRelativePath` is set by a folder pick and empty otherwise, so a
-			// flat drop is keyed by file name - which is the same thing for files
-			// that share one directory.
+			// `webkitRelativePath` is set by a folder pick and empty otherwise, so a flat drop is
+			// keyed by file name, the same thing for files sharing a directory.
 			const relativePath = file.webkitRelativePath || file.name;
 			const reader = new FileReader();
 			reader.onload = () =>
@@ -514,10 +452,9 @@ export function ImportModal() {
 		});
 
 	/**
-	 * @param filterExtensions only for a folder pick, which hands over everything
-	 * under the directory. A drop or an explicit selection is never filtered: the
-	 * user named those files, and dropping one for its extension would be the
-	 * silent discard this replaced.
+	 * @param filterExtensions only for a folder pick, which hands over everything under it. A drop
+	 *        or explicit selection is never filtered: the user named those files, and dropping one
+	 *        for its extension is a silent discard.
 	 */
 	const handleFiles = async (files: File[], filterExtensions = false): Promise<void> => {
 		const picked = filterExtensions ? files.filter((f) => isImportableFileName(f.name)) : files;
@@ -537,9 +474,8 @@ export function ImportModal() {
 		await runBatch("file", at, await Promise.all(picked.map(readDocument)));
 	};
 
-	// Files dropped on the window outside this dialog (issue #2252). Keyed on the
-	// pending list as well as `isOpen`: a drop onto the dialog's own chrome while
-	// it is already open changes nothing but the list.
+	// Files dropped on the window outside this dialog (issue #2252). Keyed on the list as well as
+	// `isOpen`: a drop on the open dialog's chrome changes only the list.
 	const pendingFiles = useImportModalStore((s) => s.pendingFiles);
 	useEffect(() => {
 		if (!isOpen || pendingFiles.length === 0) return;
@@ -552,23 +488,16 @@ export function ImportModal() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isOpen, pendingFiles]);
 
-	// Fetching a URL is the only source the user can enter twice by hand, so it is
-	// the one that needs the guard. `phase === "detecting"` was set here and in
-	// the detect path and then never read by anything that renders - the button
-	// stayed enabled and unchanged for the whole round-trip, so a second click
-	// fired a second fetch whose result raced the first.
-	//
-	// It is now read by everything: the same phase disables the drop zone, the
-	// folder picker and the Paste button, none of which had a guard at all - a
-	// second drop mid-read raced the first exactly as a second fetch did - and it
-	// is what puts the progress panel on screen (issue #882).
+	// Fetching a URL is the only source a user can enter twice by hand, so it needs the guard. The
+	// same phase disables the drop zone, the folder picker and the Paste button (a second drop
+	// mid-read races the first as a second fetch does) and puts the progress panel on screen (issue
+	// #882).
 	const isBusy = phase === "detecting";
 
 	/**
-	 * Detect and preview a pasted document, on the Paste tab's own slice.
-	 *
-	 * A curl/wget command is a request, not a collection, so it never reaches the
-	 * engine, whose answer would be "Unrecognized format" (#2250).
+	 * Detect and preview a pasted document, on the Paste tab's own slice. A curl/wget command is a
+	 * request, not a collection, so it never reaches the engine, which would answer "Unrecognized
+	 * format" (#2250).
 	 */
 	const handlePaste = async (): Promise<void> => {
 		if (isBusy) return;
@@ -596,19 +525,15 @@ export function ImportModal() {
 		fetchAbort.current = abort;
 		patchTab("url", at, { phase: "detecting", error: "" });
 		try {
-			// No `maxBytes`: this box takes any format, and a Postman or
-			// Insomnia export is never stored as a spec document, so bounding it
-			// by `maxSpecDocumentBytes` would refuse an export that imports
-			// today with a message naming a setting that does not apply to it.
-			// The engine's transport ceiling stands behind the fetch instead
-			// (issue #784), and the bundler's own check still refuses an
-			// over-cap OpenAPI document once the format is known.
-			// The third argument is what asks the engine to stream its download
-			// (issue #882). Without it this route answers only once the whole body
-			// is buffered, which for an 8 MB spec is the frozen dialog this closes.
-			// The fourth argument is this tab's cancel (issue #893). Without it the
-			// engine goes on reading a 10 MB document after the dialog that asked
-			// for it has closed.
+			// No `maxBytes`: this box takes any format, and a Postman or Insomnia export is never
+			// stored as a spec document, so `maxSpecDocumentBytes` would refuse an importable
+			// export with a message naming a setting that does not apply. The engine's transport
+			// ceiling backs the fetch instead (issue #784), and the bundler still refuses an
+			// over-cap OpenAPI document once the format is known. The third argument asks the
+			// engine to stream the download (issue #882); without it the route answers only once
+			// the body is buffered, which freezes the dialog on an 8 MB spec. The fourth is this
+			// tab's cancel (issue #893), without which the engine reads a 10 MB document on after
+			// the dialog closed.
 			const { content } = await apiService.importFetch(
 				url,
 				undefined,
@@ -617,9 +542,8 @@ export function ImportModal() {
 			);
 			await runBatch("url", at, [{ text: content, sourceUrl: url }]);
 		} catch (e) {
-			// A cancel is not a failure to report: the only way to reach it is to
-			// close the dialog, and an error banner would be waiting the next time
-			// it opened, about a download the user themselves stopped.
+			// A cancel is no failure to report: only closing the dialog reaches it, and a banner
+			// would wait for the next open, about a download the user stopped.
 			if (abort.signal.aborted) return;
 			patchTab("url", at, { progress: null, error: (e as Error).message, phase: "error" });
 		} finally {
@@ -628,18 +552,13 @@ export function ImportModal() {
 	};
 
 	/**
-	 * What Import does: check for a document already bound, then apply
-	 * (issue #680).
+	 * What Import does: check for a document already bound, then apply (issue #680). The check runs
+	 * here, not at detect time: it is a round trip per bound document, which a preview should not
+	 * pay for, and Import is the last moment the answer can change anything (another window may
+	 * have bound a collection since the preview was drawn).
 	 *
-	 * The check runs here rather than at detect time for two reasons. It is a
-	 * round trip per bound document, which nobody should pay for merely
-	 * previewing a file - and Import is the last moment the answer can still
-	 * change anything, since a collection may have been bound in another window
-	 * since the preview was drawn.
-	 *
-	 * The lookup holds the button the way the apply does: `POST /import/apply` is
-	 * create-only, so a second press while this is in flight would import
-	 * everything twice.
+	 * The lookup holds the button as the apply does: `POST /import/apply` is create-only, so a
+	 * second press mid-lookup would import everything twice.
 	 */
 	const handleImport = async () => {
 		if (applicable.length === 0 || applying) return;
@@ -660,31 +579,24 @@ export function ImportModal() {
 	};
 
 	/**
-	 * Apply the included files, **one transaction each** (issue #666).
+	 * Apply the included files, **one transaction each** (issue #666). `POST /import/apply` is
+	 * atomic within one call, so per-file keeps a refused seventh file from rolling back six good
+	 * ones, lands each file as its own root collection (what N manual imports produce) and leaves
+	 * the engine contract untouched; one combined payload would be all-or-nothing across unrelated
+	 * files.
 	 *
-	 * Sequential and per-file on purpose: `POST /import/apply` is atomic within
-	 * one call, so a seventh file the engine refuses cannot roll back six good
-	 * ones, and each file lands as its own root collection - exactly what N
-	 * manual imports produce today. A single combined payload was rejected for
-	 * the same reason: all-or-nothing across unrelated files is the wrong failure
-	 * mode, and per-file leaves the engine contract untouched.
+	 * Every attempted entry is unchecked afterwards, and an applied one cannot be checked again:
+	 * the route is create-only with no idempotency key, so a resend is a second copy, not a retry.
+	 * A failed file can be re-checked, the one honest retry, which is why its outcome stays on its
+	 * row.
 	 *
-	 * Every attempted entry is unchecked afterwards, and an applied one can no
-	 * longer be checked at all: the route is create-only and carries no
-	 * idempotency key, so a second send is a second copy of the tree rather than
-	 * a retry. A file that *failed* can be checked again - that is a deliberate
-	 * act, and the only honest way to retry one - which is why the outcome stays
-	 * on its row.
-	 *
-	 * Reached from Import, and from Import anyway on the re-import fork - which
-	 * is why it does not re-check the bindings: the user has just answered that
-	 * question.
+	 * Reached from Import and from the re-import fork's Import anyway, so it does not re-check the
+	 * bindings: the user has just answered that.
 	 */
 	const runImport = async () => {
 		if (applicable.length === 0) return;
-		// The tab this apply belongs to, captured now: it writes outcomes onto its
-		// own rows, and the user may be looking at another tab by the time the
-		// engine has answered for every file.
+		// The tab this apply belongs to, captured now: it writes outcomes onto its own rows, and
+		// the user may be on another tab by the time the engine answers.
 		const t = tab;
 		const at = generation.current[t];
 		const outcomes = new Map<string, BatchEntry["outcome"]>();
@@ -692,8 +604,7 @@ export function ImportModal() {
 		// Across the whole batch: "exactly one environment" is a property of the import,
 		// not of a file, so two files carrying one each is two.
 		const createdEnvironmentIds: string[] = [];
-		// The apply is one transaction per file and always was; the only sign of it
-		// used to be a button reading "Importing…" for all of them.
+		// The apply is one transaction per file.
 		patchTab(t, at, { progress: { stage: "applying", done: 0, total: applicable.length } });
 		for (const entry of applicable) {
 			const result = entry.result as ImportResult;
@@ -722,14 +633,12 @@ export function ImportModal() {
 				createdEnvironmentIds.push(...Object.values(applied?.environmentIds ?? {}));
 				outcomes.set(entry.id, { ok: true, message: "Imported" });
 			} catch (e) {
-				// There is no rollback since #145: the engine write is atomic, so a validation
-				// failure persisted nothing - but a failure *after* it (the id-map check, the
-				// globals write) leaves the tree committed. Surface the error and leave the
-				// modal open; the mutation invalidates on every outcome, so whatever did land
-				// is already visible behind this dialog.
-				//
-				// The engine names the item that broke by its temp id; `importFailureMessage`
-				// resolves that back to the name shown in the preview (issue #173).
+				// No rollback (#145): the engine write is atomic, so a validation failure persisted
+				// nothing, but a failure after it (the id-map check, the globals write) leaves the
+				// tree committed. Report it and keep the modal open; the mutation invalidates on
+				// every outcome, so whatever landed already shows behind the dialog.
+				// `importFailureMessage` maps the engine's temp id for the broken item back to the
+				// name the preview shows (issue #173).
 				outcomes.set(entry.id, { ok: false, message: importFailureMessage(e, result) });
 			}
 			patchTab(t, at, {
@@ -852,30 +761,24 @@ export function ImportModal() {
 				<>
 					{tab === "file" && (
 						/*
-						 * A real <button>, not a clickable div. This was a bare
-						 * div with onClick: not focusable, not in the tab order,
-						 * and not operable by Enter or Space - the only way to
-						 * reach the file picker was a mouse. Drag-and-drop still
-						 * works; the button is the keyboard path to the same
-						 * hidden <input type="file">.
+						 * A real <button>: focusable, in the tab order and operable by Enter or
+						 * Space, the keyboard path to the hidden <input type="file"> beside
+						 * drag-and-drop.
 						 */
 						/*
-						 * The dashed edge is a drag-target affordance and wants
-						 * prominence - but on this fill (`--muted`/`--accent`)
-						 * `--border-strong` is the *faintest* option in dark (1.108,
-						 * below plain `--border` at 1.157), because the fill sits
-						 * between the two tokens in lightness. `surface-sunken`'s
-						 * alpha-of-foreground rule is the strongest edge available
-						 * here in both themes (1.356 light / 1.343 dark), and its
-						 * background is the same value `bg-accent` carried.
+						 * The dashed edge is a drag-target affordance and wants prominence, but on
+						 * this fill (`--muted`/`--accent`) `--border-strong` is the faintest option
+						 * in dark (1.108, below `--border` at 1.157), as the fill sits between the
+						 * two tokens in lightness. `surface-sunken`'s alpha-of-foreground rule is
+						 * the strongest edge here in both themes (1.356 light / 1.343 dark), and
+						 * its background equals `bg-accent`.
 						 */
 						<button
 							type="button"
 							disabled={isBusy}
-							// `group`: the Upload glyph's `lift` fires from this
-							// dropzone's hover, and the `Icon motion` block gates on a
-							// `[data-slot="button"]` or `.group` ancestor - a bare
-							// <button> element is neither.
+							// `group`: the Upload glyph's `lift` fires on this dropzone's hover,
+							// and the `Icon motion` block gates on a `[data-slot="button"]` or
+							// `.group` ancestor, which a bare <button> is not.
 							className="group w-full cursor-pointer rounded-lg border-2 border-dashed border-rule surface-sunken px-6 py-9 text-center disabled:cursor-default disabled:opacity-60"
 							onClick={() => fileInputRef.current?.click()}
 							onDragOver={(e) => e.preventDefault()}
@@ -884,10 +787,8 @@ export function ImportModal() {
 								// A disabled <button> still receives drops, so the
 								// guard has to be stated here too.
 								if (isBusy) return;
-								// Every dropped file, not `files[0]`: the input had no
-								// `multiple` and this read one element, so a folder's
-								// worth of specs imported the first and discarded the
-								// rest without a word (issue #666).
+								// Every dropped file, not `files[0]`, which would import the first
+								// and silently drop the rest (issue #666).
 								void handleFiles(Array.from(e.dataTransfer.files));
 							}}
 						>
@@ -931,10 +832,9 @@ export function ImportModal() {
 						</div>
 					)}
 					{/*
-					 * Outside the button on purpose. Nested inside it, the
-					 * programmatic .click() would bubble back to the button and
-					 * re-enter this handler, and interactive content inside a
-					 * button is invalid besides.
+					 * Outside the button: nested, the programmatic .click() would bubble back to
+					 * the button and re-enter this handler, and interactive content inside a button
+					 * is invalid besides.
 					 */}
 					<input
 						ref={fileInputRef}
@@ -944,16 +844,11 @@ export function ImportModal() {
 						onChange={(e) => void handleFiles(Array.from(e.target.files ?? []))}
 					/>
 					{/*
-					 * The folder variant of the same input. `webkitdirectory` is not in
-					 * React's attribute table - it is spread in rather than written as
-					 * a prop, which is what makes it reach the DOM. Chromium (so
-					 * Electron) is the only engine that implements it, and outside one
-					 * the input degrades to an ordinary multi-file picker rather than
-					 * failing.
-					 *
-					 * Filtered to importable extensions on the way in: a directory pick
-					 * hands over everything under it, and a ledger of PNGs would bury
-					 * the specs it was opened for.
+					 * The folder variant of the same input. `webkitdirectory` is not in React's
+					 * attribute table, so it is spread in to reach the DOM. Only Chromium (so
+					 * Electron) implements it; elsewhere the input degrades to an ordinary
+					 * multi-file picker. Filtered to importable extensions: a directory pick hands
+					 * over everything under it, and a ledger of PNGs would bury the specs.
 					 */}
 					<input
 						ref={folderInputRef}
@@ -1020,14 +915,10 @@ export function ImportModal() {
 						</div>
 					)}
 					{/*
-					 * Below the tab's own controls rather than instead of them: the
-					 * URL being downloaded is the context a user waiting on 8 MB
-					 * wants most, and replacing the row would also take away the
-					 * disabled Fetch button that says a fetch is already running.
-					 *
-					 * `progress` is null for the instant between the phase changing
-					 * and the first report, so the panel opens on a named busy bar
-					 * rather than flashing nothing.
+					 * Below the tab's controls, not replacing them: the URL being downloaded is the
+					 * context a user waiting on 8 MB wants most, and the disabled Fetch button says
+					 * a fetch is running. `progress` is null between the phase change and the first
+					 * report, so the panel opens on a named busy bar rather than flashing nothing.
 					 */}
 					{isBusy && (
 						<div className="mt-4">
@@ -1042,41 +933,28 @@ export function ImportModal() {
 
 	return (
 		/*
-		 * This used to hand-roll its own modal: a fixed backdrop, a bare
-		 * role="dialog", a window keydown listener for Escape and its own close
-		 * button. That meant no focus trap, no focus restore on close, no portal
-		 * (so it rendered inside the tree that opened it), no scroll lock and no
-		 * inerting of the background - all of which Radix gives for free, and
-		 * none of which the app's other dialogs were missing.
-		 *
 		 * Radix now owns the shell: Escape, the overlay click, focus and the
 		 * shared presentation animation. Only the body below is ImportModal's.
 		 */
 		<Dialog open={isOpen} onOpenChange={(next) => !next && handleClose()}>
 			<DialogContent
-				// Overrides the default padded grid: this dialog manages its own
-				// header/tabs/body/footer bands, each with its own divider.
+				// Overrides the default padded grid: this dialog draws its own header, tabs, body
+				// and footer bands, each with its own divider.
 				//
-				// `bg-card surface-card` must stay a pair: `surface-card` sets the
-				// same background, but from `@layer components`, so the primitive's
-				// `bg-background` utility would outrank it - and tailwind-merge does
-				// not treat `surface-card` as a background class, so only `bg-card`
-				// strips the primitive's. The utility wins the cascade; the surface
-				// class contributes the `--rule` declaration the dividers below
+				// `bg-card surface-card` must stay a pair: `surface-card` sets the same background
+				// from `@layer components`, so the primitive's `bg-background` utility would
+				// outrank it, and tailwind-merge strips the primitive's only for `bg-card`. The
+				// utility wins the cascade; the surface class contributes the `--rule` the dividers
 				// resolve against.
 				//
-				// The width is the shared `xl` (576px) rather than the hard
-				// `w-[560px]` this carried: a fixed width is one the panel keeps
-				// on a viewport narrower than it, and the primitive's `w-full`
-				// under a cap gives the same stable band without that edge.
+				// The shared `xl` width (576px), not a fixed `w-[560px]`, which a viewport narrower
+				// than it would keep: `w-full` under a cap gives the same stable band without that
+				// edge.
 				//
-				// The height guard stays this dialog's own (issue #773): the
-				// primitive's `max-h-[85vh]` + `DialogBody` is for a panel with
-				// one scrolling middle, and this one has bands of its own - a
-				// tab strip, a body, a footer, each with a divider - with the
-				// scroll already on the band that needs it. `overflow-hidden`
-				// keeps that scroll where the bands put it, and 82vh leaves the
-				// divider lines clear of the viewport edge.
+				// The height guard is this dialog's own (issue #773): the primitive's
+				// `max-h-[85vh]` + `DialogBody` suits one scrolling middle, and this panel has
+				// bands with the scroll already on the one that needs it. `overflow-hidden` keeps
+				// the scroll there, and 82vh leaves the dividers clear of the viewport edge.
 				className="flex max-w-xl max-h-[82vh] flex-col gap-0 overflow-hidden border-border-strong bg-card surface-card p-0"
 				// No prose description; without this Radix logs a missing
 				// aria-describedby warning.
@@ -1087,29 +965,19 @@ export function ImportModal() {
 				</DialogHeader>
 
 				{/*
-				 * The app's Tabs primitive, styled like the request builder's
-				 * underline tabs. These were hand-rolled buttons with `py-2` and no
-				 * horizontal padding, which is what made the focus ring look wrong:
-				 * the ring correctly wrapped a 73x38 box around 73px of text, so it
-				 * read as a tall rectangle floating around the label.
+				 * The app's Tabs primitive, styled like the request builder's underline tabs; Radix
+				 * brings the tabs keyboard model (one tab stop for the set, arrow keys between
+				 * tabs).
 				 *
-				 * `size="sm"` (28px), not the `xs` default: File/URL/Paste is this
-				 * dialog's only top-level navigation, the role the dashboard's own
-				 * root tabs play - not a strip nested inside an already-chosen
-				 * section, which is what `xs` is sized for (Collection Detail, the
-				 * response viewer). Left at `xs` this read thinner than the header
-				 * and footer bands around it.
-				 *
-				 * Radix also brings the keyboard model tabs are supposed to have -
-				 * one tab stop for the set, arrow keys to move between them. The
-				 * hand-rolled version made each tab its own tab stop.
+				 * `size="sm"` (28px), not the `xs` default: File/URL/Paste is this dialog's
+				 * top-level navigation, the role the dashboard's root tabs play, while `xs` is
+				 * sized for a strip nested in a chosen section (Collection Detail, the response
+				 * viewer) and reads thinner than the header and footer bands here.
 				 */}
 				<Tabs
 					value={tab}
-					// Switching tab shows the other tab, and that is all it does
-					// (issue #893). It used to `reset()` the one shared state, which
-					// cleared the display of work that went right on running - and
-					// then landed under whichever tab was showing when it finished.
+					// Switching tab only shows the other tab (issue #893): a reset would clear the
+					// display of work that goes on running.
 					onValueChange={(v) => setTab(v as Tab)}
 					className="flex min-h-0 flex-1 flex-col"
 				>
@@ -1124,22 +992,20 @@ export function ImportModal() {
 					</TabsList>
 
 					{/*
-					 * One panel per tab, not a single panel for the active value: Radix
-					 * points each trigger's aria-controls at the panel for its own value,
-					 * so rendering only the active one left the other two referencing ids
-					 * that did not exist. Only the active panel mounts, so the shared body
-					 * below still renders exactly once.
+					 * One panel per tab, not one for the active value: Radix points each trigger's
+					 * aria-controls at its own value's panel, so a single panel leaves two triggers
+					 * referencing missing ids. Only the active panel mounts, so the shared body
+					 * still renders once.
 					 */}
 					{(["file", "url", "paste"] as Tab[]).map((t) => (
 						<TabsContent
 							key={t}
 							value={t}
 							/*
-							 * min-h holds the three tabs to one height. Their natural content
-							 * differs wildly - the File dropzone is 247px tall, the URL row only
-							 * 76 - and because the dialog is centred, that made the whole modal
-							 * resize by 171px and jump 85px up the screen when you switched to
-							 * URL. Sized to the tallest tab, so the shell never moves.
+							 * `min-h` holds the three tabs to one height: the File dropzone is
+							 * 247px tall and the URL row 76, so the centred dialog would resize by
+							 * 171px and jump 85px up on a switch to URL. Sized to the tallest tab,
+							 * so the shell never moves.
 							 */
 							className="mt-0 min-h-[248px] overflow-y-auto p-5"
 						>
@@ -1163,15 +1029,11 @@ export function ImportModal() {
 						/>
 						<div className="flex items-center justify-between gap-3">
 							{/*
-							 * One <label> each. These were two checkboxes inside a single
-							 * <label>: a label's control is its *first* labelable
-							 * descendant, so clicking the words "Import pre-request &
-							 * test scripts" toggled Import environments instead - and the
-							 * second checkbox had no label at all, shrinking its hit
-							 * target to the box itself. `size-target` (issue #1679, 24-28px)
-							 * is that box's own floor for exactly this reason - the label
-							 * fixed which words each checkbox answers to, not how small
-							 * the checkbox was to begin with.
+							 * One <label> each: a label's control is its *first* labelable
+							 * descendant, so with both checkboxes in one label the second's words
+							 * toggle the first, and the second has no label (its hit target the box
+							 * alone). `size-target` (issue #1679, 24-28px) is the box's own floor;
+							 * the labels fix which words each checkbox answers to, not its size.
 							 */}
 							<div className="flex flex-col gap-1 text-label text-muted-foreground">
 								<label className="flex w-fit items-center gap-1.5">
@@ -1282,10 +1144,7 @@ function PreviewView({
 				{collections.map((c, i) => (
 					<TreeNode key={i} collection={c} />
 				))}
-				{/*
-				 * Environments were parsed but never shown. For a Postman environment
-				 * export they are the entire import, so the box rendered empty.
-				 */}
+				{/* For a Postman environment export, the environments are the entire import. */}
 				{environments.map((e, i) => (
 					<div
 						key={i}
@@ -1340,17 +1199,12 @@ function PreviewView({
 }
 
 /**
- * The batch ledger: one row per picked file (issue #666).
+ * The batch ledger: one row per picked file (issue #666), whatever became of it: parsed,
+ * unrecognised, unreadable, or inlined into another document as a `$ref` target. "There is a row
+ * for it" is the property to hold; a row saying "Unrecognised format" is doing its job.
  *
- * Every file the user handed over has a row, whatever became of it - parsed,
- * unrecognised, unreadable, or inlined into another document as a `$ref` target.
- * That is the whole point: the flow this replaced kept the first file and said
- * nothing about the rest, so "there is a row for it" is the property to hold on
- * to, and a row that says "Unrecognised format" is doing its job.
- *
- * Rows that cannot be imported start unchecked, and the checkbox is the only
- * thing the user has to touch: the counts, the losses and the outcome are all
- * stated per file, in the same words the single-file preview uses.
+ * Rows that cannot be imported start unchecked, and the checkbox is the only control: the counts,
+ * the losses and the outcome are stated per file, in the single-file preview's words.
  */
 function BatchLedger({
 	entries,
@@ -1472,10 +1326,9 @@ function varCountLabel(n: number): string {
 }
 
 /**
- * One collection of the preview and everything beneath it, its sub-folders and
- * requests in the one order the sidebar will list them (issue #2535): the
- * order a Postman collection, a JMeter plan, an Insomnia export or a
- * Vayu-written OpenAPI document states, and folders first for any other format.
+ * One collection of the preview and everything beneath it, sub-folders and requests in the order
+ * the sidebar lists them (issue #2535): the order a Postman collection, a JMeter plan, an Insomnia
+ * export or a Vayu-written OpenAPI document states, and folders first for any other format.
  */
 function TreeNode({ collection }: { collection: CollectionDraft }) {
 	return (

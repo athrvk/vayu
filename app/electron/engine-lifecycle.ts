@@ -6,12 +6,10 @@
  */
 
 /**
- * The sidecar's lifecycle, carried to the window (#3336).
- *
- * Facts only: what the engine is doing and, for a crash, how it left. What the
- * Dock calls that is the renderer's to decide, and `engine:startFailure` stays
- * the one reason a start gives the user. Electron-free, so `main.ts` hands in
- * the send and the `ipcMain` slice.
+ * The sidecar's lifecycle, carried to the window (#3336). Facts only: what the engine is doing and,
+ * for a crash, how it left. What the Dock calls that is the renderer's to decide, and
+ * `engine:startFailure` stays the one reason a start gives the user. Electron-free, so `main.ts`
+ * hands in the send and the `ipcMain` slice.
  */
 
 import type { EngineLifecycle } from "./sidecar.js";
@@ -54,10 +52,9 @@ export interface EngineLifecycleBridge {
 }
 
 /**
- * Push every transition to the window and run `readyAfterSlow` when a slow
- * engine answers. Call it before `start()`: the first transitions happen
- * inside it, and a hook attached after the start returned `slow` would race
- * the engine's answer.
+ * Push every transition to the window and run `readyAfterSlow` when a slow engine answers. Call it
+ * before `start()`: the first transitions happen inside it, and a hook attached after a start that
+ * returned `slow` would race the engine's answer.
  */
 export function bridgeEngineLifecycle(
 	source: EngineLifecycleSource,

@@ -6,14 +6,12 @@
  */
 
 /**
- * The "+N" menu a section-tab strip sends its overflowed tabs to (#2200).
- *
- * Presentational: `useFittedTabs` decides who overflows, the strip decides what
- * choosing one means. The trigger is a sibling of the `TabsList`, never a child,
- * because a `role="tablist"` owns only tabs and a menu button inside one is
- * announced as a member of the set. It looks like `TabStrip`'s overflow trigger
- * without its left rule: that rule is `border-border`, which a card surface
- * (the response pane) paints invisible.
+ * The "+N" menu a section-tab strip sends its overflowed tabs to (#2200). Presentational:
+ * `useFittedTabs` decides who overflows, the strip what choosing one means. The trigger is a
+ * sibling of the `TabsList`, never a child: a `role="tablist"` owns only tabs, and a menu button
+ * inside one is announced as a member of the set. It looks like `TabStrip`'s overflow trigger
+ * without its left rule, a `border-border` that a card surface (the response pane) paints
+ * invisible.
  */
 
 import type { ReactNode } from "react";
@@ -31,15 +29,13 @@ export interface OverflowedTab<Id extends string> {
 	id: Id;
 	label: string;
 	/**
-	 * What the tab's trigger would have drawn after its label - a count, a dot, a
-	 * result chip. The strip passes the same node it gives the trigger, so a mark
-	 * is defined once and the menu cannot drift from it.
+	 * What the tab's trigger draws after its label (a count, a dot, a result chip): the strip
+	 * passes the trigger's own node, so a mark is defined once and the menu cannot drift from it.
 	 */
 	mark?: ReactNode;
 	/**
-	 * The tab holds a failure the user has to see (a script error, a failing test
-	 * run). A hidden one marks the "+N" trigger itself, because the menu is closed
-	 * and the item's own mark is out of sight.
+	 * The tab holds a failure the user must see (a script error, a failing test run). A hidden one
+	 * marks the "+N" trigger itself, as the menu is closed and the item's own mark out of sight.
 	 */
 	attention?: boolean;
 }

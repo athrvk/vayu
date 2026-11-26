@@ -6,26 +6,21 @@
  */
 
 /**
- * @file log-reader.ts
- * @brief The main-process reader behind the Logs tab (#3635): a listing of
- *        `<data-dir>/logs/`, a bounded page merged across files (backward, or
- *        forward from a jump), and a polling tail.
+ * @brief The main-process reader behind the Logs tab (#3635): a listing of `<data-dir>/logs/`, a
+ *        bounded page merged across files (backward, or forward from a jump), and a polling tail.
  *
- * Electron-free, the `log.ts` / `save-file-ipc.ts` shape: `fs`, the logs
- * directory and the timers arrive as arguments, so it is tested against a temp
- * directory. It logs nothing: a tail that logged its own deliveries would feed
- * on them.
+ * Electron-free, the `log.ts` / `save-file-ipc.ts` shape: `fs`, the logs directory and the timers
+ * arrive as arguments, so it is tested against a temp directory. It logs nothing: a tail that
+ * logged its own deliveries would feed on them.
  *
- * Trust: a file is opened only by a name from this module's own listing
- * (`LOG_FILE_NAME`, regular files by `lstat`, and the opened handle's identity
- * checked against that listing), never by a path a caller passes. A cursor
- * names files, so every name in one is checked against the pattern and then
+ * Trust: a file is opened only by a name from this module's own listing (`LOG_FILE_NAME`, regular
+ * files by `lstat`, the opened handle's identity checked against the listing), never by a path a
+ * caller passes. A cursor names files, so every name in one is checked against the pattern and then
  * resolved through the listing.
  *
- * Time comes from each record's `ts`, never a file name: the engine stamps its
- * name in local time and the app in UTC, so names do not sort across sources.
- * Within one file records are in time order (one writer per file), which both
- * merges and the `around` bisection rely on.
+ * Time comes from each record's `ts`, never a file name: the engine stamps its name in local time
+ * and the app in UTC, so names do not sort across sources. Within one file records are in time
+ * order (one writer per file), which both merges and the `around` bisection rely on.
  */
 
 import path from "path";
@@ -47,9 +42,8 @@ export const UNPARSED_RAW_MAX_BYTES = 8 * 1024;
 /** A record whose line is longer than this has its largest fields cut. */
 export const RECORD_MAX_BYTES = 256 * 1024;
 /**
- * A line longer than this is not parsed at all: it comes back unparsed, its
- * first `UNPARSED_RAW_MAX_BYTES`, and only those bytes are held while the rest
- * of it is read past.
+ * A line longer than this is not parsed at all: it comes back unparsed as its first
+ * `UNPARSED_RAW_MAX_BYTES`, the only bytes held while the rest of it is read past.
  */
 const LINE_MAX_BYTES = 16 * 1024 * 1024;
 const CHUNK_BYTES = 64 * 1024;
@@ -83,31 +77,28 @@ export interface LogFileInfo {
 }
 
 /**
- * The key a record carries its own line under, so Copy line and Export write
- * what the file holds and not a re-serialisation (`1.0` reads back as `1`). It
- * starts with `$`, which `docs/engine/log-record.schema.json`'s `propertyNames`
- * refuses, so no field of a schema-valid record shares it and a `key:value`
- * search term (`FIELD_NAME`) cannot name it. A line that does carry the key has
- * it overwritten, and loses nothing: the line is the value. Mirrored by
- * `RAW_LINE_KEY` in `src/modules/logs/log-entry.ts`, and held equal to it by
+ * The key a record carries its own line under, so Copy line and Export write what the file holds
+ * and not a re-serialisation (`1.0` reads back as `1`). It starts with `$`, which
+ * `docs/engine/log-record.schema.json`'s `propertyNames` refuses, so no field of a schema-valid
+ * record shares it and a `key:value` search term (`FIELD_NAME`) cannot name it; a line that does
+ * carry the key has it overwritten and loses nothing, since the line is the value. Mirrored by
+ * `RAW_LINE_KEY` in `src/modules/logs/log-entry.ts` and held equal to it by
  * `log-raw-line.conformance.test.ts`.
  */
 export const RAW_LINE_KEY = "$raw";
 
 /**
- * The key every line the reader delivers carries its place in its file under,
- * so a page can be continued from any line the renderer still holds (#3652).
- * `$`-prefixed for the reason `RAW_LINE_KEY` is, and mirrored and held equal
- * the same way (`log-raw-line.conformance.test.ts`). An unparsed line carries
- * it under the same key.
+ * The key every line the reader delivers carries its place in its file under, so a page can be
+ * continued from any line the renderer still holds (#3652); an unparsed line carries it under the
+ * same key. `$`-prefixed for the reason `RAW_LINE_KEY` is, and mirrored and held equal the same way
+ * (`log-raw-line.conformance.test.ts`).
  */
 export const POSITION_KEY = "$pos";
 
 /**
- * Where a delivered line sits. `name` and `id` are the file's, as a cursor
- * entry names it (`LogCursorFile`); `start` is the offset of the line's first
- * byte, and `end` the offset just past its newline, or the file's end for a
- * last line that has none.
+ * Where a delivered line sits. `name` and `id` are the file's, as a cursor entry names it
+ * (`LogCursorFile`); `start` is the offset of the line's first byte, and `end` the offset just past
+ * its newline, or the file's end for a last line that has none.
  */
 export interface LogLinePosition {
 	name: string;
@@ -155,10 +146,9 @@ export interface LogFieldTerm {
 }
 
 /**
- * What a read or a tail keeps. An absent or empty set does not constrain.
- * A line that is not a record has no level, source, category or fields, so it
- * passes only a filter that constrains none of them, and its free text is
- * matched against the raw line.
+ * What a read or a tail keeps; an absent or empty set does not constrain. A line that is not a
+ * record has no level, source, category or fields, so it passes only a filter that constrains none
+ * of them, and its free text is matched against the raw line.
  */
 export interface LogFilter {
 	minLevel?: LogLevel;
@@ -169,11 +159,10 @@ export interface LogFilter {
 }
 
 /**
- * Where a read stopped, per file. Backward, everything from `offset` to the
- * end of the file as it was first read has been consumed; forward, everything
- * before `offset`. `id` is the file's device and inode, so a file renamed to
- * `.1` by a rotation between two pages is still found; it is empty where the
- * filesystem reports no inode, and the name is used instead.
+ * Where a read stopped, per file: backward, everything from `offset` to the end of the file as it
+ * was first read has been consumed; forward, everything before `offset`. `id` is the file's device
+ * and inode, so a file renamed to `.1` by a rotation between two pages is still found; it is empty
+ * where the filesystem reports no inode, and the name is used instead.
  */
 export interface LogCursorFile {
 	name: string;
@@ -332,9 +321,8 @@ export async function listLogFiles(deps: LogReaderDeps): Promise<LogFileInfo[]> 
 }
 
 /**
- * Open a listed file and confirm the handle is the file the listing saw: a
- * name swapped for a symlink or another file between the two is refused.
- * `null` when it is gone or no longer that file.
+ * Open a listed file and confirm the handle is the file the listing saw, refusing a name swapped
+ * for a symlink or another file in between. `null` when it is gone or no longer that file.
  */
 async function openListed(deps: LogReaderDeps, file: ScannedFile): Promise<LogFileHandle | null> {
 	let handle: LogFileHandle;
@@ -507,9 +495,8 @@ function decodeInFile(line: PositionedLine, file: ScannedFile): LogEntry | null 
 // Filter
 
 /**
- * Keys free text does not search: the table shows them in columns of their own,
- * the raw line repeats every field, so it would match on key names, and the
- * position names the file.
+ * Keys free text does not search: the table shows them in columns of their own, the raw line
+ * repeats every field (so it would match on key names), and the position names the file.
  */
 const TEXT_EXCLUDED_KEYS = new Set([
 	"ts",
@@ -596,10 +583,9 @@ export function compileLogFilter(filter: LogFilter): (entry: LogEntry) => boolea
 const SEARCH_TOKEN = /([^\s"]*)"([^"]*)"|(\S+)/g;
 
 /**
- * A search box's text as free text plus `field:value` terms. `field:"v w"`
- * is an exact term, `field:v` a substring one; everything else, quoted
- * phrases included, joins into the free text. A value starting `//` is a URL
- * (`http://host`), not a term.
+ * A search box's text as free text plus `field:value` terms: `field:"v w"` is an exact term,
+ * `field:v` a substring one, and everything else, quoted phrases included, joins the free text. A
+ * value starting `//` is a URL (`http://host`), not a term.
  */
 export function parseSearchInput(input: string): { text: string; terms: LogFieldTerm[] } {
 	const words: string[] = [];
@@ -720,9 +706,8 @@ class BackwardLines {
 	}
 
 	/**
-	 * A line ends just past its newline, unless it runs up to the offset this
-	 * read started from: no newline came before that offset, so it is the file's
-	 * end and the line ends there.
+	 * A line ends just past its newline, unless it runs up to the offset this read started from: no
+	 * newline came before that offset, so it is the file's end and the line ends there.
 	 */
 	private positioned(line: RawLine, start: number): PositionedLine {
 		return { ...line, start, end: Math.min(start + line.length + 1, this.end) };
@@ -943,13 +928,12 @@ async function streamEnd(
 }
 
 /**
- * The `limit` records that match the filter nearest the cursor, merged across
- * every log file by `ts`: the newest older than a `before` or `around` cursor,
- * or the oldest newer than an `after` one. Reads in chunks and stops once the
- * call has read its scan budget, so a search through a long history is paged;
- * the returned cursor continues exactly where it stopped. A call always
- * consumes at least one line when any remain, so a page that found nothing
- * still moves `scannedTo` on.
+ * The `limit` records that match the filter nearest the cursor, merged across every log file by
+ * `ts`: the newest older than a `before` or `around` cursor, or the oldest newer than an `after`
+ * one. Reads in chunks and stops once the call has read its scan budget, so a search through a long
+ * history is paged, and the returned cursor continues exactly where it stopped. A call always
+ * consumes at least one line when any remain, so a page that found nothing still moves `scannedTo`
+ * on.
  */
 export async function readLogs(
 	deps: LogReaderDeps,
@@ -975,13 +959,12 @@ export async function readLogs(
 }
 
 /**
- * Open a listed file for a backward read, following it to its new name when a
- * rotation renamed it between the listing and the open (#3652). The forward
- * read can leave such a file in its cursor for the next page, since it knows
- * the offset that page starts from; a backward read without a cursor measures
- * where the file's lines end on the file itself, and an `around` read where
- * the time cuts it, so it reads the renamed file now. `null` when the file is
- * gone, or has no identity to follow it by.
+ * Open a listed file for a backward read, following it to its new name when a rotation renamed it
+ * between the listing and the open (#3652). The forward read can leave such a file in its cursor
+ * for the next page, since it knows the offset that page starts from; a backward read without a
+ * cursor measures where the file's lines end on the file itself, and an `around` read where the
+ * time cuts it, so it reads the renamed file now. `null` when the file is gone, or has no identity
+ * to follow it by.
  */
 async function openFollowingRename(
 	context: ReadContext,
@@ -1215,10 +1198,9 @@ function oldestHead(streams: ForwardStream[]): ForwardStream | null {
 }
 
 /**
- * Each listed file and the offset its forward read starts from. A file the
- * cursor does not name appeared after it was made, and one now shorter than
- * its offset was replaced under the same name: both are read from the start,
- * as the tail reads them.
+ * Each listed file and the offset its forward read starts from. A file the cursor does not name
+ * appeared after it was made, and one now shorter than its offset was replaced under the same name:
+ * both are read from the start, as the tail reads them.
  */
 function forwardStarts(
 	files: ScannedFile[],
@@ -1316,21 +1298,19 @@ interface KeyedEntry {
 }
 
 /**
- * A file is followed by identity, so a rotation (the open file renamed to
- * `.1`) reads the rest of the renamed file and then the fresh one from its
- * start. Without an inode the name stands in and a rotation reads as a
- * truncation.
+ * A file is followed by identity, so a rotation (the open file renamed to `.1`) reads the rest of
+ * the renamed file and then the fresh one from its start. Without an inode the name stands in, and
+ * a rotation reads as a truncation.
  */
 function tailKey(file: ScannedFile): string {
 	return file.id === "" ? `name:${file.name}` : file.id;
 }
 
 /**
- * Follow the log files: every `LOG_TAIL_POLL_MS` (no `fs.watch`, which is not
- * dependable across the three platforms) read what was appended to each file
- * and deliver the matching records, oldest first. Records already in a file
- * when the tail starts are the backward read's, not the tail's; a file that
- * appears later (a restarted engine) is read from its start.
+ * Follow the log files: every `LOG_TAIL_POLL_MS` (no `fs.watch`, which is not dependable across the
+ * three platforms) read what was appended to each file and deliver the matching records, oldest
+ * first. Records already in a file when the tail starts are the backward read's, not the tail's; a
+ * file that appears later (a restarted engine) is read from its start.
  */
 export async function createLogTail(deps: LogTailDeps, options: LogTailOptions): Promise<LogTail> {
 	const matches = compileLogFilter(options.filter);

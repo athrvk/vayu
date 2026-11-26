@@ -22,8 +22,8 @@ interface TargetLineProps {
 }
 
 /**
- * What the run is aimed at, said before the profile is configured (#2117). The
- * description line of the dialog: spans only, because it renders inside a `<p>`.
+ * What the run is aimed at, before the profile (#2117): spans only, since it renders inside a
+ * `<p>`.
  */
 export function TargetLine({ method, url, target, agentReference }: TargetLineProps) {
 	const shown = url.trim();

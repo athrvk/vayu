@@ -15,16 +15,14 @@
 #include <vector>
 
 /**
- * @file url_parts.hpp
  * @brief A URL split into the pieces Postman's `Url` object presents.
  *
- * The engine had no URL splitter that anything but the cookie jar could reach:
- * `cookie_jar.cpp` reads a host, a path and a scheme through libcurl's `CURLU`
- * for its own scoping, and stops there. `pm.request.url` (issue #991) needs the
- * whole shape - scheme, host segments, port, decoded path segments, the query
- * in wire order, the fragment - so it lives here rather than beside the
- * bindings in `runtime/pm/pm_request_url.cpp`, where nothing could unit-test
- * it without a JS context.
+ * `pm.request.url` (#991) needs the whole shape - scheme, host segments, port,
+ * decoded path segments, the query in wire order, the fragment - where
+ * `cookie_jar.cpp` reads only a host, a path and a scheme through libcurl's
+ * `CURLU`, for its own scoping. It lives here rather than beside the bindings
+ * in `runtime/pm/pm_request_url.cpp`, where nothing could unit-test it without
+ * a JS context.
  *
  * **libcurl owns the parsing.** Splitting a URL by hand is the class of thing
  * that is right for the URLs you thought of and wrong for the rest (IPv6
@@ -37,12 +35,12 @@
  * scripted request's URL reaches the script with its scope names still written
  * (`{{baseUrl}}/echo`, #2521), and libcurl refuses a URL with no scheme or with
  * braces in the host. Only then, and only when a token sits in the scheme or
- * the authority, the text is split as `postman-url-encoder`'s parser splits
- * it: an optional `scheme://`, the authority up to the first `/`, `?` or `#`
- * with the token kept as opaque host text, then the path, query and fragment
- * by the same splitters a libcurl reading uses. A separator inside a token
- * never splits anything, and composition writes every token back verbatim, so
- * the pass after the script still resolves it.
+ * the authority, the text is split as `postman-url-encoder`'s parser splits it:
+ * an optional `scheme://`, the authority up to the first `/`, `?` or `#` with
+ * the token kept as opaque host text, then the path, query and fragment by the
+ * same splitters a libcurl reading uses. A separator inside a token never
+ * splits anything, and composition writes every token back verbatim, so the
+ * pass after the script still resolves it.
  *
  * ## What is decoded and what is not
  *
@@ -283,10 +281,10 @@ std::string_view origin);
  * @brief The parts back as a URL.
  *
  * The inverse of @ref parse_url_parts, for a caller that has *edited* the parts
- * - `pm.request.url.path.push(...)` and the query writers (issue #1040). It is
- * not a round-trip helper: a URL nobody edited must reach the wire as the bytes
- * it arrived as, so the script surface composes only when a member was actually
- * written to, and this is never called otherwise.
+ * - `pm.request.url.path.push(...)` and the query writers (#1040). It is not a
+ *   round-trip helper: a URL nobody edited must reach the wire as the bytes it
+ *   arrived as, so the script surface composes only when a member was actually
+ *   written to, and this is never called otherwise.
  *
  * Path segments are percent-encoded here because @ref parse_url_parts decoded
  * them, each segment on its own so an edited segment containing `/` stays one
@@ -310,12 +308,11 @@ std::string_view origin);
  * this file's parsing already follows.
  *
  * **Empty when libcurl cannot escape** - an allocation failure, or a value
- * longer than the `int` its length is passed as. That is the form encoder's
- * long-standing answer, kept when its private copy of this function was folded
- * in here (issue #1228), and it is the safer of the two: an unescaped value
- * spliced into a query string or a form body carries whatever `&` and `=` it
- * contains, which adds parameters the caller never wrote. Under-sending a
- * value is recoverable; sending a different request is not.
+ * longer than the `int` its length is passed as. The form encoder shares it
+ * (#1228), and it is safer than the raw value: an unescaped value spliced into
+ * a query string or a form body carries whatever `&` and `=` it contains, which
+ * adds parameters the caller never wrote. Under-sending a value is recoverable;
+ * sending a different request is not.
  */
 [[nodiscard]] std::string percent_encode (const std::string& value);
 

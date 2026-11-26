@@ -6,10 +6,8 @@
  */
 
 /**
- * Config Queries
- *
- * TanStack Query hooks for configuration operations, and for the one thing the
- * engine derives from config that a client cannot: what a send adds on its own.
+ * TanStack Query hooks for configuration, and for the one thing the engine derives from config that
+ * a client cannot: what a send adds on its own.
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -18,9 +16,7 @@ import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import type { GetConfigResponse, RequestDefaultsScope, UpdateConfigRequest } from "@/types";
 
-/**
- * Fetch all configuration entries
- */
+/** Fetch all configuration entries */
 export function useConfigQuery() {
 	return useQuery({
 		queryKey: queryKeys.config.all,
@@ -30,19 +26,17 @@ export function useConfigQuery() {
 }
 
 /**
- * What the engine will add to a request that names none of it (issue #1229) -
- * `User-Agent`, a negotiated `Accept-Encoding`, an optional correlation id and,
- * while `sendExpectContinue` is on, `Expect: 100-continue`.
+ * What the engine adds to a request that names none of it (#1229): `User-Agent`, a negotiated
+ * `Accept-Encoding`, an optional correlation id and, while `sendExpectContinue` is on,
+ * `Expect: 100-continue`. Read, not derived: the engine decides the set (its libcurl decides which
+ * encodings it can even ask for), so a client that worked it out from the config entries would be a
+ * second definition of the same rule. Cached like config, for the same reason: it changes only when
+ * config does.
  *
- * Read rather than derived: the *engine* decides the set (its libcurl decides
- * which encodings it can even ask for), so a client that worked it out from the
- * config entries would be a second definition of the same rule. Cached like
- * config, and for the same reason - it changes only when config does.
- *
- * @param scope Defaults to `"design"` - what sending this request right now
- *   would add, the Headers tab's answer. Pass `"load"` for what a load run
- *   would add instead (issue #1338): `negotiateCompression` governs the
- *   former and `loadNegotiateCompression` the latter, and they can disagree.
+ * @param scope Defaults to `"design"`: what sending this request now would add, the Headers tab's
+ *        answer. Pass `"load"` for what a load run would add instead (#1338):
+ *        `negotiateCompression` governs the former and `loadNegotiateCompression` the latter, and
+ *        they can disagree.
  */
 export function useRequestDefaultsQuery(scope: RequestDefaultsScope = "design") {
 	return useQuery({
@@ -52,9 +46,7 @@ export function useRequestDefaultsQuery(scope: RequestDefaultsScope = "design") 
 	});
 }
 
-/**
- * Update configuration entries
- */
+/** Update configuration entries */
 export function useUpdateConfigMutation() {
 	const queryClient = useQueryClient();
 
@@ -63,12 +55,10 @@ export function useUpdateConfigMutation() {
 		onSuccess: (updatedConfig) => {
 			// Update cache with new config
 			queryClient.setQueryData<GetConfigResponse>(queryKeys.config.all, updatedConfig);
-			// Five config entries decide what a send adds on its own
-			// (`negotiateCompression`, `loadNegotiateCompression`,
-			// `sendExpectContinue`, `correlationIdEnabled`,
-			// `correlationIdHeader`), and the engine resolves them - so the
-			// declared set has to be re-read rather than patched from the entries
-			// written here.
+			// Five config entries decide what a send adds on its own (`negotiateCompression`,
+			// `loadNegotiateCompression`, `sendExpectContinue`, `correlationIdEnabled`,
+			// `correlationIdHeader`), and the engine resolves them, so the declared set is re-read
+			// rather than patched from the entries written here.
 			queryClient.invalidateQueries({ queryKey: queryKeys.requestDefaults.all });
 		},
 	});

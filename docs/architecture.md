@@ -159,8 +159,8 @@ from the last id it saw and the engine replays what was missed; a resume the eng
 from before an engine restart) opens with `reset` instead, and the Manager
 refetches everything the feed describes. The stream is open only while the
 health poll says the engine is connected. The renderer side is described in
-[State management](app/state-management.md), and the route in the
-[API reference](engine/api-reference.md#change-feed).
+[State management](app/state-management/index.md), and the route in the
+[API reference](engine/api-reference/changes.md#change-feed).
 
 ### Load Test Flow
 
@@ -201,7 +201,7 @@ when it goes away or reloads, and the blocker stops with the last holder. A run
 that stops being watched without ending hands its lock back too: the two
 services share one SSE client, so starting a collection run takes the socket
 from a streaming load run, and the client tells the displaced service rather
-than closing on it in silence, which used to leave that key held for the rest of
+than closing on it in silence, which would leave that key held for the rest of
 the session (issue #1417). A run replaced by another of its own kind hands the
 key back on the same path: each service ends the run it is replacing before it
 registers the new one, so the key is released and taken again in that order,
@@ -382,7 +382,7 @@ which reads only a document holding such a grant, so nothing here becomes a
 second door onto the file system, and the document lands in the Import dialog's
 ledger exactly as a picked file does.
 
-See [Engine API Reference](engine/api-reference.md) for complete endpoint documentation.
+See [Engine API Reference](engine/api-reference/index.md) for complete endpoint documentation.
 
 ## Sidecar Pattern
 
@@ -452,7 +452,7 @@ which case the app picks a fallback (below).
   on the command line, which process listings show; it is not logged. The
   engine takes it out of its environment at start and requires it, as the
   `X-Vayu-Grant-Secret` header, on every write to file trust (allowed folders
-  and picked files, see the [API reference](engine/api-reference.md#who-may-call-the-api)).
+  and picked files, see the [API reference](engine/api-reference/index.md#who-may-call-the-api)).
   The main process holds it in `file-trust-client.ts`, the only module that
   sends it; the renderer and the MCP server never see it. A restart spawns a
   new engine and a new secret.
@@ -476,7 +476,7 @@ which case the app picks a fallback (below).
   (next bullet). See `docs/lock-file-handling.md`.
 - **Opening the app never stops an engine it does not own** (issue #3328).
   What makes an engine the app's is the `dataDir` its `/health` reports
-  ([API reference](engine/api-reference.md#get-health)): the app compares it
+  ([API reference](engine/api-reference/health-config.md#get-health)): the app compares it
   with its own data directory, both resolved and without a trailing separator,
   ignoring case on Windows only. A Vayu engine serving another directory - a
   `vayu-engine` run from a terminal for `vayu-cli`, or a second app instance on
@@ -580,7 +580,7 @@ which case the app picks a fallback (below).
   (`useEngineRestart`) alike - both invalidate every query and then flush
   every registered save context. A failed auto-save's own retry can be backed
   off up to a minute behind either, and nothing else pokes it sooner; see
-  `docs/app/state-management.md`'s `save-store.ts` section for the retry and
+  `docs/app/state-management/save-and-drafts.md`'s `save-store.ts` section for the retry and
   the Dock's persistent "Not saved" state a failure short of that leaves on
   screen.
 - **A quit or window-close asks before discarding a flush that did not land**
@@ -680,13 +680,13 @@ which case the app picks a fallback (below).
   renderer's health poll adopts it the moment it answers. When the sidecar's own
   probe sees the answer first it moves to `ready` and the main process runs the
   file-grant sync the slow path skipped (not the log floor, which is applied
-  once per launch and already was, at `debug`). Quitting there used to end
+  once per launch and already was, at `debug`). Quitting there would end
   launches that were seconds from succeeding.
 - **The window is created alongside the engine, not after it.** First paint must
   not wait on a process whose own startup housekeeping is allowed to run for 45
   seconds - `db.init()` does orphan reconciliation, inbox cleanup and a
   page-reclaim rewrite before the engine listens at all, and that whole window
-  used to be blank screen. Nothing is lost by overlapping them: the renderer
+  would be blank screen. Nothing is lost by overlapping them: the renderer
   tolerates an absent engine by design, polling `/health` itself and rendering
   the starting state until one answers - in the Dock and in every query mounted
   at first paint, which retry a refused connection through the start window
@@ -791,7 +791,7 @@ Windows keeps its in the certificate store and the engine loads it with
 Keychain is asked whenever a certificate does not verify against the file. Per request, the Settings tab's
 *Verify TLS certificate* row turns verification off for one endpoint - stored,
 sent on every send and load test, and painted as a warning while it is off. See
-[TLS trust settings](engine/api-reference.md#tls-trust-settings) for the
+[TLS trust settings](engine/api-reference/health-config.md#tls-trust-settings) for the
 per-platform detail, including what the Windows store does not supply.
 
 The same trust and the same switch apply to the proxy's own handshake when
@@ -814,7 +814,7 @@ certificate reaches the origin each hop names. Only the file *paths* are
 stored, so the private key stays where the user's own tooling put it; a
 cert-authenticated exchange reports which entry it used, live and from History
 alike. See [Client
-certificates](engine/api-reference.md#client-certificates).
+certificates](engine/api-reference/cookies-and-certificates.md#client-certificates).
 
 Because all three of those - the hop, the trust and the certificate - fail at
 the *first real request* and libcurl names the endpoint when they do, the same
@@ -841,7 +841,7 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   the same scheme allowlist as the request itself: only `http` and `https` URLs
   are sent, checked after variables resolve, and every transfer handle is
   restricted to those two protocols for redirects too
-  ([URL schemes](engine/api-reference.md#url-schemes)).
+  ([URL schemes](engine/api-reference/compose.md#url-schemes)).
 - **Local-Only Communication**: Control API only binds to `127.0.0.1` (port 9876
   by default; the app may choose a fallback, see [Ownership model](#ownership-model))
 - **The engine serves no browser**: it sends no CORS header, and before any
@@ -856,7 +856,7 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   `POST /changes/subscriptions`, which a page cannot send, and a page cannot
   fill the stream slots to lock the app out. Local tools (the MCP server,
   `curl`, a script) send no `Origin` and are unaffected
-  ([Who may call the API](engine/api-reference.md#who-may-call-the-api)).
+  ([Who may call the API](engine/api-reference/index.md#who-may-call-the-api)).
 - **The shell carries the renderer past that gate**: the renderer is a browser
   context too. The Electron shell (`app/electron/engine-origin.ts`), on the
   main window's session, strips the renderer's `Origin` and `Referer` from
@@ -979,4 +979,4 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
 
 ---
 
-*See: [Engine Architecture](engine/architecture.md) | [App Architecture](app/architecture.md) | [Engine API Reference](engine/api-reference.md)*
+*See: [Engine Architecture](engine/architecture.md) | [App Architecture](app/architecture.md) | [Engine API Reference](engine/api-reference/index.md)*

@@ -6,19 +6,17 @@
  */
 
 /**
- * @file controller_kinds.cpp
- * @brief `control.if`, `control.once`, `control.switch`, `control.throughput`
- *        (issue #1515): JMeter-style logic controllers that decide whether
- *        this occurrence sends at all, or which member a folder dispatches
- *        to, never a body parse and never a lock.
+ * `control.if`, `control.once`, `control.switch`, `control.throughput` (#1515):
+ * JMeter-style logic controllers that decide whether this occurrence sends at
+ * all, or which member a folder dispatches to, never with a body parse or a
+ * lock.
  *
- * All four run in `step.before`, reading `ElementContext::pre_script_result`
- * exactly as `execute_exchange`'s own skip check and `decide_next_step`
- * already read a script's `pm.execution.setNextRequest` / `skipRequest` -
- * one flow-control channel, not two. `control.once` and `control.throughput`
- * keep their own count in `ElementContext::controller_state`, keyed by their
- * own `element_id` alone (never folded with `iteration`): both fire at most
- * once *ever* for the user they belong to, not once per iteration.
+ * All four run in `step.before` and write `ElementContext::pre_script_result`,
+ * which `execute_exchange`'s skip check and `decide_next_step` already read for
+ * a script's `pm.execution.setNextRequest` / `skipRequest`: one flow-control
+ * channel. `control.once` and `control.throughput` keep their count in
+ * `ElementContext::controller_state` keyed by `element_id` alone, never with
+ * `iteration`, so the count spans the user's whole run, not one iteration.
  */
 
 #include "vayu/core/element_defaults.hpp"
@@ -135,7 +133,7 @@ class ControlIfElement final : public Element {
     [[nodiscard]] bool holds (const ParsedCondition& parsed, const std::string& resolved) const {
         if (parsed.op == "exists") {
             // A token `resolve_template` could not answer keeps its braces
-            // (issue #1009) - still resolved, just to nothing this run knows.
+            // (#1009): resolved, but to nothing this run knows.
             return !resolved.empty () && resolved.find ("{{") == std::string::npos;
         }
         if (const auto& pattern = pattern_; pattern && *pattern) {
@@ -163,8 +161,8 @@ class ControlOnceElement final : public Element {
 
     void apply (ElementContext& ctx) override {
         if (ctx.controller_state == nullptr) {
-            // No state to remember across calls (a design send) - there is
-            // no "later" for "once" to distinguish from, so it always runs.
+            // No state across calls (a design send): no "later" for "once" to
+            // tell apart, so it always runs.
             ctx.outcome_status = "ok";
             return;
         }
@@ -205,11 +203,10 @@ class ControlSwitchElement final : public Element {
         } else if (config_.contains ("default") && config_["default"].is_string ()) {
             target = config_["default"].get<std::string> ();
         } else {
-            // No case matched and no default: the issue's own wording is
-            // "ends the folder"; without this occurrence's folder boundary
-            // (only `needs_span` kinds carry one) the safe, disclosed
-            // approximation is to let this member proceed unrouted rather
-            // than guess at a boundary nothing here can see.
+            // No case matched and no default. #1515 says that "ends the
+            // folder", but only `needs_span` kinds carry the folder boundary,
+            // so this member proceeds unrouted rather than guess at a boundary
+            // it cannot see.
             ctx.outcome_status = "ok";
             return;
         }
@@ -238,12 +235,11 @@ class ControlThroughputElement final : public Element {
     }
 
     void apply (ElementContext& ctx) override {
-        // `perUser: false` (issue #1569) - a shared, cross-VU budget, kept
-        // in the run's own `SharedThroughputCounters` slot rather than this
-        // VU's `controller_state`. Under the sequential run and a design
-        // send `ctx.shared_controller_state` is always null (the single
-        // implicit user already makes `controller_state` below the
-        // "shared" instance), so `perUser` changes nothing there.
+        // `perUser: false` (#1569): one cross-VU budget in the run's
+        // `SharedThroughputCounters` slot, not this VU's `controller_state`.
+        // The sequential run and a design send have no shared state (their
+        // single user's `controller_state` already is the shared one), so
+        // `perUser` changes nothing there.
         if (!config_.value ("perUser", element_defaults::CONTROL_THROUGHPUT_PER_USER) &&
         ctx.shared_controller_state != nullptr) {
             if (auto* shared = ctx.shared_controller_state->find (ctx.element_id);
@@ -265,11 +261,10 @@ class ControlThroughputElement final : public Element {
             const int64_t every_n = config_.value ("everyN", int64_t{ 1 });
             run                   = every_n <= 1 || count % every_n == 0;
         } else if (config_.contains ("percent")) {
-            // An integer carry, scaled by 1000 so a fractional percentage
-            // still accumulates exactly rather than losing precision to a
-            // `double` stored through an `int64_t` map - and so the run
-            // fires deterministically at the configured rate over many
-            // occurrences rather than approximating it with an RNG.
+            // An integer carry scaled by 1000: a fractional percentage
+            // accumulates exactly instead of losing precision through the
+            // `int64_t` map, and the rate is met deterministically, not
+            // approximated with an RNG.
             const int64_t percent_milli =
             static_cast<int64_t> (config_.value ("percent", 100.0) * 1000.0);
             auto& carry = (*ctx.controller_state)[ctx.element_id + "#carry"];
@@ -443,11 +438,10 @@ ElementKind make_control_throughput_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ControlThroughputElement> (config);
     };
-    // `perUser: false` (issue #1569, JMeter's "All threads" throughput mode)
-    // asks the run to keep one shared budget across every virtual user
-    // rather than one per user - `supports_shared_state` below is what lets
-    // `SharedThroughputCounters` find this occurrence generically, without
-    // the scan naming this kind (#1512's extensibility contract, rule 1).
+    // `perUser: false` (#1569, JMeter's "All threads" mode) keeps one budget
+    // across every virtual user. This flag is how `SharedThroughputCounters`
+    // finds the occurrence without the scan naming this kind (#1512's
+    // extensibility contract, rule 1).
     kind.supports_shared_state = true;
     kind.validate_config       = control_throughput_problem;
     kind.config_schema         = {

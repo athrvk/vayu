@@ -150,12 +150,11 @@ import {
 const APP_ORIGIN: RunOrigin = { kind: "app" };
 
 /**
- * The client's budget for `POST /import/fetch`: the engine's stall bound plus
- * the grace, not the `defaultTimeout` setting, because the engine does not
- * bound this route by the setting. A total (the buffered form) or an idle gap
- * (the streamed form) of this length outlasts the longest silence the engine
- * allows, so its own error arrives first. A steady download slower than this
- * still aborts the buffered form client-side while the engine keeps reading.
+ * The client's budget for `POST /import/fetch`: the engine's stall bound plus the grace, not the
+ * `defaultTimeout` setting, which the engine does not apply to this route. A total (the buffered
+ * form) or an idle gap (the streamed form) this long outlasts the longest silence the engine
+ * allows, so its own error arrives first. A steady download slower than this still aborts the
+ * buffered form client-side while the engine keeps reading.
  */
 const IMPORT_FETCH_BUDGET_MS = IMPORT_FETCH_STALL_TIMEOUT_MS + PROXIED_TIMEOUT_GRACE_MS;
 
@@ -167,17 +166,15 @@ function configuredMs(key: string): number {
 }
 
 /**
- * The abort budget for an engine call that proxies a remote server: the engine's
- * own bound plus enough grace that its TIMEOUT error (with a proper code and a
- * recorded run) arrives before the UI aborts. Falls back to the engine's maxima
- * when the config cache is cold.
+ * The abort budget for an engine call that proxies a remote server: the engine's own bound plus
+ * enough grace that its TIMEOUT error (with a proper code and a recorded run) arrives before the UI
+ * aborts. Falls back to the engine's maxima when the config cache is cold.
  *
- * With no payload this is the `defaultTimeout` setting plus the grace, which is
- * all a bare transfer needs (`/oauth2/token`). Given the `POST /execute` payload
- * it is a worst case for that request - an OAuth 2.0 token fetch and every
- * script add their own bounds ({@link executeBudgetMs}) - because the call runs
- * them in sequence. `/import/fetch` is not budgeted here: the engine bounds it
- * by a fixed stall, not the setting ({@link IMPORT_FETCH_BUDGET_MS}).
+ * With no payload this is the `defaultTimeout` setting plus the grace, all a bare transfer needs
+ * (`/oauth2/token`). Given the `POST /execute` payload it is that request's worst case, because the
+ * call runs an OAuth 2.0 token fetch and every script in sequence, each with its own bound
+ * ({@link executeBudgetMs}). `/import/fetch` is not budgeted here: the engine bounds it by a fixed
+ * stall, not the setting ({@link IMPORT_FETCH_BUDGET_MS}).
  */
 function proxiedRequestTimeoutMs(payload?: unknown): number {
 	return executeBudgetMs(payload, {
@@ -199,16 +196,12 @@ function discoveredStartTimeoutMs(): number {
 }
 
 /**
- * Drop `id` from a create payload before it is sent.
- *
- * Since #97 the engine assigns every id and answers a create carrying one with a
- * `400`, so this is the difference between a save working and failing, not
- * cosmetics. The `Create*Request` types already have no `id`, but that is not a
- * guarantee: excess-property checking only fires on object literals, so a call
- * site that spreads a whole record (a duplicate flow, a restored tab, a
- * transformer output) passes one through unnoticed. Stripping it in the one
- * place every create goes through makes the payload correct by construction
- * rather than by review of each new call site.
+ * Drop `id` from a create payload before it is sent. The engine assigns every id (#97) and answers
+ * a create carrying one with a `400`, so this decides whether a save works. The `Create*Request`
+ * types have no `id`, but excess-property checking only fires on object literals, so a call site
+ * that spreads a whole record (a duplicate flow, a restored tab, a transformer output) passes one
+ * through unnoticed. Stripping it where every create goes through makes the payload correct by
+ * construction, not by review of each new call site.
  */
 function withoutId<T extends object>(data: T): Omit<T, "id"> {
 	const { id: _engineAssigned, ...rest } = data as T & { id?: unknown };
@@ -272,10 +265,9 @@ export const apiService = {
 	},
 
 	async updateCollection(data: UpdateCollectionRequest): Promise<Collection> {
-		// PUT, not POST: since #95 the engine's POST is create-only and answers a
-		// known id with 409. The id travels in the path (it is the identity);
-		// the rest of the object is a merge-patch, where an omitted field keeps
-		// its stored value and an explicit null resets it to the default.
+		// PUT, not POST: the engine's POST is create-only (#95) and answers a known id with 409.
+		// The id travels in the path (it is the identity); the rest is a merge-patch, where an
+		// omitted field keeps its stored value and an explicit null resets it to the default.
 		const { id, ...patch } = data;
 		const response = await httpClient.put<RawCollection>(
 			API_ENDPOINTS.COLLECTIONS_UPDATE(id),
@@ -333,32 +325,26 @@ export const apiService = {
 	},
 
 	/**
-	 * A request's saved example responses, in stored order (issue #481).
-	 *
-	 * No transformer: unlike a request row, an example carries no timestamp the
-	 * app renders and no column that predates a schema change, so there is
-	 * nothing to reconcile - the wire shape is the domain shape, minus the
-	 * `order` and timestamps `RequestExample` deliberately does not claim.
+	 * A request's saved example responses, in stored order (#481). No transformer: an example
+	 * carries no timestamp the app renders and no column that predates a schema change, so the wire
+	 * shape is the domain shape, minus the `order` and timestamps `RequestExample` deliberately
+	 * does not claim.
 	 */
 	async listRequestExamples(requestId: string): Promise<RequestExample[]> {
 		return await httpClient.get<RequestExample[]>(API_ENDPOINTS.REQUEST_EXAMPLES(requestId));
 	},
 
-	// Trash (issue #988). No transformer on any of the three: a trash entry is
-	// the engine's own summary of a deleted row - a name, a stamp and two counts
-	// - rather than a stored record the app reshapes, so the wire shape is the
-	// only shape.
+	// Trash (#988). No transformer on any of the three: a trash entry is the engine's own summary
+	// of a deleted row (a name, a stamp and two counts), not a stored record the app reshapes.
 
 	async listTrash(): Promise<ListTrashResponse> {
 		return await httpClient.get<ListTrashResponse>(API_ENDPOINTS.TRASH);
 	},
 
 	/**
-	 * Put one deleted root back, with everything its delete took along.
-	 *
-	 * Rejects with a 409 for a request whose collection is itself in the trash -
-	 * the engine names that collection in the message, so callers surface
-	 * `ApiError.message` rather than inventing wording for it.
+	 * Put one deleted root back, with everything its delete took along. Rejects with a 409 for a
+	 * request whose collection is itself in the trash; the engine names that collection in the
+	 * message, so callers surface `ApiError.message` rather than their own wording.
 	 */
 	async restoreTrashEntry(id: string): Promise<RestoreTrashResponse> {
 		return await httpClient.post<RestoreTrashResponse>(API_ENDPOINTS.TRASH_RESTORE(id));
@@ -372,11 +358,9 @@ export const apiService = {
 	// Specs (issue #637)
 
 	/**
-	 * Store one OpenAPI document and get back its engine id and hash.
-	 *
-	 * The hash is computed engine-side on the bytes it stored, never here: the
-	 * binding it goes into is compared against a hash a *run* was stamped with,
-	 * and two implementations of sha256 agreeing is a thing to rely on only when
+	 * Store one OpenAPI document and get back its engine id and hash. The engine computes the hash
+	 * on the bytes it stored, never here: the binding it goes into is compared against a hash a
+	 * *run* was stamped with, and two sha256 implementations agreeing is safe to rely on only when
 	 * one of them did both.
 	 */
 	async createSpec(data: CreateSpecRequest): Promise<SpecDocument> {
@@ -384,106 +368,84 @@ export const apiService = {
 	},
 
 	/**
-	 * One stored document, `content` included - for the readers that need the
-	 * text: export, the sync comparison, and `$ref` resolution. Each of those
-	 * runs on a user action, so the transfer is paid when it buys something.
-	 *
-	 * Describing a document rather than reading it is `getSpecMeta` below.
+	 * One stored document, `content` included, for the readers that need the text: export, the sync
+	 * comparison and `$ref` resolution. Each runs on a user action, so the transfer is paid when it
+	 * buys something. Describing a document without reading it is `getSpecMeta` below.
 	 */
 	async getSpec(id: string): Promise<SpecDocument> {
 		return await httpClient.get<SpecDocument>(API_ENDPOINTS.SPEC_BY_ID(id));
 	},
 
 	/**
-	 * What a stored document *is*, without the document (issue #712).
-	 *
-	 * The Spec tab's card wants `sourceUrl` and `fetchedAt`, which live on the
-	 * document rather than on the collection's binding - and pulling the whole
-	 * document for them cost 12 MB on a first open of a Stripe-sized spec. The
-	 * fields here are the document's own values, so a card painted from this
-	 * read says exactly what one painted from `getSpec` would.
+	 * What a stored document *is*, without the document (#712). The Spec tab's card wants
+	 * `sourceUrl` and `fetchedAt`, which live on the document, not on the collection's binding, and
+	 * pulling the whole document for them costs 12 MB on a first open of a Stripe-sized spec. The
+	 * fields are the document's own values, so a card painted from this read says exactly what one
+	 * painted from `getSpec` would.
 	 */
 	async getSpecMeta(id: string): Promise<SpecDocumentMeta> {
 		return await httpClient.get<SpecDocumentMeta>(API_ENDPOINTS.SPEC_META(id));
 	},
 
 	/**
-	 * What a picked document is - its dialect, its title and the operations it
-	 * declares - without storing it (issue #869).
-	 *
-	 * Reads only, and the last read of a document this app used to make itself:
-	 * the Spec tab parsed a picked file to paint its card and to hand the
-	 * identities to `matchSpecOperations` below, while the bind derived the same
-	 * identities from the same bytes engine-side - so a document the two read
-	 * differently previewed one pairing and committed another.
+	 * What a picked document is (its dialect, its title and the operations it declares) without
+	 * storing it (#869). Reads only. The Spec tab's card and the identities it hands
+	 * `matchSpecOperations` come from the engine's reader, the one the bind uses, so a document
+	 * cannot preview one pairing and commit another.
 	 */
 	async describeSpec(payload: SpecDescribeRequest): Promise<SpecDescribeResponse> {
 		return await httpClient.post<SpecDescribeResponse>(API_ENDPOINTS.SPEC_DESCRIBE, payload);
 	},
 
 	/**
-	 * Which request of a collection is which operation of a document (issue
-	 * #761).
-	 *
-	 * Reads only: the tab asks this about a document the user has not decided to
-	 * bind, so nothing is stored, stamped or created. The matching rule itself is
-	 * the engine's (`core/operation_match.hpp`) - it moved there so that
-	 * everything which is not the Spec tab, an agent over MCP first among them,
-	 * can bind a collection the same way rather than through a second copy of it.
+	 * Which request of a collection is which operation of a document (#761). Reads only: the tab
+	 * asks this about a document the user has not decided to bind, so nothing is stored, stamped or
+	 * created. The matching rule is the engine's (`core/operation_match.hpp`), so everything that
+	 * is not the Spec tab, an agent over MCP first among them, binds a collection the same way, not
+	 * through a second copy of it.
 	 */
 	async matchSpecOperations(payload: SpecMatchRequest): Promise<SpecMatchResponse> {
 		return await httpClient.post<SpecMatchResponse>(API_ENDPOINTS.SPEC_MATCH, payload);
 	},
 
 	/**
-	 * What a re-fetched document would change about a bound collection
-	 * (issue #854).
-	 *
-	 * Reads only, and the whole comparison: which request is which operation
-	 * after a rename, which fields the document moved, and which of those the
-	 * user had edited themselves. It moved engine-side because the Sync section
-	 * was the last part of this feature only the Spec tab could reach - and
-	 * because "what would an import of this document build" now has one answer
-	 * (`core::spec_request_drafts_of`) rather than one here and one there.
+	 * What a re-fetched document would change about a bound collection (#854). Reads only, and the
+	 * whole comparison: which request is which operation after a rename, which fields the document
+	 * moved, and which of those the user edited themselves. It is engine-side so the Sync section
+	 * is not reachable only from the Spec tab, and so "what would an import of this document build"
+	 * has one answer (`core::spec_request_drafts_of`).
 	 */
 	async diffSpec(payload: SpecDiffRequest): Promise<SpecDiffResponse> {
 		return await httpClient.post<SpecDiffResponse>(API_ENDPOINTS.SPEC_DIFF, payload);
 	},
 
 	/**
-	 * Bind a collection to a document (issue #862).
-	 *
-	 * One call for what used to be three - store the document, move the
-	 * binding, stamp the requests - because the three are one state: a bind that
-	 * stopped after the second leaves a collection measured against a contract
-	 * its requests do not name. The engine does the pairing itself, from the
-	 * bytes it stores, so nothing here decides which request is which operation.
+	 * Bind a collection to a document (#862). One call, not three (store the document, move the
+	 * binding, stamp the requests), because the three are one state: a bind that stopped after the
+	 * second leaves a collection measured against a contract its requests do not name. The engine
+	 * pairs requests with operations from the bytes it stores, so nothing here decides which
+	 * request is which operation.
 	 */
 	async bindSpec(payload: SpecBindRequest): Promise<SpecBindResponse> {
 		return await httpClient.post<SpecBindResponse>(API_ENDPOINTS.SPEC_BIND, payload);
 	},
 
 	/**
-	 * A collection back out as an OpenAPI document (issue #855).
-	 *
-	 * The assembly is the engine's: it reads the subtree, every request's stored
-	 * examples and the bound document, patches that document (or writes a
-	 * skeleton when the collection binds none) and answers with the finished
-	 * text. It moved there with the rest of #761's phase B so that an agent can
-	 * export the same way the dialog does - and because the document being
-	 * patched is the engine's own stored bytes, which a second reader here could
-	 * only disagree with.
+	 * A collection back out as an OpenAPI document (#855). The engine assembles it: it reads the
+	 * subtree, every request's stored examples and the bound document, patches that document (or
+	 * writes a skeleton when the collection binds none) and answers with the finished text. It is
+	 * engine-side (with the rest of #761's phase B) so an agent exports the same way the dialog
+	 * does, and because the patched document is the engine's own stored bytes, which a second
+	 * reader here could only disagree with.
 	 */
 	async exportSpec(payload: SpecExportRequest): Promise<SpecExportResponse> {
 		return await httpClient.post<SpecExportResponse>(API_ENDPOINTS.SPEC_EXPORT, payload);
 	},
 
 	/**
-	 * A collection as a Postman Collection v2.1 document.
-	 *
-	 * Assembled engine-side for the reason `exportSpec` is: an agent over MCP
-	 * gets the same document the dialog downloads. Credentials are written empty
-	 * unless `includeSecrets` is set.
+	 * A collection as a Postman Collection v2.1 document, assembled engine-side for `exportSpec`'s
+	 * reason: an agent over MCP gets the same document the dialog downloads. Credentials are
+	 * written empty unless `includeSecrets` is set.
 	 */
 	async exportPostman(payload: PostmanExportRequest): Promise<PostmanExportResponse> {
 		return await httpClient.post<PostmanExportResponse>(API_ENDPOINTS.POSTMAN_EXPORT, payload);
@@ -503,10 +465,9 @@ export const apiService = {
 	},
 
 	/**
-	 * A finished load run as a document to share (issue #2127), built engine-side
-	 * so an agent over MCP gets the file the app downloads. Nothing that could
-	 * carry a credential or a payload is in it; `notes.urlCredentialsOmitted`
-	 * counts what the URL lost.
+	 * A finished load run as a document to share (#2127), built engine-side so an agent over MCP
+	 * gets the file the app downloads. It holds nothing that could carry a credential or a payload;
+	 * `notes.urlCredentialsOmitted` counts what the URL lost.
 	 */
 	async exportRunReport(payload: RunReportExportRequest): Promise<RunReportExportResponse> {
 		return await httpClient.post<RunReportExportResponse>(
@@ -516,24 +477,20 @@ export const apiService = {
 	},
 
 	/**
-	 * Apply a re-fetched document to the collection bound to it (issue #655).
-	 *
-	 * One call because it has to be one transaction: the document, the binding
-	 * that moves to it and every row the diff selected land together or not at
-	 * all. Expressed as N writes it could stop halfway and leave a collection
-	 * bound to a document its requests do not reflect.
+	 * Apply a re-fetched document to the collection bound to it (#655). One call because it is one
+	 * transaction: the document, the binding that moves to it and every row the diff selected land
+	 * together or not at all. As N writes it could stop halfway and leave a collection bound to a
+	 * document its requests do not reflect.
 	 */
 	async syncSpec(payload: SpecSyncRequest): Promise<SpecSyncResponse> {
 		return await httpClient.post<SpecSyncResponse>(API_ENDPOINTS.SPEC_SYNC, payload);
 	},
 
 	/**
-	 * Keep a response as one of the request's examples (issue #588).
-	 *
-	 * POST, and create-only like every other resource: the engine assigns the id
-	 * (#97), and `withoutId` strips one a spread carried in for the same reason
-	 * `createRequest` does. No `order` is sent - the engine appends, which is
-	 * what keeps a running mock's first-example answer unchanged.
+	 * Keep a response as one of the request's examples (#588). POST, and create-only like every
+	 * other resource: the engine assigns the id (#97), and `withoutId` strips one a spread carried
+	 * in, as for `createRequest`. No `order` is sent: the engine appends, which keeps a running
+	 * mock's first-example answer unchanged.
 	 */
 	async createRequestExample(
 		requestId: string,
@@ -546,23 +503,19 @@ export const apiService = {
 	},
 
 	/**
-	 * Remove one saved example.
-	 *
-	 * The request id is in the path rather than inferred: the engine checks the
-	 * owner before the example, so an example reached through the wrong request
-	 * is a 404 rather than a cross-request delete.
+	 * Remove one saved example. The request id is in the path, not inferred: the engine checks the
+	 * owner before the example, so an example reached through the wrong request is a 404, not a
+	 * cross-request delete.
 	 */
 	async deleteRequestExample(requestId: string, exampleId: string): Promise<void> {
 		await httpClient.delete(API_ENDPOINTS.REQUEST_EXAMPLE_BY_ID(requestId, exampleId));
 	},
 
 	/**
-	 * Reposition collections and requests in one atomic batch.
-	 *
-	 * The response is the rows as written, not an acknowledgement: the caller
-	 * has already drawn the drop optimistically and settles its caches on these
-	 * rows, so a normalization the engine performed is visible immediately
-	 * rather than only after the refetch lands.
+	 * Reposition collections and requests in one atomic batch. The answer is the rows as written,
+	 * not an acknowledgement: the caller has drawn the drop optimistically and settles its caches
+	 * on these rows, so a normalization the engine made shows at once, not only after the refetch
+	 * lands.
 	 */
 	async reorder(data: ReorderRequest): Promise<ReorderResponse> {
 		const response = await httpClient.post<{
@@ -577,7 +530,6 @@ export const apiService = {
 
 	// Environments
 	async listEnvironments(): Promise<Environment[]> {
-		// Backend returns flat array directly
 		return await httpClient.get<Environment[]>(API_ENDPOINTS.ENVIRONMENTS);
 	},
 
@@ -618,13 +570,10 @@ export const apiService = {
 	},
 
 	/**
-	 * Clear one jar, or every jar.
-	 *
-	 * The parameter distinguishes three cases the way the engine does: omitted
-	 * clears everything, `null` clears the jar used when no environment is
-	 * selected, and an id clears that environment's. Passing `null` and passing
-	 * nothing are therefore *not* the same call: one reaches the engine with
-	 * the parameter present and empty, the other with no parameter at all.
+	 * Clear one jar, or every jar. The parameter selects three cases the way the engine does:
+	 * omitted clears everything, `null` clears the jar used when no environment is selected, and an
+	 * id clears that environment's. So `null` and nothing are *not* the same call: one reaches the
+	 * engine with the parameter present and empty, the other with no parameter at all.
 	 */
 	async clearCookies(scope?: { environmentId: string | null }): Promise<ClearCookiesResponse> {
 		return await httpClient.delete<ClearCookiesResponse>(
@@ -634,12 +583,10 @@ export const apiService = {
 	},
 
 	/**
-	 * Test how a URL is reached under the current transport policy (issue #708).
-	 *
-	 * A *failed* connection still resolves: the engine answers 200 with the
-	 * outcome, because the test succeeded in answering. Only a malformed
-	 * request throws. No response body comes back - by design, and asserted
-	 * engine-side - so this can never become a second import proxy.
+	 * Test how a URL is reached under the current transport policy (#708). A *failed* connection
+	 * still resolves: the engine answers 200 with the outcome, because the test did answer. Only a
+	 * malformed request throws. No response body comes back (by design, and asserted engine-side),
+	 * so this can never become a second import proxy.
 	 */
 	async testConnection(url: string): Promise<ConnectionTestResult> {
 		return await httpClient.post<ConnectionTestResult>(API_ENDPOINTS.DIAGNOSTICS_CONNECTION, {
@@ -648,11 +595,9 @@ export const apiService = {
 	},
 
 	/**
-	 * Take one workspace snapshot (issue #987).
-	 *
-	 * Rejects on 409 - another backup is already running - which is a state the
-	 * caller shows rather than a failure: the file the user asked for is still
-	 * being written by their earlier request.
+	 * Take one workspace snapshot (#987). Rejects on 409 while another backup runs, a state the
+	 * caller shows rather than a failure: the file the user asked for is still being written by
+	 * their earlier request.
 	 */
 	async backupWorkspace(): Promise<WorkspaceBackupResult> {
 		return await httpClient.post<WorkspaceBackupResult>(API_ENDPOINTS.WORKSPACE_BACKUP, {});
@@ -729,12 +674,10 @@ export const apiService = {
 	},
 
 	/**
-	 * Delete the inbox and the captures it is holding (issue #553).
-	 *
-	 * Stronger than `stopInbox`, which frees the listener and leaves the record
-	 * - and its captures - readable for the life of the engine process. A
-	 * running inbox is stopped by the engine on the way, so this is one call
-	 * whatever state the inbox is in.
+	 * Delete the inbox and the captures it holds (#553). Stronger than `stopInbox`, which frees the
+	 * listener and leaves the record and its captures readable for the life of the engine process.
+	 * The engine stops a running inbox on the way, so this is one call whatever state the inbox is
+	 * in.
 	 */
 	async deleteInbox(inboxId: string): Promise<DeleteInboxResponse> {
 		return await httpClient.delete<DeleteInboxResponse>(API_ENDPOINTS.INBOX_BY_ID(inboxId));
@@ -846,32 +789,28 @@ export const apiService = {
 	},
 
 	/**
-	 * `allowScriptRequests` opts this execution's scripts into `pm.sendRequest`
-	 * (issue #302). The engine denies it unless asked, because Vayu's MCP target
-	 * allowlist is checked in the MCP server *before* it calls the engine - a
-	 * request issued from inside a script never passes that gate. The renderer
-	 * is the surface whose scripts the user wrote, so it asks; the MCP server
-	 * never does, and an agent cannot smuggle the field in because every MCP
-	 * tool builds its request from named arguments.
+	 * `allowScriptRequests` opts this execution's scripts into `pm.sendRequest` (#302). The engine
+	 * denies it unless asked, because Vayu's MCP target allowlist is checked in the MCP server
+	 * *before* it calls the engine, and a request issued from inside a script never passes that
+	 * gate. The renderer is the surface whose scripts the user wrote, so it asks; the MCP server
+	 * never does, and an agent cannot smuggle the field in because every MCP tool builds its
+	 * request from named arguments.
 	 *
-	 * Set here rather than at each call site, so a new caller cannot forget it
-	 * and quietly lose the feature - the same single-choke-point reason
-	 * `httpVersion` and the redirect policy are sent on every execute rather
-	 * than elided when they match a default.
+	 * Set here, not at each call site, so a new caller cannot forget it and quietly lose the
+	 * feature: the single-choke-point reason `httpVersion` and the redirect policy are sent on
+	 * every execute rather than elided at a default.
 	 *
-	 * `origin` is stamped at the same choke point, on all four run-starting
-	 * calls below, and for the same reason: an unstamped run reads as `other`
-	 * in History, indistinguishable from a script's. It is set after the spread
-	 * so a payload cannot claim a different one (issue #1817).
+	 * `origin` is stamped at the same choke point, on all four run-starting calls below: an
+	 * unstamped run reads as `other` in History, indistinguishable from a script's. It is set after
+	 * the spread so a payload cannot claim a different one (#1817).
 	 *
-	 * `includeParsedBody: false` is stamped here too, and also after the spread:
-	 * the pane is built from `bodyRaw`, so the engine's parsed copy of a JSON
-	 * body would only be held on its heap and shipped over loopback for nothing
-	 * (issue #2544). The MCP server does not send it - its tool result exposes
-	 * the parsed `body`.
+	 * `includeParsedBody: false` is stamped here too, also after the spread: the pane is built from
+	 * `bodyRaw`, so the engine's parsed copy of a JSON body would only be held on its heap and
+	 * shipped over loopback for nothing (#2544). The MCP server does not send it: its tool result
+	 * exposes the parsed `body`.
 	 *
-	 * @param signal the builder's Cancel (#3352). An abort rejects with an
-	 * `AbortError`, so the caller can tell its own cancel from a failed send.
+	 * @param signal the builder's Cancel (#3352). An abort rejects with an `AbortError`, so the
+	 *        caller can tell its own cancel from a failed send.
 	 */
 	async executeRequest(data: ExecuteRequestRequest, signal?: AbortSignal): Promise<SanityResult> {
 		return await httpClient.post<SanityResult>(
@@ -882,24 +821,19 @@ export const apiService = {
 	},
 
 	/**
-	 * The streaming half of the same endpoint (issue #574): `stream: true` makes
-	 * `POST /execute` answer `202 {runId, eventsUrl}` at once instead of the
-	 * exchange, so this returns a different type rather than a `SanityResult`
-	 * with empty fields - the two answers are different shapes and a caller has
-	 * to know which it is holding.
+	 * The streaming half of the same endpoint (#574): `stream: true` makes `POST /execute` answer
+	 * `202 {runId, eventsUrl}` at once instead of the exchange, so this returns its own type rather
+	 * than a `SanityResult` with empty fields: a caller has to know which shape it is holding.
 	 *
-	 * No `proxiedRequestTimeoutMs()`: this call returns as soon as the run row
-	 * exists, and the stream it started is bounded by the engine's own caps
-	 * (`maxStreamDurationMs`, `maxStreamEvents`, the idle timeout), not by a
-	 * client deadline.
+	 * No `proxiedRequestTimeoutMs()`: this call returns as soon as the run row exists, and the
+	 * stream it started is bounded by the engine's own caps (`maxStreamDurationMs`,
+	 * `maxStreamEvents`, the idle timeout), not by a client deadline.
 	 *
-	 * `allowScriptRequests` is sent here for the same reason `executeRequest`
-	 * sends it, and it is the same reason both times: the asker is a user at
-	 * the request editor pressing Send, and `stream` describes the shape of the
-	 * response, not what that user's scripts may do. The engine reads the flag
-	 * before it branches on `stream` (`execution.cpp`), so it governs a
-	 * streaming send's pre- and post-request scripts exactly as it governs a
-	 * buffered one's (issue #653).
+	 * `allowScriptRequests` is sent for `executeRequest`'s reason: the asker is a user at the
+	 * request editor pressing Send, and `stream` describes the shape of the response, not what that
+	 * user's scripts may do. The engine reads the flag before it branches on `stream`
+	 * (`execution.cpp`), so it governs a streaming send's pre- and post-request scripts exactly as
+	 * a buffered one's (#653).
 	 */
 	async executeStreamRequest(data: ExecuteRequestRequest): Promise<ExecuteStreamResponse> {
 		const answer = await httpClient.post<ExecuteStreamResponse>(API_ENDPOINTS.EXECUTE_REQUEST, {
@@ -930,12 +864,10 @@ export const apiService = {
 	},
 
 	/**
-	 * Start a collection run. The same `POST /runs` endpoint and the same
-	 * `202 {runId}` answer as a load test - the payload's `scenario` block is
-	 * what selects the sequential executor.
-	 *
-	 * `allowScriptRequests` for the same reason a load test sends it: every step
-	 * runs the pre-request and test scripts a Send of that request would run.
+	 * Start a collection run: the same `POST /runs` endpoint and `202 {runId}` answer as a load
+	 * test; the payload's `scenario` block selects the sequential executor. `allowScriptRequests`
+	 * for a load test's reason: every step runs the pre-request and test scripts a Send of that
+	 * request would run.
 	 */
 	async startScenarioRun(data: StartScenarioRunRequest): Promise<StartLoadTestResponse> {
 		return await httpClient.post<StartLoadTestResponse>(API_ENDPOINTS.START_LOAD_TEST, {
@@ -985,7 +917,6 @@ export const apiService = {
 	},
 
 	async getRun(id: string): Promise<Run> {
-		// Backend returns run object directly
 		return await httpClient.get<Run>(API_ENDPOINTS.RUN_BY_ID(id));
 	},
 
@@ -995,11 +926,9 @@ export const apiService = {
 	},
 
 	/**
-	 * The response headers and body captured for a run's retained samples -
-	 * every error, the slow outliers, and the first few of each status code.
-	 *
-	 * Its own request rather than fields on the report: the report path loads
-	 * and parses every result row for a run on each fetch, and the dashboard
+	 * The response headers and body captured for a run's retained samples: every error, the slow
+	 * outliers, and the first few of each status code. Its own request, not fields on the report:
+	 * the report path loads and parses every result row of a run on each fetch, and the dashboard
 	 * polls it. Join a page's `resultId` against `report.results[].id`.
 	 */
 	async getRunSamples(
@@ -1080,31 +1009,26 @@ export const apiService = {
 	/**
 	 * Fetch a URL through the engine, past the renderer's CORS.
 	 *
-	 * @param maxBytes the largest response this fetch may read (issue #784).
-	 * The route is one proxy for every import format, so the engine has no
-	 * format to derive a bound from: a caller that knows it is fetching an
-	 * OpenAPI document passes the live `maxSpecDocumentBytes`
-	 * ({@link useSpecDocumentLimit}), and a format-agnostic caller passes
-	 * nothing and gets the engine's transport ceiling - a number no import may
-	 * exceed, deliberately not restated here so the two cannot drift. Over the
-	 * bound is a `413` whose message names it.
-	 *
-	 * @param signal cancels the download (issue #893). Only the streamed form takes
-	 * it: the buffered one is a single awaited POST whose caller has nothing to do
-	 * while it runs, where a streamed one may be running behind a dialog the user
-	 * has since closed - and then the engine is reading megabytes for nobody. An
-	 * abort raises an `AbortError` rather than resolving, so a caller can tell its
-	 * own cancel from a fetch that failed.
-	 * @param onProgress called as the bytes arrive (issue #882). Its presence is
-	 * what asks the engine to stream: without it this is the buffered call it has
-	 * always been, which is what `ref-bundler` and the spec re-fetch want - they
-	 * have nowhere to draw a bar and no reason to pay for a stream. With it the
-	 * timeout becomes an *idle* one, so an 8 MB document arriving steadily is no
-	 * longer racing {@link IMPORT_FETCH_BUDGET_MS}.
-	 * @param options marks the fetch as a `$ref` a document asked for (issue
-	 * #2364), which the engine holds to a stricter rule than a URL a person typed.
-	 * Only `ref-bundler`'s fetches pass it; the body is otherwise exactly
-	 * `{url}` / `{url, maxBytes}`.
+	 * @param maxBytes the largest response this fetch may read (#784). The route is one proxy for
+	 *        every import format, so the engine has no format to derive a bound from: a caller that
+	 *        knows it fetches an OpenAPI document passes the live `maxSpecDocumentBytes`
+	 *        ({@link useSpecDocumentLimit}), and a format-agnostic caller passes nothing and gets
+	 *        the engine's transport ceiling, a number no import may exceed, deliberately not
+	 *        restated here so the two cannot drift. Over the bound is a `413` whose message names
+	 *        it.
+	 * @param signal cancels the download (#893). Only the streamed form takes it: the buffered one
+	 *        is a single awaited POST whose caller has nothing to do while it runs, where a
+	 *        streamed one may run behind a dialog the user has since closed, with the engine
+	 *        reading megabytes for nobody. An abort raises an `AbortError` rather than resolving,
+	 *        so a caller can tell its own cancel from a fetch that failed.
+	 * @param onProgress called as the bytes arrive (#882). Its presence asks the engine to stream:
+	 *        without it this is the buffered call, which `ref-bundler` and the spec re-fetch want
+	 *        (they have nowhere to draw a bar and no reason to pay for a stream). With it the
+	 *        timeout is an *idle* one, so an 8 MB document arriving steadily does not race
+	 *        {@link IMPORT_FETCH_BUDGET_MS}.
+	 * @param options marks the fetch as a `$ref` a document asked for (#2364), which the engine
+	 *        holds to a stricter rule than a URL a person typed. Only `ref-bundler`'s fetches pass
+	 *        it; the body is otherwise exactly `{url}` / `{url, maxBytes}`.
 	 */
 	async importFetch(
 		url: string,
@@ -1129,10 +1053,9 @@ export const apiService = {
 			idleTimeout: IMPORT_FETCH_BUDGET_MS,
 			...(signal ? { signal } : {}),
 		})) {
-			// An engine that has never heard of streaming answered the same request
-			// the way it always has. Nothing was reported on the way, and there is
-			// nothing to report now - but the document is here, which is what the
-			// caller asked for.
+			// An engine that predates streaming answered the request buffered. Nothing was reported
+			// on the way and there is nothing to report now, but the document is here, which is
+			// what the caller asked for.
 			if (message.kind === "buffered") {
 				return message.data as ImportFetchResponse;
 			}
@@ -1144,10 +1067,9 @@ export const apiService = {
 				return message.data as ImportFetchResponse;
 			}
 			if (message.event === IMPORT_FETCH_EVENTS.ERROR) {
-				// The only shape a streamed failure can arrive in: the status line
-				// went on the 200 that opened the stream, so the event carries the
-				// numeric status itself. Rethrown as the same `ApiError` the
-				// buffered call would have thrown, so one `catch` handles both.
+				// The only shape a streamed failure can arrive in: the status line went on the 200
+				// that opened the stream, so the event carries the numeric status. Rethrown as the
+				// `ApiError` the buffered call throws, so one `catch` handles both.
 				const failure = message.data as {
 					status: number;
 					error: { code: string; message: string };
@@ -1167,31 +1089,26 @@ export const apiService = {
 	},
 
 	/**
-	 * Parse a raw import document into the tree `applyImport` then persists
-	 * (issue #877).
+	 * Parse a raw import document into the tree `applyImport` then persists (#877).
 	 *
-	 * **The app holds no parser any more.** Every format it accepts - OpenAPI
-	 * 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export,
-	 * Insomnia v4 or v5 - is read here, by the same reader that answers what a stored
-	 * document declares. That is what makes "exactly one parser has an opinion"
-	 * true (#853): before this the renderer's `services/importers/` stack was
-	 * the second reader, and an agent over MCP could bind, diff, sync and export
-	 * a spec but could not import a document at all.
+	 * **The app holds no parser.** Every format it accepts (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a
+	 * Postman environment or globals export, Insomnia v4 or v5) is read here, by the same reader
+	 * that answers what a stored document declares. That keeps "exactly one parser has an opinion"
+	 * true (#853), and lets an agent over MCP import a document as well as bind, diff, sync and
+	 * export a spec.
 	 *
-	 * Reads only - nothing is stored, so a preview costs no write.
+	 * Reads only: nothing is stored, so a preview costs no write.
 	 */
 	async parseImport(payload: ImportParseRequest): Promise<ImportResult> {
 		return await httpClient.post<ImportResult>(API_ENDPOINTS.IMPORT_PARSE, payload);
 	},
 
 	/**
-	 * A document's bytes as a JSON DOM, through the engine's reader.
-	 *
-	 * One caller: `ref-bundler.ts`, which walks a multi-file OpenAPI document to
-	 * inline the files it references *before* anything is parsed or stored
-	 * (issue #649). It needs a tree, and a YAML reader in the renderer to get
-	 * one was the last thing keeping `js-yaml` in production `src/`. What a
-	 * document *declares* is `describeSpec`; this is only what its bytes are.
+	 * A document's bytes as a JSON DOM, through the engine's reader. One caller: `ref-bundler.ts`,
+	 * which walks a multi-file OpenAPI document to inline the files it references *before* anything
+	 * is parsed or stored (#649). It needs a tree, and a YAML reader in the renderer would keep
+	 * `js-yaml` in production `src/`. What a document *declares* is `describeSpec`; this is only
+	 * what its bytes are.
 	 */
 	async readDocument(content: string): Promise<unknown> {
 		const { document } = await httpClient.post<{ document: unknown }>(

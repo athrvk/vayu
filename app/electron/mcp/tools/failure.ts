@@ -6,15 +6,13 @@
  */
 
 /**
- * @file failure.ts
- * @brief The one failure-mapping layer (#2776): what kind of failure an error
- *        result is, and what it says about it.
+ * @brief The one failure-mapping layer (#2776): what kind of failure an error result is, and what
+ *        it says about it.
  *
- * Every error result is built by `errorResult` (`kit.ts`), which records the
- * class here; `dispatchTool` reads it back once, through
- * {@link describeFailure}, and answers the text beside a machine-readable
- * `structuredContent.error`. The class table in `docs/engine/mcp.md` ("Error
- * results") is this file's.
+ * Every error result is built by `errorResult` (`kit.ts`), which records the class here;
+ * `dispatchTool` reads it back once, through {@link describeFailure}, and answers the text beside a
+ * machine-readable `structuredContent.error`. The class table in `docs/engine/mcp/conventions.md`
+ * ("Error results") is this file's.
  */
 
 import type { EngineRequestError } from "../engine-client.js";
@@ -52,10 +50,9 @@ export interface Failure {
 	/** Complete on its own: for a reader with no tool in hand, the generic advice. */
 	message: string;
 	/**
-	 * The message carries text the engine wrote (a refusal body). The engine
-	 * words refusals so they quote no resolved value, but that is its rule to
-	 * keep, not this server's to assume: `dispatchTool` masks such a message as
-	 * it masks a run's output (`maskEngineText`).
+	 * The message carries text the engine wrote (a refusal body). The engine words refusals so they
+	 * quote no resolved value, but that is its rule to keep, not this server's to assume:
+	 * `dispatchTool` masks such a message as it masks a run's output (`maskEngineText`).
 	 */
 	engineText?: true;
 	interrupted?: Interrupted;
@@ -107,13 +104,11 @@ export function interruptedFailure(lead: string, tail?: string): Failure {
 }
 
 /**
- * The failure each error result stands for, keyed by the result.
- *
- * A WeakMap for the reason `NOTHING_CHANGED` is a WeakSet: the result object is
- * handed to the SDK verbatim (`server.ts`), so a field here would be serialized
- * to the client as though it were part of the MCP result shape. A result built
- * by spreading another one is a new key, so a helper that does that
- * (`withCaveat`) carries the entry across.
+ * The failure each error result stands for, keyed by the result. A WeakMap for the reason
+ * `NOTHING_CHANGED` is a WeakSet: the result object goes to the SDK verbatim (`server.ts`), so a
+ * field here would be serialized to the client as part of the MCP result shape. A result built by
+ * spreading another is a new key, so a helper that does that (`withCaveat`) carries the entry
+ * across.
  */
 export const FAILURES = new WeakMap<ToolResult, Failure>();
 
@@ -257,12 +252,11 @@ export function isBusyDatabase(err: EngineRequestError): boolean {
 }
 
 /**
- * The class of an HTTP refusal the engine answered. A 409 (the id exists, the
- * spec is still bound, the restore needs its parent first) and a 413 are
- * verdicts on what the call asked for, as a 400 is. A 507 (disk full) and a
- * busy database are worth repeating once the cause clears, as any other 5xx
- * is; the 503 an engine answers while shutting down is not, until it runs
- * again, which is what `unreachable` says.
+ * The class of an HTTP refusal the engine answered. A 409 (the id exists, the spec is still bound,
+ * the restore needs its parent first) and a 413 are verdicts on what the call asked for, as a 400
+ * is. A 507 (disk full) and a busy database are worth repeating once the cause clears, as any other
+ * 5xx is; the 503 an engine answers while shutting down is not until it runs again, which is what
+ * `unreachable` says.
  */
 export function engineRefusalClass(err: EngineRequestError): FailureClass {
 	if (err.status === 403) return "policy";
@@ -297,12 +291,10 @@ const nonEmptyString = (value: unknown): string | undefined =>
 
 /**
  * **The nested shape is the contract.** `error_response` in `routes.hpp` builds
- * `{"error": {"code", "message"}}` for every refusal these routes produce, and
- * that is the one shape issue #173 settled on. The flat shapes are fallbacks
- * rather than alternatives, for the same reason the renderer's `readApiError`
- * keeps one: the app and the engine sidecar are not updated together, so a
- * newer app can be talking to an older engine. The live-metrics 404 is flat on
- * purpose, `{"error": "...", "code": "...", "hint": "..."}`
+ * `{"error": {"code", "message"}}` for every refusal these routes produce, the one shape issue #173
+ * settled on. The flat shapes are fallbacks, as the renderer's `readApiError` keeps one: the app
+ * and the engine sidecar are not updated together, so a newer app can talk to an older engine. The
+ * live-metrics 404 is flat on purpose, `{"error": "...", "code": "...", "hint": "..."}`
  * (`live_metrics_unavailable_response`), so a flat `code` is read too.
  */
 function engineErrorFields(body: string): EngineErrorFields {

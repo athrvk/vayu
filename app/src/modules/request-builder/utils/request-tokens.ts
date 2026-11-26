@@ -20,14 +20,11 @@ function rowStrings(rows: readonly KeyValueItem[]): Array<string | undefined> {
 }
 
 /**
- * Whether the request holds a `{{token}}` in any field a token painter draws.
- *
- * The gate for asking the engine which names a pre-request script defers
- * (#2741): a request with none has nothing to paint, so a literal one costs no
- * compose. It reads every mode's fields, not only the active body mode's - the
- * answer is a cost gate, and a token in a hidden mode costs one compose the
- * Code section would pay anyway. The auth is scanned whole, OAuth 2.0 config
- * included, because the engine defers that config's names too.
+ * Whether any field a token painter draws holds a `{{token}}`: the gate for asking the engine which
+ * names a pre-request script defers (#2741), so a literal request costs no compose. Every mode's
+ * fields are read, not only the active one: it is a cost gate, and a hidden mode's token costs one
+ * compose the Code section pays anyway. Auth is scanned whole, OAuth 2.0 config included, as the
+ * engine defers its names too.
  */
 export function requestHasTokens(request: TokenBearingRequest): boolean {
 	const { binaryFile } = request;

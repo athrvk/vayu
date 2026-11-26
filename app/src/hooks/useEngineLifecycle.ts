@@ -6,38 +6,31 @@
  */
 
 /**
- * Keep the engine store's `engineCrash` in step with the sidecar's lifecycle
- * (#3336): the pushed transitions, plus one read of the current state for a
- * window that loaded after the last push.
+ * Keep the engine store's `engineCrash` in step with the sidecar's lifecycle (#3336): the pushed
+ * transitions, plus one read of the current state for a window that loaded after the last push.
  *
- * Facts only. `engineStatus` stays the health poll's verdict
- * (`lib/engine-start-window.ts`); this explains an unreachable engine and
- * lets the Dock offer Restart. A crash also asks the poll to look again rather
- * than wait out `HEALTH_CHECK_INTERVAL_MS` (#3493): the health query and nothing
- * else, since every other query is the reconnect's to refetch. A crash that
- * lands inside a restart's start window is safe to ask about, because the poll
- * classifies a failure there as `starting`.
+ * Facts only: `engineStatus` stays the health poll's verdict (`lib/engine-start-window.ts`); this
+ * explains an unreachable engine and lets the Dock offer Restart. A crash also asks the poll to
+ * look again rather than wait out `HEALTH_CHECK_INTERVAL_MS` (#3493), the health query and nothing
+ * else, since every other query is the reconnect's to refetch. A crash inside a restart's start
+ * window is safe to ask about: the poll classifies a failure there as `starting`.
  *
- * A crash is also the one signal that a live run has ended with its engine
- * (#3605): the run services let go of the stream, the wake lock and the OS
- * progress claim, and the dashboard's run leaves the live phases. The health
- * poll is not that signal, because it cannot tell a dead engine from a slow
- * one, and its push and the poll's verdict arrive in either order. Which runs
- * ended is recorded with the crash (`crashEndedRuns`), so the engine-lost
- * notification says it for that crash and no later one.
+ * A crash is also the one signal that a live run ended with its engine (#3605): the run services
+ * let go of the stream, the wake lock and the OS progress claim, and the dashboard's run leaves the
+ * live phases. Not the health poll, which cannot tell a dead engine from a slow one, and whose
+ * verdict and this push arrive in either order. Which runs ended is recorded with the crash
+ * (`crashEndedRuns`), so the engine-lost notification says it for that crash and no later one.
  *
- * Pushes arrive in the order the sidecar made them, so each one simply
- * replaces the last, with one exception: a crash is only ended by an engine
- * that is up or was stopped on purpose (`ready`, `slow`, `stopping`,
- * `stopped`). A restart from a crash pushes `replacing`, `choosingPort` and
- * `spawning`, and one that fails before a child exists lands on `idle`; if
- * those cleared the crash the Dock would lose both its sentence and its
- * Restart button, leaving "Engine disconnected" and no way back. The snapshot is the only reply that can be older than
- * what the window already knows, and it yields to both signs of that: a push
- * that landed while it was in flight, and a restart that opened a new start
- * window (the same guard `adoptEngineStartFailure` applies in
- * `queries/health.ts`). Letting it speak then would put a crash back over the
- * engine replacing it.
+ * Pushes arrive in the order the sidecar made them, so each replaces the last, with one exception:
+ * only an engine that is up or was stopped on purpose (`ready`, `slow`, `stopping`, `stopped`) ends
+ * a crash. A restart from a crash pushes `replacing`, `choosingPort` and `spawning`, and one that
+ * fails before a child exists lands on `idle`; if those cleared the crash the Dock would lose its
+ * sentence and its Restart button, leaving "Engine disconnected" and no way back.
+ *
+ * The snapshot is the only reply that can be older than what the window already knows, and it
+ * yields to both signs of that: a push that landed while it was in flight, and a restart that
+ * opened a new start window (the guard `adoptEngineStartFailure` applies in `queries/health.ts`).
+ * Letting it speak then would put a crash back over the engine replacing it.
  */
 
 import { useEffect } from "react";

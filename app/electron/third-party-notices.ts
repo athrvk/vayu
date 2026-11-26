@@ -6,18 +6,16 @@
  */
 
 /**
- * @file third-party-notices.ts
  * @brief Open the installer's THIRD_PARTY_NOTICES.txt (#2693).
  *
- * The file is generated at package time into `app/build/` and shipped loose by
- * `extraResources` (outside the asar, so the OS can open it). It exists only in
- * a packaged build, so a development run answers with a sentence instead of a
- * path into the repo, unless a build has already staged a copy.
+ * The file is generated at package time into `app/build/` and shipped loose by `extraResources`
+ * (outside the asar, so the OS can open it). It exists only in a packaged build, so a development
+ * run answers with a sentence instead of a path into the repo, unless a build has already staged a
+ * copy.
  *
- * Electron-free: everything it needs is passed in, so both branches are unit
- * tests. Returns what `shell.openPath` returns - an empty string on success,
- * the reason on failure - because that is the shape `app:openLogsFolder` already
- * gives the renderer.
+ * Electron-free: everything it needs is passed in, so both branches are unit tests. Returns what
+ * `shell.openPath` returns (an empty string on success, the reason on failure) because that is the
+ * shape `app:openLogsFolder` already gives the renderer.
  */
 
 import path from "path";

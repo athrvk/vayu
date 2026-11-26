@@ -5,10 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file http/sse_stream.cpp
- * @brief The streaming execution core (issue #573).
- */
+/** The streaming execution core (issue #573). */
 
 #include "vayu/http/sse_stream.hpp"
 
@@ -800,8 +797,8 @@ struct StreamChainOutcome {
 };
 
 /**
- * @brief Runs the stream as one transfer per hop, following redirects itself
- *        rather than through `CURLOPT_FOLLOWLOCATION` (#3301).
+ * Runs the stream as one transfer per hop, following redirects itself rather
+ * than through `CURLOPT_FOLLOWLOCATION` (#3301).
  *
  * `Client::send`'s `run_chain` shape on the same `RedirectChain`: the handle is
  * never reset in between, so its cookie engine and connections serve the whole
@@ -859,8 +856,8 @@ run_stream_chain (CURL* curl, TransferState& state, RedirectChain& chain, CurlEr
 }
 
 /**
- * @brief The rule the stream ended by, with the failure recorded on
- *        @p response when it is an error.
+ * The rule the stream ended by, with the failure recorded on @p response when
+ * it is an error.
  *
  * An `abort_reason` is "we ended it" in any of its three spellings: the
  * progress callback's abort, the write callback's short return, or the chain
@@ -966,8 +963,7 @@ McpReplyStream* mcp_reply) {
     set_opt<CURLOPT_XFERINFOFUNCTION> (curl, stream_progress_callback);
     set_opt<CURLOPT_XFERINFODATA> (curl, &state);
 
-    // **No `CURLOPT_TIMEOUT_MS`.** A whole-transfer deadline is exactly what
-    // made a stream unusable before this path existed: it kills a healthy
+    // **No `CURLOPT_TIMEOUT_MS`.** A whole-transfer deadline kills a healthy
     // stream at an arbitrary moment and reports it as a timeout. What a stream
     // needs bounded is silence, so the deadline is an *idle* one, kept by the
     // progress callback (`idle_window_elapsed`), and the duration cap above
@@ -982,9 +978,7 @@ McpReplyStream* mcp_reply) {
     static_cast<long> (constants::server::connect_timeout_ms (request.request.timeout_ms)));
 
     // The transport policy (TLS, the proxy, the client certificate) goes on
-    // per hop, in `run_stream_chain`, through the one shared applier: until
-    // #705 this path set no proxy option at all, and a configured proxy
-    // silently skipped streams.
+    // per hop, in `run_stream_chain`, through the one shared applier (#705).
     set_opt<CURLOPT_HTTP_VERSION> (
     curl, vayu::http::to_curl_http_version (request.request.http_version));
 
@@ -1090,7 +1084,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 namespace {
 
 /**
- * @brief Report a failure from a frame that must not let one escape.
+ * Report a failure from a frame that must not let one escape.
  *
  * The `noexcept` is the point, not decoration. Both callers are frames where an
  * escaping exception ends the process rather than being handled - a destructor,
@@ -1206,14 +1200,9 @@ std::shared_ptr<SseStreamContext> SseStreamManager::start (SseStreamRequest requ
     }
     auto& stream   = streams_[run_id];
     stream.context = context;
-    // The `try` below is a real fix and does not depend on a linter asking for
-    // it. `bugprone-exception-escape` used to report this lambda on the Windows
-    // leg alone, for a path that is not in the body: MSVC's `<thread>` invokes
-    // the callable from `_Invoke(void*) noexcept`, whose own operations it can
-    // see throw, so the diagnostic landed on the lambda that invoker wraps.
-    // That reading is what took the check out of `engine/.clang-tidy` (#1023,
-    // 33 findings on Windows against 0 on Linux over the same commit); the
-    // reasoning is recorded there and the handler stays here regardless.
+    // The `try` below is a real fix and does not depend on a linter asking for it:
+    // `bugprone-exception-escape` was taken out of `engine/.clang-tidy` (#1023), where
+    // the reasoning is recorded, and the handler stays here regardless.
     stream.worker = std::thread ([context, spec = std::move (request)] () mutable {
         // The outermost frame this thread has: `std::thread` calls
         // `std::terminate` if its entry function throws. The inner handlers

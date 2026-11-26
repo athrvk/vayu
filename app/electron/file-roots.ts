@@ -8,16 +8,15 @@
 /**
  * The folders the user allowed, as the main process reads them (#2357).
  *
- * `file:stat` answers for a path under one of them, and the engine's
- * `file_roots` table is the record: this keeps a copy of `GET /file-roots`,
- * re-read after the two things that can change it - `file:allowFolder` /
- * `file:removeAllowedFolder` (both run in this process) and an engine start.
- * The engine stores a root canonical, so a caller compares it with a path it
- * has resolved the same way.
+ * `file:stat` answers for a path under one of them, and the engine's `file_roots` table is the
+ * record: this keeps a copy of `GET /file-roots`, re-read after the two things that can change it,
+ * `file:allowFolder` / `file:removeAllowedFolder` (both run in this process) and an engine start.
+ * The engine stores a root canonical, so a caller compares it with a path it has resolved the same
+ * way.
  *
- * A read the engine cannot answer yields no folders, never a stale or guessed
- * list: the caller is a gate, and a gate that cannot tell stays shut. The copy
- * stays stale, so the next question asks again.
+ * A read the engine cannot answer yields no folders, never a stale or guessed list: the caller is a
+ * gate, and a gate that cannot tell stays shut. The copy stays stale, so the next question asks
+ * again.
  */
 
 import type { FileTrustClient } from "./file-trust-client.js";

@@ -17,7 +17,7 @@
  * line-level one is visible only to whoever opens that file, and nothing stopped
  * the count growing one justified line at a time.
  *
- * So the sites are enumerated in `docs/design-system.md` and this guard reads
+ * So the sites are enumerated in `docs/design-system/accessibility.md` and this guard reads
  * both halves. The count is a ceiling in the shape `type-scale.test.ts` uses for
  * font weights: it may come down when a suppression goes, and raising it is an
  * edit someone has to make on purpose. The doc list is compared site by site
@@ -32,24 +32,17 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { DOC_READING_GUARDS, entryCovers, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * The most directives this repository may carry.
- *
- * A ceiling, not a count to hold: 16 was what #1216 left behind, one of which
- * went with the body editor's drag handle (#1323); 17 added the Dock's
- * worker-count tooltip (#1508); 18 adds the script element form's editor
- * height handle (#1605); 19 adds ActivityRail's roving-tabindex nav (#1615);
- * 20 adds the history list's roving-tabindex group (`useHistoryListFocus`);
- * 21 adds `DisabledHint`'s wrapper span, the only keyboard path to the reason a
- * control is off (#1690); 22 adds ContextRail's roving-tabindex nav, the right-edge
- * twin of ActivityRail's (#1872).
- * The number moves down with the list in the doc when a site is fixed rather
- * than suppressed. Raising it means adding a site to the doc too, which is
- * where the reason has to convince the next reader.
+ * The most directives this repository may carry: a fixed ceiling the owner
+ * sets, not a count to hold. Remove a suppression rather than raise it. A site
+ * that has to stay is listed in `docs/design-system/accessibility.md` in the
+ * same change, where its reason has to convince the next reader, and the owner
+ * decides the ceiling. The measured count is printed by the failure below and
+ * written nowhere else.
  */
 const CEILING = 22;
 
@@ -133,7 +126,7 @@ describe("the jsx-a11y suppressions", () => {
 	it("stays under the ceiling", () => {
 		expect(
 			directives.length,
-			`Fix the site, or - if the suppression is the right answer - add it to the Accessibility section of docs/design-system.md and raise this ceiling on purpose:\n${directives
+			`${directives.length} jsx-a11y suppressions, over the fixed ceiling of ${CEILING}. Remove one rather than raise the ceiling. A site that has to stay is listed in docs/design-system/accessibility.md, and the owner sets the ceiling:\n${directives
 				.map(({ file, line, rules }) => `${file}:${line} ${rules.join(", ")}`)
 				.join("\n")}`
 		).toBeLessThanOrEqual(CEILING);
@@ -152,12 +145,9 @@ describe("the jsx-a11y suppressions", () => {
 });
 
 describe("the doc's list of suppressions", () => {
-	const [DOC] = DOC_READING_GUARDS.a11ySuppressions.paths;
-	const doc = readFileSync(fromRepoRoot(DOC), "utf8");
-
-	/** The Accessibility section alone, so a bullet elsewhere cannot answer. */
-	const afterHeading = doc.slice(doc.indexOf("\n## Accessibility") + 1);
-	const section = afterHeading.slice(0, afterHeading.indexOf("\n## ", 1));
+	/** The Accessibility page alone, so a bullet elsewhere cannot answer. */
+	const DOC = "docs/design-system/accessibility.md";
+	const section = readFileSync(fromRepoRoot(DOC), "utf8");
 
 	/**
 	 * The bullets as `path (count) - rules`. A bullet wraps across lines, so each
@@ -182,6 +172,10 @@ describe("the doc's list of suppressions", () => {
 		// rewritten into another shape, fails here rather than passing by
 		// matching nothing.
 		expect(section.length).toBeGreaterThan(1000);
+		expect(
+			DOC_READING_GUARDS.a11ySuppressions.paths.some((entry) => entryCovers(entry, DOC)),
+			`${DOC} is not routed by the registry`
+		).toBe(true);
 		expect(section).toContain("a11y-suppressions.test.ts");
 		expect(listed.length).toBeGreaterThanOrEqual(10);
 	});

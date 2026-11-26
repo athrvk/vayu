@@ -122,7 +122,7 @@ describe("the command list's density", () => {
 		expect(row, "a row should render").toBeTruthy();
 		// 14px of text in `py-1.5` is the single-line row this app draws
 		// everywhere else, and the launcher metric besides - 30.0px measured in
-		// Chromium (`abc2bd2`, `docs/app/COMPONENTS.md`), not the 32px this said
+		// Chromium (`abc2bd2`, `docs/app/COMPONENTS/palette.md`), not the 32px this said
 		// before the measurement (#1260).
 		expect(tokens(row!)).toContain("py-1.5");
 		// The dialog used to override that to `py-3` from up here, where no

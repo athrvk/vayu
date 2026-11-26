@@ -8,57 +8,44 @@
 /**
  * Variable-name autocomplete inside the script editors.
  *
- * The `{{name}}` list is registered for the body languages and deliberately not
- * for `javascript`, because a script reaches variables through
- * `pm.environment.get()` rather than braces. That reasoning is right and this
- * hook keeps it: it offers the same names in the place a script actually names
- * them - the string argument of a `pm.*` accessor - so nothing here teaches
- * brace syntax where it does not apply.
+ * The `{{name}}` list is registered for the body languages and deliberately not for `javascript`,
+ * because a script reaches variables through `pm.environment.get()` rather than braces. This hook
+ * keeps that: it offers the same names where a script actually names them, the string argument of a
+ * `pm.*` accessor, so nothing here teaches brace syntax where it does not apply. Without it a
+ * misremembered name is silent: `pm.environment.get()` returns `undefined` for a name that does not
+ * exist, so the script carries on and fails somewhere else entirely.
  *
- * Until now the names were visible only in the panel *above* the editor, which
- * you had to read off and retype into the call. A misremembered name is silent:
- * `pm.environment.get()` returns `undefined` for a name that does not exist, so
- * the script carries on and fails somewhere else entirely.
+ * **The scope comes from the accessor.** `pm.environment.get` only reads the environment, so a
+ * collection variable offered there would be a name that resolves to `undefined`.
+ * `scriptVariableCompletionContext` decides which set applies; this hook only renders it.
  *
- * **The scope comes from the accessor.** `pm.environment.get` only reads the
- * environment, so a collection variable offered there would be a name that
- * resolves to `undefined`. `scriptVariableCompletionContext` decides which set
- * applies; this hook only renders it.
+ * **And the scope answers for itself** (#1302). A single-scope list is the names that scope
+ * *defines*, through `getScopeVariables`, not the names whose ladder winner happens to sit there:
+ * `pm.collectionVariables.get` reads the collection chain and answers from it whether or not the
+ * environment defines the name too, so a list drawn from the winners would hide a collection's own
+ * `shop_domain` behind an environment that shadows it, the one configuration where the read and the
+ * `{{name}}` beside it disagree, and so the one the list most owes an author. `detail` is that
+ * scope's own answer for the same reason, and where the answer is an empty row masking another
+ * scope's value, `describeScopedRead` says so in the words the chip above the editor uses.
  *
- * **And the scope answers for itself** (issue #1302). A single-scope list is the
- * names that scope *defines*, through `getScopeVariables`, not the names whose
- * ladder-winner happens to sit there: `pm.collectionVariables.get` reads the
- * collection chain and answers from it whether or not the environment defines
- * the name too, so a list drawn from the winners hid a collection's own
- * `shop_domain` behind an environment that shadowed it - the one configuration
- * where the read and the `{{name}}` beside it disagree, and so the one the list
- * most owes an author. `detail` is that scope's own answer for the same reason,
- * and where the answer is an empty row masking another scope's value,
- * `describeScopedRead` says so in the words the chip above the editor uses.
+ * **Collection scope is the whole chain, as in a body.** The engine fills a script's collection
+ * scope from the request's collection *chain* (#234, leaf shadowing ancestor), so an ancestor's
+ * variable resolves inside `pm.collectionVariables.get()` exactly as inside `{{name}}`, and belongs
+ * in this list for the same reason as every other offered name. This list and the engine move
+ * together, or one of them offers names the other cannot read. See docs/app/variable-resolution.md.
  *
- * **Collection scope is the whole chain, the same as in a body.** The engine
- * fills a script's collection scope from the request's collection *chain*
- * (issue #234, leaf shadowing ancestor), so an ancestor's variable resolves
- * inside `pm.collectionVariables.get()` exactly as it does inside `{{name}}` -
- * and it belongs in this list for the same reason every other offered name
- * does. This list narrowed to the immediate collection while the engine did;
- * the two move together, or one of them offers names the other cannot read.
- * See docs/app/variable-resolution.md.
- *
- * **`pm.iterationData` completes columns, not variables** (issue #600). The row
- * it reads is bound from the collection's data file, so the names are the
- * declared columns of the contract in scope - the same list the `{{data.*}}`
- * tokens are validated against, so what an editor offers and what the builder
+ * **`pm.iterationData` completes columns, not variables** (#600). The row it reads is bound from
+ * the collection's data file, so the names are the declared columns of the contract in scope: the
+ * list the `{{data.*}}` tokens are validated against, so what an editor offers and what the builder
  * paints green cannot disagree.
  *
- * **`pm.variables` completes both** (issue #1063). It is the one accessor that
- * reads a bound row's bare column names *and* the three scopes (issue #1007),
- * so its list is the union - a column offered there is a name the call really
- * can return, which is the rule every other list here already follows.
+ * **`pm.variables` completes both** (#1063). It is the one accessor that reads a bound row's bare
+ * column names *and* the three scopes (#1007), so its list is the union: a column offered there is
+ * a name the call really can return, the rule every other list here follows.
  *
- * Call once (in App). A completion provider is global per language, so a single
- * registration covers every script editor instance. The same shape as
- * `useScriptCompletionProvider` and `useVariableCompletionProvider` beside it.
+ * Call once (in App): a completion provider is global per language, so one registration covers
+ * every script editor, the shape of `useScriptCompletionProvider` and
+ * `useVariableCompletionProvider` beside it.
  */
 
 import { useEffect } from "react";
@@ -80,11 +67,9 @@ const SCRIPT_LANGUAGE = "javascript";
 const CLOSE_BRACES = "}}";
 
 /**
- * The resolver's own precedence, so the winning definition sorts first.
- *
- * A single-scope list shares one scope, so this prefix is constant there and the
- * key is already the alphabetical order such a list wants (#1302). A branch that
- * dropped the prefix for those lists would order nothing differently.
+ * The resolver's own precedence, so the winning definition sorts first. A single-scope list shares
+ * one scope, so this prefix is constant there and the key is already the alphabetical order such a
+ * list wants (#1302); dropping the prefix for those lists would order nothing differently.
  */
 const SCOPE_ORDER: Record<string, number> = { environment: 0, collection: 1, global: 2 };
 
@@ -117,10 +102,9 @@ export function useScriptVariableCompletionProvider() {
 	// at startup, and from the CDN - see `lib/monaco-loader.ts` (#1146).
 	const monaco = useLoadedMonaco();
 	/*
-	 * The active tab's collection, since a provider registered per language has
-	 * no request builder context to take one from and the resolver offers no
-	 * collection variables without it. The resolver walks up from here, which is
-	 * the same chain the engine hands the script.
+	 * The active tab's collection: a provider registered per language has no request builder
+	 * context to take one from, and the resolver offers no collection variables without it. The
+	 * resolver walks up from here, the same chain the engine hands the script.
 	 */
 	const collectionId = useActiveCollectionId();
 	const { getAllVariables, getScopeVariables, getVariableOrigins } = useVariableResolver({
@@ -156,11 +140,9 @@ export function useScriptVariableCompletionProvider() {
 				};
 
 				/*
-				 * A column list and a variable list share no rules: no scope filter
-				 * applies, generators do not exist there, and the declaring
-				 * collection is the useful detail rather than a resolved value. So
-				 * it answers here rather than threading a third case through the
-				 * mapping below.
+				 * A column list and a variable list share no rules (no scope filter, no generators,
+				 * and the declaring collection is the useful detail rather than a resolved value),
+				 * so it answers here rather than threading a third case through the mapping below.
 				 */
 				if (context.scope === "data") {
 					return {
@@ -185,15 +167,13 @@ export function useScriptVariableCompletionProvider() {
 				const wrap = (name: string) => (template ? `{{${name}${closing}` : name);
 
 				/*
-				 * The scope answers for itself (issue #1302). `pm.environment.get`
-				 * reads one scope and only the merged `pm.variables` sees them
-				 * all, so the merged read takes the ladder's winners and a
-				 * single-scope read takes that scope's own definitions - which are
-				 * not the same names. Filtering the winners by scope offered a
-				 * collection's `shop_domain` only while the environment did not
-				 * also define it, hiding from the list the very name the call
-				 * still reads, and printing the winner's value beside every name
-				 * it did offer.
+				 * The scope answers for itself (#1302). `pm.environment.get` reads one scope and
+				 * only the merged `pm.variables` sees them all, so the merged read takes the
+				 * ladder's winners and a single-scope read that scope's own definitions, which are
+				 * not the same names. Filtering the winners by scope would offer a collection's
+				 * `shop_domain` only while the environment did not also define it, hiding the very
+				 * name the call still reads, and print the winner's value beside every name it did
+				 * offer.
 				 */
 				const scope = context.scope === "all" ? null : context.scope;
 				const variables = scope ? getScopeVariables(scope) : getAllVariables();
@@ -201,12 +181,11 @@ export function useScriptVariableCompletionProvider() {
 					variables
 				).map(([name, info]) => {
 					/*
-					 * The trap at typing time rather than after a failed run
-					 * (#1196's second item): this scope answers emptily while
-					 * another holds the value, so the read returns `""` and the
-					 * `{{name}}` beside it does not. One sentence, from the same
-					 * function the chip above the editor reads - a second
-					 * cross-check here would be a copy that drifts from it.
+					 * The trap at typing time rather than after a failed run (#1196's second item):
+					 * this scope answers emptily while another holds the value, so the read returns
+					 * `""` and the `{{name}}` beside it does not. One sentence, from the function
+					 * the chip above the editor reads; a second cross-check here would be a copy
+					 * that drifts from it.
 					 */
 					const shadowed = scope
 						? describeScopedRead(
@@ -232,35 +211,29 @@ export function useScriptVariableCompletionProvider() {
 				});
 
 				/*
-				 * Declared columns, blended into the merged accessor and nowhere
-				 * else (issue #1063). A bound row answers bare column names
-				 * through `pm.variables` above every scope (issue #1007), so a
-				 * column is one of the names that call can return - and it was
-				 * the one such name the list never offered, which makes it a
-				 * column you have to already know to use.
+				 * Declared columns, blended into the merged accessor and nowhere else (#1063). A
+				 * bound row answers bare column names through `pm.variables` above every scope
+				 * (#1007), so a column is one of the names that call can return; left out of the
+				 * list, it is a column you have to already know to use.
 				 *
-				 * The single-scope `get`/`has` never see the row, and
-				 * `pm.iterationData` answered from the branch above, so neither
-				 * reaches here. Every `replaceIn` does, a scoped one included
-				 * (issue #3147), and belongs: `resolve_template_with_data`
-				 * resolves a bare `{{email}}` from the row for it too, so leaving
-				 * it out would take a condition written only to preserve the gap.
+				 * The single-scope `get`/`has` never see the row, and `pm.iterationData` answered
+				 * from the branch above, so neither reaches here. Every `replaceIn` does, a scoped
+				 * one included (#3147), and belongs: `resolve_template_with_data` resolves a bare
+				 * `{{email}}` from the row for it too, so leaving it out would take a condition
+				 * written only to preserve the gap.
 				 *
-				 * The columns come from the contract rather than from `variables`
-				 * because the namespace is disjoint from the scopes - no variable
-				 * can carry one. A name that is both a column and a variable is
-				 * offered twice on purpose: the row wins while one is bound and
-				 * the scope answers when none is, and a single entry would have
-				 * to hide one of those.
+				 * The columns come from the contract rather than from `variables` because the
+				 * namespace is disjoint from the scopes: no variable can carry one. A name that is
+				 * both a column and a variable is offered twice on purpose: the row wins while one
+				 * is bound and the scope answers when none is, and a single entry would have to
+				 * hide one of those.
 				 *
-				 * **Only `replaceIn` gets the prefixed spelling** (issue #1077), and
-				 * the asymmetry is the rule rather than an oversight: `replaceIn`
-				 * resolves `{{data.email}}` and `{{email}}` from the same row, so
-				 * withholding one of two spellings that work would be the same gap
-				 * this fixes; `pm.variables.get("data.email")` reads no column at
-				 * all, the namespace being disjoint from the scopes there, so
-				 * offering it in a name argument would teach a call that returns
-				 * `undefined`.
+				 * **Only `replaceIn` gets the prefixed spelling** (#1077), and the asymmetry is the
+				 * rule rather than an oversight: `replaceIn` resolves `{{data.email}}` and
+				 * `{{email}}` from the same row, so withholding one of two spellings that work
+				 * would be the same gap this fixes; `pm.variables.get("data.email")` reads no
+				 * column at all, the namespace being disjoint from the scopes there, so offering it
+				 * in a name argument would teach a call that returns `undefined`.
 				 */
 				if (context.scope === "all" || template) {
 					for (const column of dataColumns?.columns ?? []) {
@@ -306,19 +279,17 @@ export function useScriptVariableCompletionProvider() {
 				}
 
 				/*
-				 * The reserved identity namespace (issue #1057). `replaceIn` resolves
-				 * `{{$vu}}` / `{{$iteration}}` against the identity the request beside
-				 * the script was bound with - whatever the run's shape gives it, down
-				 * to `1` / `0` on a plain Send, since `POST /execute` binds those into
-				 * every send that carries no row (a single send is a run of one). That
-				 * is a different question from `pm.info.vu` / `pm.info.iteration`, which
-				 * stay `undefined` on that same plain Send: `pm.info` answers which
-				 * iteration of which run this is, and there is no run, while a token
-				 * answers what it resolves to here, and here it resolves to what the
-				 * request beside it carried. Never withheld for a same-named scope
-				 * variable, unlike the generators below: the engine resolves these two
-				 * names ahead of every scope, so a variable called `$vu` shadows
-				 * nothing and offering the name is still offering what resolves.
+				 * The reserved identity namespace (#1057). `replaceIn` resolves `{{$vu}}` /
+				 * `{{$iteration}}` against the identity the request beside the script was bound
+				 * with, whatever the run's shape gives it, down to `1` / `0` on a plain Send, since
+				 * `POST /execute` binds those into every send that carries no row (a single send is
+				 * a run of one). A different question from `pm.info.vu` / `pm.info.iteration`,
+				 * which stay `undefined` on that same plain Send: `pm.info` answers which iteration
+				 * of which run this is, and there is no run, while a token answers what it resolves
+				 * to here, which is what the request beside it carried. Never withheld for a
+				 * same-named scope variable, unlike the generators below: the engine resolves these
+				 * two names ahead of every scope, so a variable called `$vu` shadows nothing and
+				 * offering the name is still offering what resolves.
 				 */
 				if (template) {
 					for (const identity of ITERATION_VARIABLES) {

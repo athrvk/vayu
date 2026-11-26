@@ -8,25 +8,22 @@
 /**
  * A trailing-timer batcher for a live SSE stream, leading edge optional.
  *
- * `LoadTestService` and `ScenarioRunService` both read a stream the renderer
- * cannot commit per event, and both answered it the same way: buffer, commit
- * the first item at once - the first tick or step of a run is the one a reader
- * is waiting on, and holding it back makes a fast run look slow to start - and
- * let a trailing timer carry whatever arrives inside the window. Since #1153
- * that was two field-for-field copies of one mechanism, which is the shape a
- * timing fix or a teardown leak lands in one of and not the other.
+ * `LoadTestService` and `ScenarioRunService` both read a stream the renderer cannot commit per
+ * event, and share this answer to it: buffer, commit the first item at once (the first tick or step
+ * of a run is the one a reader is waiting on, and holding it back makes a fast run look slow to
+ * start), and let a trailing timer carry whatever arrives inside the window (#1153). One mechanism,
+ * not two field-for-field copies, because a copy is where a timing fix or a teardown leak lands in
+ * one and not the other.
  *
- * It owns the buffer, the timer and the cadence, and nothing else. What a batch
- * commits to, when a stream is torn down, and whatever else rides the same
- * flush stay with the caller, whose lifecycles genuinely differ: one has a
- * `stopMonitoring` and a second buffer riding this flush, the other drains on
- * error as well as on close.
+ * It owns the buffer, the timer and the cadence, and nothing else. What a batch commits to, when a
+ * stream is torn down, and whatever else rides the same flush stay with the caller, whose
+ * lifecycles genuinely differ: one has a `stopMonitoring` and a second buffer riding this flush,
+ * the other drains on error as well as on close.
  *
- * The two options exist for the third caller, the inbox's capture notifier
- * (#1388), whose window is a rate limit rather than a render budget: it waits
- * out a full window before saying anything, because a burst that posts once for
- * the first capture and once for the rest is two notifications where the issue
- * allows one, and it takes its cadence as a number rather than from the
+ * The two options exist for the third caller, the inbox's capture notifier (#1388), whose window is
+ * a rate limit rather than a render budget: it waits out a full window before saying anything,
+ * because a burst that posts once for the first capture and once for the rest is two notifications
+ * where the issue allows one, and it takes its cadence as a number rather than from the
  * live-refresh setting, which is about how often a chart repaints.
  */
 

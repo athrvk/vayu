@@ -21,10 +21,9 @@ const NO_COLLECTIONS: Collection[] = [];
 const NO_ENVIRONMENTS: Environment[] = [];
 
 /**
- * The distinct OAuth 2.0 tokens the stored requests of @p collectionIds send,
- * against the active environment - see {@link distinctRunOAuth2Configs}. Pass
- * an empty list to ask nothing. Memoised: the configs are handed to a guard
- * that re-queries when its config changes identity.
+ * The distinct OAuth 2.0 tokens the stored requests of @p collectionIds send, against the active
+ * environment (see {@link distinctRunOAuth2Configs}); an empty list asks nothing. Memoised: the
+ * guard receiving the configs re-queries when a config changes identity.
  */
 export function useRunOAuth2Configs(collectionIds: string[]): RunOAuth2Config[] {
 	const { data: collections = NO_COLLECTIONS } = useCollectionsQuery();

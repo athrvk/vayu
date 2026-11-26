@@ -39,14 +39,14 @@ rather than per URL; a headless engine with nothing resolved falls back to
 environment-variable pickup rather than to no proxy. Client certificates carry
 no qualification any more - they are proven on a wire on all three platforms,
 in both PEM-pair and PKCS#12 form. Detail:
-[proxy settings](../engine/api-reference.md#proxy-settings),
-[TLS trust](../engine/api-reference.md#tls-trust-settings) and
-[client certificates](../engine/api-reference.md#client-certificates).
+[proxy settings](../engine/api-reference/health-config.md#proxy-settings),
+[TLS trust](../engine/api-reference/health-config.md#tls-trust-settings) and
+[client certificates](../engine/api-reference/cookies-and-certificates.md#client-certificates).
 
 \*\* **What the file leaves out.** The report holds aggregates and time series
 only, never traces, samples or request values, and the HTML page runs no script
 and loads nothing. Detail:
-[the HTML report](../engine/api-reference.md#the-html-report).
+[the HTML report](../engine/api-reference/export.md#the-html-report).
 
 \*\*\* **A generator, not an importer.** k6 itself reads no OpenAPI document.
 Grafana publishes [`openapi-to-k6`](https://github.com/grafana/openapi-to-k6),
@@ -100,7 +100,7 @@ run as an ordered scenario, in design mode or under load, with per-step results
 and threshold verdicts. While it runs you watch throughput, latency percentiles
 and error counters stream live over SSE rather than reading a summary after the
 fact, and every run stays in the history sidebar to be
-[compared against another](../engine/mcp.md).
+[compared against another](../engine/mcp/index.md).
 
 ## When to choose k6
 

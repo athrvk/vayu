@@ -8,16 +8,13 @@
 /**
  * The cookies this request's host has in the jar.
  *
- * **This is an approximation and the UI says so.** libcurl decides what is
- * actually attached, applying the full domain/path/secure/expiry matching rules;
- * re-implementing those here would be a second matcher to keep in step with a
- * C library, and it would be wrong in the cases that matter (a path-scoped
- * cookie, a `Secure` cookie on an http URL). So this filters by host, calls
- * itself "cookies for this host", and points at the raw-request view - which
- * shows the `Cookie` line the jar actually sent - for the exact answer.
+ * **An approximation, and the UI says so.** libcurl decides what is attached, applying the full
+ * domain/path/secure/expiry rules; re-implementing them here would be a second matcher to keep in
+ * step with a C library, wrong in the cases that matter (a path-scoped cookie, a `Secure` cookie on
+ * an http URL). So this filters by host, calls itself "cookies for this host", and points at the
+ * raw-request view, which shows the `Cookie` line the jar sent, for the exact answer.
  *
- * The jar is per environment (issue #301), so the section reads the scope for
- * the environment that is active right now and clears that one.
+ * The jar is per environment (#301), so the section reads and clears the active environment's.
  */
 
 import { Cookie as CookieIcon } from "lucide-react";

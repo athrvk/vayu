@@ -11,8 +11,8 @@ namespace vayu::http {
  * Read a script from a run payload.
  *
  * Two forms are accepted. `list_key` is a list of parts, each recording the
- * collection or request it came from; the engine joins them. `legacy_key` is
- * the older single pre-joined string, kept because the engine is a standalone
+ * collection or request it came from; the engine joins them. `legacy_key` is a
+ * single pre-joined string, still accepted because the engine is a standalone
  * binary with a documented HTTP API. The list wins when both are sent; they are
  * never merged.
  *
@@ -21,8 +21,8 @@ namespace vayu::http {
  * not run the parts separately, and do not change the separator: a syntax error
  * reports a line number counted from the start of the joined text.
  *
- * Parts that are empty or only whitespace are dropped. The renderer used to
- * keep them and MCP used to drop them; this is now the single rule.
+ * Parts that are empty or only whitespace are dropped, whether the renderer or
+ * MCP sent them.
  */
 std::string read_script (const nlohmann::json& json, const char* list_key, const char* legacy_key);
 

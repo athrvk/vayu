@@ -6,18 +6,15 @@
  */
 
 /**
- * Pure GraphQL diagnostics - monaco-free so it is unit-testable in node.
- * Positions are 1-based (Monaco convention); graphql-language-service emits
- * 0-based LSP ranges, converted here.
+ * Pure GraphQL diagnostics, monaco-free so it is unit-testable in node. Positions are 1-based
+ * (Monaco convention); graphql-language-service emits 0-based LSP ranges, converted here.
  *
- * **`{{variable}}` tokens are masked, not reported.** The editor completes them
- * and the engine resolves them, so marking every one as a syntax error was the
- * editor arguing with itself - and worse than cosmetic: an unmasked token is a
- * *parse* failure, which costs the rest of the document its validation. The
- * masked text parses, so everything else is still checked, and any marker that
- * lands on a placeholder is dropped because it is about a character the user
- * never typed. The mask is length-preserving, which is what makes the positions
- * that come back usable against the original text.
+ * **`{{variable}}` tokens are masked, not reported.** The editor completes them and the engine
+ * resolves them, so marking each as a syntax error would be the editor arguing with itself, and
+ * worse than cosmetic: an unmasked token is a *parse* failure, which costs the rest of the document
+ * its validation. The masked text parses, so everything else is still checked, and a marker that
+ * lands on a placeholder is dropped as being about a character the user never typed. The mask is
+ * length-preserving, so the positions that come back fit the original text.
  */
 
 import { parse, type GraphQLSchema } from "graphql";

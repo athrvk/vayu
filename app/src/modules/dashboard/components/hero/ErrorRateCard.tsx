@@ -44,10 +44,9 @@ const STATUS_SEGMENTS: readonly StatusSegment[] = [
 ];
 
 /**
- * The bucket a status code draws in. The engine counts 200-399 as success
- * (3xx included) and status 0 as no response; anything else it counts as an
- * HTTP error (`isErrorStatus`), so a code outside the 4xx and 5xx classes (a
- * 1xx, a 600) lands with 5xx rather than being dropped from the bar.
+ * The bucket a status code draws in. The engine counts 200-399 as success (3xx included) and status
+ * 0 as no response, and anything else as an HTTP error (`isErrorStatus`), so a code outside the 4xx
+ * and 5xx classes (a 1xx, a 600) lands with 5xx rather than dropping from the bar.
  */
 function bucketFor(code: number): StatusSegment["key"] {
 	if (code === 0) return "none";

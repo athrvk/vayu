@@ -6,21 +6,19 @@
  */
 
 /**
- * castByType
- *
  * Coerces a stored variable's raw string `value` into its declared type
- * (`'string' | 'number' | 'boolean' | 'json'`). The on-disk shape is always a
- * string - `type` is a UI/script hint per the data-model PRD §5.2 - so this is
- * where the cast happens at read time.
+ * (`'string' | 'number' | 'boolean' | 'json'`). The on-disk shape is always a string (`type` is a
+ * UI/script hint per the data-model PRD §5.2), so this is where the cast happens, at read time.
  *
  * Rules (matches the PRD's expected behavior):
  *   - string  → returned as-is
  *   - number  → Number(value); invalid → NaN (caller decides what to do)
- *   - boolean → "true"/"1"/"yes" → true; "false"/"0"/"no"/"" → false; else falls back to Boolean(value)
+ *   - boolean → "true"/"1"/"yes" → true; "false"/"0"/"no"/"" → false; else falls back to
+ *     Boolean(value)
  *   - json    → JSON.parse(value); on parse error, returns the raw string
  *
- * This utility is also used engine-side conceptually; the engine has its own
- * castByType in C++/QuickJS that mirrors these rules.
+ * The engine's script runtime casts a loaded row by the same rules (`cast_variable_to_jsvalue` in
+ * `engine/src/runtime/pm/pm_scopes.cpp`), so it reads alike in both runtimes.
  */
 
 import type { VariableValue } from "@/types";

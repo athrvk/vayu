@@ -75,10 +75,8 @@ const CODE_PATTERN = new RegExp(`${QUOTED}|${EPOCH}`, "g");
 const PROSE_PATTERN = new RegExp(`${ISO}|${HTTP_DATE}|${ASCTIME}|${EPOCH}`, "g");
 
 /**
- * The times on one line, one pass of @p pattern.
- *
- * A quoted match carries its content in a group and starts one column past
- * the opening quote; a bare match is its own text.
+ * The times on one line, one pass of @p pattern. A quoted match carries its content in a group and
+ * starts one column past the opening quote; a bare match is its own text.
  */
 function timesInLine(line: string, lineNumber: number, pattern: RegExp): TimeTokenRange[] {
 	const ranges: TimeTokenRange[] = [];

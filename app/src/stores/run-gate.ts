@@ -6,21 +6,19 @@
  */
 
 /**
- * Whether a run may start now, the one answer every user-started entry point
- * asks (#3351, #3381): the request builder, and the Run Collection dialog for a
- * load run and for a sequence alike. The engine sets no limit on concurrent
- * runs; this is the renderer's policy, and it holds because one live run owns
- * the live view.
+ * Whether a run may start now, the one answer every user-started entry point asks (#3351, #3381):
+ * the request builder, and the Run Collection dialog for a load run and a sequence alike. The
+ * engine sets no limit on concurrent runs; this is the renderer's policy, and it holds because one
+ * live run owns the live view.
  *
- * Two stores answer it, not one. `sseClient` holds a single `EventSource`, so a
- * run attaching takes the stream from the live run, load or sequence, and the
- * run it took keeps executing on the engine with no live view. The refusal
- * names the live run and offers to stop it (`useStopLiveRun`).
+ * Two stores answer it, one per run kind. `sseClient` holds a single `EventSource`, so a run
+ * attaching takes the stream from the live run, load or sequence, and the run it took keeps
+ * executing on the engine with no live view. The refusal names the live run and offers to stop it
+ * (`useStopLiveRun`).
  *
- * A run an MCP agent started is asked the same question but never refused: the
- * engine already has it, so when the gate is shut the app attaches nothing and
- * says so (`useRunWatchers`). The names say "load run" from before the gate
- * covered both kinds.
+ * A run an MCP agent started is asked the same question but never refused: the engine already has
+ * it, so when the gate is shut the app attaches nothing and says so (`useRunWatchers`). The names
+ * say "load run" from before the gate covered both kinds.
  */
 
 import { useMemo } from "react";
@@ -76,10 +74,9 @@ export function loadRunGateOf(dashboard: DashboardRun, scenario: ScenarioRun): L
 }
 
 /**
- * Whether the dashboard may re-attach the stream to its own run (Reconnect,
- * or the re-attach on mount): refused only while a collection run streams,
- * since attaching would take that run's stream. The dashboard's run being
- * live is the reason to re-attach, so it is not asked.
+ * Whether the dashboard may re-attach the stream to its own run (Reconnect, or on mount): refused
+ * only while a collection run streams, since attaching would take that run's stream. The
+ * dashboard's run being live is the reason to re-attach, so it is not asked.
  */
 export function reattachGateOf(scenario: ScenarioRun): LoadRunGate {
 	if (scenario.runId && scenario.isStreaming) {

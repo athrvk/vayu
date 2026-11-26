@@ -9,10 +9,9 @@ import { resolveHeaderLines } from "@/lib/header-lines";
 import type { ResponseState } from "../../types";
 
 /**
- * The `WWW-Authenticate` values to ask `POST /oauth2/step-up` about, or `[]`
- * when @p response cannot be a step-up: only a 403 can (RFC 6750 section 3.1
- * answers `insufficient_scope` with 403). Each received line is its own value,
- * so a challenge split across lines is read as the server sent it.
+ * The `WWW-Authenticate` values to ask `POST /oauth2/step-up` about, or `[]` when @p response
+ * cannot be a step-up: only a 403 can (RFC 6750 section 3.1). Each received line is its own value,
+ * so a challenge split across lines is read as sent.
  */
 export function stepUpChallenges(
 	response: Pick<ResponseState, "status" | "headers" | "headerLines">

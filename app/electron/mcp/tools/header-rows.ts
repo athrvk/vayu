@@ -6,7 +6,6 @@
  */
 
 /**
- * @file header-rows.ts
  * @brief A `headers` argument written over a stored header list: the rows or
  *        the map a write tool takes, and the stored value a withheld row keeps.
  */
@@ -48,18 +47,14 @@ export function keepsStoredValue(row: HeaderRowArg): row is KeptHeaderRow {
 }
 
 /**
- * A `headers` argument as rows: an ordered `{key, value, enabled?}` array, or
- * a string map (#3422).
- *
- * The array is taken row for row, in order, a repeated key kept - a response
- * with several `Set-Cookie` lines is several rows, which a map cannot hold.
- * `enabled` defaults to true. The members of {@link HEADER_ROW_EXTRA_MEMBERS}
- * a row carries are forwarded as given. A row with `valueWithheld: true` and no `value`
- * is the row a read withheld, written back: it stands for the stored value
- * (`restoreWithheldHeaderRows`). The map is the short spelling, one enabled
- * row per name. Rows are `{key, value}` rather than `run_request`'s
- * `{name, value}` lines because these are the rows the engine stores and the
- * reads return.
+ * A `headers` argument as rows: an ordered `{key, value, enabled?}` array, or a string map (#3422).
+ * The array is taken row for row, in order, a repeated key kept (a response with several
+ * `Set-Cookie` lines is several rows, which a map cannot hold). `enabled` defaults to true. The
+ * members of {@link HEADER_ROW_EXTRA_MEMBERS} a row carries are forwarded as given. A row with
+ * `valueWithheld: true` and no `value` is the row a read withheld, written back: it stands for the
+ * stored value (`restoreWithheldHeaderRows`). The map is the short spelling, one enabled row per
+ * name. Rows are `{key, value}` rather than `run_request`'s `{name, value}` lines because these are
+ * the rows the engine stores and the reads return.
  */
 export function readHeaderRows(headers: unknown): HeaderRowArg[] {
 	if (Array.isArray(headers)) return headers.map(readHeaderRow);
@@ -102,13 +97,11 @@ function readRowExtras(row: Record<string, unknown>, at: string): HeaderRowExtra
 }
 
 /**
- * @p rows with each withheld row given the stored value it stands for: the
- * row of @p stored with the same name, folded as the credential rules fold
- * it, at the same occurrence counted over every row of that name on each
- * side. Order, `enabled`, repeats and any other member the row carries are
- * the call's. A withheld row with no
- * such stored row is refused, naming the header, before anything is written;
- * with nothing stored (a create), every withheld row is.
+ * @p rows with each withheld row given the stored value it stands for: the row of @p stored with
+ * the same name, folded as the credential rules fold it, at the same occurrence counted over every
+ * row of that name on each side. Order, `enabled`, repeats and any other member the row carries are
+ * the call's. A withheld row with no such stored row is refused, naming the header, before anything
+ * is written; with nothing stored (a create), every withheld row is.
  */
 export function restoreWithheldHeaderRows(stored: unknown, rows: HeaderRowArg[]): HeaderRow[] {
 	const storedValues = valuesByName(stored);

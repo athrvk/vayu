@@ -14,16 +14,12 @@ export interface RunDayGroup {
 }
 
 /**
- * A calendar-day label for `ms` relative to `now` - "Today", "Yesterday", or
- * a date. This replaced the per-row relative timestamp ("8h ago" repeated
- * down a page of same-day runs said nothing after the first row); it says
- * once, above the day's rows, what every row used to say on its own.
+ * A calendar-day label for `ms` relative to `now`: "Today", "Yesterday", or a date. Said once above
+ * the day's rows, it replaces a per-row "8h ago" repeated on every row of the day.
  *
- * A calendar date rather than "N days ago" for anything older: the latter
- * decays on every render (today's "6 days ago" is tomorrow's "7 days ago"),
- * so a run's group would drift out from under it between renders with no
- * event that changed it. Top history UIs (Postman, Hoppscotch) group the
- * same way for the same reason.
+ * A date rather than "N days ago" for anything older: that decays on every render (today's "6 days
+ * ago" is tomorrow's "7 days ago"), so a run's group would drift out from under it with no event
+ * that changed it. Postman and Hoppscotch group history the same way.
  */
 function dayLabel(ms: number, now: Date): string {
 	if (!ms) return "Unknown date";
@@ -36,13 +32,10 @@ function dayLabel(ms: number, now: Date): string {
 }
 
 /**
- * Buckets `runs` into consecutive same-day groups, in the order they arrive.
- *
- * Consecutive rather than a full group-then-sort pass: `runs` is already in
- * whatever order `filterRuns`'s Newest/Oldest sort produced, and grouping
- * adjacent same-day runs preserves that order for free - a full bucket pass
- * would have to re-sort groups against the same `sortBy` the caller already
- * applied, a second copy of a decision made once upstream.
+ * Buckets `runs` into consecutive same-day groups, in arrival order. Consecutive, not
+ * group-then-sort: `runs` is already in `filterRuns`'s Newest/Oldest order, which grouping adjacent
+ * rows keeps for free, while a full bucket pass would re-sort groups against the same `sortBy`, a
+ * second copy of a decision made upstream.
  */
 export function groupRunsByDay(runs: Run[], now: Date = new Date()): RunDayGroup[] {
 	const groups: RunDayGroup[] = [];

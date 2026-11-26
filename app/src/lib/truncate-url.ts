@@ -6,23 +6,18 @@
  */
 
 /**
- * Keep the end of a URL when there is not room for all of it (#1691).
+ * Keep the end of a URL when there is not room for all of it (#1691). CSS `truncate` cuts the tail,
+ * which is exactly backwards for a URL: the part that identifies one row is the path, and the part
+ * every row shares is the scheme and the host, so a page of unsaved local runs reads
+ * `http://127.0.0.1:9...` five times over, five identical rows for five different requests.
  *
- * CSS `truncate` cuts the tail, which is exactly backwards for a URL: the part
- * that identifies one row is the path, and the part every row shares is the
- * scheme and the host. A page of unsaved local runs read
- * `http://127.0.0.1:9...` five times over - five identical rows for five
- * different requests.
+ * So the head gives way and the tail does not. The result is a *display* string and nothing else:
+ * it is never parsed, never sent, and the full value stays one hover away in the element's `title`.
  *
- * So the head gives way and the tail does not. The result is a *display* string
- * and nothing else: it is never parsed, never sent, and the full value stays one
- * hover away in the element's `title`.
- *
- * This is deliberately not a `new URL()` job. A row can hold a value that is
- * still being typed, one carrying `{{variables}}` in the authority, or a
- * relative path - `URL` throws on all three, and a truncation helper that throws
- * on the input it is most needed for is worse than useless. The split is textual:
- * the first `/` after the `://`, or the first `/` at all.
+ * Deliberately not a `new URL()` job. A row can hold a value still being typed, one carrying
+ * `{{variables}}` in the authority, or a relative path; `URL` throws on all three, and a truncation
+ * helper that throws on the input it is most needed for is worse than useless. The split is
+ * textual: the first `/` after the `://`, or the first `/` at all.
  */
 
 /** Where the path starts, or -1 when the value shows no path at all. */
@@ -32,10 +27,8 @@ function pathStart(url: string): number {
 }
 
 /**
- * `url` shortened to at most `max` characters, keeping the path tail.
- *
- * The ellipsis is one character (`…`, not three dots) so the budget spends on
- * the value rather than on the mark.
+ * `url` shortened to at most `max` characters, keeping the path tail. The ellipsis is one character
+ * (`…`, not three dots) so the budget spends on the value rather than on the mark.
  */
 export function truncateUrl(url: string, max = 48): string {
 	const value = url.trim();

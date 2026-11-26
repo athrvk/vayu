@@ -6,15 +6,11 @@
  */
 
 /**
- * @file http/routes/events.cpp
- * @brief `GET /runs/:id/events` - the relay that hands a streaming run's events
- *        to a client (issue #573).
- *
- * An assembly of machinery that already exists rather than new invention: the
- * bounded ring and its replay-then-tail read are `GET /runs/:id/live`'s
- * (pattern B), the resume parsing and the one-stream claim are
- * `GET /inbox/:id/live`'s (pattern A). What is new is only the source - a
- * consumer worker's ring instead of a metrics thread's.
+ * `GET /runs/:id/events`: the relay handing a streaming run's events to a
+ * client (#573), assembled from existing machinery: the bounded ring and its
+ * replay-then-tail read are `GET /runs/:id/live`'s (pattern B), the resume
+ * parsing and one-stream claim `GET /inbox/:id/live`'s (pattern A). Only the
+ * source is new: a consumer worker's ring, not a metrics thread's.
  */
 
 #include "vayu/core/constants.hpp"
@@ -111,15 +107,13 @@ httplib::DataSink& sink) {
 }
 
 /**
- * The relay itself, from @p resume_from to the producer's last frame.
- *
- * Always answers `false` - the provider is done when this returns. Every stream
- * ends with a statement of why, including one whose consumer had already drained
- * the ring: the reason is the answer to "did I see everything?", so it cannot be
- * inferable only from having been connected at the right moment. The
- * exceptions are a lost claim, where the slot - and the completion frame with
- * it - belongs to the stream that took it over, and a server that is stopping
- * (@p stopping, #2683), where the relay ends but the stream has not.
+ * The relay, from @p resume_from to the producer's last frame. Always answers
+ * `false` (the provider is done). Every stream ends saying why, even one whose
+ * consumer had drained the ring: the reason answers "did I see everything?",
+ * which must not depend on having connected at the right moment. The exceptions
+ * are a lost claim, where the slot and its completion frame belong to the
+ * stream that took over, and a stopping server (@p stopping, #2683), where the
+ * relay ends but the stream has not.
  */
 bool relay_run_events (const std::shared_ptr<vayu::http::SseStreamContext>& context,
 size_t resume_from,

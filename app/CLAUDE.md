@@ -18,7 +18,7 @@ everything.
 - Feature-organized: `app/src/modules/<feature>/` (collections, console,
   dashboard, history, inbox, logs, mock-server, palette, request-builder,
   services, settings, trash, variables, welcome); shared shell and primitives in `app/src/components/`
-  (layout, shared, ui). See `docs/app/COMPONENTS.md`.
+  (layout, shared, ui). See `docs/app/COMPONENTS/index.md`.
 - **Import holds no parser** (#877). `app/src/services/importers/` is the batch
   ledger, the temp ids and the apply; `parseImport` is one `POST /import/parse`
   call, and every format is read by `engine/src/core/import_document.cpp`. A
@@ -144,8 +144,9 @@ everything.
   callback instead of importing `log.ts` directly, the same seam it already
   uses for `ipcMain` and the rest of Electron.
 - Styling: Tailwind CSS v4; all colours via CSS custom properties.
-- **Design system: `docs/design-system.md`**: tokens, elevation, typography,
-  component patterns, accessibility. **Read it before touching any UI file.**
+- **Design system: `docs/design-system/`**: tokens, elevation, typography,
+  component patterns, accessibility, one page per token family
+  (`index.md` lists them). **Read the page before touching any UI file.**
 
 ## Tests default to the `node` environment
 
@@ -164,14 +165,16 @@ Forgetting it fails loudly (`document is not defined`), never silently.
 **A test's budget is a hang detector, sized for the slowest CI leg.**
 `src/test/timeouts.ts` holds the suite's budgets (60s a case and hook, 15s
 for `waitFor` / `findBy*`); `vitest.config.ts` and `src/test/setup.ts` read
-them. vitest's 5s and Testing Library's 1s defaults, and the hand-sized
-10-20s overrides that followed (#846, #1280, #1219), were each a measurement
-on one machine times a guess. A full parallel run on four cores measured cases
-at 6x their idle figure, and Windows runs the suite 3-4x slower again, so
-every one of those budgets failed healthy runs and cost a CI re-run. A case
-names no budget of its own: `timeouts.guard.test.ts` refuses a numeric
-`timeout:` in a test file, and a case that runs a whole build uses
-`BUILD_TEST_TIMEOUT_MS`.
+them. A hand-sized budget is a measurement on one machine times a guess: a full
+parallel run on four cores measures cases at 6x their idle figure, and Windows
+runs the suite 3-4x slower again. A case names no budget of its own:
+`timeouts.guard.test.ts` refuses a numeric `timeout:` in a test file, and a case
+that runs a whole build uses `BUILD_TEST_TIMEOUT_MS`.
+
+**A ceiling's docblock and a test file's size have guards beside that one.**
+`ceiling-docblock.guard.test.ts` keeps a ceiling's docblock to the rule, with no
+value and no raise history; `scripts/test-size-lint.py` caps a test file at
+1,500 lines (root `CLAUDE.md`, "Testing").
 
 **Render cost is held down by fixture size, not by the clock.** Ask what the
 fixture size is _for_. A property such as "past the grid's first window" needs
@@ -270,13 +273,13 @@ is the settings pane's) and scroll it directly with `scrollWithin`
   variant pairs `bg-x` with `hover:bg-x/80`, and `cn()` (tailwind-merge)
   replaces `bg-*` but not `hover:bg-*`, so the caller's fill wins at rest and
   the variant's hover wins on hover. → `badge-hover.test.tsx`
-- **`docs/design-system.md` values are checked against `index.css`**, and the
-  paths its Source Files table names are checked to exist
+- **The `docs/design-system/` pages' values are checked against `index.css`**,
+  and the paths the Source Files table on `index.md` names are checked to exist
   → `design-system-doc.test.ts`. Prose is not: if you change a value, read the
   sentence around it, and if you rename a component the doc describes, the table
   row fails but the section around it will not.
-- **Accessibility has a section of its own** in `docs/design-system.md`
-  ("Accessibility", after Focus & Interaction States): which check holds which
+- **Accessibility has a page of its own**, `docs/design-system/accessibility.md`
+  (after `focus-states.md`): which check holds which
   rule, why a tooltip is not a name, why `outline-none` needs a replacement in
   the same class string, and the three `jsx-a11y` rules configured rather than
   obeyed as written. `eslint-plugin-jsx-a11y` recommended runs on every `.tsx`
@@ -315,7 +318,7 @@ parity a single token cannot give. On `--muted` / `--accent` no border token
 works at all (`--border-strong` is weaker there than `--border` in dark, 1.11
 vs 1.16, and the pair inverts in light), which is why sunken uses an alpha of
 `--foreground`. Definitions in `index.css`, rationale in
-`docs/design-system.md`.
+`docs/design-system/surfaces.md`.
 
 The mistake is **enumerable, not impossible**: a `border-rule` under no
 declared surface silently falls back to the invisible default. So guard the
@@ -326,7 +329,7 @@ use across the tree; a new surface declares one rather than picking a token.
 a divider is `border-rule` and nothing else.
 On an element whose primitive already sets a background utility
 (`DialogContent`'s `bg-background`), `surface-card` alone loses the cascade:
-write the pair `bg-card surface-card` (see `docs/design-system.md`).
+write the pair `bg-card surface-card` (see `docs/design-system/surfaces.md`).
 
 ## Driving the renderer without Electron
 
@@ -364,12 +367,12 @@ cannot add a response header, and `route.fetch` reads the whole body before
 
 | Doc                                 | Update it when you change…                                                        |
 | ----------------------------------- | --------------------------------------------------------------------------------- |
-| `docs/design-system.md`             | Any token value, colour rule, radius, or shared UI primitive                      |
+| `docs/design-system/`               | Any token value, colour rule, radius, or shared UI primitive                      |
 | `docs/ux-writing.md`                | Voice, error-message templates, terminology, or any user-facing string convention |
-| `docs/app/COMPONENTS.md`            | Adding or moving a module / shared component                                      |
+| `docs/app/COMPONENTS/`              | Adding or moving a module / shared component                                      |
 | `docs/app/architecture.md`          | Renderer-side structural decisions                                                |
-| `docs/app/state-management.md`      | Adding a store, changing query keys or cache policy                               |
-| `docs/app/api-integration.md`       | Request/response shapes the renderer sends                                        |
+| `docs/app/state-management/`        | Adding a store, changing query keys or cache policy                               |
+| `docs/app/api-integration/`         | Request/response shapes the renderer sends                                        |
 | `docs/app/variable-resolution.md`   | Resolution order, scopes, the resolver hook                                       |
 | `docs/app/import-collections/`      | Detectors, drafts, any format mapping                                             |
 | `docs/app/pm-api-compatibility.md`  | Which `pm.*` APIs the runtime supports                                            |

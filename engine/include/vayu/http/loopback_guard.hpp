@@ -8,9 +8,8 @@
  */
 
 /**
- * @file http/loopback_guard.hpp
  * @brief The one rule that keeps an outbound transfer off Vayu's own ports
- *        (issue #2355).
+ *        (#2355).
  *
  * The engine's management API admits any request with a loopback `Host` and
  * no `Origin`, which is exactly what libcurl sends. So a request the engine

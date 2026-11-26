@@ -8,7 +8,6 @@
  */
 
 /**
- * @file file_access_policy.hpp
  * @brief Which files a request body may be read from.
  *
  * The trust rule is one sentence: Vayu sends a file you picked, or any file

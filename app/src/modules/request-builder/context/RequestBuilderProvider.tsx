@@ -6,14 +6,8 @@
  */
 
 /**
- * RequestBuilder Provider
- *
- * Provides:
- * - Request state management
- * - Variable resolution layer
- * - Execute/save actions
- * - Response state (persisted via store)
- * - Auto-save with debouncing
+ * Request state, variable resolution, execute and save actions, the response (persisted via the
+ * store) and debounced autosave.
  */
 
 import {
@@ -91,9 +85,8 @@ import { useRequestModelLifecycle } from "../hooks/useRequestModelLifecycle";
 import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
 
 /**
- * Every `RequestState` field the per-field merge below watches - everything
- * `MergeableRequestField` allows, spelled out because `mergeExternalWrite`
- * needs the list to iterate, not just the type.
+ * Every field the per-field merge watches (`MergeableRequestField`), spelled out because
+ * `mergeExternalWrite` iterates it.
  */
 const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 	"name",
@@ -125,17 +118,16 @@ const MERGEABLE_FIELDS: readonly MergeableRequestField[] = [
 ];
 
 /**
- * The key/value tables. Their rows carry ephemeral ids every fetch makes anew,
- * so they are compared as stored rows and adopted with the draft's ids carried
- * over, or every save's echo would remount every row under the caret (#3663).
+ * The key/value tables. Their rows carry ephemeral ids every fetch makes anew, so they compare as
+ * stored rows and are adopted with the draft's ids carried over, or every save's echo would remount
+ * every row under the caret (#3663).
  */
 const ROW_FIELDS = ["params", "headers", "formData", "urlEncoded"] as const;
 
 /**
- * How many saves' values the merge recognises as echoes. Two, not one: a save
- * queued behind another (`useSaveManager`) starts in the microtask after the
- * first resolves, before the first's cache write has rendered, so the first's
- * echo arrives after the second has already recorded what it sends (#3664).
+ * How many saves' values the merge recognises as echoes. Two: a save queued behind another
+ * (`useSaveManager`) starts in the microtask after the first resolves, before the first's cache
+ * write renders, so the first's echo arrives after the second recorded what it sends (#3664).
  */
 const SENDS_REMEMBERED = 2;
 
@@ -182,10 +174,9 @@ function pickFields(
 	request: RequestState,
 	fields: Iterable<MergeableRequestField>
 ): Partial<RequestState> {
-	// `Record<string, unknown>`, not `Partial<RequestState>`: `field` is a plain
-	// union member here, not a generic correlated with `request[field]`, so
-	// TypeScript cannot verify the pair matches per assignment - the same reason
-	// `updateField` casts at its call site.
+	// `Record<string, unknown>`: `field` is a plain union member, not a generic tied to
+	// `request[field]`, so TypeScript cannot check each pair; `updateField` casts for the same
+	// reason.
 	const picked: Record<string, unknown> = {};
 	for (const field of fields) picked[field] = request[field];
 	return picked as Partial<RequestState>;
@@ -195,52 +186,37 @@ interface RequestBuilderProviderProps {
 	children: ReactNode;
 	initialRequest?: Partial<RequestState>;
 	/**
-	 * The identity this builder files its per-builder memory under - the
-	 * Send-with-row picker's row index (issue #1272), the one per-request map
-	 * left provider-side now that the three reversible-setting records (the
-	 * body mode's `Content-Type`, the Event stream toggle's `Accept`, the
-	 * GraphQL mode's `method`) all mark ownership on the request's own state
-	 * instead (issues #1481, #1505).
-	 *
-	 * Defaults to `request.id`, which is what a request tab wants. The History
-	 * run view passes its run id, because the copy it renders is deliberately
-	 * id-less (`design-run-seed.ts` sets `id: null`, one of the two gates that
-	 * detach it) and two open run tabs would otherwise be one identity. Pass an
-	 * id the tab strip can name - a record keyed under it is bounded by that
-	 * tab, exactly as a request's is.
+	 * The identity this builder files its per-builder memory under: the Send-with-row picker's row
+	 * index (#1272) and the Bulk edit drafts (#3666). The reversible settings (the body mode's
+	 * `Content-Type`, the Event stream toggle's `Accept`, the GraphQL mode's `method`) mark
+	 * ownership on the request itself (#1481, #1505). Defaults to `request.id`. The History run
+	 * view passes its run id: its copy is deliberately id-less (`design-run-seed.ts` sets
+	 * `id: null`, one of the two detaching gates), and two open run tabs would otherwise share one
+	 * identity. Pass an id the tab strip names, so a record under it is bounded by that tab.
 	 */
 	memoryKey?: string;
 	/**
-	 * Starting response for a builder with no id, which cannot read the store.
-	 * Used by the History run view, where the response comes from the run.
-	 *
-	 * Keep the reference stable (memoize it): it is read by the reset effect
-	 * below, not only by the `useState` initialiser.
+	 * Starting response for an id-less builder, which cannot read the store (the History run view,
+	 * from the run). Keep it stable (memoize it): the reset below reads it, not only the
+	 * initialiser.
 	 */
 	initialResponse?: ResponseState | null;
 	/**
-	 * Elements to show as "runs before your own" instead of the live collection
-	 * chain (issue #1512). The History run view passes what the run recorded,
-	 * so a copy of a past run lists the scripts that actually ran, not the
-	 * ones the collection carries today.
+	 * Elements shown as "runs before your own" instead of the live chain (#1512): the History run
+	 * view passes what the run recorded, so a past run lists the scripts that ran, not today's.
 	 */
 	inheritedElements?: ResolvedElement[];
 	/**
-	 * The whole glued script a run recorded before script parts existed. Shown
-	 * read-only, because its collection and request halves cannot be separated
-	 * and the editor above is therefore necessarily empty.
+	 * The whole glued script a run recorded before script parts existed, shown read-only: its
+	 * collection and request halves cannot be separated, so the editor above is empty.
 	 */
 	legacyPreScript?: string;
 	legacyPostScript?: string;
 	collectionId?: string | null;
 	/**
-	 * Send the request and return the exchange.
-	 *
-	 * `dataRow` is the one row a Send-with-row binds (issue #601) - the URL,
-	 * headers and body substitute against it and both scripts read it as
-	 * `pm.iterationData`. Undefined is the ordinary Send.
-	 *
-	 * `signal` is the send's Cancel (#3352). A handler that ignores it still
+	 * Send the request and return the exchange. `dataRow` is Send-with-row's one row (#601): the
+	 * URL, headers and body bind against it and both scripts read it as `pm.iterationData`;
+	 * undefined is a plain Send. `signal` is the send's Cancel (#3352): a handler ignoring it still
 	 * has its answer dropped, but the engine finishes a send nobody reads.
 	 */
 	onExecute?: (
@@ -249,22 +225,18 @@ interface RequestBuilderProviderProps {
 		signal?: AbortSignal
 	) => Promise<ResponseState | null>;
 	/**
-	 * Send a stream-flagged request (issue #574). Separate from `onExecute`
-	 * because the two answers are different things, not two shapes of one: a
-	 * buffered send returns the exchange, a streamed one returns the run to
-	 * follow and there is no exchange yet. A builder given no handler cannot
-	 * stream - the History run view's detached copy is one - and Send falls back
-	 * to the buffered path rather than doing nothing.
+	 * Send a stream-flagged request (#574). Apart from `onExecute`: a buffered send returns the
+	 * exchange, a streamed one the run to follow, with no exchange yet. A builder without it cannot
+	 * stream (the History run view's detached copy), and Send falls back to buffering, not nothing.
 	 */
 	onExecuteStream?: (
 		request: RequestState,
 		dataRow?: Record<string, unknown>
 	) => Promise<StreamStartResult | null>;
 	/**
-	 * Save the request. `changedFields` is exactly what the user has touched
-	 * since the draft last agreed with the server (issue #1436) - a field
-	 * silently adopted from an external write is never in it, so the payload
-	 * `onSave` builds does not write that field back.
+	 * Save the request. `changedFields` is exactly what the user touched since the draft last
+	 * agreed with the server (#1436); a field adopted from an external write is never in it, so
+	 * `onSave`'s payload does not write it back.
 	 */
 	onSave?: (
 		request: RequestState,
@@ -287,35 +259,30 @@ export default function RequestBuilderProvider({
 	onSave,
 	onStartLoadTest,
 }: RequestBuilderProviderProps) {
-	// Request state
 	const [request, setRequestState] = useState<RequestState>(() => ({
 		...createDefaultRequestState(),
 		...initialRequest,
 		collectionId: collectionId || null,
 	}));
 
-	// The catalogue's `required` keys per kind (issue #1635) - `handleSave`
-	// below needs it to decide whether `elements` is safe to send; cached by
-	// `useElementKindsQuery` itself, so this costs nothing beyond the fetch
-	// `ElementsPanel` already makes.
+	// The catalogue's `required` keys per kind (#1635), for `handleSave` to judge whether
+	// `elements` is safe to send; `useElementKindsQuery` caches it, so it costs nothing beyond
+	// `ElementsPanel`'s fetch.
 	const { data: elementKinds } = useElementKindsQuery();
 	const { errors: elementErrors, refuse: refuseElement } = useElementRefusals(request.elements);
 
-	// The id of the request currently on screen. This single provider is reused
-	// across request tabs (no per-tab key), so an execute that is still in flight
-	// when the user switches requests must be able to tell whether its result
-	// still belongs on screen. A ref, not the closure's `request`, because the
-	// running executeRequest closed over the request that was active at Send.
+	// The request on screen. One provider serves every request tab, so an in-flight execute must
+	// tell whether its result still belongs on screen; a ref, since `executeRequest` closed over
+	// the request active at Send.
 	const currentRequestIdRef = useRef<string | null>(request.id ?? null);
 	useEffect(() => {
 		currentRequestIdRef.current = request.id ?? null;
 	}, [request.id]);
 
-	// Response state - use store for persistence across view switches
+	// The response, in the store so it survives view switches.
 	const getResponse = useResponseStore((s) => s.getResponse);
 	const storeSetResponse = useResponseStore((s) => s.setResponse);
 	const [response, setLocalResponse] = useState<ResponseState | null>(() => {
-		// Initialize from store if available
 		const requestId = initialRequest?.id;
 		if (requestId) {
 			const stored = getResponse(requestId);
@@ -323,12 +290,10 @@ export default function RequestBuilderProvider({
 				return stored as ResponseState;
 			}
 		}
-		// Nothing stored - a detached copy has no id to look one up by, so it
-		// hands its response in directly.
+		// Nothing stored: a detached copy has no id to look one up, so it hands its response in.
 		return initialResponse ?? null;
 	});
 
-	// Wrapper to update both local state and store
 	const setResponse = useCallback(
 		(newResponse: ResponseState | null) => {
 			setLocalResponse(newResponse);
@@ -340,38 +305,33 @@ export default function RequestBuilderProvider({
 		[request.id, storeSetResponse]
 	);
 
-	// Fetch last design run from backend (for app reload scenarios)
+	// The last design run from the backend, for an app reload.
 	const {
 		run: lastDesignRun,
 		report: lastDesignRunReport,
 		isLoading: isLoadingLastRun,
 	} = useLastDesignRunQuery(request.id);
 	/*
-	 * The request the backend restore below has already answered for - null once
-	 * the provider is handed a different request, which is what lets a return to
-	 * an earlier request ask again. State rather than a ref because the restore
-	 * reads it while rendering. A stored response adopted at mount counts as an
-	 * answer: otherwise the Send that clears the pane would be refilled from the
-	 * previous design run (#3421).
+	 * The request the backend restore has answered for; null once the provider gets another
+	 * request, so a return to an earlier one asks again. State, as the restore reads it during
+	 * render. A stored response adopted at mount counts as an answer, or the Send clearing the pane
+	 * would be refilled from the previous design run (#3421).
 	 */
 	const [restoredFor, setRestoredFor] = useState<string | null>(() =>
 		response && request.id ? request.id : null
 	);
 	const [restoredResponse, setRestoredResponse] = useState<ResponseState | null>(null);
-	// A stream this request holds, live or finished until another Send or a clear,
-	// owns the pane: the last design run must not fill it meanwhile.
+	// A stream this request holds, live or finished until another Send or a clear, owns the pane:
+	// the last design run must not fill it meanwhile.
 	const holdsStream = useExecutionEventsStore(
 		(s) => !!s.runId && !!s.requestId && s.requestId === request.id
 	);
 
 	/*
-	 * Load the response from the backend when nothing is cached locally and the
-	 * last design run has one (the app-reload case).
-	 *
-	 * Derived while rendering rather than in an effect: it reads query state and
-	 * writes component state, so an effect would paint the empty viewer first and
-	 * replace it a frame later. Persisting to the response store is a write to
-	 * something outside React, so that half stays in the effect below.
+	 * Load the response from the backend when nothing is cached and the last design run has one (an
+	 * app reload). Derived during render, not in an effect: it reads query state and writes
+	 * component state, so an effect would paint the empty viewer first. Persisting to the store is
+	 * outside React, so that half stays in the effect below.
 	 */
 	if (
 		request.id &&
@@ -398,14 +358,10 @@ export default function RequestBuilderProvider({
 		}
 	}, [restoredResponse, restoredForId, storeSetResponse]);
 
-	// UI state
 	/*
-	 * Kept per request id (`tab-selection-store`), so the active sub-tab
-	 * survives `Shell.tsx` unmounting this builder when its workspace tab is
-	 * not on screen. The reset block further down restores it again when
-	 * `initialRequest.id` changes without a remount - switching between two
-	 * open request tabs reuses this same provider instance rather than
-	 * remounting it.
+	 * Kept per request id (`tab-selection-store`), so the active sub-tab survives `Shell.tsx`
+	 * unmounting this builder; the reset block below restores it when `initialRequest.id` changes
+	 * without a remount, as switching request tabs reuses this provider.
 	 */
 	const getRequestTab = useTabSelectionStore((s) => s.getRequestTab);
 	const setRequestTab = useTabSelectionStore((s) => s.setRequestTab);
@@ -421,18 +377,13 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
-	 * The context bar's GraphQL outline scrolls the query editor, and the editor
-	 * only exists while the Body tab is on screen - Radix unmounts the rest. So a
-	 * click from a hidden Body tab brings the tab forward and `GraphQLBody`
-	 * serves the command on mount; revealing into an editor nobody can see is the
-	 * silent-failure alternative.
-	 *
-	 * This end only opens the tab. `GraphQLBody` owns consuming and clearing,
-	 * because it is the one that knows whether the operation is still there - and
-	 * clearing here would race it to the slot. What this end does clear is a
-	 * command nothing under it can ever serve: another request's, or one for a
-	 * request that no longer sends a GraphQL body. Left in the slot, it would be
-	 * replayed at the next GraphQL body that mounts.
+	 * The context bar's GraphQL outline scrolls the query editor, which exists only while Body is
+	 * shown (Radix unmounts the rest), so a click from a hidden Body brings the tab forward and
+	 * `GraphQLBody` serves the command on mount. This end only opens the tab: `GraphQLBody`
+	 * consumes and clears, as it knows whether the operation still exists, and clearing here would
+	 * race it. This end clears only a command nothing under it can serve (another request's, or one
+	 * whose request no longer has a GraphQL body), which would otherwise replay at the next GraphQL
+	 * body to mount.
 	 */
 	const clearReveal = useRevealStore((s) => s.clearReveal);
 	const requestId = request.id ?? null;
@@ -446,51 +397,34 @@ export default function RequestBuilderProvider({
 			}
 			setActiveTab("body");
 		};
-		// Read as well as subscribed to, so a command that outlived the request it
-		// was written for is dropped when this provider is handed the next one.
+		// Read as well as subscribed, so a command outliving its request is dropped when the next
+		// arrives.
 		serve(useRevealStore.getState().pending);
 		return useRevealStore.subscribe((s) => serve(s.pending));
 	}, [requestId, bodyMode, clearReveal, setActiveTab]);
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
 	/*
-	 * How many edits this request has seen - the generation `handleSave` checks
-	 * before it reports the request clean.
-	 *
-	 * `onSave(request)` serialises the state as it was when the save started, so
-	 * a keystroke that lands during the round trip is not in the payload that
-	 * went out. Clearing `hasUnsavedChanges` unconditionally on the way back
-	 * therefore marked that keystroke saved and dropped it: nothing was left
-	 * dirty, so `useSaveManager` never re-armed and the Dock said "Saved".
-	 * Comparing generations across the await keeps a save from claiming an edit
-	 * it never carried - the same shape `save-store.ts` uses to keep an early
-	 * timer off a later save's indicator.
-	 *
-	 * Kept as a ref *and* as state on purpose: the ref is what survives the
-	 * await, and the state is what `useSaveManager` can watch to restart its
-	 * debounce on each edit.
+	 * How many edits this request has seen: the generation `handleSave` checks before reporting
+	 * clean. `onSave(request)` serialises the state at save start, so a keystroke during the round
+	 * trip is not in the payload; clearing `hasUnsavedChanges` unconditionally marked it saved and
+	 * lost it (`useSaveManager` never re-armed, the Dock said "Saved"). Comparing generations
+	 * across the await stops a save claiming an edit it never carried, as `save-store.ts` keeps an
+	 * early timer off a later save. A ref *and* state: the ref survives the await, the state is
+	 * what `useSaveManager` watches to restart its debounce.
 	 */
 	const changeTokenRef = useRef(0);
 	const [changeToken, setChangeToken] = useState(0);
 	/**
-	 * Bump the generation without claiming an unsaved change of our own.
-	 *
-	 * `markDirty` below is for the user's edits, which need `hasUnsavedChanges`
-	 * too. A foreign write landing mid-save (issue #1436) is not an edit - most
-	 * of the time it is adopted with nothing left to save - but it still has to
-	 * move the generation, or `handleSave`'s in-flight check cannot tell "the
-	 * save's response is exactly what went out" from "something happened while
-	 * it was in the air" and would clear `hasUnsavedChanges` over a field the
-	 * merge just changed underneath the response.
-	 *
-	 * Called only from effects and event handlers, never from the render body:
-	 * `changeTokenRef` has to update synchronously, ahead of the next render,
-	 * for `handleSave`'s in-flight check to read the true latest value across
-	 * an `await` - and a ref write during render is exactly what React's rules
-	 * (and this repo's `react-hooks/refs` lint) forbid, since a render can be
-	 * discarded or replayed. The per-field merge below flags a foreign write by
-	 * changing `baseline`; the effect right after it is what turns that into a
-	 * generation bump, entirely outside the render phase.
+	 * Bump the generation without claiming an unsaved change. `markDirty` is for user edits. A
+	 * foreign write mid-save (#1436) is no edit (usually adopted with nothing to save) but must
+	 * move the generation, or `handleSave` could not tell "the response is what went out" from
+	 * "something happened in the air" and would clear `hasUnsavedChanges` over a field the merge
+	 * just changed. Called only from effects and handlers, never render: `changeTokenRef` must
+	 * update synchronously before the next render for `handleSave` to read it across an `await`,
+	 * and a ref write in render is what React (and `react-hooks/refs`) forbid, since renders can be
+	 * discarded. The merge flags a foreign write by changing `baseline`; the effect after it bumps
+	 * the generation outside render.
 	 */
 	const bumpGeneration = useCallback(() => {
 		changeTokenRef.current += 1;
@@ -502,19 +436,12 @@ export default function RequestBuilderProvider({
 	}, [bumpGeneration]);
 
 	/*
-	 * The per-field merge state for issue #1436 - all of it `useState`, not a
-	 * ref, so the merge below can read and adjust it during render the same
-	 * way `lastReset` above does: this is state derived from props, and an
-	 * effect would paint the previous request's fields for a frame before
-	 * correcting them.
-	 *
-	 * `baseline` is the value the draft last agreed with the server on - not
-	 * necessarily `request`, which is whatever the user has typed.
-	 *
-	 * `touchedFields` is which top-level fields the user has edited since that
-	 * baseline - what `setRequest` adds to and a successful save clears. It is
-	 * what tells the merge "adopt silently" from "this is a conflict", and what
-	 * `handleSave` reads to send only what changed.
+	 * The per-field merge state for #1436, all `useState`, so the merge reads and adjusts it during
+	 * render as `lastReset` does: state derived from props, where an effect would paint the
+	 * previous request's fields for a frame. `baseline` is the value the draft last agreed on with
+	 * the server, not necessarily `request` (what the user typed). `touchedFields` is which fields
+	 * the user edited since that baseline: `setRequest` adds, a successful save clears; it tells
+	 * "adopt silently" from "conflict", and is what `handleSave` sends.
 	 */
 	const [baseline, setBaseline] = useState<RequestState>(request);
 	const [touchedFields, setTouchedFields] = useState<ReadonlySet<MergeableRequestField>>(
@@ -522,41 +449,31 @@ export default function RequestBuilderProvider({
 	);
 	const [fieldConflicts, setFieldConflicts] = useState<RequestFieldConflicts>({});
 	/**
-	 * What the last `SENDS_REMEMBERED` saves sent, field by field, newest last
-	 * (#3664). The merge reads it to tell a save's echo from someone else's
-	 * write. An entry is added before `onSave` is awaited and kept after it
-	 * resolves, because the cache write that echoes it can render on either
-	 * side of the resolve; a save that rejects removes its own entry, since it
-	 * has no echo and a later outside write of the same value must conflict.
-	 * A settled save's values stay until later saves or a reset push them out,
-	 * so an outside write equal to one of them reads as an echo - accepted:
-	 * the draft is not touched by it, only the baseline moves. State, not a
-	 * ref: the merge reads it during render.
+	 * What the last `SENDS_REMEMBERED` saves sent, by field, newest last (#3664), so the merge
+	 * tells a save's echo from another's write. Added before `onSave` is awaited and kept after,
+	 * since the echoing cache write can render either side of the resolve; a rejected save removes
+	 * its entry (no echo, so a later outside write of the value must conflict). A settled save's
+	 * values stay until pushed out, so an outside write equal to one reads as an echo; accepted, as
+	 * only the baseline moves. State: the merge reads it during render.
 	 */
 	const [recentSends, setRecentSends] = useState<readonly Partial<RequestState>[]>([]);
 	/**
-	 * The request this builder was showing has been deleted elsewhere, while
-	 * this tab still has it open (issue #1436). Sets `useSaveManager`'s
-	 * `enabled` to false, so a dirty draft's autosave timer - already armed, or
-	 * about to be - never fires a PUT against an id that now 404s.
+	 * The request was deleted elsewhere while this tab has it (#1436). Turns `useSaveManager`'s
+	 * `enabled` off, so an armed autosave never PUTs to an id that now 404s.
 	 */
 	const [requestGone, setRequestGone] = useState(false);
 	/**
-	 * Which `initialRequest` object the merge below has already processed.
-	 * `index.tsx` only produces a new one when `fetchedRequest` itself changes
-	 * (its `useMemo` dep), so this reference check is what keeps the merge -
-	 * a JSON-comparing diff over every mergeable field - from running on every
-	 * keystroke instead of only on an actual refetch.
+	 * The `initialRequest` object the merge last processed. `index.tsx` makes a new one only when
+	 * `fetchedRequest` changes, so this reference check keeps the merge (a JSON diff over every
+	 * field) off every keystroke.
 	 */
 	const [lastProcessedInitialRequest, setLastProcessedInitialRequest] = useState<
 		Partial<RequestState> | undefined
 	>(undefined);
 
 	/*
-	 * The generation bump a foreign write earns (see `bumpGeneration` above),
-	 * done from an effect rather than from the merge block itself. Skips its
-	 * first run: `baseline`'s own mount is not a foreign write, and bumping the
-	 * generation before anything has been edited would just be noise.
+	 * The generation bump a foreign write earns (`bumpGeneration`), from an effect, not the merge
+	 * block. Skips its first run: `baseline`'s mount is no foreign write.
 	 */
 	const isFirstBaselineEffectRef = useRef(true);
 	useEffect(() => {
@@ -568,16 +485,11 @@ export default function RequestBuilderProvider({
 	}, [baseline, bumpGeneration]);
 
 	/*
-	 * What the body modes you are not looking at were holding. It lives here
-	 * rather than in `BodyPanel` because Radix unmounts an inactive
-	 * `TabsContent`: a panel-local ref is discarded the moment you glance at the
-	 * Headers tab, and your stashed JSON with it.
-	 *
-	 * Not reset by the request-change effect below, deliberately. The drafts
-	 * carry their own `requestId` and `switchBody` drops any that belong to
-	 * another request, so a second reset here would be a copy of that rule that
-	 * could fall out of step with it - and would fire on a *save*, when an
-	 * unsaved request is first assigned an id, wiping drafts the user still has.
+	 * What the unseen body modes hold, here rather than in `BodyPanel`: Radix unmounts an inactive
+	 * `TabsContent`, so a panel ref, and the stashed JSON, would vanish on a glance at Headers. Not
+	 * reset by the request-change block: drafts carry their `requestId` and `switchBody` drops
+	 * another request's, so a second reset would be a copy of that rule, and would fire on a *save*
+	 * that first gives an unsaved request its id, wiping live drafts.
 	 */
 	const bodyDraftsRef = useRef<BodyDrafts>(emptyDrafts(initialRequest?.id ?? null));
 	const getBodyDrafts = useCallback(() => bodyDraftsRef.current, []);
@@ -586,11 +498,9 @@ export default function RequestBuilderProvider({
 	}, []);
 
 	/*
-	 * The GraphQL Variables pane's in-progress text, which the stored body cannot
-	 * always hold. Here for the drafts' reason - the panel is unmounted whenever
-	 * another tab is on screen - and, like them, not reset by the request-change
-	 * effect below: the draft names its own request and `ownVariablesDraft` drops
-	 * one belonging to another.
+	 * The GraphQL Variables pane's in-progress text, which the body cannot always hold. Here for
+	 * the drafts' reason, and like them not reset on a request change: it names its request and
+	 * `ownVariablesDraft` drops another's.
 	 */
 	const variablesDraftRef = useRef<VariablesDraft | null>(null);
 	const getVariablesDraft = useCallback(() => variablesDraftRef.current, []);
@@ -599,33 +509,18 @@ export default function RequestBuilderProvider({
 	}, []);
 
 	/*
-	 * The one identity every per-builder map here is read and written under: the
-	 * method record below and the picker's row index further down. One
-	 * `RequestBuilderProvider` serves every tab, so a slot holding a single
-	 * record held whichever request was in a mode last, and the request before
-	 * it kept what the app had changed for it (issue #1269).
-	 *
-	 * A request tab is its request; a builder over something else says so with
-	 * `memoryKey`, because two id-less builders are not one builder (issue
-	 * #1272). Spelled once rather than per map - the maps share a sweep, and two
-	 * spellings of one rule are how they drift apart.
-	 *
-	 * The Content-Type row a body mode adds, the `Accept: text/event-stream`
-	 * row the Event stream toggle adds, and the method the GraphQL mode sets
-	 * (issue #1228) used to all be tracked this way - an in-memory record that
-	 * could not survive a reload, leaving a stale auto-written value
-	 * indistinguishable from one the user chose (issue #1481). All three now
-	 * carry their own ownership on the request's own state (`KeyValueEntry.source`
-	 * for the two rows, `RequestState.methodSource` for the method, issue
-	 * #1505) and need no slot here.
+	 * The identity every per-builder map here is filed under: the picker's row index and the Bulk
+	 * edit drafts. One provider serves every tab, so a single-record slot held whichever request
+	 * used it last, and the request before kept what the app changed for it (#1269). A request tab
+	 * is its request; a builder over something else says so with `memoryKey`, as two id-less
+	 * builders are not one (#1272). Spelled once: the maps share a sweep, and two spellings drift.
 	 */
 	const memoryKey = declaredMemoryKey ?? request.id ?? UNSAVED_AUTO_KEY;
 	/*
-	 * Which builder is on screen, for a save that runs after the provider has
-	 * moved on: `useSaveManager` flushes the previous request's save from a
-	 * passive effect's cleanup, with that request's `handleSave`. A layout
-	 * effect, so the ref is current before any passive cleanup of the same
-	 * commit, however soon the flush reaches `handleSave`.
+	 * Which builder is on screen, for a save that runs after the provider moved on:
+	 * `useSaveManager` flushes the previous request's save from a passive cleanup with that
+	 * request's `handleSave`. A layout effect, so the ref is current before any passive cleanup of
+	 * the same commit.
 	 */
 	const shownMemoryKeyRef = useRef(memoryKey);
 	useLayoutEffect(() => {
@@ -633,10 +528,9 @@ export default function RequestBuilderProvider({
 	}, [memoryKey]);
 
 	/*
-	 * The Params and Headers Bulk edit drafts (#3666), per builder like the maps
-	 * below and bounded by the same open-tab sweep. Not reset by the request
-	 * change block: filed under `memoryKey`, a draft is only ever read by the
-	 * request it was typed in, and returns with it.
+	 * The Params and Headers Bulk edit drafts (#3666), per builder and swept with the open tabs.
+	 * Not reset on a request change: filed under `memoryKey`, a draft is read only by its own
+	 * request and returns with it.
 	 */
 	const [bulkDraftsByKey, setBulkDraftsByKey] = useState<Record<string, BulkDrafts>>({});
 	const bulkDrafts = bulkDraftsByKey[memoryKey] ?? NO_BULK_DRAFTS;
@@ -657,20 +551,16 @@ export default function RequestBuilderProvider({
 		[memoryKey, setBulkDrafts]
 	);
 
-	// What bounds the row memory below is stated there, which the same sweep
-	// bounds (issue #1271): one rule over every per-builder map the provider
-	// holds, rather than one rule each.
+	// The row memory below is bounded by the same sweep (#1271): one rule over every per-builder
+	// map.
 
 	const { data: collections = [] } = useCollectionsQuery();
 
 	/**
-	 * The data contract in scope (issue #600) - the nearest declared ancestor of
-	 * this request's collection, from the collections already loaded above.
-	 *
-	 * Resolved once here and carried on the context, so `VariableInput` and the
-	 * key/value rows can paint a `{{data.*}}` token against it without reaching
-	 * for the query cache themselves. Undefined is the ordinary state: most
-	 * collections declare nothing.
+	 * The data contract in scope (#600): the nearest declaring ancestor of this request's
+	 * collection, from the collections loaded above. Resolved once and carried on the context, so
+	 * `VariableInput` and the rows paint `{{data.*}}` against it without the query cache. Undefined
+	 * is ordinary: most collections declare nothing.
 	 */
 	const dataColumns = useMemo(
 		() => resolveDataContract(collectionId, collections) ?? undefined,
@@ -678,37 +568,23 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
-	 * Send-with-row (issue #601): the rows this request could bind, and the one
-	 * it was last sent with.
+	 * Send-with-row (#601): the rows this request could bind and the one last sent with. Here, not
+	 * in `UrlBar`, because the *preview* needs it as much as the picker (#1062): a row reaching the
+	 * engine beside composition left the URL bar, tab title and token painting previewing an
+	 * environment value the send answered from the row. The provider already owns both inputs (the
+	 * contract and the row cap), so this takes props off the context.
 	 *
-	 * Here rather than in `UrlBar`, where it started, because the *preview* needs
-	 * it as much as the picker does (issue #1062). A row reaching the engine
-	 * beside composition and never through it is what left the URL bar, the tab
-	 * title and the token painting previewing an environment value for a name the
-	 * send answers from the row. The provider already owns both of this hook's
-	 * inputs - the contract above and the row cap below - so lifting the state
-	 * here also takes two props off the context rather than adding any.
-	 *
-	 * The index is still session-lived and still not persisted: it is a property
-	 * of *this editing session* - "the row I am iterating on" - and not of the
-	 * request. Persisting it would point a saved number at a file whose rows are
-	 * deliberately not saved, so a later session would bind a different row under
-	 * the same index.
-	 *
-	 * Keyed by request, though (issue #659 item 1). Switching request tabs does
-	 * not remount the builder - `Shell` renders `<RequestBuilder />` at the same
-	 * position for every request tab, so React keeps the instance and its state -
-	 * and a single number therefore followed the user from one request to the
-	 * next.
-	 *
-	 * The row cap the declared file is measured against (issue #751) is read here
-	 * for the same reason the contract is resolved here: the config query is the
-	 * provider's to hold, not the URL bar's.
+	 * The index is session-lived, never persisted: "the row I am iterating on" belongs to this
+	 * session, and persisting it would point a saved number at a file whose rows are not saved.
+	 * Keyed by request (#659 item 1): `Shell` renders `<RequestBuilder />` at one position for
+	 * every request tab, so React keeps its state, and a single number followed the user across
+	 * requests. The row cap the declared file is measured against (#751) is read here, as the
+	 * config query is the provider's.
 	 */
 	const { maxRows: dataFileMaxRows } = useDataFileLimits();
 	const sendWithRow = useSendWithRow(dataColumns, dataFileMaxRows);
 	const [rowIndexByRequest, setRowIndexByRequest] = useState<Record<string, number>>({});
-	// Filed under the same identity as the records above, for the same reason.
+	// Filed under the same identity, for the same reason.
 	const lastRowIndex = rowIndexByRequest[memoryKey] ?? null;
 	const rememberRowIndex = useCallback(
 		(index: number) =>
@@ -716,16 +592,10 @@ export default function RequestBuilderProvider({
 		[memoryKey]
 	);
 	/*
-	 * A Send that carries no row leaves the request bound to none (issue #1062).
-	 *
-	 * Picking a row is not a setting, it is the row this request is being sent
-	 * with, and Send and the send chord both send *without* one - so a pick left
-	 * standing across a plain Send would put the row's value in every preview
-	 * beside a request that had just gone out with the environment's. That is the
-	 * disagreement this issue exists to end, arrived at from the other side. The
-	 * picker's own memory is what it always was in every other respect: it
-	 * survives a tab switch and a return (issue #659), because neither of those
-	 * is a send.
+	 * A Send without a row leaves the request bound to none (#1062). A pick is the row this request
+	 * is sent with, not a setting, and Send and its chord send *without* one, so a pick kept across
+	 * a plain Send would preview the row's value beside a request just sent with the environment's.
+	 * Otherwise the memory survives a tab switch and a return (#659): neither is a send.
 	 */
 	const forgetRowIndex = useCallback(
 		() =>
@@ -743,29 +613,16 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
-	 * What bounds every per-builder map above: the open tabs (issues #1269,
-	 * #1271, #1272). An entry - a record, or a picked row index - is only ever
-	 * read by the builder it is filed under, so once that builder has no tab it
-	 * can never be read again, and a per-builder store that nothing prunes is
-	 * how a map becomes a leak. `MAX_OPEN_TABS` caps the tab strip, so this caps
-	 * the maps.
-	 *
-	 * Subscribed to rather than selected, like the reveal command above: a
-	 * provider that re-rendered on every tab focus would pay for it on the
-	 * request the user is actually working in. The three slots prune a ref, so
-	 * they cannot re-render at all; the row memory is state - `lastRowIndex` is
-	 * read during render - so `retainKeys` returns the map it was given when it
-	 * drops nothing, and React bails out.
-	 *
-	 * A run tab is swept like a request tab, because the History copy it holds
-	 * now files under its run id (issue #1272) and that id names a tab like any
-	 * other. Run ids and request ids come from different tables and cannot
-	 * collide; a run tab holding no builder - a load test, a scenario - only
-	 * ever keeps a key nothing wrote.
-	 *
-	 * The id-less key survives the sweep: it names no tab, and a builder that
-	 * declares no identity of its own is the one whose memory nothing else
-	 * could keep.
+	 * What bounds every per-builder map: the open tabs (#1269, #1271, #1272). An entry (a picked
+	 * row index, a Bulk edit draft) is read only by its builder, so with no tab it is never read
+	 * again, and an unpruned store leaks. `MAX_OPEN_TABS` caps the strip, so this caps the maps.
+	 * Subscribed, not selected, like the reveal command: re-rendering on every tab focus would
+	 * charge the working request. Both maps are state, read during render, so `retainKeys` returns
+	 * the same map when it drops nothing and React bails out. A run tab is swept like a request
+	 * tab: History's copy files under its run id (#1272), naming a tab. Run and request ids come
+	 * from different tables and cannot collide; a run tab with no builder (load test, scenario)
+	 * keeps only an unwritten key. The id-less key survives: it names no tab, and its builder's
+	 * memory nothing else could keep.
 	 */
 	useEffect(() => {
 		const retainOpen = (tabs: readonly Tab[]) => {
@@ -784,13 +641,9 @@ export default function RequestBuilderProvider({
 	useRequestModelLifecycle();
 
 	/**
-	 * The row the preview resolves against - the picked one, once the file it
-	 * came from has actually been read.
-	 *
-	 * Null until then, including for an index restored from a "Repro row N"
-	 * navigation before the picker has opened: the index names a row the app has
-	 * not loaded, and previewing against a row nobody has is worse than
-	 * previewing the composition.
+	 * The row the preview resolves against: the picked one, once its file has been read. Null until
+	 * then, including an index restored by "Repro row N" before the picker opened: previewing
+	 * against an unloaded row is worse than previewing the composition.
 	 */
 	const boundRow = useMemo(
 		() =>
@@ -801,15 +654,11 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
-	 * Publish the bound row for the one preview surface that is not below this
-	 * provider: the tab strip (issue #1074). `useTabDescriptors` labels every
-	 * open tab from a single list-wide resolver, so it cannot take the row from
-	 * this context the way the bar and the panels do - and a tab labelled from
-	 * the environment while the bar beneath it shows the file's value is the same
-	 * one-bind-two-answers split #1062 closed everywhere else.
-	 *
-	 * Cleared on unmount as well as whenever there is no row, so the slot cannot
-	 * outlive the builder that justified it.
+	 * Publish the bound row for the one preview outside this provider, the tab strip (#1074):
+	 * `useTabDescriptors` labels every tab from one list-wide resolver and cannot read this
+	 * context, and a tab labelled from the environment over a bar showing the file's value is the
+	 * split #1062 closed. Cleared on unmount and whenever there is no row, so the slot cannot
+	 * outlive its builder.
 	 */
 	const setBoundRow = useBoundRowStore((s) => s.setBoundRow);
 	const boundRequestId = request.id ?? null;
@@ -820,7 +669,6 @@ export default function RequestBuilderProvider({
 		return () => setBoundRow(null);
 	}, [boundRow, boundRequestId, setBoundRow]);
 
-	// Variable resolution
 	const {
 		resolveString,
 		resolveField: resolveStoredField,
@@ -831,60 +679,44 @@ export default function RequestBuilderProvider({
 	} = useVariableResolver({ collectionId: collectionId || undefined, boundRow });
 
 	/**
-	 * The auth this request will actually send: `inherit` walked through the
-	 * collection chain by the shared resolver, then `{{variables}}` resolved for
-	 * preview. Null when the request sends no credentials.
-	 *
-	 * Preview only, like the resolved URL beside it - execution resolves
-	 * engine-side (`POST /compose`) and this is never sent. Its reader is the
-	 * GraphQL schema cache's identity: keyed on the auth block *as typed*, an
-	 * `inherit` was one unchanging value, so editing the ancestor collection's
-	 * credential or the environment variable its token interpolates served the
-	 * schema fetched with the old one (#383).
+	 * The auth this request sends: `inherit` walked by the shared resolver, then `{{variables}}`
+	 * resolved for preview; null without credentials. Preview only (execution resolves engine-side,
+	 * `POST /compose`); its reader is the GraphQL schema cache's identity, which keyed on auth *as
+	 * typed* left `inherit` one constant, so editing the ancestor's credential or the token's
+	 * variable served the schema fetched with the old one (#383).
 	 */
 	const collectionAncestors = useCollectionAncestors(collectionId);
 	const resolvedAuth = useMemo<Record<string, unknown> | null>(() => {
 		const forSend = resolveAuthForSend(request.auth, collectionAncestors);
-		// A jwt_bearer `privateKey` names a secret variable; resolving it would
-		// put the PEM in this memo and in the schema cache's identity digest.
+		// A jwt_bearer `privateKey` names a secret variable; resolving it would put the PEM in this
+		// memo and the schema cache's identity digest.
 		return forSend ? keepSigningKeyReferenceInAuth(resolveObject(forSend), forSend) : null;
 	}, [request.auth, collectionAncestors, resolveObject]);
 
 	/*
-	 * The names a pre-request script sets at send (#2521), so the token painters
-	 * stop showing their stored values as what will be sent (#2741). Asked here,
-	 * once for the builder, because painting is per editor; and only while the
-	 * request holds a `{{token}}`, so a literal request costs no compose. The
-	 * answer is the Code section's cache entry, refreshed by the invalidations
-	 * that refresh it, never per keystroke.
+	 * Names a pre-request script sets at send (#2521), so token painters stop showing stored values
+	 * as sent (#2741). Asked once here, as painting is per editor, and only while the request has a
+	 * `{{token}}`, so a literal request costs no compose. The answer is the Code section's cache
+	 * entry, refreshed by its invalidations, never per keystroke.
 	 */
 	const hasTokens = useMemo(() => requestHasTokens(request), [request]);
 	const deferredVariables = useDeferredVariables(request.id ?? "", hasTokens);
-	// The field previews (the rows' sigma peek, the Body tab's Resolved pane) leave
-	// the same names written, so none of them prints a value the script replaces.
+	// The field previews (the rows' sigma peek, Body's Resolved pane) leave the same names written,
+	// so none prints a value the script replaces.
 	const resolveField = leaveDeferredField(resolveStoredField, deferredVariables);
 
-	// Variable writes - shared with the collection Elements tab, see useVariableWriter.
+	// Variable writes, shared with the collection Elements tab (useVariableWriter).
 	const { updateVariable, writableScopes } = useVariableWriter({
 		collectionId: collectionId || undefined,
 	});
 
 	/*
-	 * Reset when the request the provider was handed changes.
-	 *
-	 * Adjusted during render rather than from an effect: this is state derived
-	 * from props, so an effect would first paint the previous request's state
-	 * and then correct it. The trigger is `id` / `initialResponse` - never the
-	 * `initialRequest` object itself, which a parent re-render replaces by
-	 * reference and which would discard unsaved edits (the reason this carried
-	 * an `exhaustive-deps` suppression).
-	 *
-	 * `collectionId` alone is not a full reset (issue #1436): the same request
-	 * moved to a different collection is not a different request, and the
-	 * block below this one updates just that field in place.
-	 *
-	 * The mount pass is covered by the `useState` initialisers above, which set
-	 * exactly what this block would.
+	 * Reset when the provider gets another request, during render, not in an effect: state derived
+	 * from props, which an effect would paint stale first. Triggered by `id` / `initialResponse`,
+	 * never the `initialRequest` object, which a parent re-render replaces by reference and which
+	 * would discard unsaved edits. `collectionId` alone is no full reset (#1436): a moved request
+	 * is the same request, and the block below updates just that field. The mount is covered by the
+	 * `useState` initialisers.
 	 */
 	const [lastReset, setLastReset] = useState({
 		id: initialRequest?.id,
@@ -904,8 +736,7 @@ export default function RequestBuilderProvider({
 		};
 		setRequestState(seeded);
 		setHasUnsavedChanges(false);
-		// A different request: the merge state below starts over from what it
-		// was just handed, not from the request we left (issue #1436).
+		// Another request: the merge state starts over from what it was handed (#1436).
 		setBaseline(seeded);
 		setTouchedFields(new Set());
 		setFieldConflicts({});
@@ -913,36 +744,29 @@ export default function RequestBuilderProvider({
 		setRequestGone(false);
 		setLastProcessedInitialRequest(initialRequest);
 
-		// Restore response from store for this request
 		const requestId = initialRequest.id;
 		if (requestId) {
 			const stored = getResponse(requestId);
 			setLocalResponse(stored ? (stored as ResponseState) : null);
-			// Let the backend restore run again for the request now on screen,
-			// unless a stored response already answered for it (#3421).
+			// Let the backend restore run again for this request, unless a stored response answered
+			// (#3421).
 			setRestoredFor(stored ? requestId : null);
 		} else {
 			setRestoredFor(null);
 			/*
-			 * No id, so there is no stored response to restore - fall back to
-			 * the one handed in. Clearing it unconditionally (as it used to)
-			 * threw away `initialResponse`, and a detached copy opened showing
-			 * "No response yet".
+			 * No id, so no stored response: fall back to the one handed in, or a detached copy
+			 * opens on "No response yet".
 			 */
 			setLocalResponse(initialResponse ?? null);
 		}
 
-		// Restore or default the active tab for whatever request is now on
-		// screen - the same per-request lookup the mount-time initializer
-		// above uses, needed again here because switching between two open
-		// request tabs reuses this provider instance rather than remounting it.
+		// Restore or default the active tab for the request now on screen, as the mount initializer
+		// does: switching request tabs reuses this provider.
 		setActiveTabState(requestId ? (getRequestTab(requestId) ?? "params") : "params");
 	} else if (initialRequest && lastReset.collectionId !== collectionId) {
 		/*
-		 * The same request, moved to a different collection underneath us
-		 * (issue #1436, the `move_item` case). The reset above used to treat
-		 * this exactly like a different request and discard the whole draft;
-		 * now only `collectionId` moves; a dirty body or headers survive.
+		 * The same request moved to another collection (#1436, `move_item`): only `collectionId`
+		 * moves; dirty fields survive.
 		 */
 		setLastReset((prev) => ({ ...prev, collectionId }));
 		const nextCollectionId = collectionId || null;
@@ -951,12 +775,10 @@ export default function RequestBuilderProvider({
 	}
 
 	/*
-	 * The request this builder is showing has been deleted elsewhere (issue
-	 * #1436): `index.tsx` keeps this provider mounted so the draft survives to
-	 * be offered, but stops handing it an `initialRequest` once the fetch 404s.
-	 * `request.id` is the guard against a brand-new, id-less builder (the
-	 * History run view's detached copy), which never has an `initialRequest`
-	 * either and is not "gone".
+	 * The request was deleted elsewhere (#1436): `index.tsx` keeps this provider mounted so the
+	 * draft survives to be offered, but stops passing `initialRequest` once the fetch 404s.
+	 * `request.id` guards against a new id-less builder (History's detached copy), which has no
+	 * `initialRequest` either and is not "gone".
 	 */
 	if (!initialRequest && request.id && !requestGone) {
 		setRequestGone(true);
@@ -965,34 +787,20 @@ export default function RequestBuilderProvider({
 	}
 
 	/*
-	 * The per-field three-way merge (issue #1436), generalizing what used to be
-	 * a name-only special case (`useEntityDraft` and #1437's `InfoTab` proved
-	 * the shape first, for the collection tabs).
+	 * The per-field three-way merge (#1436). A field untouched since the last known-good value
+	 * adopts an external change silently, through `setRequestState`, never `setRequest`: adopting
+	 * is no edit, and dirtying it would save back what was just read. A touched field the fetch
+	 * disagrees with is left and surfaced in `fieldConflicts`. `mergeExternalWrite` diffs; this
+	 * applies the outcome.
 	 *
-	 * A field the user has not touched since the last known-good value adopts
-	 * an external change silently - `setRequestState`, never `setRequest`,
-	 * because adopting someone else's write is not an edit of ours and marking
-	 * it dirty would schedule a save that writes back what we just read. A
-	 * field the user has touched, to a value the fetch now disagrees with, is
-	 * left alone and surfaced in `fieldConflicts` for the caller to show and
-	 * let the user resolve. `mergeExternalWrite` does the diffing; this block
-	 * only applies its outcome.
-	 *
-	 * Our own save's echo is not an outside write even when the user kept typing
-	 * through the round trip (#3664): the cache hands back what the save sent,
-	 * which now disagrees with both `baseline` and the draft. `recentSends` lets
-	 * the merge recognise it by value, move `baseline` to it and leave the field
-	 * touched, so the next save sends the newer draft. A value no recent save
-	 * here sent still conflicts, in flight or not.
-	 *
-	 * Gated on `initialRequest`'s own identity, not on every render: it is a
-	 * content-comparing diff over every mergeable field, and `index.tsx` only
-	 * produces a new object when the underlying fetch actually changes.
-	 *
-	 * Skipped in a render that is a reset (#3662): the reset above has already
-	 * seeded `baseline` and cleared `touchedFields` through queued setters, so
-	 * this render still reads the previous request's values and would report its
-	 * touched fields as conflicts over the fresh state.
+	 * Our save's echo is no outside write even when the user typed through the round trip (#3664):
+	 * the cache returns what was sent, disagreeing with `baseline` and draft. `recentSends`
+	 * recognises it by value, moves `baseline` and leaves the field touched, so the next save sends
+	 * the newer draft; a value no recent save sent still conflicts. Gated on `initialRequest`'s
+	 * identity (a content diff over every field; `index.tsx` makes a new object only on a real
+	 * fetch change). Skipped in a reset render (#3662): the reset queued `baseline` and cleared
+	 * `touchedFields`, so this render still reads the previous request's values and would report
+	 * them as conflicts.
 	 */
 	if (initialRequest && !isReset && initialRequest !== lastProcessedInitialRequest) {
 		setLastProcessedInitialRequest(initialRequest);
@@ -1010,9 +818,8 @@ export default function RequestBuilderProvider({
 				const patch = outcome.patch;
 				setRequestState((prev) => ({ ...prev, ...withCarriedRowIds(patch, prev) }));
 			}
-			// The generation bump this earns happens in the effect above, keyed
-			// on `baseline` changing - not here, so nothing during render writes
-			// the ref `handleSave`'s in-flight check reads.
+			// The generation bump happens in the effect keyed on `baseline`, so nothing in render
+			// writes the ref `handleSave` reads.
 			setBaseline(outcome.nextBaseline);
 		}
 		if (JSON.stringify(outcome.conflicts) !== JSON.stringify(fieldConflicts)) {
@@ -1021,16 +828,15 @@ export default function RequestBuilderProvider({
 	}
 
 	/**
-	 * Adopt the incoming value for one conflicted field (issue #1436's "Take
-	 * theirs"), the per-field sibling of #1437's `InfoTab.takeTheirName`.
+	 * Adopt the incoming value for one conflicted field (#1436's "Take theirs"), sibling of #1437's
+	 * `InfoTab.takeTheirName`.
 	 */
 	const takeExternalField = useCallback(
 		(field: MergeableRequestField) => {
 			const value = fieldConflicts[field];
 			if (value === undefined) return;
-			// Same cast `updateField` uses below: `field` and `value` are a
-			// matched pair by construction, which a plain computed property
-			// cannot tell TypeScript on its own.
+			// `updateField`'s cast: `field` and `value` match by construction, which a computed
+			// property cannot tell TypeScript.
 			const patch = { [field]: value } as Partial<RequestState>;
 			setRequestState((current) => ({ ...current, ...withCarriedRowIds(patch, current) }));
 			setBaseline((prev) => ({ ...prev, ...patch }));
@@ -1050,12 +856,8 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
-	 * Hand the stored name back when an edit is refused.
-	 *
-	 * `baseline` holds the last value the request query delivered for every
-	 * mergeable field, `name` included - `request.name` is whatever the user
-	 * has typed. There is always a baseline once a request is loaded, so
-	 * nothing here is conditional the way the old `lastKnownName` state was.
+	 * Hand the stored name back when an edit is refused. `baseline` holds the last fetched value of
+	 * every mergeable field, `name` included, and always exists once a request is loaded.
 	 */
 	const restoreStoredName = useCallback(() => {
 		setRequestState((prev) =>
@@ -1075,14 +877,12 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
-	 * Write the drafts a save is carrying into the request on screen (#3666),
-	 * leaving the textarea open on them: autosave fires on its own timer, often
-	 * mid-typing, and must not close the editor under the caret. No generation
-	 * bump and no dirty flag, because this edit is in the payload the save
-	 * sends; `handleSave` marks it unsaved if that save fails. Skipped once the
-	 * provider shows another request (the goodbye flush of the one left), whose
-	 * state this is not; the draft itself is filed under its own key and is
-	 * still rebased. Answers whether the request on screen took the drafts.
+	 * Write a save's carried drafts into the request on screen (#3666), leaving the textarea open:
+	 * autosave fires on its own timer, often mid-typing, and must not close the editor under the
+	 * caret. No bump, no dirty flag: the edit is in the payload, and `handleSave` marks it unsaved
+	 * if the save fails. Skipped once another request is shown (the goodbye flush), whose state
+	 * this is not; the draft, filed under its own key, is still rebased. Answers whether the shown
+	 * request took them.
 	 */
 	const adoptSavedDrafts = useCallback(
 		(key: string, patch: Partial<RequestState>): boolean => {
@@ -1095,40 +895,35 @@ export default function RequestBuilderProvider({
 		[setBulkDrafts]
 	);
 
-	// Centralized save manager - handles auto-save, keyboard shortcut, and status
+	// The centralized save: autosave, the keyboard shortcut and status.
 	const handleSave = useCallback(async () => {
 		if (!onSave) return;
-		// Read from state, not the ref: this closure's `request` is the snapshot
-		// `onSave` serialises, and `changeToken` is the generation that produced
-		// it. The ref holds whatever the newest edit made it, which is the thing
-		// we are comparing against.
+		// From state, not the ref: this closure's `request` is what `onSave` serialises and
+		// `changeToken` the generation behind it; the ref holds the newest edit's, which is what it
+		// is compared against.
 		const savedGeneration = changeToken;
-		// What this save records about itself (the values it sent, the fields it
-		// settled, the dirty flag) is its request's state, and the provider may
-		// show another by the time it is written: the goodbye flush starts after
-		// the switch, and any save can settle after one (#3730). An id-less request
-		// given its id by this save reads as not shown either, at no cost: the new
-		// id resets the provider (`lastReset`) to the request this save stored.
+		// What this save records (values sent, fields settled, dirty flag) is its request's state,
+		// and the provider may show another by then: the goodbye flush starts after the switch, and
+		// any save can settle after one (#3730). An id-less request given its id by this save reads
+		// as not shown, at no cost: the new id resets the provider (`lastReset`) to the request
+		// this save stored.
 		const isShown = () => shownMemoryKeyRef.current === memoryKey;
-		// An open Bulk edit draft is saved as if committed (#3666), built into
-		// the snapshot here because `request` will not hold it until a render.
+		// An open Bulk edit draft is saved as if committed (#3666), built into the snapshot here
+		// since `request` will not hold it until a render.
 		const draftPatch = bulkDraftsPatch(request, bulkDrafts);
 		const saving = draftPatch ? { ...request, ...draftPatch } : request;
 		const adoptedDrafts = !!draftPatch && adoptSavedDrafts(memoryKey, draftPatch);
-		// Snapshotting the set (state is already immutable per update, but the
-		// name says what matters): a `setRequest` that lands during the await
-		// cannot silently add to what this save already claims to have sent.
+		// A snapshot of the set, so a `setRequest` during the await cannot add to what this save
+		// claims sent.
 		const changedFields = draftPatch
 			? withPatchedFields(touchedFields, draftPatch)
 			: touchedFields;
-		// `buildUpdatePayload` sends the whole `elements` array whenever it is
-		// touched (issue #1635), and the engine 400s the *entire* payload on one
-		// element it refuses - a fresh `config: {}`, or a value the schema
-		// rejects (#3048). So the list alone is held back and every other touched
-		// field still goes out: "elements" stays touched, its baseline stays the
-		// last saved list, and `SaveBlockedError` (thrown once the rest is
-		// recorded) keeps `useSaveManager` at `"pending"` rather than backing off
-		// a retry against a payload that will not have changed.
+		// `buildUpdatePayload` sends the whole `elements` array when touched (#1635), and the
+		// engine 400s the *whole* payload on one refused element (a fresh `config: {}`, a
+		// schema-rejected value, #3048). So only the list is held back: "elements" stays touched,
+		// its baseline the last saved list, and `SaveBlockedError` (thrown once the rest is
+		// recorded) keeps `useSaveManager` at `"pending"` rather than backing off a retry of an
+		// unchanged payload.
 		const elementsHeldBack =
 			changedFields.has("elements") &&
 			hasIncompleteElement(saving.elements, elementKinds ?? []);
@@ -1141,25 +936,21 @@ export default function RequestBuilderProvider({
 		try {
 			await onSave(saving, sentFields);
 		} catch (error) {
-			// By identity, not position: a later save may already have appended.
+			// By identity, not position: a later save may have appended.
 			setRecentSends((prev) => prev.filter((entry) => entry !== sent));
 			// The request holds the drafts now, and this save did not write them.
 			if (adoptedDrafts && isShown()) setHasUnsavedChanges(true);
-			// The engine names the element it refused (#3043); the failure itself
-			// still propagates to `useSaveManager` for its toast and Dock status.
+			// The engine names the refused element (#3043); the failure still reaches
+			// `useSaveManager` for its toast and Dock status.
 			if (sentFields.has("elements")) refuseElement(error, saving.elements);
 			throw error;
 		}
-		// An edit landed, or a foreign write arrived, while this save was in
-		// flight: either way `changeTokenRef` moved and the payload that went
-		// out is not the whole story any more, so the request is still dirty
-		// and `useSaveManager` has to keep its debounce running for it. The
-		// fields this save carried stay touched, since a fresh edit to one of
-		// them since the snapshot above would otherwise be forgotten, and their
-		// baseline is left to the merge: the cache's echo of this payload moves
-		// it, recognised through `recentSends` (#3664). A switch also moves the
-		// generation (the reset's new `baseline`), but which request is shown is
-		// asked outright rather than inferred from that.
+		// An edit or foreign write landed in flight: `changeTokenRef` moved and the payload is not
+		// the whole story, so the request stays dirty and `useSaveManager` keeps debouncing. The
+		// sent fields stay touched (a fresh edit to one would otherwise be forgotten), their
+		// baseline left to the merge, which recognises this payload's echo through `recentSends`
+		// (#3664). A switch also moves the generation, but which request is shown is asked
+		// outright, not inferred.
 		const settled = isShown() && changeTokenRef.current === savedGeneration;
 		if (settled) recordSaved(saving, sentFields);
 		if (elementsHeldBack) throw new SaveBlockedError();
@@ -1186,13 +977,11 @@ export default function RequestBuilderProvider({
 		onSave: handleSave,
 		hasChanges: hasUnsavedChanges,
 		changeToken,
-		// Not just `!!onSave`: a request deleted elsewhere (issue #1436) must
-		// not have its dirty draft's autosave timer - already armed, or about
-		// to be - fire a PUT against an id that now 404s.
+		// Not just `!!onSave`: a request deleted elsewhere (#1436) must not have an armed autosave
+		// PUT to an id that now 404s.
 		enabled: !!onSave && !requestGone,
 	});
 
-	// Set request with change tracking
 	const setRequest = useCallback(
 		(updates: Partial<RequestState>) => {
 			setRequestState((prev) => ({ ...prev, ...updates }));
@@ -1212,10 +1001,9 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
-	 * A commit that left lines out says so (#3694) - the rows that did parse are
-	 * already written, so this is a notice, never a refusal. Send and the Table
-	 * toggle report; a Save keeps the editor open on the same text and autosave
-	 * would repeat the notice on every pass, so neither does.
+	 * A commit that left lines out says so (#3694); the parsed rows are written, so it is a notice,
+	 * never a refusal. Send and the Table toggle report; a Save keeps the editor on the same text
+	 * and autosave would repeat the notice every pass, so neither does.
 	 */
 	const showToast = useToastStore((s) => s.showToast);
 	const reportUnreadLines = useCallback(
@@ -1226,10 +1014,9 @@ export default function RequestBuilderProvider({
 	);
 
 	/*
-	 * Send's commit (#3666): what is on screen is what is sent, so every open
-	 * draft is written into the request and closed. Returns the request the
-	 * Send carries, built here because `request` will not hold the drafts
-	 * until the next render.
+	 * Send's commit (#3666): what is on screen is sent, so every open draft is written and closed.
+	 * Returns the request the Send carries, built here as `request` holds the drafts only next
+	 * render.
 	 */
 	const commitBulkDraftsForSend = useCallback((): RequestState => {
 		const patch = bulkDraftsPatch(request, bulkDrafts);
@@ -1252,20 +1039,17 @@ export default function RequestBuilderProvider({
 		[request, bulkDrafts, setBulkDraft, setRequest, reportUnreadLines]
 	);
 
-	// saveRequest now uses the centralized forceSave
 	const saveRequest = useCallback(async () => {
 		await forceSave();
 	}, [forceSave]);
 
-	// The one field that is state without being data (issue #1229): which engine
-	// defaults this send refuses. It is never written to the request, so it must
-	// not mark the tab dirty - `setRequest` would, and autosave would then PUT a
-	// request whose saved fields nobody touched.
+	// The one field that is state, not data (#1229): which engine defaults this send refuses. Never
+	// written to the request, so it must not dirty the tab, as `setRequest` would, leading autosave
+	// to PUT a request nobody changed.
 	const setDisabledDefaultHeaders = useCallback((names: string[]) => {
 		setRequestState((prev) => ({ ...prev, disabledDefaultHeaders: names }));
 	}, []);
 
-	// Update single field
 	const updateField = useCallback(
 		<K extends keyof RequestState>(field: K, value: RequestState[K]) => {
 			setRequest({ [field]: value } as Partial<RequestState>);
@@ -1273,7 +1057,6 @@ export default function RequestBuilderProvider({
 		[setRequest]
 	);
 
-	// Get variable info
 	const getVariable = useCallback(
 		(name: string): VariableInfo | null => {
 			const info = resolverGetVariable(name);
@@ -1283,24 +1066,18 @@ export default function RequestBuilderProvider({
 		[resolverGetVariable]
 	);
 
-	// Get all variables.
-	//
-	// Passed through rather than re-picked field by field. The old version
-	// rebuilt each entry as `{ value, scope, secret }`, which silently dropped
-	// `sourceName` / `sourceId` (so the popover could name a scope but not the
-	// environment) along with `type` / `typedValue`. A hand-copied projection of
-	// a type is a place fields go to die; the resolver already produces exactly
-	// this shape.
+	// Passed through, not re-picked per field: a hand-copied projection drops fields (it once lost
+	// `sourceName` / `sourceId` and `type` / `typedValue`), and the resolver already makes this
+	// shape.
 	const getAllVariables = useCallback(
 		(): Record<string, VariableInfo> => resolverGetAllVariables(),
 		[resolverGetAllVariables]
 	);
 
 	/*
-	 * The live stream this builder started, if it is still the one the store is
-	 * holding. Selected against `request.id` for the same reason the execute
-	 * result is: one provider serves every request tab, so rows belonging to a
-	 * stream started from another request must not appear under this one.
+	 * The live stream this builder started, if the store still holds it, selected against
+	 * `request.id` as the execute result is: one provider serves every tab, so another request's
+	 * stream must not show.
 	 */
 	const streamRunId = useExecutionEventsStore((s) =>
 		s.requestId && s.requestId === requestId ? s.runId : null
@@ -1308,16 +1085,15 @@ export default function RequestBuilderProvider({
 	const isStreaming = useExecutionEventsStore(
 		(s) => s.isStreaming && !!s.requestId && s.requestId === requestId
 	);
-	// One subscription, owned here: the store names which stream, and the
-	// provider is the component that outlives every panel that reads it.
+	// One subscription, owned here: the store names the stream, and the provider outlives every
+	// panel reading it.
 	useExecutionEvents();
 
 	/*
-	 * Every finished stream run lands in its own request's stored response,
-	 * whichever request is on screen (#3382). The live pane is touched only when
-	 * that request is the one showing. Only a builder that can start a stream
-	 * finalizes one: the History run view's detached copy has no stream handler,
-	 * and its provider must not race this one for the global store.
+	 * Every finished stream lands in its own request's stored response, whichever request is shown
+	 * (#3382); the live pane only when that request is showing. Only a builder that can stream
+	 * finalizes: History's detached copy has no stream handler and must not race this for the
+	 * global store.
 	 */
 	const landStreamResponse = useCallback(
 		(ownerId: string, restored: ResponseState) => {
@@ -1333,20 +1109,18 @@ export default function RequestBuilderProvider({
 		if (!streamRunId) return;
 		try {
 			await apiService.stopRun(streamRunId);
-			// Nothing is set here on success: the engine drives the run to a
-			// terminal status and the relay's `complete` frame - carrying
-			// `reason: "stopped"` - is what ends the stream on this side. Ending
-			// it locally would report a reason the run never recorded.
+			// Nothing set on success: the engine ends the run, and the relay's `complete` frame
+			// (`reason: "stopped"`) ends the stream here; ending it locally would report a reason
+			// the run never recorded.
 		} catch (error) {
 			console.error("Failed to stop the event stream:", error);
 		}
 	}, [streamRunId]);
 
 	/*
-	 * Which requests have a send in flight (#3352), filed under `memoryKey` like
-	 * every other per-builder map here. `isExecuting` is derived for the request
-	 * on screen, so leaving a request mid-send and coming back finds it still
-	 * sending, and its Send stays refused until its own answer lands.
+	 * Requests with a send in flight (#3352), under `memoryKey` like the other maps. `isExecuting`
+	 * is derived for the request on screen, so leaving mid-send and returning finds it sending, and
+	 * its Send stays refused until its own answer lands.
 	 */
 	const [inFlightSends, setInFlightSends] = useState<InFlightSends>(NO_SENDS);
 	const [sendTracker] = useState(() => createSendTracker(setInFlightSends));
@@ -1355,40 +1129,30 @@ export default function RequestBuilderProvider({
 	const cancelSend = useCallback(() => sendTracker.cancel(memoryKey), [sendTracker, memoryKey]);
 
 	/**
-	 * Execute the request.
-	 *
-	 * `dataRow` is Send-with-row's chosen row (issue #601). It travels to both
-	 * handlers rather than only the buffered one: a stream-flagged request in a
-	 * data-driven collection binds a row exactly as a buffered one does
-	 * engine-side, and a row silently dropped on that path would be the
-	 * written-but-never-read defect in its plainest form.
+	 * Execute the request. `dataRow` is Send-with-row's row (#601), passed to both handlers: a
+	 * stream-flagged request in a data-driven collection binds a row as a buffered one does, and a
+	 * row dropped on that path would be the written-but-never-read defect plainly.
 	 */
 	const executeRequest = useCallback(
 		async (dataRow?: Record<string, unknown>) => {
-			// A Send with no row un-binds this request: the previews must describe
-			// the request that is going out, not the one the last pick described.
+			// A Send without a row un-binds this request: previews must describe what is going out.
 			if (!dataRow) forgetRowIndex();
-			// Snapshot the request as it is at Send. If the user switches to another
-			// request before this resolves, the result must land on the request that
-			// actually ran - not on whatever is on screen when it finishes.
+			// Snapshot at Send: if the user switches requests before it resolves, the result lands
+			// on the request that ran.
 			const executingRequest = commitBulkDraftsForSend();
 			const executingId = executingRequest.id;
-			// What save-as-example records as the request that produced this
-			// response (issue #1763). Taken here, not at Save, so edits made
-			// while reading the response stay out of it; only a saved request
-			// can hold an example, so an unsaved one takes none.
+			// What save-as-example records as this response's request (#1763), taken here, not at
+			// Save, so edits made while reading stay out; only a saved request can hold an example.
 			const sent = executingId ? sentRequestOf(executingRequest) : undefined;
-			// This Send supersedes the note that another request took this one's
-			// live feed over, and any finalisation of its earlier stream.
+			// This Send supersedes the note that another request took this one's feed, and any
+			// finalisation of its earlier stream.
 			if (executingId) useExecutionEventsStore.getState().beginSend(executingId);
 			/*
-			 * Persist under the request that ran, so returning to it shows its own
-			 * response; `storeSetResponse` is keyed by id and safe even if this
-			 * provider has moved on. The live view is touched only while that request
-			 * is on screen - the ref is current, unlike this closure's `executingId`.
-			 * An answer from a send that a newer send of the same request overtook
-			 * is dropped, so it can never land over the newer one's; so is a
-			 * cancelled send's.
+			 * Persist under the request that ran, so returning to it shows its response;
+			 * `storeSetResponse` is keyed by id and safe after the provider moved on. The live view
+			 * is touched only while that request is shown (the ref is current, unlike
+			 * `executingId`). An answer from an overtaken or cancelled send is dropped, never
+			 * landing over the newer one.
 			 */
 			const land = (send: SendTicket, result: ResponseState) => {
 				if (!send.isCurrent()) return;
@@ -1397,24 +1161,22 @@ export default function RequestBuilderProvider({
 			};
 
 			/*
-			 * A stream-flagged request takes the other endpoint answer (issue #574):
-			 * `202 {runId, eventsUrl}` and no exchange. The buffered path is still
-			 * the fallback when this builder was given no stream handler, because a
-			 * Send that silently did nothing is worse than one that buffers.
+			 * A stream-flagged request takes the other endpoint answer (#574):
+			 * `202 {runId, eventsUrl}`, no exchange. Without a stream handler the buffered path is
+			 * the fallback: a silent Send is worse.
 			 */
 			if (executingRequest.stream && onExecuteStream) {
 				const send = sendTracker.begin(memoryKey);
 				setLocalResponse(null);
 				if (executingId) useResponseStore.getState().clearResponse(executingId);
-				// The pane is now this Send's to fill. Marked answered here, not when
-				// the stream opens: a last-design query still loading would otherwise
-				// resolve inside the wait for the `202` and fill the earlier run (#3421).
+				// The pane is this Send's now; marked answered here, not when the stream opens, or
+				// a loading last-design query resolving during the `202` wait would fill the
+				// earlier run (#3421).
 				if (executingId) setRestoredFor(executingId);
-				// The previous stream's rows belong to the send that is being
-				// replaced. Cleared here rather than on arrival of the first event,
-				// so a stream that never opens does not leave the last one on screen.
-				// Another request's live stream keeps running at the engine, and the
-				// store notes it for that request's pane.
+				// The previous stream's rows belong to the replaced send; cleared here, not on the
+				// first event, so a stream that never opens leaves nothing stale. Another request's
+				// live stream keeps running at the engine, and the store notes it for that
+				// request's pane.
 				useExecutionEventsStore.getState().handOver(executingId);
 				try {
 					const started = await onExecuteStream(executingRequest, dataRow);
@@ -1423,8 +1185,7 @@ export default function RequestBuilderProvider({
 						land(send, started.response);
 						return;
 					}
-					// An overtaken send's stream is not followed: the feed is the
-					// newer send's to open.
+					// An overtaken send's stream is not followed: the feed is the newer send's.
 					if (!send.isCurrent()) return;
 					useExecutionEventsStore.getState().startStream({
 						requestId: executingId,
@@ -1437,11 +1198,9 @@ export default function RequestBuilderProvider({
 					console.error("Request execution failed:", error);
 				} finally {
 					/*
-					 * Finished even though the stream has only just begun. The request
-					 * is no longer in flight - the engine has the transfer and has
-					 * answered - and leaving the spinner up would hide the Events tab
-					 * behind "Sending…" for the whole life of the stream. `isStreaming`
-					 * is what reports the rest.
+					 * Finished though the stream just began: the engine has the transfer and
+					 * answered, and a spinner would hide the Events tab behind "Sending…" for the
+					 * stream's life. `isStreaming` reports the rest.
 					 */
 					send.finish();
 				}
@@ -1451,29 +1210,15 @@ export default function RequestBuilderProvider({
 			if (!onExecute) return;
 
 			/*
-			 * The previous response stays on screen for the whole send.
-			 *
-			 * Clearing it here (`setLocalResponse(null)`, which this used to do)
-			 * is what made a re-send throw away the exchange the user was
-			 * reading: the pane had nothing left but its loading branch, and
-			 * fixing that branch alone would only have moved it on to "No
-			 * response yet". Either way the status, the headers and the body of
-			 * the send before this one were gone from the press of Send -
-			 * for a fast request, a blank flash; for a slow one, nothing to
-			 * compare the new answer against. `isExecuting` is what the pane
-			 * reads to mark it stale, and every path out of `onExecute`
-			 * resolves to a response that replaces it (a failure comes back as
-			 * a `status: 0` one - see `handleExecute` in `request-builder/`),
-			 * so there is no case where the old one is left standing as if it
-			 * were the answer to this send. Cancel leaves it standing as what it
-			 * was, the last answer, because the request is idle again at once.
-			 *
-			 * The streaming path above still clears, and must: its pane is fed
-			 * by a placeholder built from the relay's `open` frame, and that
-			 * placeholder is only built when there is no stored response. It
-			 * clears the stored entry as well as the local copy, because the
-			 * mount initialiser and the request-switch reset read the store
-			 * back, so a stale entry would resurface on the next switch.
+			 * The previous response stays on screen for the whole send: clearing it threw away the
+			 * exchange being read (a blank flash, or nothing to compare against on a slow request).
+			 * `isExecuting` marks it stale, and every path out of `onExecute` resolves to a
+			 * replacing response (a failure is a `status: 0` one, `handleExecute` in
+			 * `request-builder/`), so it is never left standing as this send's answer. Cancel
+			 * leaves it as the last answer, the request idle at once. The streaming path still
+			 * clears, and must: its pane's placeholder from the relay's `open` frame is built only
+			 * with no stored response, and it clears the store entry too, since the mount
+			 * initialiser and the switch reset read the store and a stale entry would resurface.
 			 */
 			const send = sendTracker.begin(memoryKey, { cancellable: true });
 
@@ -1498,14 +1243,13 @@ export default function RequestBuilderProvider({
 		]
 	);
 
-	// Start load test: carries an open Bulk edit draft like Send does (#3666).
+	// Start a load test, carrying an open Bulk edit draft as Send does (#3666).
 	const startLoadTest = useCallback(() => {
 		if (onStartLoadTest) {
 			onStartLoadTest(commitBulkDraftsForSend());
 		}
 	}, [commitBulkDraftsForSend, onStartLoadTest]);
 
-	// Context value
 	const contextValue = useMemo<RequestBuilderContextValue>(
 		() => ({
 			request,
@@ -1613,21 +1357,12 @@ export default function RequestBuilderProvider({
 	return (
 		<RequestBuilderContext.Provider value={contextValue}>
 			{/*
-			 * Inside the context, not around it: the `{{token}}` popover the code
-			 * editors open is the same one the single-line fields open, and it
-			 * needs this provider's `updateVariable` and `writableScopes` to edit
-			 * or create anything (issue #1220). Every Monaco editor that
-			 * interpolates variables is somewhere under here.
-			 *
-			 * `contextValue` already carries every field `VariableSupport` needs
-			 * (`resolveField`, `getAllVariables`, `getVariableOrigins`,
-			 * `updateVariable`, `writableScopes`, `dataColumns`), so it is handed
-			 * straight through as `support` rather than read back via
-			 * `useVariableSupport()` - that hook reaches for
-			 * `useRequestBuilderContext()`, which throws with no provider above it,
-			 * and this component has not yet rendered its own
-			 * `<RequestBuilderContext.Provider>` at the point a hook call in its own
-			 * body would run.
+			 * Inside the context, not around it: code editors' `{{token}}` popover is the
+			 * single-line fields', and needs this provider's `updateVariable` and `writableScopes`
+			 * to edit or create (#1220); every variable-interpolating Monaco is under here.
+			 * `contextValue` already holds every `VariableSupport` field, so it goes through as
+			 * `support`, not via `useVariableSupport()`, which calls `useRequestBuilderContext()`
+			 * and would throw here, before this component renders its own provider.
 			 */}
 			<EditorVariableTokensProvider support={contextValue}>
 				{children}

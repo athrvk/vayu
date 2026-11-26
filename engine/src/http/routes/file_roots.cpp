@@ -6,20 +6,15 @@
  */
 
 /**
- * @file http/routes/file_roots.cpp
- * @brief The folders a request-body file may be read from without a person
- * choosing it in the editor (`file_roots`, `FileAccessPolicy`).
- *
- * Three rules are held here because only a route can answer with a status
- * code: a row names an existing directory by absolute path, stored canonical
- * (so the policy compares like with like and a symlinked spelling is one
- * folder), that directory is neither a filesystem root nor the home folder
- * or a folder containing it (`refused_root_reason`), and one folder is one
- * row - a second
- * spelling of an allowed folder is a 409. Writes need the grant secret
+ * The folders a request-body file may be read from without a person choosing it
+ * in the editor (`file_roots`, `FileAccessPolicy`). Three rules live here,
+ * since only a route answers with a status: a row names an existing directory
+ * by absolute path, stored canonical (so the policy compares like with like and
+ * a symlinked spelling is one folder); the directory is neither a filesystem
+ * root nor the home folder or one containing it (`refused_root_reason`); and
+ * one folder is one row, a second spelling a 409. Writes need the grant secret
  * (`admit_file_trust_write`, #2356): a caller that could add a folder could
- * otherwise send any file under it, which the picked-file grants exist to
- * prevent.
+ * send any file under it, which the picked-file grants exist to prevent.
  */
 
 #include "vayu/http/file_access_policy.hpp"

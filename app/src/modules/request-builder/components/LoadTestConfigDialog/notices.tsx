@@ -49,22 +49,18 @@ export interface NoticeInputs extends DraftErrors {
 	/** Set only for a host that is not local; never gates Start (#2117). */
 	remoteTarget: RemoteTarget | null;
 	/**
-	 * Budgets the dialog opened with that the user did not type this time
-	 * (issue #2194): the sentence naming them, and what clears exactly those.
+	 * Budgets carried in untyped (#2194): the sentence naming them, and what clears exactly those.
 	 */
 	carriedBudgets?: { summary: string; onClear: () => void } | null;
 	/**
-	 * Opens the collection-run flow for the request's collection; absent where
-	 * the request has no collection to run, which leaves the notice without
-	 * its action.
+	 * Opens the collection-run flow for the request's collection; absent without one, no action.
 	 */
 	onRunCollection?: () => void;
 }
 
 /**
- * Several notices can be on screen at once. Severity is a prop and the
- * blocking ones sort above the advisory ones, because with a stack that is the
- * only thing saying which one is stopping you.
+ * Several notices can show at once, so severity is a prop and blocking ones sort above advisory
+ * ones: in a stack that is the only thing saying which one stops you.
  */
 export function buildNotices({
 	rampDurationError,
@@ -192,12 +188,9 @@ export function buildNotices({
 		});
 	}
 
-	// Unconditional before issue #1594: the load path ran no element at all,
-	// so a pre-request script never reached the wire regardless of what the
-	// run asked for. Now `elements.scripts: "allInline"` runs every one per
-	// submission and "asMarked" runs the ones marked inline, so the warning is
-	// true only for an unmarked script at the other two settings, and for a
-	// marked one at "allDeferred" (the engine's `script_element_runs_inline`).
+	// `elements.scripts: "allInline"` runs every pre-request script per submission and "asMarked"
+	// runs the marked ones (#1594), so the warning holds only for an unmarked script at the other
+	// two settings, or a marked one at "allDeferred" (the engine's `script_element_runs_inline`).
 	const preScriptSkipped =
 		hasPreRequestScript || (hasInlinePreScript && scriptsOverride === "allDeferred");
 	if (preScriptSkipped && scriptsOverride !== "allInline") {

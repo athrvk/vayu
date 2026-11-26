@@ -16,13 +16,11 @@ interface AppFocusPayload {
 }
 
 /**
- * What an agent may be told a tab is called.
- *
- * `useTabDescriptors` titles an unnamed request and a design or load run by a
- * URL, and that URL is resolved (a request's against the live variables, a
- * run's as sent), so a secret variable used in it would reach an agent in a
- * label while Reveal secrets is off. `fromUrl` marks exactly those labels; they
- * give way to the tab's kind, and every other label is a saved name.
+ * What an agent may be told a tab is called. `useTabDescriptors` titles an unnamed request and a
+ * design or load run by a URL, resolved (a request's against the live variables, a run's as sent),
+ * so a secret variable in it would reach an agent in a label while Reveal secrets is off. `fromUrl`
+ * marks exactly those labels; they give way to the tab's kind, and every other label is a saved
+ * name.
  */
 export function focusTabLabel(tab: Tab, descriptor: { label: string; fromUrl?: boolean }): string {
 	if (!descriptor.fromUrl) return descriptor.label;
@@ -30,13 +28,11 @@ export function focusTabLabel(tab: Tab, descriptor: { label: string; fromUrl?: b
 }
 
 /**
- * Keep the main process's copy of what the user has open current, so an MCP
- * client can answer "the request I have open" (issue #2045).
- *
- * Mounted once at the root, beside `useDataFileLocationMirror`. Publishes the
- * whole snapshot, and only when it differs from the last one sent: a label
- * resolving or an unrelated store write re-renders this without changing it.
- * Absent outside Electron, where there is no MCP server to tell.
+ * Keep the main process's copy of what the user has open current, so an MCP client can answer "the
+ * request I have open" (#2045). Mounted once at the root, beside `useDataFileLocationMirror`.
+ * Publishes the whole snapshot, only when it differs from the last one sent: a label resolving or
+ * an unrelated store write re-renders this without changing it. Absent outside Electron, where
+ * there is no MCP server to tell.
  */
 export function useAppFocusMirror(): void {
 	const activeTab = useTabsStore((s) => s.openTabs.find((t) => t.id === s.activeTabId) ?? null);

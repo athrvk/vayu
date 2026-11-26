@@ -6,25 +6,18 @@
  */
 
 /**
- * KeyboardShortcutsPanel
+ * The read-only list of every chord the app listens for (#951), so that ⌘W, ⌘B, ⌘I and ⌘1-9 appear
+ * somewhere on screen, not only in a handler and a doc.
  *
- * The read-only list of every chord the app listens for (#951). Until it
- * existed, ⌘W, ⌘B, ⌘I and ⌘1-9 appeared nowhere on screen: the Dock advertised
- * the drawer switchers, the URL bar advertised Send and Load Test, and the rest
- * lived in a handler and a doc.
+ * **It holds no list.** Rows come from `SHORTCUT_GROUPS` in `constants/shortcuts.ts`, each row's
+ * name from that chord's `label`, and its key-caps from `chordKeys`, the function the Dock's
+ * tooltips and the response pane's empty state render through. A table of names and keys typed here
+ * is the defect removed from the Shell (#938), wrong the first time a chord changed.
+ * `KeyboardShortcutsPanel.test.tsx` counts the rendered rows against the registry, so a chord
+ * cannot be added without appearing here.
  *
- * **It holds no list.** Rows come from `SHORTCUT_GROUPS` in
- * `constants/shortcuts.ts`, each row's name from that chord's own `label`, and
- * its key-caps from `chordKeys` - the same function the Dock's tooltips and the
- * response pane's empty state render through. A table of names and keys typed
- * out here is the exact defect #938 removed from the Shell, and it would be
- * wrong the first time a chord changed. `KeyboardShortcutsPanel.test.tsx`
- * counts the rendered rows against the registry, so a chord cannot be added
- * without appearing here.
- *
- * Read-only on purpose: rebinding is a store, a persistence format, a conflict
- * check against the native menu and a matcher that reads user data. #951 scopes
- * this to the list.
+ * Read-only on purpose: rebinding is a store, a persistence format, a conflict check against the
+ * native menu and a matcher reading user data; #951 scopes this to the list.
  */
 
 import { Card, CardContent, Eyebrow, Kbd } from "@/components/ui";
@@ -39,13 +32,11 @@ const SHORTCUTS = appSetting("keyboard-shortcuts");
 export default function KeyboardShortcutsPanel() {
 	return (
 		<div data-setting-anchor={SHORTCUTS.anchor}>
-			{/* No CardHeader: the pane's own band already prints this panel's name
-			    and description from `app-panels.ts`, and a card repeating them was
-			    two headings a few pixels apart with drifted copy - "chord" against
-			    "shortcut", and a second sentence about rebinding that the band's
-			    save note already makes ("Shortcuts are fixed; this screen is a
-			    reference."). One source of copy per panel (issue #1688);
-			    `SettingsMain.panel-heading.test.tsx` holds it. */}
+			{/*
+			 * No CardHeader: the pane's band already prints this panel's name and description from
+			 * `app-panels.ts`, and a card repeating them is two headings with drifting copy. One
+			 * source of copy per panel (#1688); `SettingsMain.panel-heading.test.tsx` holds it.
+			 */}
 			<Card>
 				<CardContent className="space-y-5 pt-6">
 					{SHORTCUT_GROUPS.map((group) => (

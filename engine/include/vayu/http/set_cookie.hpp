@@ -6,12 +6,11 @@
  */
 
 /**
- * @file http/set_cookie.hpp
  * @brief Parse a response's `Set-Cookie` header into name / value / attributes.
  *
- * The renderer has had this parser since the response Cookies tab was fixed
+ * The renderer has its own copy of this parser
  * (`app/src/modules/request-builder/components/ResponseViewer/parse-set-cookie.ts`);
- * this is the engine's copy, for `pm.response.cookies`. Two copies of a parser
+ * this is the engine's, for `pm.response.cookies`. Two copies of a parser
  * drift, so they are pinned to each other by the cross-language fixture
  * `tests/fixtures/set-cookie-conformance.json`, read by
  * `tests/set_cookie_test.cpp` (gtest) and
@@ -39,20 +38,19 @@ struct SetCookie {
     std::string name;
     std::string value;
     /// Everything after the name=value pair, one entry per `;` chunk, in wire
-    /// order and unparsed ("Path=/", "HttpOnly"). Structured attribute
-    /// accessors wait for the cookie jar (#301 step 2) - a script that needs
-    /// one reads the string today rather than being handed a field the engine
-    /// does not really keep.
+    /// order and unparsed ("Path=/", "HttpOnly"). There are no structured
+    /// attribute accessors (#301 built the cookie jar without them); a script
+    /// that needs one reads the string.
     std::vector<std::string> attrs;
 };
 
 /**
  * @brief Parse one `Set-Cookie` header line: one line, one cookie.
  *
- * No comma splitting. A header line is never several cookies - that is what
- * the folded form loses - so `prefs=a=1, theme=dark; Path=/` is the single
- * cookie `prefs` with the value `a=1, theme=dark` (issue #2460). The pair
- * still splits at the first `=`, as `parse_set_cookie` does.
+ * No comma splitting. A header line is never several cookies - that is what the
+ * folded form loses - so `prefs=a=1, theme=dark; Path=/` is the single cookie
+ * `prefs` with the value `a=1, theme=dark` (#2460). The pair still splits at
+ * the first `=`, as `parse_set_cookie` does.
  *
  * @param line One line's value, e.g. `id=a3fWa; Path=/; HttpOnly`.
  * @return The cookie, or `std::nullopt` for a line that names none (no `=`, or

@@ -6,39 +6,32 @@
  */
 
 /**
- * The `{{token}}` affordances of a script editor - `javascript`'s entry in
- * `VARIABLE_TOKEN_MATCHERS` (`monaco-variable-tokens.ts`), and the reason a
- * script needs a matcher of its own rather than the body languages' single
- * `{{...}}` regex (issue #1220 script support).
+ * The `{{token}}` affordances of a script editor: `javascript`'s entry in `VARIABLE_TOKEN_MATCHERS`
+ * (`monaco-variable-tokens.ts`), and the reason a script needs a matcher of its own rather than the
+ * body languages' single `{{...}}` regex (#1220 script support).
  *
- * A script *names* a variable one of three ways, and only some of them are a
- * real read:
+ * A script *names* a variable one of three ways, and only some of them are a real read:
  *
- *  - `pm.<accessor>.get("name")` - a real read, of exactly one slice of the
- *    ladder. Which slice is `PM_ACCESSORS` in `referenced-variables.ts`
- *    (issue #1063) - the one table this module reads rather than duplicates,
- *    per that file's own warning about a second copy drifting.
- *  - `pm.<accessor>.replaceIn("...{{name}}...")` - the one place `{{name}}`
- *    inside a script *is* interpolated, so every token in the template
- *    argument gets the same full treatment a body language's does. The merged
- *    `pm.variables` form reads the whole ladder; `pm.environment`,
- *    `pm.globals` and `pm.collectionVariables` read their own scope alone
- *    (#3133, #3147). `pm.iterationData` has no `replaceIn`.
- *  - a bare `{{name}}` anywhere else - never interpolated (D16,
- *    `docs/engine/scripting.md`), so it is muted and informational only.
+ *  - `pm.<accessor>.get("name")`: a real read, of exactly one slice of the ladder. Which slice is
+ *    `PM_ACCESSORS` in `referenced-variables.ts` (#1063), the one table this module reads rather
+ *    than duplicates, per that file's own warning about a second copy drifting.
+ *  - `pm.<accessor>.replaceIn("...{{name}}...")`: the one place `{{name}}` inside a script *is*
+ *    interpolated, so every token in the template argument gets the full treatment a body
+ *    language's does. The merged `pm.variables` form reads the whole ladder; `pm.environment`,
+ *    `pm.globals` and `pm.collectionVariables` read their own scope alone (#3133, #3147).
+ *    `pm.iterationData` has no `replaceIn`.
+ *  - a bare `{{name}}` anywhere else: never interpolated (D16,
+ *    `docs/engine/scripting/variables.md`), so it is muted and informational only.
  *
- * **Not an AST parse.** These are three fixed call shapes, so a regex per
- * accessor is intentionally sufficient and cheap on every keystroke - the
- * same call this module's callers already made for the body languages. What
- * a regex alone gets wrong is a name inside a comment or a string that merely
- * *looks* like a call, which is why this scans the whole script through a
- * small string/comment-aware mask first (`maskComments`) rather than
- * matching against the raw source.
+ * **Not an AST parse.** These are three fixed call shapes, so a regex per accessor is intentionally
+ * sufficient and cheap on every keystroke. What a regex alone gets wrong is a name inside a comment
+ * or a string that merely *looks* like a call, which is why this scans the whole script through a
+ * small string/comment-aware mask first (`maskComments`) rather than matching against the raw
+ * source.
  *
- * A known, accepted gap: a `//` inside a regex literal (`/https?:\/\//`) is
- * read as a comment starter, the same heuristic limit `referenced-variables.ts`
- * and every other regex-based scan in this codebase already accepts rather
- * than reaching for a real tokenizer to close it.
+ * A known, accepted gap: a `//` inside a regex literal (`/https?:\/\//`) is read as a comment
+ * starter, the same heuristic limit `referenced-variables.ts` and every other regex-based scan in
+ * this codebase accepts rather than reaching for a real tokenizer.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -170,11 +163,10 @@ function hintForAccessor(accessor: string): ScriptTokenHint {
 }
 
 /**
- * The hint for one `{{name}}` inside `pm.<accessor>.replaceIn(...)`. A scoped
- * call resolves a scope variable against its own scope alone, but the names that
- * are not scope variables - generators, the iteration identity, `data.*`, a
- * bound row's columns - answer as the merged form's do (`pm_scopes.cpp`,
- * `js_pm_scope_replace_in`). `template` says so, and the classifier asks the
+ * The hint for one `{{name}}` inside `pm.<accessor>.replaceIn(...)`. A scoped call resolves a scope
+ * variable against its own scope alone, but the names that are not scope variables (generators, the
+ * iteration identity, `data.*`, a bound row's columns) answer as the merged form's do
+ * (`pm_scopes.cpp`, `js_pm_scope_replace_in`). `template` says so, and the classifier asks the
  * scope first and falls through to those; a `get` never sets it.
  */
 function templateHint(accessorHint: ScriptTokenHint): ScriptTokenHint {

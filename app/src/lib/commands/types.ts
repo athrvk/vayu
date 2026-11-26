@@ -6,18 +6,14 @@
  */
 
 /**
- * What a command *is*, and what it is allowed to know.
+ * What a command *is*, and what it may know. A definition, not a component: `id`, what it reads as,
+ * and one `perform`, so the palette, the native menu and any other surface offer the same action
+ * without each hand-rolling its own copy of "what this action is".
  *
- * A command is a definition, not a component: `id`, what it reads as, and one
- * `perform`. That is what lets the palette, the native menu and (later) any
- * other surface offer the same action without each hand-rolling its own copy of
- * "what this action is" - the defect that made a menu item and a tile drift
- * apart in the first place.
- *
- * **Stores are not in the context.** They are module singletons, so a `perform`
- * reaches `useTabsStore.getState()` directly rather than being handed an
- * `openTab`. The context carries only what `getState()` cannot answer: what the
- * user is looking at, and the surfaces a caller can open.
+ * **Stores are not in the context.** They are module singletons, so a `perform` reaches
+ * `useTabsStore.getState()` directly rather than being handed an `openTab`. The context carries
+ * only what `getState()` cannot answer: what the user is looking at, and the surfaces a caller can
+ * open.
  */
 
 import type { LucideIcon } from "lucide-react";
@@ -28,29 +24,22 @@ import type { Tab } from "@/stores";
 import type { Collection } from "@/types";
 
 /**
- * Which palette group a command renders under.
- *
- * Two, not one: the settings roster is twelve entries wide (seven app panels
- * plus five engine categories) and would otherwise bury the five actions it
- * sits next to.
+ * Which palette group a command renders under. Two, not one: the settings roster is a row per app
+ * panel and engine category, and would otherwise bury the actions it sits next to.
  */
 export type CommandGroup = "action" | "settings";
 
 /**
- * Dialogs and flows a command cannot open on its own.
+ * Dialogs and flows a command cannot open on its own. Everything else a `perform` needs is in a
+ * store, but a collection picker, a run dialog and the theme hook are React: they exist only where
+ * something has mounted them. A caller that has not (the native menu bridge) omits this, and the
+ * commands that need it declare themselves unavailable rather than throwing when picked.
  *
- * Everything else a `perform` needs is in a store, but a collection picker, a
- * run dialog and the theme hook are React - they exist only where something has
- * mounted them. A caller that has not (the native menu bridge) simply omits
- * this, and the commands that need it declare themselves unavailable rather
- * than throwing when picked.
- *
- * Two kinds of entry live here, and the difference is who supplies them. The
- * required four are the *host's*: a surface that renders the palette can mount
- * all four itself, so offering `surfaces` at all means offering those. The
- * optional ones are contributed by a **mounted feature** through
- * `live-surfaces.ts` - present only while that feature is on screen, which is
- * why they are optional even for a host that offers everything it owns.
+ * Two kinds of entry live here, told apart by who supplies them. The required four are the
+ * *host's*: a surface that renders the palette can mount all four itself, so offering `surfaces` at
+ * all means offering those. The optional ones are contributed by a **mounted feature** through
+ * `live-surfaces.ts`, present only while that feature is on screen, which is why they are optional
+ * even for a host that offers everything it owns.
  */
 export interface CommandSurfaces {
 	/**
@@ -141,19 +130,16 @@ export interface Command {
 	/** Where the row says this action already lives, when that is not obvious. */
 	subtitle?: string;
 	/**
-	 * The chord that already runs this action, for a surface that advertises it.
-	 *
-	 * The `Chord` object from `constants/shortcuts.ts` and never a second
-	 * spelling of it (#938): a row printing "⌘W" that the handler does not
-	 * listen for is exactly the drift that file exists to end. Present only
-	 * where a chord genuinely runs *this* command - most commands have none, and
-	 * inventing one for them would put a key on screen that does nothing.
+	 * The chord that already runs this action, for a surface that advertises it: the `Chord` object
+	 * from `constants/shortcuts.ts`, never a second spelling of it (#938), since a row printing
+	 * "⌘W" that the handler does not listen for is exactly the drift that file exists to end.
+	 * Present only where a chord genuinely runs *this* command; most have none, and inventing one
+	 * would put a key on screen that does nothing.
 	 */
 	shortcut?: Chord;
 	/**
-	 * Whether this command can run at all right now. Omitted means always -
-	 * spelled that way rather than `() => true` so the roster reads as "these
-	 * five are contextual" at a glance.
+	 * Whether this command can run at all right now. Omitted means always, spelled that way rather
+	 * than `() => true` so the contextual commands stand out in the roster at a glance.
 	 */
 	available?: (ctx: CommandContext) => boolean;
 	perform: (ctx: CommandContext) => void;

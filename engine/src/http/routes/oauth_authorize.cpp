@@ -6,10 +6,9 @@
  */
 
 /**
- * @file http/routes/oauth_authorize.cpp
- * @brief Interactive OAuth 2.0 authorization-code manager (engine-hosted
- *        loopback + PKCE) plus the URL builder. Lives with the routes because
- *        the loopback listener needs httplib (linked into the engine + tests).
+ * The interactive OAuth 2.0 authorization-code manager (engine-hosted loopback
+ * plus PKCE) and the URL builder, with the routes because the loopback listener
+ * needs httplib (linked into the engine and the tests).
  */
 
 #include "vayu/http/oauth_authorize.hpp"
@@ -413,11 +412,11 @@ const std::string& expected_state) {
 
 /**
  * The outcome of a callback whose state matched: a response from an issuer
- * other than @p issuer, the IdP's own refusal, or the token exchange this
- * redirect exists to make, which @p cancel (when set) ends
- * early. The issuer is checked first because a refusal from the wrong issuer
- * must not be shown as the expected one's (the MCP spec on RFC 9207). Never
- * throws: a claimed attempt that never publishes is never reaped.
+ * other than @p issuer, the IdP's own refusal, or the token exchange the
+ * redirect exists to make, which @p cancel (when set) ends early. The issuer is
+ * checked first: a refusal from the wrong issuer must not be shown as the
+ * expected one's (the MCP spec on RFC 9207). Never throws: a claimed attempt
+ * that never publishes is never reaped.
  */
 CallbackOutcome resolve_oauth_callback (vayu::db::Database& db,
 const nlohmann::json& config,
@@ -763,9 +762,9 @@ const std::atomic<bool>* cancel) {
 AuthorizeStatus OAuth2AuthorizeManager::complete (vayu::db::Database& db,
 const std::string& attempt_id,
 const std::string& callback_url) {
-    // Snapshot what the exchange needs under the lock, then release it: the token
-    // exchange is a network round-trip and must not stall status() polls for
-    // other attempts (the manager is shared across all in-flight authorizations).
+    // Snapshot what the exchange needs, then release the lock: the exchange is
+    // a network round-trip, and the manager is shared by every in-flight
+    // authorization, so it must not stall their status() polls.
     std::string state, code_verifier, redirect_uri;
     nlohmann::json config;
     std::optional<ExpectedIssuer> issuer;

@@ -6,21 +6,11 @@
  */
 
 /**
- * HeadersPanel Component
- *
- * The headers table, plus the text form of the same thing, plus a read-only
- * group naming what the engine adds on its own.
- *
- * The bulk-edit machinery - the mode flag, the draft text, the toggle handler,
- * the toolbar and the textarea - used to live here *and* in `ParamsPanel`, in
- * duplicate. It is `BulkEditor` now; only the format differs between the two,
- * and that is what this file passes.
- *
- * **The table holds only the user's headers** (issue #1229). Three rows used to
- * be seeded into it by the app itself, uneditable and saved with the request.
- * The engine adds its own at send time now and declares them over
- * `GET /request-defaults`, so they are *shown* here rather than written into
- * the request - and each can be switched off for this send.
+ * The headers table, its text form, and a read-only group naming what the engine adds itself. Bulk
+ * edit is `BulkEditor`; only the format differs from `ParamsPanel`. **The table holds only the
+ * user's headers** (#1229): the engine adds its own at send time and declares them over
+ * `GET /request-defaults`, so they are *shown* here, not written into the request, and each can be
+ * switched off for this send.
  */
 
 import { useCallback } from "react";
@@ -39,12 +29,9 @@ import { EmptyTableHint } from "./EmptyTableHint";
 import { isStoredOff } from "../../../utils/automatic-headers";
 
 /**
- * One declared default, with the tick that keeps it on this send.
- *
- * Muted rather than disabled: the row is not editable - its value is the
- * engine's, and a generated one does not exist until the send makes it - but
- * the checkbox is an ordinary control, so the opt-out stays reachable by
- * keyboard and reads at full contrast.
+ * One declared default, with the tick keeping it on this send. Muted, not disabled: the value is
+ * the engine's (a generated one exists only at send), but the checkbox is ordinary, so the opt-out
+ * stays keyboard-reachable at full contrast.
  */
 function DefaultHeaderRow({
 	header,
@@ -55,30 +42,24 @@ function DefaultHeaderRow({
 	header: RequestDefaultHeader;
 	sent: boolean;
 	/**
-	 * Left off every send by the request's stored `disabledSystemHeaders`
-	 * (issue #1765). The engine unions that list with this send's opt-outs, so
-	 * a tick here could not put the header back: the box shows off and is
-	 * disabled, and the value cell names the tab that owns the setting.
+	 * Off on every send by the request's stored `disabledSystemHeaders` (#1765). The engine unions
+	 * that with this send's opt-outs, so a tick could not restore it: the box shows off, disabled,
+	 * and the value cell names the tab owning the setting.
 	 */
 	storedOff: boolean;
 	onToggle: (sent: boolean) => void;
 }) {
 	return (
-		// The table's own column track, so name and value line up with the rows
-		// above rather than starting a second, narrower grid.
+		// The table's column track, so name and value line up with the rows above.
 		<div className={cn("grid gap-2 items-center px-1 py-0.5", KEY_VALUE_GRID)}>
 			<Checkbox
 				checked={sent && !storedOff}
 				disabled={storedOff}
 				onChange={(e) => onToggle(e.target.checked)}
-				// Named after the header it governs: one per row, and a bare
-				// "checkbox" says nothing about which.
+				// Named after its header: one per row, and a bare "checkbox" says nothing.
 				aria-label={`Send ${header.name}`}
-				// `size-target` (issue #1679), not `size-icon`: a bare checkbox is
-				// its own hit target, the same reason `KeyValueRow`'s row-enable
-				// checkbox already carries this class - this one was the sweep's
-				// own blind spot, never wired through a `Button`/`TooltipIconButton`
-				// so #1679's "swap the icon-button override" fix never found it.
+				// `size-target` (#1679), not `size-icon`: a bare checkbox is its own hit target, as
+				// `KeyValueRow`'s row-enable checkbox is.
 				className="size-target"
 			/>
 			<span
@@ -96,9 +77,8 @@ function DefaultHeaderRow({
 					off for this request in Settings
 				</span>
 			) : header.generated ? (
-				// A generated header has no value to print - the engine makes a
-				// fresh one per transfer - so the cell says that rather than
-				// showing a blank the reader would take for "no value".
+				// A generated header has no value to print (a fresh one per transfer), so the cell
+				// says so rather than show a blank read as "no value".
 				<span className="text-xs italic text-muted-foreground truncate">
 					generated per request
 				</span>
@@ -131,10 +111,9 @@ export default function HeadersPanel() {
 	const variables = useVariableSupport();
 	const { data: requestDefaults } = useRequestDefaultsQuery();
 
-	// Stable, not an inline arrow: `useHeadersManager` hands this straight back
-	// as `handleHeadersChange`, which is `KeyValueEditor`'s `onChange` and a
-	// dependency of every row callback there - a fresh identity per render
-	// would re-render every header row on every keystroke (issue #1716).
+	// Stable, not an inline arrow: `useHeadersManager` returns it as `handleHeadersChange`, the
+	// `KeyValueEditor` `onChange` every row callback depends on, so a fresh identity would
+	// re-render every row per keystroke (#1716).
 	const onHeadersUpdate = useCallback(
 		(newHeaders: KeyValueItem[]) => updateField("headers", newHeaders),
 		[updateField]
@@ -145,9 +124,8 @@ export default function HeadersPanel() {
 	});
 
 	const disabled = request.disabledDefaultHeaders;
-	// Its own setter, not `updateField`: an opt-out is never saved, so marking
-	// the tab dirty for one would put an unsaved-changes badge - and an autosave
-	// PUT - behind a tick that changes nothing stored (issue #1229).
+	// Its own setter, not `updateField`: an opt-out is never saved, so marking the tab dirty would
+	// put an unsaved badge, and an autosave PUT, behind a tick that changes nothing stored (#1229).
 	const toggleDefault = useCallback(
 		(name: string, sent: boolean) => {
 			setDisabledDefaultHeaders(

@@ -8,19 +8,15 @@
 import { create } from "zustand";
 
 /**
- * Which OAuth 2.0 configs have an interactive sign-in running, by cache key
- * (#3354).
+ * Which OAuth 2.0 configs have an interactive sign-in running, by cache key (#3354). A sign-in
+ * belongs to the config, not to the row that started it: the builder's Auth tab, the context bar
+ * and the collection editor can each show a row for one config, and a second Get token must find
+ * the first sign-in running, not open a second browser tab. Rows hold the sign-in between them
+ * (`acquire`) and the last to unmount stops it, so nothing is left polling for a row nobody sees.
  *
- * A sign-in belongs to the config, not to the row that started it: the request
- * builder's Auth tab, the context bar and the collection editor can each show a
- * row for the same config, and a second Get token on one config must find the
- * first one running rather than open a second browser tab. The same config also
- * outlives any one row, so rows hold the sign-in between them (`acquire`) and
- * the last to unmount stops it: nothing is left polling for a row nobody sees.
- *
- * The controllers and owner counts sit beside the store rather than in it, as
- * in `request-builder/context/send-tracker.ts`: `active` is what renders, and
- * a controller is nothing a render reads.
+ * The controllers and owner counts sit beside the store, not in it, as in
+ * `request-builder/context/send-tracker.ts`: `active` is what renders, and no render reads a
+ * controller.
  */
 
 interface OAuthSigninState {
@@ -52,9 +48,8 @@ function begin(key: string): AbortSignal | null {
 }
 
 /**
- * The flow that holds @p signal is over. A no-op for a signal that is no longer
- * the key's, so a cancelled flow settling late cannot end the sign-in that
- * replaced it.
+ * The flow holding @p signal is over. A no-op for a signal that is no longer the key's, so a
+ * cancelled flow settling late cannot end the sign-in that replaced it.
  */
 function end(key: string, signal: AbortSignal): void {
 	if (controllers.get(key)?.signal !== signal) return;

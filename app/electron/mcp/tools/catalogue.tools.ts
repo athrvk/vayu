@@ -6,12 +6,10 @@
  */
 
 /**
- * @file catalogue.tools.ts
- * @brief `list_element_kinds` and `get_script_api`: the element registry and
- *        the script sandbox's API by tool, for a client that cannot read the
- *        `vayu://elements/kinds` and `vayu://scripting/completions` resources
- *        (#3559). Both read through the resources' own projections, so the two
- *        surfaces cannot come to disagree.
+ * @brief `list_element_kinds` and `get_script_api`: the element registry and the script sandbox's
+ *        API by tool, for a client that cannot read the `vayu://elements/kinds` and
+ *        `vayu://scripting/completions` resources (#3559). Both read through the resources' own
+ *        projections, so the surfaces cannot disagree.
  */
 
 import { z } from "zod";

@@ -6,26 +6,22 @@
  */
 
 /**
- * @file in-flight-calls.ts
- * @brief An abort handle per 2025-era request the HTTP host is still serving,
- *        so that client's `notifications/cancelled` reaches it (#3574).
+ * @brief An abort handle per 2025-era request the HTTP host is still serving, so that client's
+ *        `notifications/cancelled` reaches it (#3574).
  *
- * The host builds a fresh server per POST, so a cancel arrives at a server that
- * never saw the request it names, and the SDK answers it 202 and drops it. The
- * host keeps the request's `AbortController` here instead, under the
- * `Mcp-Session-Id` it issued and the JSON-RPC request id, and aborts it when the
- * cancel names both. Never the request id alone: every client counts from 0.
+ * The host builds a fresh server per POST, so a cancel arrives at a server that never saw the
+ * request it names, and the SDK answers it 202 and drops it. The host keeps the request's
+ * `AbortController` here instead, under the `Mcp-Session-Id` it issued and the JSON-RPC request id,
+ * and aborts it when the cancel names both. Never the request id alone: every client counts from 0.
  * A string id and a number id are different requests, as JSON-RPC has it.
  *
- * Nothing else is kept, and an entry lives exactly as long as its exchange:
- * the host releases it when the response ends however it ends. There is no
- * idle expiry, because a collection run holds its exchange for as long as its
- * requests take, however long that is.
+ * Nothing else is kept, and an entry lives exactly as long as its exchange: the host releases it
+ * when the response ends however it ends. There is no idle expiry, because a collection run holds
+ * its exchange for as long as its requests take, however long that is.
  *
- * The cap is the bound against whoever can reach the port; a call evicted past
- * it keeps running and can no longer be cancelled by its client. A stop does
- * not read this registry: it ends every 2025-era exchange, held or not
- * (`http.ts`, #3575).
+ * The cap is the bound against whoever can reach the port; a call evicted past it keeps running and
+ * can no longer be cancelled by its client. A stop does not read this registry: it ends every
+ * 2025-era exchange, held or not (`http.ts`, #3575).
  */
 
 import type { RequestId } from "@modelcontextprotocol/server";

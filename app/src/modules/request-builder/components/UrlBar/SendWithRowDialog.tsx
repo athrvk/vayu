@@ -6,48 +6,27 @@
  */
 
 /**
- * SendWithRowDialog - Send, bound to one row of the collection's data file (#601).
+ * Send, bound to one row of the collection's data file (#601), so a script reading
+ * `pm.iterationData` or a URL carrying `{{data.id}}` is exercised in one click, not a whole
+ * collection run, and the response lands in the usual pane.
  *
- * The gap this closes is an authoring one. A pre-request script that reads
- * `pm.iterationData`, or a URL carrying `{{data.id}}`, could only be exercised
- * by starting a whole collection run and then digging the step out of the
- * result - so the edit loop for one line of script was a run. Here the row is
- * one click beside Send, and the response lands in the pane it always does.
+ * - **A caret on Send, not a third button.** The row list is a *mode of sending*, and the UrlBar
+ *   has no spare width (index.tsx: the pair is ~140px, and each icon tried cost ~20px). A split
+ *   button says "same verb, choose the input"; the caret carries Send's fill so the pair reads as
+ *   one.
+ * - **A dialog, not a popover** (#892). Choosing a row of tabular data is a *browse*: at `2xl` the
+ *   rows are a grid with columns named once, every row present, a filter to narrow them, and the
+ *   number field as a shortcut. A ~384px popover forced one truncated line per row with column
+ *   names repeated, a twenty-row cap, and the 21st row reachable only by index.
+ * - **Not the file rendered into a box**: rows arrive as scrolled to ({@link useGrowingWindow}), so
+ *   a thousand-row set costs a screenful of DOM.
+ * - **Absent, not disabled, with nothing to bind**: outside a data-driven collection a disabled
+ *   control would promise what the request cannot do. The one visible-but-blocked state is a
+ *   declared file that moved, which is repairable and says so, as the Run dialog's pre-fill does.
  *
- * **A caret on Send, not a third button.** The row list is a *mode of sending*,
- * not a second action, and the UrlBar has no width to spare for another label
- * (see index.tsx - the pair is ~140px and every icon that was tried cost ~20px
- * of the row the URL is already short of). A split button says "same verb,
- * choose the input", which is exactly what this is. The caret carries Send's
- * own fill so the pair reads as one control rather than a seam.
- *
- * **A dialog, not a popover** (issue #892). It was a ~384px popover anchored
- * under the caret, and every compromise in the old design came from that box:
- * a row was one truncated line with its column name printed in front of every
- * value (`userId=1001 email=ada@example.com plan=pro q…`), the list stopped at
- * twenty rows, and a number field stood in for the rows there was no room to
- * show. Picking a row meant reading a sentence instead of scanning a column,
- * and the twenty-first row was reachable only by knowing its index. Choosing a
- * row out of tabular data is a *browse*, and a browse needs the room: at
- * `2xl` the rows are a real grid with the columns named once, every row is in
- * it, and a filter narrows them. The number field stays, demoted from mechanism
- * to shortcut.
- *
- * The one thing the popover was right about is kept: this is not the file
- * rendered into a box. Rows arrive as they are scrolled to
- * ({@link useGrowingWindow}), so a thousand-row set costs a screenful of DOM
- * rather than a thousand rows of it.
- *
- * **Absent, not disabled, when there is nothing to bind.** A request outside a
- * data-driven collection has no rows, and a disabled control offering to send
- * with one would be a promise the request cannot keep. The one visible-but-
- * blocked state is a declared file that has moved, which is repairable and says
- * so - the same rule the Run dialog's pre-fill follows.
- *
- * The rows are read when this opens and the set is not persisted, held only for
- * as long as the dialog and the send that follows it (see `data-file-store`).
- * The send itself is stored like any other design send, so the values the
- * chosen row bound are in its History trace (issue #731).
+ * Rows are read on open and never persisted, held only for the dialog and the send that follows
+ * (`data-file-store`); the send is stored like any design send, so the bound values are in its
+ * History trace (#731).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -91,37 +70,26 @@ export interface SendWithRowDialogProps {
 	/** Whether the caret owns the group's right corner (no Load Test beside it). */
 	lastInGroup: boolean;
 	/**
-	 * The row index this request was last sent with, and the setter for it.
-	 *
-	 * Held by the caller - the builder, keyed by request id, in plain state - so
-	 * iterating on a script is one click rather than a hunt through the list
-	 * each time. Deliberately not persisted: it points into a file whose rows
-	 * are not, and a remembered index against a file that has since changed
-	 * would name a different row. Keyed rather than single because the builder
-	 * is not remounted per tab (#659); a lone number followed the user across
-	 * requests.
+	 * The row index this request was last sent with, and its setter. Held by the caller (the
+	 * builder, keyed by request id, plain state), so iterating on a script is one click. Not
+	 * persisted: it points into a file whose rows are not, and a stale index would name another
+	 * row. Keyed, not single, because the builder is not remounted per tab (#659); a lone number
+	 * followed the user across requests.
 	 */
 	lastRowIndex: number | null;
 	onRowIndexChange: (index: number) => void;
 	/**
-	 * Whether the picker is showing, held by the caller.
-	 *
-	 * Controlled rather than local because opening is not always the user's
-	 * click here: a step card's "Repro row N" opens the request *and* this
-	 * picker on the row that step bound (issue #730), and the caller is what
-	 * hears that navigation.
+	 * Whether the picker shows, held by the caller: a step card's "Repro row N" opens the request
+	 * *and* this picker on that step's row (#730), and the caller hears that navigation.
 	 */
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 }
 
 /**
- * How many rows are added each time the end of the list is scrolled into view.
- *
- * Larger than the console's default because a row is one line of a grid rather
- * than a wrapped log line, so a screenful is more of them - and because the
- * whole set is bounded by `maxScenarioDataRows` (1,000 by default), which means
- * a single growth step covers most real files outright.
+ * Rows added each time the list's end scrolls into view. Above the console's default: a row is one
+ * grid line, not a wrapped log line, and the set is bounded by `maxScenarioDataRows` (1,000 by
+ * default), so one step covers most files.
  */
 const ROW_WINDOW_STEP = 100;
 
@@ -130,11 +98,8 @@ type RowEntry =
 	{ kind: "empty" } | { kind: "row"; index: number } | { kind: "error"; message: string };
 
 /**
- * Read a typed row number as a 0-based index into `total` rows.
- *
- * Refuses rather than clamps: a request to send row 900 of a 500-row file is a
- * mistake about *which row*, and binding row 500 instead would send something
- * the user did not ask for and say nothing about it.
+ * A typed row number as a 0-based index into `total` rows. Refuses rather than clamps: row 900 of a
+ * 500-row file is a mistake about *which row*, and binding row 500 would silently send another.
  */
 function parseRowEntry(text: string, total: number): RowEntry {
 	const trimmed = text.trim();
@@ -153,11 +118,8 @@ function parseRowEntry(text: string, total: number): RowEntry {
 }
 
 /**
- * One cell's text, capped so a long value cannot set the grid's width.
- *
- * The cap is generous where the popover's was tight (40 characters for the whole
- * row): a cell has its own column here, and the row is not competing with six
- * others for one line.
+ * One cell's text, capped so a long value cannot set the grid's width; generous, since each cell
+ * has its own column.
  */
 function cellText(value: unknown): string {
 	const text = dataCellText(value);
@@ -165,17 +127,11 @@ function cellText(value: unknown): string {
 }
 
 /**
- * Rows whose text matches `query`, with their original indices kept.
- *
- * Matched against the whole row rather than a chosen column: the user is
- * looking for a row they can describe ("the enterprise one", "grace"), not
- * running a query, and asking them which column it is in first would be the
- * wrong question. Case-insensitive for the same reason.
- *
- * The index travels with the row because everything else about this dialog is
- * stated in file positions - the number field, the footer, the remembered row,
- * a step's repro - and a filtered list that renumbered from 1 would make "row
- * 3" mean two different rows depending on what was typed in the filter.
+ * Rows whose text matches `query`, keeping original indices. Matched against the whole row, not a
+ * column: the user describes a row ("the enterprise one", "grace"), not a query, so asking which
+ * column first is the wrong question; case-insensitive for the same reason. The index travels with
+ * the row because everything else here speaks file positions (the number field, the footer, the
+ * remembered row, a step's repro), and renumbering a filtered list would make "row 3" ambiguous.
  */
 function matchingRows(
 	rows: DataFileRow[],
@@ -205,32 +161,23 @@ export default function SendWithRowDialog({
 
 	const parsed = rows.parsed;
 	const total = parsed?.rows.length ?? 0;
-	/*
-	 * Memoised, not `parsed?.columns ?? []`: that fallback is a fresh array on
-	 * every render, so the filter below would re-run for every keystroke
-	 * anywhere in the dialog rather than for a change to the rows or the query.
-	 */
+	// Memoised: `parsed?.columns ?? []` is a fresh array per render, re-running the filter on every
+	// keystroke.
 	const columns = useMemo(() => parsed?.columns ?? [], [parsed]);
 
 	const typed = parseRowEntry(entry, total);
 	/*
-	 * The row this dialog is pointing at: what was typed, or - when nothing has
-	 * been - the row the caller arrived with, which is the row a step card's
-	 * repro named. Falls back to the first row so the footer always names one.
-	 * Which row is *focusable* is a separate question, answered by `focusable`
-	 * below: this index can point outside the rows on screen, and the grid's tab
-	 * stop cannot.
+	 * The row the dialog points at: what was typed, else the caller's row (a step card's repro),
+	 * else the first, so the footer always names one. Which row is *focusable* is `focusable`'s
+	 * question: this index can point off screen, the grid's tab stop cannot.
 	 */
 	const selected = typed.kind === "row" ? typed.index : (lastRowIndex ?? 0);
 	/*
-	 * Whether `selected` still names a row of the file just read (issue #894).
-	 *
-	 * Only the fallback can be stale - `parseRowEntry` refuses a number outside
-	 * the file, while neither the remembered index nor a step's repro target is
-	 * clamped against a file that has since shrunk, been re-picked, or been cut
-	 * by a lowered `maxScenarioDataRows`. Named here rather than fixed by
-	 * clamping, for the same reason the typed path refuses: binding the last row
-	 * instead would send a row the user did not ask for and say nothing.
+	 * Whether `selected` still names a row of the file just read (#894). Only the fallback can be
+	 * stale: `parseRowEntry` refuses an out-of-file number, but the remembered index and a repro
+	 * target are not clamped against a file that shrank, was re-picked, or was cut by a lowered
+	 * `maxScenarioDataRows`. Named, not clamped, for the typed path's reason: binding the last row
+	 * would silently send another.
 	 */
 	const selectedMissing = selected >= total;
 
@@ -242,34 +189,26 @@ export default function SendWithRowDialog({
 	const rendered = visibleRows.slice(0, visible);
 
 	/*
-	 * Which rendered row carries the grid's single tab stop.
-	 *
-	 * `selected` is an address into the *file*, and three ordinary states leave
-	 * it outside the rows on screen: a remembered index past the growing window,
-	 * a filter that excludes it, and a file that shrank under it (#894). Hanging
-	 * the roving `tabIndex=0` off `selected` alone meant every one of those left
-	 * the grid with no tab stop at all - out of the tab order, its key handler
-	 * unreachable, which is the opposite of what a roving tabindex is for.
-	 *
-	 * So the tab stop falls back to the first rendered row. It moves the *focus*,
-	 * never the selection: which row a Send binds is #894's question and is still
-	 * answered by refusing, not by quietly re-pointing at a row nobody asked for.
+	 * Which rendered row holds the grid's single tab stop. `selected` addresses the *file*, and
+	 * three ordinary states put it off screen: a remembered index past the window, a filter
+	 * excluding it, a file that shrank (#894). A tab stop on `selected` alone left the grid with
+	 * none, out of the tab order with its keys unreachable. So it falls back to the first rendered
+	 * row, moving *focus*, never selection: which row a Send binds is still answered by refusing.
 	 */
 	const focusable = rendered.some(({ index }) => index === selected)
 		? selected
 		: (rendered[0]?.index ?? -1);
 
 	/*
-	 * Read on open, not on mount: a request tab must not touch the filesystem
-	 * for a send nobody asked for. Hung off the state rather than off the
-	 * trigger's click, because the caller can open this without one - a repro
-	 * navigation does, and that read is one the user did ask for.
+	 * Read on open, not mount: a request tab must not touch the filesystem for a send nobody asked
+	 * for. Hung off the state, not the trigger's click, since a repro navigation opens this without
+	 * one, and that read was asked for.
 	 */
 	const wasOpen = useRef(open);
 	useEffect(() => {
 		if (open && !wasOpen.current) {
 			rows.load();
-			// A new visit starts from the file, not from the last visit's typing.
+			// A new visit starts from the file, not the last visit's typing.
 			setFilter("");
 			setEntry("");
 		}
@@ -277,11 +216,8 @@ export default function SendWithRowDialog({
 	}, [open, rows]);
 
 	/*
-	 * Bring the selected row into view when it was reached by number rather than
-	 * by clicking - typing "480" is the case the old number field existed for,
-	 * and here it should scroll the grid to row 480 instead of pinning a copy of
-	 * it above the list. Optional-called because jsdom has no layout and
-	 * therefore no `scrollIntoView`.
+	 * Bring the selected row into view when reached by number, not click: typing "480" scrolls the
+	 * grid to row 480. Optional-called because jsdom has no layout, so no `scrollIntoView`.
 	 */
 	const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
 	useEffect(() => {
@@ -290,14 +226,10 @@ export default function SendWithRowDialog({
 	}, [typed.kind, selected]);
 
 	/*
-	 * Focus follows selection, but only when the grid itself moved it.
-	 *
-	 * Arrow keys change `selected` through the number field's state, and that
-	 * same state is what a user types into - so focusing the selected row on
-	 * every change would pull the caret out of the field mid-number. The flag is
-	 * set by the grid's own handler and read once, so a keyboard move takes DOM
-	 * focus with it (the ring, and the row a screen reader announces) while
-	 * typing "480" leaves focus where it was typed.
+	 * Focus follows selection only when the grid moved it. Arrows change `selected` through the
+	 * number field's state, which the user also types into, so focusing on every change would pull
+	 * the caret out mid-number. The grid's handler sets this flag, read once: a keyboard move takes
+	 * DOM focus (the ring, the row a screen reader announces), while typing "480" leaves focus put.
 	 */
 	const focusMovedRow = useRef(false);
 	useEffect(() => {
@@ -309,13 +241,11 @@ export default function SendWithRowDialog({
 	const send = useCallback(
 		(index: number) => {
 			/*
-			 * The one funnel every entry path reaches, so the bounds check lives
-			 * here: `parsed.rows[index]` is typed as a row but is `undefined` for
-			 * an index the file has no row at, and `executeRequest` reads that as
-			 * an ordinary row-less send - the request goes out with every
-			 * `{{data.*}}` token unbound and nothing says so (issue #894). The UI
-			 * refuses before this point; this is what makes the silent send
-			 * unreachable rather than merely unlikely.
+			 * The funnel every entry path reaches, so the bounds check is here:
+			 * `parsed.rows[index]` is typed as a row but `undefined` past the file, which
+			 * `executeRequest` reads as a row-less send, every `{{data.*}}` unbound with nothing
+			 * said (#894). The UI refuses earlier; this makes the silent send unreachable, not
+			 * merely unlikely.
 			 */
 			if (!parsed || index < 0 || index >= parsed.rows.length) return;
 			onRowIndexChange(index);
@@ -327,30 +257,20 @@ export default function SendWithRowDialog({
 	);
 
 	/**
-	 * How many rows PageUp/PageDown cover.
-	 *
-	 * Taken rather than left out: the grid pattern lists them as optional, and
-	 * without them a keyboard user crossing a 500-row file has one row per press
-	 * or the number field's absolute address, with nothing between. Ten is a
-	 * screenful of this grid at the dialog's height rather than a computed page,
-	 * because the scroller's height is not known here and a wrong measurement
-	 * would move the selection somewhere the eye did not follow.
+	 * Rows PageUp/PageDown cover. Optional in the grid pattern but taken: without them a keyboard
+	 * user crossing 500 rows has one row per press or the field's absolute address. Ten, a
+	 * screenful at the dialog's height, not a computed page: the scroller's height is unknown here,
+	 * and a wrong measurement would move the selection where the eye did not follow.
 	 */
 	const PAGE_ROWS = 10;
 
 	/**
-	 * Arrow keys move the selection through the *rendered* rows, Enter sends.
-	 *
-	 * The number field is the absolute address and this is the relative one, so
-	 * a keyboard user who has filtered to four rows steps through those four
-	 * rather than through the file underneath them. Bounded by what is rendered
-	 * rather than by the whole filtered set because focus follows selection: a
-	 * step onto a row past the growing window would move `aria-selected` to a row
-	 * with no element to focus, which is the announcement gap this closes.
-	 *
-	 * `isCommitEnter` rather than `e.key === "Enter"`: an Enter carrying Ctrl/Cmd
-	 * is the app's Send chord, and this grid and the window listener both acting
-	 * on it produced two competing executions of the same request (#935).
+	 * Arrows move the selection through the *rendered* rows; Enter sends. The number field is the
+	 * absolute address and this the relative one, so after filtering to four rows a user steps
+	 * through those four. Bounded by what is rendered, as focus follows selection: a step past the
+	 * window would move `aria-selected` to a row with nothing to focus. `isCommitEnter`, not
+	 * `e.key === "Enter"`: a Ctrl/Cmd+Enter is the Send chord, and this grid and the window
+	 * listener both acting on it ran the request twice (#935).
 	 */
 	const onGridKeyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
 		if (isCommitEnter(e) || e.key === " ") {
@@ -378,8 +298,7 @@ export default function SendWithRowDialog({
 		e.preventDefault();
 		const next = rendered[Math.min(Math.max(target, 0), last)];
 		if (!next || next.index === selected) return;
-		// Through the number field's own state, so the two addresses of a row
-		// never disagree about which one is selected.
+		// Through the number field's state, so a row's two addresses never disagree.
 		focusMovedRow.current = true;
 		setEntry(String(next.index + 1));
 	};
@@ -387,12 +306,9 @@ export default function SendWithRowDialog({
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			{/*
-			 * Send and Load Test on either side of this caret both carry a
-			 * `Hint` tooltip (their chord); this had none at all, so hovering
-			 * the one control between two tooltipped ones read as broken rather
-			 * than deliberately silent. No chord to show - the picker opens on
-			 * click only - so a plain label rather than `Hint`, which requires
-			 * one.
+			 * Send and Load Test beside this caret carry `Hint` tooltips, so an untooltipped caret
+			 * between them read as broken. No chord (it opens on click only), so a plain label
+			 * rather than `Hint`, which needs one.
 			 */}
 			<Tooltip>
 				<TooltipTrigger asChild>
@@ -402,17 +318,12 @@ export default function SendWithRowDialog({
 							aria-label="Send with a data row"
 							disabled={disabled}
 							className={cn(
-								// `h-control`, not `h-8` - this caret sits between two
-								// `h-control` buttons (issue #1679) and a leftover `h-8`
-								// read as the same height only by coincidence before
-								// `--spacing` moved to the 3px rhythm (#1670); after that it
-								// is visibly shorter than Send and Load Test on either side
-								// of it, and it only shows up once a collection's data file
-								// is bound, which is why it survived unnoticed.
+								// `h-control`, not `h-8`: between two `h-control` buttons (#1679),
+								// and since `--spacing` moved to the 3px rhythm (#1670) `h-8` is
+								// visibly shorter; the caret shows only with a bound data file.
 								"h-control min-w-target px-2 inline-flex items-center shrink-0",
-								// Send's own fill and border - this is Send's caret, not a
-								// control beside it - with the shared edge transparent so the
-								// two do not draw a 2px line between them.
+								// Send's own fill and border, as Send's caret, with the shared edge
+								// transparent so no 2px line forms.
 								"bg-primary-fill text-white border border-primary-fill border-l-white/25",
 								"hover:bg-primary-fill-hover hover:border-primary-fill-hover",
 								"disabled:opacity-50 disabled:hover:bg-primary-fill transition-colors",
@@ -426,8 +337,10 @@ export default function SendWithRowDialog({
 				<TooltipContent side="bottom">Send with a data row</TooltipContent>
 			</Tooltip>
 
-			{/* `2xl`, the browser width - see `DialogContent`. Seven columns of
-			    ordinary CSV is the shape this is sized for. */}
+			{/*
+			 * `2xl`, the browser width (see `DialogContent`), sized for seven columns of ordinary
+			 * CSV.
+			 */}
 			<DialogContent className="sm:max-w-2xl">
 				<DialogHeader>
 					<DialogTitle>Send with a data row</DialogTitle>
@@ -438,9 +351,10 @@ export default function SendWithRowDialog({
 					</DialogDescription>
 				</DialogHeader>
 
-				{/* The file this is reading, said the same way the Run dialog's
-				    preview says it - same file, same summary, so the two do not
-				    read as two different data sets. */}
+				{/*
+				 * The file, said as the Run dialog's preview says it, so the two do not read as two
+				 * data sets.
+				 */}
 				<div className="flex items-center gap-2 rounded-md border border-rule bg-card surface-card px-3 py-2 text-xs">
 					<FileSpreadsheet
 						aria-hidden="true"
@@ -485,9 +399,9 @@ export default function SendWithRowDialog({
 									className="text-xs"
 								/>
 							</label>
-							{/* The absolute address, kept from the popover and demoted:
-							    the rows are all here now, so this is how you reach row
-							    480 of 500 without scrolling to it. */}
+							{/*
+							 * The absolute address: how to reach row 480 of 500 without scrolling.
+							 */}
 							<label className="space-y-1">
 								<span className="text-label text-muted-foreground">Row</span>
 								<Input
@@ -503,22 +417,23 @@ export default function SendWithRowDialog({
 									placeholder={`1 - ${total.toLocaleString()}`}
 									aria-label="Send with a row by number"
 									aria-invalid={typed.kind === "error"}
-									// Fixed rem, not `w-28`: the field holds a row number
-									// (the placeholder reads e.g. "1 - 500"), a text measure
-									// that should not narrow at the Default density the way
-									// `w-28`'s `--spacing` unit does.
+									// Fixed rem, not `w-28`: a row number (e.g. "1 - 500") is a
+									// text measure that should not narrow at the Default density as
+									// `--spacing` does.
 									className="w-[7rem] font-mono text-xs"
 								/>
 							</label>
 						</div>
-						{/* Named, never clamped or ignored: a number outside the file
-						    is a mistake about which row, and sending a different one
-						    would be worse than sending none. */}
+						{/*
+						 * Named, never clamped or ignored: an out-of-file number is a mistake about
+						 * which row, and sending another is worse than none.
+						 */}
 						{typed.kind === "error" && <FieldError>{typed.message}</FieldError>}
-						{/* The same refusal for the row nobody typed: a remembered index,
-						    or a step's repro target, pointing past the file as it reads
-						    now. Said rather than clamped, and the footer's button is
-						    dead while it stands. */}
+						{/*
+						 * The same refusal for a row nobody typed (a remembered index or repro
+						 * target past the file as it reads now): said, not clamped, and the
+						 * footer's button is dead while it stands.
+						 */}
 						{selectedMissing && (
 							<FieldError>
 								Row {(selected + 1).toLocaleString()} no longer exists - the file
@@ -529,9 +444,10 @@ export default function SendWithRowDialog({
 
 						<DialogBody className="rounded-md border border-rule">
 							{visibleRows.length === 0 ? (
-								/* An empty box would read as "the file has no rows",
-								   which is a different fact from "nothing matches what
-								   you typed" - and only one of them is fixable here. */
+								/*
+								 * An empty box would read as "the file has no rows", a different
+								 * fact from "nothing matches", and only one is fixable here.
+								 */
 								<EmptyState
 									variant="inline"
 									compact
@@ -548,17 +464,13 @@ export default function SendWithRowDialog({
 								/>
 							) : (
 								/*
-								 * `role="grid"`, so the rows can be `aria-selected` -
-								 * that attribute means nothing on a plain table's row.
-								 * A roving tabindex keeps the grid one tab stop rather
-								 * than one per row, which at a thousand rows is the
-								 * difference between a keyboard reaching the footer and
-								 * not - exactly one, always, because the stop falls back
-								 * to the first rendered row when the selected row is not
-								 * on screen (see `focusable`). Arrow, Home, End and
-								 * PageUp/PageDown move that stop and DOM focus with it,
-								 * per the WAI-ARIA grid pattern: a selection a screen
-								 * reader is never told about is not a selection.
+								 * `role="grid"`, so rows can be `aria-selected` (meaningless on a
+								 * plain table row). A roving tabindex keeps the grid one tab stop,
+								 * not a thousand, the difference between a keyboard reaching the
+								 * footer or not; always exactly one, as it falls back to the first
+								 * rendered row (`focusable`). Arrow, Home, End and PageUp/PageDown
+								 * move it and DOM focus together, per the WAI-ARIA grid pattern: a
+								 * selection a screen reader never hears is not one.
 								 */
 								<Table role="grid" aria-label="Data rows">
 									<TableHeader className="sticky top-0 z-10 bg-card">
@@ -601,9 +513,10 @@ export default function SendWithRowDialog({
 											</TableRow>
 										))}
 										{hasMore && (
-											/* The sentinel the window grows on. It is a
-											   real row so it lands inside the scroller
-											   the observer needs it to appear in. */
+											/*
+											 * The sentinel the window grows on: a real row, so it
+											 * lands inside the scroller its observer watches.
+											 */
 											<TableRow ref={sentinelRef} className="border-b-0">
 												<TableCell
 													colSpan={columns.length + 1}
@@ -620,9 +533,10 @@ export default function SendWithRowDialog({
 
 						<DialogFooter className="items-center">
 							<p className="mr-auto text-label text-muted-foreground">
-								{/* Which rows are on screen, and that scrolling brings
-								    the rest - said because the grid can clip without
-								    looking clipped on an overlay-scrollbar platform. */}
+								{/*
+								 * Which rows are on screen and that scrolling brings the rest: the
+								 * grid can clip without looking clipped under overlay scrollbars.
+								 */}
 								{filter.trim() !== ""
 									? `${visibleRows.length.toLocaleString()} of ${total.toLocaleString()} ${pluralize(
 											total,
@@ -633,14 +547,12 @@ export default function SendWithRowDialog({
 										: `All ${total.toLocaleString()} ${pluralize(total, "row")}.`}
 							</p>
 							<DialogCancelButton size="sm" onClick={() => onOpenChange(false)} />
-							{/* Names the row it will send, so a row reached by typing a
-							    number is confirmable without hunting for it in the
-							    grid. Clicking a row still sends outright - the fast
-							    loop this feature exists for is one click.
-
-							    Disabled while the named row is not in the file, so the
-							    button never offers a send it would have to make without
-							    a row; the line above the grid says which row and why. */}
+							{/*
+							 * Names the row it sends, so a row reached by number is confirmable;
+							 * clicking a row still sends at once, the one-click loop this exists
+							 * for. Disabled while that row is not in the file, so it never offers a
+							 * row-less send; the line above the grid says which row and why.
+							 */}
 							<Button
 								size="sm"
 								disabled={selectedMissing}

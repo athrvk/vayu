@@ -8,18 +8,17 @@
  */
 
 /**
- * @file http/list_page.hpp
  * @brief The `q` / `limit` / `offset` paging the whole-list routes share
- *        (`GET /requests`, `/collections`, `/cookies`, `/trash`; issue #2443).
+ *        (`GET /requests`, `/collections`, `/cookies`, `/trash`; #2443).
  *
  * Opt-in by key presence: a call naming none of the three keys gets the route's
- * original answer, unchanged, so a client written before paging existed reads
- * what it always read. A call naming any of them gets the `{data, pagination}`
- * envelope `GET /runs` answers with.
+ * unpaged answer, unchanged, so a client that does not page is unaffected. A
+ * call naming any of them gets the `{data, pagination}` envelope `GET /runs`
+ * answers with.
  *
  * Filtering and slicing run in memory, over the vector the route already
- * fetched in its documented order: `total` is that filtered vector's size, so it
- * comes from the same read as the page and needs no second query or lock.
+ * fetched in its documented order: `total` is that filtered vector's size, so
+ * it comes from the same read as the page and needs no second query or lock.
  */
 
 #include <cstddef>

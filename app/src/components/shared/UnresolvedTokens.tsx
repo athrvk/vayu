@@ -6,20 +6,16 @@
  */
 
 /**
- * A step's unresolved `{{variables}}` (issue #3269), shown beside its
- * {@link ExtractorMisses}: an extractor miss unsets a variable, and this is the
- * later step that sent that name as literal text. The step can still pass.
+ * A step's unresolved `{{variables}}` (#3269), beside its {@link ExtractorMisses}: an extractor
+ * miss unsets a variable, and this is the later step sending that name as literal text; the step
+ * can still pass. The engine counts two things under one field, so the caller says which:
+ * - `"names"` - a sequential collection run's step: the distinct `{{names}}` it sent unresolved.
+ *   Absent, never 0, when none.
+ * - `"sends"` - a scenario load run's step: the executions that sent one. Always present, so 0 is a
+ *   real "none".
  *
- * The engine counts two different things under the one field name, so the
- * caller says which:
- * - `"names"` - a sequential collection run's step: the distinct `{{names}}`
- *   that step sent unresolved. Absent, never 0, when none.
- * - `"sends"` - a scenario load run's step: the executions of the step that sent
- *   one. Always present, so 0 is a real "none".
- * Either way nothing renders for an absent, zero or non-numeric count.
- *
- * Text, not a `Badge`: it paints no background, the rule
- * `badge-hover.test.tsx` keeps for the ones that do.
+ * Nothing renders for an absent, zero or non-numeric count. Text, not a `Badge`: it paints no
+ * background, the rule `badge-hover.test.tsx` keeps for those that do.
  */
 
 import { AlertTriangle } from "lucide-react";

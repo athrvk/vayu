@@ -39,12 +39,10 @@ interface TrashItemProps {
 }
 
 /**
- * How each kind reads on a row. A `Record` over the union, not a ternary: a kind
- * the engine adds fails to compile here until it has a glyph and a word, rather
- * than rendering as whichever kind the ternary's last branch named. The
- * environment's glyph is the one the Variables view draws for an environment,
- * the example's is the bookmark family "Save as example" uses, and the
- * certificate's is the one its Settings card is headed by.
+ * How each kind reads on a row. A `Record` over the union, not a ternary, so a kind the engine adds
+ * fails to compile until it has a glyph and a word. The environment's glyph is the one the
+ * Variables view draws for it, the example's the bookmark family "Save as example" uses, the
+ * certificate's the one heading its Settings card.
  */
 const KIND_DISPLAY: Record<TrashEntry["kind"], { icon: LucideIcon; label: string }> = {
 	collection: { icon: Folder, label: "Collection" },
@@ -55,16 +53,15 @@ const KIND_DISPLAY: Record<TrashEntry["kind"], { icon: LucideIcon; label: string
 };
 
 /**
- * What a purge of this entry destroys, as a phrase - "with 3 requests", "with 2
- * collections, 11 requests", "with 12 variables" - or nothing at all when the
- * entry stood alone.
+ * What a purge of this entry destroys, as a phrase ("with 3 requests", "with 2 collections, 11
+ * requests", "with 12 variables"), or nothing when the entry stood alone. It is the one thing a
+ * trash row says that the tree could not: a collection in the trash otherwise looks exactly like an
+ * empty one.
  *
- * A collection reads the engine's **purge** totals, not the cohort counts
- * (#3449): a purge also takes whatever an earlier delete left under the root, so
- * the cohort is a floor, and "Delete forever" on a row that undercounts is the
- * wrong moment for one. An environment's number is the variables on its own row.
- * It is the one thing a trash row says that the tree could never have shown: a
- * collection in the trash looks exactly like an empty one otherwise.
+ * A collection reads the engine's **purge** totals, not the cohort counts (#3449): a purge also
+ * takes whatever an earlier delete left under the root, so the cohort is a floor, and "Delete
+ * forever" is the wrong moment to undercount. An environment's number is the variables on its own
+ * row.
  */
 function contentsSummary(entry: TrashEntry): string | null {
 	const parts: string[] = [];
@@ -81,14 +78,12 @@ function contentsSummary(entry: TrashEntry): string | null {
 }
 
 /**
- * One deleted root, with the two things that can happen to it and a copy of
- * its reference for an agent.
+ * One deleted root: restore, delete forever, and a copy of its reference for an agent.
  *
- * **The actions take no width until the row is hovered or focused** (#3495).
- * Three always-visible buttons left the name about 105px of a 260px drawer and
- * the meta line four wrapped lines. They stay in the DOM and keyboard-reachable
- * (`ROW_ACTIONS_REVEAL`), and a device with no hover keeps them showing, since
- * Restore and Delete forever are the entire reason a trash row is on screen.
+ * **The actions take no width until the row is hovered or focused** (#3495): three visible buttons
+ * left the name about 105px of a 260px drawer. They stay in the DOM and keyboard-reachable
+ * (`ROW_ACTIONS_REVEAL`), and a device with no hover keeps them showing, since Restore and Delete
+ * forever are the reason a trash row is on screen.
  */
 export default function TrashItem({
 	entry,
@@ -111,21 +106,18 @@ export default function TrashItem({
 	const metaRef = useOverflowTitle<HTMLParagraphElement>(metaTitle);
 
 	return (
-		// `surface-card` + `border-rule` rather than a border token: `--border` on
-		// `--card` is the same colour in dark, so the row would have no edge. See
-		// RunItem, which carries the same pair for the same reason.
-		// `group relative`: the row is what the actions reveal on, and the
-		// collapsed cluster is absolutely positioned against it.
+		// `surface-card` + `border-rule`, not a border token: `--border` on `--card` is the same
+		// colour in dark, so the row would have no edge (RunItem carries the pair for the same
+		// reason). `group relative`: the actions reveal on the row, and the collapsed cluster is
+		// positioned against it.
 		<div
-			// Where a purge hands focus on to (#1234). `tabIndex={-1}` makes the row
-			// a target for `.focus()` without adding a tab stop in front of the
-			// buttons, and it holds even while they are disabled by the purge in
-			// flight - which is exactly when focus needs somewhere to be.
+			// Where a purge hands focus on to (#1234). `tabIndex={-1}` makes the row a `.focus()`
+			// target without a tab stop in front of the buttons, and holds while the purge in
+			// flight disables them, which is when focus needs somewhere to be.
 			data-trash-id={entry.id}
 			tabIndex={-1}
-			// `focus-row`, not the baseline ring: this row is a composite the
-			// baseline would leave unmarked, since it is written
-			// `[tabindex]:not([tabindex="-1"])`.
+			// `focus-row`: the baseline ring, written `[tabindex]:not([tabindex="-1"])`, leaves
+			// this composite unmarked.
 			className="focus-row group relative surface-card border border-rule rounded-md overflow-hidden w-full"
 		>
 			<div className="flex items-center gap-2 px-3 py-2 min-w-0">
@@ -134,12 +126,10 @@ export default function TrashItem({
 				<div className="flex-1 min-w-0">
 					<TruncatedText className="text-sm text-foreground">{entry.name}</TruncatedText>
 					{/*
-					 * The kind is written out, not left to the icon. The glyph
-					 * is `aria-hidden` (it is decoration, per the design
-					 * system), so with the icon alone a screen reader gets a
-					 * name and a date and no way to tell a deleted folder from
-					 * a deleted request - and a sighted reader has to already
-					 * know which shape means which.
+					 * The kind is written out, not left to the icon: the glyph is `aria-hidden`
+					 * decoration (the design system's rule), so with the icon alone a screen reader
+					 * gets a name and a date and cannot tell a deleted folder from a request, and a
+					 * sighted reader has to know which shape means which.
 					 */}
 					<p ref={metaRef} className="truncate text-xs text-muted-foreground">
 						{kindLabel}

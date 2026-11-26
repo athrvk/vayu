@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Queries Index
- *
- * Central export for all TanStack Query hooks.
- */
+/** Central export for all TanStack Query hooks. */
 
 // Query Keys
 export { queryKeys } from "./keys";

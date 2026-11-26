@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for the run comparison (issue #2127). Read by the app's vitest suite (app/electron/mcp/compare.conformance.test.ts, which replays every case through BOTH app/electron/mcp/compare.ts and app/src/lib/run-compare.ts) and by the engine gtest suite (engine/tests/run_export_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through vayu::core::compare_run_reports). `expected` is compareReports' answer less the two run ids; the engine writes its `comparability` as `differences[]` ({field: code, base, target}, no message) and its `latency`, `throughput` and `reliability` as one `deltas[]` in that order. A report flagged `summary.summaryMissing` has its counts and latency read as absent, and one flagged `summary.partial` its latency alone, each side judged on its own (#2904). The engine writes such a report with no `latency` object (#2938); the cases that still carry a block of zeros are documents exported before that, and read the same. A case whose input JSON cannot spell (NaN, Infinity) stays inline in the app test.",
+  "$comment": "Cross-language conformance fixture for the run comparison (issue #2127). Read by the app's vitest suite (app/electron/mcp/compare.conformance.test.ts, which replays every case through BOTH app/electron/mcp/compare.ts and app/src/lib/run-compare.ts) and by the engine gtest suite (engine/tests/run_export_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through vayu::core::compare_run_reports). `expected` is compareReports' answer less the two run ids; the engine writes its `comparability` as `differences[]` ({field: code, base, target}, no message) and its `latency`, `throughput` and `reliability` as one `deltas[]` in that order. A report flagged `summary.summaryMissing` has its counts and latency read as absent, and one flagged `summary.partial` its latency alone, each side judged on its own (#2904). The engine writes such a report with no `latency` object (#2938); the cases that still carry a block of zeros are documents exported before that, and read the same. `errorClasses` is `{}` unless both reports carry `summary.errorClasses` as an object (#3828): a run stored before the engine counted them is not a run with zero failures. A case whose input JSON cannot spell (NaN, Infinity) stays inline in the app test.",
   "cases": [
     {
       "name": "a clean regression",
@@ -38,6 +38,7 @@
           {"metric":"summary.totalRequests","base":6000,"target":5400,"delta":-600,"pctChange":-10,"direction":"neutral"}
         ],
         "statusCodes": {"200":{"base":5970,"target":5292},"500":{"base":30,"target":108}},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -107,6 +108,7 @@
           {"metric":"summary.totalRequests","base":4000,"target":7000,"delta":3000,"pctChange":75,"direction":"neutral"}
         ],
         "statusCodes": {"200":{"base":3880,"target":7000},"503":{"base":120,"target":0}},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -151,6 +153,7 @@
           {"metric":"summary.totalRequests","base":6000,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {"200":{"base":6000,"target":0}},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -185,6 +188,7 @@
           {"metric":"summary.totalRequests","base":0,"target":500,"delta":500,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {"200":{"base":0,"target":495},"429":{"base":0,"target":5}},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -273,6 +277,7 @@
           }
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -314,6 +319,7 @@
           {"metric":"summary.totalRequests","base":6000,"target":5400,"delta":-600,"pctChange":-10,"direction":"neutral"}
         ],
         "statusCodes": {"200":{"base":5970,"target":5292},"429":{"base":0,"target":8},"500":{"base":30,"target":100}},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -354,6 +360,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {"200":{"base":10,"target":12}},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -394,6 +401,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {"200":{"base":10,"target":0},"301":{"base":0,"target":0}},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -427,6 +435,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {"200":{"base":0,"target":0}},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -467,6 +476,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": true,
         "comparability": [
           {
@@ -500,6 +510,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [
           {
@@ -533,6 +544,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [
           {
@@ -566,6 +578,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [
           {
@@ -599,6 +612,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -645,6 +659,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [
           {"code":"mode","message":"Test mode differs.","base":"constant_concurrency","target":"ramp_up"},
@@ -727,6 +742,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": true,
         "comparability": [
           {"code":"run_type","message":"Run types differ, so these figures measure different things.","base":"Load test","target":"Collection run"},
@@ -789,6 +805,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [{"code":"concurrency","message":"Virtual users differ.","base":"1 to 50, ramp 10s","target":"25 to 50, ramp 10s"}]
       }
@@ -829,6 +846,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [
           {"code":"concurrency","message":"Virtual users differ.","base":"2.5","target":"1e-7"},
@@ -872,6 +890,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [{"code":"duration","message":"Run durations differ by more than 2x.","base":"10 s","target":"20.1 s"}]
       }
@@ -912,6 +931,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -952,6 +972,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [{"code":"duration","message":"Run durations differ by more than 2x.","base":"0.3 s, stopped","target":"10.8 s"}]
       }
@@ -992,6 +1013,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [{"code":"duration","message":"Run durations differ by more than 2x.","base":"0.3 s","target":"1.4 s, failed"}]
       }
@@ -1032,6 +1054,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1075,6 +1098,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1115,6 +1139,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [
           {"code":"run_type","message":"Run types differ, so these figures measure different things.","base":"Load test","target":"Collection run"},
@@ -1160,6 +1185,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [
           {"code":"run_type","message":"Run types differ, so these figures measure different things.","base":"Send","target":"replay"}
@@ -1202,6 +1228,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [
           {"code":"concurrency","message":"Virtual users differ.","base":"not recorded","target":"100"},
@@ -1245,6 +1272,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1285,6 +1313,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [{"code":"data_file","message":"Data file differs.","base":"none","target":"bbbbbbbb"}]
       }
@@ -1325,6 +1354,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [{"code":"data_file","message":"Data file differs.","base":"users.csv (aaaaaaaa)","target":"users.csv (aaaaaaaa), numbers read as numbers"}]
       }
@@ -1365,6 +1395,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1405,6 +1436,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1445,6 +1477,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [{"code":"status","message":"Run status differs.","base":"Completed","target":"Completed"}]
       }
@@ -1485,6 +1518,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [{"code":"request","message":"Request differs.","base":"https://api.test/a","target":"https://api.test/b"}]
       }
@@ -1525,6 +1559,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": [
           {
@@ -1572,6 +1607,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1612,6 +1648,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1652,6 +1689,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1678,6 +1716,7 @@
           {"metric":"summary.totalRequests","base":6000,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1704,6 +1743,7 @@
           {"metric":"summary.totalRequests","base":null,"target":5400,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1730,6 +1770,7 @@
           {"metric":"summary.totalRequests","base":6000,"target":3000,"delta":-3000,"pctChange":-50,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1756,6 +1797,7 @@
           {"metric":"summary.totalRequests","base":6000,"target":3000,"delta":-3000,"pctChange":-50,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1782,6 +1824,7 @@
           {"metric":"summary.totalRequests","base":6000,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1808,6 +1851,7 @@
           {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1834,6 +1878,7 @@
           {"metric":"summary.totalRequests","base":null,"target":3000,"delta":null,"pctChange":null,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }
@@ -1860,6 +1905,196 @@
           {"metric":"summary.totalRequests","base":6000,"target":5400,"delta":-600,"pctChange":-10,"direction":"neutral"}
         ],
         "statusCodes": {},
+        "errorClasses": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "mcp error classes both runs recorded: every class either counted, the other side's missing count 0, protocolCodes left out",
+      "base": {"summary":{"errorClasses":{"transport":2,"protocol":4,"tool":10,"protocolCodes":{"-32602":3,"other":1}}}},
+      "target": {"summary":{"errorClasses":{"protocol":9,"tool":1,"protocolCodes":{"-32602":9}}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "errorClasses": {"transport":{"base":2,"target":0},"protocol":{"base":4,"target":9},"tool":{"base":10,"target":1}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "mcp error classes one run never recorded them: no figure, not a zero",
+      "base": {"summary":{"avgRps":null}},
+      "target": {"summary":{"errorClasses":{"tool":5}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "errorClasses": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "mcp error classes neither run recorded them",
+      "base": {"summary":{}},
+      "target": {},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "errorClasses": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "mcp error classes a recorded {} against counts: the clean run reads 0",
+      "base": {"summary":{"errorClasses":{}}},
+      "target": {"summary":{"errorClasses":{"protocol":3}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "errorClasses": {"protocol":{"base":0,"target":3}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "mcp error classes both runs recorded {}: nothing failed on either side",
+      "base": {"summary":{"errorClasses":{}}},
+      "target": {"summary":{"errorClasses":{}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "errorClasses": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "mcp error classes a value that is not a number is not counted",
+      "base": {"summary":{"errorClasses":{"transport":"many","protocol":null,"tool":7,"protocolCodes":1}}},
+      "target": {"summary":{"errorClasses":{"protocol":true,"tool":2}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "errorClasses": {"tool":{"base":7,"target":2}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "mcp error classes a block that is not an object is not recorded",
+      "base": {"summary":{"errorClasses":[1,2]}},
+      "target": {"summary":{"errorClasses":{"tool":1}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "errorClasses": {},
         "compressionNegotiationDiffers": false,
         "comparability": []
       }

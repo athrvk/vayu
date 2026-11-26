@@ -49,12 +49,12 @@ the URL by the same rule the URL bar uses (below), so a request written from a
 URL alone (an MCP or API caller) stores one row per pair, and the exports and
 the spec diff, which read `params[]`, see its query. Rows that already agree
 are left byte for byte; a write that states `params` stores them as sent (see
-[engine/api-reference.md](engine/api-reference.md#post-requests)).
+[engine/api-reference/requests.md](engine/api-reference/requests.md#post-requests)).
 
 A **path row** (`"in": "path"`, issue #1764) is the one row the engine reads:
 `url` keeps the `:name` segment verbatim and composition writes the row's value
 into it at send time (see
-[engine/api-reference.md](engine/api-reference.md#path-variables)). A path row
+[engine/api-reference/compose.md](engine/api-reference/compose.md#path-variables)). A path row
 never joins the query.
 
 The URL bar keeps the same invariant the other way: typing into it **merges**
@@ -141,10 +141,10 @@ parse time (`parseImport`, see
 
 A content-based body (`json`, `text`, `graphql`, `jsonrpc`, `mcp`, `xml`) is stored as
 `{ "mode": "<mode>", "content": "<string>" }` (an `mcp` body may add `mcpTool`,
-see [api-reference.md](engine/api-reference.md#the-mcp-body)), and an empty `content` is still a
+see [api-reference/request-body.md](engine/api-reference/request-body.md#the-mcp-body)), and an empty `content` is still a
 body of that mode - clearing the editor to retype it is not the same action as
 picking **None**. The save path tests `bodyMode` alone rather than falling back
-to `mode: "none"` when the content is an empty (falsy) string, which used to
+to `mode: "none"` when the content is an empty (falsy) string, which would
 collapse a cleared JSON/text/XML/GraphQL/JSON-RPC body to `none` on save (issue
 #1490) while the mode selector kept showing the old mode until the next reload.
 
@@ -164,7 +164,7 @@ writes is dropped, and the schema-version-6 migration granted every file the
 editor had stored as chosen before removing the key from every row.
 A send's history record keeps `request.bodyFile {fileName, size, sha256}` for a
 binary body - never the bytes or the path; see
-[the engine API reference](engine/api-reference.md#file-references-binary-bodies-and-file-parts).
+[the engine API reference](engine/api-reference/request-body.md#file-references-binary-bodies-and-file-parts).
 
 ### 2. Request Execution
 
@@ -216,8 +216,8 @@ Separate from execution history, and deliberately so: a `results` row records a
 response that *happened* and is pruned with its run, while an example is a
 response the request *documents* and lives as long as the request does. Examples
 are what an importer found next to a request - Postman's saved responses, an
-OpenAPI operation's documented ones - which every parser used to drop, because
-there was nowhere to keep them (issue #481).
+OpenAPI operation's documented ones - which a parser without a place to keep them
+would drop (issue #481).
 
 ```json
 {
@@ -246,9 +246,9 @@ in the sense the next section describes: they stay on the row while the request
 is in the trash, unreachable because every read of them checks the owner first,
 and a purge removes them in the same transaction as the request.
 
-### 5. The deletion lifecycle (issue #988)
+### 5. The deletion lifecycle
 
-**Deleting a collection or a request does not remove it.** `DELETE
+**Deleting a collection or a request does not remove it** (issue #988). `DELETE
 /collections/:id` and `DELETE /requests/:id` stamp `deleted_at` on the row - and,
 for a collection, on its whole subtree in one transaction - and every read
 surface filters stamped rows out. To the sidebar, an export, an MCP tool or a

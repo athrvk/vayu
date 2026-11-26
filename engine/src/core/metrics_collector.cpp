@@ -5,11 +5,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file core/metrics_collector.cpp
- * @brief Implementation of high-performance in-memory metrics collector
- */
-
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/reservoir.hpp"
 #include "vayu/core/sample_capture.hpp"
@@ -61,9 +56,9 @@ double us_to_ms (int64_t us) {
 }
 
 /// HdrHistogram's floor is 1, so a stream's event count is recorded one above
-/// itself and read back one below (#3240): a stream that delivered nothing is
-/// then a 0 in every figure rather than a 1. Counts under 2047 stay exact at
-/// three significant figures.
+/// itself and read back one below (#3240): a stream that delivered nothing is a
+/// 0 in every figure, not a 1. Counts under 2047 stay exact at three
+/// significant figures.
 constexpr int64_t STREAM_EVENTS_OFFSET = 1;
 
 int64_t stream_events_recorded (size_t events) {
@@ -186,15 +181,15 @@ nlohmann::json latency_distribution (const struct hdr_histogram* histogram) {
 }
 
 /**
- * Copy @p live, which workers may still be recording into, onto @p copy, a
- * histogram built with the same range and precision, so hdr's plain readers
- * can run on the copy.
+ * Copies @p live, which workers may still be recording into, onto @p copy
+ * (built with the same range and precision), so hdr's plain readers can run on
+ * the copy.
  *
  * Each count is one relaxed atomic load, the reader's half of the workers'
- * hdr_record_value_atomic; a plain read of a count a worker is incrementing
- * is a data race. `live`'s own total and extremes are not read at all: they
- * are recomputed from the copied counts, so the copy agrees with itself even
- * when completions land during the walk.
+ * hdr_record_value_atomic; a plain read of a count being incremented is a data
+ * race. `live`'s total and extremes are not read: they are recomputed from the
+ * copied counts, so the copy agrees with itself even when completions land
+ * during the walk.
  */
 void snapshot_histogram (const struct hdr_histogram& live, struct hdr_histogram& copy) {
     if (copy.counts_len != live.counts_len) {
@@ -272,12 +267,10 @@ uint64_t next_random () {
 }
 
 /**
- * @brief What applying a reservoir slot did with the candidate.
- *
- * Three outcomes rather than "did it cost a record": every caller counts a drop
- * for the two that are not `Appended`, but a caller holding a byte budget also
- * has to know *whose* bytes to give back - the incumbent's on `Displaced`, the
- * candidate's own on `Refused`.
+ * What applying a reservoir slot did with the candidate. Three outcomes, not
+ * "did it cost a record": every caller counts a drop for the two that are not
+ * `Appended`, but a caller holding a byte budget must also know whose bytes to
+ * give back, the incumbent's on `Displaced`, the candidate's on `Refused`.
  */
 enum class SlotOutcome : std::uint8_t {
     Appended,  ///< stored in a store that had room
@@ -286,18 +279,17 @@ enum class SlotOutcome : std::uint8_t {
 };
 
 /**
- * Apply a reservoir slot to a bounded store. Requires the store's mutex.
+ * Applies a reservoir slot to a bounded store. Requires the store's mutex.
  *
- * The slot is claimed outside the lock (that is what keeps the copy off the
- * critical section), so by the time the insert happens another thread may have
- * appended ahead of it - hence the size checks here rather than trusting the
- * slot's own append flag. Anything that lands on an occupied index displaces
- * the incumbent, which the caller counts as a drop.
+ * The slot is claimed outside the lock, keeping the copy off the critical
+ * section, so another thread may have appended ahead of it by now: hence the
+ * size checks here rather than trusting the slot's append flag. Anything
+ * landing on an occupied index displaces the incumbent, which the caller counts
+ * as a drop.
  *
- * @param value taken by reference and **swapped** on `Displaced`, so the caller
- *        is handed the record that left the store rather than having it
- *        destroyed here - which is the only place its size can still be read.
- *        Moved from on `Appended`, untouched on `Refused`.
+ * @param value taken by reference and swapped on `Displaced`, so the caller
+ *        gets the record that left the store, the only place its size can still
+ *        be read; moved from on `Appended`, untouched on `Refused`.
  */
 template <typename T>
 SlotOutcome
@@ -325,14 +317,12 @@ size_t held_body_bytes (const std::vector<ResponseSample>& samples) {
 }
 
 /**
- * Body bytes a settled insert gives back to the run's sample budget.
- *
- * The candidate was charged before it was copied, so what is released depends
- * on which record actually left the retained set: the incumbent `insert_at_slot`
- * swapped out on `Displaced`, and the candidate's own bytes on `Refused`. One
- * function because getting that backwards leaks budget in one direction and
- * double-refunds it in the other, and neither shows up as a wrong number until
- * a long run stops sampling.
+ * Body bytes a settled insert gives back to the run's sample budget. The
+ * candidate was charged before it was copied, so the release depends on which
+ * record left the retained set: the incumbent `insert_at_slot` swapped out on
+ * `Displaced`, the candidate on `Refused`. One function because getting it
+ * backwards leaks budget one way and double-refunds it the other, and neither
+ * shows as a wrong number until a long run stops sampling.
  */
 size_t reclaimed_bytes (SlotOutcome outcome, size_t candidate_bytes, const ResponseSample& leftover) {
     switch (outcome) {
@@ -349,17 +339,16 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
   second_histogram_ (new_latency_histogram ()),
   run_so_far_histogram_ (new_latency_histogram ()),
   level_histogram_ (new_latency_histogram ()) {
-    // Both sample rates are sampling *periods* - "keep 1 in N" - used as the
-    // right-hand side of a `%` in the hot record path and as a divisor in the
-    // reserve below. A 0 there is integer division by zero: a SIGFPE that takes
-    // the whole daemon down, from a field a caller can simply set to 0.
-    // POST /runs now rejects that (validate_run_config), and this clamp makes
-    // the collector safe for any caller, not just that one route.
+    // Both sample rates are periods ("keep 1 in N"), the right-hand side of a
+    // `%` on the hot path and a divisor in the reserve below. A 0 would be
+    // integer division by zero, a SIGFPE taking the daemon down. POST /runs
+    // rejects it (validate_run_config); this clamp makes the collector safe for
+    // any caller.
     config_.success_sample_rate = std::max (config_.success_sample_rate, size_t{ 1 });
     config_.response_sample_rate = std::max (config_.response_sample_rate, size_t{ 1 });
 
-    // Initialize HdrHistogram for lock-free latency recording
-    // 3 significant figures = ~0.1% precision, max 1 hour in microseconds
+    // Lock-free latency recording at 3 significant figures (~0.1% precision),
+    // up to 1 hour in microseconds.
     int result = hdr_init (1, // Minimum value (1 microsecond)
     constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US, // Maximum value (1 hour in microseconds)
     constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES, // Significant figures
@@ -368,9 +357,9 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
         throw std::runtime_error ("Failed to initialize HdrHistogram");
     }
 
-    // Windowed (rolling) percentile source. Same value range / precision as the
-    // cumulative histogram, but sampled-and-reset per tick so live percentiles
-    // reflect the recent window instead of the all-time distribution.
+    // The rolling-window source: the cumulative histogram's range and
+    // precision, sampled and reset per tick so live percentiles show the recent
+    // window, not the whole run.
     int interval_result = hdr_interval_recorder_init_all (&interval_recorder_,
     1, // Minimum value (1 microsecond)
     constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
@@ -382,13 +371,11 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
     }
     interval_recorder_ready_ = true;
 
-    // Per-phase bank, and the snapshot the gate frame reads it through.
-    // Allocated only when enabled, so "off" is a null pointer rather than a
-    // flag consulted per completion, and phase_percentiles() and the gate
-    // frame have nothing to report from. A partial failure closes what it
-    // built and leaves the bank null: the run is still fully measurable
-    // without phase percentiles, which is not true of the two histograms
-    // above.
+    // The per-phase bank and the snapshot the gate frame reads it through,
+    // allocated only when enabled, so "off" is a null pointer, not a flag read
+    // per completion. A partial failure closes what it built and leaves the
+    // bank null: a run is measurable without phase percentiles, unlike the two
+    // histograms above.
     if (config_.phase_histograms) {
         struct hdr_histogram* snapshot = nullptr;
         if (allocate_phase_bank (phase_histograms_, snapshot)) {
@@ -401,9 +388,8 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
         }
     }
 
-    // A streaming run's per-completion histograms. Allocated on the same
-    // "off is a null pointer" rule as the bank above; a failure to allocate
-    // one costs its distribution and nothing else, since the totals behind
+    // A streaming run's per-completion histograms, null when off as the bank
+    // above. A failed allocation costs its distribution only: the totals behind
     // events/sec are plain counters.
     if (config_.stream_metrics) {
         using constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US;
@@ -424,25 +410,23 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
         }
     }
 
-    // Pre-allocate vectors to avoid reallocation during test
     size_t expected = config_.expected_requests;
 
-    // Both reserves below are capped. They derive from `expected_requests`,
-    // which is duration x RPS and has no ceiling of its own, so a long run at a
-    // high rate asks for an allocation that simply cannot be served - and it
-    // throws from here, inside RunContext's constructor, which the route calls
-    // *after* it has written the run row. The caller sees an opaque 500 and the
-    // row sits `pending` forever. Capping only costs a reallocation on a run
-    // that big; the vectors still grow to whatever the run actually produces.
+    // Both reserves are capped. They derive from `expected_requests` (duration
+    // x RPS, no ceiling), so a long high-rate run would ask for an allocation
+    // that cannot be served, and it throws here, inside RunContext's
+    // constructor, which the route calls after writing the run row: the caller
+    // sees an opaque 500 and the row stays `pending` forever. The cap costs
+    // only a reallocation on such a run; the vectors still grow to what it
+    // produces.
     const size_t max_reserve = constants::metrics_collector::MAX_RESERVE_RECORDS;
 
-    // Reserve errors vector (assume ~5% error rate max)
+    // Errors: the cap, else ~5% of the expected requests.
     size_t error_reserve = config_.max_errors > 0 ?
     config_.max_errors :
     std::max (expected / 20U, size_t{ 10000 });
     errors_.reserve (std::min (error_reserve, max_reserve));
 
-    // Reserve success results if storing traces
     if (config_.store_success_traces) {
         size_t success_reserve = config_.max_success_results > 0 ?
         config_.max_success_results :
@@ -451,21 +435,19 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
     }
 
     // Slow-request records are captured whether or not timing breakdowns are
-    // stored - that is the whole point of a threshold - so this reserve is not
-    // conditional on store_success_traces. Unlimited (0) reserves nothing and
-    // lets the vector grow, as elsewhere.
+    // stored (that is a threshold's point), so this reserve does not depend on
+    // store_success_traces. Unlimited (0) reserves nothing.
     if (config_.max_slow_results > 0) {
         slow_results_.reserve (std::min (config_.max_slow_results, max_reserve));
     }
 
     // Exemplars are bounded by EXEMPLARS_PER_STATUS x distinct status codes,
-    // which is single digits on any real target, so the reserve is the store's
-    // own ceiling rather than anything derived from the request count.
+    // single digits on a real target, so the reserve is the store's ceiling,
+    // not derived from the request count.
     if (config_.capture_response_bodies && config_.max_exemplar_results > 0) {
         exemplar_results_.reserve (std::min (config_.max_exemplar_results, max_reserve));
     }
 
-    // Reserve response samples for script validation
     response_samples_.reserve (config_.max_response_samples);
 }
 
@@ -524,17 +506,16 @@ void MetricsCollector::record_latency_sample (double latency_ms, double queue_wa
     atomic_add_double (total_latency_sum_, latency_ms);
     atomic_add_double (total_queue_wait_sum_, queue_wait_ms);
 
-    // Record latency in both histograms. Every event-loop worker thread calls
-    // this on its own thread, so the atomic recorder API is required - the
-    // plain hdr_record_value / hdr_interval_recorder_record_value pair is a
-    // non-atomic `counts[i] += 1; total_count += 1`, which loses increments and
-    // tears min/max under concurrent writers.
-    // Convert milliseconds to microseconds for histogram precision; one value
-    // feeds both histograms, so they agree on a completion past the ceiling.
+    // Every event-loop worker records on its own thread, so the atomic recorder
+    // API is required: the plain hdr_record_value /
+    // hdr_interval_recorder_record_value pair is a non-atomic
+    // `counts[i] += 1; total_count += 1`, losing increments and tearing min/max
+    // under concurrent writers. One microsecond value feeds both histograms, so
+    // they agree on a completion past the ceiling.
     const int64_t latency_us = histogram_latency_us (latency_ms, 1);
     hdr_record_value_atomic (latency_histogram_, latency_us);
-    // Also feed the rolling-window recorder, the one source of every live and
-    // stored per-tick percentile.
+    // The rolling window, the one source of every live and stored per-tick
+    // percentile.
     hdr_interval_recorder_record_value_atomic (&interval_recorder_, latency_us);
 
     // Last, and release: it publishes the sums above to latency_samples().
@@ -545,10 +526,9 @@ bool MetricsCollector::claim_status_exemplar (int status_code) {
     if (!config_.capture_response_bodies) {
         return false;
     }
-    // Out-of-range codes share the last slot rather than taking a lock: a
-    // misbehaving proxy answering 999 still gets exemplars, they are just not
-    // per-code. Keeping this branch lock-free is the point - it runs on every
-    // completion, retained or not.
+    // Out-of-range codes share the last slot rather than take a lock: a proxy
+    // answering 999 still gets exemplars, just not per code. This branch runs
+    // on every completion, retained or not, so it stays lock-free.
     const int slot = (status_code >= 0 && status_code < STATUS_CODE_SLOTS - 1) ?
     status_code :
     STATUS_CODE_SLOTS - 1;
@@ -585,9 +565,9 @@ CapturedExchange MetricsCollector::capture_exchange (const Response& response) {
         return captured;
     }
 
-    // Charge the run budget before copying. fetch_add-then-refund rather than a
-    // CAS loop: the overshoot is bounded by one body per concurrent writer, and
-    // the budget is a memory guard, not an accounting figure.
+    // Charged before copying. fetch_add-then-refund, not a CAS loop: the
+    // overshoot is bounded by one body per concurrent writer, and the budget is
+    // a memory guard, not an accounting figure.
     const size_t before = captured_bytes_.fetch_add (want, std::memory_order_relaxed);
     if (before + want > config_.max_sample_bytes) {
         captured_bytes_.fetch_sub (want, std::memory_order_relaxed);
@@ -608,34 +588,31 @@ const std::string& trace_data,
 SuccessTraceReason trace_reason,
 const Response* capture_source,
 const Timing* phases) {
-    // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
 
-    // Track the per-code count (lock-free for in-range codes).
     record_status_code (status_code);
 
     record_latency_sample (latency_ms, queue_wait_ms);
 
-    // Per-phase bank, fed before the retention gate below and independently of
-    // it: a phase distribution drawn from the completions that happened to be
-    // sampled is the biased answer this bank exists to replace.
+    // Fed before the retention gate and independently of it: a phase
+    // distribution drawn only from the sampled completions is the biased answer
+    // this bank replaces.
     //
-    // A phase that did not happen still records its 0. That is not the same
-    // claim as "TLS was free" - a run over plain HTTP records five million
-    // zeroes into the TLS histogram and its p99 is 0, which is the truthful
-    // reading of "this run did no handshakes". The distinction a reader has to
-    // keep is present-vs-absent *section*: phase_percentiles() owns it for the
+    // A phase that did not happen still records its 0, which is not "TLS was
+    // free": a plain-HTTP run records millions of zeroes into the TLS histogram
+    // and its p99 of 0 truthfully says it did no handshakes. What a reader must
+    // keep is present-vs-absent section, owned by phase_percentiles() for the
     // report and put_gate_distributions() for the gate frame. Every recorded
     // phase is in the report's averages too (#2782), zeros included, which
-    // is what makes `avgTlsMs` the mean over every completion.
+    // makes `avgTlsMs` the mean over every completion.
     if (phases != nullptr && phase_histograms_[0] != nullptr) {
         const std::array<double, TIMING_PHASE_COUNT> values = { phases->dns_ms,
             phases->connect_ms, phases->tls_ms, phases->first_byte_ms, phases->download_ms };
         for (size_t i = 0; i < TIMING_PHASE_COUNT; ++i) {
-            // Clamped at 0 rather than at 1 like the latency histogram above:
-            // a 0ms phase is the common case (a reused connection does no DNS
-            // and no handshake), so flooring it to 1us would inflate every
-            // percentile of the phases that legitimately did not run.
+            // Clamped at 0, not 1 as latency is: a 0ms phase is common (a
+            // reused connection does no DNS and no handshake), and flooring it
+            // to 1us would inflate every percentile of the phases that did not
+            // run.
             hdr_record_value_atomic (
             phase_histograms_.at (i), histogram_latency_us (values.at (i), 0));
         }
@@ -646,9 +623,9 @@ const Timing* phases) {
         slow_total_.fetch_add (1, std::memory_order_relaxed);
     }
 
-    // Store the trace the caller built, in whichever budget asked for it. The
-    // sampling decision happened before the trace was serialised (see
-    // should_sample_success), so nothing is built here to be discarded.
+    // The trace the caller built, in the budget that asked for it. Sampling was
+    // decided before serialisation (should_sample_success), so nothing is built
+    // here to be discarded.
     if (trace_data.empty () || trace_reason == SuccessTraceReason::None) {
         return;
     }
@@ -657,16 +634,15 @@ const Timing* phases) {
     record.trace_data = trace_data;
 
     // Exemplars take the straight path: a fixed number per status code, kept
-    // until the store is full and then refused. No reservoir, because being
-    // retained is the only thing an exemplar is for.
+    // until the store is full, then refused. No reservoir, since being retained
+    // is all an exemplar is for.
     //
-    // A refusal here leaves its captured bytes charged to the run budget with
-    // no record to show for them. Left unrefunded deliberately: the budget is a
-    // memory ceiling rather than an accounting figure, over-counting it only
-    // makes capture stop sooner, and the alternative is holding the store's
-    // mutex across a body-sized copy. The gate above already bounds this to
-    // EXEMPLARS_PER_STATUS per status code, so it needs a target answering with
-    // more distinct codes than `max_exemplar_results` to happen at all.
+    // A refusal leaves its captured bytes charged to the run budget with no
+    // record. Deliberately unrefunded: the budget is a memory ceiling,
+    // over-counting only stops capture sooner, and refunding would hold the
+    // store's mutex across a body-sized copy. The gate above bounds this to
+    // EXEMPLARS_PER_STATUS per code, so it needs a target with more distinct
+    // codes than `max_exemplar_results`.
     if (trace_reason == SuccessTraceReason::Exemplar) {
         if (capture_source != nullptr) {
             record.capture = capture_exchange (*capture_source);
@@ -687,11 +663,11 @@ const Timing* phases) {
     auto& seen_counter = slow ? slow_seen_ : success_seen_;
     auto& dropped      = slow ? slow_dropped_ : success_dropped_;
 
-    // Whether to capture is the caller's call, not this store's: handle_result
-    // knows whether the completion was an outlier or a claimed exemplar, and a
-    // record can land in the sampled budget while still deserving a body.
-    // Deciding it from `trace_reason` here would make the two inseparable, and
-    // the store a record lands in is not what makes its body worth keeping.
+    // Capture is the caller's call: handle_result knows whether the completion
+    // was an outlier or a claimed exemplar, and a record can land in the
+    // sampled budget and still deserve a body. Deciding it from `trace_reason`
+    // would tie the two together, and the store a record lands in is not what
+    // makes its body worth keeping.
     const Response* capture = capture_source;
 
     if (capacity == 0) { // unlimited
@@ -727,15 +703,14 @@ const Timing* phases) {
 }
 
 bool MetricsCollector::should_sample_success () {
-    // The counter advances for every completion, sampled or not - it is what
-    // gives the period its meaning. Only the answer depends on the toggle.
+    // The counter advances on every completion, sampled or not, which gives the
+    // period its meaning; only the answer depends on the toggle.
     const size_t counter = success_sample_counter_.fetch_add (1, std::memory_order_relaxed);
     return config_.store_success_traces && counter % config_.success_sample_rate == 0;
 }
 
 void MetricsCollector::record_response_sample (const Response& response,
 SampleIdentity identity) {
-    // Only sample based on configured rate
     size_t counter = response_sample_counter_.fetch_add (1, std::memory_order_relaxed);
     if (counter % config_.response_sample_rate != 0) {
         return;
@@ -747,10 +722,8 @@ SampleIdentity identity) {
         return;
     }
 
-    // Claim a slot before copying anything. Past capacity most candidates are
-    // refused, and a refusal costs neither the body-sized copy below nor the
-    // mutex - which the old hard stop took on every sampled completion for the
-    // rest of the run, purely to find the buffer full.
+    // A slot is claimed before copying: past capacity most candidates are
+    // refused, and a refusal costs neither the body copy nor the mutex.
     const size_t seen = response_seen_.fetch_add (1, std::memory_order_relaxed);
     const ReservoirSlot slot = reservoir_slot (seen, capacity, next_random ());
     if (!slot.accepted) {
@@ -758,11 +731,10 @@ SampleIdentity identity) {
         return;
     }
 
-    // The run's byte budget, charged before the body-sized copy for the same
-    // reason the slot is claimed before it. A body that no longer fits drops
-    // the *whole* sample: truncating it here would hand the deferred script or
-    // schema pass a cut body and have it report a failure the target never
-    // produced (issue #1155).
+    // The run's byte budget is charged before the copy, as the slot is claimed.
+    // A body that no longer fits drops the whole sample: a cut body would make
+    // the deferred script or schema pass report a failure the target never
+    // produced (#1155).
     const size_t bytes = response.body.size ();
     if (!claim_response_sample_bytes (bytes)) {
         response_dropped_.fetch_add (1, std::memory_order_relaxed);
@@ -796,10 +768,9 @@ void MetricsCollector::configure_step_samples (const std::vector<bool>& sampled)
     const size_t read_steps =
     static_cast<size_t> (std::count (sampled.begin (), sampled.end (), true));
 
-    // The whole run budget across the steps a deferred pass will actually read,
-    // floored at one so a plan with more of them than slots still samples every
-    // one. See the header for why the floor is the deliberate over-run and not
-    // an oversight.
+    // The run budget split across the steps a deferred pass will read, floored
+    // at one so a plan with more such steps than slots still samples each; the
+    // header says why the floor's over-run is deliberate.
     const size_t per_step = read_steps == 0 ?
     0 :
     std::max<size_t> (1, config_.max_response_samples / read_steps);
@@ -826,16 +797,15 @@ SampleIdentity identity) {
         return;
     }
 
-    // Per step rather than per run: the run-wide counter would hand a plan's
-    // steps a rotating share of the 1-in-N period instead of each step keeping
-    // its own.
+    // Per step: the run-wide counter would give a plan's steps a rotating share
+    // of the 1-in-N period instead of each its own.
     const size_t counter = store.rate_counter.fetch_add (1, std::memory_order_relaxed);
     if (counter % config_.response_sample_rate != 0) {
         return;
     }
 
-    // Claim before copying, exactly as the run-level store does - a refusal
-    // must not cost a body-sized copy.
+    // Claimed before copying, as the run-level store does: a refusal must not
+    // cost a body copy.
     const size_t seen = store.seen.fetch_add (1, std::memory_order_relaxed);
     const ReservoirSlot slot = reservoir_slot (seen, store.capacity, next_random ());
     if (!slot.accepted) {
@@ -843,9 +813,9 @@ SampleIdentity identity) {
         return;
     }
 
-    // One budget for the whole run, not one per step: a plan's steps share the
-    // process the samples are resident in, so a hot step's bodies have to be
-    // spendable against the same ceiling the run-level store spends against.
+    // One budget for the whole run, not per step: the steps share the process
+    // the samples live in, so a hot step's bodies spend against the run-level
+    // store's ceiling.
     const size_t bytes = response.body.size ();
     if (!claim_response_sample_bytes (bytes)) {
         response_dropped_.fetch_add (1, std::memory_order_relaxed);
@@ -869,18 +839,17 @@ SampleIdentity identity) {
 }
 
 bool MetricsCollector::claim_response_sample_bytes (size_t bytes) {
-    // fetch_add-then-refund rather than a CAS loop, exactly as the capture
-    // budget does it (see capture_exchange): the overshoot is bounded by one
-    // body per concurrent writer, and a run that briefly reads its own budget
-    // as fuller than it is drops one more sample, which the counter discloses.
+    // fetch_add-then-refund, not a CAS loop, as the capture budget does
+    // (capture_exchange): the overshoot is bounded by one body per concurrent
+    // writer, and a run briefly reading its budget as fuller than it is drops
+    // one more sample, which the counter discloses.
     const size_t before =
     response_sample_bytes_.fetch_add (bytes, std::memory_order_relaxed);
     if (before + bytes > config_.max_response_sample_bytes) {
         response_sample_bytes_.fetch_sub (bytes, std::memory_order_relaxed);
-        // Recorded here rather than at the two call sites, so a third store
-        // spending the same budget cannot forget to say so. This refusal is
-        // the whole of what makes the retained set non-uniform - see
-        // response_sample_budget_spent().
+        // Recorded here, not at the two call sites, so a third store spending
+        // the budget cannot forget. This refusal is all that makes the retained
+        // set non-uniform (response_sample_budget_spent()).
         response_budget_spent_.store (true, std::memory_order_relaxed);
         return false;
     }
@@ -895,11 +864,10 @@ void MetricsCollector::release_response_sample_bytes (size_t bytes) {
 }
 
 void MetricsCollector::release_response_samples () {
-    // Each store gives back exactly what it held, rather than the budget being
-    // zeroed: a store zeroed here and a completion still unwinding its own
-    // refund would take the counter below zero, and a size_t below zero is a
-    // budget of 1.8e19 - the bound off, silently, in the one window where
-    // nothing else would notice.
+    // Each store gives back exactly what it held rather than the budget being
+    // zeroed: a zeroing beside a completion still unwinding its refund would
+    // take the counter below zero, and a size_t below zero is a budget of
+    // 1.8e19, the bound silently off.
     {
         std::lock_guard<std::mutex> lock (response_samples_mutex_);
         release_response_sample_bytes (held_body_bytes (response_samples_));
@@ -927,7 +895,6 @@ const std::string& message,
 const std::string& trace_data,
 const Response* capture_source,
 std::optional<AttemptDuration> attempt) {
-    // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
     const size_t error_index = total_errors_.fetch_add (1, std::memory_order_relaxed);
     // A code outside the enum cannot name a type; slot 0 (None) reads "unknown".
@@ -935,27 +902,26 @@ std::optional<AttemptDuration> attempt) {
     const size_t slot    = type_slot < ERROR_CODE_COUNT ? type_slot : 0;
     error_type_counts_.at (slot).fetch_add (1, std::memory_order_relaxed);
 
-    // Transport errors (timeout, connection, DNS, …) carry no HTTP status, so
-    // bucket them under code 0. This keeps the status-code distribution summing
-    // to total_requests - the dashboard breakdown reconciles with the headline
-    // count, and the report's failed/errorRate tallies (recomputed from the
-    // distribution) account for them instead of silently dropping to zero.
+    // Transport errors (timeout, connection, DNS, ...) carry no HTTP status, so
+    // they count under code 0. The distribution then sums to total_requests:
+    // the dashboard breakdown reconciles with the headline count, and the
+    // report's failed/errorRate tallies, recomputed from the distribution,
+    // include them.
     record_status_code (0);
 
     if (attempt) {
         record_latency_sample (attempt->latency_ms, attempt->queue_wait_ms);
     }
 
-    // Store the error record while the store has room. Past the cap the record
-    // is dropped but counted - total_errors_ and the status-code distribution
-    // above stay exact, so only the per-error detail is lost. Without the cap a
-    // fully-failing target grows this vector for the life of the run and then
-    // flushes it as an enormous write.
-    // Copy the exchange before taking the store's mutex, so a body-sized copy
-    // never lengthens a critical section every failing completion queues on.
-    // `error_index` is this call's position in the error sequence, and the
-    // store admits the first `max_errors` of exactly that sequence, so this
-    // predicate and the one under the lock agree without a second counter.
+    // Error records are stored while the store has room; past the cap a record
+    // is dropped but counted, so total_errors_ and the distribution stay exact
+    // and only the detail is lost. Uncapped, a fully-failing target grows this
+    // vector all run and then flushes it as one enormous write. The exchange is
+    // copied before taking the store's mutex, so a body copy never lengthens a
+    // critical section every failing completion queues on. `error_index` is
+    // this call's place in the error sequence, and the store admits the first
+    // `max_errors` of that sequence, so this predicate and the one under the
+    // lock agree without a second counter.
     std::optional<CapturedExchange> captured;
     if (capture_source != nullptr &&
     (config_.max_errors == 0 || error_index < config_.max_errors)) {
@@ -978,8 +944,8 @@ std::optional<AttemptDuration> attempt) {
         }
     }
 
-    // Log once, outside the lock, so a capped run leaves a trace instead of
-    // silently truncating its error list.
+    // Logged once, outside the lock, so a capped run says its error list was
+    // truncated.
     if (first_drop) {
         vayu::utils::log_warning ("run",
         "Run " + run_id_ + ": error store full at " + std::to_string (config_.max_errors) +
@@ -994,6 +960,19 @@ std::map<std::string, size_t> MetricsCollector::error_type_counts () const {
         if (count > 0) {
             counts[error_type_name (static_cast<ErrorCode> (slot))] += count;
         }
+    }
+    return counts;
+}
+
+McpErrorCounts MetricsCollector::error_class_counts () const {
+    McpErrorCounts counts;
+    for (size_t slot = 0; slot < McpErrorCounts::CLASS_COUNT; ++slot) {
+        counts.classes.at (slot) =
+        error_class_counts_.at (slot).load (std::memory_order_relaxed);
+    }
+    for (size_t slot = 0; slot < McpErrorCounts::CODE_SLOT_COUNT; ++slot) {
+        counts.protocol_codes.at (slot) =
+        protocol_code_counts_.at (slot).load (std::memory_order_relaxed);
     }
     return counts;
 }
@@ -1036,10 +1015,9 @@ MetricsCollector::Percentiles MetricsCollector::calculate_percentiles () {
 
 std::optional<std::array<MetricsCollector::Percentiles, TIMING_PHASE_COUNT>>
 MetricsCollector::phase_percentiles () const {
-    // The five are allocated and fed together, so the first answers for all of
-    // them: a null bank is the toggle off, an empty one is a run where nothing
-    // successful completed. Both are "no distribution to report", which is
-    // what the absent section says.
+    // The five are allocated and fed together, so the first answers for all: a
+    // null bank is the toggle off, an empty one a run where nothing succeeded.
+    // Both mean no distribution, which the absent section says.
     if (phase_histograms_[0] == nullptr || phase_histograms_[0]->total_count == 0) {
         return std::nullopt;
     }
@@ -1290,9 +1268,8 @@ const MetricsCollector::Percentiles& interval) {
 
 void MetricsCollector::record_stream_completion (const StreamCompletion& completion) {
     if (!config_.stream_metrics) {
-        // Off means the report has no `stream` section at all, not a section of
-        // zeros - so the counters behind it must not tick either. Checked here
-        // rather than at the call site because this is the one place that knows
+        // Off means no `stream` section at all, not a section of zeros, so its
+        // counters must not tick either. Checked here, the one place that knows
         // what the toggle governs.
         return;
     }
@@ -1348,12 +1325,11 @@ MetricsCollector::Percentiles MetricsCollector::sample_window_percentiles () {
         return {};
     }
 
-    // Sample-and-recycle: hand back the histogram that has been accumulating since
-    // the previous call and swap in a fresh (reset) one for the next window. Safe
-    // to call concurrently with the recording writers via the phaser; must be
-    // driven by a single reader thread only (the metrics producer). The returned
-    // pointer is owned by the recorder and valid until the next sample, so the
-    // merges below happen now or never.
+    // Sample-and-recycle: returns the histogram accumulating since the last
+    // call and swaps in a reset one. Safe beside the recording writers via the
+    // phaser, but for one reader thread only (the metrics producer). The
+    // pointer is the recorder's and valid until the next sample, so the merges
+    // below happen now or never.
     struct hdr_histogram* interval = hdr_interval_recorder_sample (&interval_recorder_);
     if (interval == nullptr || interval->total_count == 0) {
         return {}; // empty window → zeros
@@ -1406,7 +1382,7 @@ void MetricsCollector::record_status_code (int status_code) {
         status_seconds_.record (status_code, steady_now_ms () - load_start);
     }
     if (status_code >= 0 && status_code < STATUS_CODE_SLOTS) {
-        // Hot path: single relaxed atomic increment, no lock.
+        // Hot path: one relaxed increment, no lock.
         status_code_counts_.at (static_cast<size_t> (status_code)).fetch_add (1, std::memory_order_relaxed);
         return;
     }
@@ -1477,10 +1453,9 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
     std::vector<db::Result> batch;
     std::vector<db::PendingResultBody> bodies;
 
-    // Turn a record's captured exchange into a row for `result_bodies`. This is
-    // where the expensive half of capture lives - JSON, binary detection and
-    // hashing - deliberately after load generation has stopped rather than
-    // inline in the completion drain (see CapturedExchange).
+    // A record's captured exchange as a `result_bodies` row. Capture's
+    // expensive half (JSON, binary detection, hashing) lives here, after load
+    // generation has stopped, not in the completion drain (CapturedExchange).
     auto collect_capture = [&] (const ResultRecord& record) {
         if (!record.capture.has_value ()) {
             return;
@@ -1512,7 +1487,6 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
         bodies.push_back (std::move (pending));
     };
 
-    // Collect all error records
     {
         std::lock_guard<std::mutex> lock (errors_mutex_);
         batch.reserve (errors_.size () + success_results_.size ());
@@ -1531,9 +1505,8 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
         }
     }
 
-    // Collect sampled success records, the slow-request outliers and the
-    // per-status exemplars. Three budgets in memory, one table on disk: a
-    // stored row is a stored row, and the report tells them apart by the
+    // Sampled successes, slow outliers and per-status exemplars: three budgets
+    // in memory, one table on disk, the report telling them apart by the
     // trace's `isSlow` marker.
     {
         std::lock_guard<std::mutex> lock (success_mutex_);
@@ -1543,9 +1516,9 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
                 db_result.run_id      = run_id_;
                 db_result.timestamp   = success.timestamp;
                 db_result.status_code = success.status_code;
-                // ResultRecord doesn't carry the wire reason phrase; derive
-                // from code via the shared helper. The single-request design
-                // path (execution.cpp) preserves the wire phrase directly.
+                // ResultRecord carries no wire reason phrase, so it is derived
+                // from the code; the design path (execution.cpp) keeps the wire
+                // phrase.
                 db_result.status_text = vayu::http::status_text (success.status_code);
                 db_result.latency_ms = success.latency_ms;
                 db_result.trace_data = success.trace_data;
@@ -1581,14 +1554,13 @@ int64_t MetricsCollector::latency_count () const {
 size_t MetricsCollector::memory_usage_bytes () const {
     size_t bytes = sizeof (MetricsCollector);
 
-    // HdrHistogram memory (fixed size ~20-40KB)
+    // HdrHistogram memory (a fixed ~20-40KB).
     if (latency_histogram_ != nullptr) {
         bytes += hdr_get_memory_size (latency_histogram_);
     }
 
-    // A record's captured exchange, when it has one. Counted here rather than
-    // assumed small: bodies are what make a retained record expensive, and the
-    // whole-run budget is only a ceiling, not a measurement.
+    // Counted, not assumed small: bodies are what make a retained record
+    // expensive, and the run budget is only a ceiling, not a measurement.
     auto capture_bytes = [] (const ResultRecord& record) -> size_t {
         if (!record.capture.has_value ()) {
             return 0;
@@ -1601,7 +1573,6 @@ size_t MetricsCollector::memory_usage_bytes () const {
         return record_bytes;
     };
 
-    // Errors vector
     {
         std::lock_guard<std::mutex> lock (errors_mutex_);
         bytes += errors_.capacity () * sizeof (ResultRecord);
@@ -1611,7 +1582,6 @@ size_t MetricsCollector::memory_usage_bytes () const {
         }
     }
 
-    // Success, slow-request and exemplar result vectors
     {
         std::lock_guard<std::mutex> lock (success_mutex_);
         for (const auto* store : { &success_results_, &slow_results_, &exemplar_results_ }) {
@@ -1631,11 +1601,10 @@ size_t requests_sent,
 size_t requests_expected,
 const std::map<int, size_t>* status_snapshot,
 const Percentiles* window_percentiles) const {
-    // Snapshot the status-code distribution once: reuse the caller's snapshot
-    // when provided (the metrics tick takes one snapshot and feeds it to both
-    // the SSE builder and the persisted-rows builder), otherwise compute it.
-    // The error counts, the class breakdown and the full map below all derive
-    // from this single copy - no second scan.
+    // One status-code snapshot: the caller's when given (the metrics tick feeds
+    // one to both the SSE builder and the persisted-rows builder), otherwise
+    // taken here. The error counts, class breakdown and full map below all
+    // derive from it.
     std::map<int, size_t> local_dist;
     const std::map<int, size_t>& dist = status_snapshot != nullptr ?
     *status_snapshot :
@@ -1650,12 +1619,11 @@ const Percentiles* window_percentiles) const {
     const size_t success = total - failures.failed; // failed is a part of total
     double avg_lat       = average_latency ();
 
-    // Calculate rate metrics (Open Model)
-    // Send Rate: How fast Vayu is dispatching requests to the server
+    // Open model: the send rate is how fast Vayu dispatches requests.
     double send_rate =
     elapsed_seconds > 0 ? static_cast<double> (requests_sent) / elapsed_seconds : 0.0;
 
-    // Throughput: How fast the server is responding (completed requests)
+    // Throughput: how fast the server completes them.
     double throughput =
     elapsed_seconds > 0 ? static_cast<double> (total) / elapsed_seconds : 0.0;
 
@@ -1673,14 +1641,13 @@ const Percentiles* window_percentiles) const {
     stats["activeConnections"] = current_active;
     stats["elapsedSeconds"]    = elapsed_seconds;
 
-    // Run progress - feeds the dashboard ETA stat for closed-ended modes
-    // (iterations). requests_expected is 0 for open-ended modes (constant_rps).
+    // Run progress for the dashboard ETA of closed-ended modes (iterations);
+    // requests_expected is 0 for open-ended ones (constant_rps).
     stats["requestsSent"]     = requests_sent;
     stats["requestsExpected"] = requests_expected;
 
-    // Status code class breakdown. The dedicated class atomics were removed to
-    // keep the hot path a single increment; classes are derived here. Code 0
-    // (transport errors) and out-of-range codes belong to no class bucket.
+    // Class breakdown, derived here to keep the hot path one increment. Code 0
+    // (transport errors) and out-of-range codes are in no class.
     size_t s2xx = 0, s3xx = 0, s4xx = 0, s5xx = 0;
     for (const auto& [code, count] : dist) {
         if (code >= 200 && code < 300)
@@ -1701,21 +1668,19 @@ const Percentiles* window_percentiles) const {
     stats["stalledMs"]       = stalled_ms ();
     stats["avgQueueWaitMs"]  = average_queue_wait ();
 
-    // A streaming run's events so far and its open streams (#3236), counted
-    // as the events arrive, so a run of long streams is not blank until the
-    // first one ends. Open streams are the streaming transfers alone (#3304),
-    // never `current_active`, which also counts a collection run's ordinary
-    // steps. Absent rather than zero on every other run, the report's
-    // `stream` rule.
+    // A streaming run's events so far and open streams (#3236), counted as
+    // events arrive so a run of long streams is not blank until one ends. Open
+    // streams are the streaming transfers alone (#3304), not `current_active`,
+    // which also counts a collection run's ordinary steps. Absent, not zero, on
+    // other runs: the report's `stream` rule.
     if (live_streams_ != nullptr) {
         stats["streamEvents"] = live_streams_->events.load (std::memory_order_relaxed);
         stats["streamsOpen"] = live_streams_->open.load (std::memory_order_relaxed);
     }
 
-    // This run's custom metrics so far (issue #1500), on the same tick the
-    // built-in phases ride rather than a second endpoint - they advance on
-    // the same cadence. Absent for a run that has recorded none yet, the
-    // same rule the report's section follows.
+    // Custom metrics so far (#1500), on the tick the built-in phases ride,
+    // since they advance on the same cadence; absent for a run that has
+    // recorded none, as in the report.
     if (auto custom = custom_metric_summaries ()) {
         stats["customMetrics"] = build_custom_metrics_payload (*custom);
     }
@@ -1731,9 +1696,8 @@ const Percentiles* window_percentiles) const {
     stats["bytesSent"]     = total_bytes_sent ();
     stats["bytesReceived"] = total_bytes_received ();
 
-    // Full status-code map (same shape the stored time-series carries), so the
-    // app maps one shape for both live and history. Derived from the same
-    // single snapshot as the class breakdown above.
+    // The full status-code map, in the stored time-series' shape so the app
+    // maps live and history alike, from the same snapshot as the breakdown.
     nlohmann::json codes = nlohmann::json::object ();
     for (const auto& [code, count] : dist) {
         codes[std::to_string (code)] = count;

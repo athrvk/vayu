@@ -9,15 +9,11 @@ import { Callout } from "@/components/shared";
 import { deferredTokens } from "@/lib/deferred-note";
 
 /**
- * Says a load run's OAuth 2.0 token is acquired once, before any script, from
- * the stored values (#2742), when a pre-request script may change a name the
- * config uses. A Send resolves the config after the script, so the same request
- * behaves differently there and the user has no other way to learn it.
- *
- * The names are the ones the engine deferred, which says a script *runs*, not
- * that it writes the name - hence "may be changed".
- *
- * Renders nothing for an empty @p names.
+ * Says a load run acquires its OAuth 2.0 token once, before any script, from stored values (#2742),
+ * when a pre-request script may change a name the config uses. A Send resolves the config after the
+ * script, so the request behaves differently there and nothing else tells the user. The names are
+ * the engine's deferred ones, which say a script *runs*, not that it writes them; hence "may be
+ * changed". Renders nothing for empty @p names.
  */
 export function OAuth2DeferredNote({ names }: { names: readonly string[] }) {
 	if (names.length === 0) return null;

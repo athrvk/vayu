@@ -6,20 +6,16 @@
  */
 
 /**
- * @file extract_kinds.cpp
- * @brief `extract.json`, `extract.regex`, `extract.header` (issue #1514),
- *        `extract.boundary` (issue #1518, JMeter's Boundary Extractor).
+ * `extract.json`, `extract.regex`, `extract.header` (#1514) and
+ * `extract.boundary` (#1518, JMeter's Boundary Extractor).
  *
- * All three run in `step.after` (they read the response) and share one write
- * convention: `matchNo` picks among however many matches a step produced -
- * 1-based ("the first match" is 1, not 0, JMeter's own convention), `0` picks
- * one at random, `-1` writes every match as `<variable>_1` .. `<variable>_N`
- * plus a `<variable>_matchNr` count. A miss writes `default` when the config
- * gives one, else unsets the variable (#3053) and reports `"missing"`, and -
- * only when `required` is set - also appends a failed assertion to the step's
- * test tally, the same channel `assert_kinds.cpp` uses, so a required
- * extractor participating in a step's pass/fail is one mechanism rather than
- * two.
+ * All run in `step.after` and share one write convention. `matchNo` picks among
+ * a step's matches: 1-based (JMeter's convention), `0` one at random, `-1`
+ * every match as `<variable>_1` .. `<variable>_N` plus a `<variable>_matchNr`
+ * count. A miss writes `default` when the config gives one, else unsets the
+ * variable (#3053) and reports `"missing"`; only when `required` is set does it
+ * also append a failed assertion to the step's tests, the channel
+ * `assert_kinds.cpp` uses.
  */
 
 #include "vayu/core/element_defaults.hpp"
@@ -139,10 +135,9 @@ ToText to_text) {
 }
 
 // ---------------------------------------------------------------------------
-// extract.json - a JSONPath subset: `$.a.b`, `['a b']`, `[n]`, `[*]`, `..name`.
-// Filters (`[?...]`) are refused at validate by the kind's `validate_config`.
-// The subset itself lives in `json_path.{hpp,cpp}`, shared with
-// `assert.jsonpath` below.
+// extract.json - a JSONPath subset (`$.a.b`, `['a b']`, `[n]`, `[*]`,
+// `..name`), shared with `assert.jsonpath` through `json_path.{hpp,cpp}`.
+// `validate_config` refuses filters (`[?...]`).
 // ---------------------------------------------------------------------------
 
 class ExtractJsonElement final : public Element {
@@ -342,13 +337,10 @@ class ExtractHeaderElement final : public Element {
 };
 
 // ---------------------------------------------------------------------------
-// extract.boundary - JMeter's Boundary Extractor: everything between the
-// first occurrence of `leftBoundary` and the next occurrence of
-// `rightBoundary`, on the response body. Only `body` is a field here, unlike
-// `extract.regex`'s four: JMeter's own Boundary Extractor takes no field
-// selector either - it is a text-splice tool for a response body (or a JMeter
-// variable, which Vayu already generalizes to any prior extractor's output),
-// not a general-purpose field reader.
+// extract.boundary - JMeter's Boundary Extractor: the body text between the
+// first `leftBoundary` and the next `rightBoundary`. Body only, unlike
+// `extract.regex`'s four fields: JMeter's takes no field selector either (its
+// variable source is, in Vayu, any prior extractor's output).
 // ---------------------------------------------------------------------------
 
 class ExtractBoundaryElement final : public Element {

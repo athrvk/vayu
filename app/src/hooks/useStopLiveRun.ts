@@ -46,14 +46,11 @@ async function stopDashboardRun(runId: string): Promise<void> {
 }
 
 /**
- * A run no dashboard owns: a collection run, or a History tab's run with no
- * stream of its own.
- *
- * A tab attached to the run's stream hears the end again through `complete`,
- * and its service refreshes these keys on close. A tab that is *not* attached
- * gets no such event, so without this its run would sit on "running" - still
- * offering a Stop for something already stopped, and never loading what the run
- * just wrote.
+ * A run no dashboard owns: a collection run, or a History tab's run with no stream of its own. A
+ * tab attached to the run's stream hears the end again through `complete`, and its service
+ * refreshes these keys on close; a tab that is *not* attached gets no such event, so without this
+ * its run would sit on "running", still offering a Stop for something already stopped and never
+ * loading what the run just wrote.
  */
 async function stopRunAndRefresh(runId: string): Promise<void> {
 	await apiService.stopRun(runId);
@@ -64,14 +61,13 @@ async function stopRunAndRefresh(runId: string): Promise<void> {
 }
 
 /**
- * Stop the live run a `RunningRun` names, the run id supplied per call: the
- * Run Collection dialog's Stop (#3381) learns which run it holds only from the
- * gate, and the dashboard's own Stop is the same call.
+ * Stop the live run a `RunningRun` names, the run id supplied per call: the Run Collection dialog's
+ * Stop (#3381) learns which run it holds only from the gate, and the dashboard's own Stop is the
+ * same call.
  *
- * `stop` resolves once the stop and what follows it are done and never throws.
- * A failure is a toast with a retry: the run is still sending requests, so the
- * retry is the reason for telling them at all, and without it a click that
- * failed is indistinguishable from one that did nothing.
+ * `stop` resolves once the stop and what follows it are done, and never throws. A failure is a
+ * toast with a retry: the run is still sending requests, so the retry is the reason for telling
+ * them at all, and without it a failed click is indistinguishable from one that did nothing.
  */
 export function useStopLiveRun(): {
 	stop: (running: RunningRun) => Promise<void>;

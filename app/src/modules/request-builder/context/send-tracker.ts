@@ -6,24 +6,14 @@
  */
 
 /**
- * Which send of each request is in flight (#3352).
- *
- * One `RequestBuilderProvider` serves every request tab, so "is a send in
- * flight" is a question about a request, not about the builder: switching away
- * from a request mid-send and back must find it still sending. Each send is
- * numbered when it starts, and its finish and its response count only while
- * that number is still the request's current one. A send overtaken by a newer
- * send of the same request can therefore neither clear the newer one's
- * "Sending…" nor land its answer over the newer one's.
- *
- * A request with no entry is idle. Every send ends in `finish` (the provider
- * calls it from a `finally`) or in `cancel`, so an entry never outlives its
- * send and the map needs no pruning against the open tabs.
- *
- * Closure state rather than React state, for the same reason as
- * `createAltTapWatcher`: the send's own `await` is what reads it back, and a
- * closure is the one place that is current across that `await`. `onChange`
- * hands each new map to whatever renders it.
+ * Which send of each request is in flight (#3352). One `RequestBuilderProvider` serves every
+ * request tab, so "in flight" is per request: leaving mid-send and returning must find it still
+ * sending. Each send is numbered at start, and its finish and response count only while that number
+ * is the request's current one, so an overtaken send can neither clear the newer one's "Sending…"
+ * nor land its answer over it. No entry is idle; every send ends in `finish` (the provider's
+ * `finally`) or `cancel`, so no entry outlives its send and no pruning is needed. Closure state,
+ * not React state, as `createAltTapWatcher` is: the send's own `await` reads it back, and a closure
+ * is current across that `await`; `onChange` hands each new map to the renderer.
  */
 
 /** One request's send in flight. */
@@ -51,17 +41,15 @@ export interface SendTicket {
 export interface SendTracker {
 	begin(key: string, options?: { cancellable?: boolean }): SendTicket;
 	/**
-	 * Abort the request's cancellable send and return the request to idle at
-	 * once. The cancelled ticket stops being current, so its answer is dropped
-	 * and its own `finish` is a no-op, like an overtaken send's.
+	 * Abort the request's cancellable send and make it idle at once. The cancelled ticket is no
+	 * longer current, so its answer is dropped and its `finish` is a no-op, as an overtaken send's.
 	 */
 	cancel(key: string): void;
 }
 
 export function createSendTracker(onChange: (sends: InFlightSends) => void): SendTracker {
 	let sends: InFlightSends = NO_SENDS;
-	// Beside `sends` rather than in it: `sends` is what renders, and a
-	// controller is nothing a render reads.
+	// Beside `sends`, not in it: `sends` is rendered, and a controller is nothing a render reads.
 	const controllers = new Map<string, AbortController>();
 	let lastSendId = 0;
 

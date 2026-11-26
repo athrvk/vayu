@@ -8,14 +8,7 @@
  */
 
 /**
- * @file platform.hpp
  * @brief Cross-platform abstraction layer for OS-specific operations
- *
- * This header provides platform-independent interfaces for:
- * - Process management (PID, signals)
- * - File locking (single instance)
- * - Directory operations
- * - Signal handling
  */
 
 #include <chrono>
@@ -29,7 +22,6 @@
 #include <system_error>
 #include <vector>
 
-// Platform detection macros
 // Macros, not an enum: every consumer is a preprocessor conditional
 // (`#if VAYU_PLATFORM_WINDOWS`), which an enum cannot serve.
 // NOLINTBEGIN(modernize-macro-to-enum)
@@ -117,13 +109,13 @@ enum class LockAcquisition : std::uint8_t {
  * @return What is held; `Refused` leaves nothing open
  *
  * POSIX: `flock` on the directory containing @p path, then on the file. The
- * guard has to be the directory (issue #2422): a `flock` lives on an inode, so
- * once something unlinks the file, a newcomer's `O_CREAT` makes a new inode
- * whose lock is free. Re-checking the path's inode after locking would not
- * help, because only the holder could run that check, never the newcomer. The
- * file is still locked so an engine older than the directory lock, which takes
- * only the file, and this one exclude each other. Windows: the file is opened
- * with share mode 0, so it cannot be deleted while held, and byte-locked.
+ * guard has to be the directory (#2422): a `flock` lives on an inode, so once
+ * something unlinks the file, a newcomer's `O_CREAT` makes a new inode whose
+ * lock is free. Re-checking the path's inode after locking would not help,
+ * because only the holder could run that check, never the newcomer. The file is
+ * still locked so an engine older than the directory lock, which takes only the
+ * file, and this one exclude each other. Windows: the file is opened with share
+ * mode 0, so it cannot be deleted while held, and byte-locked.
  */
 [[nodiscard]] LockAcquisition acquire_file_lock (const std::string& path, LockHandle& handle);
 
@@ -143,8 +135,7 @@ bool write_pid_to_lock (LockHandle handle);
 bool read_pid_from_lock (const std::string& path, int& pid);
 
 /**
- * @brief Release a previously acquired file lock, the file before the
- *        directory on POSIX
+ * @brief Release the file lock, the file before the directory on POSIX
  * @param handle Lock handle from acquire_file_lock, invalid afterwards
  */
 void release_file_lock (LockHandle& handle);
@@ -320,19 +311,14 @@ void close_file (ReadOnlyFile file);
 // Signal Handling
 // ============================================================================
 
-/**
- * @brief Callback type for shutdown signals
- */
 using ShutdownCallback = std::function<void (bool force)>;
 
 /**
  * @brief Set up signal handlers for graceful shutdown
  * @param callback Function to call when shutdown signal is received
  *
- * On Unix: Handles SIGINT and SIGTERM
- * On Windows: Handles CTRL+C and CTRL+BREAK via SetConsoleCtrlHandler
- *
- * The callback receives 'force=true' on second signal (force quit)
+ * POSIX: SIGINT and SIGTERM. Windows: CTRL+C and CTRL+BREAK, via
+ * `SetConsoleCtrlHandler`. A second signal calls back with `force` true.
  */
 void setup_signal_handlers (ShutdownCallback callback);
 
@@ -364,8 +350,8 @@ std::string path_join (const std::string& base, const std::string& component);
  * @brief The data directory a binary uses when nothing names one.
  * @return `./data`, adjacent to wherever the binary was started from.
  *
- * Shared by `vayu-engine` and `vayu-cli` (issue #1557) so a log file each
- * writes with no `--data-dir` of its own lands under the same tree, telling
+ * Shared by `vayu-engine` and `vayu-cli` (#1557) so a log file each writes with
+ * no `--data-dir` of its own lands under the same tree, telling
  * `engine_<stamp>.log` and `cli_<stamp>.log` apart by prefix rather than by
  * directory.
  */
@@ -413,7 +399,7 @@ std::string home_directory ();
  *
  * Windows' default timer resolution is ~15.6 ms, and `timeBeginPeriod (1)`
  * lowers it to 1 ms. Two consumers need that, and **both live only while a run
- * is sending** (issue #1161):
+ * is sending** (#1161):
  *
  * - the event loop's `curl_multi_poll (..., POLL_TIMEOUT_MS)`, which asks for a
  *   1 ms wait per iteration and gets ~15.6 ms without this;
@@ -424,11 +410,11 @@ std::string home_directory ();
  * So the request is scoped to runs and not to the process: the sidecar is
  * resident for the whole app session and idle for almost all of it, and a
  * process-lifetime request is the classic Windows battery finding. The holder
- * is the event loop itself (`detail::EventLoopImpl`), which exists only while
- * a run is sending and is destroyed by `release_execution_resources` as the
- * run is retained - so nothing has to remember to give the request back, and
- * a design-mode scenario run, which sends sequentially and builds no loop,
- * never asks for it.
+ * is the event loop itself (`detail::EventLoopImpl`), which exists only while a
+ * run is sending and is destroyed by `release_execution_resources` as the run
+ * is retained - so nothing has to remember to give the request back, and a
+ * design-mode scenario run, which sends sequentially and builds no loop, never
+ * asks for it.
  *
  * Nesting is safe: the underlying request is refcounted, taken by the first
  * holder and released by the last, under a mutex - the count and the OS call
@@ -471,34 +457,37 @@ class HighResolutionTimerScope {
 [[nodiscard]] bool pin_current_thread (unsigned cpu_index);
 
 /**
- * @brief Raise the calling thread's scheduling priority a modest amount, best-effort.
+ * @brief Raise the calling thread's scheduling priority a modest amount,
+ *        best-effort.
  * @return true if the OS accepted the request, false otherwise (never throws).
  *
- * Deliberately NOT realtime (SCHED_FIFO/SCHED_RR on Linux, THREAD_TIME_CONSTRAINT_POLICY
- * everywhere): this engine shares the machine with the app it is a sidecar for and
- * the target under test, and a realtime thread that misbehaves can starve both.
- * Windows: THREAD_PRIORITY_ABOVE_NORMAL. Linux: a `nice` adjustment only (SCHED_FIFO
- * needs CAP_SYS_NICE, usually absent in a container, and would starve the UI/target
- * on a shared box even when granted). macOS: THREAD_PRECEDENCE_POLICY, not a
- * time-constraint policy (that one really is closer to realtime).
+ * Deliberately NOT realtime (SCHED_FIFO/SCHED_RR on Linux,
+ * THREAD_TIME_CONSTRAINT_POLICY on macOS): this engine shares the machine with
+ * the app it is a sidecar for and the target under test, and a realtime thread
+ * that misbehaves can starve both. Windows: THREAD_PRIORITY_ABOVE_NORMAL.
+ * Linux: a `nice` adjustment only (SCHED_FIFO needs CAP_SYS_NICE, usually
+ * absent in a container, and would starve the UI/target on a shared box even
+ * when granted). macOS: THREAD_PRECEDENCE_POLICY, not a time-constraint policy
+ * (that one really is closer to realtime).
  */
 [[nodiscard]] bool raise_current_thread_priority ();
 
 /**
- * @brief Sleep until `deadline`, using the platform's most precise wait primitive.
+ * @brief Sleep until `deadline`, using the platform's most precise wait
+ *        primitive.
  * @param deadline An absolute steady_clock time point.
  *
- * Linux: clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...) - absolute rather than
- * relative, so it carries no "time already spent computing the duration" error the
- * way sleep_for's relative arithmetic does. macOS: mach_wait_until (no clock_nanosleep
- * there). Windows: falls back to sleep_for's relative form - the precision problem
- * there is solved separately (HighResolutionTimerScope + the caller's own spin tail),
- * not by this function; this exists for Linux/macOS.
+ * Linux: clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...) - absolute rather
+ * than relative, so it carries no "time already spent computing the duration"
+ * error the way sleep_for's relative arithmetic does. macOS: mach_wait_until
+ * (no clock_nanosleep there). Windows: falls back to sleep_for's relative form;
+ * the precision there comes from HighResolutionTimerScope and the caller's own
+ * spin tail, not from this function, which exists for Linux/macOS.
  *
- * Never spins and never busy-waits past the deadline itself - a caller wanting a
- * spin tail (see `tick_sleep_leg_us` / `wait_for_next_tick` in `load_strategy.cpp`)
- * calls this for the coarse leg only and spins the remainder itself, exactly as the
- * existing Windows leg already does.
+ * Never spins and never busy-waits past the deadline itself - a caller wanting
+ * a spin tail (see `tick_sleep_leg_us` / `wait_for_next_tick` in
+ * `load_strategy.cpp`) calls this for the coarse leg only and spins the
+ * remainder itself, as the Windows leg does.
  */
 void sleep_until_precise (std::chrono::steady_clock::time_point deadline);
 
@@ -515,11 +504,11 @@ void sleep_until_precise (std::chrono::steady_clock::time_point deadline);
  * after which a block that size comes from the allocating thread's arena and
  * stays resident there once freed. Each HTTP worker thread has an arena of its
  * own, and `malloc_trim` cannot shrink the end of one that is not the main
- * thread's, where such a block lands, so one large design send per worker left
- * the daemon hundreds of MB larger for the session (issue #2544). A fixed
- * threshold (`mallopt (M_MMAP_THRESHOLD)`) ends the raising. macOS, the Windows CRT and musl already map a large block
- * separately, so there this does nothing and answers true. Call it once, at
- * daemon start, before any thread exists.
+ * thread's, where such a block lands, so one large design send per worker would
+ * leave the daemon hundreds of MB larger for the session (#2544). A fixed
+ * threshold (`mallopt (M_MMAP_THRESHOLD)`) ends the raising. macOS, the Windows
+ * CRT and musl already map a large block separately, so there this does nothing
+ * and answers true. Call it once, at daemon start, before any thread exists.
  */
 [[nodiscard]] bool return_large_frees_to_os (std::size_t min_bytes);
 
@@ -529,11 +518,11 @@ void sleep_until_precise (std::chrono::steady_clock::time_point deadline);
  *
  * glibc keeps a freed small block in its arena's free lists for reuse, so the
  * tens of thousands of nodes a parsed response body built stay resident in the
- * worker thread's arena once freed (issue #2544). On glibc this is
- * `malloc_trim (0)`, which releases the whole pages inside those free blocks
- * in every arena; the large blocks are `return_large_frees_to_os`'s. A no-op
- * where the C library returns memory itself (macOS, the Windows CRT, musl). It
- * walks every arena: call it after a rare large release, never per request.
+ * worker thread's arena once freed (#2544). On glibc this is `malloc_trim (0)`,
+ * which releases the whole pages inside those free blocks in every arena; the
+ * large blocks are `return_large_frees_to_os`'s. A no-op where the C library
+ * returns memory itself (macOS, the Windows CRT, musl). It walks every arena:
+ * call it after a rare large release, never per request.
  */
 void release_free_heap ();
 

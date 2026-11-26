@@ -6,14 +6,10 @@
  */
 
 /**
- * Where the tree's one tab stop is, and which row should hold it.
- *
- * The tree is a single Tab stop with a roving tabindex, so moving focus is
- * never just `.focus()` - the stop has to move with it, or the next Tab returns
- * to a row the user has since navigated away from. That two-step lived in
- * `useRovingTreeFocus` and was copied into `useRevealActiveSelection`; the
- * delete refocus (#1218) would have been a third. It is one function here, and
- * the callers share it.
+ * Where the tree's one tab stop is, and which row should hold it. The tree is a single Tab stop
+ * with a roving tabindex, so moving focus is never just `.focus()`: the stop must move with it, or
+ * the next Tab returns to a row the user has left. One function here, shared by
+ * `useRovingTreeFocus`, `useRevealActiveSelection` and the delete refocus (#1218).
  */
 
 /** What a row is, everywhere the tree reads one out of the DOM. */
@@ -31,11 +27,9 @@ export function treeRows(tree: HTMLElement | null | undefined): HTMLElement[] {
 }
 
 /**
- * Focus `row` and move the tree's single tab stop onto it.
- *
- * Every other row is reset first. Promoting the destination alone leaks a stop
- * per call: this is a DOM mutation on top of a vdom prop that did not change,
- * so React re-renders to nothing and each stray `0` survives.
+ * Focus `row` and move the tree's single tab stop onto it. Every other row is reset first:
+ * promoting the destination alone leaks a stop per call, as this DOM mutation sits on a vdom prop
+ * that did not change, so React re-renders to nothing and each stray `0` survives.
  */
 export function focusTreeRow(
 	tree: HTMLElement | null | undefined,
@@ -64,13 +58,10 @@ export interface TreeModelRow {
 }
 
 /**
- * The rows a windowed tree navigates over, mounted or not (#2543).
- *
- * A tree that mounts only the rows in view cannot be walked through the DOM:
- * End would stop at the last mounted row and a typeahead would miss every name
- * scrolled away. One that passes this to `useRovingTreeFocus` is walked
- * through its rows instead, and moving focus is the tree's own job, because
- * only the tree knows how to mount a row before it is focused.
+ * The rows a windowed tree navigates over, mounted or not (#2543). A tree mounting only the rows in
+ * view cannot be walked through the DOM: End would stop at the last mounted row and a typeahead
+ * would miss every scrolled-away name. A tree passing this to `useRovingTreeFocus` is walked
+ * through its rows, and moving focus is its own job, as only it can mount a row before focusing it.
  */
 export interface TreeRowModel {
 	/** Every treeitem, in the order they are shown. */
@@ -117,38 +108,30 @@ export function rowLevels(rows: readonly HTMLElement[]): number[] {
 }
 
 /**
- * The row that owns `rows[index]`: the nearest row above it that is shallower.
- * `null` for a root, which is the honest answer rather than a near miss.
+ * The row that owns `rows[index]`: the nearest row above it that is shallower; `null` for a root,
+ * the honest answer rather than a near miss.
  *
- * Depth comes from `aria-level`, never from the DOM shape, and this is the one
- * reading of the hierarchy the whole tree uses - navigation and delete refocus
- * alike. A row's children are rendered as a *sibling* of that row rather than
- * inside it, so `closest()` finds no parent and a walk up the ancestors answers
- * with whichever treeitem an ancestor holds first: the group's own first row,
- * which is a preceding *sibling* of every row after it. That walk sent
- * ArrowLeft to the top of a list instead of out of it (#1237). Two of the three
- * trees defeat any shape-based rule outright - the schema explorer and the
- * collection tree render every row, at every depth, as a sibling - while
- * `aria-level` is on every row of all three, because the same sibling shape is
- * why the hierarchy has to be announced rather than inferred.
+ * Depth comes from `aria-level`, never from the DOM shape, and this is the tree's one reading of
+ * the hierarchy, for navigation and delete refocus alike. A row's children render as *siblings* of
+ * it, so `closest()` finds no parent and a walk up the ancestors answers with the group's own first
+ * row, a preceding *sibling*, which sent ArrowLeft to the top of a list instead of out of it
+ * (#1237). Two of the three trees (the schema explorer and the collection tree) render every row at
+ * every depth as a sibling, defeating any shape-based rule, while all three put `aria-level` on
+ * every row, since that same shape is why the hierarchy is announced rather than inferred.
  *
- * The rule itself is `parentIndex`, over levels alone: the key handler reads
- * it directly, because a windowed tree hands it levels from its rows rather
- * than elements from the DOM. This is its form for a list of mounted rows,
- * which is what `rowAfterRemoving` holds.
+ * The rule itself is `parentIndex`, over levels alone; the key handler reads it directly, as a
+ * windowed tree hands it levels from its rows, not elements from the DOM. This is its form for a
+ * list of mounted rows, which is what `rowAfterRemoving` holds.
  */
 export function parentRow(rows: HTMLElement[], index: number): HTMLElement | null {
 	return rows[parentIndex(rowLevels(rows), index)] ?? null;
 }
 
 /**
- * The row that should hold focus once `row` and everything under it is gone:
- * the following sibling, the parent when it was the last child, and the row
- * before it when it was the last child of the root.
- *
- * Depth comes from `aria-level` rather than the DOM shape. The rows between a
- * folder and its next sibling are its descendants, and they die with it - a
- * "next row in document order" rule would hand focus to one of them.
+ * The row that should hold focus once `row` and everything under it is gone: the following sibling,
+ * the parent when it was the last child, and the row before it when it was the root's last child.
+ * Depth comes from `aria-level`: the rows between a folder and its next sibling are its descendants
+ * and die with it, so a "next row in document order" rule would hand focus to one of them.
  */
 export function rowAfterRemoving(
 	tree: HTMLElement | null | undefined,

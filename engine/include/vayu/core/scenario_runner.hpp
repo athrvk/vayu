@@ -8,9 +8,8 @@
  */
 
 /**
- * @file core/scenario_runner.hpp
  * @brief The design-mode sequential runner: one pass over a `ScenarioPlan` per
- *        iteration, step by step, through `http::Client` (issue #353).
+ *        iteration, step by step, through `http::Client` (#353).
  *
  * The plan is shared with the load path; the executor is not, and that
  * divergence is the design. A scenario step needs the environment cookie jar
@@ -36,6 +35,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
@@ -47,16 +47,14 @@ namespace vayu::core {
 /**
  * @brief How one step execution ended.
  *
- * The first four exist from the start even though nothing produces `Skipped` until
- * flow control lands (phase 4): the summary and the SSE wire shape must not
- * need widening later, and a skipped step counted as a pass is precisely the
- * false-pass class issue #180 exists to eliminate.
+ * `Skipped` is an outcome of its own because a skipped step counted as a pass
+ * is precisely the false-pass class #180 exists to eliminate.
  *
  * `Failed` is an assertion that did not hold - the request itself completed, so
  * the iteration continues. `Errored` is the step not completing at all (a
  * transport failure, a timeout, a script that threw). It ends the iteration
  * only when the run asked for `stopOnError`, as in Postman and Newman; the
- * runner's own flow-control refusals end it either way (issue #2526).
+ * runner's own flow-control refusals end it either way (#2526).
  *
  * `Stopped` is a step the run's Stop, or an engine shutdown, cut short (#3397):
  * its transfer, or the late OAuth 2.0 token request ahead of it, answered the
@@ -85,10 +83,9 @@ enum class StepOutcome : std::uint8_t {
  * failed" as it streams while the list itself waits for the stored row.
  *
  * Counted from **both scripts**, exactly the assertions
- * `build_script_result_node` serializes (issue #810), so the live tally and the
- * stored list count the same things rather than disagreeing by one script's
- * worth - which they did while the node listed the post-request script alone
- * and `describe_failed_tests` failed steps on either.
+ * `build_script_result_node` serializes (#810), and the scripts
+ * `describe_failed_tests` fails a step on, so the live tally and the stored
+ * list count the same things rather than disagreeing by one script's worth.
  */
 struct StepTestTally {
     size_t passed = 0;
@@ -464,21 +461,25 @@ struct ScenarioSummaryInputs {
     /// stored `status_codes` the report reads (#2822). A step the plan
     /// skipped (a script's decision, or a row that would not bind) sent no
     /// request and is not in this map, on the same terms it is left out of
-    /// `coverage` above.
+    /// `coverage` above. A failed `mcp` reply under a 2xx or 3xx is counted
+    /// under `0`, the bucket the load path records it in (#3828), so it is an
+    /// error of the run here too.
     std::map<int, size_t> status_codes;
+    /// The sent steps' failed `mcp` replies by class (#3828), the load path's
+    /// `RunSummaryInputs::error_classes`.
+    McpErrorCounts error_classes;
     /// The sent steps whose response negotiated a lower protocol than the one
     /// requested (`Response::http_version_downgraded`, #3262): requests, as in
     /// the load path's `RunSummaryInputs::http_version_downgraded`, so the
     /// report's "HTTP/2 fell back" reading counts the same unit in both modes.
     size_t http_version_downgraded = 0;
-    /// Every sent step's latency, in the order steps ran. Kept as a plain
-    /// list rather than through `MetricsCollector`: that collector is
-    /// shared, already ticking for the run's SSE frames, and built for a
-    /// concurrent load run's histogram - feeding it here only to read a
-    /// snapshot back at the very end would make its *live* numbers (which
-    /// nothing reads today) start reflecting a design-mode run mid-flight,
-    /// a behaviour nobody asked for. `summarize_latencies` turns this into
-    /// `latency` below, once, at the run's finish point.
+    /// Every sent step's latency, in the order steps ran. Kept as a plain list
+    /// rather than through `MetricsCollector`: that collector is shared,
+    /// already ticking for the run's SSE frames, and built for a concurrent
+    /// load run's histogram - feeding it here only to read a snapshot back at
+    /// the very end would make its *live* numbers (which nothing reads) start
+    /// reflecting a design-mode run mid-flight. `summarize_latencies` turns
+    /// this into `latency` below, once, at the run's finish point.
     std::vector<double> latencies;
     /// `latencies` summarised: the threshold table's input and the stored
     /// `latency` block, one computation (issue #2389).

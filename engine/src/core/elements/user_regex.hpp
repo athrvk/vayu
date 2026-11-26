@@ -8,22 +8,19 @@
  */
 
 /**
- * @file user_regex.hpp
- * @brief The one way a pattern a user wrote is compiled and run (#1874):
- *        `extract.regex`, `assert.jsonpath`'s `regex`, `assert.contains`'s
- *        `matches` and `control.if`'s `matches` all go through it.
+ * The one way a pattern a user wrote is compiled and run (#1874):
+ * `extract.regex`, `assert.jsonpath`'s `regex`, `assert.contains`'s `matches`
+ * and `control.if`'s `matches` all go through it.
  *
  * RE2, not `std::regex`: libstdc++'s executor recurses once per consumed
- * character, so a greedy group spanning a response body of a few tens of
- * kilobytes overflowed the worker's stack and took the daemon down. RE2 runs
- * in time linear in the text and keeps its state on the heap, so no body size
- * and no pattern can do that. The price is the dialect: no backreferences and
- * no lookaround, which RE2 refuses at compile time. Text is matched as bytes,
- * as `std::regex` matched it, so a body that is not UTF-8 is still searchable.
+ * character, so a greedy group over a body of a few tens of kilobytes overflows
+ * the worker's stack and takes the daemon down. RE2 runs in linear time with
+ * its state on the heap, so no body or pattern can. The price is the dialect:
+ * no backreferences or lookaround, which RE2 refuses at compile time. Text is
+ * matched as bytes, so a body that is not UTF-8 is still searchable.
  *
- * Source-tree-local (not under `include/vayu/`), and `<re2/re2.h>` is
- * included only by `user_regex.cpp`: nothing outside
- * `engine/src/core/elements/` runs a user's pattern.
+ * Source-tree-local, and only `user_regex.cpp` includes `<re2/re2.h>`: nothing
+ * outside `engine/src/core/elements/` runs a user's pattern.
  */
 
 #include <expected>

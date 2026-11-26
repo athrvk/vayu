@@ -16,7 +16,7 @@ shape both sides of the wire agree on; it is generated from, or checked against,
 > pipeline that runs a kind in the design send and the sequential collection run, and the phase-0
 > kinds below. `elements` is the only script source now - `pre_request_script` /
 > `post_request_script` are gone, cut over by a one-shot migration (see
-> [`db-schema.md`](db-schema.md#the-script-to-elements-migration-issue-1514)); no transitional
+> [`db-schema/startup-and-recovery.md`](db-schema/startup-and-recovery.md#the-script-to-elements-migration)); no transitional
 > alias, per the owner's decision. Issue #1495 lands the pipeline on a **scenario** load run's
 > producer/completion hooks (below); issue #1594 lands it on a **single-request** load run's own
 > submission too, through `requestElements` - see that section. Issue #1499 lands the first kinds to run at a run's own boundary rather
@@ -43,7 +43,7 @@ validate against that kind's JSON Schema - both checked by
 `vayu::core::Registry::validate` (`engine/include/vayu/core/elements.hpp`), which every write route
 runs before storing and `POST /execute` runs on its inline list before sending (`400` naming the
 index, the kind and the field on a violation; `/execute` judges a collection-origin entry as a
-collection's own, see [its `elements`](api-reference.md#post-execute)). A `kind` the registry does not
+collection's own, see [its `elements`](api-reference/execute.md#post-execute)). A `kind` the registry does not
 hold is refused with the ones it does (`Item 1 has an unrecognized kind: 'assert.sttus'. Kinds:
 inherit.disable, script.pre, ...`, #3559), in registration order. A rule the
 schema cannot express (a JSONPath that parses, a pattern RE2 compiles, an assertion having
@@ -76,7 +76,7 @@ A kind that writes a variable scope sets `ElementKind::writes_variables` (every 
 `extract.*` kind today). A collection run's plan reads it through the registry: when any step
 carries such a kind at a phase before some send, every step is composed with its `{{names}}` left
 for the send, so a value an earlier step writes reaches a later one (#2521, see
-[Scenario runs](api-reference.md#scenario-runs)). A new kind that writes a variable sets the flag
+[Scenario runs](api-reference/scenario-runs.md#scenario-runs)). A new kind that writes a variable sets the flag
 or a plan resolves the value it writes too early.
 
 ## Schema annotations
@@ -310,7 +310,7 @@ The JSON-reading kinds (`extract.json`, `assert.jsonpath`, `assert.jsonschema`, 
 step, through `ElementContext`'s lazily filled slot, which keeps every object's members in the order
 the body wrote them (`nlohmann::ordered_json`, issue #2459) and costs time linear in the body
 however wide its objects are - a body over the
-[`maxElementBodyBytes`](api-reference.md#get-config) config entry (default 1 MiB, restart-free)
+[`maxElementBodyBytes`](api-reference/health-config.md#get-config) config entry (default 1 MiB, restart-free)
 is not parsed, and so is a body that nests deeper than 100 levels (the kinds that read the tree
 recurse over it, and a hostile server chooses its shape). A body that cannot be read, whether it is
 not JSON, empty, too deep or too big, is not a pass: the reason is `response body is not JSON, nests
@@ -336,7 +336,7 @@ the body they search.
 
 **An `mcp` step's body is its final JSON-RPC response** (issue #3762). Every kind that reads the
 body (the JSON-reading and text-reading kinds above, `assert.size`, `metric.record`) reads the
-final response the [reply reader](api-reference.md#the-mcp-reply) found, whether the server
+final response the [reply reader](api-reference/request-body.md#the-mcp-reply) found, whether the server
 answered with one JSON object or with an event stream of notifications ending in it, so
 `assert.jsonpath` on `$.result.content[0].text` reads the tool's text on a Send, a collection run
 and both load-run shapes alike. A tool's structured result is
@@ -358,7 +358,7 @@ for the rest. The pointer is relative to the value judged, so under `source: "js
 inside that value, not at the reply.
 
 The validator is the one `pm.response.to.have.jsonSchema` and the OpenAPI response contracts use
-(valijson, **draft-07**; [scripting](scripting.md) has its limits). A keyword it does not evaluate
+(valijson, **draft-07**; [scripting](scripting/index.md) has its limits). A keyword it does not evaluate
 (`unevaluatedProperties`, `prefixItems`, `dependentSchemas`, a nested `propertyNames`: what a JSON
 Schema 2020-12 schema, MCP's default dialect, can hold) fails the assertion whatever the value is,
 naming each keyword with how many times the schema uses it: `the schema uses keywords the draft-07
@@ -416,7 +416,7 @@ would be a needless dependency for what a rate condition actually needs.
 stream: the first match of the path in the **last** event whose `data` parses as JSON and has one,
 which is where a completion stream puts its final `usage` (`$.usage.completion_tokens`). Events are
 parsed from the buffered body with the same `SseParser` as `pm.response.events`, each event's data
-kept to [`sseMaxEventBytes`](api-reference.md#get-config) and parsed to the same 100-level depth
+kept to [`sseMaxEventBytes`](api-reference/health-config.md#get-config) and parsed to the same 100-level depth
 bound as a body, and once per step however many elements read them. The list is never cut at
 `sseMaxStoredEvents`, so a stream longer than that cap still reads its real last event. `[DONE]`, a
 comment and any other data that is not JSON are passed over. It records nothing and reports
@@ -431,12 +431,12 @@ there.
 `metric.record` writes through `ElementContext::record_metric`, a callback bound only when a run's `MetricsCollector` is
 reachable (the sequential run, a scenario load run, design mode's `script.pre`/`script.post`); a
 bare design send has none, and the element reports `skipped` there rather than recording nowhere
-silently. `pm.metrics.trend`/`.counter`/`.rate` (`docs/engine/scripting.md`) write through the same
+silently. `pm.metrics.trend`/`.counter`/`.rate` (`docs/engine/scripting/execution-metrics-data.md`) write through the same
 callback from a script, so both surfaces share one collector-side implementation
 (`MetricsCollector::record_custom_metric`). Every run is capped at
 `constants::metrics_collector::MAX_CUSTOM_METRIC_NAMES` (32) distinct names, refused at
-`Registry::validate` time for a declared `metric.record` - see `api-reference.md`'s `customMetrics`
-and thresholds sections for how a recorded value reaches the report and a `custom.<name>.<stat>`
+`Registry::validate` time for a declared `metric.record` - see `api-reference/collection-runs.md`'s `customMetrics`
+and `api-reference/load-runs.md`'s thresholds sections for how a recorded value reaches the report and a `custom.<name>.<stat>`
 budget.
 
 `script.pre` / `script.post`'s `apply` never touches `ScriptEngine` itself: it calls back into
@@ -499,7 +499,7 @@ shape and cap of an inline element's (#3455). The `pm.sendRequest` records the s
 run's only) ride the same row as `scriptRequests` (`ElementOutcome::script_requests`, #3633). A design (sequential) run writes its variable scopes back after teardown, so a
 teardown's `pm.environment.set` / `pm.globals.set` is saved with the steps' (#3249); a load run
 persists none. Teardown's script sees `pm.info.run` (`requestsSent`, `errorRate` - on a load run
-the report's, by the [one error definition](api-reference.md#what-counts-as-an-error) -
+the report's, by the [one error definition](api-reference/metrics.md#what-counts-as-an-error) -
 `assertionsPassed`, `assertionsFailed`) - the one context that can report a run summary, because it is
 the one that runs after there is one. Neither kind gets a per-element `allowRequests` toggle: `pm.sendRequest`
 inside either script is gated by the run's own `allowScriptRequests` (`ScriptConfig::allow_send_request`,
@@ -586,8 +586,8 @@ transaction's span. The report gains
 for a transaction the run never closed.
 
 **`control.switch` and `control.loop` under a scenario load run (issue #1569).** A scenario load run's
-virtual users used to advance through the plan strictly forward (`VirtualUser::step`), with no jump the
-way a repeat or a dispatch needs. They now do: `ScenarioLoadState::step_index` (the load path's own
+virtual users advance through the plan (`VirtualUser::step`) with the jump a repeat or a dispatch
+needs: `ScenarioLoadState::step_index` (the load path's own
 `ScenarioStepIndex`, built once per run) resolves a `control.switch` target or a `control.loop`'s
 folder-start name through the same `resolve_next_step` the sequential run's `setNextRequest` uses, and
 `finish_step` applies the result to the VU's own `step`, guarded against a cycle that never closes by
@@ -640,7 +640,7 @@ homes, on the `scripts` node's own precedent.
 population the run's `maxAssertionFailureRatePct` threshold reads beside the sampled one (a
 deferred script's replay), judging the worse of the two rates (#2892); a failed budget flips the
 run's terminal status to `Failed` when the run also asks for `thresholds.failRun: true`
-(`api-reference.md`'s thresholds section, #1497).
+(`api-reference/load-runs.md`'s thresholds section, #1497).
 
 ## Load paths
 
@@ -714,7 +714,7 @@ failed and logged: `script.pre` / `script.post` copy them onto the outcome
 offered, and counts what it turned away. Its slots are written once and published through an
 atomic size, and each slot's count is an atomic beside it, so a repeat or a full list is a few
 lock-free compares and one relaxed increment; only keeping a new entry takes the list's mutex. The wire shape is in
-[api-reference.md](api-reference.md#scenario-load-runs).
+[api-reference/scenario-load.md](api-reference/scenario-load.md#scenario-load-runs).
 Ids are unique within one level's list, not across the chain (a duplicated collection keeps its
 elements' ids), so a step's composed list can hold one id twice; each still gets its own row,
 counts and label, told apart by its `origin` kind, scope and id (`ElementSlotIndex`).
@@ -851,7 +851,7 @@ only `extract.*`, `assert.*`, `timer.think` and `script.pre`/`script.post`
 - #1495 - the pipeline on a scenario load run's producer/completion hooks (this page's Load
   paths section).
 - #1497 - the `maxAssertionFailureRatePct` run threshold and `thresholds.failRun`, over the
-  combined `assert.*` element and `pm.test` tally (see `api-reference.md`'s thresholds section).
+  combined `assert.*` element and `pm.test` tally (see `api-reference/load-runs.md`'s thresholds section).
 - #1564 - the same `thresholds` block, evaluated for a collection (sequential) run too, not
   only a load run.
 - #1498 - `timer.think`'s gaussian option, the `timer.pacing` kind, a per-run seeded RNG

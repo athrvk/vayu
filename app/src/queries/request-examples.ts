@@ -6,18 +6,13 @@
  */
 
 /**
- * Saved example responses for a request (issues #481, #588).
+ * Saved example responses for a request (#481, #588). A response on screen can be kept as an
+ * example and an example removed again (#588), hence the two mutations below; there is no `PUT`:
+ * editing a stored example is its own change, and the panel is a viewer.
  *
- * The list arrived first and was read-only: examples came from an importer, so
- * there was nothing here to write one with. #588 closed that loop - a response
- * on screen can be kept as an example, and an example can be removed again -
- * which is why the two mutations below exist and `PUT` still does not. Editing
- * a stored example is its own change; the panel is a viewer.
- *
- * Both writes settle by invalidating the one list key rather than splicing the
- * row in. The engine decides the id, the `order` an append lands on and the
- * stored shape of the row, so a hand-written cache entry would be this app's
- * guess at all three - and the list is one small request.
+ * Both writes settle by invalidating the one list key rather than splicing the row in. The engine
+ * decides the id, the `order` an append lands on and the stored shape of the row, so a hand-written
+ * cache entry would be this app's guess at all three, and the list is one small request.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,11 +21,8 @@ import type { CreateRequestExampleRequest } from "@/types";
 import { queryKeys } from "./keys";
 
 /**
- * One request's examples, in stored order.
- *
- * Disabled without a request id so the Examples tab can call it
- * unconditionally: a request being composed has no id yet, and there is nothing
- * to fetch for one.
+ * One request's examples, in stored order. Disabled without a request id so the Examples tab can
+ * call it unconditionally: a request being composed has no id yet, and nothing to fetch.
  */
 export function useRequestExamplesQuery(requestId: string | null) {
 	return useQuery({
@@ -41,11 +33,9 @@ export function useRequestExamplesQuery(requestId: string | null) {
 }
 
 /**
- * Keep a response as one of the request's examples (issue #588).
- *
- * The engine's refusals - a body over the per-example cap, the hundredth
- * example on one request - come back as the mutation's error and are shown by
- * the dialog that called it, not as a toast behind it.
+ * Keep a response as one of the request's examples (#588). The engine's refusals (a body over the
+ * per-example cap, the hundredth example on one request) come back as the mutation's error and are
+ * shown by the dialog that called it, not as a toast behind it.
  */
 export function useCreateRequestExampleMutation() {
 	const queryClient = useQueryClient();
@@ -66,23 +56,18 @@ export function useCreateRequestExampleMutation() {
 }
 
 /**
- * Remove one saved example.
+ * Remove one saved example: an example you can create and never remove would be the #553 shape at a
+ * smaller scale. The route is not scoped to app-saved rows: an imported example is as much the
+ * user's to prune as a saved one. What the engine does with the row differs by origin (#2971): a
+ * saved example goes to the Trash, an imported one becomes a spec-sync tombstone. The mutation
+ * cannot tell which, so it invalidates `trash.all` either way; for a tombstone that costs one
+ * refetch of a list that comes back unchanged.
  *
- * An example you can create and never remove is the #553 shape at a smaller
- * scale, which is why this landed with the create rather than after it. The
- * route is not scoped to app-saved rows: an imported example is as much the
- * user's to prune as a saved one. What the engine does with the row differs by
- * origin (#2971) - a saved example goes to the Trash, an imported one becomes a
- * spec-sync tombstone - and the mutation cannot tell which, so it invalidates
- * `trash.all` either way; for a tombstone that costs one refetch of a list
- * that comes back unchanged.
- *
- * The delete can also clear the request's `mockExampleId` when it named this
- * row (#3422), but the request's detail is not invalidated here: the engine
- * publishes that request write and the example's own on the change feed, which
- * the app's `useChangeFeed` maps onto the request detail and lists
- * (`change-feed-invalidation.ts`). Until it lands, the Examples tab's selector
- * already shows the first example for a pointer that names a missing one.
+ * The delete can also clear the request's `mockExampleId` when it named this row (#3422), but the
+ * request's detail is not invalidated here: the engine publishes that request write and the
+ * example's own on the change feed, which the app's `useChangeFeed` maps onto the request detail
+ * and lists (`change-feed-invalidation.ts`). Until it lands, the Examples tab's selector already
+ * shows the first example for a pointer that names a missing one.
  */
 export function useDeleteRequestExampleMutation() {
 	const queryClient = useQueryClient();

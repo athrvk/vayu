@@ -6,9 +6,8 @@
  */
 
 /**
- * Load test configuration: the dialog shell, the mode row and the Start
- * handler. Each profile's fields, the three disclosures, the data file, the
- * notices, the saved memo and the payload are the files beside it.
+ * Load test configuration: the dialog shell, the mode row and the Start handler. Profile fields,
+ * disclosures, data file, notices, saved memo and payload are the files beside it.
  */
 
 import { useMemo, useRef, useState } from "react";
@@ -72,91 +71,74 @@ export interface LoadTestConfigDialogProps {
 	onStart: (config: LoadTestConfig) => void;
 	isStarting: boolean;
 	/**
-	 * True when the pending request has an enabled, non-blank pre-request script
-	 * that is not marked inline (`hasUnmarkedPreScript`): the one the engine skips
-	 * unless Scripts is All inline.
+	 * An enabled, non-blank pre-request script not marked inline (`hasUnmarkedPreScript`): the
+	 * engine skips it unless Scripts is All inline.
 	 */
 	hasPreRequestScript: boolean;
 	/**
-	 * True when the pending request has an enabled, non-blank pre-request script
-	 * marked inline (`hasInlinePreScript`): it runs at As marked, and only All
-	 * deferred skips it.
+	 * An enabled, non-blank pre-request script marked inline (`hasInlinePreScript`): it runs at As
+	 * marked; only All deferred skips it.
 	 */
 	hasInlinePreScript: boolean;
 	/**
-	 * True when a post-request script (the request's own or an inherited
-	 * collection one) would be replayed after the run on a sample of
-	 * responses, i.e. it is not marked inline (`hasReplayedPostScript`).
+	 * A post-request script (own or inherited) not marked inline, so replayed after the run on a
+	 * sample of responses (`hasReplayedPostScript`).
 	 */
 	hasPostRequestScript: boolean;
 	/** Variable-resolved OAuth 2.0 config, when the effective auth is oauth2. */
 	oauth2Config?: OAuth2Config;
 	/**
-	 * The names in that OAuth 2.0 config that a pre-request script may change,
-	 * from the engine's `deferredVariables` (#2742). A load run fetches its token
-	 * before any script, so the dialog says the script's changes do not apply.
-	 * Memoise it.
+	 * Names in that OAuth 2.0 config a pre-request script may change, from the engine's
+	 * `deferredVariables` (#2742). A load run fetches its token before any script, so the dialog
+	 * says those changes do not apply. Memoise it.
 	 */
 	oauth2DeferredNames?: readonly string[];
 	/**
-	 * True when the pending request has its `stream` setting on (issue #576).
-	 *
-	 * It gates the two cap fields rather than being set here: whether a request
-	 * streams belongs to the request (its Settings tab), and only *how much of
-	 * each stream this run measures* belongs to the run. Showing the caps for a
-	 * request that does not stream would offer bounds on something that is not
-	 * happening.
+	 * The request's `stream` setting is on (#576). It gates the two cap fields rather than being
+	 * set here: streaming belongs to the request (its Settings tab), only *how much of each stream
+	 * is measured* to the run, and caps on a non-streaming request bound nothing.
 	 */
 	isStreamingRequest: boolean;
 	/**
-	 * The collection the request being load-tested belongs to, for the data
-	 * file's contract (issues #993, #2050).
-	 *
-	 * Only the *contract* is resolved from it - the nearest declaring ancestor,
-	 * the rule every other surface applies (`resolveDataContract`) - so a file
-	 * missing a column the collection declares is said here rather than at the
-	 * first bind, and a picked file declares for that ancestor. Undefined for a
-	 * request that belongs to no collection, which has no contract: a pick there
-	 * declares nothing and stays a plain run input.
+	 * The request's collection, for the data file's contract (#993, #2050). Only the contract is
+	 * resolved from it (the nearest declaring ancestor, `resolveDataContract`, as everywhere), so a
+	 * file missing a declared column is said here, not at the first bind, and a picked file
+	 * declares for that ancestor. Undefined with no collection: no contract, so a pick declares
+	 * nothing and stays a plain run input.
 	 */
 	collectionId?: string;
 	/**
-	 * The request being load-tested, as the editor holds it - the draft, not the
-	 * stored row - for the audit of which `{{data.*}}` columns it references
-	 * that a picked file lacks (issue #2050). Memoise it: it is a dependency of
-	 * the audit.
+	 * The request as the editor holds it (the draft, not the stored row), to audit which
+	 * `{{data.*}}` columns it references that a picked file lacks (#2050). Memoise it: the audit
+	 * depends on it.
 	 */
 	request?: ColumnAuditRequest;
 	/**
-	 * The saved request, for each budget's "Copy for agent". The stored row's id
-	 * and name, not the draft's: an unsaved rename is not a name the agent's
-	 * tools know. Absent for a request with no saved row.
+	 * The saved request, for each budget's "Copy for agent": the stored row's id and name, not the
+	 * draft's, since the agent's tools do not know an unsaved rename. Absent with no saved row.
 	 */
 	referenceOwner?: ThresholdOwner;
 	/**
-	 * The collection names above the saved request, root first, so the target
-	 * line's "Copy request for agent" says where the request lives the way the
-	 * sidebar's copy does. Read only when `referenceOwner` is a request.
+	 * Collection names above the saved request, root first, so the target line's "Copy request for
+	 * agent" says where it lives as the sidebar's copy does. Read only when `referenceOwner` is
+	 * set.
 	 */
 	collectionPath?: readonly string[];
 	/**
-	 * The enabled elements in the run's resolved chain that only a scenario can
-	 * run (`scenarioOnlyElements`, #3050), each with the origin that names where
-	 * to remove it. Any of them blocks Start. Memoise it.
+	 * Enabled elements in the run's chain that only a scenario runs (`scenarioOnlyElements`,
+	 * #3050), each with the origin naming where to remove it. Any one blocks Start. Memoise it.
 	 */
 	scenarioOnlyElements?: readonly ResolvedElement[];
 	/**
-	 * Closes this dialog and opens the collection-run flow for the request's
-	 * collection - the way out of `scenarioOnlyElements`. Absent when the
-	 * collection could not be resolved.
+	 * Closes this dialog and opens the collection-run flow, the way out of `scenarioOnlyElements`.
+	 * Absent when the collection could not be resolved.
 	 */
 	onRunCollection?: () => void;
 	/** The request's HTTP method, for the target line. */
 	method?: string;
 	/**
-	 * The request's URL with its variables resolved, as the run will send it
-	 * (#2117). It names the target and decides the off-network advisory; absent,
-	 * the dialog says nothing about where the run is aimed.
+	 * The variable-resolved URL, as the run sends it (#2117). It names the target and decides the
+	 * off-network advisory; absent, the dialog says nothing about the target.
 	 */
 	url?: string;
 }
@@ -210,24 +192,17 @@ export default function LoadTestConfigDialog({
 	method,
 	url,
 }: LoadTestConfigDialogProps) {
-	/**
-	 * The ceilings are a user setting (Settings -> Load testing), so every range
-	 * below is resolved rather than read off the constant.
-	 */
+	// The ceilings are a user setting (Settings -> Load testing), so every range is resolved.
 	const ceilings = useClientSettingsStore((s) => s.loadTestCeilings);
 	const limits = useMemo(() => resolveLoadTestLimits(ceilings), [ceilings]);
-	/**
-	 * The p99 budget and Capacity Discovery's latency budget both start from the
-	 * capacity SLO the user already set (Settings -> `sloThresholdMs`), which
-	 * until now only annotated a chart.
-	 */
+	// The p99 budget and Capacity Discovery's latency budget start from the user's capacity SLO
+	// (Settings -> `sloThresholdMs`).
 	const sloThresholdMs = useClientSettingsStore((s) => s.sloThresholdMs);
 	/**
-	 * Server monitoring. The cadence and the metric cap are engine settings
-	 * (`monitorIntervalMs` / `monitorMaxSeries`), so the dialog seeds and bounds
-	 * itself from them rather than from its own numbers - otherwise the cadence
-	 * setting would never apply to a run started here (this dialog always sends
-	 * an explicit interval) and a raised cap would still be refused locally.
+	 * The cadence and metric cap are engine settings (`monitorIntervalMs` / `monitorMaxSeries`),
+	 * and the dialog seeds and bounds itself from them: it always sends an explicit interval, so
+	 * otherwise the cadence setting would never apply here, and a raised cap would still be refused
+	 * locally.
 	 */
 	const monitorSettings = useMonitorSettings();
 	const { initial, save } = useSavedLoadTestConfig(limits, {
@@ -256,12 +231,10 @@ export default function LoadTestConfigDialog({
 	const dataFile = useLoadTestDataFile(collectionId, request);
 
 	/*
-	 * The Headers tab renders the design answer, and it is the tab a user reads
-	 * right before opening this dialog (issue #1338). `negotiateCompression`
-	 * and `loadNegotiateCompression` are two config keys, so the two scopes can
-	 * disagree on `Accept-Encoding` - reading both here is what lets the notice
-	 * below say so, rather than the dialog silently starting a run that sends
-	 * something different from what the tab just showed.
+	 * The Headers tab shows the design answer, read just before this dialog opens (#1338).
+	 * `negotiateCompression` and `loadNegotiateCompression` are separate keys, so the scopes can
+	 * disagree on `Accept-Encoding`; reading both lets the notice say so instead of silently
+	 * sending something the tab did not show.
 	 */
 	const { data: designDefaults } = useRequestDefaultsQuery("design");
 	const { data: loadDefaults } = useRequestDefaultsQuery("load");
@@ -281,10 +254,8 @@ export default function LoadTestConfigDialog({
 		retryAfterBackoff,
 		retryAfterMaxMs,
 	});
-	// A file the parser refused leaves no rows behind, so starting the run would
-	// send the request with its `{{data.*}}` tokens written as they stand - the
-	// failure the whole namespace exists to prevent. The picker prints the
-	// reason; this is what stops the Start button.
+	// A refused file leaves no rows, so the run would send its `{{data.*}}` tokens as written, the
+	// failure the namespace exists to prevent. The picker prints why; this stops Start.
 	const blockingError = firstBlockingError(errors) ?? dataFile.error;
 
 	// Classified once: the target line and the advisory read the same answer.
@@ -304,8 +275,8 @@ export default function LoadTestConfigDialog({
 		{ budgets: initial.budgets, customBudgets: initial.customBudgets },
 		{ budgets, customBudgets }
 	);
-	// The notice and its Clear button speak only for what this run sends: in
-	// Capacity or on a stream the Settings p99 seed is dormant, so neither names it.
+	// The notice and Clear speak only for what this run sends: in Capacity or on a stream the
+	// Settings p99 seed is dormant, so neither names it.
 	const judgedCarried = withoutUnsentSeed(carried, profile.mode, isStreamingRequest);
 	const carriedSummary = describeCarried(
 		judgedCarried,
@@ -335,8 +306,8 @@ export default function LoadTestConfigDialog({
 	});
 
 	/**
-	 * The memo's budgets are attributed to this request only when this Start is
-	 * what changed them; an untouched carry keeps naming whoever set it.
+	 * The memo's budgets name this request only if this Start changed them; an untouched carry
+	 * keeps its setter.
 	 */
 	const budgetsOriginToSave = () => {
 		const changed = budgetsChanged(
@@ -430,11 +401,10 @@ export default function LoadTestConfigDialog({
 				</DialogHeader>
 
 				{/*
-				 * Pinned between header and body, not inside the scroller: a blocking
-				 * notice explains why Start is disabled, and in a two-pane body it would
-				 * scroll out of sight with the column it sits in. Capped so a stack of
-				 * them cannot take the fields' height. `-mx-1 px-1 py-px` is DialogBody's
-				 * clearance (#1627), so a focused notice button's ring is not clipped.
+				 * Pinned between header and body, not in the scroller: a blocking notice explains
+				 * why Start is disabled, and in a two-pane body it would scroll away with its
+				 * column. Capped so a stack cannot take the fields' height. `-mx-1 px-1 py-px` is
+				 * DialogBody's clearance (#1627), so a focused notice button's ring is not clipped.
 				 */}
 				{notices.length > 0 && (
 					<div
@@ -452,11 +422,9 @@ export default function LoadTestConfigDialog({
 					<div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
 						<div className="min-w-0 space-y-4">
 							{/*
-							 * First field in the dialog, not the last one inside "Recording
-							 * & limits": naming the run is what a user does before picking
-							 * its profile, not an afterthought behind a collapsed advanced
-							 * section - a comment written after the run started is a comment
-							 * about a run already forgotten which one it was.
+							 * First field, not last under "Recording & limits": naming a run comes
+							 * before picking its profile, and a comment written after the run
+							 * started is about a run already forgotten.
 							 */}
 							<div className="space-y-1.5">
 								<Label htmlFor="lt-comment" className="text-xs">
@@ -578,10 +546,11 @@ export default function LoadTestConfigDialog({
 
 				<DialogFooter>
 					<DialogCancelButton onClick={onClose} disabled={isStarting} />
-					{/* The OAuth2 gate is the one worth a hint: the guard above says
-					    what is wrong, but it collapses, and Start then reads as
-					    broken. `blockingError` is already on screen beside the field
-					    it belongs to, so the reason here only has to point at it. */}
+					{/*
+					 * The OAuth2 gate gets a hint: its guard says what is wrong but collapses, and
+					 * Start then reads as broken. `blockingError` is already shown beside its
+					 * field, so this only points at it.
+					 */}
 					<DisabledHint
 						reason={startDisabledReason({
 							isStarting,

@@ -6,31 +6,25 @@
  */
 
 /**
- * Indent an XML document for reading.
+ * Indent an XML document for reading. Without it the response viewer's Pretty toggle formats **JSON
+ * only**, so Pretty and Raw are byte-identical for every XML response, the one thing the toggle
+ * exists to do, undone for the SOAP and legacy-enterprise APIs the `xml` body mode (#580) is for.
  *
- * The response viewer's Pretty toggle pretty-printed **JSON only**, so Pretty
- * and Raw were byte-identical for every XML response - the one thing the toggle
- * exists to do, not done, for the SOAP and legacy-enterprise APIs the `xml` body
- * mode (issue #580) is for.
+ * **A string walk, not a parser.** `DOMParser` is available in the renderer but not in the `node`
+ * test environment this repo defaults to, so the rule would be the one thing untestable, and
+ * Prettier core ships no XML parser. A tag-depth walk needs neither and is exact about the only
+ * thing asked of it: where the line breaks go.
  *
- * **A string walk, not a parser.** `DOMParser` is available in the renderer and
- * would be the obvious tool; it is not available in the `node` test environment
- * this repo defaults to, so the rule would be the one thing untestable. Prettier
- * core ships no XML parser either. A tag-depth walk needs neither and is exact
- * about the only thing being asked of it: where the line breaks go.
+ * **Malformed input comes back unchanged**, the contract `lib/graphql/format.ts` has: a body
+ * mid-edit, or one still holding an unresolved `{{token}}`, must render as what the user typed
+ * rather than as a guess at what they meant. "Malformed" means the walk cannot trust its own depth:
+ * an unterminated tag, a close tag that does not match the open one, or anything left open at the
+ * end.
  *
- * **Malformed input comes back unchanged**, the same contract
- * `lib/graphql/format.ts` has - a body mid-edit, or one still holding an
- * unresolved `{{token}}`, must render as what the user typed rather than as a
- * guess at what they meant. "Malformed" here means the walk cannot trust its own
- * depth: an unterminated tag, a close tag that does not match the open one, or
- * anything left open at the end.
- *
- * **Mixed content is emitted verbatim.** In `<p>hello <b>x</b> world</p>` the
- * spaces around `<b>` are part of the text, and an indenter that put each child
- * on its own line would be editing the document rather than formatting it. An
- * element holding both text and element children is therefore copied through
- * from the source, inner formatting and all.
+ * **Mixed content is emitted verbatim.** In `<p>hello <b>x</b> world</p>` the spaces around `<b>`
+ * are part of the text, and an indenter that put each child on its own line would be editing the
+ * document rather than formatting it. An element holding both text and element children is
+ * therefore copied through from the source, inner formatting and all.
  */
 
 /** Two spaces, matching the `JSON.stringify(value, null, 2)` beside it. */
@@ -65,14 +59,10 @@ function readName(source: string, start: number): string {
 }
 
 /**
- * The offset one past this tag's `>`.
- *
- * Quote-aware, because an attribute value may legitimately contain `>`
- * (`<a href="x?a=1&gt;2">` is not the only shape - an unescaped `>` in an
- * attribute is well-formed XML). Scanning for the next `>` would end the tag
- * inside the attribute and take the rest of the document with it.
- *
- * -1 when the tag is never closed, which the caller reads as malformed.
+ * The offset one past this tag's `>`, or -1 when the tag is never closed, which the caller reads as
+ * malformed. Quote-aware, because an attribute value may legitimately contain `>` (an unescaped `>`
+ * in an attribute is well-formed XML), and scanning for the next `>` would end the tag inside the
+ * attribute and take the rest of the document with it.
  */
 function endOfTag(source: string, start: number): number {
 	let quote = "";
@@ -139,12 +129,10 @@ function tokenize(source: string): Token[] | null {
 }
 
 /**
- * For every `open` token, the index of its matching `close`.
- *
- * Null when the two do not pair up - a close naming a different element than
- * the one that is open, a close with nothing open, or an element still open at
- * the end. Each of those means the depth this whole function computes would be
- * a guess, so the caller returns the source untouched instead.
+ * For every `open` token, the index of its matching `close`. Null when the two do not pair up (a
+ * close naming a different element than the one that is open, a close with nothing open, or an
+ * element still open at the end): each means the depth this function computes would be a guess, so
+ * the caller returns the source untouched instead.
  */
 function pairTags(tokens: Token[]): Map<number, number> | null {
 	const partner = new Map<number, number>();
@@ -165,13 +153,11 @@ function pairTags(tokens: Token[]): Map<number, number> | null {
 }
 
 /**
- * Whether an element's children are text and elements both - see the header.
- *
- * Its *direct* children: a nested element is stepped over rather than walked
- * into, because text deeper down belongs to that element and says nothing about
- * this one. Counting descendants instead would call every ancestor of a leaf
- * value mixed - which is to say, almost every document - and the indenter would
- * emit the whole tree on one line.
+ * Whether an element's children are text and elements both (see the header). Its *direct* children:
+ * a nested element is stepped over rather than walked into, because text deeper down belongs to
+ * that element and says nothing about this one. Counting descendants instead would call every
+ * ancestor of a leaf value mixed (almost every document), and the indenter would emit the whole
+ * tree on one line.
  */
 function isMixed(
 	tokens: Token[],

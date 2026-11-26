@@ -6,33 +6,17 @@
  */
 
 /**
- * ResponseTimingTab Component
+ * One design-mode response's timing breakdown. The five network phases (DNS → Connect → TLS → TTFB
+ * → Download) are sequential, so one continuous track with proportional segments, then a legend and
+ * a Wire · Queue · Vayu · Scripts · Total summary. The dashboard `TimingWaterfall`'s idiom (the
+ * same `--chart-*` tokens), from one response's timing rather than run averages.
  *
- * Per-request timing breakdown for a single (design-mode) response. The five
- * network phases (DNS → Connect → TLS → TTFB → Download) are sequential, so
- * they render as one continuous timeline track with proportional segments,
- * followed by a precise legend and a Wire · Queue · Vayu · Scripts · Total summary.
- *
- * **Every phase is a fixed categorical hue**, and the list of them - label,
- * hue, tooltip, the field each one reads - now comes from `TIMING_PHASES` in
- * `shared/response-viewer/timing-phases.ts` rather than being declared here.
- * Two hues were once wrong in this file: TTFB took `--primary` and Download
- * took `--success`. `--primary` tracks the user's accent, which the design
- * system forbids for a chart series precisely because of what happened here -
- * under the green scheme `--primary` is hue 142 and `--success` is hue 142,
- * three points of lightness apart, so two of the five phases rendered as the
- * same swatch. Under the default orange, TTFB sat 14 degrees from Connect's
- * amber. `--success` was the second problem on its own terms: a status token
- * spent on a series that has no status.
- *
- * They are `--chart-3` (violet) and `--chart-6` (moss). `--chart-6` was added
- * for this - the set had four fixed hues and this chart needs five. Fixing it
- * here left the dashboard's `TimingWaterfall` painting the same two phases the
- * same wrong way for as long as the two lists were separate, which is the
- * argument for the shared descriptor.
- *
- * Mirrors the dashboard TimingWaterfall's visual idiom (same --chart-* tokens),
- * but is driven by a single response's timing object rather than run averages.
+ * **Every phase is a fixed categorical hue** from `TIMING_PHASES`
+ * (`shared/response-viewer/timing-phases.ts`), shared with the dashboard so the two lists cannot
+ * diverge. TTFB is `--chart-3` (violet), Download `--chart-6` (moss, added since four fixed hues
+ * were too few). Not `--primary`: it tracks the user's accent, and under the green scheme it equals
+ * `--success`'s hue 142 three lightness points apart, two phases one swatch (under orange, 14
+ * degrees from Connect's amber). Not `--success`: a status token on a series with no status.
  */
 
 import { type ReactNode } from "react";
@@ -51,19 +35,16 @@ import type { RedirectHop } from "@/types/domain";
 import type { ResponseTiming } from "../../types";
 
 /**
- * `border-rule`, not the chip's default `border-border`. This tab sits inside a
- * pane that declares `surface-card`, and on a card `--border` is the same
- * colour as `--card` in dark - so the dot had no outline in one theme. `ml-1`
- * rather than the default `ml-1.5` keeps the legend rows tight.
+ * `border-rule`, not the chip's `border-border`: in this `surface-card` pane `--border` equals
+ * `--card` in dark, leaving the dot unoutlined. `ml-1`, not `ml-1.5`, keeps legend rows tight.
  */
 const TIP_CLASS = "ml-1 border-rule";
 
 /**
- * The engine adds each followed hop's libcurl timers into the phase fields
- * (`add_phase_times`), so after a redirect TTFB is a sum of waits at every
- * server on the chain, which the shared `PHASE_TIPS.ttfb` ("the server") would
- * misdescribe. Kept here: the dashboard and history read the shared tip for
- * single requests.
+ * The engine adds each followed hop's libcurl timers into the phase fields (`add_phase_times`), so
+ * after a redirect TTFB sums the waits at every server, which the shared `PHASE_TIPS.ttfb` ("the
+ * server") misdescribes. Kept here; the dashboard and history keep the shared tip for single
+ * requests.
  */
 const SUMMED_TTFB_TIP =
 	"Time to first byte, summed over every request in the redirect chain - server processing + propagation at each hop. It is not one server's wait.";
@@ -76,9 +57,8 @@ export interface ResponseTimingTabProps {
 	/** The hops followed before the final response; their phases are in `timing`. */
 	redirects?: RedirectHop[];
 	/**
-	 * A stream's first event, in ms after the send (#3775). Absent unless the
-	 * stream has an event and its send time is known. A stream's TTFB is when
-	 * the headers arrived, which says nothing about when the first token did.
+	 * A stream's first event, ms after the send (#3775); absent without an event or a known send
+	 * time. A stream's TTFB is when headers arrived, saying nothing about the first token.
 	 */
 	firstEventMs?: number;
 }
@@ -99,7 +79,7 @@ export default function ResponseTimingTab({
 		summed && p.key === "ttfb" ? { ...p, tip: SUMMED_TTFB_TIP } : p
 	);
 
-	// Bar segments are proportional to the network phases (which sum to ≈ wire).
+	// Segments are proportional to the network phases, which sum to about wire time.
 	const phaseSum = phases.reduce((s, p) => s + Math.max(0, p.value), 0);
 	const pct = (v: number) => (phaseSum > 0 ? (Math.max(0, v) / phaseSum) * 100 : 0);
 
@@ -112,7 +92,6 @@ export default function ResponseTimingTab({
 				</p>
 			)}
 
-			{/* Continuous timeline: each phase is a sequential segment of the request. */}
 			<div className="flex h-2.5 w-full overflow-hidden rounded-sm bg-accent">
 				{phases.map((p) => (
 					<span
@@ -128,7 +107,6 @@ export default function ResponseTimingTab({
 				))}
 			</div>
 
-			{/* Legend: color swatch · phase · value · share of network time. */}
 			<div className="mt-3.5 space-y-1.5">
 				{phases.map((p) => (
 					<div
@@ -159,7 +137,6 @@ export default function ResponseTimingTab({
 				))}
 			</div>
 
-			{/* Summary: wire vs generator-side overhead vs Vayu's own cost vs scripts vs perceived total. */}
 			<div className="mt-3.5 pt-3 border-t border-dashed border-rule flex flex-wrap items-center gap-x-5 gap-y-1.5 text-label">
 				{timing.wireMs !== undefined && (
 					<TimingStat

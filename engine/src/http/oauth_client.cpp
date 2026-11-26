@@ -73,7 +73,7 @@ using vayu::utils::url_decode;
  * Whether a body that is not JSON may be read as the legacy form-encoded token
  * response (#3201): only under a form, `text/plain` or absent Content-Type, and
  * never when it opens like markup. A gateway's HTML error page holds `=` in
- * every attribute, and decoded as a form it named its own markup as the
+ * every attribute, and decoded as a form it would name its own markup as the
  * provider's `error`.
  */
 bool may_be_form_encoded (const std::string& body, const vayu::Headers& headers) {
@@ -178,8 +178,8 @@ int64_t parse_expires_in (const nlohmann::json& body) {
 }
 
 // What `fallbackExpiresIn` asks a token that states no lifetime to be kept for,
-// in seconds, held to MAX_FALLBACK_EXPIRES_IN_SECONDS, or 0 (non-expiring, as
-// before) when it is absent or not a positive number.
+// in seconds, held to MAX_FALLBACK_EXPIRES_IN_SECONDS, or 0 (non-expiring) when
+// it is absent or not a positive number.
 int64_t fallback_expires_in (const nlohmann::json& config) {
     const auto it = config.find ("fallbackExpiresIn");
     if (it == config.end () || !it->is_number ()) {

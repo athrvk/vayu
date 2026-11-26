@@ -6,11 +6,10 @@
  */
 
 /**
- * @file prompts.ts
  * @brief MCP prompts - server-provided, parameterized starting points the user
  *        picks from their client (e.g. a slash menu). Each builds a ready-to-run
  *        message, embedding the relevant engine data (run report / comparison)
- *        so the agent has the context inline. See docs/engine/mcp.md.
+ *        so the agent has the context inline. See docs/engine/mcp/resources-and-prompts.md.
  */
 
 import { z } from "zod";
@@ -153,7 +152,7 @@ export const PROMPTS: McpPromptDef[] = [
 			return {
 				messages: [
 					userText(
-						"Diagnose the errors in this Vayu run. Identify which status codes / error types " +
+						"Diagnose the errors in this Vayu run. Identify which status codes / error types / mcp failure classes (summary.errorClasses) " +
 							"dominate, whether failures correlate with load (latency climbing toward saturation), " +
 							`and suggest likely causes and the next checks to run. ${PARTIAL_REPORT_SENTENCE}${RUN_ERROR_DEFINITION_SENTENCE}\n\nRun ${runId} report:\n${JSON.stringify(report)}`
 					),

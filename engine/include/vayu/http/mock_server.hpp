@@ -44,8 +44,7 @@ struct MockRouteWinner {
 
 /**
  * One entry of a mock's route table: a stored request, its path template, and
- * every one of its saved examples (issue #481 phase 3 widened this from just
- * the first).
+ * every one of its saved examples, not just the first (#481 phase 3).
  *
  * Built once when the mock starts and const thereafter. A running mock does not
  * hot-reload edits to the collection - restart it - which is what makes the
@@ -70,10 +69,9 @@ struct MockRoute {
     /// The example `mode == "fixed"` names. Unset for every other mode, and
     /// for "fixed" itself when the request names no target.
     std::optional<std::string> fixed_example_id;
-    /// False when `examples` is empty. The route is kept anyway: "this
-    /// request matched but has nothing to serve" is a far better answer
-    /// than "no such route", and it is the one an import that dropped its
-    /// examples produces.
+    /// False when `examples` is empty. The route is kept anyway: "this request
+    /// matched but has nothing to serve" is a better answer than "no such
+    /// route", and it is what an import that dropped its examples produces.
     bool has_response = false;
     /// Set by `mark_shadowed_routes` when another request has this one's method
     /// and path shape and answers for both (the query is not part of a route,
@@ -117,8 +115,8 @@ struct MockServerInfo {
     int latency_ms     = 0;
     int error_rate_pct = 0;
     /// How many routes the table holds, and how many of those have no example
-    /// to serve. The second number is the one that explains an empty-looking
-    /// mock, so it is reported rather than left to be discovered per-404.
+    /// to serve. The second explains an empty-looking mock, so it is reported
+    /// rather than left to each 404.
     int route_count            = 0;
     int routes_without_example = 0;
     /// How many requests are shadowed by another with the same method and path
@@ -164,11 +162,9 @@ struct MockParseError {
  * no case for exposing it - it answers with stored example bodies, which can
  * carry whatever a recorded response carried, and the engine has no route auth.
  *
- * The parsed request is the *value*, not an out-parameter: this used to return
- * `std::optional<MockParseError>` with the result written through a reference,
- * so an empty return meant success and a caller could read a half-filled `out`
- * it never checked. `std::expected` makes the request unreachable unless the
- * payload was accepted.
+ * The parsed request is the *value*, not an out-parameter, so a caller cannot
+ * read a half-filled result it never checked: `std::expected` makes the request
+ * unreachable unless the payload was accepted.
  */
 std::expected<MockStartRequest, MockParseError> parse_mock_start (const nlohmann::json& json);
 
@@ -248,7 +244,7 @@ const std::string& method,
 const std::string& path);
 
 /**
- * Which of @p route's saved examples answers this request (issue #481 phase 3).
+ * Which of @p route's saved examples answers this request (#481 phase 3).
  *
  * Caller guarantees `route.has_response` (so `route.examples` is never empty
  * here). "first" and a "fixed" target that still exists are pinned - the same
@@ -273,13 +269,13 @@ nlohmann::json mock_server_info_json (const MockServerInfo& info);
 
 /** The wire shape of one route, for `GET /mock/:id/routes`. `hits` is a
  *  snapshot of that route's serve count, read separately from the manager
- *  (issue #481 phase 3) since it is mutable state the route table itself is
+ *  (#481 phase 3) since it is mutable state the route table itself is
  *  not. A shadowed route also carries `shadowed: true` and `shadowedBy`
  *  (`{requestId, requestName}`); both are absent otherwise. */
 nlohmann::json mock_route_json (const MockRoute& route, std::uint64_t hits);
 
 /**
- * Owns the engine's collection mock servers (issue #481 phase 2).
+ * Owns the engine's collection mock servers (#481 phase 2).
  *
  * Each mock is an independent `httplib::Server` on its own thread that answers
  * a collection's saved example responses on the paths its requests describe.

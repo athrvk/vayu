@@ -6,8 +6,6 @@
  */
 
 /**
- * OverviewTab Component
- *
  * Displays the key-metric glance, summary statistics, verdicts, status codes
  * and errors. The run's request and configuration sit above the tabs, in
  * `LoadTestDetail`'s scrolling body.
@@ -43,6 +41,7 @@ import { RunEvents } from "./RunEvents";
 import RunKeyMetrics from "./RunKeyMetrics";
 import { UnrecordedFiguresNotice } from "./UnrecordedFiguresNotice";
 import { unrecordedFiguresOf } from "./unrecorded-figures";
+import { ErrorClassesCard } from "./ErrorClassesCard";
 import { SlowRequestsCard } from "./SlowRequestsCard";
 import { extractTestFailures, sampleResultsWithoutValidationRow } from "../test-validation";
 import { locateSample, numberByTime, type SampleDestination } from "../sample-filter";
@@ -178,11 +177,11 @@ export default function OverviewTab({
 			    run that made none, which then keeps the card below as it was. */}
 			<ExactAssertionsSummary assertions={exactAssertionsOf(report)} />
 
-			{/* Whether the run's own assertions passed, and which failed. The
-			    schema block above judges the response against a contract; this
-			    judges it against the run's pm.test scripts - the same distinction
-			    the live dashboard draws. Absent for a run that asserted nothing,
-			    so a run without tests reads exactly as it did before this block. */}
+			{/*
+			 * Whether the run's own assertions passed, and which failed: the schema block above
+			 * judges the response against a contract, this against the run's pm.test scripts (the
+			 * live dashboard's distinction). Absent for a run that asserted nothing.
+			 */}
 			<TestValidationSummary
 				testValidation={report.testValidation}
 				sampling={report.sampling}
@@ -215,12 +214,10 @@ export default function OverviewTab({
 							{Object.entries(report.statusCodes).map(
 								([code, count]: [string, number]) => {
 									/*
-									 * One vocabulary, from `constants/http-status`. These tiles
-									 * used raw palette classes and their own branches, which put
-									 * 3xx on blue while the badge said amber and the chart said
-									 * violet - and painted a 5xx and a connection failure the
-									 * same red, so "the server erred" and "there was no server"
-									 * were indistinguishable at a glance.
+									 * One vocabulary, from `constants/http-status`: one colour per
+									 * class across tile, badge and chart, and a 5xx told apart from
+									 * a connection failure, as "the server erred" and "there was no
+									 * server" must differ at a glance.
 									 */
 									const style = STATUS_CLASS_STYLE[httpStatusClass(Number(code))];
 
@@ -251,6 +248,10 @@ export default function OverviewTab({
 					</CardContent>
 				</Card>
 			)}
+
+			{/* An MCP run's failed replies by class. Absent for a run stored before
+			    the engine counted them, and for one that saw none. */}
+			<ErrorClassesCard errorClasses={report.summary.errorClasses} />
 
 			{/* Outside every count above and below; a stopped run can have this and no errors. */}
 			<CancelledRequestsNote count={report.summary.cancelledRequests} />

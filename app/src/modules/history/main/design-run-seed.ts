@@ -6,10 +6,8 @@
  */
 
 /**
- * Turn a stored design run into starting values for the request builder.
- *
- * Pure on purpose: no hooks, no queries, no store. The view that renders it
- * then has nothing to prove but rendering.
+ * Turn a stored design run into starting values for the request builder. Pure (no hooks, queries or
+ * store), so the view rendering it has nothing to prove but rendering.
  *
  * Three sources, each for what only it has:
  *
@@ -67,15 +65,13 @@ interface DesignSnapshot {
 	method?: string;
 	url?: string;
 	/**
-	 * The posted lines (issue #2466) for a run the app started, the older record
-	 * for one stored before - `headerLinesOf` reads both. Values the engine
-	 * withheld hold the marker in either.
+	 * The posted lines (#2466) for a run the app started, the older record for one stored before;
+	 * `headerLinesOf` reads both. Withheld values hold the marker in either.
 	 */
 	headers?: HeaderLine[] | Record<string, string>;
 	/**
-	 * The path rows composition could not write into `url` (issue #1764): a
-	 * value still holding a token, left at `:name` for the send to answer.
-	 * Absent when every `:name` was written, which is the usual case.
+	 * The path rows composition could not write into `url` (#1764): a value still holding a token,
+	 * left at `:name` for the send. Absent when every `:name` was written, the usual case.
 	 */
 	params?: KeyValueEntry[];
 	body?: {
@@ -91,10 +87,9 @@ interface DesignSnapshot {
 	};
 	auth?: { mode?: string };
 	/**
-	 * The composed element list the send ran: the collection chain's, then the
-	 * request's own, each stamped with its `origin`, and without the elements
-	 * the send left out (disabled, incomplete). Read defensively - the snapshot
-	 * is not typed engine-side. Absent on a run recorded before #1514.
+	 * The composed element list the send ran: the collection chain's, then the request's own, each
+	 * stamped with its `origin`, minus those the send left out (disabled, incomplete). Read
+	 * defensively (the snapshot is not typed engine-side). Absent on a run recorded before #1514.
 	 */
 	elements?: unknown;
 	/** Retired by #1514: read only when `elements` is absent. */
@@ -119,43 +114,38 @@ export interface DesignRunSeed {
 	/** Starting values. `id` is null, and that is what detaches the copy. */
 	request: Partial<RequestState>;
 	/**
-	 * What the collection chain contributed, as the run recorded it, to show
-	 * read-only next to the request's own and to replay unchanged: every stored
-	 * element whose origin is a collection, with its origin (scope included) as
-	 * stored. For a run recorded before #1514 these are rebuilt from the retired
-	 * script parts, pre before post, with no scope.
+	 * What the collection chain contributed, as recorded, shown read-only beside the request's own
+	 * and replayed unchanged: every stored element whose origin is a collection, origin (scope
+	 * included) as stored. For a run before #1514, rebuilt from the retired script parts, pre
+	 * before post, with no scope.
 	 */
 	inheritedElements: ResolvedElement[];
 	/** Set only for a run stored before script parts existed. */
 	legacyPreScript?: string;
 	legacyPostScript?: string;
 	/**
-	 * The auth mode this run actually sent, from the snapshot. Only the *mode*
-	 * survives storage (`sanitize_config_snapshot` drops the credential), so
-	 * this is all there is - but shown read-only next to the live request's
-	 * current auth it answers "did the request's auth change since this ran?",
-	 * which the editor alone cannot, because the editor shows the *current*
-	 * mode. `undefined` when the run recorded no auth (mode "none" or absent).
+	 * The auth mode this run sent, from the snapshot. Only the *mode* survives storage
+	 * (`sanitize_config_snapshot` drops the credential), but shown read-only beside the live
+	 * request's auth it answers "did the auth change since this ran?", which the editor cannot, as
+	 * it shows the *current* mode. `undefined` when the run recorded no auth (mode "none" or
+	 * absent).
 	 */
 	recordedAuthMode?: string;
 	/**
-	 * True when the engine truncated this run's stored request body
-	 * (`maxTraceBodyBytes`), on the trace or on the config snapshot itself -
-	 * both are capped at the same limit. "Save to request" must
-	 * not write a possibly-incomplete body back - see {@link applyRunToRequest}.
+	 * True when the engine truncated this run's stored request body (`maxTraceBodyBytes`), on the
+	 * trace or on the config snapshot (both capped at that limit). "Save to request" must not write
+	 * a possibly incomplete body back: see {@link applyRunToRequest}.
 	 */
 	requestBodyTruncated?: boolean;
 	/**
-	 * What a `binary` body sent, as the engine recorded it at send time:
-	 * the file's name, its size and its sha256 - never its bytes, and never
-	 * its path. Read off the trace's request node (`request.bodyFile`), and
+	 * What a `binary` body sent, as the engine recorded it at send time: the file's name, size and
+	 * sha256, never its bytes or path. Read off the trace's request node (`request.bodyFile`);
 	 * absent for every other body and for a run stored before the field.
 	 */
 	requestBodyFile?: SentBodyFile;
 	/**
-	 * What the engine withheld from the snapshot (`<redacted>`, #1803), so none
-	 * of it is seeded as if the run had sent it and "Save to request" does not
-	 * write it back - see {@link applyRunToRequest}.
+	 * What the engine withheld from the snapshot (`<redacted>`, #1803), so none of it is seeded as
+	 * if sent and "Save to request" does not write it back (see {@link applyRunToRequest}).
 	 */
 	withheld: WithheldParts;
 }
@@ -197,22 +187,18 @@ function fileRefOf(node: unknown): FileRef {
 }
 
 /**
- * A run's recorded headers as editor rows, minus the ones a pre-#1229 client
- * put on the wire itself.
+ * A run's recorded headers as editor rows, minus those a pre-#1229 client put on the wire itself. A
+ * run row is the one place those survive the engine's startup repair (which rewrites stored
+ * *requests*, never traces), so otherwise a replay of an old run would seed its frozen
+ * `X-Request-ID` and the day's version string and send both again as user headers. Same rule as the
+ * request loader's, from the same definition.
  *
- * A run row is the one place those survive the engine's startup repair, which
- * rewrites stored *requests* and never traces - so without this a replay of an
- * old run would seed the copy with that run's frozen `X-Request-ID` and the
- * version string of the day it ran, and send both again as ordinary user
- * headers. Same rule as the request loader's, from the same definition.
- *
- * A header whose recorded value the engine withheld (#1803) is never a row:
- * replayed, it would send the literal `<redacted>` as the credential. The
- * request's own row of that name stands in for it when `liveHeaders` has one,
- * the same way the live auth stands in for the recorded auth, so a header the
- * user typed still goes out and "Save to request" finds nothing to change.
- * The row is taken whole, disabled or not: a disabled one stays disabled in
- * the copy instead of being replayed or dropped from the saved request.
+ * A header whose recorded value the engine withheld (#1803) is never a row: replayed, it would send
+ * the literal `<redacted>` as the credential. The request's own row of that name stands in when
+ * `liveHeaders` has one, as the live auth stands in for the recorded auth, so a typed header still
+ * goes out and "Save to request" finds nothing to change. The row is taken whole, disabled or not:
+ * a disabled one stays disabled in the copy rather than being replayed or dropped from the saved
+ * request.
  */
 function toHeaderItems(
 	headers: HeaderLine[] | Record<string, string> | undefined,
@@ -235,10 +221,9 @@ function toHeaderItems(
 					key,
 					value,
 					enabled: true,
-					// The run's `bodyModeHeaders` (issue #1765) put back on their rows,
-					// so the replay tells the engine the same thing the recorded Send
-					// did: these are the body mode's own, which a `content-type` opt-out
-					// removes.
+					// The run's `bodyModeHeaders` (#1765) put back on their rows, so the replay
+					// tells the engine what the recorded Send did: these are the body mode's own,
+					// which a `content-type` opt-out removes.
 					...(bodyModeRows.has(index) ? { source: "body-mode" as const } : {}),
 				},
 			];
@@ -247,10 +232,9 @@ function toHeaderItems(
 }
 
 /**
- * The index of the last line carrying each of `names`, compared without case:
- * the engine marks a name by its last row (`bodyModeHeaders`, issue #1765), so
- * of a typed `Content-Type` repeated after the body mode's, only the one it
- * wrote last is the body mode's.
+ * The index of the last line carrying each of `names`, compared without case: the engine marks a
+ * name by its last row (`bodyModeHeaders`, #1765), so of a typed `Content-Type` repeated after the
+ * body mode's, only the last is the body mode's.
  */
 function lastRowOfEach(lines: HeaderLine[], names: unknown[]): Set<number> {
 	const wanted = new Set(
@@ -285,13 +269,11 @@ function withheldParts(
 }
 
 /**
- * The copy's Params rows: the URL's query, then the path rows the run sent.
- *
- * A `:name` still in the recorded URL is one composition left for the send to
- * answer (its value held a token), and the value is in the snapshot's own
- * `params`, not in the URL - so a copy seeded from the URL alone would replay
- * `:name` literally, and "Save to request" would blank the row. A name the
- * snapshot has no row for (a run recorded before #1764) gets an empty one.
+ * The copy's Params rows: the URL's query, then the path rows the run sent. A `:name` still in the
+ * recorded URL is one composition left for the send (its value held a token), and its value is in
+ * the snapshot's `params`, not the URL, so a copy seeded from the URL alone would replay `:name`
+ * literally and "Save to request" would blank the row. A name with no snapshot row (a run before
+ * #1764) gets an empty one.
  */
 function paramsFromSnapshot(snapshot: DesignSnapshot) {
 	const url = snapshot.url ?? "";
@@ -321,16 +303,15 @@ function collectionParts(parts: ScriptPart[] | undefined): ScriptPart[] {
 }
 
 /**
- * A recorded script part as a `script.pre` / `script.post` element (issue
- * #1512), so a run's historical parts can ride the same `elements` wire field
- * a replay now sends - see `DesignRunView.tsx`'s `handleExecute`. Only the
- * script text and origin survive a stored run; `enabled` is always true,
- * since a disabled element was never recorded as a part in the first place.
+ * A recorded script part as a `script.pre` / `script.post` element (#1512), so historical parts
+ * ride the `elements` wire field a replay sends (see `DesignRunView.tsx`'s `handleExecute`). Only
+ * the script text and origin survive a stored run; `enabled` is always true, as a disabled element
+ * was never recorded as a part.
  *
  * `null` for a part whose script is missing, not a string or only whitespace
- * (`isBlankScriptElement`, #1609): the engine refuses a script element with no
- * script (#3052), so replaying one would turn the whole resend into a 400. The
- * part is left out instead, as a blank script is everywhere else.
+ * (`isBlankScriptElement`, #1609): the engine refuses a script element with no script (#3052), so
+ * replaying one would 400 the whole resend. The part is left out, as a blank script is everywhere
+ * else.
  */
 export function scriptPartToElement(
 	part: Omit<ScriptPart, "script"> & { script?: unknown },
@@ -372,10 +353,9 @@ function storedOriginOf(raw: unknown): ElementOrigin | null {
 }
 
 /**
- * One stored element, or null when it is not one the copy can hold: not an
- * object, no string `id` / `kind`, no object `config`, an origin of an unknown
- * kind, or a script with no text (`isBlankScriptElement`, #3052: the engine
- * refuses one, so replaying it would turn the resend into a 400).
+ * One stored element, or null when the copy cannot hold it: not an object, no string `id` / `kind`,
+ * no object `config`, an unknown origin kind, or a script with no text (`isBlankScriptElement`,
+ * #3052: the engine refuses one, so replaying it would 400 the resend).
  */
 function storedElementOf(raw: unknown): ResolvedElement | null {
 	if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.kind !== "string") return null;
@@ -466,11 +446,9 @@ function recordedElements(snapshot: DesignSnapshot): RecordedElements {
 }
 
 /**
- * The name the copy starts with, which Send records on its run
- * (`execIdentity`): the run's recorded request name when it is one the user set
- * (the same rule the tab strip uses), else the URL path the strip would show.
- * A url the engine withheld names nothing. `undefined` leaves the default
- * state's name in place.
+ * The copy's starting name, which Send records on its run (`execIdentity`): the run's recorded
+ * request name when the user set it (the tab strip's rule), else the URL path the strip would show.
+ * A url the engine withheld names nothing. `undefined` keeps the default state's name.
  */
 function copyName(run: Run, snapshot: DesignSnapshot, withheldUrl: boolean): string | undefined {
 	const recorded = run.configSnapshot?.requestName ?? run.summary?.requestName ?? "";
@@ -483,11 +461,10 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 	const trace = run.result?.trace;
 
 	/*
-	 * Headers and auth move together. With a live request we show its current
-	 * auth, because that is what a fresh resolution will send, and the snapshot
-	 * headers hold no credential: the engine withholds those values. Without one
-	 * there is nothing to resolve, so the wire headers are used as they are - the
-	 * recorded Authorization included - and the copy replays exactly what ran.
+	 * Headers and auth move together. With a live request the copy shows its current auth, which a
+	 * fresh resolution will send, as the snapshot headers hold no credential (the engine withholds
+	 * those values). Without one there is nothing to resolve, so the wire headers are used as they
+	 * are, the recorded Authorization included, and the copy replays exactly what ran.
 	 */
 	const recordedHeaders = liveRequest ? snapshot.headers : trace?.request?.headers;
 	const headers = liveRequest
@@ -525,17 +502,15 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			elements: recorded.own,
 			followRedirects: snapshot.followRedirects ?? DEFAULT_FOLLOW_REDIRECTS,
 			maxRedirects: snapshot.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
-			// The timeout the send named, so a replay waits as long as the run did;
-			// no key is a send that took the `defaultTimeout` setting, and the
-			// replay takes the setting too. Display-and-replay only: Save to
-			// request never writes it (see `writableFields`).
+			// The timeout the send named, so a replay waits as long as the run did; no key is a
+			// send that took the `defaultTimeout` setting, and the replay takes it too. Display and
+			// replay only: Save to request never writes it (see `writableFields`).
 			timeout: typeof snapshot.timeout === "number" ? snapshot.timeout : null,
 			httpVersion: isHttpVersion(snapshot.httpVersion)
 				? snapshot.httpVersion
 				: DEFAULT_HTTP_VERSION,
-			// A run recorded before the field was sent has no key, and reads as
-			// verifying - the same direction every other default here takes,
-			// and the only safe one for this field.
+			// A run recorded before the field has no key and reads as verifying, the direction
+			// every other default here takes and the only safe one for this field.
 			verifySSL: snapshot.verifySSL ?? DEFAULT_VERIFY_SSL,
 			// Postman's protocol switches (issue #1765), same direction: a run
 			// recorded before they existed used the jar, encoded its URL and

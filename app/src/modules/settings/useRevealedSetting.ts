@@ -6,18 +6,13 @@
  */
 
 /**
- * Reveal the setting a search result asked for.
+ * Reveal the setting a search result asked for. A result selects the owning category and leaves
+ * `highlightedKey` behind; this finds the block carrying that key as `data-setting-anchor`, scrolls
+ * it into view and outlines it for a moment.
  *
- * A result selects the owning category and leaves `highlightedKey` behind; this
- * finds the block that carries that key as `data-setting-anchor`, scrolls it
- * into view and outlines it for a moment.
- *
- * One mechanism for both halves. The engine cards originally did this with a
- * React ref and a conditional class, which worked only because those cards are
- * rendered by one component from one array - the app panels are seven
- * hand-written files, and giving them a second, different reveal would have
- * meant two implementations of "show me this setting" for one feature. An
- * attribute is what both can carry.
+ * One mechanism for both halves: the engine cards are one component over one array, the app panels
+ * seven hand-written files, and an attribute is what both can carry, so "show me this setting" has
+ * one implementation.
  */
 
 /* global setTimeout, clearTimeout, MutationObserver */
@@ -30,11 +25,9 @@ import { scrollWithin } from "@/lib/scroll-within";
 export const HIGHLIGHT_MS = 2500;
 
 /**
- * Tailwind classes, applied imperatively.
- *
- * The alternative - a `highlighted` prop threaded down to every card in every
- * panel - is the change this attribute exists to avoid. Written as separate
- * literals so Tailwind's scanner emits them.
+ * Tailwind classes applied imperatively; the alternative, a `highlighted` prop threaded to every
+ * card in every panel, is what the attribute avoids. Separate literals so Tailwind's scanner emits
+ * them.
  */
 const HIGHLIGHT_CLASSES = ["ring-2", "ring-primary", "rounded-lg"];
 

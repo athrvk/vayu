@@ -79,7 +79,7 @@ never held back, and never leaves a run, a trace or a History entry behind. A
 header you typed by hand is not part of the schema's identity, so after editing
 an `Authorization` row directly, press Refresh.
 
-A coding agent connected over the [MCP server](../engine/mcp.md) reads the same
+A coding agent connected over the [MCP server](../engine/mcp/index.md) reads the same
 schema with `get_graphql_schema`: the request composed the same way and
 introspected with the same auth, so it sees the types the editor sees.
 
@@ -220,11 +220,11 @@ editor pane and not here.
 
 The section is hidden outright off a non-GraphQL body (`useGraphQLRelevance`),
 rather than rendering to say the request does not send one - a header every REST
-request used to carry and the reader scanned past on the way to the two sections
+request would carry and the reader would scan past on the way to the two sections
 that meant something (#1310). That verdict answers from the same
 `useRequestQuery` data the section itself reads, so a REST tab never even
-requests the section's own lazy ~320KB chunk (#1146): it used to arrive the
-moment the expanded section mounted just to say the request was not GraphQL.
+requests the section's own lazy chunk (#1146): mounting the
+expanded section just to say the request was not GraphQL would load it.
 
 The outline reads the saved request, so it follows the editor as autosave
 catches up rather than keystroke by keystroke.

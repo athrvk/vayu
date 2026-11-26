@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * PerformanceTab Component
- *
- * Displays latency distribution, rate control metrics, and time-series charts.
- */
+/** The Performance tab: latency distribution, rate control and the time-series charts. */
 
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, InfoChip } from "@/components/ui";
@@ -62,24 +58,20 @@ export default function PerformanceTab({
 	// no SLO line and judges no tile by one (#2939).
 	const sloMs = derived.runSloMs;
 	const hasSlo = sloMs !== undefined;
-	// Stored ticks carry each second's merged percentiles (#2385), so the
-	// history percentile chart / scatter can render the same views as the live
-	// dashboard. Mirror MetricsView's split: ramp_up and capacity →
-	// response-time-vs-concurrency scatter (capacity elbow), other modes →
+	// Stored ticks carry each second's merged percentiles (#2385), so the history percentile chart
+	// and scatter render the live dashboard's views, split as MetricsView does: ramp_up and
+	// capacity get the response-time-vs-concurrency scatter (capacity elbow), other modes
 	// percentiles-over-time.
 	//
-	// The gate asks a predicate, not a series (#1190, the rule #1152 wrote into
-	// modules/dashboard/README.md). The chart below builds the percentile series
-	// from this same array, so building it here too transformed a loaded run's
-	// ticks twice on every render of the tab. `hasPercentileSignal` reads every
-	// tick rather than each bucket's last-write-wins sample, so it can only be
-	// more permissive than the `.some((d) => d.p99 > 0)` it replaces - and the
+	// The gate asks a predicate, not a series (#1190; the rule #1152 wrote into
+	// modules/dashboard/README.md): the chart builds the percentile series from this same array, so
+	// building it here too would transform a loaded run's ticks twice per render.
+	// `hasPercentileSignal` reads every tick, not each bucket's last-write-wins sample, and the
 	// chart's own two-point guard still decides whether anything is drawn.
 	//
-	// Memoised despite returning a boolean, as MetricsView does: the predicate
-	// stops at the first tick carrying a p99, but the run that has none - the
-	// one whose card this hides - is the case that scans every tick, and a
-	// loaded series runs to thousands of them.
+	// Memoised despite returning a boolean, as in MetricsView: the predicate stops at the first
+	// tick with a p99, but the run with none (the one whose card this hides) scans every tick, and
+	// a loaded series runs to thousands.
 	const hasPercentileData = useMemo(() => hasPercentileSignal(timeSeries), [timeSeries]);
 	const showsConcurrencyScatter = isConcurrencySweepMode(derived.mode);
 	// A run the engine could not fully record carries no latency block (#2938):
@@ -160,10 +152,10 @@ export default function PerformanceTab({
 					</Card>
 				))}
 
-			{/* What the scrape recorded, beside the chart that drew it. Present
-			    whenever the run monitored anything - including a run whose every
-			    scrape failed, which has a section, a failure count and no line
-			    above it, and until now read as an unexplained empty chart. */}
+			{/*
+			 * What the scrape recorded, beside the chart that drew it; present whenever the run
+			 * monitored anything, even when every scrape failed.
+			 */}
 			{report.monitor && (
 				<Card className="enter-fade">
 					<CardHeader>
@@ -307,10 +299,10 @@ export default function PerformanceTab({
 								<p className="text-xs text-muted-foreground mb-2">
 									Achievement rate
 								</p>
-								{/* good / caution / bad is semantics, not decoration, so all
-								    three branches take the semantic -text trio. The third
-								    already did; the first two were raw palette, which made
-								    one expression speak two vocabularies. */}
+								{/*
+								 * good / caution / bad is semantics, not decoration, so all three
+								 * branches take the semantic -text trio.
+								 */}
 								<p
 									className={cn(
 										"text-metric font-bold",

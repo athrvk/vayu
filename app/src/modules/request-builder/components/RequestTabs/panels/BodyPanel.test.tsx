@@ -323,7 +323,7 @@ describe("the editor fills the pane", () => {
 		const { container } = renderPanel({ bodyMode: "json" });
 		const root = container.firstElementChild!;
 		// `min-h-0` is the half that lets it shrink too - see the flex-shrink rule
-		// in docs/design-system.md.
+		// in docs/design-system/overflow-and-shrink.md.
 		for (const cls of ["flex", "flex-col", "flex-1", "min-h-0"]) {
 			expect(root.className, `root is missing ${cls}`).toContain(cls);
 		}

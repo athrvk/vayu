@@ -6,18 +6,13 @@
  */
 
 /**
- * InheritanceChain
+ * The root→leaf ancestor chain of a collection, marking whose auth a descendant request set to
+ * `Inherit from collection` would inherit:
  *
- * Renders the root→leaf ancestor chain for a collection and indicates which
- * ancestor's auth would be inherited if a descendant request used
- * `Inherit from collection`.
- *
- * Rules:
- *   - The nearest ancestor (inclusive of this collection) that defines auth is
- *     the resolved source, unless an ancestor explicitly set to No Auth
- *     (`noauth`) blocks inheriting first - see `resolveAuthSource`.
+ *   - The nearest ancestor (this collection included) that defines auth is the source, unless an
+ *     ancestor set to No Auth (`noauth`) blocks inheriting first (see `resolveAuthSource`).
  *   - The current collection is tagged This.
- *   - If a request explicitly overrides auth, that's noted in the row.
+ *   - A request that overrides auth is noted in its row.
  */
 
 import { Folder } from "lucide-react";
@@ -42,19 +37,12 @@ interface InheritanceChainProps {
 const TAG_CLASS = "text-micro bg-primary-tint text-primary px-1.5 py-px shrink-0";
 
 /**
- * The auth *type*, never its value.
- *
- * This cell is `shrink-0` - it is meant to hold a short constant, and the row's
- * name is what yields. It used to interpolate the credential itself
- * (`Bearer ${auth.token}`), so one imported JWT put several hundred unbreakable
- * mono characters into a flex child that had been told not to shrink: the row
- * pushed past the card's border and scrolled the whole tab sideways. It also put
- * the bearer token in plain sight in a summary panel that nobody opened to read
- * a secret.
- *
- * The request-side twin of this component (request-builder's
- * AuthInheritBanner) already does it this way - a bounded type label in the
- * chain row, with the credential shown separately and truncated.
+ * The auth *type*, never its value. This cell is `shrink-0`, meant for a short constant while the
+ * row's name yields: a credential here (one imported JWT is several hundred unbreakable mono
+ * characters) would push the row past the card's border, scroll the whole tab sideways, and show a
+ * bearer token in a summary panel nobody opened to read a secret. The request-side twin
+ * (request-builder's AuthInheritBanner) does the same: a bounded type label in the chain row, the
+ * credential shown separately and truncated.
  */
 function describeAuth(c: Collection): string {
 	// A stored mode the registry does not know (a newer engine, a hand-edited
@@ -76,19 +64,18 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 	const unsavedMark = (c: Collection) =>
 		draftIsUnsaved && c.id === collectionId ? " (unsaved)" : "";
 
-	// Resolution walks leaf → root and picks the nearest collection that defines
-	// auth (nested folders take precedence, i.e. closer to leaf wins), stopping at
-	// one explicitly set to No Auth. Shared with what execution actually sends, so
-	// this panel cannot claim a SOURCE the request would not use.
+	// Resolution walks leaf → root and picks the nearest collection that defines auth (closer to
+	// the leaf wins), stopping at one set to No Auth. Shared with what execution sends, so this
+	// panel cannot claim a SOURCE the request would not use.
 	const { source, blockedBy } = resolveAuthSource(ancestors);
 	const sourceId = source?.id;
 
 	return (
 		<Card pad="sm" className="mt-7 px-4">
-			{/* Was a hand-typed copy of the eyebrow that had drifted to
-			    `tracking-[0.07em]`. At 11px that is 0.11px per character - not a
-			    deliberate variant, just a copy nobody could diff against the
-			    original. */}
+			{/*
+			 * The `Eyebrow` primitive, never a hand-typed copy of its classes: a copy drifts
+			 * unseen.
+			 */}
 			<Eyebrow className="mb-2.5">Inheritance chain</Eyebrow>
 
 			{ancestors.map((c, i) => {

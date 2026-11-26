@@ -6,30 +6,21 @@
  */
 
 /**
- * Tail a streaming request's events (issue #574).
+ * Tail a streaming request's events (#574). `POST /execute` with `stream: true` answers
+ * `202 {runId, eventsUrl}`, and the upstream's events arrive over that URL as SSE. This owns the
+ * one subscription `execution-events-store` holds and writes every frame there, batched on the
+ * live-refresh cadence, not one commit per frame (#1158).
  *
- * `POST /execute` with `stream: true` answers `202 {runId, eventsUrl}` and the
- * upstream's events arrive over that URL as SSE. This hook owns exactly one
- * such subscription - the one `execution-events-store` is holding - and writes
- * every frame into that store, in batches on the live-refresh cadence rather
- * than one commit per frame (issue #1158).
+ * **A per-endpoint `EventSource`, not the `SSEClient` singleton**, which belongs to load and
+ * scenario runs: one connection living as long as the dashboard, deliberately never reconnecting.
+ * This follows the inbox capture stream (`services/inbox-watch-service.ts`, #506): `EventSource`
+ * treats any non-200 as fatal, and a reconnect inside the engine's dead-socket window meets
+ * `409 run_events_in_use` from the previous socket's claim, so one unlucky drop would silently end
+ * the stream for the tab's life.
  *
- * **A per-endpoint `EventSource`, not the `SSEClient` singleton.** That client
- * belongs to load and scenario runs: it is a single connection whose lifetime
- * is the dashboard's, and it deliberately does not reconnect. Neither property
- * fits here. The shape this follows instead is the inbox capture stream's
- * (`services/inbox-watch-service.ts`), for the reason it was written (#506):
- * `EventSource` treats any non-200 as fatal and never retries it, and a
- * reconnect landing inside the engine's dead-socket
- * window meets a `409 run_events_in_use` from the claim the previous socket is
- * still holding - so one unlucky disconnect would end the stream for the life
- * of the tab, silently.
- *
- * A resume is safe to re-deliver in one direction only, so the resume point is
- * tracked rather than the ring replayed: `?lastEventId=` picks up at the frame
- * *after* the one named, so a dropped consumer re-renders nothing. Frame ids
- * start at 0 and the store appends blindly, so replaying from the start would
- * double every row.
+ * The resume point is tracked, not the ring replayed: `?lastEventId=` resumes *after* the named
+ * frame, so a dropped consumer re-renders nothing. Frame ids start at 0 and the store appends
+ * blindly, so a replay from the start would double every row.
  */
 
 import { useEffect, useRef } from "react";
@@ -51,12 +42,10 @@ export const EXECUTION_EVENTS_RETRY_BASE_MS = 400;
 export const EXECUTION_EVENTS_RETRY_MAX_MS = 5000;
 
 /**
- * How long to wait before reconnect attempt @p attempt (1-based).
- *
- * The first step has to outlast the engine's stale-claim window - the previous
- * consumer's claim is held until two keep-alive intervals have passed without a
- * write - because a reconnect inside it is refused with a 409. The app cannot
- * read that setting, so the backoff doubles rather than guessing it.
+ * The wait before reconnect @p attempt (1-based). The first step must outlast the engine's
+ * stale-claim window (the previous claim holds until two keep-alive intervals pass without a
+ * write), as a reconnect inside it is a 409. The app cannot read that setting, so the backoff
+ * doubles rather than guess.
  */
 export function executionEventsRetryDelayMs(
 	attempt: number,
@@ -73,9 +62,8 @@ export function executionEventsRetryDelayMs(
 export function parseOpenFrame(raw: unknown): StreamOpen | null {
 	if (typeof raw !== "object" || raw === null) return null;
 	const e = raw as Record<string, unknown>;
-	// `statusCode` is what the status bar renders. A frame without one says
-	// nothing about what the stream connected to, so it is dropped rather than
-	// defaulted into a "0" the pane would draw as a client error.
+	// `statusCode` is what the status bar renders; a frame without one says nothing about the
+	// stream, so it is dropped, not defaulted to a "0" the pane would draw as a client error.
 	if (typeof e.statusCode !== "number") return null;
 	return {
 		statusCode: e.statusCode,
@@ -88,12 +76,9 @@ export function parseOpenFrame(raw: unknown): StreamOpen | null {
 }
 
 /**
- * Narrow one relayed upstream event, or reject it.
- *
- * `data` is the row's whole content and `event` is what it is labelled with, so
- * a frame missing either is dropped rather than defaulted - a row reading
- * `message` with an empty body claims an event the origin never sent. An event
- * whose `data` is genuinely empty arrives as `""`, which is a string and passes.
+ * Narrow one relayed upstream event, or reject it. `data` is the row's content and `event` its
+ * label, so a frame missing either is dropped, not defaulted (a `message` row with an empty body
+ * claims an event never sent). Genuinely empty `data` arrives as `""` and passes.
  */
 export function parseMessageFrame(raw: unknown): StreamEvent | null {
 	if (typeof raw !== "object" || raw === null) return null;
@@ -120,38 +105,32 @@ export function parseCompleteFrame(raw: unknown): {
 } {
 	const e = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
 	return {
-		// A reason this app does not know is reported as `error` rather than
-		// invented: the tab says why every stream ended, and "the engine said
-		// something I could not read" is closer to an error than to a clean close.
+		// An unknown reason reads as `error`, not invented: the tab says why every stream ended,
+		// and "unreadable" is nearer an error than a clean close.
 		reason: isEndReason(e.reason) ? e.reason : "error",
 		totalEvents: typeof e.totalEvents === "number" ? e.totalEvents : null,
 	};
 }
 
 /**
- * Subscribe to the stream `execution-events-store` is holding.
- *
- * Called once, by `RequestBuilderProvider`. It takes no arguments because the
- * store already names the subscription: one stream at a time, and starting
- * another is what ends this one.
+ * Subscribe to the stream `execution-events-store` holds. Called once, by `RequestBuilderProvider`;
+ * no arguments, as the store names the subscription: one stream at a time, and starting another
+ * ends it.
  */
 export function useExecutionEvents(): void {
 	const runId = useExecutionEventsStore((s) => s.runId);
 	const eventsUrl = useExecutionEventsStore((s) => s.eventsUrl);
 	const isStreaming = useExecutionEventsStore((s) => s.isStreaming);
 
-	// Survives the effect re-running, and is keyed by run: a frame id belongs to
-	// the relay that issued it.
+	// Survives the effect re-running, keyed by run: a frame id belongs to the relay that issued it.
 	const resumeFrom = useRef<{ runId: string | null; lastEventId: string }>({
 		runId: null,
 		lastEventId: "",
 	});
 
 	useEffect(() => {
-		// `isStreaming` gates as well as `runId`: once the stream has ended the
-		// store keeps its rows for the pane to read, and re-opening the relay for
-		// a finished run would replay the whole ring into a list that already has
-		// it.
+		// `isStreaming` gates too: an ended stream's rows stay for the pane, and reopening the
+		// relay for a finished run would replay the ring into a full list.
 		if (!runId || !eventsUrl || !isStreaming) return;
 
 		if (resumeFrom.current.runId !== runId) {
@@ -161,16 +140,11 @@ export function useExecutionEvents(): void {
 		const store = useExecutionEventsStore.getState();
 
 		/*
-		 * A commit per flush window, not per frame (issue #1158).
-		 *
-		 * The buffer, the leading edge and the trailing timer are
-		 * `services/throttled-batcher.ts` - the same mechanism `LoadTestService`
-		 * and `ScenarioRunService` commit through, on the same `liveRefreshMs`
-		 * cadence, so a timing fix lands in one place rather than three.
-		 *
-		 * It lives in the effect rather than in a ref, because everything it
-		 * holds belongs to one subscription: the buffer is this run's frames,
-		 * the way the resume point and the `EventSource` beside it are.
+		 * A commit per flush window, not per frame (#1158), through
+		 * `services/throttled-batcher.ts`, the mechanism `LoadTestService` and `ScenarioRunService`
+		 * use on the same `liveRefreshMs` cadence, so a timing fix lands once. In the effect, not a
+		 * ref: it holds one subscription's frames, like the resume point and the `EventSource`
+		 * beside it.
 		 */
 		const batcher = createThrottledBatcher<StreamEvent>((batch) =>
 			store.addEvents(runId, batch)
@@ -180,8 +154,8 @@ export function useExecutionEvents(): void {
 		let retryTimer: ReturnType<typeof setTimeout> | null = null;
 		let attempts = 0;
 		let cancelled = false;
-		// Set by the `complete` frame. The relay closes the socket right after
-		// it, and that close must not be read as a drop worth retrying.
+		// Set by the `complete` frame; the relay closes the socket right after, which must not read
+		// as a drop.
 		let ended = false;
 
 		/** Remember where to resume, for every frame that carries an id. */
@@ -199,17 +173,15 @@ export function useExecutionEvents(): void {
 		};
 
 		const connect = () => {
-			// `Last-Event-ID` is a header the browser sets on its own reconnect and
-			// that no API lets us set on a fresh connection, so ours travels as a
-			// query parameter the engine reads on the same terms.
+			// `Last-Event-ID` is a header only the browser's own reconnect sets, with no API for a
+			// fresh connection, so ours goes as a query parameter the engine reads the same way.
 			const { lastEventId } = resumeFrom.current;
 			const query = lastEventId ? `?lastEventId=${encodeURIComponent(lastEventId)}` : "";
 			source = new EventSource(`${API_ENDPOINTS.BASE_URL}${eventsUrl}${query}`);
 
 			source.addEventListener("open", (event) => {
-				// The relay's own `open` *frame*, not `EventSource`'s connection
-				// event - they share a name and mean different things. Only a frame
-				// carries data, which is how they are told apart.
+				// The relay's `open` *frame*, not `EventSource`'s connection event: same name,
+				// different meaning; only a frame carries data, which tells them apart.
 				if (!(event instanceof MessageEvent)) {
 					attempts = 0;
 					return;
@@ -231,10 +203,9 @@ export function useExecutionEvents(): void {
 					event instanceof MessageEvent
 						? parseCompleteFrame(payloadOf(event))
 						: { reason: "error" as const, totalEvents: null };
-				// Before `endStream`, and not only so the last window's rows are
-				// on screen: a `complete` frame that named no total falls back to
-				// `events.length`, so a tail still in the buffer would be missing
-				// from the count as well as from the list.
+				// Before `endStream`, and not only for the last rows: a `complete` naming no total
+				// falls back to `events.length`, so a buffered tail would be missing from the count
+				// too.
 				batcher.flush();
 				store.endStream(runId, reason, totalEvents);
 				source?.close();
@@ -242,8 +213,7 @@ export function useExecutionEvents(): void {
 			});
 
 			source.onerror = () => {
-				// The socket closing *after* a `complete` is the stream ending
-				// normally, not a drop.
+				// The socket closing *after* a `complete` is a normal end, not a drop.
 				if (ended || cancelled) {
 					source?.close();
 					source = null;
@@ -253,14 +223,12 @@ export function useExecutionEvents(): void {
 				source = null;
 
 				if (attempts >= EXECUTION_EVENTS_MAX_RETRIES) {
-					// What arrived before the stream was lost belongs under the
-					// notice explaining why it stopped, not dropped with it.
+					// What arrived before the loss belongs under the notice explaining it, not
+					// dropped with it.
 					batcher.flush();
-					// Ended rather than left open: the reconnects are spent, so
-					// nothing more is coming and a pane that kept saying "streaming"
-					// would be lying. `error` is the honest reason - the engine may
-					// well still be receiving events we can no longer see, and the
-					// stored trace is what will say what it got.
+					// Ended, not left open: the reconnects are spent, and a pane still saying
+					// "streaming" would lie. `error` is honest: the engine may still be receiving
+					// events, and the stored trace will say what.
 					store.setError(
 						runId,
 						"Couldn't reconnect to Vayu's live feed of this stream. The run's stored events are still recorded."
@@ -278,14 +246,11 @@ export function useExecutionEvents(): void {
 		return () => {
 			cancelled = true;
 			/*
-			 * Flush rather than discard. A teardown is either the stream ending -
-			 * where the buffer is already empty, having been flushed above - or
-			 * this subscription being replaced, and only the store can tell which
-			 * run the leftovers belong to: `addEvents` drops a batch addressed to
-			 * a run it is no longer holding, and `startStream` has already moved
-			 * it on by the time React runs this. Discarding here instead would
-			 * lose up to one window of a stream that is still the store's, which
-			 * the relay will not re-deliver - the resume point has passed them.
+			 * Flush, not discard. Teardown is the stream ending (buffer already flushed) or this
+			 * subscription being replaced, and only the store knows which run the leftovers belong
+			 * to: `addEvents` drops a batch for a run it no longer holds, and `startStream` has
+			 * moved it on by now. Discarding would lose up to a window of a still-held stream,
+			 * which the relay will not re-deliver past the resume point.
 			 */
 			batcher.flush();
 			if (retryTimer !== null) clearTimeout(retryTimer);

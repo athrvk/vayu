@@ -6,24 +6,17 @@
  */
 
 /**
- * Whether this response matched the schema its contract declares (issue #628).
- *
- * Three states, deliberately spelled differently, because collapsing any two of
- * them is the defect this whole feature is guarding against:
+ * Whether this response matched its contract's schema (#628). Three states, spelled apart, as
+ * collapsing any two is the defect this guards against:
  *
  * - **matched schema** - checked, and nothing was wrong.
  * - **schema failed** - checked, and something was.
- * - **not checked** - the collection is bound, and this response could not be
- *   judged: no schema for its status, a body that is not JSON, an index the
- *   document does not carry. It is *not* a failure, and it is not silence
- *   either.
+ * - **not checked** - the collection is bound, and this response could not be judged (no schema for
+ *   its status, a non-JSON body, an index the document lacks): *not* a failure, and not silence.
  *
- * A response whose collection binds no document renders nothing at all - the
- * component is not given a verdict, because the engine writes none.
- *
- * A `valid: true` beside an unevaluated-keyword disclosure is narrower than it
- * looks: part of the schema could not be evaluated by a draft-07 validator, so
- * the chip says "partly checked" rather than claiming a clean match.
+ * A response whose collection binds no document renders nothing: the engine writes no verdict. A
+ * `valid: true` beside an unevaluated-keyword disclosure is narrower than it looks, part of the
+ * schema being beyond a draft-07 validator, so the chip says "partly checked".
  */
 
 import { CheckCircle2, HelpCircle, XCircle } from "lucide-react";

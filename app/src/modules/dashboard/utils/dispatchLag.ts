@@ -47,11 +47,10 @@ export function isGapOpen(
 }
 
 /**
- * Whether the run has lasted long enough for responses to have caught up with
- * the sends. Completions trail dispatches by the mean latency, so a run younger
- * than that has an open gap even on a healthy server: 500 req/s against a
- * 100 ms target always has ~50 requests in flight. `meanLatencyMs` is 0 until a
- * response has landed, which is not settled either.
+ * Whether the run has lasted long enough for responses to catch up with the sends: completions
+ * trail dispatches by the mean latency, so a younger run has an open gap even on a healthy server
+ * (500 req/s against a 100 ms target always has ~50 requests in flight). `meanLatencyMs` is 0 until
+ * a response has landed, which is not settled either.
  */
 export function isSettled(elapsedSeconds: number, meanLatencyMs: number): boolean {
 	if (!(meanLatencyMs > 0)) return false;
@@ -88,10 +87,9 @@ export function isHeld(since: number | null, elapsedSeconds: number): boolean {
 }
 
 /**
- * The chip's verdict from two rates. The caller says which rates and how much
- * context backs them: a live run feeds the windowed pair with `held` and
- * `settled` read from the run's clock, History feeds the finished run's
- * cumulative pair with both true because nothing is still in flight.
+ * The chip's verdict from two rates, the caller saying which and how much context backs them: a
+ * live run feeds the windowed pair with `held` and `settled` read from the run's clock; History
+ * feeds the finished run's cumulative pair with both true, as nothing is still in flight.
  * `undefined` when either rate is missing, so the card draws no chip.
  */
 export function dispatchStatus(input: {

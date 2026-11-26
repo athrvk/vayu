@@ -6,19 +6,10 @@
  */
 
 /**
- * Normalising the engine's console output into what the panel renders.
- *
- * The engine sends one entry per line carrying the script that wrote it and the
- * `console.*` method that was called - `{source, scope?, level, message,
- * scriptRequest?}`. Both used to be missing: the source was a `"[pre] "` text
- * prefix, indistinguishable from a script logging that string itself, and the
- * level was discarded at the QuickJS binding, so every line reached this panel
- * looking identical whether the script called `log` or `error`.
- *
- * A bare string is still accepted, because a renderer can be talking to an
- * older engine sidecar. It is decoded the way that engine meant it - the prefix
- * picks the source, and the level is `log`, which is what the panel drew
- * everything as anyway.
+ * The engine's console output, normalised for the panel. The engine sends one entry per line with
+ * the script and `console.*` method: `{source, scope?, level, message, scriptRequest?}`. A bare
+ * string is still accepted, since the renderer may talk to an older engine sidecar: its prefix
+ * picks the source, and the level is `log`, as that engine's output was drawn.
  */
 
 import type { ConsoleLevel, ConsoleLogEntry, ElementScope, ScriptSource } from "@/types";
@@ -41,10 +32,8 @@ const PRE_PREFIX = "[pre] ";
 const LEVELS: ReadonlySet<string> = new Set<ConsoleLevel>(["log", "info", "warn", "error"]);
 
 /**
- * An unrecognised level reads as `log` rather than being dropped.
- *
- * A line the panel refuses to draw is worse than one drawn in the plain tone,
- * and an unheard-of level is exactly what a *newer* engine would send.
+ * An unknown level reads as `log`, never dropped: an undrawn line is worse than a plain one, and a
+ * newer engine is what sends one.
  */
 function coerceLevel(level: unknown): ConsoleLevel {
 	return typeof level === "string" && LEVELS.has(level) ? (level as ConsoleLevel) : "log";
@@ -65,8 +54,8 @@ export function parseConsoleLogs(logs: ReadonlyArray<ConsoleLogEntry | string>):
 					source: log.source === "pre" ? "pre" : "test",
 					scope: log.scope,
 					level: coerceLevel(log.level),
-					// `console.log()` with no argument is a real thing a script does,
-					// and a vanished line is worse than a blank one.
+					// `console.log()` with no argument is real, and a vanished line is worse than a
+					// blank one.
 					message: typeof log.message === "string" ? log.message : "",
 					...(typeof log.scriptRequest === "number" && {
 						scriptRequest: log.scriptRequest,
@@ -76,11 +65,8 @@ export function parseConsoleLogs(logs: ReadonlyArray<ConsoleLogEntry | string>):
 }
 
 /**
- * Splits parsed logs into the two sections the panel renders.
- *
- * Returned as a pair rather than filtered twice at the call site, because the
- * two filters and the two sections drifting apart is exactly the shape this
- * file exists to prevent.
+ * Parsed logs as the panel's two sections, returned as a pair so the two filters and sections
+ * cannot drift.
  */
 export function splitBySource<Row extends { source: LogSource }>(
 	parsed: readonly Row[]

@@ -6,27 +6,24 @@
  */
 
 /**
- * A run's progress on the taskbar button and the Dock icon (issue #1362).
+ * A run's progress on the taskbar button and the Dock icon (#1362).
  *
- * While a load test runs, the only place its progress exists is the dashboard
- * inside the window. A user who started a thirty-minute run and switched to
- * their editor - the case the wake lock (#1357) and the system notifications
- * (#1358) also address - has nothing to glance at. Windows paints a fill on the
- * taskbar button and macOS draws a bar on the Dock icon from one Electron call.
+ * While a load test runs, its progress exists only on the dashboard inside the window, so a user
+ * who started a thirty-minute run and switched to their editor (the case the wake lock, #1357, and
+ * the system notifications, #1358, also address) has nothing to glance at. Windows paints a fill on
+ * the taskbar button and macOS draws a bar on the Dock icon from one Electron call.
  *
  * **Two platforms, not three.** Electron 44 removed Unity launcher support, and
- * `BrowserWindow.setProgressBar` now "continues functioning on Windows and
- * macOS only". So on Linux this module paints nothing at all rather than
- * calling into a no-op, which is also what keeps the Linux branch honest in a
- * test instead of passing by accident on the CI runner's own platform.
+ * `BrowserWindow.setProgressBar` now "continues functioning on Windows and macOS only". So on Linux
+ * this module paints nothing rather than calling into a no-op, which also keeps the Linux branch
+ * honest in a test instead of passing by accident on the CI runner's own platform.
  *
- * The renderer decides *what* a run's progress is - only it holds the run's
- * denominator - and this side decides *how*, which is the same split
- * `notify.ts` uses and the reason no platform detail reaches React.
+ * The renderer decides *what* a run's progress is (only it holds the run's denominator) and this
+ * side decides *how*, the split `notify.ts` uses and the reason no platform detail reaches React.
  *
- * Kept out of main.ts so it can be tested - main.ts creates windows and starts
- * the engine at import time, which no unit test can do. The Electron surfaces it
- * needs arrive as arguments for the same reason.
+ * Kept out of main.ts so it can be tested: main.ts creates windows and starts the engine at import
+ * time, which no unit test can do. The Electron surfaces it needs arrive as arguments for the same
+ * reason.
  */
 
 import { createRendererWatch, type IpcEventLike } from "./renderer-watch.js";
@@ -34,20 +31,17 @@ import { createRendererWatch, type IpcEventLike } from "./renderer-watch.js";
 export const RUN_PROGRESS_CHANNEL = "runs:progress";
 
 /**
- * How long the failed state stays on the taskbar before it clears (Windows).
- *
- * Long enough to be seen by someone glancing over, short enough that the button
- * is not still red when the user comes back and reads the notification instead.
+ * How long the failed state stays on the taskbar before it clears (Windows): long enough to be seen
+ * by someone glancing over, short enough that the button is not still red when the user comes back
+ * and reads the notification instead.
  */
 export const RUN_PROGRESS_ERROR_FLASH_MS = 2000;
 
 /**
- * What the OS should show for the run the renderer has put in front.
- *
- * `value` is null for a run with no denominator - an open-ended load test, or a
- * collection run, whose plan length only the engine resolves. Windows can say
- * "something is running" for those; macOS has no indeterminate Dock bar and
- * shows nothing.
+ * What the OS should show for the run the renderer has put in front. `value` is null for a run with
+ * no denominator (an open-ended load test, or a collection run, whose plan length only the engine
+ * resolves): Windows can say "something is running" for those; macOS has no indeterminate Dock bar
+ * and shows nothing.
  */
 export type RunProgressUpdate =
 	{ state: "running"; value: number | null } | { state: "failed" } | { state: "idle" };
@@ -62,9 +56,8 @@ export interface ProgressWindowLike {
 
 export interface RunProgressDeps {
 	/**
-	 * The window as it is right now, or null. Read per call rather than
-	 * captured: on macOS the app outlives its window, and a captured one would
-	 * be painted after it was destroyed.
+	 * The current window, or null; read per call, not captured: on macOS the app outlives its
+	 * window, and a captured one would be painted after it was destroyed.
 	 */
 	window: () => ProgressWindowLike | null;
 	/** Defaults to the host's. Injected so both branches can be tested. */
@@ -116,10 +109,9 @@ export function createRunProgress(deps: RunProgressDeps): RunProgressPainter {
 			set(clampFraction(value));
 			return;
 		}
-		// Windows says "running, length unknown"; macOS has no such Dock bar, so
-		// it shows nothing. Cleared rather than left alone: a determinate bar may
-		// already be painted from the run this one took over from, and a frozen
-		// fraction is worse than no bar at all.
+		// Windows says "running, length unknown"; macOS has no such Dock bar and shows nothing.
+		// Cleared rather than left alone: a determinate bar may already be painted from the run
+		// this one took over from, and a frozen fraction is worse than no bar.
 		if (platform === "win32") set(INDETERMINATE, "indeterminate");
 		else set(CLEARED);
 	}
@@ -169,11 +161,9 @@ export interface IpcLike {
 }
 
 /**
- * Read one message off the channel, or `null` for anything that is not one.
- *
- * A malformed payload is dropped rather than painted: the values reach an OS
- * surface that outlives the window, and the one thing worse than no bar is a
- * frozen one nothing will come back to clear.
+ * Read one message off the channel, or `null` for anything that is not one. A malformed payload is
+ * dropped rather than painted: the values reach an OS surface that outlives the window, and the one
+ * thing worse than no bar is a frozen one nothing will come back to clear.
  */
 export function parseRunProgressUpdate(raw: unknown): RunProgressUpdate | null {
 	if (typeof raw !== "object" || raw === null) return null;
@@ -186,12 +176,9 @@ export function parseRunProgressUpdate(raw: unknown): RunProgressUpdate | null {
 }
 
 /**
- * Wire the channel, and make the indicator die with the renderer that asked for
- * it.
- *
- * The teardown is not a nicety: a renderer that crashes or reloads mid-run never
- * gets to send its terminal message, and without this the taskbar keeps a bar
- * for a run that is gone until the app quits.
+ * Wire the channel, and make the indicator die with the renderer that asked for it. The teardown is
+ * not a nicety: a renderer that crashes or reloads mid-run never gets to send its terminal message,
+ * and without this the taskbar keeps a bar for a run that is gone until the app quits.
  */
 export function registerRunProgressIpc(
 	ipc: IpcLike,

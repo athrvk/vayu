@@ -6,28 +6,18 @@
  */
 
 /**
- * useSendWithRow - the rows a single Send can bind, for this request (#601).
+ * The rows a single Send can bind, for this request (#601), so a script reading `pm.iterationData`
+ * is testable without a collection run. It answers *which* rows are available from:
  *
- * A pre-request script reading `pm.iterationData` used to be untestable without
- * launching a collection run: the row only ever arrived through a scenario, so
- * the edit loop was "start a run, find the step, read the result". This hook is
- * the authoring-time half of closing that - it answers *which* rows are
- * available to bind, from the two things phases 1 and 2 already established:
+ * - **the contract in scope** (`useDataContract`, the leaf-to-root chain rule), which says the
+ *   request's collection is data-driven; and
+ * - **the file that contract was declared from** (the declaring collection's `dataFile`, by id from
+ *   `data-file-store`), machine-local, which is why it is not "any file".
  *
- * - **the contract in scope** (`useDataContract`, the leaf-to-root chain rule),
- *   which says this request's collection is data-driven at all; and
- * - **the file that contract was declared from** (the declaring collection's
- *   `dataFile`, read by id from `data-file-store`), which is machine-local and
- *   therefore the reason this is not simply "any file".
- *
- * The file is read **when the picker opens**, never on mount. A request tab
- * mounting must not touch the filesystem for a Send the user has not asked for,
- * and the rows are the one thing in this feature that must never be persisted
- * or held longer than the send that uses them (see `data-file-store`).
- *
- * A file that has moved is a *note*, not an error toast: the fix is picking it
- * again in the Data tab, and the affordance says so rather than vanishing - the
- * same rule `RunCollectionDialog`'s pre-fill follows.
+ * The file is read **when the picker opens**, never on mount: a mounting tab must not touch the
+ * filesystem unasked, and the rows must never be persisted or held past the send using them
+ * (`data-file-store`). A moved file is a *note*, not an error toast: the fix is picking it again in
+ * the Data tab, and the affordance says so, as `RunCollectionDialog`'s pre-fill does.
  */
 
 import { useCallback, useState } from "react";
@@ -42,14 +32,10 @@ export type SendWithRowStatus = "idle" | "loading" | "ready" | "unavailable";
 
 export interface SendWithRowState {
 	/**
-	 * Whether this request can be sent with a row at all - a contract in scope
-	 * and a remembered file for the collection that declared it.
-	 *
-	 * The affordance is **absent** when this is false rather than disabled: a
-	 * request outside a data-driven collection has nothing to bind, and a
-	 * disabled control offering "Send with row" would be a promise the request
-	 * cannot keep. The one disabled-with-a-reason state is a file that moved,
-	 * which is a repairable condition and named as such.
+	 * Whether a row can be bound at all: a contract in scope and a remembered file for its
+	 * declaring collection. The affordance is **absent**, not disabled, when false: outside a
+	 * data-driven collection a disabled "Send with row" promises what the request cannot do. The
+	 * one disabled state is a moved file, which is repairable and named.
 	 */
 	available: boolean;
 	/** The contract that made it available, for naming the declaring collection. */
@@ -66,27 +52,20 @@ export interface SendWithRowState {
 }
 
 /**
- * @param contract The contract in scope, from the builder context's
- *        `dataColumns`. Passed in rather than resolved here, deliberately:
- *        `useDataContract` reads the collections query, and a UrlBar that
- *        needed a `QueryClientProvider` to render is the coupling issue #564
- *        removed from the variable slice and #600 kept out of the token
- *        painter. The provider already holds this answer.
- * @param maxRows The live `maxScenarioDataRows` (issue #751), from the builder
- *        context's `dataFileMaxRows` - and for the same reason as the contract,
- *        since it is the config query that knows it. The cap bounds a *run* and
- *        a Send binds one row, but the file is the collection's data set: one
- *        the picker would refuse is not a set to offer rows out of, and letting
- *        it through here would mean a request sending happily beside a
- *        collection that cannot run at all.
+ * @param contract The contract in scope, the context's `dataColumns`, passed in on purpose:
+ *        `useDataContract` reads the collections query, and a UrlBar needing a
+ *        `QueryClientProvider` is the coupling #564 removed and #600 kept out of the token painter.
+ * @param maxRows The live `maxScenarioDataRows` (#751), the context's `dataFileMaxRows`, for the
+ *        same reason. The cap bounds a *run* and a Send binds one row, but the file is the
+ *        collection's set: one the picker would refuse offers no rows, else a request would send
+ *        happily beside a collection that cannot run.
  */
 export function useSendWithRow(
 	contract: DataContractScope | undefined,
 	maxRows: number
 ): SendWithRowState {
-	// Keyed by the collection that *declared* the contract, not by the request's
-	// own parent: under the chain rule a sub-collection inherits an ancestor's
-	// contract, and the file was picked in that ancestor's Data tab.
+	// Keyed by the collection that *declared* the contract, not the request's parent: under the
+	// chain rule a sub-collection inherits it, and the file was picked in the ancestor's Data tab.
 	const location = useDataFileStore((s) =>
 		contract ? s.locations[contract.collectionId] : undefined
 	);
@@ -97,15 +76,13 @@ export function useSendWithRow(
 
 	const path = location?.path;
 	const fileName = location?.fileName;
-	// Read the way the binding says, so the row a Send binds is the row a run
-	// would (#2540).
+	// Read as the binding says, so a Send binds the row a run would (#2540).
 	const castNumbers = location?.castNumbers ?? false;
 
 	const load = useCallback(() => {
 		if (!path) return;
 		if (!canReadDeclaredDataFile()) {
-			// No Electron, no path to re-read. Said plainly rather than left as a
-			// spinner that never resolves.
+			// No Electron, no path to re-read: said plainly, not a spinner that never resolves.
 			setStatus("unavailable");
 			setError("Reading the declared data file needs the desktop app.");
 			return;

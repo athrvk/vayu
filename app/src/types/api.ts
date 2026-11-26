@@ -59,10 +59,9 @@ export interface OAuth2TokenRequest {
 	force?: boolean;
 	interactive?: OAuth2InteractiveExchange;
 	/**
-	 * The scopes the engine resolves a `jwt_bearer` `privateKey` reference
-	 * against - the active environment and the request's collection. The rest of
-	 * `config` is sent resolved; a request naming neither id carries a key file or
-	 * no `jwt_bearer` grant (#3632).
+	 * The scopes a `jwt_bearer` `privateKey` reference resolves against: the active environment and
+	 * the request's collection. The rest of `config` is sent resolved; a request naming neither
+	 * carries a key file or no `jwt_bearer` grant (#3632).
 	 */
 	environmentId?: string;
 	collectionId?: string;
@@ -145,11 +144,9 @@ export interface ListCollectionsResponse {
 
 export interface CreateCollectionRequest {
 	/**
-	 * Never sent: the engine assigns every id and rejects a create that carries
-	 * one with a 400 (#97). Declared as `never` rather than omitted so a literal
-	 * with an `id` is a type error at the call site, not a runtime 400 - and
-	 * `apiService.createCollection` strips it anyway, for the spread-through
-	 * cases the type system cannot see.
+	 * Never sent: the engine assigns every id and 400s a create carrying one (#97). `never`, not
+	 * omitted, so a literal with an `id` fails at the call site; `apiService.createCollection` also
+	 * strips it, for spreads the type system cannot see.
 	 */
 	id?: never;
 	name: string;
@@ -173,9 +170,8 @@ export interface UpdateCollectionRequest {
 	name?: string;
 	description?: string;
 	/**
-	 * `string | null`, not `string`: the engine reads absent as "keep the current
-	 * parent" and an explicit JSON `null` as "move to the root", so a move out of
-	 * a folder is only expressible as a null that survives to the wire.
+	 * `string | null`: the engine reads absent as "keep the parent" and JSON `null` as "move to the
+	 * root", so a move out of a nested collection needs a null that reaches the wire.
 	 */
 	parentId?: string | null;
 	order?: number;
@@ -183,23 +179,19 @@ export interface UpdateCollectionRequest {
 	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
 	elements?: ElementDef[];
 	/**
-	 * `CollectionDataSchema | null`, not just the object: the engine reads absent
-	 * as "keep the declared contract" and an explicit JSON `null` as "reset to
-	 * no contract", so **Clear** is only expressible as a null that survives to
-	 * the wire - the same rule `parentId` above rides.
+	 * `| null` by `parentId`'s rule: absent keeps the declared contract, `null` resets to none, so
+	 * **Clear** is only expressible as a null that reaches the wire.
 	 */
 	dataSchema?: CollectionDataSchema | null;
 	/**
-	 * Unbind only: `null` (or `{}`) resets the binding to unbound, and absent
-	 * keeps it. The engine refuses any other value with a 400 (#3348); binding
-	 * restamps the collection's requests, which is `POST /specs/bind`
+	 * Unbind only: `null` (or `{}`) unbinds, absent keeps the binding, and anything else is a 400
+	 * (#3348). Binding restamps the collection's requests, so it is `POST /specs/bind`
 	 * (`useBindSpecMutation`).
 	 */
 	openapi?: Record<string, never> | null;
 	/**
-	 * The picked spec file and the data file, each `| null` for the reason
-	 * `openapi` is: absent keeps the stored location, `null` forgets it. The
-	 * object is replaced whole, never merged member by member.
+	 * The picked spec file and the data file, `| null` as `openapi` is: absent keeps the stored
+	 * location, `null` forgets it. Each object is replaced whole, never merged.
 	 */
 	specFile?: SpecFileLocation | null;
 	dataFile?: DataFileLocation | null;
@@ -210,8 +202,8 @@ export interface ListRequestsParams {
 	collectionId?: string;
 	/**
 	 * `"summary"` answers each row as a `RequestSummary` (#2546). Set only by
-	 * `apiService.listRequestSummaries`, so the row type follows the method
-	 * called rather than a flag a caller could pass to the wrong one.
+	 * `apiService.listRequestSummaries`, so the row type follows the method, not a flag a caller
+	 * could pass to the wrong one.
 	 */
 	fields?: "summary";
 }
@@ -254,9 +246,8 @@ export interface CreateRequestRequest {
 	/** Send the URL unencoded - see {@link Request.disableUrlEncoding}. */
 	disableUrlEncoding?: boolean;
 	/**
-	 * Postman's `protocolProfileBehavior`, verbatim - see
-	 * {@link Request.postmanProtocolBehavior}. The engine takes an object too,
-	 * but only the stored text keeps the source's member order.
+	 * Postman's `protocolProfileBehavior`, verbatim; see {@link Request.postmanProtocolBehavior}.
+	 * The engine takes an object too, but only the stored text keeps the source's member order.
 	 */
 	postmanProtocolBehavior?: string | Record<string, unknown> | null;
 	/** Which spec operation this request is - see {@link Request.specOperation}. */
@@ -269,9 +260,8 @@ export interface CreateRequestRequest {
 export interface UpdateRequestRequest {
 	id: string;
 	/**
-	 * The collection this request should belong to - a cross-collection move.
-	 * The engine 400s an id that resolves to no collection rather than stranding
-	 * the row, and a move that states no `order` appends in the destination.
+	 * The collection to move this request to. The engine 400s an id naming no collection rather
+	 * than strand the row; a move with no `order` appends in the destination.
 	 */
 	collectionId?: string;
 	name?: string;
@@ -286,10 +276,7 @@ export interface UpdateRequestRequest {
 	elements?: ElementDef[];
 	followRedirects?: boolean;
 	maxRedirects?: number;
-	/**
-	 * See {@link Request.timeout}. Absent keeps the stored value on a `PUT`;
-	 * `null` resets it to the `defaultTimeout` setting.
-	 */
+	/** See {@link Request.timeout}. Absent keeps it; `null` resets it to `defaultTimeout`. */
 	timeout?: number | null;
 	httpVersion?: HttpVersion;
 	/** Verify the TLS certificate - see {@link Request.verifySSL}. */
@@ -297,8 +284,8 @@ export interface UpdateRequestRequest {
 	/** Consume the response as an event stream - see {@link Request.stream}. */
 	stream?: boolean;
 	/**
-	 * See {@link Request.streamTextPath}. Absent keeps the stored path; `null`
-	 * clears it. A string needs `stream: true` once the write lands.
+	 * See {@link Request.streamTextPath}. Absent keeps the path, `null` clears it; a string needs
+	 * `stream: true` once the write lands.
 	 */
 	streamTextPath?: string | null;
 	/** See {@link Request.streamFirstContentMarker}; absent keeps it, `null` clears it. */
@@ -312,21 +299,15 @@ export interface UpdateRequestRequest {
 	/** See {@link import("./domain").Request.mockResponseMode}. */
 	mockResponseMode?: import("./domain").MockResponseMode;
 	/**
-	 * `string | null`, same rule as `specOperation` below: absent keeps the
-	 * stored example and an explicit `null` clears it. See
+	 * Absent keeps the stored example, `null` clears it, as `specOperation` below. See
 	 * {@link import("./domain").Request.mockExampleId}.
 	 */
 	mockExampleId?: string | null;
-	/**
-	 * `SpecOperation | null`, like the collection binding above: absent keeps the
-	 * stored operation and an explicit `null` clears it, so stamping and
-	 * un-stamping are the same verb.
-	 */
+	/** Absent keeps the operation, `null` clears it: stamp and un-stamp are one verb. */
 	specOperation?: SpecOperation | null;
 	/**
-	 * `MethodSource | null`, same rule as `specOperation` above: absent keeps
-	 * the stored marker and an explicit `null` clears it - which is what
-	 * leaving GraphQL, or picking a method by hand, sends.
+	 * Absent keeps the marker, `null` clears it (as `specOperation`); leaving GraphQL or picking a
+	 * method by hand sends the `null`.
 	 */
 	methodSource?: MethodSource | null;
 	order?: number;
@@ -335,24 +316,19 @@ export interface UpdateRequestRequest {
 // Reorder API (POST /reorder)
 
 /**
- * One row's new position in a batch reorder, and - when it changes owner - its
- * new owner.
- *
- * `parentId` / `collectionId` follow the same merge-patch rule the single-row
- * `PUT`s use: omitted keeps the current owner, present states a move. Unlike
- * those, an owner that resolves to no stored collection is a `400` rather than
- * a tolerated forward reference, because nothing here is bulk-created.
+ * One row's new position in a batch reorder and, when it changes owner, the new owner. `parentId` /
+ * `collectionId` follow the single-row `PUT` merge-patch rule (omitted keeps the owner), except
+ * that an owner naming no stored collection is a `400`, not a tolerated forward reference, since
+ * nothing here is bulk-created.
  */
 export type ReorderMove =
 	| { type: "collection"; id: string; order: number; parentId?: string | null }
 	| { type: "request"; id: string; order: number; collectionId?: string };
 
 /**
- * A parent whose children - its sub-folders and its requests, one list (#2535) -
- * are renumbered dense `0..n-1` in sibling order before the moves apply.
- * `parentId: null` is the root collections, and is stated rather than omitted -
- * the engine rejects an absent `parentId` so a renumber can never land on a
- * scope the caller did not mean.
+ * A parent whose children (sub-collections and requests, one list, #2535) are renumbered dense
+ * `0..n-1` before the moves apply. `parentId: null` is the root, stated rather than omitted: the
+ * engine refuses an absent `parentId` so a renumber never lands on a scope the caller did not mean.
  */
 export interface ReorderNormalize {
 	parentId: string | null;
@@ -364,17 +340,10 @@ export interface ReorderRequest {
 }
 
 /**
- * One saved example, written from a live response (issue #588).
- *
- * `order` is deliberately not sendable: the engine appends when it is absent,
- * and appending is the contract this surface needs - a mock server answers with
- * the *first* example of a matched route, so a save must never change what a
- * restarted mock would serve.
- *
- * `origin` is a write-only field from the app's point of view. It is the
- * discriminator a spec sync reads (#627) to know which rows it may replace, so
- * everything saved here says `user` and nothing else in the app reads it back -
- * `RequestExample` does not claim it for that reason.
+ * One saved example, written from a live response (#588). `order` is not sendable: the engine
+ * appends, and a mock serves a matched route's *first* example, so a save must never change what a
+ * restarted mock serves. `origin` is always `user` here; a spec sync reads it (#627) to know which
+ * rows it may replace.
  */
 export interface CreateRequestExampleRequest {
 	/** Engine-assigned - see CreateCollectionRequest.id. */
@@ -387,31 +356,25 @@ export interface CreateRequestExampleRequest {
 	contentType: string;
 	origin: "user";
 	/**
-	 * Whether `body` stops short of the response it was captured from - the
-	 * trace's `maxTraceBodyBytes` cap (issue #659).
-	 *
-	 * Required rather than optional: this is the only writer that can ever have
-	 * a partial body, so leaving it off would be a claim by omission that the
-	 * save is complete.
+	 * Whether `body` stops short of the captured response, at the trace's `maxTraceBodyBytes` cap
+	 * (#659). Required: this is the one writer that can have a partial body, so omitting it would
+	 * claim by omission that the save is complete.
 	 */
 	bodyTruncated: boolean;
 	/**
-	 * The exchange this response came from, as the builder held it at Send
-	 * (issue #1763). Create-only: the engine builds the Postman saved-response
-	 * shape from it once and stores it in `request_examples.postman_response`,
-	 * so a later export writes the request that was sent rather than the one
-	 * the request has become. Absent when the response was restored from a
-	 * stored run - there is no snapshot to report, and the export regenerates.
+	 * The exchange as the builder held it at Send (#1763). Create-only: the engine builds the
+	 * Postman saved-response shape from it once (`request_examples.postman_response`), so an export
+	 * writes the request that was sent, not what it has become. Absent for a response restored from
+	 * a stored run, which has no snapshot; the export then regenerates.
 	 */
 	savedFrom?: ExampleSavedFrom;
 }
 
 /**
- * The request as the user wrote it at Send (issue #1763): `{{vars}}`
- * unresolved, the request's own URL before any redirect, path rows included.
- * The stored request-column shapes; the engine's `savedFrom` reader checks
- * only their outer shapes (not a request save's appliers) before mapping them
- * as the export maps a request. Auth is deliberately not part of it.
+ * The request as written at Send (#1763): `{{vars}}` unresolved, its own URL before any redirect,
+ * path rows included. Stored request-column shapes; the engine's `savedFrom` reader checks only
+ * their outer shapes (not a request save's appliers) and maps them as the export maps a request.
+ * Auth is deliberately left out.
  */
 export interface ExampleSentRequest {
 	method: string;
@@ -428,11 +391,7 @@ export interface ExampleSavedFrom {
 	statusText: string;
 	/** Absent writes `responseTime: null`. */
 	responseTimeMs?: number;
-	/**
-	 * When the response came in, in epoch milliseconds (0 or more) - the
-	 * time a cookie's `Max-Age` counts from. Absent uses the engine's clock
-	 * at the save.
-	 */
+	/** Epoch ms (0 or more) of arrival, which a cookie's `Max-Age` counts from; absent: now. */
 	receivedAt?: number;
 }
 
@@ -451,7 +410,7 @@ export interface CreateEnvironmentRequest {
 	/** Engine-assigned - see CreateCollectionRequest.id. */
 	id?: never;
 	name: string;
-	description?: string; // engine accepts this (environments.cpp); was missing from the TS type
+	description?: string; // engine accepts this (environments.cpp)
 	variables: Record<string, VariableValue>;
 	isActive?: boolean;
 }
@@ -479,167 +438,120 @@ export interface UpdateGlobalsRequest {
 export interface ExecuteRequestRequest {
 	method: string;
 	url: string;
-	// Resolved, enabled-only. The ordered lines are what composition returns
-	// (a repeated name stays repeated, #2466); the record is the older
-	// single-valued form, one line per key.
+	// Resolved, enabled-only. The ordered lines are what composition returns (a repeated name stays
+	// repeated, #2466); the record is the single-valued form, one line per key.
 	headers?: HeaderLine[] | Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
 	/**
-	 * The resolved elements to run for this exchange - the collection chain's,
-	 * root to leaf, then the request's own, each stamped with its origin
-	 * (issue #1512). Replaces `preRequestScripts`/`postRequestScripts`: a
-	 * script is one of these now, at `kind: "script.pre"` / `"script.post"`.
-	 * The engine refuses the two old keys outright (400 naming `elements`).
+	 * The resolved elements for this exchange: the collection chain's root to leaf, then the
+	 * request's own, each stamped with its origin (#1512). A script is one at `kind: "script.pre"`
+	 * / `"script.post"`; the engine refuses `preRequestScripts` / `postRequestScripts` (400 naming
+	 * `elements`).
 	 */
 	elements?: ResolvedElement[];
 	/**
-	 * Redirect policy. Omitted means the engine's own defaults apply (follow,
-	 * cap at 10) - send them explicitly so a request that opts out of following
-	 * actually sees its 3xx in the response pane.
+	 * Redirect policy. Omitted, the engine's defaults apply (follow, cap at 10); send them
+	 * explicitly so a request that opts out of following sees its 3xx.
 	 */
 	followRedirects?: boolean;
 	maxRedirects?: number;
 	/**
-	 * Whole-transfer deadline in milliseconds. Present only when the composed
-	 * request states one (issue #2937): absent, the engine reads the
-	 * `defaultTimeout` setting at send time, which is why it is the one setting
-	 * here that is never sent at its default.
+	 * Whole-transfer deadline, ms, present only when the composed request states one (#2937).
+	 * Absent, the engine reads `defaultTimeout` at send time, which is why it is the one setting
+	 * here never sent at its default.
 	 */
 	timeout?: number;
 	/**
-	 * Protocol to negotiate. Sent on *every* execute, never elided when it
-	 * equals the default - exactly like the redirect policy above, and for the
-	 * same reason: an omitted field lets an engine-side default win silently,
-	 * which is not a decision the client should hand over. Both engine clients
-	 * (renderer and MCP) must agree on this; see CLAUDE.md's request-composition
-	 * section.
+	 * Protocol to negotiate. Sent on *every* execute, never elided at the default, like the
+	 * redirect policy: an omitted field lets an engine default win silently, which the client must
+	 * not hand over. Both engine clients (renderer and MCP) must agree; see CLAUDE.md's
+	 * request-composition section.
 	 */
 	httpVersion?: HttpVersion;
 	/**
-	 * Verify the TLS certificate. Sent on every execute for the reason above
-	 * and one more: the engine's default is `true`, so an omitted `false`
-	 * verifies the certificate the user turned verification off for - the
-	 * default winning silently is a security decision here, not a surprise
-	 * (issue #706).
+	 * Verify the TLS certificate. Sent on every execute for that reason and one more: the engine
+	 * defaults to `true`, so an omitted `false` verifies a certificate the user turned verification
+	 * off for, a security decision, not a surprise (#706).
 	 */
 	verifySSL?: boolean;
 	/**
-	 * The engine's own default headers this send refuses, by name (issue #1229) -
-	 * see {@link RequestDefaults} for what it can name.
-	 *
-	 * Omitted, never `[]`, when the send refuses none: a payload refusing
-	 * nothing is exactly the payload sent before the field existed. A malformed
-	 * list (not an array, a non-string in it, a name that is not a header name)
-	 * is a `400`, because a client asking for a request it will not get has no
-	 * later gate that would notice; a name the engine adds nothing under is
-	 * accepted and does nothing, since config can switch a default off between
-	 * a client reading the declared set and sending.
+	 * The engine's default headers this send refuses, by name (#1229); see {@link RequestDefaults}
+	 * for what it can name. Omitted, never `[]`, when it refuses none: that is the payload sent
+	 * before the field existed. A malformed list (not an array, a non-string, a non-header name) is
+	 * a `400`, since no later gate would notice a request the client will not get; a name the
+	 * engine adds nothing under is accepted and inert, because config can switch a default off
+	 * between a client reading the set and sending.
 	 */
 	disabledDefaultHeaders?: string[];
 	/**
-	 * The request's stored protocol settings (issue #1765). Sent on **every**
-	 * execute, never elided at the default, for the `verifySSL` reason above.
-	 * `disabledSystemHeaders` is the *stored* opt-out list and is distinct from
-	 * the per-send `disabledDefaultHeaders`: the engine unions the two.
+	 * The request's stored protocol settings (#1765), sent on **every** execute for the `verifySSL`
+	 * reason. `disabledSystemHeaders` is the *stored* opt-out list, distinct from the per-send
+	 * `disabledDefaultHeaders`; the engine unions the two.
 	 */
 	disableCookies?: boolean;
 	disabledSystemHeaders?: string[];
 	disableUrlEncoding?: boolean;
 	requestId?: string;
 	/**
-	 * The request's name, for the script sandbox to read as `pm.info.requestName`
-	 * (issue #300). Not an HTTP field - it never reaches the wire.
-	 *
-	 * Sent by the client because Send executes *editor state*, which may be
-	 * unsaved or a detached replay copy and therefore carries a name no stored
-	 * row has. `POST /compose` fills it in on its by-id path (MCP's route), and
-	 * `POST /execute` falls back to the row named by `requestId`, so a caller
-	 * that only links an id still gets a name. Omitted rather than sent empty:
-	 * a script must read `undefined`, not `""`.
+	 * The request's name, read by scripts as `pm.info.requestName` (#300); never on the wire. Sent
+	 * because Send executes *editor state*, which may be unsaved or a detached replay copy with a
+	 * name no stored row has. `POST /compose` fills it on its by-id path (MCP's route) and
+	 * `POST /execute` falls back to `requestId`'s row, so a caller linking only an id still gets
+	 * one. Omitted, not empty: a script must read `undefined`, not `""`.
 	 */
 	requestName?: string;
 	environmentId?: string;
 	/**
-	 * Run the request in full but record nothing: no run row, no History entry,
-	 * no result trace on disk, no retention prune (issue #382). Absent means
-	 * recorded, which is what every user-initiated send wants.
-	 *
-	 * The one caller is GraphQL schema introspection - a background fetch the
-	 * user never made, which as an ordinary design run filled History with runs
-	 * nobody sent, wrote the resolved credentials into a trace on disk, and
-	 * evicted real runs through the count-based retention prune. MCP's
-	 * `run_request` deliberately does *not* set it: an agent's runs belong in
-	 * History like anyone else's.
+	 * Run in full but record nothing: no run row, History entry, trace on disk or retention prune
+	 * (#382). Absent means recorded, as every user send wants. The one caller is GraphQL schema
+	 * introspection, a background fetch the user never made, which as a design run filled History,
+	 * wrote resolved credentials into a trace and evicted real runs through the count-based prune.
+	 * MCP's `run_request` does *not* set it: an agent's runs belong in History.
 	 */
 	transient?: boolean;
 	/**
-	 * Consume the response as a `text/event-stream` instead of buffering it
-	 * (issue #573). It changes the *execution model*, not a transfer option, so
-	 * the endpoint answers `202` with {@link ExecuteStreamResponse} rather than
-	 * the exchange.
-	 *
-	 * Sent on **every** execute, never elided when false - the same
-	 * single-choke-point rule the redirect policy and `httpVersion` follow, and
-	 * for a sharper reason here: the two answers have different *shapes*, so a
-	 * caller that let an engine-side default decide would not know which one it
-	 * was about to parse.
-	 *
-	 * The engine refuses `stream` combined with `transient` (a stream is its run
-	 * row) with a `400` naming why. Scripts are not refused: the pre-request one
-	 * runs before the transfer and the post-request one after the stream ends,
-	 * reading its events as `pm.response.events` (issue #575). Their output is
-	 * stored on the run's trace, since the endpoint answered `202` long before
-	 * the post-request script ran.
+	 * Consume the response as `text/event-stream` instead of buffering it (#573). It changes the
+	 * *execution model*: the endpoint answers `202` with {@link ExecuteStreamResponse}, not the
+	 * exchange. Sent on **every** execute, never elided when false, by the redirect-policy rule and
+	 * a sharper reason: the two answers have different shapes, so a caller letting an engine
+	 * default decide would not know which it is about to parse. `stream` with `transient` is a
+	 * `400` (a stream is its run row). Scripts run: the pre-request one before the transfer, the
+	 * post-request one after the stream ends, reading `pm.response.events` (#575); their output is
+	 * stored on the run's trace, since the `202` went long before.
 	 */
 	stream?: boolean;
 	/**
-	 * The JSONPath each event's JSON `data` is read through for the reply's
-	 * text (issue #3773). An inline compose carries none, so a send states it
-	 * here, beside `stream: true` only: the engine refuses a path on a buffered
-	 * send, and refuses one outside the JSONPath subset with a message that
-	 * names the field. Absent means no text is read.
+	 * The JSONPath each event's JSON `data` is read through for the reply's text (#3773). An inline
+	 * compose carries none, so a send states it here, beside `stream: true` only: the engine
+	 * refuses a path on a buffered send, and one outside the JSONPath subset with a message naming
+	 * the field. Absent reads no text.
 	 */
 	streamTextPath?: string;
 	/**
-	 * One data row to bind before the request goes out (issue #601).
-	 *
-	 * The single-send half of `scenario.data`: `{{data.column}}` tokens in the
-	 * URL, headers, body, form fields and auth credentials are substituted
-	 * against it, and both scripts read it as `pm.iterationData`
-	 * (`pm.info.iteration` is 0 - the send *is* row 0 of 1). Absent is the
-	 * ordinary send, where those tokens go out written as they stand and
-	 * `pm.iterationData` is `undefined`.
-	 *
-	 * An object of name/value pairs, never the array a run sends: one row. A
-	 * column the row does not carry is a `400` naming the token and the row's
-	 * own columns, and nothing is sent - the same refusal a run makes per
-	 * iteration, moved to before the run row exists.
-	 *
-	 * Credentials bind **before** they are encoded (issue #642), so basic auth
-	 * base64s the row's values rather than the token text - the same deferral a
-	 * collection run performs per iteration (issue #591). OAuth 2.0 is the one
-	 * mode no row can reach, because its token is acquired against the token
-	 * endpoint instead of being written into the request; a `{{data.*}}` in an
-	 * oauth2 config is a `400` naming the token.
+	 * One data row bound before the request goes out (#601), the single-send half of
+	 * `scenario.data`. `{{data.column}}` in the URL, headers, body, form fields and auth
+	 * credentials binds against it, and both scripts read it as `pm.iterationData`
+	 * (`pm.info.iteration` is 0: the send is row 0 of 1). Absent, those tokens go out as written
+	 * and `pm.iterationData` is `undefined`. An object, not a run's array. A column the row lacks
+	 * is a `400` naming the token and the row's columns, and nothing is sent, as a run refuses per
+	 * iteration. Credentials bind **before** encoding (#642), so basic auth base64s the row's
+	 * values, as a collection run does per iteration (#591). OAuth 2.0 is unreachable by a row (its
+	 * token comes from the token endpoint), so `{{data.*}}` in an oauth2 config is a `400` naming
+	 * the token.
 	 */
 	data?: Record<string, unknown>;
 	/**
-	 * Who started the run (issue #1817). Stamped `{kind: "app"}` by `apiService`
-	 * on every execute and run start, so a caller never sets it; declared here
-	 * because the payload is the wire's shape.
+	 * Who started the run (#1817). `apiService` stamps `{kind: "app"}` on every execute and run
+	 * start, so a caller never sets it; declared because the payload is the wire's shape.
 	 */
 	origin?: RunOrigin;
 	/**
-	 * Whether the answer's `body` carries a parsed copy of a JSON response
-	 * (issue #2544). The engine's default is `true`; `false` answers `body: null`
-	 * and skips building the tree, which for a large body is a copy of the whole
-	 * response held on the daemon's heap. `bodyRaw` is unaffected.
-	 *
-	 * `apiService.executeRequest` sends `false` on every execute: the pane is
-	 * built from `bodyRaw` (`paneBody`) and nothing in the renderer reads `body`.
-	 * The MCP server leaves it unset, because its `run_request` result exposes the
-	 * parsed `body` to the agent.
+	 * Whether the answer's `body` carries a parsed copy of a JSON response (#2544). The engine
+	 * defaults to `true`; `false` answers `body: null` and skips the tree, which for a large body
+	 * is a whole copy on the daemon's heap. `bodyRaw` is unaffected. `apiService.executeRequest`
+	 * always sends `false` (the pane is built from `bodyRaw`, `paneBody`, and nothing reads
+	 * `body`); the MCP server leaves it unset, as its `run_request` shows the agent `body`.
 	 */
 	includeParsedBody?: boolean;
 }
@@ -647,16 +559,10 @@ export interface ExecuteRequestRequest {
 export type ExecuteRequestResponse = SanityResult;
 
 /**
- * What `POST /execute` answers for a streaming request: `202`, at once, with
- * the run row it created and the URL its events arrive on. There is no
- * exchange to return - the transfer has only just been handed to the engine's
- * consumer worker.
- *
- * `eventsUrl` is engine-relative (`/runs/:id/events`) and is used **as given**
- * rather than rebuilt from `runId`: the engine names where its own events are,
- * and a second spelling of that path in `api-endpoints.ts` would be a copy that
- * can disagree with the answer. An answer missing either field is a malformed
- * answer and fails loudly rather than being guessed at.
+ * `POST /execute`'s answer for a streaming request: `202` at once, with the run row and its events
+ * URL; the transfer has only just reached the consumer worker, so there is no exchange. `eventsUrl`
+ * (`/runs/:id/events`) is used **as given**, never rebuilt from `runId`: a second spelling in
+ * `api-endpoints.ts` could disagree with the engine. An answer missing either field fails loudly.
  */
 export interface ExecuteStreamResponse {
 	runId: string;
@@ -665,21 +571,13 @@ export interface ExecuteStreamResponse {
 }
 
 /**
- * ComposeRequestRequest - the `POST /compose` body (issue #226).
- *
- * The engine owns request composition: it resolves `{{variables}}` (with the
- * app's precedence) and `inherit` auth (walking the collection chain), and
- * returns the execute-ready payload that `POST /execute` / `POST /runs`
- * accept unchanged. Pure - nothing is sent, no run row is created - and the
- * execution endpoints never interpolate, so a payload is resolved exactly
- * once.
- *
- * Two entry shapes, combinable: `requestId` composes the stored request;
- * `request` is an inline unresolved request (the renderer's editor state,
- * which may be unsaved or a detached replay copy) - given both, the inline
- * fields lay over the stored ones before resolution. `collectionId` scopes an
- * inline request's variable chain and inherit walk (a stored request's own
- * collection wins).
+ * The `POST /compose` body (#226). The engine owns composition: it resolves `{{variables}}` (the
+ * app's precedence) and `inherit` auth (walking the chain) into the payload `POST /execute` /
+ * `POST /runs` accept unchanged. Pure (nothing sent, no run row), and the execution endpoints never
+ * interpolate, so a payload is resolved exactly once. `requestId` composes the stored request;
+ * `request` is an inline unresolved one (editor state, maybe unsaved or a replay copy); given both,
+ * the inline fields lay over the stored ones. `collectionId` scopes an inline request's chain (a
+ * stored request's own collection wins).
  */
 export interface ComposeRequestRequest {
 	requestId?: string;
@@ -687,60 +585,38 @@ export interface ComposeRequestRequest {
 	collectionId?: string;
 	environmentId?: string;
 	/**
-	 * The bare column names a data row will bind after this composition (issue
-	 * #1007) - names only, never values.
-	 *
-	 * Postman binds a dataset's columns to bare names, so an imported collection
-	 * writes `{{username}}` where Vayu's reserved namespace would write
-	 * `{{data.username}}`. Composition cannot substitute either one - it happens
-	 * once and a row is bound per iteration - so these names are left written as
-	 * they stand for the bind, *above* the environment: a same-named variable
-	 * answering here would send the value the row exists to replace.
-	 *
-	 * Absent means no dataset is bound, which is composition exactly as it was.
-	 * Sent only by a caller that will actually bind a row (`POST /execute` with
-	 * `data`, `POST /runs` with a data set) - never as "the columns this
-	 * collection declares", which describes no particular run. The engine
-	 * refuses a non-array, and an entry that is not a non-empty string, with a
-	 * `400`.
+	 * Bare column names a data row will bind after this composition (#1007), names only. Postman
+	 * binds columns to bare names, so an import writes `{{username}}` where Vayu writes
+	 * `{{data.username}}`. Composition runs once and a row binds per iteration, so these names stay
+	 * written for the bind, *above* the environment: a same-named variable here would send the
+	 * value the row replaces. Absent means no dataset. Sent only by a caller that will bind a row
+	 * (`POST /execute` with `data`, `POST /runs` with a data set), never as "the columns the
+	 * collection declares". A non-array, or an entry that is not a non-empty string, is a `400`.
 	 */
 	dataColumns?: string[];
 	/**
-	 * Leave the `{{$guid}}` family (every `dynamic_variable_names()` token)
-	 * written as-is instead of resolving it now (issue #995).
-	 *
-	 * Composition happens once but a load run repeats the composed payload
-	 * per iteration, per virtual user - resolving the generator family here
-	 * would send the same generated value on every repetition. Set this only
-	 * by a caller that starts a run from the composed result (`POST /runs`);
-	 * an ordinary Send composes once and sends once, so it must keep
-	 * resolving the family at composition and leaves this absent. Absent or
-	 * `false` behaves exactly as composition always has; the engine rejects
-	 * a non-boolean with a `400`.
+	 * Leave the `{{$guid}}` family (every `dynamic_variable_names()` token) written instead of
+	 * resolving it now (#995). A load run repeats the composed payload per iteration and virtual
+	 * user, so resolving here would send one generated value every time. Set only by a caller
+	 * starting a run from the result (`POST /runs`); a Send composes and sends once, so it resolves
+	 * the family here. Absent or `false` resolves as usual; a non-boolean is a `400`.
 	 */
 	deferDynamicVariables?: boolean;
 }
 
 /**
- * What `POST /compose` returns: an `ExecuteRequestRequest` plus whatever
- * extra fields rode through composition verbatim (e.g. the resolved
- * `elements` array a load run renames onto `requestElements` - scripts are
- * never interpolated).
+ * `POST /compose`'s answer: an `ExecuteRequestRequest` plus fields that rode through verbatim (the
+ * resolved `elements` a load run renames to `requestElements`; scripts are never interpolated).
  *
- * `deferredVariables` (#2521) is an answer about the composition, not part of
- * the request: the names a pre-request script runs before, left written as
- * `{{name}}` in the payload because the script may replace them. Sorted, and
- * absent when nothing was deferred. It is for display; `useEngine` strips it
- * from the payload a send hands on to `/execute` or `/runs`.
- *
- * `collectionId` (#3461) is the leaf of the chain composition read, absent when
- * it read none. Unlike `deferredVariables` it is part of the send: `/execute`
- * and `/runs` read the scripts' collection scope from it when no `requestId`
- * row names one, so a spread of the answer carries it.
- *
- * `stream` is present on a by-id compose only, as the saved row's Event stream
- * setting (#3561); a caller that spreads that answer into `/execute` states
- * its own, or a streaming row answers `202 {runId, eventsUrl}`.
+ * - `deferredVariables` (#2521): names a pre-request script runs before, left as `{{name}}` because
+ *   it may replace them. Sorted; absent when none. Display only: `useEngine` strips it before
+ *   `/execute` or `/runs`.
+ * - `collectionId` (#3461): the leaf of the chain composition read, absent when none. Part of the
+ *   send: `/execute` and `/runs` read the scripts' collection scope from it when no `requestId` row
+ *   names one, so a spread of the answer carries it.
+ * - `stream`: on a by-id compose only, the saved row's Event stream setting (#3561); a caller
+ *   spreading that answer into `/execute` states its own, or a streaming row answers
+ *   `202 {runId, eventsUrl}`.
  */
 export type ComposedRequest = ExecuteRequestRequest &
 	Record<string, unknown> & {
@@ -749,23 +625,18 @@ export type ComposedRequest = ExecuteRequestRequest &
 	};
 
 /**
- * StartLoadTestRequest - Matches POST /run backend endpoint
- * The backend expects a flat structure with:
- * - HTTP request fields (method, url, headers, body) at root level
- * - mode: "constant_rps" | "constant_concurrency" | "iterations" | "ramp_up"
- * - Mode-specific params (duration, targetRps, iterations, concurrency, etc.)
+ * The single-request `POST /runs` body: the HTTP request's fields at the root, a `mode`, and that
+ * mode's parameters.
  */
 export interface StartLoadTestRequest {
 	method: string;
 	url: string;
-	// Resolved, enabled-only: ordered lines or the single-valued record, as the
-	// execute endpoint takes them.
+	// Resolved, enabled-only: ordered lines or the single-valued record, as `/execute` takes them.
 	headers?: HeaderLine[] | Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
 
-	// Redirect policy - same fields the single-request endpoint takes, so a load
-	// test exercises the request under the policy the user configured for it.
+	// Redirect policy, as `/execute` takes it, so a load test runs under the user's policy.
 	followRedirects?: boolean;
 	maxRedirects?: number;
 
@@ -779,17 +650,13 @@ export interface StartLoadTestRequest {
 	verifySSL?: boolean;
 
 	/**
-	 * The engine's own default headers this run refuses, by name (issue #1229).
-	 * Same field, same rules and same omit-when-empty contract as
-	 * {@link ExecuteRequestRequest.disabledDefaultHeaders} - a load run has to
-	 * send the header set a Send sends, or it measures a different request.
+	 * The engine's default headers this run refuses (#1229), on the rules and omit-when-empty
+	 * contract of {@link ExecuteRequestRequest.disabledDefaultHeaders}: a load run must send Send's
+	 * header set, or it measures a different request.
 	 */
 	disabledDefaultHeaders?: string[];
 
-	/**
-	 * The request's stored protocol settings (issue #1765), always sent, same
-	 * rationale as {@link ExecuteRequestRequest.disableCookies}.
-	 */
+	/** Always sent (#1765); see {@link ExecuteRequestRequest.disableCookies}. */
 	disableCookies?: boolean;
 	disabledSystemHeaders?: string[];
 	disableUrlEncoding?: boolean;
@@ -810,10 +677,8 @@ export interface StartLoadTestRequest {
 	rampUpDuration?: string;
 	startConcurrency?: number;
 
-	// For "capacity" mode. `startConcurrency` is where the search begins and
-	// `concurrency` is the ceiling it will not climb past - both fields the ramp
-	// already owns, reused rather than respelled. `duration` is the whole
-	// search's deadline.
+	// For "capacity" mode: `startConcurrency` is where the search begins and `concurrency` the
+	// ceiling it never passes, the ramp's fields reused; `duration` is the whole search's deadline.
 	/** p99 budget the search looks for the edge of, in ms. */
 	sloMs?: number;
 	/** How long each concurrency level is held before it is judged, e.g. `"5s"`. */
@@ -828,133 +693,99 @@ export interface StartLoadTestRequest {
 	maxInFlight?: number; // Max concurrent in-flight requests before drops/queue. Default per-strategy.
 
 	// Data capture options
-	// Sampling period, not a percentage: the engine keeps a trace when
-	// `counter % success_sample_rate == 0`, so 1 keeps every response and 100
-	// keeps 1%. A 0 is a division by zero engine-side, and the engine rejects
-	// it with a 400. Build it with `successSamplePeriod`, which converts from
-	// the percentage the UI shows.
+	// A sampling period, not a percentage: the engine keeps a trace when
+	// `counter % success_sample_rate == 0`, so 1 keeps every response and 100 keeps 1%. 0 would
+	// divide by zero, so the engine 400s it. Build it with `successSamplePeriod`, which converts
+	// the UI's percentage.
 	success_sample_rate?: number;
 	slow_threshold_ms?: number;
 	save_timing_breakdown?: boolean;
 	/**
-	 * Hold a virtual user for a 429's or 503's `Retry-After` (capped by
-	 * `retryAfterMaxMs`) before its next request, so the run does not hammer a
-	 * limiter (#3782). Off by default: a run that backs off measures the rate
-	 * the limiter allows. Closed-loop modes only; `constant_rps` skips it with
-	 * a warning.
+	 * Hold a virtual user for a 429's or 503's `Retry-After` (capped by `retryAfterMaxMs`) before
+	 * its next request, so the run does not hammer a limiter (#3782). Off by default: a run that
+	 * backs off measures the rate the limiter allows. Closed-loop modes only; `constant_rps` skips
+	 * it with a warning.
 	 */
 	retryAfterBackoff?: boolean;
 	/** The longest one wait, 1-3600000 ms; the engine defaults it to 30000. */
 	retryAfterMaxMs?: number;
 	/**
-	 * This run's own step-level elements (issue #1594): the collection chain
-	 * root to leaf, then the request's own, the same resolved list
-	 * {@link ExecuteRequestRequest.elements} carries and `POST /compose`
-	 * echoes back. A distinct key from `elements` below - the run payload is
-	 * flat, so one key cannot be both a request-shaped array and the
-	 * run-level override object. Replaces the retired `tests` field, which
-	 * `POST /runs` now refuses by name alongside `postRequestScript(s)` /
-	 * `preRequestScript(s)`.
+	 * This run's step-level elements (#1594): the chain root to leaf, then the request's own, the
+	 * list {@link ExecuteRequestRequest.elements} carries and `POST /compose` echoes. A key apart
+	 * from `elements` because the payload is flat, so one key cannot be both the array and the
+	 * run-level override. `POST /runs` refuses `tests`, `postRequestScript(s)` and
+	 * `preRequestScript(s)` by name.
 	 */
 	requestElements?: ResolvedElement[];
 	/**
-	 * The `elements` run override (issue #1594), single-target runs only now
-	 * too: `scripts` picks whether a `script.*` element in
-	 * {@link requestElements} runs inline on the event-loop worker or stays
-	 * deferred to the post-run replay. Accepted (and validated) beside a
-	 * `scenario` block as well, since the validator does not distinguish the
-	 * two shapes - see {@link StartScenarioRunRequest.elements} for `timers`,
+	 * The `elements` run override (#1594): `scripts` picks whether a `script.*` element in
+	 * {@link requestElements} runs inline on the event-loop worker or stays deferred to the
+	 * post-run replay. Also accepted (and validated) beside a `scenario` block, since the validator
+	 * does not tell the shapes apart; see {@link StartScenarioRunRequest.elements} for `timers`,
 	 * which this dialog has no control for.
 	 */
 	elements?: { scripts?: "asMarked" | "allInline" | "allDeferred" };
 
-	// Pass/fail budgets for the whole run. camelCase because these are the
-	// engine's own metric names, which come back unchanged in the report's
-	// `thresholdValidation`. Omitted entirely when none were declared - the
-	// engine rejects an empty object rather than starting an unjudged run.
+	// Pass/fail budgets for the whole run, camelCase as the engine's own metric names, which return
+	// unchanged in the report's `thresholdValidation`. Omitted when none: the engine refuses an
+	// empty object rather than start an unjudged run.
 	thresholds?: RunThresholds;
 
 	/**
-	 * Which of the `thresholds` keys were carried over rather than set for this
-	 * run (issue #2195): the engine stores the list and the report echoes it as
-	 * `metadata.configuration.carriedBudgets`; it never changes the verdict.
-	 * Omitted when none were.
+	 * The `thresholds` keys carried over rather than set for this run (#2195). The engine stores
+	 * it, the report echoes it as `metadata.configuration.carriedBudgets`, and it never changes the
+	 * verdict. Omitted when none.
 	 */
 	carriedBudgets?: string[];
 
-	// The server-vitals endpoint to scrape during the run. camelCase for the
-	// same reason `thresholds` is - these are the engine's own field names.
-	// Omitted entirely when no endpoint was given; the engine rejects a block
-	// with no `series` rather than starting a run that scrapes nothing.
+	// The server-vitals endpoint scraped during the run, camelCase like `thresholds`. Omitted when
+	// no endpoint was given: the engine refuses a block with no `series`.
 	monitor?: RunMonitorConfig;
 
 	/**
-	 * Consume each transfer as a `text/event-stream` (issue #576).
-	 *
-	 * The same flag and the same two cap names `POST /execute` takes, because
-	 * the engine reads both endpoints through one parser - a load run declares
-	 * a stream exactly as a Send does. Sent from the request's own `stream`
-	 * setting, never from the load dialog: whether a request streams is a
-	 * property of the request, and only the bounds below belong to the run.
+	 * Consume each transfer as `text/event-stream` (#576), with `POST /execute`'s flag and cap
+	 * names: the engine reads both endpoints through one parser. Sent from the request's own
+	 * `stream`, never from the load dialog: streaming is the request's property; only the bounds
+	 * below are the run's.
 	 */
 	stream?: boolean;
 	/** See {@link ExecuteRequestRequest.streamTextPath}; read off the request, like `stream`. */
 	streamTextPath?: string;
 	/**
-	 * The literal the run's streams are timed to (issue #3774), read off the
-	 * request like `stream`; a send does not carry it, because a Send checks
-	 * the field and times nothing with it. Absent means no marker.
+	 * The literal the run's streams are timed to (#3774), read off the request like `stream`. A
+	 * Send carries none: it checks the field and times nothing with it. Absent means no marker.
 	 */
 	streamFirstContentMarker?: string;
 	/**
-	 * Wall-clock ceiling on one stream, in ms; omitted takes the engine's
-	 * `sseMaxStreamDurationMs`. Under load a stream is bounded by construction -
-	 * the load loop refills concurrency per completion, so a transfer that
-	 * never ends leaks its slot for the rest of the run - and reaching a cap is
-	 * a **successful** completion rather than a timeout.
+	 * Wall-clock ceiling on one stream, ms; omitted takes `sseMaxStreamDurationMs`. Under load a
+	 * stream is bounded by construction (the loop refills concurrency per completion, so an endless
+	 * transfer leaks its slot for the rest of the run), and reaching a cap is a **successful**
+	 * completion, not a timeout.
 	 */
 	maxStreamDurationMs?: number;
 	/** Ceiling on events delivered by one stream; omitted takes `sseMaxStreamEvents`. */
 	maxStreamEvents?: number;
 
 	/**
-	 * The data set this run binds, one object per row (issue #993).
-	 *
-	 * The single-request spelling of `scenario.data`, read by the same engine
-	 * validator and bounded by the same `maxScenarioDataRows` /
-	 * `maxScenarioDataBytes` settings - a present-but-empty array is refused
-	 * rather than run. **One row per submission**, claimed off a run-wide cursor
-	 * that wraps, so a run longer than the set repeats it; a scenario run's row
-	 * is per iteration and shared by every step instead, which is why the two
-	 * fields are separate and why sending both is a `400`.
-	 *
-	 * Every `{{data.column}}` in the URL, headers, body and auth credentials
-	 * binds per submission, and a deferred `script.post` element reads the row
-	 * its sample carried as `pm.iterationData`. The set is never persisted - the run
-	 * snapshot records its row count, plus the file name and hash below - but a
-	 * bound cell travels in the request that carried it, which the run stores
-	 * with its retained traces.
+	 * The data set this run binds, one object per row (#993): `scenario.data`'s single-request
+	 * spelling, read by the same validator and bounded by `maxScenarioDataRows` /
+	 * `maxScenarioDataBytes`; an empty array is refused. **One row per submission**, from a
+	 * run-wide cursor that wraps, so a run longer than the set repeats it. A scenario run's row is
+	 * per iteration and shared by every step instead, so the fields are separate and sending both
+	 * is a `400`. Every `{{data.column}}` in the URL, headers, body and auth binds per submission,
+	 * and a deferred `script.post` reads its sample's row as `pm.iterationData`. The set is never
+	 * persisted (the snapshot records its row count, file name and hash), but a bound cell travels
+	 * in its request, which the run stores with its retained traces.
 	 */
 	data?: Record<string, unknown>[];
-	/**
-	 * The data file the rows came from (issue #2051): a display name, never a
-	 * path. Only beside `data`; the engine refuses it alone.
-	 */
+	/** The rows' file (#2051): a display name, never a path; refused without `data`. */
 	dataFileName?: string;
-	/**
-	 * SHA-256 of that file's bytes, 64 lowercase hex, so two runs can be told
-	 * apart by their file's content. Only beside `data`.
-	 */
+	/** That file's SHA-256, 64 lowercase hex, to tell two runs' files apart. Only beside `data`. */
 	dataFileHash?: string;
-	/**
-	 * Whether the file's numbers were read as numbers (issue #2540). The rows
-	 * are already typed; the engine only records it. Only beside `data`.
-	 */
+	/** Numbers read as numbers (#2540); the engine only records it. Only beside `data`. */
 	dataFileCastNumbers?: boolean;
 	/**
-	 * Who started the run (issue #1817). Stamped `{kind: "app"}` by `apiService`
-	 * on every execute and run start, so a caller never sets it; declared here
-	 * because the payload is the wire's shape.
+	 * Who started it (#1817), stamped by `apiService`; see {@link ExecuteRequestRequest.origin}.
 	 */
 	origin?: RunOrigin;
 }
@@ -966,42 +797,27 @@ export interface StartLoadTestResponse {
 }
 
 /**
- * StartScenarioRunRequest - the other shape `POST /runs` accepts.
- *
- * A scenario states its work as an ordered collection instead of a single
- * request, so it carries no `method`/`url` and no `mode`: the block replaces
- * them, and `iterations` lives inside it rather than beside a load-test mode.
- * The engine resolves the collection into a plan before answering, so every
- * rejection (empty collection, a step that will not compose, a plan over
- * `maxScenarioSteps`) is a `400` and no run row is created.
- *
- * The response is a load run's - `202 {runId}` - because the lifecycle is a
- * load run's; only the executor differs.
- *
- * Adding a load `mode` beside the block turns it into a **scenario load run**
- * (issue #357): the same plan, driven by `concurrency` virtual users on the
- * event loop rather than one sequence through the client. The absence of `mode`
- * is what still means design mode, so a payload written before load-mode
- * scenarios existed keeps its meaning exactly.
+ * The other `POST /runs` shape: an ordered collection instead of a single request, so no
+ * `method`/`url` and no `mode`, and `iterations` inside the block. The engine resolves the plan
+ * before answering, so every rejection (empty collection, a step that will not compose, a plan over
+ * `maxScenarioSteps`) is a `400` with no run row. The answer is a load run's `202 {runId}`: the
+ * lifecycle is a load run's, only the executor differs. A load `mode` beside the block makes a
+ * **scenario load run** (#357): the same plan driven by `concurrency` virtual users on the event
+ * loop. No `mode` means design mode, so an older payload keeps its meaning.
  */
 export interface StartScenarioRunRequest {
 	/**
-	 * Load mode, for a scenario *load* run. Omit for a design-mode collection
-	 * run.
-	 *
-	 * `constant_rps` is a `400` here, not a silent downgrade: an open-loop
-	 * arrival rate over a multi-step sequence is an arrival-rate executor,
-	 * which Vayu does not implement. So is any non-zero `rps`/`targetRps`: a
-	 * scenario run is closed-loop by design, whatever the declared mode.
+	 * Load mode, for a scenario *load* run; omit for a design-mode run. `constant_rps` is a `400`,
+	 * not a silent downgrade: an open-loop rate over a multi-step sequence is an arrival-rate
+	 * executor, which Vayu lacks. So is any non-zero `rps`/`targetRps`: a scenario run is
+	 * closed-loop by design.
 	 */
 	mode?: "constant_concurrency" | "ramp_up" | "iterations";
 	/** Wall-clock length, e.g. `"60s"`. Read by the two duration-bounded modes. */
 	duration?: string;
 	/**
-	 * The number of **virtual users** - which is what `concurrency` means for a
-	 * scenario, and what k6 and JMeter mean by it. Each walks the plan on its
-	 * own, with its own cookies, and in-flight requests are bounded by this
-	 * count by construction (so `maxInFlight` has nothing to do for this run).
+	 * The number of **virtual users**, as k6 and JMeter mean it. Each walks the plan alone, with
+	 * its own cookies; in-flight requests are bounded by this count, so `maxInFlight` is moot.
 	 */
 	concurrency?: number;
 	/** `ramp_up` only: the virtual-user count the ramp starts from. */
@@ -1009,166 +825,114 @@ export interface StartScenarioRunRequest {
 	/** `ramp_up` only: how long the ramp takes, e.g. `"10s"`. */
 	rampUpDuration?: string;
 	/**
-	 * `mode: "iterations"` only: total passes over the plan across all virtual
-	 * users. Distinct from `scenario.iterations`, which is the design-mode
-	 * runner's per-run pass count - a load run reads this one.
+	 * `mode: "iterations"` only: total passes over the plan across all virtual users. Not
+	 * `scenario.iterations`, the design runner's per-run pass count; a load run reads this one.
 	 */
 	iterations?: number;
 	/**
-	 * Run-level stream caps (#3235), in ms, for a collection run whose stored
-	 * requests include one with `stream` set. They bound each such step and are
-	 * accepted **without** `stream` here; a step that does not stream ignores
-	 * them, and omitted ones fall back to the `sse*` settings cap by cap. Never
-	 * send `stream` on a scenario run: it is a `400`, since the flag belongs to
-	 * each stored request.
+	 * Run-level stream caps (#3235), ms, for a collection run with a `stream` request. They bound
+	 * each such step and are accepted **without** `stream`; a non-streaming step ignores them, and
+	 * an omitted one falls back to its `sse*` setting. Never send `stream` on a scenario run: it is
+	 * a `400`, since the flag belongs to each stored request.
 	 */
 	maxStreamDurationMs?: number;
 	maxStreamEvents?: number;
 	/**
-	 * Scenario load run only: hold a virtual user for a 429's or 503's
-	 * `Retry-After` (capped by `retryAfterMaxMs`) before its next step, so the
-	 * run does not hammer a limiter (#3782, #3799). **Omitted when off**: absent
-	 * already means off, and the cap is sent only with it.
+	 * Scenario load run only: hold a virtual user for a 429's or 503's `Retry-After` (capped by
+	 * `retryAfterMaxMs`) before its next step (#3782, #3799). **Omitted when off**: absent means
+	 * off, and the cap is sent only with it.
 	 */
 	retryAfterBackoff?: boolean;
 	/** The longest one wait, 1-3600000 ms; the engine defaults it to 30000. */
 	retryAfterMaxMs?: number;
 	scenario: {
 		/**
-		 * The discriminator for a future stored scenario. `"collection"` is the
-		 * only value the engine accepts today, and an unknown one is a 400
-		 * rather than a fall-through to the collection path.
+		 * Discriminator for a future stored scenario. `"collection"` is the only accepted value; an
+		 * unknown one is a 400, never a fall-through to the collection path.
 		 */
 		source: "collection";
 		collectionId: string;
 		/**
-		 * Descend into sub-collections, depth-first, each subtree ahead of its
-		 * parent's own requests - the order the sidebar shows. Default false.
+		 * Descend into sub-collections depth-first, each subtree before its parent's own requests
+		 * (the sidebar's order). Default false.
 		 */
 		recursive?: boolean;
 		/**
-		 * Passes over the plan. Whole number, 1 or more.
-		 *
-		 * Default 1 - or, with `data` present and this absent, the row count.
-		 * Omit it rather than sending the row count: the engine owns that rule
-		 * (`parse_scenario_request`), and a client computing its own would be a
-		 * second copy of it.
+		 * Passes over the plan, a whole number, 1 or more. Default 1, or the row count when `data`
+		 * is present and this absent. Omit it rather than send the row count: the engine owns that
+		 * rule (`parse_scenario_request`), and a client's copy would be a second one.
 		 */
 		iterations?: number;
 		/**
-		 * The data set, one object per row, driving `{{data.column}}` and
-		 * `pm.iterationData` (issue #402).
-		 *
-		 * Inline on the payload because the engine never opens a file: the
-		 * script sandbox has no filesystem access and a user-supplied path
-		 * would be a new trust boundary. The app parses CSV/TSV/JSON/JSONL
-		 * (`services/data-files`) and sends the rows; the engine bounds them
-		 * with `maxScenarioDataRows` and `maxScenarioDataBytes` and rejects a
-		 * present-but-empty array. The row *set* is never persisted on either
-		 * side - the run snapshot records its count, plus the file name and hash
-		 * below - but a cell bound into a request is stored with that request,
-		 * in the step trace the run keeps (issue #731).
+		 * The data set, one object per row, driving `{{data.column}}` and `pm.iterationData`
+		 * (#402). Inline because the engine never opens a file: the sandbox has no filesystem, and
+		 * a user path would be a new trust boundary. The app parses CSV/TSV/JSON/JSONL
+		 * (`services/data-files`); the engine bounds the rows by `maxScenarioDataRows` and
+		 * `maxScenarioDataBytes` and refuses an empty array. The row *set* is never persisted (the
+		 * snapshot records its count, file name and hash), but a cell bound into a request is
+		 * stored with it in the step trace (#731).
 		 */
 		data?: Record<string, unknown>[];
-		/**
-		 * The data file the rows came from (issue #2051): a display name, never
-		 * a path. Only beside `data`; the engine refuses it alone.
-		 */
+		/** The rows' file (#2051): a display name, never a path; refused without `data`. */
 		dataFileName?: string;
 		/** SHA-256 of that file's bytes, 64 lowercase hex. Only beside `data`. */
 		dataFileHash?: string;
-		/**
-		 * Whether the file's numbers were read as numbers (issue #2540). The
-		 * rows are already typed; the engine only records it. Only beside `data`.
-		 */
+		/** Numbers read as numbers (#2540); the engine only records it. Only beside `data`. */
 		dataFileCastNumbers?: boolean;
 	};
 	/** What `{{variables}}` resolve against, and whose cookie jar the run uses. */
 	environmentId?: string;
 	/**
-	 * Make the collection's OpenAPI contract a gate: a step that passed
-	 * everything else and whose response does not match the schema the bound
-	 * document declares is **failed** (issue #720).
-	 *
-	 * Top-level rather than inside `scenario`, because that is where the engine
-	 * reads it (`read_fail_on_schema_error`), beside the other run-scoped
-	 * properties of who asked for the run.
-	 *
-	 * **Omitted when off**, unlike `followRedirects`: the engine's default is
-	 * `false`, so absent already means what the user asked for, and a run
-	 * snapshot that carries the key only when it was on keeps a payload written
-	 * before this existed reading the same way. Design-mode collection runs
-	 * only - the load executor defers validation to run end and never demotes a
-	 * step on it.
+	 * Make the collection's OpenAPI contract a gate: a step that passed all else but whose response
+	 * does not match the bound document's schema is **failed** (#720). Top-level, where the engine
+	 * reads it (`read_fail_on_schema_error`). **Omitted when off**, unlike `followRedirects`: the
+	 * engine defaults to `false`, and a snapshot carrying the key only when on reads the same as
+	 * one written before it existed. Design-mode runs only: the load executor validates at run end
+	 * and never demotes a step.
 	 */
 	failOnSchemaError?: boolean;
 	/**
-	 * End a collection run's iteration at every `errored` step, a script error
-	 * and a transport failure included (issue #2526). Off, the engine's default,
-	 * an errored step is reported on its step and the iteration moves on to the
-	 * next request, as Postman and Newman do; the runner's own refusals end the
-	 * iteration either way.
-	 *
-	 * Top-level beside `failOnSchemaError`, and **omitted when off** on the same
-	 * terms: absent already means the default, and a snapshot that carries the key
-	 * only when it was on reads the same as one written before it existed.
-	 * Design-mode collection runs only - a scenario load run does not read it.
+	 * End a collection run's iteration at every `errored` step, script errors and transport
+	 * failures included (#2526). Off (the default), an errored step is reported and the iteration
+	 * moves on, as Postman and Newman do; the runner's own refusals end the iteration either way.
+	 * Top-level and **omitted when off**, as `failOnSchemaError`. Design-mode runs only; a scenario
+	 * load run ignores it.
 	 */
 	stopOnError?: boolean;
 	/**
-	 * Overrides how the element pipeline runs across every step of a
-	 * **scenario load run** (`mode` present), without editing the collection
-	 * itself (issue #1495). Top-level, not inside `scenario` - the engine
-	 * reads it off the run payload directly (`validate_elements_run_override`,
-	 * `engine/src/core/load_strategy.cpp`) the same way for both `POST /runs`
-	 * shapes. Every key is optional; an unknown key or an out-of-set value is
-	 * a `400` naming the field.
-	 *
-	 * Accepted (and validated) on a design-mode run too, since the validator
-	 * does not distinguish the two shapes, but has nothing to override there -
-	 * a sequential run has no inline/deferred distinction to make. Omit it
-	 * outside a scenario load run.
+	 * Overrides the element pipeline across every step without editing the collection (#1495).
+	 * Top-level, where the engine reads it for both `POST /runs` shapes
+	 * (`validate_elements_run_override`, `engine/src/core/load_strategy.cpp`); every key is
+	 * optional, and an unknown key or value is a `400` naming the field. `timers` applies to a
+	 * design-mode run too; `scripts` and `includeScriptTime` only to a scenario load run, since a
+	 * sequential run has no inline/deferred split.
 	 */
 	elements?: {
 		/**
-		 * `"asConfigured"` (default): every `timer.*` element runs its own
-		 * stored config. `"off"`: every `timer.*` element is silenced for the
-		 * run. `{fixedMs}` / `{minMs, maxMs}` (issue #1498): every `timer.*`
-		 * element's own wait span is replaced by the same fixed value or
-		 * uniform range, whatever that element's own config says - the same
-		 * "replaced, not merged" rule `scripts` below already uses. No app
-		 * control sends the object shapes yet (`RunCollectionDialog`'s Timers
-		 * toggle is `asConfigured` | `off` only); the engine accepts them
-		 * regardless, for a caller (MCP, a future control) that wants them.
+		 * `"asConfigured"` (default): each `timer.*` runs its stored config. `"off"`: every one is
+		 * silenced. `{fixedMs}` / `{minMs, maxMs}` (#1498): each one's wait is replaced by the same
+		 * value or uniform range, "replaced, not merged" as `scripts` is. No app control sends the
+		 * object shapes (`RunCollectionDialog`'s Timers toggle is `asConfigured` | `off`); the
+		 * engine accepts them for MCP or a future control.
 		 */
 		timers?: "asConfigured" | "off" | { fixedMs: number } | { minMs?: number; maxMs?: number };
 		/**
-		 * `"asMarked"` (default) reads each `script.*` element's own
-		 * `config.inline`; `"allInline"` / `"allDeferred"` force every
-		 * `script.*` element of the run one way regardless of its own
-		 * marking. `extract.*` and `assert.*` are unaffected - they always
-		 * run inline on a scenario load run.
+		 * `"asMarked"` (default) reads each `script.*` element's `config.inline`; `"allInline"` /
+		 * `"allDeferred"` force every one of the run's `script.*` elements one way. `extract.*` and
+		 * `assert.*` always run inline on a scenario load run.
 		 */
 		scripts?: "asMarked" | "allInline" | "allDeferred";
-		/**
-		 * Folds the element pipeline's own elapsed time into a step's
-		 * recorded latency, and the run's with it, when `true`. Default
-		 * `false` - both are the transfer alone.
-		 */
+		/** Adds pipeline time to step and run latency when `true`; default: transfer only. */
 		includeScriptTime?: boolean;
 	};
 	/**
-	 * Pass/fail budgets this run is judged against (issue #1497 for a load
-	 * run; #1564 extends the same evaluation to a design-mode collection run).
-	 * Top-level, matching where the engine reads it (`validate_thresholds`,
-	 * `evaluate_thresholds`) for both `POST /runs` shapes. Omit to leave the
-	 * run measured but not judged - the pre-existing behaviour.
+	 * Pass/fail budgets the run is judged against (#1497 for a load run, #1564 for a design-mode
+	 * collection run). Top-level, where the engine reads it (`validate_thresholds`,
+	 * `evaluate_thresholds`) for both shapes. Omit to measure the run without judging it.
 	 */
 	thresholds?: RunThresholds;
 	/**
-	 * Who started the run (issue #1817). Stamped `{kind: "app"}` by `apiService`
-	 * on every execute and run start, so a caller never sets it; declared here
-	 * because the payload is the wire's shape.
+	 * Who started it (#1817), stamped by `apiService`; see {@link ExecuteRequestRequest.origin}.
 	 */
 	origin?: RunOrigin;
 }
@@ -1194,10 +958,8 @@ export interface GetRunResponse {
 export type GetRunReportResponse = RunReport;
 
 /**
- * `DELETE /runs`: the clear-history verdict. `deletedIds` is what a client
- * closes tabs for; `deleted` is its length. `keptPinned` counts the baselines
- * still stored afterwards, and a run kept for being in flight is in neither
- * number.
+ * `DELETE /runs`' verdict. `deletedIds` is what a client closes tabs for; `deleted` is its length.
+ * `keptPinned` counts baselines still stored; a run kept for being in flight is in neither count.
  */
 export interface ClearRunsResponse {
 	deleted: number;
@@ -1220,12 +982,9 @@ export interface StopRunResponse {
 // Cookie jar API (issue #301)
 
 /**
- * One cookie the engine holds, as `GET /cookies` reports it.
- *
- * Every field has a reader in `CookiesCard`: the name and value are the row,
- * the domain and path say which requests it rides on, `secure` / `httpOnly`
- * are the badges, and `expires` (0 for a session cookie) distinguishes "until
- * you close vayu" from a date.
+ * One cookie the engine holds, as `GET /cookies` reports it. `CookiesCard` reads every field: name
+ * and value are the row, domain and path say which requests it rides on, `secure` / `httpOnly` are
+ * badges, and `expires` (0 for a session cookie) tells "until you close Vayu" from a date.
  */
 export interface EngineCookie {
 	name: string;
@@ -1238,10 +997,7 @@ export interface EngineCookie {
 	expires: number;
 }
 
-/**
- * One jar. `environmentId` is null for requests sent with no environment
- * selected - null rather than "" so it cannot be mistaken for an id.
- */
+/** One jar. `environmentId` is null for sends with no environment, never "", so it is no id. */
 export interface CookieScope {
 	environmentId: string | null;
 	cookies: EngineCookie[];
@@ -1258,28 +1014,22 @@ export interface ClearCookiesResponse {
 // Client-certificate registry (issue #707)
 
 /**
- * One registry entry, as `GET /client-certificates` reports it.
- *
- * The passphrase is deliberately absent: the engine never echoes it (it is
- * write-only over the wire), so this shape carries `hasPassphrase` instead -
- * which is the only thing the card has to render. Sending it back would put a
- * secret into every screenshot of the Settings panel.
- */
-/**
- * What the certificate file holds (issue #833). `pem` keeps the key in a second
- * file; `p12` is a PKCS#12 bundle carrying both. Every platform reads both
- * shapes since issue #851 - the engine still stores which one it is, because
- * libcurl needs telling (`CURLOPT_SSLCERTTYPE`) and would otherwise hand a
- * bundle to its PEM parser.
+ * What the certificate file holds (#833): `pem` keeps the key in a second file; `p12` is a PKCS#12
+ * bundle with both. Every platform reads both (#851); the engine stores which, because libcurl must
+ * be told (`CURLOPT_SSLCERTTYPE`) or it hands a bundle to its PEM parser.
  */
 export type ClientCertificateFormat = "pem" | "p12";
 
+/**
+ * A registry entry, as `GET /client-certificates` reports it. No passphrase: the engine never
+ * echoes it (write-only), so `hasPassphrase` is all the card renders; echoing it would put a secret
+ * in every screenshot of Settings.
+ */
 export interface ClientCertificate {
 	id: string;
 	/**
-	 * Lower-cased hostname, no scheme or port - the engine stores it this way -
-	 * or the one wildcard form, `*.example.com`, which answers for every
-	 * subdomain and never for the domain itself (issue #803).
+	 * Lower-cased hostname, no scheme or port (as stored), or the one wildcard form
+	 * `*.example.com`, which answers every subdomain and never the domain itself (#803).
 	 */
 	host: string;
 	/** The port this entry is specific to, or null when it answers on every one. */
@@ -1294,36 +1044,30 @@ export interface ClientCertificate {
 }
 
 /**
- * A row as `GET /client-certificates` answers it: the stored entry plus
- * whether the engine would present it, judged against the files as they are
- * now (issue #3260). Only the list judges - a create or update refuses an
- * unusable row and answers a bare `ClientCertificate` - so a result of either
- * must never be patched into a list cache as if it said `usable`.
+ * A row as `GET /client-certificates` lists it: the entry plus whether the engine would present it,
+ * judged against the files now (#3260). Only the list judges (a create or update refuses an
+ * unusable row and answers a bare `ClientCertificate`), so never patch either result into a list
+ * cache as if it said `usable`.
  */
 export interface ClientCertificateListEntry extends ClientCertificate {
-	/**
-	 * `false` for a row whose file moved or whose format was edited around the
-	 * routes: the engine leaves it out of every send.
-	 */
+	/** `false` if the file moved or the format was edited around the routes: never sent. */
 	usable: boolean;
 	/** Why the entry is not presented; present only when `usable` is `false`. */
 	problem?: string;
 }
 
 /**
- * A create or update body. `port: null` means every port, and on an update
- * `passphrase: null` clears a stored one - the engine's standard
- * null-vs-absent rule, which is why both are nullable rather than optional.
+ * A create or update body. `port: null` means every port; on an update `passphrase: null` clears a
+ * stored one, the engine's null-vs-absent rule, hence nullable rather than optional.
  */
 export interface ClientCertificateInput {
 	host: string;
 	port: number | null;
 	certPath: string;
 	/**
-	 * Absent lets the engine read the format off the file, which is what a
-	 * caller that has no opinion should do. Naming it is checked against those
-	 * same bytes, so a wrong value is a `400` rather than a handshake failure
-	 * later.
+	 * Absent lets the engine read the format off the file, as a caller with no opinion should. A
+	 * named one is checked against those bytes, so a wrong value is a `400`, not a handshake
+	 * failure later.
 	 */
 	certFormat?: ClientCertificateFormat;
 	/** `null` clears a stored path - how an entry moves from `pem` to `p12`. */
@@ -1334,21 +1078,15 @@ export interface ClientCertificateInput {
 // Transport diagnostics (issue #708)
 
 /**
- * Which hop answered, and how.
- *
- * Coarser than the engine's `ErrorCode` on purpose: the reader is choosing
- * which setting to point a user at, and these are the outcomes that lead
- * somewhere different. Everything else is `failed`, carrying the engine's own
- * message rather than a fourth word that implies a fourth remedy.
+ * Which hop answered, and how. Coarser than the engine's `ErrorCode` on purpose: the reader picks
+ * which setting to point at, and these are the outcomes that lead somewhere different. Anything
+ * else is `failed`, with the engine's message, not a fourth word implying a fourth remedy.
  */
 export type ConnectionTestOutcome = "ok" | "proxy_failed" | "tls_failed" | "timed_out" | "failed";
 
 /**
- * What `POST /diagnostics/connection` answers with.
- *
- * There is no response body here and there must never be one: this is a
- * diagnostics surface, not a fetch proxy (that is `/import/fetch`, behind its
- * own byte bound).
+ * What `POST /diagnostics/connection` answers. No response body, ever: this is diagnostics, not a
+ * fetch proxy (that is `/import/fetch`, behind its own byte bound).
  */
 export interface ConnectionTestResult {
 	url: string;
@@ -1357,26 +1095,19 @@ export interface ConnectionTestResult {
 	proxy: {
 		/** The `proxyMode` in force - `environment`, `system`, `manual` or `off`. */
 		mode: string;
-		/**
-		 * The proxy the probe went through, without its `user:pass@` - the
-		 * engine strips credentials, so this is safe to show. Absent when the
-		 * probe went direct.
-		 */
+		/** The proxy, `user:pass@` stripped by the engine so safe to show; absent when direct. */
 		url?: string;
 		/**
-		 * `"environment"` when the proxy was not configured in Vayu: `environment`
-		 * mode, or `system` with nothing resolved, where libcurl read
-		 * `http_proxy` / `https_proxy` / `all_proxy` itself and did send the probe
-		 * through one. `url` is then what it read, and absent only if that could
-		 * not be read back. Absent when `url` is the setting in force or the probe
-		 * went direct.
+		 * `"environment"` when Vayu did not configure the proxy (`environment` mode, or `system`
+		 * with nothing resolved) and libcurl read `http_proxy` / `https_proxy` / `all_proxy` itself
+		 * and sent the probe through one. `url` is then what it read, absent only if unreadable.
+		 * Absent when `url` is the setting in force or the probe went direct.
 		 */
 		source?: "environment";
 	};
 	/**
-	 * The registry entry the probe offered, `""` when none matched or the URL
-	 * is `http://`, where nothing is presented (issue #3260). "Offered": the
-	 * handshake may still have refused it, which `outcome` reports.
+	 * The registry entry the probe offered; `""` when none matched or the URL is `http://`, where
+	 * none is presented (#3260). "Offered": the handshake may have refused it (see `outcome`).
 	 */
 	clientCertificate: string;
 	/** The status line, present only on `ok`. */
@@ -1390,18 +1121,14 @@ export interface ConnectionTestResult {
 // Workspace backup (issue #987)
 
 /**
- * What `POST /workspace/backup` answers with.
- *
- * `path` is the whole point of the shape: restoring is a file copy the user
- * performs themselves, with the engine stopped, so the one thing they need back
- * is where the snapshot went. There is deliberately no restore call to pair
- * with this - a live engine overwriting its own open database is the footgun
- * the feature avoids.
+ * What `POST /workspace/backup` answers. `path` is the point: restoring is a file copy the user
+ * does with the engine stopped, so where the snapshot went is what they need. There is no restore
+ * call: a live engine overwriting its own open database is the footgun the feature avoids.
  */
 export interface WorkspaceBackupResult {
 	/** Absolute path of the snapshot written. */
 	path: string;
-	/** Its size on disk - a compacted copy, so smaller than the live database. */
+	/** Size on disk; a compacted copy, so smaller than the live database. */
 	sizeBytes: number;
 	/** When it was taken, in Unix ms. */
 	createdAt: number;
@@ -1412,50 +1139,38 @@ export interface WorkspaceBackupResult {
 // Trash (issue #988)
 
 /**
- * One deleted root, as `GET /trash` lists it.
+ * One deleted root, as `GET /trash` lists it. **Roots only:** deleting a collection stamps its
+ * subtree in one transaction, and the engine lists the row the user deleted, not every row that
+ * went with it. A request is a root only while its collection is live, an example only while its
+ * request is.
  *
- * **Roots only.** Deleting a collection stamps its whole subtree in one
- * transaction, and the engine reports the row the user actually deleted rather
- * than every row that went with it - a request whose collection is in the trash
- * is not listed separately. A request is a root only while its collection is
- * live, and an example only while its request is.
+ * A collection's `purgeCollections` and `purgeRequests` are what a **purge** destroys: every
+ * deleted row under the root, an *earlier* delete's included, which the list does not show (#3449);
+ * a purge prompt and the row read them. The engine also sends the **cohort** pair `collections` /
+ * `requests` (what that one delete took, which a restore puts back, never above the purge totals);
+ * this type does not claim it because nothing reads it. Add it with its reader.
  *
- * A collection entry's `purgeCollections` and `purgeRequests` are what a
- * **purge** destroys: every deleted row under the root, an *earlier* delete's
- * included, which the list does not show (#3449). A purge prompt and a row that
- * tell the user what leaves for good read them. The engine also sends the
- * **cohort** pair `collections` / `requests` - what that one delete took, which
- * is exactly what a restore puts back, and never above the purge totals - and
- * this type deliberately does not claim it: nothing here reads it. Add it back
- * with its reader, not before.
- *
- * An environment (#2970) is always a root and takes nothing with it: its
- * variables live on its own row, so they are counted in `variables` rather than
- * as a cascade. A saved example (#2971) and a client certificate (#2973)
- * likewise take nothing with them; a certificate's `name` is its target, `host`
- * or `host:port`.
+ * An environment (#2970) is always a root and takes nothing with it: its variables are on its row,
+ * counted in `variables`. A saved example (#2971) and a client certificate (#2973) take nothing
+ * either; a certificate's `name` is its target, `host` or `host:port`.
  */
 export interface TrashEntry {
 	id: string;
 	kind: "collection" | "request" | "environment" | "example" | "clientCertificate";
 	name: string;
-	/** When it was deleted, in Unix ms - the stamp the retention purge reads. */
+	/** When it was deleted, Unix ms; the stamp the retention purge reads. */
 	deletedAt: number;
 	/*
-	 * The engine also sends `parentId` - the collection's old parent, the
-	 * request's owning collection, the example's owning request, null for an
-	 * environment or a client certificate - and this type deliberately does not
-	 * claim it, the way `RequestExample` omits the `order` and timestamps it does
-	 * not use. Nothing here reads it: a row names the owner through `parentName`,
-	 * which the engine resolves, because the id would have to be looked up in a
-	 * live tree that need not hold a parent that is itself deleted. Add `parentId`
-	 * back with its reader, not before. The whole wire shape is in
-	 * `docs/engine/api-reference.md` under Trash.
+	 * The engine also sends `parentId` (the collection's old parent, the request's collection, the
+	 * example's request, null for an environment or certificate); this type does not claim it, as
+	 * `RequestExample` omits fields it does not use. A row names its owner through `parentName`,
+	 * which the engine resolves, because the id would need a live tree that may not hold a deleted
+	 * parent. Add `parentId` with its reader. The wire shape is in
+	 * `docs/engine/api-reference/trash.md`.
 	 */
 	/**
-	 * The live owner's name: the collection a request came from, the request an
-	 * example came from. Sent on request and example entries only, so two
-	 * same-named entries tell apart by it (#3449).
+	 * The live owner's name (a request's collection, an example's request). Request and example
+	 * entries only, so two same-named entries tell apart (#3449).
 	 */
 	parentName?: string;
 	/** Sub-collections a purge destroys, an earlier delete's included (#3449). Always 0 for every kind but a collection. */
@@ -1472,15 +1187,10 @@ export interface ListTrashResponse {
 }
 
 /**
- * What `POST /trash/{id}/restore` answers with: the entry, as it was listed,
- * plus what the restore had to do to put it back.
- *
- * `reparentedToRoot` is the one thing the caller cannot infer. A collection
- * whose parent is gone or itself in the trash cannot go back where it came
- * from, so the engine clears its parent and it returns as a tree root - which
- * moves a folder the user has to be told about. A *request* in that position is
- * refused instead (409, naming the Trash root to restore first), because a
- * request has no root to land on.
+ * What `POST /trash/{id}/restore` answers: the entry as listed, plus what the restore did.
+ * `reparentedToRoot` is the one thing a caller cannot infer: a collection whose parent is gone or
+ * trashed returns as a tree root, which moves it, and the user must be told. A *request* there is
+ * refused (409 naming the Trash root to restore first), since a request has no root to land on.
  */
 export interface RestoreTrashResponse extends TrashEntry {
 	restored: true;
@@ -1492,8 +1202,8 @@ export interface PurgeTrashResponse extends TrashEntry {
 	purged: true;
 }
 
-// Webhook inbox API (issue #480). An inbox is engine-hosted listener state, so
-// none of these shapes is stored client-side - the surface reads them back.
+// Webhook inbox API (#480). An inbox is engine-hosted listener state, so nothing here is stored
+// client-side; the surface reads it back.
 
 /** What an inbox answers every caller with. */
 export interface InboxCannedResponse {
@@ -1506,17 +1216,12 @@ export interface InboxCannedResponse {
 export interface Inbox {
 	inboxId: string;
 	/**
-	 * What a webhook source is pointed at: `http://<bind>:<port>/`, except for
-	 * a wildcard bind (`0.0.0.0`, `::`), where it is the machine's first
-	 * non-loopback IPv4 address, since the wildcard is no address a sender can
-	 * use (#3114).
+	 * What a webhook source is pointed at: `http://<bind>:<port>/`, except for a wildcard bind
+	 * (`0.0.0.0`, `::`), where it is the first non-loopback IPv4 address, since a sender cannot use
+	 * the wildcard (#3114).
 	 */
 	url: string;
-	/**
-	 * Every non-loopback IPv4 address of the machine as an inbox URL. Present
-	 * for a wildcard bind only (empty when the machine has none), absent
-	 * otherwise.
-	 */
+	/** Each non-loopback IPv4 address as an inbox URL; wildcard binds only (may be empty). */
 	reachableAt?: string[];
 	bind: string;
 	port: number;
@@ -1525,16 +1230,14 @@ export interface Inbox {
 	/** False when the inbox is reachable beyond this machine - badge it. */
 	loopback: boolean;
 	/**
-	 * How many captures this inbox is holding - what deleting it would destroy.
-	 *
-	 * Up to one services poll old, so a surface that also holds the capture list
-	 * knows better; see `capturesAtRisk` in `modules/inbox/useInboxDeletion.ts`.
+	 * Captures held, i.e. what deleting the inbox destroys. Up to one services poll old, so a
+	 * surface holding the capture list knows better (`capturesAtRisk` in
+	 * `modules/inbox/useInboxDeletion.ts`).
 	 */
 	captureCount: number;
 	/**
-	 * The pages granted credentialed CORS (#2367), canonical spelling. Empty is
-	 * the default policy: every origin may read the canned answer, none with
-	 * the user's cookies. Fixed for the inbox's life.
+	 * Pages granted credentialed CORS (#2367), canonical spelling. Empty is the default: every
+	 * origin may read the canned answer, none with the user's cookies. Fixed for the inbox's life.
 	 */
 	allowedOrigins: string[];
 	response: InboxCannedResponse;
@@ -1551,20 +1254,15 @@ export interface InboxCapture {
 	/** Raw query string, without the `?`. */
 	query: string;
 	headers: Record<string, string>;
-	/**
-	 * At most the engine's per-capture cap; see `bodyTruncated`. UTF-8 text, or
-	 * the base64 of the stored bytes when `bodyEncoding` is `"base64"`.
-	 */
+	/** At most the per-capture cap (`bodyTruncated`); UTF-8, or base64 under `"base64"`. */
 	body: string;
 	/**
-	 * `"base64"` when the stored bytes are not valid UTF-8 (a protobuf, an image,
-	 * a gzip), so `body` is a spelling of bytes and not text to show. A truncated
-	 * base64 body is still one whole base64 string, of the stored prefix.
+	 * `"base64"` when the stored bytes are not valid UTF-8 (protobuf, image, gzip), so `body`
+	 * spells bytes, not text to show. Truncated base64 is still whole base64, of the prefix.
 	 */
 	bodyEncoding: "utf8" | "base64";
 	/**
-	 * Size as received, in bytes: larger than the stored body when truncated,
-	 * and for base64 not the length of `body`, which is the encoded spelling.
+	 * Size as received: above the stored body when truncated, and for base64 not `body`'s length.
 	 */
 	bodyBytes: number;
 	bodyTruncated: boolean;
@@ -1608,14 +1306,13 @@ export interface DeleteInboxResponse {
 	capturesDeleted: number;
 }
 
-// OAuth 2.0 mock issuer API (issue #479). Engine-process state like an inbox:
-// the engine holds each issuer on its own loopback listener and a restart
-// forgets every one of them, so nothing here is stored client-side either.
+// OAuth 2.0 mock issuer API (#479). Engine-process state like an inbox: each issuer has its own
+// loopback listener and a restart forgets them all, so nothing is stored client-side.
 
 /**
- * How the issuer misbehaves, so retry, error and discovery handling are
- * testable. The first three affect `/token` only; the rest each break one other
- * route (the RFC 8414 document, `/register`, the `iss` on the authorize redirect).
+ * How the issuer misbehaves, to test retry, error and discovery handling. The first three affect
+ * `/token`; each other one breaks one route (the RFC 8414 document, `/register`, the authorize
+ * redirect's `iss`).
  */
 export type MockIssuerFailureMode =
 	| "none"
@@ -1635,7 +1332,7 @@ export interface MockIssuer {
 	authorizeUrl: string;
 	/** RFC 8414 authorization server metadata. */
 	metadataUrl: string;
-	/** The URL to enter in an OAuth config's discovery field: a protected resource whose 401 leads to the metadata. */
+	/** For a config's discovery field: a protected resource whose 401 leads to the metadata. */
 	discoverUrl: string;
 	/** HS256 secret the service under test verifies this issuer's tokens with. */
 	signingKey: string;
@@ -1671,9 +1368,8 @@ export interface StartMockIssuerRequest {
 }
 
 /**
- * The start call answers with the URLs and the key only - not the full record.
- * The list is what carries the settings back, which is why starting one
- * invalidates it rather than writing the reply into the cache.
+ * The start call answers URLs and the key only; the list carries the settings, so starting one
+ * invalidates the list rather than writing the reply into the cache.
  */
 export interface StartMockIssuerResponse {
 	issuerId: string;
@@ -1700,15 +1396,14 @@ export interface StopMockIssuerResponse {
 	stopped: boolean;
 }
 
-// Collection mock server API (issue #481 phase 2). Engine-process state like an
-// inbox or an issuer: the engine holds each mock on its own loopback listener,
-// serving the collection's saved examples, and a restart forgets every one.
+// Collection mock server API (#481 phase 2). Engine-process state like an inbox or issuer: each
+// mock serves the collection's saved examples on its own loopback listener; a restart forgets all.
 
 /** One running mock server, as `POST /mock/start` and `GET /mock` describe it. */
 export interface MockServer {
 	mockId: string;
 	collectionId: string;
-	/** Named at start time - the collection may since have been renamed. */
+	/** Named at start time; the collection may have been renamed since. */
 	collectionName: string;
 	/** `http://127.0.0.1:<port>`, with no trailing slash: a base to point at. */
 	url: string;
@@ -1717,23 +1412,17 @@ export interface MockServer {
 	errorRatePct: number;
 	/** Requests in the collection subtree the mock is serving. */
 	routeCount: number;
-	/**
-	 * How many of those have no saved example and so answer 501.
-	 *
-	 * The number that explains an otherwise empty-looking mock, which is why it
-	 * is reported rather than left to be discovered one 501 at a time.
-	 */
+	/** Routes with no saved example, which answer 501: what explains an empty-looking mock. */
 	routesWithoutExample: number;
 	/**
-	 * Requests that share a method and path with another and so never answer
-	 * (#3115). Absent from an engine older than that fix.
+	 * Requests that never answer: another request shares their method and path (#3115). Absent from
+	 * older engines.
 	 */
 	duplicateRoutes?: number;
 	createdAt: number;
 	/**
-	 * The pages granted credentialed CORS (#2367), canonical spelling. Empty is
-	 * the default policy: every origin may read the mock, none with the user's
-	 * cookies. Fixed for the mock's life.
+	 * Pages granted credentialed CORS (#2367), canonical spelling. Empty is the default: every
+	 * origin may read the mock, none with the user's cookies. Fixed for the mock's life.
 	 */
 	allowedOrigins: string[];
 }
@@ -1776,8 +1465,7 @@ export interface MockServerRoute {
 	/** How many times this route has answered a request, since the mock started. */
 	hits: number;
 	/**
-	 * Present (and `true`) only when another request has the same method and
-	 * path and answers for both (#3115). Absent, never `false`, otherwise.
+	 * Only when another request with this method and path answers for both (#3115); never `false`.
 	 */
 	shadowed?: true;
 	/** The request that answers in this row's place; present exactly when `shadowed` is. */
@@ -1823,23 +1511,16 @@ export interface UpdateConfigRequest {
 }
 
 /**
- * Which send `GET /request-defaults` is answering for (issue #1338).
- *
- * The two can disagree: `negotiateCompression` governs a design send's
- * `Accept-Encoding` and `loadNegotiateCompression` governs a load run's, so the
- * same config can produce two different declared sets. `"design"` is the
- * Headers tab's answer (what sending this request right now would add);
- * `"load"` is what a load run of it would add instead.
+ * Which send `GET /request-defaults` answers for (#1338). They can differ: `negotiateCompression`
+ * governs a design send's `Accept-Encoding` and `loadNegotiateCompression` a load run's. `"design"`
+ * is the Headers tab's answer (what sending now adds); `"load"` is what a load run adds instead.
  */
 export type RequestDefaultsScope = "design" | "load";
 
 /**
- * One header the engine adds to a request that does not name it (issue #1229).
- *
- * Declared by the engine over `GET /request-defaults` rather than re-derived
- * here from the config entries: a client deriving the set would be a second
- * definition of the same rule, which is exactly how the renderer's copies and
- * the engine came to disagree before.
+ * A header the engine adds to a request that does not name it (#1229). Declared by the engine over
+ * `GET /request-defaults`, not derived here from config: a client's copy would be a second
+ * definition of the rule, which is how the renderer and the engine came to disagree.
  */
 export interface RequestDefaultHeader {
 	/** The header name as it goes on the wire. */
@@ -1860,10 +1541,9 @@ export interface RequestDefaults {
 // Import API
 
 /**
- * What marks a `POST /import/fetch` as a `$ref` a document asked for, not a URL
- * a person typed (issue #2364). With `reference` the engine follows no redirect
- * and refuses a loopback or link-local peer other than `sourceUrl`'s own host
- * and port; with no `sourceUrl` every such peer is refused.
+ * Marks a `POST /import/fetch` as a `$ref` a document asked for, not a URL a person typed (#2364).
+ * With `reference` the engine follows no redirect and refuses a loopback or link-local peer other
+ * than `sourceUrl`'s own host and port; without `sourceUrl` it refuses every such peer.
  */
 export interface ImportFetchOptions {
 	reference?: boolean;
@@ -1877,11 +1557,9 @@ export interface ImportFetchResponse {
 }
 
 /**
- * How much of a URL import has arrived (issue #882).
- *
- * `total` is the upstream's `Content-Length`, and **null when it declared none** -
- * a chunked response has no denominator. The dialog draws bytes received for
- * that case rather than a percentage of a number nobody stated.
+ * How much of a URL import has arrived (#882). `total` is the upstream's `Content-Length`, **null
+ * when it declared none** (a chunked response); the dialog then draws bytes received, not a
+ * percentage.
  */
 export interface ImportFetchProgress {
 	received: number;
@@ -1889,14 +1567,10 @@ export interface ImportFetchProgress {
 }
 
 /**
- * POST /import/apply - the whole parsed import in one atomic call.
- *
- * Items reference each other by opaque `tempId`s that never reach the database;
- * the engine assigns every real id and returns the translation in `idMap`. That
- * is why none of these shapes carries an `id` - the engine rejects one (it owns
- * ID generation for this path). Field names and defaults are otherwise identical
- * to the matching `Create*Request`, because the engine runs the same per-resource
- * field appliers for both.
+ * `POST /import/apply`: the whole parsed import in one atomic call. Items reference each other by
+ * opaque `tempId`s that never reach the database; the engine assigns every id (refusing one sent)
+ * and returns the translation in `idMap`. Names and defaults otherwise match the `Create*Request`,
+ * because the engine runs the same per-resource field appliers.
  */
 export interface ImportApplyCollection {
 	tempId: string;
@@ -1907,19 +1581,15 @@ export interface ImportApplyCollection {
 	variables?: Record<string, VariableValue>;
 	auth?: Exclude<RequestAuth, { mode: "inherit" }>;
 	/**
-	 * Typed behaviours (extractors, assertions, timers, scripts - issue #1512),
-	 * carried through verbatim from the parsed draft. The app does not yet edit
-	 * or display these (issue #1516); this is passthrough only, so an import
-	 * with a `script.pre` / `script.post` element still lands on the created
-	 * row instead of being silently dropped now that `preRequestScript` /
-	 * `postRequestScript` are refused (issue #1514).
+	 * Typed behaviours (#1512), carried verbatim from the parsed draft so a `script.pre` /
+	 * `script.post` element lands on the created row instead of being dropped; `preRequestScript` /
+	 * `postRequestScript` are refused (#1514). The Elements tab edits them afterwards (#1516).
 	 */
 	elements?: unknown[];
 	/**
-	 * The spec document this collection binds, named by the payload's own temp id
-	 * (issue #637). `specTempId` and not `specId`: the document is created by the
-	 * same call, so its engine id does not exist yet - the engine resolves the
-	 * temp id and stores the real one, and `specTempId` is never persisted.
+	 * The spec document this collection binds, by the payload's temp id (#637). `specTempId`, not
+	 * `specId`: the document is created by the same call, so the engine resolves the temp id and
+	 * stores the real one; `specTempId` is never persisted.
 	 */
 	openapi?: { specTempId: string };
 	/** The collection's data contract, when the source states one (a Vayu export does). */
@@ -1927,13 +1597,9 @@ export interface ImportApplyCollection {
 }
 
 /**
- * An OpenAPI document riding along with the import that produced the tree
- * (issue #637).
- *
- * A fourth top-level section rather than a field on the collection, because a
- * spec is a resource of its own that several collections may bind - it gets a
- * temp id, appears in the `idMap`, and is referenced by
- * {@link ImportApplyCollection.openapi}.
+ * An OpenAPI document riding along with its import (#637). A section of its own, not a field on the
+ * collection, because several collections may bind one spec: it gets a temp id, appears in `idMap`,
+ * and {@link ImportApplyCollection.openapi} references it.
  */
 export interface ImportApplySpec {
 	tempId: string;
@@ -1941,18 +1607,14 @@ export interface ImportApplySpec {
 	/** Absent when the document did not come from a URL (a file or a paste). */
 	sourceUrl?: string;
 	/**
-	 * Neither index is sent: the engine reads the document this section stores
-	 * and derives the declared operations (issue #853) and the response schemas
-	 * (issue #860) from it, the way it computes the hash.
+	 * Neither index is sent: the engine derives the declared operations (#853) and response schemas
+	 * (#860) from the stored document, as it computes the hash.
 	 */
 }
 
 /**
- * A saved example response nested on an import's request item (issue #481).
- *
- * No `tempId`: an example is referenced by nothing, so the engine assigns its
- * id and it never appears in the response's `idMap`. Array order is the stored
- * order - the engine numbers them by payload index.
+ * A saved example on an import's request item (#481). No `tempId`: nothing references an example,
+ * so the engine assigns its id and it never reaches `idMap`. Array order is stored order.
  */
 export interface ImportApplyExample {
 	name: string;
@@ -2002,8 +1664,7 @@ export interface ImportApplyRequestItem {
 	/** Omitted unless the source states which saved example a mock answers with. */
 	mockResponseMode?: MockResponseMode;
 	/**
-	 * The `"fixed"` target, by position among this item's own `examples` - no
-	 * id exists yet for a row this import has not created (issue #1649).
+	 * The `"fixed"` target, by index in this item's `examples`: those rows have no id yet (#1649).
 	 */
 	mockExampleIndex?: number;
 }
@@ -2016,12 +1677,9 @@ export interface ImportApplyEnvironment {
 }
 
 /**
- * A `client_certificates` registry candidate a Postman import resolved (issue
- * #1656) - same field names `POST /client-certificates` takes, because
- * `POST /import/apply` reuses that route's own check-and-write, best-effort,
- * after the rest of the tree commits. No `tempId`: nothing else in the tree
- * references a certificate by one, and the engine owns its id the same way it
- * owns a hand-created row's.
+ * A registry candidate a Postman import resolved (#1656), with `POST /client-certificates`' field
+ * names, because `POST /import/apply` reuses that route's check-and-write, best-effort, after the
+ * tree commits. No `tempId`: nothing references a certificate, and the engine owns its id.
  */
 export interface ImportApplyClientCertificate {
 	host: string;
@@ -2033,19 +1691,15 @@ export interface ImportApplyClientCertificate {
 }
 
 /**
- * `POST /import/parse` (issue #877) - a raw import document in, the whole
- * `ImportResult` out.
- *
- * `fileName`, `sourceUrl` and `unresolvedRefs` are the three facts no parser
- * can read out of the bytes and the caller can: what the file is called, where
- * it was fetched from (which a relative `servers[0].url` resolves against and
- * which a spec document is stored with), and how many external `$ref`s the
- * bundling pass could not reach.
+ * `POST /import/parse` (#877): a raw import document in, the whole `ImportResult` out. `fileName`,
+ * `sourceUrl` and `unresolvedRefs` are what no parser can read from the bytes: the file's name,
+ * where it came from (a relative `servers[0].url` resolves against it, and a spec is stored with
+ * it), and how many external `$ref`s bundling could not reach.
  */
 export interface ImportParseRequest {
 	/** The document's text, verbatim. */
 	content: string;
-	/** Both default to `true` engine-side; the dialog sends what its toggles say. */
+	/** Both default to `true` engine-side; the dialog sends its toggles. */
 	importEnvironments?: boolean;
 	importScripts?: boolean;
 	fileName?: string;
@@ -2058,16 +1712,13 @@ export interface ImportApplyRequest {
 	requests: ImportApplyRequestItem[];
 	environments: ImportApplyEnvironment[];
 	/**
-	 * Spec documents this payload creates. Always sent, `[]` included: the engine
-	 * reads an absent section as "none", and stating it keeps the payload one
-	 * shape for every format rather than one the OpenAPI parsers grow a key on.
+	 * Spec documents this payload creates. Always sent, `[]` included: absent also reads as none,
+	 * but stating it keeps one payload shape for every format.
 	 */
 	specs: ImportApplySpec[];
 	/**
-	 * `client_certificates` registry candidates a Postman import resolved
-	 * (issue #1656). Always sent, `[]` included, on the same "one shape for
-	 * every format" rule as {@link specs} - only a Postman preview ever
-	 * populates it.
+	 * Registry candidates a Postman import resolved (#1656). Always sent, `[]` included, by
+	 * {@link specs}' one-shape rule; only a Postman preview fills it.
 	 */
 	clientCertificates: ImportApplyClientCertificate[];
 }
@@ -2077,9 +1728,8 @@ export interface ImportApplyResponse {
 	idMap: Record<string, string>;
 }
 
-// Specs API (issue #637). Create-only and read-by-id: a document that changed
-// is a different document, so there is no PUT - a re-fetch stores a new one and
-// moves the binding.
+// Specs API (#637). Create-only and read by id: a changed document is a different document, so
+// there is no PUT; a re-fetch stores a new one and moves the binding.
 
 /** A stored OpenAPI document as the engine hands it back. */
 export interface SpecDocument {
@@ -2091,30 +1741,21 @@ export interface SpecDocument {
 	/** Hex sha256, computed engine-side on every write. */
 	hash: string;
 	/**
-	 * The declared-operation index stored beside the document (issue #629).
-	 *
-	 * `null` - not `[]` - for a document stored before the index existed or by a
-	 * client that sends none, so "coverage was never extractable for this
-	 * document" reads differently from "this document declares nothing".
+	 * The declared-operation index stored beside the document (#629). `null`, not `[]`, when stored
+	 * before the index existed or by a client sending none, so "never extractable" differs from
+	 * "declares nothing".
 	 */
 	operations: DeclaredOperation[] | null;
-	/**
-	 * The response schema index (issue #628), `null` on the same terms as
-	 * `operations` above: a document stored before schemas were extracted reads
-	 * differently from one whose operations declare none.
-	 */
+	/** The response schema index (#628); `null` on `operations`' terms. */
 	responseSchemas: ResponseSchemaIndex | null;
 }
 
 /**
- * A stored document described rather than transferred (issue #712).
- *
- * `GET /specs/:id/meta` - what the Spec tab's card needs to paint a source, a
- * date and a size, without the up-to-`maxSpecDocumentBytes` document behind it
- * (12 MB for Stripe's spec) riding along on a tab opening. The fields it does
- * carry are the document's own, value for value; `content`, `operations` and
- * `responseSchemas` are **absent**, not empty, so "not read here" cannot be
- * mistaken for "this document has none".
+ * A stored document described rather than transferred (#712): `GET /specs/:id/meta` gives the Spec
+ * tab's card a source, date and size without the up-to-`maxSpecDocumentBytes` document (12 MB for
+ * Stripe's spec) riding along on every tab open. Its fields are the document's own; `content`,
+ * `operations` and `responseSchemas` are **absent**, not empty, so "not read here" is not "has
+ * none".
  */
 export interface SpecDocumentMeta {
 	id: string;
@@ -2133,20 +1774,17 @@ export interface CreateSpecRequest {
 	content: string;
 	sourceUrl?: string | null;
 	/**
-	 * Neither index is a field here: the engine reads the document it is storing
-	 * and derives the declared-operation index (issue #629, moved by #853) and
-	 * the response schema index (issue #628, moved by #860) from it, the way it
-	 * computes the hash. Sending either is a `400`.
+	 * Neither index is a field: the engine derives the declared operations (#629, moved by #853)
+	 * and response schemas (#628, moved by #860) from the stored document, as it computes the hash.
+	 * Sending either is a `400`.
 	 */
 }
 
-// Spec sync (issue #655) - `POST /specs/sync` applies a re-fetched document to
-// the collection bound to it: the document is stored, the binding moves to it,
-// and the selected operations are created, updated and deleted in one
-// transaction. Separate from `/import/apply` because that route only ever
-// creates; see engine/src/http/routes/spec_sync.cpp.
+// Spec sync (#655): `POST /specs/sync` applies a re-fetched document to its bound collection,
+// storing it, moving the binding and creating, updating and deleting the chosen operations in one
+// transaction. Not `/import/apply`, which only creates; see engine/src/http/routes/spec_sync.cpp.
 
-/** A tag folder an added operation needs and the collection does not have yet. */
+/** A tag collection an added operation needs and the collection lacks. */
 export interface SpecSyncCollection {
 	tempId: string;
 	name: string;
@@ -2156,11 +1794,9 @@ export interface SpecSyncCollection {
 }
 
 /**
- * An operation the document added, as the request it becomes.
- *
- * `examples` is not among the fields: a sync writes the responses the document
- * it stores documents (issue #869), so a created request's examples come off
- * that document rather than out of the payload. Sending them is a `400`.
+ * An added operation, as the request it becomes. No `examples`: a sync writes the responses its
+ * stored document declares (#869), so a created request's examples come from that document; sending
+ * them is a `400`.
  */
 export type SpecSyncCreate = Omit<ImportApplyRequestItem, "collectionTempId" | "examples"> & {
 	/** The stored collection it lands in - or `collectionTempId`, never both. */
@@ -2169,15 +1805,11 @@ export type SpecSyncCreate = Omit<ImportApplyRequestItem, "collectionTempId" | "
 };
 
 /**
- * A merge-patch on one stored request: only the fields the user chose to take
- * from the document, plus the identity when the document moved it.
- *
- * `examples` is a decision rather than a list (issue #869): `true` refreshes
- * this request's imported examples from the document being stored - the ones
- * saved from live responses are never touched, nor is a status the user deleted
- * - and absent leaves every example alone. The rows themselves are the engine's,
- * read off the document it is storing, so a payload cannot state an example for
- * a response the document does not describe.
+ * A merge-patch on one stored request: only the fields the user takes from the document, plus the
+ * identity when the document moved it. `examples` is a decision (#869): `true` refreshes the
+ * request's imported examples from the stored document (examples saved from live responses, and
+ * statuses the user deleted, are untouched); absent leaves all alone. The engine reads the rows off
+ * the document, so a payload cannot state an example the document does not describe.
  */
 export interface SpecSyncUpdate {
 	id: string;
@@ -2194,33 +1826,23 @@ export interface SpecSyncUpdate {
 }
 
 /**
- * What `POST /specs/match` is asked (issue #761): a collection, and the
- * operations a document declares.
- *
- * The requests are *not* sent. The engine gathers the collection's whole
- * subtree itself, because an OpenAPI import binds the root and files every
- * request under a tag sub-collection - a caller that sent "the collection's
- * requests" would be matching against a set that excludes almost all of them.
+ * What `POST /specs/match` is asked (#761): a collection and the operations a document declares. No
+ * requests: the engine walks the subtree itself, because an OpenAPI import binds the root and files
+ * requests under tag sub-collections, so "the collection's requests" would miss most.
  */
 export interface SpecMatchRequest {
 	collectionId: string;
 	/**
-	 * The identities the document declares.
-	 *
-	 * Relayed from `POST /specs/describe` rather than extracted by the caller
-	 * (issue #869): the engine reads the picked bytes, and what it answers is
-	 * what the bind will derive from the same bytes - so a preview and the write
-	 * it previews cannot pair the requests differently.
+	 * The identities the document declares, relayed from `POST /specs/describe` rather than
+	 * extracted by the caller (#869): the engine's answer is what the bind derives from the same
+	 * bytes, so a preview and its write cannot pair requests differently.
 	 */
 	operations: SpecOperation[];
 	/**
-	 * The path parts of the document's server URLs, relayed from
-	 * `POST /specs/describe` (issue #3030).
-	 *
-	 * A request written as a literal URL carries the server's base path
-	 * (`https://h/v1/pets`) where the document writes `/pets`, and the bind
-	 * derives the base paths from the document itself - so a preview that left
-	 * them out would show fewer matches than the bind stamps.
+	 * The path parts of the document's server URLs, relayed from `POST /specs/describe` (#3030). A
+	 * literal-URL request carries the base path (`https://h/v1/pets`) where the document writes
+	 * `/pets`, and the bind derives base paths from the document, so a preview without them would
+	 * show fewer matches than the bind stamps.
 	 */
 	basePaths?: string[];
 }
@@ -2232,12 +1854,9 @@ export interface SpecDescribeRequest {
 }
 
 /**
- * What the engine says a picked document is (issue #869).
- *
- * The three things the Spec tab's card shows before a bind, from the reader the
- * bind itself uses. A document that is not a contract, or that cannot be read at
- * all, is a `400` with the sentence saying which - never an answer declaring
- * nothing.
+ * What the engine says a picked document is (#869): what the Spec tab's card shows before a bind,
+ * from the bind's own reader. A document that is not a contract or cannot be read is a `400` saying
+ * which, never an answer declaring nothing.
  */
 export interface SpecDescribeResponse {
 	/** `"OpenAPI 3.0"`, `"OpenAPI 3.1"` or `"OpenAPI 2.0 (Swagger)"`. */
@@ -2247,8 +1866,7 @@ export interface SpecDescribeResponse {
 	/** Every operation it declares, in document order. */
 	operations: SpecOperation[];
 	/**
-	 * The path of every server URL it names, `[]` when it states none (issue
-	 * #3030). What `POST /specs/match` takes beside `operations`.
+	 * Each server URL's path, `[]` if none (#3030); `POST /specs/match` takes it with `operations`.
 	 */
 	basePaths: string[];
 }
@@ -2258,27 +1876,17 @@ export interface SpecMatchResponse {
 	matched: { requestId: string; operation: SpecOperation }[];
 	/** Request ids left over - no operation, or an ambiguous shape. */
 	unmatchedRequests: string[];
-	/**
-	 * Operations no request claimed. These become new requests in a sync
-	 * (#627), never in a bind - which creates and deletes nothing.
-	 */
+	/** Unclaimed operations: a sync creates requests for them (#627), a bind never does. */
 	unmatchedOperations: SpecOperation[];
 }
 
 /**
- * What `POST /specs/bind` is asked (issue #862): a collection and a document.
- *
- * **No pairing is sent**, which is the whole shape of this route. A bind writes
- * identity, and identity worked out by the caller would be a second opinion
- * about what the document declares - so the engine reads the bytes it is about
- * to store, matches the collection's subtree against the index it derives from
- * them, and stamps the result. `SpecMatchRequest` above previews the same rule
- * over the same walk; this commits it.
- *
- * There is deliberately no `clear` list either. Clearing the requests that
- * matched the *previous* document is not a second thing a caller states, it is
- * the other half of the same walk - and a list is exactly what #718 was: one a
- * caller could forget.
+ * What `POST /specs/bind` is asked (#862): a collection and a document. **No pairing is sent:** a
+ * bind writes identity, and a caller's pairing would be a second opinion on what the document
+ * declares, so the engine matches the subtree against the index it derives from the bytes it
+ * stores, and stamps the result. `SpecMatchRequest` previews the same rule over the same walk. No
+ * `clear` list either: clearing what matched the *previous* document is the other half of the same
+ * walk, and a list is what #718 was, one a caller could forget.
  */
 export interface SpecBindRequest {
 	collectionId: string;
@@ -2296,10 +1904,7 @@ export interface SpecBindResponse {
 	syncedAt: number;
 	/** Requests that matched an operation and now carry its identity. */
 	stamped: number;
-	/**
-	 * Requests whose identity was *removed* because nothing in this document
-	 * claimed them (issue #718). Non-zero only on a re-bind.
-	 */
+	/** Requests whose identity was *removed*, unclaimed by this document (#718); re-binds only. */
 	cleared: number;
 	/** Request ids left over - no operation, or an ambiguous shape. */
 	unmatchedRequests: string[];
@@ -2307,22 +1912,15 @@ export interface SpecBindResponse {
 	unmatchedOperations: SpecOperation[];
 }
 
-// Spec diff (issue #854) - `POST /specs/diff` answers what a re-fetched
-// document would change about the collection bound to it. The comparison moved
-// engine-side with the rest of #761's phase B: the Sync section was the last
-// part of the spec feature an agent could not reach, and a second implementation
-// of "what does this document produce" is the thing #853's reader exists to
-// prevent. Nothing is written - applying is `POST /specs/sync`.
+// Spec diff (#854): `POST /specs/diff` answers what a re-fetched document would change about its
+// bound collection, and writes nothing (applying is `POST /specs/sync`). It is engine-side (#761
+// phase B) so an agent can reach it and #853's reader stays the one "what does this produce".
 
 /**
- * What `POST /specs/diff` is asked: a bound collection, and the document to
- * compare it against.
- *
- * Neither the requests nor the *bound* document are sent. The engine walks the
- * collection's subtree itself (an import files its requests under one
- * sub-collection per tag) and reads the bound document from the binding -
- * the three-way user-touched rule is only worth anything if the "previous" side
- * is the bytes actually stored.
+ * What `POST /specs/diff` is asked: a bound collection and the document to compare. Neither the
+ * requests nor the *bound* document are sent: the engine walks the subtree (an import files
+ * requests under tag sub-collections) and reads the bound document from the binding, since the
+ * three-way user-touched rule only works if the "previous" side is the bytes stored.
  */
 export interface SpecDiffRequest {
 	collectionId: string;
@@ -2331,11 +1929,9 @@ export interface SpecDiffRequest {
 }
 
 /**
- * The request an import of the document would build for one operation - the
- * values behind every `SpecFieldDiff.next`, and what an apply writes.
- *
- * The rendered `next` is truncated for display, so the apply reads from here
- * rather than from the report: one draft, compared and then written.
+ * The request an import would build for one operation: the values behind every
+ * `SpecFieldDiff.next`, and what an apply writes. `next` is truncated for display, so the apply
+ * reads this, not the report: one draft, compared and then written.
  */
 export interface SpecDraftRequest {
 	name: string;
@@ -2346,26 +1942,20 @@ export interface SpecDraftRequest {
 	headers: KeyValueEntry[];
 	body: RequestBody;
 	/**
-	 * The operation's documented responses (issue #481).
-	 *
-	 * Not compared - the rule that governs them (`origin="import"` is replaced,
-	 * `origin="user"` survives) only means anything at apply time - but carried,
-	 * because applying a change refreshes the request's imported examples from
-	 * them.
+	 * The operation's documented responses (#481). Not compared (the `origin="import"` replaced,
+	 * `origin="user"` kept rule only matters at apply), but carried because applying refreshes the
+	 * request's imported examples from them.
 	 */
 	examples: SpecDraftExample[];
 }
 
 /**
- * One documented response of an operation, as the engine derives it.
- *
- * The same shape the import parsers' `ExampleDraft` has, and stated in full
- * rather than as an `ImportApplyExample`: every field is present on the wire
- * here, where the import payload's are optional because a format that states no
- * status or no media type still writes a row.
+ * One documented response, as the engine derives it: the import parsers' `ExampleDraft`, in full
+ * rather than as `ImportApplyExample`, since every field is on the wire here while the import's are
+ * optional for formats stating no status or media type.
  */
 export interface SpecDraftExample {
-	/** `"200 - A user"` when the response is described, `"200"` when it is not. */
+	/** `"200 - A user"` with a description, `"200"` without. */
 	name: string;
 	status: number;
 	/** `Content-Type`, or empty when the response documents no payload. */
@@ -2375,10 +1965,9 @@ export interface SpecDraftExample {
 }
 
 /**
- * The fields an OpenAPI import writes, and therefore the only ones a sync has
- * any claim on. `auth` and the scripts are absent on purpose: an import sets
- * auth to `inherit` and both scripts to empty for every operation, so a
- * difference there is always the user's and never the document's.
+ * The fields an OpenAPI import writes that a sync may claim. `auth` and the elements are absent on
+ * purpose: an import reads them (`security`, `x-vayu-elements`), but a sync never compares them, so
+ * a re-fetched document cannot overwrite what the user edited (`read_import_only_members`).
  */
 export type SpecField = "name" | "description" | "method" | "url" | "params" | "headers" | "body";
 
@@ -2390,9 +1979,8 @@ export interface SpecFieldDiff {
 	/** What the re-fetched document produces, rendered for display. */
 	next: string;
 	/**
-	 * The request's value is neither the new document's nor the bound one's -
-	 * somebody edited it. False whenever `previousUnknown` is set: with no bound
-	 * value to compare against, "the user did this" is not a claim to make.
+	 * The request's value is neither the new document's nor the bound one's: somebody edited it.
+	 * False whenever `previousUnknown` is set, since with no bound value that claim cannot be made.
 	 */
 	userTouched: boolean;
 }
@@ -2404,17 +1992,15 @@ export interface SpecDiffAdded {
 	folder: string;
 	draft: SpecDraftRequest;
 	/**
-	 * A sync with no ticks stated creates this - see {@link SpecDiffChanged.safe}
-	 * for why the engine says so rather than the reader working it out.
+	 * A sync with no ticks creates this; {@link SpecDiffChanged.safe} says why the engine judges.
 	 */
 	safe: boolean;
 }
 
 /**
- * An operation no request claims because a person deleted its request (issue
- * #3031). Shaped like {@link SpecDiffAdded}, since ticking one is the same
- * create, but it is never in `added`: nothing pre-ticks it, and the engine's
- * `safe` is always `false`.
+ * An operation no request claims because a person deleted its request (#3031). Shaped like
+ * {@link SpecDiffAdded}, since ticking one is the same create, but never in `added`: nothing
+ * pre-ticks it, and `safe` is always `false`.
  */
 export interface SpecDiffDeclined extends SpecDiffAdded {
 	safe: false;
@@ -2426,8 +2012,7 @@ export interface SpecDiffRemoved {
 	name: string;
 	operation: SpecOperation;
 	/**
-	 * A sync with no ticks stated deletes this - always `false`, because
-	 * deleting is opt-in. Carried rather than assumed for
+	 * A sync with no ticks deletes this: always `false`, as deleting is opt-in. Carried for
 	 * {@link SpecDiffChanged.safe}'s reason.
 	 */
 	safe: boolean;
@@ -2445,28 +2030,22 @@ export interface SpecDiffChanged {
 	matchedBy: "operationId" | "path";
 	/** The document moved the identity itself - the other half of it changed. */
 	renamed: boolean;
-	/**
-	 * The bound document does not declare this operation, so what the user
-	 * edited cannot be told apart from what the document changed.
-	 */
+	/** Not in the bound document, so user edits cannot be told apart from document changes. */
 	previousUnknown: boolean;
 	/** Every field that no longer matches, in display order. Empty for a pure rename. */
 	fields: SpecFieldDiff[];
 	draft: SpecDraftRequest;
 	/**
-	 * A sync with no ticks stated updates this request at all (issue #871).
-	 *
-	 * The engine's answer rather than this side's: the rules behind it - never
-	 * write a field somebody edited, never delete, leave a request nothing can be
-	 * told apart about alone - are the ones whose silent failure costs a person
-	 * their work, and they now have one author (`core::safe_spec_apply`) with
-	 * `POST /specs/sync`'s `policy: "safe"` applying the same answer this
-	 * reports. `defaultSelection` reads these marks instead of deriving them.
+	 * A sync with no ticks updates this request at all (#871). The engine's answer, not this
+	 * side's: its rules (never write a field somebody edited, never delete, leave an
+	 * indistinguishable request alone) are the ones whose silent failure costs a person their work,
+	 * so they have one author (`core::safe_spec_apply`), which `POST /specs/sync`'s
+	 * `policy: "safe"` applies too. `defaultSelection` reads these marks instead of deriving them.
 	 */
 	safe: boolean;
 	/**
-	 * The fields such a sync writes. Empty for a pure rename - a real selection
-	 * rather than an absence - and empty for a request it leaves alone.
+	 * The fields such a sync writes; empty for a pure rename (a real selection) and for a request
+	 * it leaves alone.
 	 */
 	safeFields: SpecField[];
 }
@@ -2482,9 +2061,8 @@ export interface SpecDiffResponse {
 	/** Requests whose operation is unchanged in every compared field. */
 	unchanged: number;
 	/**
-	 * Requests carrying no operation identity at all - not part of the
-	 * comparison, but counted, because a sync that silently ignores half a
-	 * collection is a sync nobody can read.
+	 * Requests with no operation identity: not compared, but counted, because a sync silently
+	 * ignoring half a collection is unreadable.
 	 */
 	unmapped: number;
 }
@@ -2493,14 +2071,10 @@ export interface SpecDiffResponse {
 export type ExportFormat = "json" | "yaml";
 
 /**
- * What `POST /specs/export` is asked (issue #855): a collection, and how to
- * write it.
- *
- * Neither the requests nor the bound document are sent. The engine gathers the
- * subtree, its examples and the stored document itself - the same reason
- * `SpecMatchRequest` sends no requests, plus one of its own: the document is
- * what the export *patches*, and a renderer that sent it would be handing back
- * bytes it had already read a second opinion out of.
+ * What `POST /specs/export` is asked (#855): a collection and how to write it. Neither the requests
+ * nor the bound document are sent: the engine gathers the subtree, its examples and the document,
+ * as `SpecMatchRequest` does, and the export *patches* the document, so a renderer sending it back
+ * would return bytes it already read a second opinion out of.
  */
 export interface SpecExportRequest {
 	collectionId: string;
@@ -2511,19 +2085,16 @@ export interface SpecExportRequest {
 }
 
 /**
- * What a bound export may write into the document it updates - the user's
- * choice in the export dialog. `contract` keeps the document as the API's
- * contract (examples and parameter values only); `full` writes every edit the
- * collection holds, new operations included, into the document's own dialect.
+ * What a bound export may write into its document, the export dialog's choice. `contract` keeps it
+ * the API's contract (examples and parameter values only); `full` writes every edit the collection
+ * holds, new operations included, in the document's dialect.
  */
 export type ExportMode = "contract" | "full";
 
 /**
- * What the export could not carry, and what it changed.
- *
- * Every field is shown before the user downloads. A count of zero is a
- * statement too - "0 requests with no operation" is how a bound export says it
- * carried everything - so these are always present rather than optional.
+ * What the export could not carry, and what it changed, all shown before download. Zero is a
+ * statement too ("0 requests with no operation" is how a bound export says it carried everything),
+ * so every field is present.
  */
 export interface ExportNotes {
 	/** `document` updated the bound spec; `skeleton` described a free-form collection. */
@@ -2549,19 +2120,16 @@ export interface ExportNotes {
 	/** A Swagger 2.0 document: operations are removed, nothing is written in. */
 	vocabularyNotWritten: boolean;
 	/**
-	 * Credential values written as `""` - auth tokens, passwords, API-key and
-	 * client-secret values, variables marked secret, and by name the header,
-	 * query-parameter and URL-password values and a saved example's response
-	 * headers. Each is counted once wherever it is written.
-	 * A pure `{{variable}}` is kept; bodies and scripts are never judged.
-	 * Counted for a `contract` export too, at the parameter a withheld row would
-	 * have filled.
+	 * Credential values written as `""`: auth tokens, passwords, API-key and client-secret values,
+	 * secret variables, and by name the header, query-parameter and URL-password values and a saved
+	 * example's response headers, each counted once wherever written. A pure `{{variable}}` is
+	 * kept; bodies and scripts are never judged. A `contract` export counts too, at the parameter a
+	 * withheld row would have filled.
 	 */
 	secretsOmitted: number;
 	/**
-	 * Requests only `x-vayu-collection` carries - no path, or a method and path
-	 * another request already claimed. Vayu re-imports them; another tool does
-	 * not see them.
+	 * Requests only `x-vayu-collection` carries (no path, or a method and path another request
+	 * claimed). Vayu re-imports them; other tools do not see them.
 	 */
 	requestsOnlyInExtension: number;
 	/** Operations a `full` bound export added for requests the document never declared. */
@@ -2579,19 +2147,15 @@ export interface SpecExportResponse {
 }
 
 /**
- * What `POST /export/postman` is asked: a collection, and whether its
- * credentials travel with it.
- *
- * Like `SpecExportRequest`, nothing but the id is sent - the engine reads the
- * subtree, its variables and its auth itself.
+ * What `POST /export/postman` is asked: a collection and whether its credentials travel. Only the
+ * id, as `SpecExportRequest`: the engine reads the subtree, variables and auth itself.
  */
 export interface PostmanExportRequest {
 	collectionId: string;
 	/**
-	 * Write credentials as stored. Defaults to `false` engine-side, where auth
-	 * secrets, secret variables and the credentials in headers, parameters,
-	 * URLs, saved examples and cookie values are written empty and counted in
-	 * `PostmanExportNotes.secretsOmitted`. `true` is what Postman's own export
+	 * Write credentials as stored. Default `false` engine-side: auth secrets, secret variables and
+	 * the credentials in headers, parameters, URLs, saved examples and cookie values are written
+	 * empty and counted in `PostmanExportNotes.secretsOmitted`. `true` is what Postman's own export
 	 * does.
 	 */
 	includeSecrets?: boolean;
@@ -2607,19 +2171,16 @@ export interface PostmanNotCarried {
 }
 
 /**
- * What a Postman export wrote and what it could not.
- *
- * `notCarried` is open-ended on purpose: the engine names each loss in its own
- * words, so a new kind reaches the dialog without a field added here.
+ * What a Postman export wrote and could not. `notCarried` is open-ended: the engine names each loss
+ * in its own words, so a new kind reaches the dialog without a field here.
  */
 export interface PostmanExportNotes {
 	requestsExported: number;
 	foldersExported: number;
 	/**
-	 * Credential values written as `""`: auth secrets, secret variables, and by
-	 * name the header, parameter and URL values, a saved example's recorded
-	 * request and response headers, and every cookie value. Zero when
-	 * `includeSecrets` was set. Bodies are never judged.
+	 * Credential values written as `""`: auth secrets, secret variables, and by name the header,
+	 * parameter and URL values, a saved example's recorded request and response headers, and every
+	 * cookie value. Zero under `includeSecrets`. Bodies are never judged.
 	 */
 	secretsOmitted: number;
 	notCarried: PostmanNotCarried[];
@@ -2634,31 +2195,30 @@ export interface PostmanExportResponse {
 }
 
 /**
- * What `POST /export/postman-environment` is asked: an environment, and whether
- * its secret values travel with it. Nothing but the id is sent - the engine
- * reads the variables itself.
+ * What `POST /export/postman-environment` is asked: an environment and whether its secret values
+ * travel. Only the id; the engine reads the variables.
  */
 export interface PostmanEnvironmentExportRequest {
 	environmentId: string;
 	/**
-	 * Write secret values as stored. Defaults to `false` engine-side, where each
-	 * secret variable keeps its row and name but its value is written `""` and
-	 * counted in `PostmanEnvironmentExportNotes.secretsOmitted`.
+	 * Write secret values as stored. Default `false` engine-side: a secret variable keeps its row
+	 * and name, its value is written `""` and counted in
+	 * `PostmanEnvironmentExportNotes.secretsOmitted`.
 	 */
 	includeSecrets?: boolean;
 }
 
 /**
- * What a Postman environment export wrote and what it could not. `notCarried`
- * is open-ended for the reason `PostmanExportNotes.notCarried` is.
+ * What a Postman environment export wrote and could not; `notCarried` is open-ended, as
+ * `PostmanExportNotes`'.
  */
 export interface PostmanEnvironmentExportNotes {
 	variablesExported: number;
 	/** Secret values written as `""`. Zero when `includeSecrets` was set. */
 	secretsOmitted: number;
 	/**
-	 * One `variable_types` entry when a type was not written: a `json` type
-	 * (written as `default`) or a typed secret's type (written as `secret`).
+	 * One `variable_types` entry per untyped write: a `json` type (as `default`), a typed secret's
+	 * (as `secret`).
 	 */
 	notCarried: PostmanNotCarried[];
 }
@@ -2672,8 +2232,7 @@ export interface PostmanEnvironmentExportResponse {
 }
 
 /**
- * The formats `POST /export/run-report` writes: `json`, `markdown` (#2131) and
- * `html` (#2135), the last one text/html with the charts drawn inline.
+ * `POST /export/run-report`'s formats: `json`, `markdown` (#2131), `html` (#2135, charts inline).
  */
 export type RunReportExportFormat = "json" | "markdown" | "html";
 
@@ -2690,8 +2249,8 @@ export interface RunReportExportRequest {
 
 export interface RunReportExportNotes {
 	/**
-	 * Values the URL lost to `redact_url_credentials`: a `user:pass@` password
-	 * and each credential-named query or fragment value.
+	 * Values the URL lost to `redact_url_credentials`: a `user:pass@` password, each
+	 * credential-named query or fragment value.
 	 */
 	urlCredentialsOmitted: number;
 }
@@ -2714,16 +2273,15 @@ export interface SpecSyncRequest {
 		content: string;
 		sourceUrl?: string | null;
 		/**
-		 * Neither index is carried: a sync writes a *new* `spec_documents` row,
-		 * and the engine derives both from the document that row stores (issues
-		 * #853 and #860), so there is nothing for a sync to forget and silently
-		 * turn coverage or validation off with.
+		 * Neither index is carried: a sync writes a *new* `spec_documents` row and the engine
+		 * derives both from it (#853, #860), so a sync cannot forget them and silently turn
+		 * coverage or validation off.
 		 */
 	};
 	collections: SpecSyncCollection[];
 	create: SpecSyncCreate[];
 	update: SpecSyncUpdate[];
-	/** Request ids. One already deleted is not an error - it is the asked-for state. */
+	/** Request ids; one already deleted is the asked-for state, not an error. */
 	delete: string[];
 }
 

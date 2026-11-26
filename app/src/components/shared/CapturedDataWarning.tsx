@@ -6,23 +6,14 @@
  */
 
 /**
- * "The responses below were stored verbatim" - wherever a run's captured
- * exchanges are on screen.
- *
- * Capture does not redact, deliberately and consistently with design-mode
- * traces, which already store request headers as sent. The mitigation for that
- * decision is this notice plus the run's own persisted marker
- * (`sampling.responseBodiesCaptured`), rather than the UI trying to guess which
- * header or body field is a credential - a guess that is wrong in both
- * directions and gives false confidence when it is wrong the reassuring way.
- *
- * Silent when the run captured nothing, and silent on runs recorded before
- * capture existed (the field is absent, not zero). Both surfaces that show
- * captured samples render it, so the wording lives here once.
- *
- * `StoredExchangeWarning` is the design-mode half of the same disclosure, over
- * a collection run's stored step exchanges. They are a pair - change the claim
- * in one and read the other.
+ * "The responses below were stored verbatim", wherever a run's captured exchanges show. Capture
+ * does not redact, deliberately and as design-mode traces store request headers as sent; the
+ * mitigation is this notice plus the run's persisted marker (`sampling.responseBodiesCaptured`),
+ * not a UI guess at which field is a credential, wrong both ways and falsely reassuring one of
+ * them. Silent when nothing was captured and on runs recorded before capture (absent, not zero).
+ * Both surfaces showing captured samples render it, so the wording lives once.
+ * `StoredExchangeWarning` is the design-mode half, over a collection run's stored step exchanges:
+ * change the claim in one, read the other.
  */
 
 import { Callout } from "./Callout";

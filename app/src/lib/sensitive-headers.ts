@@ -6,15 +6,12 @@
  */
 
 /**
- * Which header rows carry a credential whatever their value is (issue #1806).
- *
- * A secret *variable* is masked by value; a header typed straight into the
- * Headers tab is not a variable, so the name is the only signal. The list is
- * the engine's header subset of `is_secret_field_name` (`log_redact.hpp`), the
- * names its curl-debug redaction blanks, pinned to it by
- * `engine/tests/fixtures/log-redaction-conformance.json`'s
- * `sensitiveHeaderNames`. The request's own API-key header is the one name no
- * list can hold, so a caller passes it in.
+ * Which header rows carry a credential whatever their value is (#1806). A secret *variable* is
+ * masked by value; a header typed straight into the Headers tab is not a variable, so the name is
+ * the only signal. The list is the engine's header subset of `is_secret_field_name`
+ * (`log_redact.hpp`), the names its curl-debug redaction blanks, pinned to it by
+ * `engine/tests/fixtures/log-redaction-conformance.json`'s `sensitiveHeaderNames`. The request's
+ * own API-key header is the one name no list can hold, so a caller passes it in.
  */
 
 import { WITHHELD_MARKER } from "./withheld-value";

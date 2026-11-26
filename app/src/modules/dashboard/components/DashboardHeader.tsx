@@ -6,8 +6,6 @@
  */
 
 /**
- * DashboardHeader Component
- *
  * Compact 52px single-row header with status, method, URL, config info, and stop button.
  * A collection load run has no URL, so the collection and its step count take that
  * place (#2270); the run's comment, when it has one, sits under it. A finished
@@ -26,13 +24,11 @@ import { formatNumber } from "@/lib/format-number";
 import { dataFileDisplayName } from "@/lib/run-data-file";
 import RunExportMenu from "@/modules/history/main/components/RunExportMenu";
 
-// memo'd (#1714): LoadTestDashboard re-renders on every metrics tick during a
-// run (up to 10 Hz), and this header's own props barely ever change. The
-// caller passes a stable onStop (useCallback) and a memoised configuration,
-// so the memo actually holds rather than just decorating the export.
-// `elapsedDuration` is the engine's fractional elapsed and changes on every
-// tick, but the header draws only MM:SS, so the comparator below ignores
-// sub-second movement.
+// memo'd (#1714): LoadTestDashboard re-renders on every metrics tick during a run (up to 10 Hz) and
+// these props barely change; the caller passes a stable onStop (useCallback) and a memoised
+// configuration, so the memo holds. `elapsedDuration` is the engine's fractional elapsed and
+// changes every tick, but the header draws only MM:SS, so the comparator below ignores sub-second
+// movement.
 function DashboardHeader({
 	live,
 	endedAs,
@@ -89,15 +85,14 @@ function DashboardHeader({
 				? `up to ${formatConcurrency(configuration.concurrency)}`
 				: formatConcurrency(configuration.concurrency)
 		);
-	// Was matching on "rps" / "concurrency", which `LoadTestMode` cannot hold -
-	// so every real run fell through and printed a raw `constant_rps` here.
-	// A collection run is the one the header names by its collection, not a URL.
+	// The mode's label from the `LoadTestMode` value itself (a raw `constant_rps` is never
+	// printed); a collection run is the one the header names by its collection, not a URL.
 	if (configuration?.mode)
 		configParts.push(
 			loadTestModeLabel(configuration.mode, collectionName ? "collection" : undefined)
 		);
-	// The rows are never stored, so the count (and, since #2051, the file's
-	// name) is the only trace on the dashboard that a file drove the run
+	// The rows are never stored, so the count (and the file's
+	// name, #2051) is the only trace on the dashboard that a file drove the run
 	// (#1940). Nothing for a run without one.
 	const rowCount = configuration?.dataRowCount;
 	if (rowCount != null && rowCount > 0) {

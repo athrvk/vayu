@@ -6,15 +6,10 @@
  */
 
 /**
- * useScriptCompletionProvider Hook
- *
- * Registers the engine-provided `pm.*` completions with Monaco's JavaScript
- * language so the script editors get `pm.` autocomplete. The completion set is
- * fetched and cached by useScriptCompletionsQuery; this hook is the consumer
- * that wires that data into Monaco.
- *
- * Call once (in App). The provider is global per language, so a single
- * registration covers every JavaScript editor instance.
+ * Registers the engine-provided `pm.*` completions with Monaco's JavaScript language, so the script
+ * editors get `pm.` autocomplete; `useScriptCompletionsQuery` fetches and caches the set. Call once
+ * (in App): the provider is global per language, so one registration covers every JavaScript
+ * editor.
  */
 
 import { useEffect } from "react";
@@ -54,13 +49,12 @@ export function useScriptCompletionProvider() {
 					.slice(0, position.column - 1);
 
 				/*
-				 * Nothing in this list belongs inside a string literal. The chain
-				 * regex is happy to match the word under the caret wherever it sits,
-				 * so `pm.environment.get("ba` offered the whole dotted `pm.*` surface
-				 * and accepting one replaced the half-typed variable name with
-				 * `pm.response.body`. A string argument is exactly where the
-				 * *variable* list belongs (`useScriptVariableCompletionProvider`), so
-				 * yielding here is what leaves the right list showing alone.
+				 * Nothing in this list belongs inside a string literal. The chain regex matches the
+				 * word under the caret wherever it sits, so `pm.environment.get("ba` would offer
+				 * the whole dotted `pm.*` surface, and accepting one would replace the half-typed
+				 * variable name with `pm.response.body`. A string argument is where the *variable*
+				 * list belongs (`useScriptVariableCompletionProvider`), so yielding here leaves the
+				 * right list showing alone.
 				 */
 				if (openStringLiteral(linePrefix)) return { suggestions: [] };
 
@@ -72,11 +66,10 @@ export function useScriptCompletionProvider() {
 				};
 
 				/*
-				 * Most `pm.*` completions are snippets carrying their own argument
-				 * list, which is the wrong shape when the call is already written:
-				 * completing `pm.variables.rep|("$guid")` left
-				 * `pm.variables.replaceIn("template")("$guid")` behind. Where the
-				 * line already opens a call, insert the callee alone.
+				 * Most `pm.*` completions are snippets carrying their own argument list, the wrong
+				 * shape when the call is already written: completing `pm.variables.rep|("$guid")`
+				 * would leave `pm.variables.replaceIn("template")("$guid")`. Where the line already
+				 * opens a call, insert the callee alone.
 				 */
 				const lineSuffix = model
 					.getLineContent(position.lineNumber)

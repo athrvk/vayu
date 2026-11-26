@@ -6,47 +6,37 @@
  */
 
 /**
- * Execution Events Store (the live half of a streaming request, issue #574)
+ * The live half of a streaming request (#574). `useExecutionEvents` pushes each relayed frame in
+ * and the response pane's Events tab reads it, so the rows survive switching request tabs: the same
+ * split, for the same reason, as `LoadTestService` / `dashboard-store` and `ScenarioRunService` /
+ * `scenario-run-store`.
  *
- * `useExecutionEvents` pushes each relayed frame in here and the response
- * pane's Events tab reads it, so the rows survive switching to another request
- * tab and back - the same split, for the same reason, as `LoadTestService` and
- * `dashboard-store`, and `ScenarioRunService` and `scenario-run-store`.
+ * It holds **one** stream. A stream Send replaces what the previous one left, as sending again
+ * replaces the response: the second Send is what closes the first's feed. It closes the feed, not
+ * the run: the engine's consumer worker keeps going until the stream's own end rule, so a feed
+ * taken over from another request is remembered in `replacedFeeds` for that request's pane to say
+ * so, once the new stream has started (#3352).
  *
- * It holds **one** stream. A stream Send replaces whatever the previous one
- * left, exactly as sending again replaces the response: two live feeds are not
- * a state the builder can reach, since the second Send is what closes the
- * first's. It closes the feed, not the run: the engine's consumer worker keeps
- * going until the stream's own end rule, so a feed taken over from another
- * request is remembered in `replacedFeeds` for that request's pane to say so,
- * once the new stream has actually started (#3352).
+ * It also holds the *request* the stream belongs to: the builder is one provider reused across
+ * request tabs, so "are these rows mine?" is a question about the request on screen, which a run id
+ * cannot answer.
  *
- * It also holds the *request* the stream belongs to, not only the run. The
- * builder is one provider reused across request tabs, so "are these rows mine?"
- * is a question about the request on screen, and a run id alone cannot answer
- * it.
+ * And it holds what each stream's finalisation needs, for the held stream and every replaced feed:
+ * the Send snapshot, the left-out elements and the claim that keeps each run to one finalisation
+ * (#3382). Not provider refs: `Shell.tsx` unmounts the builder on every non-request tab, and a
+ * remount must neither finalize an ended run again nor drop a displaced run's snapshot.
  *
- * And it holds what the stream's finalisation needs, for the held stream and
- * every replaced feed alike: the Send snapshot, the left-out elements and the
- * claim that keeps each run to one finalisation (#3382). Not provider refs:
- * `Shell.tsx` unmounts the builder on every tab that is not a request, and a
- * remount must neither finalize an ended run again nor drop a displaced run's
- * snapshot.
+ * Once the run is terminal the **stored** trace is the complete record and the tab reads that
+ * (`restore-response.ts`); this only ever holds what has arrived so far.
  *
- * Once the run reaches its terminal status the **stored** trace is the complete
- * record and the tab reads that instead (`restore-response.ts`) - what lives
- * here is only ever what has arrived so far.
+ * **The stream cap bounds it, not the retained ring** (#1158). The ring (`sseMaxRetainedEvents`,
+ * 2,000 by default) is what a *reconnect* replays; a connected client gets the ring and then tails
+ * to the stream's end, so what accumulates here is bounded by `sseMaxStreamEvents` (100,000 by
+ * default, 10,000,000 at the ceiling) or the duration cap, whichever comes first. So the Events tab
+ * windows this list.
  *
- * **What bounds that is the stream cap, not the retained ring** (issue #1158).
- * The ring - `sseMaxRetainedEvents`, 2,000 by default - is what a *reconnect*
- * replays; a connected client is replayed the ring and then tails to the end of
- * the stream, so what accumulates here is bounded by `sseMaxStreamEvents`
- * instead: 100,000 events by default, 10,000,000 at the ceiling, or the
- * duration cap, whichever the stream reaches first. Which is why the Events tab
- * windows this list rather than assuming it stays short.
- *
- * Rows arrive **in batches**, on the same `liveRefreshMs` cadence the load and
- * scenario dashboards commit on - see `addEvents`.
+ * Rows arrive **in batches**, on the `liveRefreshMs` cadence the load and scenario dashboards
+ * commit on (see `addEvents`).
  */
 
 import { create } from "zustand";
@@ -60,10 +50,9 @@ interface SendSnapshot {
 	/** The draft elements the Send left out of its payload (#3066). */
 	leftOut: LeftOutElement[];
 	/**
-	 * Epoch ms the stream was started at (#3775): the zero of the Events rows'
-	 * offsets, the status bar's clock and the Timing tab's first event. Null for
-	 * a stream not started in this session, whose stored trace's `startedAt`
-	 * (#3805) stands in as `ResponseState.sentAt` instead.
+	 * Epoch ms the stream was started at (#3775): the zero of the Events rows' offsets, the status
+	 * bar's clock and the Timing tab's first event. Null for a stream not started in this session,
+	 * whose stored trace's `startedAt` (#3805) stands in as `ResponseState.sentAt`.
 	 */
 	sentAt: number | null;
 }
@@ -102,17 +91,15 @@ interface ExecutionEventsState {
 	/** Events received so far, oldest first. */
 	events: StreamEvent[];
 	/**
-	 * The `text` of every event received so far, joined in order (issue #3773).
-	 * Kept beside `events` rather than derived from them at render, so a
-	 * 100,000-event stream does not re-walk its list on every batch. `""` until
-	 * an event carries one, which is also what a request with no path reads as.
+	 * The `text` of every event received so far, joined in order (#3773). Kept beside `events`, not
+	 * derived at render, so a 100,000-event stream does not re-walk its list every batch. `""`
+	 * until an event carries one, which is also what a request with no path reads as.
 	 */
 	streamText: string;
 	/**
-	 * Every event the engine has seen, which is what the `complete` frame
-	 * reports. Only ever set from that frame: while the stream runs, the
-	 * arrived-so-far count is `events.length` and pretending otherwise would
-	 * report a total nothing had counted.
+	 * Every event the engine has seen, as the `complete` frame reports it. Set only from that
+	 * frame: while the stream runs the arrived-so-far count is `events.length`, and anything else
+	 * would report a total nothing had counted.
 	 */
 	totalEvents: number | null;
 	/** True from the send until the stream terminates, however it terminates. */
@@ -122,10 +109,9 @@ interface ExecutionEventsState {
 	/** A transport failure on the relay; cleared by the next `startStream`. */
 	error: string | null;
 	/**
-	 * The draft elements this stream's Send left out of its payload (#3066). The
-	 * stream's response is built twice - the placeholder from the `open` frame,
-	 * then the stored run's - and neither carries what the app composed, so both
-	 * read it here.
+	 * The draft elements this stream's Send left out of its payload (#3066). The stream's response
+	 * is built twice (the placeholder from the `open` frame, then the stored run's), and neither
+	 * carries what the app composed, so both read it here.
 	 */
 	leftOut: LeftOutElement[];
 	/** This stream's Send snapshot (#1763), attached to its stored response. */
@@ -148,10 +134,9 @@ interface ExecutionEventsState {
 	sendCounts: Readonly<Record<string, number>>;
 
 	/**
-	 * A live stream another request's Send emptied the feed of, held until that
-	 * Send's stream starts: `startStream` moves it into `replacedFeeds`. A send
-	 * that never opens a stream therefore takes nothing over, and the entry
-	 * waits for whichever stream does start next.
+	 * A live stream another request's Send emptied the feed of, held until that Send's stream
+	 * starts (`startStream` moves it into `replacedFeeds`). A send that never opens a stream takes
+	 * nothing over, and the entry waits for the next stream that does start.
 	 */
 	displaced: DisplacedFeed | null;
 
@@ -161,9 +146,8 @@ interface ExecutionEventsState {
 	 */
 	handOver: (requestId: string | null) => void;
 	/**
-	 * A Send of `requestId` began, streaming or not. It supersedes the request's
-	 * `replacedFeeds` entry, and counts against any finalisation of its earlier
-	 * run still in flight.
+	 * A Send of `requestId` began, streaming or not. It supersedes the request's `replacedFeeds`
+	 * entry and counts against any finalisation of its earlier run still in flight.
 	 */
 	beginSend: (requestId: string) => void;
 	/**
@@ -353,21 +337,18 @@ export const useExecutionEventsStore = create<ExecutionEventsState>((set, get) =
 	releaseFinalization: (runId) => set((s) => withFinalized(s, runId, false)),
 
 	/*
-	 * Every writer below is addressed to a run, and a write for a run this store
-	 * is not holding is dropped.
-	 *
-	 * Not defensive tidiness: the relay replays its retained ring on connect, so
-	 * a frame from a stream that has already been replaced can still arrive on a
-	 * socket that has not finished closing. It belongs to nothing on screen.
+	 * Every writer below is addressed to a run, and a write for a run this store is not holding is
+	 * dropped. Not tidiness: the relay replays its retained ring on connect, so a frame from an
+	 * already replaced stream can still arrive on a socket that has not finished closing, and it
+	 * belongs to nothing on screen.
 	 */
 	noteOpen: (runId, open) => set((s) => (s.runId === runId ? { open } : s)),
 
 	/*
-	 * One copy and one notify per *batch* (issue #1158). A frame used to cost a
-	 * full copy of the list on its own, so a stream running at a few hundred
-	 * events a second spent a renderer core on spread-copies and re-renders for
-	 * as long as it ran. The batch is `useExecutionEvents`', collected by
-	 * `services/throttled-batcher.ts` - never empty, per that helper's contract.
+	 * One copy and one notify per *batch* (#1158): a copy per frame spent a renderer core on
+	 * spread-copies and re-renders for a stream at a few hundred events a second. The batch is
+	 * `useExecutionEvents`', collected by `services/throttled-batcher.ts`, never empty by that
+	 * helper's contract.
 	 */
 	addEvents: (runId, events) =>
 		set((s) =>

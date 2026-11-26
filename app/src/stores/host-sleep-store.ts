@@ -6,23 +6,19 @@
  */
 
 /**
- * Host Sleep Store - when the machine slept under a run, per run (issue #1357).
+ * When the machine slept under a run, per run (#1357).
  *
- * The wake lock the app holds during a run is a request to the OS, not a
- * guarantee: a closed lid, a critical battery or a user who forces sleep
- * overrides it. The run's series then has a stretch it cannot explain, and a
- * reader with no marker reads it as the server's fault.
+ * The run's wake lock is a request to the OS, not a guarantee: a closed lid, a critical battery or
+ * a forced sleep overrides it, and the series then has a stretch a reader with no marker blames on
+ * the server.
  *
- * The engine's run report has no field for a client-side annotation - the
- * engine was suspended too and knows nothing about it - so the record lives
- * here, beside the report rather than inside it, keyed by run id. Two readers:
- * the live dashboard marks it on the charts, and History's Events tab states it
- * in words for the same run later.
+ * The engine's run report has no field for a client-side annotation (the engine was suspended too
+ * and knows nothing), so the record lives here, beside the report, keyed by run id. Two readers:
+ * the live dashboard marks it on the charts, and History's Events tab states it in words later.
  *
- * Persisted, because the gap outlives the session that produced it: a user who
- * finds the hole tomorrow needs the same answer. Bounded on both axes - the
- * newest {@link MAX_RUNS} runs, {@link MAX_SLEEPS_PER_RUN} intervals each -
- * because localStorage is a fixed budget shared with the workspace, and a run
+ * Persisted, because the gap outlives the session: a user who finds the hole tomorrow needs the
+ * same answer. Bounded on both axes (the newest {@link MAX_RUNS} runs, {@link MAX_SLEEPS_PER_RUN}
+ * intervals each), because localStorage is a fixed budget shared with the workspace, and a run
  * nobody has open is not worth a byte of it.
  */
 
@@ -37,14 +33,11 @@ export interface HostSleep {
 	/** How long the host was down. This is the number a reader needs. */
 	durationMs: number;
 	/**
-	 * Elapsed seconds into the run at the last tick before the suspend, which is
-	 * where the marker sits on the charts.
-	 *
-	 * Deliberately not paired with an end: whether the engine's elapsed clock
-	 * advanced through the suspend is a per-platform answer (a monotonic clock
-	 * stops on Linux and macOS; a boot-time clock does not), so a band drawn
-	 * `durationMs` wide would be a claim about the series that may be fiction.
-	 * The marker says where, the duration says how long.
+	 * Elapsed seconds into the run at the last tick before the suspend, where the marker sits on
+	 * the charts. Not paired with an end, deliberately: whether the engine's elapsed clock advanced
+	 * through the suspend is a per-platform answer (a monotonic clock stops on Linux and macOS; a
+	 * boot-time clock does not), so a band `durationMs` wide could be fiction. The marker says
+	 * where, the duration says how long.
 	 */
 	startSeconds: number;
 }
@@ -82,12 +75,9 @@ function isSleep(value: unknown): value is HostSleep {
 }
 
 /**
- * Normalize a persisted payload.
- *
- * Wired as both `migrate` and `merge`, as `recovery-notice-store` is and for
- * the same reason: `migrate` only runs on a version change, `merge` runs on
- * every rehydrate. A hand-edited or half-written entry must not put a
- * non-array where a reader maps over one.
+ * Normalize a persisted payload. Wired as both `migrate` and `merge`, as `recovery-notice-store`
+ * is: `migrate` runs only on a version change, `merge` on every rehydrate, and a hand-edited or
+ * half-written entry must not put a non-array where a reader maps over one.
  */
 function normalizeHostSleeps(persisted: unknown): PersistedHostSleeps {
 	const stored = (persisted ?? {}) as Partial<PersistedHostSleeps>;
@@ -145,11 +135,9 @@ export const useHostSleepStore = create<HostSleepState>()(
 );
 
 /**
- * The sleeps recorded against one run, for a component that has its id.
- *
- * A selector rather than a prop drilled from the view that owns the run: both
- * readers (the live dashboard, History's detail) already hold the run id, and
- * neither derives anything from the list that the other would have to match.
+ * The sleeps recorded against one run. A selector, not a prop drilled from the run's view: both
+ * readers (the live dashboard, History's detail) already hold the run id, and neither derives
+ * anything the other would have to match.
  */
 export function useHostSleeps(runId: string | null | undefined): readonly HostSleep[] {
 	return useHostSleepStore((state) => (runId ? (state.byRun[runId] ?? NONE) : NONE));

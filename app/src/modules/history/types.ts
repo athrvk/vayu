@@ -5,20 +5,15 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * History Component Types
- */
-
 import type { Run, RunReport, LoadTestMetrics, MonitorSample } from "@/types";
 import type { DashboardDerived } from "@/modules/dashboard/types";
 import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
 
 /**
- * The sentence-case name a run type goes by wherever the app says it: a header,
- * a filter option, a tab title, an accessible name, the palette subtitle, the
- * History breadcrumb. The one table - `types.test.ts` fails on a second one.
- * `design` is the wire value for a single send and stays so; the user never sees
- * that word.
+ * The sentence-case name a run type goes by wherever the app says it: a header, a filter option, a
+ * tab title, an accessible name, the palette subtitle, the History breadcrumb. The one table
+ * (`types.test.ts` fails on a second). `design` is the wire value for a single send and stays so;
+ * the user never sees the word.
  */
 export const RUN_TYPE_NAME: Record<Run["type"], string> = {
 	design: "Send",
@@ -31,10 +26,9 @@ export interface TabProps {
 	runId?: string;
 	derived: DashboardDerived;
 	/**
-	 * Degradation windows detected in the run's per-tick series, derived once by
-	 * `LoadTestDetail`. Overview states them in words, Performance shades them on
-	 * the charts - one detection, two readings of it. Absent for a run whose
-	 * series never loaded or that had none.
+	 * Degradation windows in the run's per-tick series, detected once by `LoadTestDetail`: Overview
+	 * states them in words, Performance shades them on the charts. Absent for a run whose series
+	 * never loaded or that had none.
 	 */
 	anomalies?: Anomaly[];
 }
@@ -83,9 +77,7 @@ export interface LoadTestDetailProps {
  */
 export type SampleResult = NonNullable<RunReport["results"]>[number];
 
-/**
- * Time-series metrics response from GET /runs/:runId/metrics
- */
+/** Time-series metrics response from GET /runs/:runId/metrics. */
 export interface TimeSeriesResponse {
 	data: LoadTestMetrics[];
 	pagination: {
@@ -100,7 +92,7 @@ export interface TimeSeriesResponse {
 	 * outnumbered `maxPoints` and each entry of `data` folds `ticksPerBucket`
 	 * consecutive ticks: latency percentiles, concurrency and backpressure are the
 	 * bucket's max, `current_rps` its mean, everything else its last tick's
-	 * (`docs/engine/api-reference.md`, "Downsampling with `maxPoints`").
+	 * (`docs/engine/api-reference/metrics.md`, "Downsampling with `maxPoints`").
 	 */
 	bucketed?: boolean;
 	/** Ticks folded into each entry; `1` when the series already fit. */
@@ -125,7 +117,7 @@ export interface MonitorSeriesResponse {
 	 * Present only on a `maxPoints` request (#2611). `true` when the stored samples
 	 * outnumbered `maxPoints` and each entry of `data` folds `ticksPerBucket`
 	 * consecutive scrapes: each series is the bucket's max, the timestamp its last
-	 * scrape's (`docs/engine/api-reference.md`, "Downsampling the monitor series").
+	 * scrape's (`docs/engine/api-reference/metrics.md`, "Downsampling the monitor series").
 	 */
 	bucketed?: boolean;
 	/** Scrapes folded into each entry; `1` when the series already fit. */

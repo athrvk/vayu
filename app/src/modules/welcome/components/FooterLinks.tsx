@@ -6,12 +6,9 @@
  */
 
 /**
- * FooterLinks
- *
- * Low-emphasis row shared by both welcome states. Settings opens in-app; the
- * doc links (the MCP page included) go to the system browser through the keyed `openAppLink` channel
- * (the renderer cannot open arbitrary URLs, and a plain anchor would spawn an
- * unmanaged Electron window).
+ * The low-emphasis row both welcome states share. Settings opens in-app; the doc links (the MCP
+ * page included) go to the system browser through the keyed `openAppLink` channel: the renderer
+ * cannot open arbitrary URLs, and a plain anchor would spawn an unmanaged Electron window.
  */
 
 import { useTabsStore } from "@/stores";

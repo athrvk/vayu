@@ -6,14 +6,12 @@
  */
 
 /**
- * @file diff-bodies.ts
- * @brief `diff_bodies` (#3705): the bounded difference between two stored
- *        bodies - RFC 6901 pointers for two JSON bodies, a line diff for other
- *        text, and equal / not equal for a binary one.
+ * @brief `diff_bodies` (#3705): the bounded difference between two stored bodies: RFC 6901 pointers
+ *        for two JSON bodies, a line diff for other text, equal / not equal for a binary one.
  *
- * Both nodes are read *as masked*: the caller masks the two records in one
- * pass first, so a secret that differs between them is `<redacted>` on both
- * sides and is no difference, and every size counts the masked bytes.
+ * Both nodes are read *as masked*: the caller masks the two records in one pass first, so a secret
+ * that differs between them is `<redacted>` on both sides and is no difference, and every size
+ * counts the masked bytes.
  */
 
 import { boundText, MAX_INLINE_BODY_BYTES } from "./inline-body-bounds.js";

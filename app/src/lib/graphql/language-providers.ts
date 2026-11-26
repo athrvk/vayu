@@ -28,14 +28,11 @@ const MARKER_OWNER = "graphql";
 const DEBOUNCE_MS = TIMING.GRAPHQL_DIAGNOSTICS_DEBOUNCE_MS;
 
 /**
- * LSP completion kind -> the name Monaco knows it by.
- *
- * Derived from the enum rather than written out, because the two enumerations
- * agree on every name and disagree on every number: a hand-copied table is 25
- * chances to transpose two of them, and one transposition is a wrong icon that
- * no test would think to check. `graphql-language-service` classifies every
- * suggestion it returns - fields, arguments, enum values, variables, directives
- * - and all of that was being flattened to `Field` before it reached the widget.
+ * LSP completion kind -> the name Monaco knows it by, so each suggestion `graphql-language-service`
+ * classifies (fields, arguments, enum values, variables, directives) keeps its icon. Derived from
+ * the enum rather than written out: the two enumerations agree on every name and disagree on every
+ * number, so a hand-copied table is 25 chances to transpose two, and a transposition is a wrong
+ * icon no test would think to check.
  */
 const LSP_KIND_NAMES = new Map<number, string>(
 	Object.entries(CompletionItemKind).map(([name, value]) => [value as number, name])
@@ -44,8 +41,7 @@ const LSP_KIND_NAMES = new Map<number, string>(
 export function toMonacoCompletionKind(monaco: MonacoApi, lspKind: number | undefined): number {
 	const kinds = monaco.languages.CompletionItemKind as unknown as Record<string, number>;
 	const name = lspKind === undefined ? undefined : LSP_KIND_NAMES.get(lspKind);
-	// `Field` is what every suggestion used to get, so it stays the fallback: an
-	// unmapped kind is no worse than before, never a missing icon.
+	// `Field` is the fallback: an unmapped kind gets the generic icon, never a missing one.
 	return name !== undefined && name in kinds ? kinds[name] : kinds.Field;
 }
 
@@ -103,16 +99,11 @@ export function registerGraphqlProviders(monaco: MonacoApi): void {
 
 	monaco.languages.registerCompletionItemProvider("graphql", {
 		/*
-		 * Structural triggers only - NOT space/newline. Triggering on "\n" popped
-		 * the suggestion widget after every Enter, so a second Enter (meant as a
-		 * newline) accepted the first suggestion instead. Typing a field name still
-		 * shows suggestions via Monaco's quick-suggest.
-		 *
-		 * `" "` was in this list while the comment above said it must not be, and
-		 * it is the same bug one keystroke earlier: space popped the widget, so the
-		 * Enter that followed accepted a suggestion instead of breaking the line.
-		 * A space carries no structure in GraphQL - after `field ` the useful
-		 * completions are the ones `{` and `(` already trigger.
+		 * Structural triggers only, never space or newline. A trigger on "\n" or " " pops the
+		 * suggestion widget, so the Enter that follows (meant as a newline) accepts the first
+		 * suggestion instead. A space carries no structure in GraphQL: after `field ` the useful
+		 * completions are the ones `{` and `(` already trigger, and typing a field name still shows
+		 * suggestions through Monaco's quick-suggest.
 		 */
 		triggerCharacters: [":", "(", "{", "@", "$"],
 		provideCompletionItems(model, position) {

@@ -5,10 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file http/routes/environments.cpp
- * @brief Environment management routes
- */
+/** Environment management routes. */
 
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
@@ -23,24 +20,15 @@
 namespace vayu::http::routes {
 
 /**
- * Applies the request body onto `e` under the one null-vs-absent rule (see the
- * helpers in routes.hpp). Shared by the create and update cores.
- *
- * This is where the `"null"`-string bug died: the old handler wrote
- * `e.variables = json["variables"].dump()` with no null guard, so
- * `{"variables": null}` stored the four-character text `null` - a value that
- * parses as JSON but is not an object, so every reader silently saw no
- * variables at all. `apply_json_field` resets it to `{}` instead.
- *
- * `isActive` used to be honoured only on create, which left an update unable to
- * change it; it now follows the same rule on both verbs. Storing `true` here is
- * how a client says "make this the active environment": the DB layer clears the
- * previous one in the same transaction (`deactivate_other_environments_locked`),
- * so the route needs no deactivate step of its own and there is no verb for
- * "clear all" beyond writing `isActive: false` to the active one.
- *
- * Declared in routes.hpp because `POST /import/apply` applies the same fields to
- * every environment in a bulk payload (issue #96).
+ * Applies the request body onto `e` under the one null-vs-absent rule
+ * (routes.hpp), shared by the create and update cores. `{"variables": null}`
+ * resets to `{}`: a stored text `null` parses as JSON but is no object, so
+ * every reader would silently see no variables. `isActive: true` is how a
+ * client makes this the active environment: the DB layer clears the previous
+ * one in the same transaction (`deactivate_other_environments_locked`), so
+ * there is no deactivate step, and "clear all" is `isActive: false` on the
+ * active one. Declared in routes.hpp because `POST /import/apply` applies it to
+ * every environment in a bulk payload (#96).
  */
 RouteResult apply_environment_fields (vayu::db::Environment& e,
 const nlohmann::json& json,
@@ -192,9 +180,10 @@ delete_environment_response (vayu::db::Database& db, const std::string& id) {
 void register_environment_routes (RouteContext& ctx) {
     /**
      * GET /environments
-     * Retrieves all saved environments from the database.
-     * Environments contain variables that can be used in requests (e.g., API keys, base URLs).
-     * Returns: Array of environment objects with id, name, variables, and timestamps.
+     * Every live environment (the variable sets requests read: API keys, base
+     * URLs).
+     * Returns: Array of environment objects with id, name, variables, and
+     * timestamps.
      */
     ctx.server.Get ("/environments", [&ctx] (const httplib::Request&, httplib::Response& res) {
         auto envs               = ctx.db.get_environments ();

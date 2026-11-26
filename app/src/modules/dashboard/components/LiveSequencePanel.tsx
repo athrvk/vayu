@@ -6,15 +6,12 @@
  */
 
 /**
- * The sequence a scenario load run is running, between the hero row and the
- * charts (issue #2823): the SEQUENCE chip History's request bar wears, the
- * iterations so far, and each step's executed and error counts - the live
- * counterpart of History's Steps tab, drawn from the same cells.
- *
- * Its data is the gate frame's `scenario` block, which carries no latency: a
- * step's percentiles exist only in the finished report. `progress` is the block
- * itself (`utils/liveScenario.ts`), so this memo'd panel re-renders once a
- * second, when a new gate lands, and not on the frames between.
+ * The sequence a scenario load run is running, between the hero row and the charts (issue #2823):
+ * the SEQUENCE chip History's request bar wears, the iterations so far, and each step's executed
+ * and error counts, the live counterpart of History's Steps tab, drawn from the same cells. Its
+ * data is the gate frame's `scenario` block, which carries no latency (a step's percentiles exist
+ * only in the finished report); `progress` is the block itself (`utils/liveScenario.ts`), so this
+ * memo'd panel re-renders once a second, when a gate lands, not on the frames between.
  */
 
 import { memo } from "react";

@@ -53,9 +53,9 @@ std::size_t identifier_begin (std::string_view code, std::size_t last) {
     return last;
 }
 
-/// The characters after which a `/` begins a regular expression rather than
-/// dividing: everything that cannot end an operand. `)` and `]` end one, so
-/// they are absent.
+/// The characters after which `/` opens a regular expression rather than
+/// dividing: those that cannot end an operand (`)` and `]` can, so they are
+/// absent).
 constexpr std::string_view REGEX_PRECEDERS = "(,=:[!&|?{};+-*%<>~^";
 
 /// The words after which a `/` also begins a regular expression: each takes an
@@ -81,10 +81,9 @@ class Stripper {
     std::string_view src_;
     std::string code_;
     std::size_t at_ = 0;
-    /// The last character that was neither whitespace nor inside a literal,
-    /// and where it stands; what decides whether a `/` opens a regular
-    /// expression. The position is only read when the character is part of a
-    /// word, to find the word.
+    /// The last character neither whitespace nor inside a literal, which
+    /// decides whether a `/` opens a regular expression; `last_at_` is where it
+    /// stands, read only when it is part of a word, to find the word.
     char last_           = '\0';
     std::size_t last_at_ = 0;
     /// One entry per open `${` of a template literal: the braces opened inside
@@ -209,9 +208,9 @@ class Stripper {
         last_ = '/';
     }
 
-    /// Template text from just after a backtick, or just after the `}` that
-    /// ended a `${ }`, up to the closing backtick or the next `${`. Returns to
-    /// the main loop at a `${` so the expression is read as code.
+    /// Template text from just after a backtick or a `${ }`'s closing `}`, up
+    /// to the closing backtick or the next `${`, where it returns to the main
+    /// loop so the expression is read as code.
     void template_body () {
         const std::size_t start = at_;
         while (at_ < src_.size ()) {
@@ -273,7 +272,7 @@ bool follows_property_dot (std::string_view code, std::size_t begin) {
     return dot == 0 || before[dot - 1] != '.';
 }
 
-/// Whether only whitespace and one dot lies between the offset @p previous_end
+/// Whether only whitespace and one dot lie between the offsets @p previous_end
 /// and @p begin.
 bool joined_by_dot (std::string_view code, std::size_t previous_end, std::size_t begin) {
     const std::string_view gap = code.substr (previous_end, begin - previous_end);
@@ -310,11 +309,11 @@ std::string_view word_of (std::string_view code, const Token& token) {
 // Names the script declares
 // ---------------------------------------------------------------------------
 
-/// For each bracket of @p code, the index of the bracket it pairs with, and
-/// `npos` for every other byte and for a bracket the script never pairs. The
-/// kinds are not told apart: any closer closes the innermost open bracket, so
-/// a script with mismatched brackets still pairs most of what it holds. One pass
-/// for every question the scan asks of a bracket, rather than a scan from each.
+/// For each bracket of @p code, the index of its partner; `npos` for every
+/// other byte and for an unpaired bracket. Kinds are not told apart (any closer
+/// closes the innermost open bracket), so a script with mismatched brackets
+/// still pairs most of what it holds. One pass answers every bracket question
+/// the scan asks.
 std::vector<std::size_t> pair_brackets (std::string_view code) {
     std::vector<std::size_t> partner (code.size (), std::string_view::npos);
     std::vector<std::size_t> open;
@@ -349,13 +348,13 @@ constexpr auto BINDING_KEYWORDS = std::to_array<BindingKeyword> ({
 
 /**
  * The names the script declares itself. A script with its own `cheerio` or
- * `Backbone` is not reading Postman's global of that name, and counting it
- * would name every script that keeps a value under one of those words. A name is declared
- * by a binding keyword, a parameter list, or sitting before `=>`.
+ * `Backbone` is not reading Postman's global, and counting it would name every
+ * script that keeps a value under such a word. A name is declared by a binding
+ * keyword, a parameter list, or standing before `=>`.
  *
- * Scope is the whole script: a name declared anywhere stops being counted
- * anywhere, which can hide a global used beside a local of the same name, a
- * case too rare to be worth tracking scopes for.
+ * Scope is the whole script: a name declared anywhere is uncounted everywhere,
+ * which can hide a global used beside a local of the same name, too rare a case
+ * to track scopes for.
  */
 class Declarations {
     public:
@@ -476,9 +475,9 @@ enum class Exemption : std::uint8_t {
     /// `require('<a module on the shelf>')`: the call's argument is a string
     /// literal naming one of `vayu::runtime::SHELF_MODULE_NAMES`.
     ShelfModule,
-    /// A bare `CryptoJS`, or a path of members the shim defines
+    /// A bare `CryptoJS`, or a member path the shim defines
     /// (`vayu::runtime::CRYPTO_JS_MEMBERS`); anything else under it throws.
-    /// Reads through an alias or a destructure are `CryptoJsReads`'s, not the row's.
+    /// Reads through an alias or a destructure are `CryptoJsReads`'s.
     CryptoJsMember,
     /// A call with an empty argument list (`pm.response.json()`); the same
     /// path called with anything between the parentheses is the row's use.
@@ -486,13 +485,11 @@ enum class Exemption : std::uint8_t {
 };
 
 /**
- * One API Vayu does not run.
- *
- * @p path is dotted words that must follow one another as a property path;
- * `|` separates alternatives for a word (`include|contain.keys`).
- * @p follow, when set, lists the characters one of which must come next (after
- * whitespace): `require` is the module loader only as `require(`.
- * @p exempt names a use the rule still lets through.
+ * One API Vayu does not run. @p path is dotted words that must follow one
+ * another as a property path, `|` separating a word's alternatives
+ * (`include|contain.keys`). @p follow, when set, lists the characters one of
+ * which must come next, after whitespace (`require` is the loader only as
+ * `require(`). @p exempt names a use the rule still lets through.
  */
 struct ApiRule {
     std::string_view name;
@@ -515,8 +512,8 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "Buffer", Anchor::Bare, "Buffer", "" },
 // Browser and Node globals the sandbox lacks (#3132). `process`, `window`,
 // `document` and `alert` are left out on purpose: they are common identifiers
-// in a script's own code, so naming them would send people to look at a notice
-// that is wrong more often than right.
+// in a script's own code, so a notice naming them would be wrong more often
+// than right.
 { "fetch", Anchor::Bare, "fetch", "" },
 { "XMLHttpRequest", Anchor::Bare, "XMLHttpRequest", "" },
 { "URL", Anchor::Bare, "URL", "" },
@@ -653,9 +650,9 @@ struct ShelfRequire {
 };
 
 /// The call whose `(` follows @p callee_end, when it passes one string literal
-/// that names a module on the shelf. A computed name (`require(name)`), a
-/// template with a `${ }` and a second argument are all refused: the scan
-/// cannot say what they load, and a notice errs toward naming.
+/// naming a module on the shelf. A computed name (`require(name)`), a template
+/// with a `${ }` or a second argument is refused: the scan cannot say what it
+/// loads, and a notice errs toward naming.
 std::optional<ShelfRequire>
 shelf_require (std::string_view script, std::string_view code, std::size_t callee_end) {
     const std::size_t open = code.find_first_not_of (WHITESPACE, callee_end);
@@ -708,11 +705,11 @@ bool continues_path (const ScanInput& in, std::size_t next, std::size_t end) {
     joined_by_dot (in.code, end, in.tokens.at (next).begin);
 }
 
-/// Walks the members read from @p at, leaving it at the last one that is listed.
-/// Whatever follows the first leaf of the list (`CryptoJS.enc.Hex.stringify`)
-/// belongs to the value, so the walk stops there. False for a member the shim
-/// lacks or a computed one (`CryptoJS[name]`, `CryptoJS.enc[name]`), which cannot
-/// be read: a notice errs toward naming.
+/// Walks the members read from @p at, leaving it at the last listed one; past
+/// the first leaf (`CryptoJS.enc.Hex.stringify`) the reads belong to the value,
+/// so the walk stops there. False for a member the shim lacks or a computed one
+/// (`CryptoJS[name]`, `CryptoJS.enc[name]`), which cannot be read: a notice
+/// errs toward naming.
 bool follow_members (const ScanInput& in, PathCursor& at) {
     while (holds_namespace (at.path)) {
         if (!continues_path (in, at.next, at.end)) {
@@ -760,9 +757,9 @@ bool is_exempt_use (const ApiRule& rule, const ScanInput& in, std::size_t end) {
     return false;
 }
 
-/// A rule of one bare word names a global; it does not when the script has its
-/// own variable of that name. `CryptoJS` is the exception: a script declares it
-/// as `const CryptoJS = require('crypto-js')`, which is the same object, so the
+/// A one-word bare rule names a global, unless the script has its own variable
+/// of that name. `CryptoJS` is the exception:
+/// `const CryptoJS = require('crypto-js')` is the same object, so the
 /// declaration says nothing about which members it has.
 bool is_declared_global (const ApiRule& rule, const Declarations& declared) {
     return rule.exempt != Exemption::CryptoJsMember && rule.anchor == Anchor::Bare &&
@@ -788,16 +785,15 @@ bool is_variable_keyword (std::string_view word) {
 /**
  * The crypto-js members a script reads without writing `CryptoJS.<member>`
  * (#2628), which the table row cannot see: `const C = CryptoJS; C.AES`,
- * `require('crypto-js').AES`, and `const { AES } = CryptoJS`.
+ * `require('crypto-js').AES`, `const { AES } = CryptoJS`.
  *
- * Names are followed in one pass, in the order the script declares them. A name
- * is bound by a declaration whose value is the namespace, or a namespace under
- * it (`const enc = CryptoJS.enc`, `const { enc } = ...`), and every later
- * mention of it is read like `CryptoJS` itself. Out of scope, as the
- * whole-script scope of `Declarations` is: a reassignment (`C = CryptoJS`), a
- * second declarator of a statement (`var a = 1, C = CryptoJS`), a name passed
- * through a parameter or a property, and a name shadowed in another scope.
- * A notice for a local of the same name beats a script that throws.
+ * One pass, in declaration order. A name is bound by a declaration whose value
+ * is the namespace or a namespace under it (`const enc = CryptoJS.enc`,
+ * `const { enc } = ...`), and every later mention is read like `CryptoJS`. Out
+ * of scope, as `Declarations`' whole-script scope is: a reassignment
+ * (`C = CryptoJS`), a second declarator (`var a = 1, C = CryptoJS`), a name
+ * passed through a parameter or a property, and shadowing in another scope. A
+ * notice for a same-named local beats a script that throws.
  */
 class CryptoJsReads {
     public:

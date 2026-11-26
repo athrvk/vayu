@@ -6,15 +6,12 @@
  */
 
 /**
- * The chip that stands where a method sits for a run whose target is a sequence
- * (#2823): History's request bar and the live dashboard's sequence panel draw
- * the same one.
- *
- * Not a `MethodBadge`: SEQUENCE is not a method, and the primitive would tint it
- * in the OPTIONS colour (the `getMethodColor` fallback) and truncate it at the
- * seven-character method column. It keeps the neutral outline chip, minus a
- * `font-bold` the code font has no face for - `Badge`'s own `font-semibold` is
- * the weight the mono step documents (#1199).
+ * The chip where a method would sit for a run whose target is a sequence (#2823), drawn by
+ * History's request bar and the live dashboard's sequence panel. Not a `MethodBadge`: SEQUENCE is
+ * no method, and the primitive would tint it the OPTIONS colour (the `getMethodColor` fallback) and
+ * truncate it in the five-character method column. The neutral outline chip, without a `font-bold`
+ * the code font has no face for: `Badge`'s `font-semibold` is the mono step's documented weight
+ * (#1199).
  */
 
 import { Badge } from "@/components/ui";

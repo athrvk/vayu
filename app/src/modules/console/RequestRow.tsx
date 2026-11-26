@@ -6,10 +6,9 @@
  */
 
 /**
- * A Send or a script's `pm.sendRequest` in the session Console (#3634): the
- * shared `SampledExchange` row, its title the method and the masked URL, its
- * status, time and size in the row's own tracks, and its expansion the
- * exchange the row holds.
+ * A Send or a script's `pm.sendRequest` in the session Console (#3634): the shared
+ * `SampledExchange` row, titled by the method and the masked URL, with status, time and size in the
+ * row's own tracks and the held exchange as its expansion.
  */
 
 import { memo } from "react";

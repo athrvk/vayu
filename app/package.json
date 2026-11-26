@@ -28,7 +28,8 @@
 		"format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,scss,md,html,yml,yaml,cjs,mjs}\"",
 		"type-check": "concurrently --group --names renderer,electron,electron-tests \"node node_modules/tsc7/bin/tsc --noEmit\" \"node node_modules/tsc7/bin/tsc -p tsconfig.node.json --noEmit\" \"node node_modules/tsc7/bin/tsc -p tsconfig.electron-test.json\"",
 		"test": "vitest run",
-		"test:watch": "vitest"
+		"test:watch": "vitest",
+		"docs:mcp-tools": "cross-env UPDATE_TOOLS_DOC=1 vitest run electron/mcp/tools-doc.fresh.test.ts"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/node": "^2.1.2",

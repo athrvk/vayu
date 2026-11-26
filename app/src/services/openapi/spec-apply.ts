@@ -6,59 +6,49 @@
  */
 
 /**
- * Turning a spec diff and the user's ticks into the one call that applies them
- * (issue #655, phase 2c of #625).
+ * Turning a spec diff and the user's ticks into the one call that applies them (#655, phase 2c of
+ * #625).
  *
- * The comparison is the engine's since issue #854 (`POST /specs/diff`), and
- * since issue #871 so is the *selection* - which of a diff a sync writes when
- * nobody has ticked anything. This file builds the payload for the ticks a user
- * actually made; it no longer decides what those ticks start as.
+ * The comparison is the engine's (`POST /specs/diff`, #854), and so is the default *selection*,
+ * which of a diff a sync writes when nobody has ticked anything (#871). This file builds the
+ * payload for the ticks a user actually made; it does not decide what those ticks start as.
  *
- * That move is the whole point of the split now. The two rules that matter -
+ * The two rules that matter,
  *
  * - **a field the user edited is never written unless they ticked it**, and
- * - **deleting is opt-in** -
+ * - **deleting is opt-in**,
  *
- * are the ones whose silent failure destroys somebody's work, and they used to
- * live here alone. `electron/` may not import `src/` (see the MCP doc), so
- * every caller that was not the Spec tab either went without an apply or copied
- * them, and a copy of a rule like that is a second opinion about which of a
- * user's fields a sync may overwrite. They are now `core::safe_spec_apply` in
- * the engine, reported per entry on the diff (`safe`, `safeFields`) and applied
- * by `POST /specs/sync`'s `policy: "safe"`. {@link defaultSelection} reads that
- * answer; it does not re-derive it.
+ * are the ones whose silent failure destroys somebody's work, so they live where every caller
+ * reaches them: `core::safe_spec_apply` in the engine, reported per entry on the diff (`safe`,
+ * `safeFields`) and applied by `POST /specs/sync`'s `policy: "safe"`. `electron/` may not import
+ * `src/` (see the MCP doc), and a copy of a rule like that is a second opinion about which of a
+ * user's fields a sync may overwrite. {@link defaultSelection} reads the engine's answer; it does
+ * not re-derive it.
  *
- * What is still this file's is the payload for a *changed* selection - a user
- * who unticked a field, or ticked a deletion. Those are choices a person made,
- * which no policy can state for them.
+ * What is this file's is the payload for a *changed* selection: a user who unticked a field, or
+ * ticked a deletion. Those are choices a person made, which no policy can state for them.
  *
- * **Applying a change refreshes that request's imported examples.** The diff
- * deliberately does not compare examples (#654), so the rule is stated rather
- * than shown: the document's responses replace the examples a previous import
- * or sync wrote, and an example saved from a live response is never touched -
- * the engine keeps that promise by `origin`, not this payload. Since issue #869
- * the *rows* are the engine's too: this sends the decision (`examples: true`)
- * and the engine writes what the document it is storing documents. What rode
- * here before was that same answer, carried from the diff two calls earlier and
- * handed back - a round trip that let a payload state examples for a response no
- * document describes.
+ * **Applying a change refreshes that request's imported examples.** The diff deliberately does not
+ * compare examples (#654), so the rule is stated rather than shown: the document's responses
+ * replace the examples a previous import or sync wrote, and an example saved from a live response
+ * is never touched, a promise the engine keeps by `origin`, not this payload. The *rows* are the
+ * engine's too (#869): this sends the decision (`examples: true`) and the engine writes what the
+ * document it is storing documents, so no payload can state examples for a response no document
+ * describes.
  *
- * **The identity travels with the request, always - and it is `specOperation`,
- * not `method`.** An applied change writes `specOperation` whether or not
- * anything was ticked: an operation *is* its method and path template, so a
- * request that recorded the old identity after a rename would be diffed against
- * the wrong operation next time - the exact failure the engine's matcher
- * (`core/operation_match.hpp`) warns about. `request.method` used to ride along
- * on that reasoning and does not anymore (issue #717): it is what the request
- * *sends*, protects no lookup, and writing it unconditionally silently reverted
- * a user's `GET` -> `HEAD` edit on any applied change. It is now a compared,
- * flaggable, tickable `SpecField` like `url`, which is what an import-written
- * field is owed.
+ * **The identity travels with the request, always, and it is `specOperation`, not `method`.** An
+ * applied change writes `specOperation` whether or not anything was ticked: an operation *is* its
+ * method and path template, so a request that recorded the old identity after a rename would be
+ * diffed against the wrong operation next time, the failure the engine's matcher
+ * (`core/operation_match.hpp`) warns about. `request.method` does not ride along (#717): it is what
+ * the request *sends*, protects no lookup, and writing it unconditionally would silently revert a
+ * user's `GET` -> `HEAD` edit on any applied change. It is a compared, flaggable, tickable
+ * `SpecField` like `url`, which is what an import-written field is owed.
  *
  * A method left unticked therefore leaves `request.method` disagreeing with the
- * `specOperation.method` beside it. That is a state the user chose and it stays
- * visible: the next check compares the two again and offers the field again,
- * where writing it for them would be the silent revert this fixes.
+ * `specOperation.method` beside it. That is a state the user chose and it stays visible: the next
+ * check compares the two again and offers the field again, where writing it for them would be a
+ * silent revert.
  */
 
 import type {
@@ -83,12 +73,9 @@ export function operationKey(operation: SpecOperation): string {
 }
 
 /**
- * What the user chose to apply.
- *
- * A changed request is present in `changed` when it is being applied at all,
- * and its value is the fields to take from the document - empty for a request
- * whose only change is the identity, which is a real selection rather than an
- * absence.
+ * What the user chose to apply. A changed request is present in `changed` when it is being applied
+ * at all, and its value is the fields to take from the document: empty for a request whose only
+ * change is the identity, which is a real selection rather than an absence.
  */
 export interface SpecApplySelection {
 	/** {@link operationKey} of each added operation to create. */
@@ -105,21 +92,17 @@ export interface SpecApplySelection {
 }
 
 /**
- * The ticks a user is offered before touching anything, as the engine states
- * them (issue #871).
+ * The ticks a user is offered before touching anything, as the engine states them (#871).
  *
- * A reader of `safe` / `safeFields`, not a second author of them: what those
- * mean - everything the document adds, every field it moved that nobody here
- * had edited, no deletions, and a request the comparison could not make
- * three-way left alone whole - is `core::safe_spec_apply`, the same answer
- * `POST /specs/sync`'s `policy: "safe"` applies. An agent syncing over MCP and
- * a person clicking Apply without changing a tick therefore write the same
- * rows, because there is one function deciding it rather than two that agree
+ * A reader of `safe` / `safeFields`, not a second author of them: what those mean (everything the
+ * document adds, every field it moved that nobody here had edited, no deletions, and a request the
+ * comparison could not make three-way left alone whole) is `core::safe_spec_apply`, the answer
+ * `POST /specs/sync`'s `policy: "safe"` applies. So an agent syncing over MCP and a person clicking
+ * Apply without changing a tick write the same rows: one function decides it, not two that agree
  * today.
  *
- * **A declined operation is never offered ticked** (issue #3031), whatever its
- * `safe` says: its request was deleted on purpose, and bringing it back is the
- * user's tick or nothing.
+ * **A declined operation is never offered ticked** (#3031), whatever its `safe` says: its request
+ * was deleted on purpose, and bringing it back is the user's tick or nothing.
  */
 export function defaultSelection(diff: SpecDiffResponse): SpecApplySelection {
 	const changed = new Map<string, ReadonlySet<SpecField>>();
@@ -140,13 +123,10 @@ export function defaultSelection(diff: SpecDiffResponse): SpecApplySelection {
 }
 
 /**
- * Whether a selection would write any request *rows*.
- *
- * Not "would write anything at all" (issue #717): every apply stores the
- * re-fetched document and moves the binding to it, so an empty selection is a
- * document-level update rather than a no-op. This answers which of the two an
- * apply would be - what the button says it is about to do - and never whether
- * one is worth making.
+ * Whether a selection would write any request *rows*. Not "would write anything at all" (#717):
+ * every apply stores the re-fetched document and moves the binding to it, so an empty selection is
+ * a document-level update, not a no-op. This answers which of the two an apply would be (what the
+ * button says it is about to do), never whether one is worth making.
  */
 export function isEmptySelection(selection: SpecApplySelection): boolean {
 	return (
@@ -171,16 +151,12 @@ export interface BuildSyncPayloadInput {
 }
 
 /**
- * The `POST /specs/sync` body for one selection.
- *
- * Added operations, and the declined ones a user ticked, land where an import
- * would have put them - the sub-collection named after the operation's first
- * tag, else the one its path names (issue #710), created here when the bound
- * collection does not have one yet, and the
- * bound collection itself for an operation that gets neither. Matching an
- * existing folder by name rather than creating one per
- * sync is what keeps a collection that has been synced five times shaped like
- * one that was imported once.
+ * The `POST /specs/sync` body for one selection. Added operations, and the declined ones a user
+ * ticked, land where an import would have put them: the sub-collection named after the operation's
+ * first tag, else the one its path names (#710), created here when the bound collection does not
+ * have one yet, and the bound collection itself for an operation that gets neither. Matching an
+ * existing folder by name rather than creating one per sync is what keeps a collection synced five
+ * times shaped like one imported once.
  */
 export function buildSyncPayload({
 	collectionId,
@@ -226,18 +202,15 @@ export function buildSyncPayload({
 }
 
 /**
- * An added operation's draft as the import pipeline's own shape.
+ * An added operation's draft as the import pipeline's own shape. The three constants an OpenAPI
+ * import writes for every operation it builds (`inherit` auth and two empty scripts) are stated
+ * here because the engine's draft deliberately omits them: they are the same value for every
+ * operation of every document, so a comparison would never report one and carrying them per
+ * operation would be bytes nothing reads.
  *
- * The three constants an OpenAPI import writes for every operation it builds -
- * `inherit` auth and two empty scripts - are stated here because the engine's
- * draft deliberately omits them: they are the same value for every operation of
- * every document, so a comparison would never report one and carrying them
- * across the wire per operation would be bytes nothing reads.
- *
- * The point of assembling one is `requestFieldsFromDraft`: an operation the
- * document adds must become the request an import of that document would, and
- * one mapping for both paths is what makes that structural rather than
- * remembered.
+ * The point of assembling one is `requestFieldsFromDraft`: an operation the document adds must
+ * become the request an import of that document would, and one mapping for both paths makes that
+ * structural rather than remembered.
  */
 function draftOf(entry: SpecDiffAdded): RequestDraft {
 	// The documented responses are dropped rather than carried: a sync writes the
@@ -279,15 +252,14 @@ function updateItem(item: SpecDiffChanged, fields: ReadonlySet<SpecField>): Spec
 		patch.body = draft.body;
 		patch.bodyType = draft.body.mode; // the engine never derives this
 	}
-	// The recorded identity, whether or not anything else was ticked - see the
-	// file comment for why this rides along and `request.method` no longer does.
+	// The recorded identity, whether or not anything else was ticked; see the file comment for why
+	// this rides along and `request.method` does not.
 	patch.specOperation = item.operation;
-	// True on every applied change, which is the rule this file has always
-	// followed: applying anything to a request refreshes the examples the
-	// document wrote for it. The engine reads the rows off the document being
-	// stored - including the empty answer for an operation whose responses were
-	// removed, which is what makes the last import's examples go. Absent would
-	// mean "leave every example alone", and no applied change means that.
+	// True on every applied change: applying anything to a request refreshes the examples the
+	// document wrote for it. The engine reads the rows off the document being stored, including the
+	// empty answer for an operation whose responses were removed, which is what makes the last
+	// import's examples go. Absent would mean "leave every example alone", and no applied change
+	// means that.
 	patch.examples = true;
 	return patch;
 }

@@ -14,8 +14,8 @@
  * the questions that matter - does a `2XX` count as hit by a status the
  * operation's own `200` already answered, is a transport error a response - are
  * decisions this file makes and no executor can change. The wiring that carries
- * them into a run's summary is pinned in scenario_runner_test.cpp and
- * runs_route_test.cpp.
+ * them into a run's summary is pinned in scenario_runner_flow_test.cpp and
+ * runs_route_report_sections_test.cpp.
  */
 
 #include "optional_assert.hpp"

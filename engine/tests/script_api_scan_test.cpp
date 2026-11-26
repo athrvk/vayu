@@ -12,7 +12,7 @@
  *        the table, and the ways a plain text search would be wrong.
  *
  * The Postman importer's own cases (`PostmanImport.*` in
- * `import_parse_test.cpp`) cover where the names land; these cover what is
+ * `import_parse_postman_test.cpp`) cover where the names land; these cover what is
  * found. Removing a row of the table fails the case of its family.
  */
 

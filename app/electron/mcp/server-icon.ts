@@ -6,7 +6,6 @@
  */
 
 /**
- * @file server-icon.ts
  * @brief The icon the MCP server names in its identity, inlined as a data URI.
  *
  * Inlined rather than read from disk: the stdio CLI runs without the app and

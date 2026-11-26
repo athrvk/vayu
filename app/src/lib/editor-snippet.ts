@@ -6,28 +6,24 @@
  */
 
 /**
- * Insert a completion-table template at the cursor.
+ * Insert a completion-table template at the cursor, through Monaco's own snippet controller, not a
+ * text splice: the engine's completion templates are snippets (`${1:200}`, `$0`), and only the
+ * controller turns those into the tab stops a user expects. Inserting the raw string would put
+ * `${1:200}` in the script, and re-implementing tab stops here would be a hand-rolled copy of a
+ * primitive Monaco ships and fixes.
  *
- * Through Monaco's own snippet controller, not a text splice: the templates in
- * the engine's completion table are snippets (`${1:200}`, `$0`), and only the
- * controller turns those into the tab stops a user expects. Inserting the raw
- * string would put `${1:200}` in the script, and re-implementing tab stops here
- * would be a hand-rolled copy of a primitive Monaco already ships and fixes.
+ * **The controller is reached by contribution, never by action id.**
+ * `editor.trigger(source, "editor.action.insertSnippet", { snippet })` does nothing at all: that
+ * command belongs to VS Code's *workbench*, not the standalone editor this app embeds, and
+ * `monaco-editor` registers `SnippetController2` as the `snippetController2` *contribution* with no
+ * action of that name. `trigger` looks its argument up in the editor's action map and returns
+ * silently on no match, so a wrong id is an error nowhere: the click simply does nothing.
+ * `getContribution` is the door that reports its own absence (`null`), which is why it is used
+ * here.
  *
- * **The controller is reached by contribution, never by action id.** This first
- * shipped as `editor.trigger(source, "editor.action.insertSnippet", { snippet })`
- * and did nothing at all: that command belongs to VS Code's *workbench*, not to
- * the standalone editor this app embeds - `monaco-editor` registers
- * `SnippetController2` as the `snippetController2` *contribution* and no action
- * of that name. `trigger` looks its argument up in the editor's action map and
- * returns silently when there is no match, so a wrong id is not an error
- * anywhere: the click simply did nothing. `getContribution` is the door that
- * reports its own absence (`null`), which is why it is the one used here.
- *
- * It is the one place in the renderer that drives the controller, which is why
- * it takes the editor instance rather than living in a component: the two hosts
- * (the request Script panel and the collection Script tab) both hold one, and
- * neither should learn how a snippet is inserted.
+ * The one place in the renderer that drives the controller, which is why it takes the editor
+ * instance rather than living in a component: its hosts (`ScriptSnippets` and the script element's
+ * form, `ScriptElementForm`) both hold one, and neither should learn how a snippet is inserted.
  */
 
 import type * as Monaco from "monaco-editor";
@@ -99,15 +95,12 @@ export function insertSnippetAtCursor(
 	editor.focus();
 
 	/*
-	 * Where it lands, decided here rather than left to the controller.
-	 *
-	 * `SnippetSession` builds its edit from `editor.getSelections()`, so a
-	 * selection is the range the template *replaces*. That is right when the
-	 * snippet was accepted from the completion popup - the selection is the
-	 * prefix being completed - and wrong from a list: clicking a row would
-	 * delete whatever the author had highlighted, with no way to see it coming.
-	 * So a selection is collapsed to its end first: the click adds code, never
-	 * removes any.
+	 * Where it lands, decided here rather than left to the controller. `SnippetSession` builds its
+	 * edit from `editor.getSelections()`, so a selection is the range the template *replaces*:
+	 * right when the snippet was accepted from the completion popup (the selection is the prefix
+	 * being completed), wrong from a list, where a click would delete whatever the author had
+	 * highlighted with no way to see it coming. So a selection is collapsed to its end first: the
+	 * click adds code, never removes any.
 	 */
 	const model = editor.getModel();
 	const selection = editor.getSelection();
@@ -118,15 +111,12 @@ export function insertSnippetAtCursor(
 	}
 
 	/*
-	 * A caret at the very start of a script nobody has clicked into is not a
-	 * decision, it is Monaco's default - and dropping a template above code the
-	 * author has already written is the least likely thing they meant. The
-	 * GraphQL explorer answers the same question the same way: a cursor outside
-	 * every selection set does not become a splice point at offset 0, the
-	 * insertion is appended to the end of the document as a new operation
-	 * (`insert-skeleton.ts`, placement `new-operation`). This is that rule in
-	 * a language with no selection sets: no caret of the author's own, so the
-	 * template goes after what is already there.
+	 * A caret at the very start of a script nobody has clicked into is not a decision but Monaco's
+	 * default, and dropping a template above code the author already wrote is the least likely
+	 * thing they meant. The GraphQL explorer answers the same question the same way: a cursor
+	 * outside every selection set does not become a splice point at offset 0, and the insertion is
+	 * appended as a new operation (`insert-skeleton.ts`, placement `new-operation`). Here that rule
+	 * is: no caret of the author's own, so the template goes after what is already there.
 	 */
 	const untouched = position.lineNumber === 1 && position.column === 1;
 	const line =

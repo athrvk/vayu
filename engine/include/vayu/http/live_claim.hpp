@@ -23,7 +23,7 @@ namespace vayu::http {
 using LiveClaim = std::uint64_t;
 
 /**
- * The single-watcher slot an SSE endpoint hands out (issue #506).
+ * The single-watcher slot an SSE endpoint hands out (#506).
  *
  * Every engine SSE endpoint occupies one cpp-httplib pool thread for as long as
  * its stream is open (the server uses the default task queue), so an unbounded
@@ -32,12 +32,12 @@ using LiveClaim = std::uint64_t;
  *
  * A claim held by a **provably dead** stream is taken over rather than refused:
  * the holder only notices its socket died when the next write fails, up to one
- * poll interval later, so a client reconnecting inside that window used to meet
- * a 409 - which `EventSource` treats as fatal, killing the stream for good. A
- * holder that has not written successfully for `stale_after` is not writing, so
- * its slot is given to the newcomer. Every live holder writes at least a
- * keep-alive well inside that window, so a genuinely live stream is never
- * evicted and a second concurrent watcher is still refused.
+ * poll interval later, so refusing would meet a client reconnecting inside that
+ * window with a 409 - which `EventSource` treats as fatal, killing the stream
+ * for good. A holder that has not written successfully for `stale_after` is not
+ * writing, so its slot is given to the newcomer. Every live holder writes at
+ * least a keep-alive well inside that window, so a genuinely live stream is
+ * never evicted and a second concurrent watcher is still refused.
  *
  * `stale_after` is passed per call rather than held, because the window is
  * derived from the owner's own cadence (an inbox's poll interval, a stream's
@@ -45,8 +45,8 @@ using LiveClaim = std::uint64_t;
  *
  * **Not** internally synchronized: every method must be called under the lock
  * that guards the owning record, which is also the lock its other fields are
- * read under. That is what lets an owner adopt it without changing its locking
- * - `InboxManager` holds one per inbox under its registry's lock,
+ * read under. That is what lets an owner adopt it without changing its locking:
+ * `InboxManager` holds one per inbox under its registry's lock,
  * `SseStreamContext` one under a mutex of its own.
  */
 class LiveClaimSlot {

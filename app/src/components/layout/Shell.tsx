@@ -64,21 +64,17 @@ import { HeadingSection } from "@/components/ui/heading";
 import RequestBuilder from "@/modules/request-builder";
 
 /*
- * One tab's surface is mounted at a time, so every surface but the one on
- * screen was 5.5MB of module graph parsed before the window could appear
- * (#1146). Each is its own chunk now, fetched when its tab is first opened.
- *
- * RequestBuilder stays eager: it is what the app opens into for anyone with a
- * request tab restored, so deferring it would trade paint time for a skeleton
- * on the surface most likely to be first.
+ * One tab's surface is mounted at a time, so each is its own chunk, fetched when its tab is first
+ * opened: eager, the surfaces not on screen were 5.5MB of module graph parsed before the window
+ * could appear (#1146). RequestBuilder stays eager: anyone with a request tab restored opens into
+ * it, so deferring it would trade paint time for a skeleton on the surface most likely to be first.
  */
 const CollectionDetail = lazy(() => import("@/modules/collections/CollectionDetail"));
 const LoadTestDashboard = lazy(() => import("@/modules/dashboard"));
 /*
- * Both of these are the component's own file rather than its module barrel,
- * and that is what makes them split at all: a barrel is one module, so
- * `@/modules/settings` would be pulled in eagerly anyway by `Drawer`'s
- * `SettingsCategoryTree` import - and the Drawer is mounted on every tab.
+ * A surface splits only when it is imported from the component's own file, not its module barrel: a
+ * barrel is one module, so one eager import of it anywhere (`Drawer`, mounted on every tab, reads
+ * `SettingsCategoryTree` from the settings module) would pull the surface back in.
  */
 const HistoryDetail = lazy(() => import("@/modules/history/main/HistoryDetail"));
 const WelcomeScreen = lazy(() => import("@/modules/welcome/WelcomeScreen"));
@@ -88,9 +84,8 @@ const InboxView = lazy(() => import("@/modules/inbox"));
 const MockServerView = lazy(() => import("@/modules/mock-server"));
 
 /**
- * What the skeleton says while a surface's chunk loads. Named per tab type
- * rather than a bare "Loading" - which pane is arriving is the one thing the
- * placeholder knows and a screen reader cannot see.
+ * What the skeleton says while a surface's chunk loads, per tab type rather than a bare "Loading":
+ * which pane is arriving is the one thing the placeholder knows and a screen reader cannot see.
  */
 const LOADING_LABEL: Record<TabType, string> = {
 	welcome: "Loading welcome screen",
@@ -131,11 +126,9 @@ function renderTabContent(tab: Tab | null): React.ReactNode {
 }
 
 /**
- * Which way this key cycles the window's regions, or `null` when it is not
- * either region chord.
- *
- * Outside the component and asked before the handler's modifier gate, because
- * F6 is the one chord in the map that carries no ⌘ or Ctrl.
+ * Which way this key cycles the window's regions, or `null` for neither region chord. Outside the
+ * component and asked before the handler's modifier gate: F6 is the one chord in the map with no ⌘
+ * or Ctrl.
  */
 function regionStep(e: KeyboardEvent): 1 | -1 | null {
 	if (matchesChord(e, NEXT_REGION_CHORD)) return 1;
@@ -144,21 +137,15 @@ function regionStep(e: KeyboardEvent): 1 | -1 | null {
 }
 
 /**
- * Which way this key navigates the history, or `null` when it is neither chord.
+ * Which way this key navigates the history, or `null` for neither chord. Asked before the modifier
+ * gate like F6: off macOS the pair is Alt+←/→, with no ⌘ or Ctrl (#1245).
  *
- * Asked before the modifier gate for the same reason F6 is: off macOS the pair
- * is Alt+←/→, which carries no ⌘ or Ctrl (#1245).
- *
- * A code editor keeps the chord, because it is the one place either pair means
- * something else: Monaco binds CtrlCmd+[ and +] to outdent and indent, so on
- * macOS - where the chord *is* that pair - navigating would break editing to
- * offer navigation. `ownsEnterKey` rather than `isTextEntryTarget`, so a plain
- * input keeps it: Back from the URL bar is what a browser does, and neither ⌘[
- * nor Alt+← edits text in a field.
- *
- * The collection tree's Alt+Arrow reorder and the tab strip's Alt+Arrow move
- * need no check here: each handler stops the event at its own widget, so it
- * never reaches this listener.
+ * A code editor keeps the chord, the one place either pair means something else: Monaco binds
+ * CtrlCmd+[ and +] to outdent and indent, so on macOS, where that pair is the chord, navigating
+ * would break editing. `ownsEnterKey`, not `isTextEntryTarget`, so a plain input does not keep it:
+ * Back from the URL bar is what a browser does, and neither ⌘[ nor Alt+← edits text in a field. The
+ * collection tree's Alt+Arrow reorder and the tab strip's Alt+Arrow move need no check here: each
+ * handler stops the event at its own widget.
  */
 function navigationStep(e: KeyboardEvent): NavDirection | null {
 	if (e.target instanceof HTMLElement && ownsEnterKey(e.target)) return null;
@@ -168,11 +155,9 @@ function navigationStep(e: KeyboardEvent): NavDirection | null {
 }
 
 /**
- * Which way this pointer button navigates, or `null` for an ordinary button.
- *
- * Chromium reports the mouse's thumb buttons as 3 and 4 on every platform, which
- * is the only route to them in the renderer: they produce no key event and no
- * click on the element under the pointer.
+ * Which way this pointer button navigates, or `null` for an ordinary button. Chromium reports the
+ * mouse's thumb buttons as 3 and 4 on every platform, the only route to them in the renderer: they
+ * produce no key event and no click on the element under the pointer.
  */
 function pointerNavigationStep(button: number): NavDirection | null {
 	if (button === 3) return "back";
@@ -187,11 +172,10 @@ export default function Shell() {
 	const focusAdjacentTab = useTabsStore((s) => s.focusAdjacentTab);
 	const openTab = useTabsStore((s) => s.openTab);
 	/*
-	 * The Shell hosts the new-request flow for its ⌘N chord, and the palette
-	 * hosts its own for the "New request" command. Two hosts of one hook, not
-	 * two flows: `useNewRequest` is written to be mounted more than once ("each
-	 * caller renders its own from `pickerProps`, so two surfaces never fight
-	 * over one dialog's open state"), and both reach the same creation path.
+	 * The Shell hosts the new-request flow for its ⌘N chord and the palette its own for "New
+	 * request": two hosts of one hook, not two flows. `useNewRequest` is built to mount more than
+	 * once (each caller renders its own picker from `pickerProps`, so two surfaces never fight over
+	 * one dialog's open state), and both reach the same creation path.
 	 */
 	const { newRequest, pickerProps } = useNewRequest();
 	const toggleDrawer = useLayoutStore((s) => s.toggleDrawer);
@@ -218,71 +202,53 @@ export default function Shell() {
 			revealDrawerView("collections");
 		} else if (activeTab?.type === "run") {
 			/*
-			 * A run's list is History, so a run tab belongs with it - and with the
-			 * drawer open. It had no branch at all, which was not quite the same as
-			 * "leave it alone": the drawer never *opened*, so picking a run while it
-			 * was closed left the sidebar shut.
-			 *
-			 * The guard this has to respect is the older bug where opening a run
-			 * threw the user out of the History list. Selecting History satisfies
-			 * that rather than violating it - the failure then was landing
-			 * somewhere else.
+			 * A run's list is History, so a run tab belongs with it, with the drawer open. Opening
+			 * a run must not throw the user out of the History list, and revealing History is what
+			 * keeps them in it.
 			 */
 			revealDrawerView("history");
 		} else if (activeTab?.type === "dashboard") {
 			/*
-			 * Deliberately nothing. Written out rather than left to fall off the
-			 * end, because "no branch" is what made the `run` case a bug for so
-			 * long - it is indistinguishable from nobody having considered it, and
-			 * the next person adding branches for completeness would add one here.
+			 * Deliberately nothing, written out rather than left to fall off the end: a missing
+			 * branch reads the same as one nobody considered (how the `run` case was a bug), and
+			 * invites one added for completeness.
 			 *
-			 * The dashboard is a detour from a request, not a list item: it is
-			 * opened only by the request builder when a load test starts, carries
-			 * `entityId: null`, and its back button returns to `sourceRequestId`
-			 * rather than closing. So when it opens, the drawer is already on
-			 * Collections with that request revealed - which is both where the user
-			 * came from and where Back sends them. Switching to History would
-			 * discard exactly that context, twice per round trip.
-			 *
-			 * A judgement call, not a forced one: a running test *does* appear in
-			 * History (`listRuns` applies no status filter, and the sidebar offers
-			 * a "Running" filter), so showing History here would not be
-			 * nonsensical - just contrary to the flow.
+			 * The dashboard is a detour from a request, not a list item: only the request builder
+			 * opens it, when a load test starts, with `entityId: null`, and its back button returns
+			 * to `sourceRequestId` rather than closing. The drawer is already on Collections with
+			 * that request revealed, where the user came from and where Back sends them; switching
+			 * to History would discard that context twice per round trip. A judgement call: a
+			 * running test does appear in History (`listRuns` applies no status filter, and the
+			 * sidebar offers a "Running" filter), so History would be contrary to the flow, not
+			 * nonsensical.
 			 */
 		}
 	}, [activeTab?.type, revealDrawerView]);
 
 	useEffect(() => {
 		/*
-		 * Every chord here is a definition in `constants/shortcuts.ts`, matched by
-		 * `matchesChord` - the same registry the ActivityRail's tooltips advertise
-		 * from and the same matcher the Send/Load Test handler uses (#938).
-		 *
-		 * It was fourteen hand-rolled comparisons against `e.key` behind a raw
-		 * `e.metaKey || e.ctrlKey`, and the two bugs that cost were both things
-		 * the registry has always compared and the hand-rolled map did not:
-		 * `altKey` (so Ctrl+Alt+S, which is AltGr+S on many European Windows
-		 * layouts, saved) and the layout-independence of the digit row (⌘1-9 was
-		 * dead on AZERTY, whose unshifted digits produce `&é"'(-è_çà`).
+		 * Every chord here is a definition in `constants/shortcuts.ts`, matched by `matchesChord`:
+		 * the registry the ActivityRail's tooltips advertise from and the matcher the Send/Load
+		 * Test handler uses (#938). A hand-rolled comparison against `e.key` misses what the
+		 * registry compares: `altKey` (Ctrl+Alt+S is AltGr+S on many European Windows layouts, and
+		 * must not save) and the digit row independent of layout (⌘1-9 on AZERTY, whose unshifted
+		 * digits produce `&é"'(-è_çà`).
 		 */
 		const handleKeyDown = (e: KeyboardEvent) => {
-			// F6 and ⇧F6 are the only chords here without the primary modifier, so
-			// they are settled before the gate that lets every other key go by
-			// untouched - the gate is what keeps this listener off the typing path.
+			// F6 and ⇧F6, the only chords here without the primary modifier, are settled before the
+			// gate that lets every other key go by untouched, which keeps this listener off the
+			// typing path.
 			const region = regionStep(e);
 			const navigation = navigationStep(e);
 			if (region === null && navigation === null && !(e.metaKey || e.ctrlKey)) return;
 			/*
-			 * Nothing here acts while a modal is up (#935). Every chord below
-			 * moves or destroys the thing the dialog is attached to - ⌘W closed
-			 * the tab underneath it, ⌘1-9 switched away from it - so the dialog's
-			 * owner unmounted mid-interaction and the dialog went with it.
-			 *
-			 * Escape closes the dialog first; then the chords are live again. ⌘K is
-			 * not in this map: `CommandPalette` binds it and asks `isModalOpen()`
-			 * itself, so it too refuses to open over another dialog. Its toggle-closed
-			 * still works with the palette up, because that guard applies only while
-			 * the palette is closed.
+			 * Nothing here acts while a modal is up (#935): every chord below moves or destroys
+			 * what the dialog is attached to (⌘W closes the tab under it, ⌘1-9 switches away from
+			 * it), so the dialog's owner would unmount mid-interaction and the dialog with it.
+			 * Escape closes the dialog first; then the chords are live again. ⌘K is not in this
+			 * map: `CommandPalette` binds it and asks `isModalOpen()` itself, so it too refuses to
+			 * open over another dialog. Its toggle-closed still works with the palette up, as that
+			 * guard applies only while the palette is closed.
 			 */
 			if (isModalOpen()) return;
 
@@ -357,10 +323,9 @@ export default function Shell() {
 				return;
 			}
 
-			// The drawer switchers, from the same table the ActivityRail's tooltips
-			// read. Settings is in that table too and is handled above, by the
-			// chord it shares - opening the tab, which brings its drawer view with
-			// it.
+			// The drawer switchers, from the table the ActivityRail's tooltips read. Settings is in
+			// it too and is handled above, by the chord it shares: opening the tab brings its
+			// drawer view with it.
 			for (const [view, chord] of Object.entries(DRAWER_VIEW_CHORDS) as [
 				DrawerView,
 				Chord,
@@ -401,20 +366,13 @@ export default function Shell() {
 
 	useEffect(() => {
 		/*
-		 * The mouse's own back and forward buttons (#1245).
-		 *
-		 * On `mouseup` rather than `mousedown`, matching what a button press means
-		 * everywhere else, and on `window` rather than a container because these
-		 * buttons are aimed at the app, not at whatever the pointer happens to be
-		 * over. `preventDefault` because Chromium's own default for them is to
-		 * navigate the *document* - which in a packaged app means leaving the app's
-		 * page for whatever it was loaded from.
-		 *
-		 * `isModalOpen` for the reason the chord map asks it (#935): a dialog is
-		 * *visually* on top, but it is portalled into `document.body` and stops
-		 * nothing, so a press on it bubbles to this window listener like any
-		 * other - and navigating there unmounts the surface the dialog belongs to
-		 * mid-interaction.
+		 * The mouse's own back and forward buttons (#1245). On `mouseup`, what a button press means
+		 * everywhere else, and on `window`, not a container: these buttons are aimed at the app,
+		 * not at whatever the pointer is over. `preventDefault`: Chromium's own default navigates
+		 * the *document*, which in a packaged app leaves the app's page for whatever it was loaded
+		 * from. `isModalOpen` as in the chord map (#935): a dialog is portalled into
+		 * `document.body` and stops nothing, so a press on it bubbles here, and navigating unmounts
+		 * the surface the dialog belongs to.
 		 */
 		const handleMouseUp = (e: MouseEvent) => {
 			const direction = pointerNavigationStep(e.button);
@@ -450,33 +408,27 @@ export default function Shell() {
 			<div className="flex flex-1 overflow-hidden">
 				<ActivityRail />
 				{/*
-				 * The drawer's positioned box: the drawer and the content column,
-				 * not the ActivityRail. In overlay mode the drawer is `absolute
-				 * left-0` against this box, so it opens over the content's left edge
-				 * and never over the rail that toggles it (#3494). The box is there
-				 * in both modes, so crossing the threshold changes a class list and
+				 * The drawer's positioned box: the drawer and the content column, not the
+				 * ActivityRail. In overlay mode the drawer is `absolute left-0` against it, so it
+				 * opens over the content's left edge, never over the rail that toggles it (#3494).
+				 * The box is there in both modes, so crossing the threshold changes a class list,
 				 * never the tree the active tab renders into.
 				 */}
 				<div className="relative flex flex-1 min-w-0 overflow-hidden">
 					<Drawer mode={drawerMode} siblingMode={contextBarMode} />
 					{/*
-					 * The content column: tab strip on top, then main + ContextBar.
+					 * The content column: tab strip on top, then main + ContextBar. The strip spans
+					 * this column, not the window, as this is the region tabs switch; the drawer is
+					 * a global navigator with its own header band beside this row. As the drawer's
+					 * flex sibling, the column's left edge follows the drawer's resize handle in
+					 * push mode with no width to keep in sync.
 					 *
-					 * The strip is scoped to this column rather than spanning the
-					 * window because that is the region tabs actually switch - the
-					 * drawer is a global navigator and keeps its own header band
-					 * beside this row. Its left edge therefore follows the drawer's
-					 * resize handle for free in push mode: the column is the drawer's
-					 * flex sibling, so there is no width to compute or keep in sync.
-					 *
-					 * `relative` moved down with the strip, onto the main+context row:
-					 * the ContextBar's overlay mode positions against its nearest
-					 * positioned ancestor, and from the outer row it would now cover
-					 * the tabs it belongs to. `ContextRail` sits one level out from
-					 * that `relative` box rather than inside it, as a plain flex item
-					 * beside whatever the box contains - so an overlaying ContextBar
-					 * covers `main` up to the rail and never the rail itself, which is
-					 * what keeps the rail reachable in overlay mode too (#1615).
+					 * `relative` is on the main+context row, below the strip: the ContextBar's
+					 * overlay mode positions against its nearest positioned ancestor, and from the
+					 * outer row it would cover the tabs. `ContextRail` sits one level out from that
+					 * box, a plain flex item beside it, so an overlaying ContextBar covers `main`
+					 * up to the rail and never the rail, which keeps the rail reachable in overlay
+					 * mode (#1615).
 					 */}
 					<div className="flex flex-1 flex-col min-w-0 overflow-hidden">
 						<TabStrip />
@@ -491,11 +443,10 @@ export default function Shell() {
 								>
 									{/*
 									 * The other half of the strip's tabs pattern: the region a tab
-									 * controls has to say so, or `aria-controls` points at nothing
-									 * and the panel claims no owner. The role goes on a child of
-									 * `main` rather than on `main` itself - `main` is a landmark and
-									 * carries only `role="main"`, so overwriting it would trade one
-									 * relationship for another.
+									 * controls says so, or `aria-controls` points at nothing and
+									 * the panel claims no owner. The role goes on a child of
+									 * `main`: `main` is a landmark carrying only `role="main"`, and
+									 * overwriting it would trade one relationship for another.
 									 */}
 									<div
 										role="tabpanel"

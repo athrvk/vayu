@@ -19,10 +19,9 @@ export interface CopyForAgentButtonProps {
 }
 
 /**
- * The icon form of "Copy for agent" (#2047): a Copy glyph that swaps to a check
- * once the line landed, with no toast beside it (`useCopy({ feedback: "icon" })`).
- * One copy of the control for the dense rows of a list or a form, where a row
- * menu has no room, hence the compact `size-control-sm` hit area.
+ * The icon form of "Copy for agent" (#2047): a Copy glyph swapping to a check once copied, no toast
+ * (`useCopy({ feedback: "icon" })`). One control for dense list or form rows, where a row menu has
+ * no room, hence the compact `size-control-sm` hit area.
  */
 export function CopyForAgentButton({ reference, label, className }: CopyForAgentButtonProps) {
 	const { copy, copied } = useCopy({ feedback: "icon" });

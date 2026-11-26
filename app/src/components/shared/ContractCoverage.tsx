@@ -6,27 +6,14 @@
  */
 
 /**
- * Which operations of the collection's bound contract a run exercised, and which
- * of their declared responses it saw (issue #629).
- *
- * The other half of "did this run prove anything": `ThresholdVerdict` beside it
- * says whether the run met its budgets, and this says whether it touched the
- * contract at all. A run can pass every budget and every assertion while never
- * calling four of eighteen operations, and nothing before this could say so.
- *
- * Two surfaces show it - the history detail's Overview and a scenario run's own
- * view - so it lives here once rather than being written twice and drifting,
- * exactly as `ThresholdVerdict` and `CapacitySummary` do.
- *
- * **Silent when the run was not measured against a contract.** An absent block
- * says "not measured", which is a different claim from "measured and covered
- * nothing", and it is why a run of an unbound collection renders exactly as it
- * did before coverage existed. The engine spells that as an absent `coverage`,
- * never an empty one.
- *
- * Rows arrive uncovered-first from the engine and are rendered in that order:
- * an operation nothing exercised is the finding the block is opened for, and
- * re-sorting here would be a second opinion about which those are.
+ * Which operations of the collection's bound contract a run exercised, and which of their declared
+ * responses it saw (#629): the other half of "did this run prove anything" beside
+ * `ThresholdVerdict`. A run can pass every budget and assertion while never calling four of
+ * eighteen operations. Shared, as the history Overview and a scenario run's view show it (like
+ * `ThresholdVerdict` and `CapacitySummary`). **Silent when not measured against a contract**:
+ * absent says "not measured", another claim from "covered nothing", and the engine spells it as an
+ * absent `coverage`, never an empty one. Rows arrive uncovered-first and are drawn so: an
+ * unexercised operation is the finding, and re-sorting would be a second opinion.
  */
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
@@ -39,14 +26,11 @@ import type { RunCoverage, RunCoverageOperation } from "@/types/domain";
 export interface ContractCoverageProps {
 	coverage: RunCoverage | undefined;
 	/**
-	 * `metadata.openapi.inherited` - the contract belongs to an ancestor of the
-	 * collection that ran (issue #716).
-	 *
-	 * The numbers are unchanged by it; what changes is how they read. Running one
-	 * tag sub-collection of an imported spec is measured against the whole
-	 * document, so "4 / 618 operations" is the honest answer for a scoped run and
-	 * a catastrophe for a whole-collection one, and nothing else on this card
-	 * tells them apart.
+	 * `metadata.openapi.inherited`: the contract is bound on an ancestor of the collection that ran
+	 * (#716). The numbers do not change, their reading does: one tag sub-collection of an imported
+	 * spec is measured against the whole document, so "4 / 618 operations" is honest for a scoped
+	 * run and a catastrophe for a whole-collection one, and nothing else on the card tells them
+	 * apart.
 	 */
 	inheritedBinding?: boolean;
 	className?: string;
@@ -59,9 +43,8 @@ function formatPct(value: number): string {
 }
 
 /**
- * Every send of the operation failed to connect. `sent` counts transport
- * failures (the engine's documented choice), so `covered` alone cannot tell a
- * reached operation from one nothing answered.
+ * Every send of the operation failed to connect: `sent` counts transport failures (the engine's
+ * documented choice), so `covered` alone cannot tell a reached operation from one nothing answered.
  */
 function gotNoResponse(operation: RunCoverageOperation): boolean {
 	return operation.sent > 0 && (operation.transportErrors ?? 0) >= operation.sent;
@@ -79,20 +62,13 @@ export function ContractCoverage({ coverage, inheritedBinding, className }: Cont
 			<CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
 				<CardTitle>Contract coverage</CardTitle>
 				{/*
-				 * `Badge variant="chip"` for the reason `ThresholdVerdict` states
-				 * at its own chip: it is the one variant that lets a caller own
-				 * the background without inheriting a `hover:bg-*` that
-				 * tailwind-merge will not replace, and it is what supplies the
-				 * radius. Text on a tint, never the bare `--status-*` fill as a
-				 * foreground.
-				 *
-				 * Neutral rather than red when something is uncovered: an
-				 * unexercised operation is a gap in the run, not a failure of the
-				 * system under test, and painting it destructive would put it in
-				 * the same vocabulary as a failed budget. An operation whose every
-				 * send failed to connect is the same kind of gap: it counts as
-				 * covered because something was tried, but nothing was learned
-				 * from it, so the chip is not green either.
+				 * `Badge variant="chip"`, for `ThresholdVerdict`'s reason: the variant lets a
+				 * caller own the background without a `hover:bg-*` tailwind-merge keeps, and
+				 * supplies the radius. Text on a tint, never the bare `--status-*` fill as
+				 * foreground. Neutral, not red, when something is uncovered: a gap in the run, not
+				 * a failure of the system under test, and red would put it beside a failed budget.
+				 * An operation whose every send failed to connect is the same gap: covered, as
+				 * something was tried, but nothing learned, so not green either.
 				 */}
 				<Badge
 					variant="chip"
@@ -118,20 +94,17 @@ export function ContractCoverage({ coverage, inheritedBinding, className }: Cont
 						` ${coverage.undeclaredOperationRequests} ${pluralize(coverage.undeclaredOperationRequests, "request")} went to operations this document does not declare.`}
 				</p>
 				{/*
-				 * Every number above and below is exact. Said here rather than
-				 * left to the docs because the block sits among sampled figures -
-				 * the latency percentiles and the stored samples are a reservoir
-				 * under load - and a reader has no way to know which kind these
-				 * are (docs/app/openapi.md, "What is exact and what is sampled").
+				 * Every number here is exact, said here, not only in the docs: the block sits among
+				 * sampled figures (latency percentiles and stored samples are a reservoir under
+				 * load), and a reader cannot tell which kind these are (docs/app/openapi.md, "What
+				 * is exact and what is sampled").
 				 */}
 				<p className="mb-3 text-label text-muted-foreground">
 					Counted on every send, not from the stored sample.
 					{/*
-					 * Beside "what these numbers are" rather than raised as a
-					 * warning: running one tag folder of an imported spec is an
-					 * ordinary thing to do, and the operations it leaves uncovered
-					 * are the truth about the contract rather than a fault to flag
-					 * (issue #716).
+					 * Beside "what these numbers are", not a warning: running one tag folder of an
+					 * imported spec is ordinary, and what it leaves uncovered is the truth about
+					 * the contract, not a fault (#716).
 					 */}
 					{inheritedBinding &&
 						" The contract is bound on a parent collection, so its operations outside this one count as uncovered."}
@@ -152,20 +125,16 @@ export function ContractCoverage({ coverage, inheritedBinding, className }: Cont
 function CoverageRow({ operation }: { operation: RunCoverageOperation }) {
 	const covered = operation.sent > 0;
 	/*
-	 * `undeclaredSeen` repeats the codes from `statusesSeen` that answered to no
-	 * declared pattern, so the row can paint them apart rather than leaving the
-	 * header's "N undeclared statuses observed" unanswerable from the list below
-	 * it (issue #723). A Set because a row carries up to 50 of each.
+	 * `undeclaredSeen` repeats the `statusesSeen` codes matching no declared pattern, so the row
+	 * paints them apart and answers the header's "N undeclared statuses observed" (#723). A Set, as
+	 * a row carries up to 50 of each.
 	 */
 	const undeclared = new Set(operation.undeclaredSeen);
 	/*
-	 * The two lists are capped independently by the engine, so an undeclared code
-	 * past the seen cap can be absent from `statusesSeen` while `undeclaredSeen`
-	 * still carries it. Painting their union rather than `statusesSeen` alone
-	 * shows every code the row discloses, which is what makes `statusesTruncated`
-	 * - the distinct statuses in neither list - the count of what is *not* shown
-	 * beside it (issue #786). Identical to `statusesSeen` on every row under the
-	 * cap, which is every row in practice.
+	 * The engine caps the two lists independently, so an undeclared code past the seen cap can be
+	 * in `undeclaredSeen` only. Painting their union shows every code the row discloses, which
+	 * makes `statusesTruncated` (the distinct statuses in neither) the count of what is *not* shown
+	 * (#786). Identical to `statusesSeen` under the cap, every row in practice.
 	 */
 	const statuses = [...new Set([...operation.statusesSeen, ...undeclared])].sort((a, b) => a - b);
 
@@ -188,14 +157,11 @@ function CoverageRow({ operation }: { operation: RunCoverageOperation }) {
 						<span
 							key={status}
 							/*
-							 * The warning *tint* behind the status's own text
-							 * colour, never a fill under it: an undeclared 200
-							 * is still a 200, and repainting the code itself
-							 * would trade one fact for the other. Tint plus
-							 * `--status-*-text` is the pairing the status-token
-							 * rules allow (app/CLAUDE.md); a background makes it
-							 * a box, so it takes a radius token rather than
-							 * pinning square.
+							 * The warning *tint* behind the status's own text colour, never a fill
+							 * under it: an undeclared 200 is still a 200, and repainting the code
+							 * would trade one fact for the other. Tint plus `--status-*-text` is
+							 * the pairing the status rules allow (app/CLAUDE.md); a background
+							 * makes it a box, so it takes a radius token.
 							 */
 							className={cn(
 								"font-mono text-xs",
@@ -209,17 +175,17 @@ function CoverageRow({ operation }: { operation: RunCoverageOperation }) {
 							}
 						>
 							{status}
-							{/* The tint is the only visual difference, and colour
-							    alone is not a difference for every reader. */}
+							{/*
+							 * The tint is the only visual difference, and colour alone is not one
+							 * for every reader.
+							 */}
 							{isUndeclared && <span className="sr-only"> undeclared</span>}
 						</span>
 					);
 				})}
 				{/*
-				 * Statuses this operation answered with that the engine's
-				 * per-operation cap left out of both lists. A list shorter than
-				 * the count it belongs to, rendered as though complete, is the
-				 * shape the truncation-disclosure discipline exists to forbid.
+				 * Statuses the engine's per-operation cap left out of both lists: a list shorter
+				 * than its count, drawn as complete, is what truncation disclosure forbids.
 				 */}
 				{operation.statusesTruncated !== undefined && (
 					<span

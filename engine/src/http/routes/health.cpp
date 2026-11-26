@@ -5,10 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file http/routes/health.cpp
- * @brief Health check and shutdown routes
- */
+/** Health check and shutdown routes. */
 
 #include "vayu/core/worker_count.hpp"
 #include "vayu/db/recovery.hpp"
@@ -21,23 +18,15 @@
 namespace vayu::http::routes {
 
 /**
- * The body of `GET /health`.
- *
- * Extracted from the handler so the `recovery` node can be tested without
- * standing a server up - the node is a claim about the user's data, and the
- * cases worth pinning are the two the caller cannot arrange over HTTP (a clean
- * start and a wiped one).
- *
- * `recovery` is **absent** on a clean start rather than `null`, per the
- * engine's usual absent-not-null rule: a client that has never seen the key has
- * nothing to render, and the app's notice keys off its presence.
- *
- * `dataDir` is @p data_dir as given: the daemon resolves it once at startup
- * (`core::absolute_data_dir`), because a relative path is relative to a
- * current directory only the engine knows.
- *
- * Not `const`: `resolve_worker_count` reads the `workers` config entry, and
- * `Database::get_config_int` is not itself `const`.
+ * The body of `GET /health`, outside the handler so the `recovery` node is
+ * testable without a server: the node is a claim about the user's data, and the
+ * cases worth pinning (a clean start, a wiped one) cannot be arranged over
+ * HTTP. `recovery` is **absent** on a clean start, not `null`: the app's notice
+ * keys off its presence. `dataDir` is @p data_dir as given, resolved once at
+ * startup (`core::absolute_data_dir`), since a relative path is relative to a
+ * current directory only the engine knows. @p db is not `const`:
+ * `resolve_worker_count` reads `workers` through the non-`const`
+ * `Database::get_config_int`.
  */
 nlohmann::json build_health_response (vayu::db::Database& db, const std::string& data_dir) {
     nlohmann::json response;
@@ -83,15 +72,13 @@ void register_health_routes (RouteContext& ctx) {
 
     /**
      * POST /shutdown
-     * Triggers a graceful shutdown of the engine.
-     * This is used by the Electron app to cleanly shut down the engine on Windows
-     * where SIGTERM doesn't work as expected.
-     *
-     * The shutdown sequence:
-     * 1. Send response to client
-     * 2. Call the shutdown callback (sets g_running = false in daemon.cpp)
-     * 3. Main loop in daemon.cpp exits and calls server.stop() once
-     * 4. daemon.cpp then performs final cleanup (stop runs, release lock, flush logs)
+     * A graceful shutdown, which the Electron app uses on Windows, where
+     * SIGTERM does not work as expected:
+     * 1. the handler sets its 200 and calls the shutdown callback, which
+     *    sets `g_running = false` (daemon.cpp);
+     * 2. the main loop exits and calls `server.stop ()` once, which joins
+     *    httplib's pool after this handler has written the 200;
+     * 3. daemon.cpp cleans up (stops runs, releases the lock, flushes logs).
      */
     ctx.server.Post ("/shutdown", [&ctx] (const httplib::Request&, httplib::Response& res) {
         vayu::utils::log_info ("http", "Graceful shutdown requested");
@@ -103,8 +90,7 @@ void register_health_routes (RouteContext& ctx) {
         // Called inline: the callback only signals the daemon's wait, and the
         // teardown that follows cannot overtake this response - `server.stop()`
         // joins httplib's worker pool, and this handler's worker writes the
-        // 200 before it returns to the pool. The 100 ms sleep that used to sit
-        // here bought nothing that ordering does not already guarantee.
+        // 200 before it returns to the pool.
         if (ctx.on_shutdown) {
             vayu::utils::log_debug ("http", "Invoking shutdown callback");
             ctx.on_shutdown ();

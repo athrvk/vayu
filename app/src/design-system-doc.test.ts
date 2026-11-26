@@ -6,9 +6,10 @@
  */
 
 /**
- * `docs/design-system.md` quotes real token values. They have to still be real.
+ * The pages of `docs/design-system/` quote real token values. They have to
+ * still be real.
  *
- * The doc opens with "future sessions must read this before touching any UI
+ * The index opens with "future sessions must read this before touching any UI
  * file", which makes a stale value worse than no value - it is read as
  * authoritative and copied. Nothing connected the two files, so they drifted:
  * the accent table listed `sunset` as `24.6 95% 53.1%` where the CSS had
@@ -22,25 +23,68 @@
 
 import { describe, it, expect } from "vitest";
 import { existsSync, globSync, readFileSync, statSync } from "node:fs";
+import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
-import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { DOC_READING_GUARDS, fromRepoRoot, markdownFiles } from "@/lib/routed-inputs.testkit";
 import { declaredValues, familiesWithTextPair, indexCss as css } from "@/lib/css-tokens.testkit";
 
-/** Repository-relative, so CI can route the page this reads. See the testkit. */
-const [DESIGN_SYSTEM_DOC] = DOC_READING_GUARDS.designSystem.paths;
+/** Repository-relative, so CI can route the pages this reads. See the testkit. */
+const [DESIGN_SYSTEM_DIR] = DOC_READING_GUARDS.designSystem.paths;
 
-const doc = readFileSync(fromRepoRoot(DESIGN_SYSTEM_DOC), "utf8");
+const pages = markdownFiles(fromRepoRoot(DESIGN_SYSTEM_DIR)).map((path) => ({
+	name: basename(path),
+	text: readFileSync(path, "utf8"),
+}));
+
+/** Every page, one after another: what the value, table and snippet scans read. */
+const doc = pages.map(({ text }) => text).join("\n");
+
+/** One page by name, for a check that holds a single table to the code. */
+function page(name: string): string {
+	const found = pages.find((entry) => entry.name === name);
+	if (!found) throw new Error(`${DESIGN_SYSTEM_DIR}${name} is not a page of the design system`);
+	return found.text;
+}
+
+/** Every line of every page, with the page and the line number a failure names. */
+const lines = pages.flatMap(({ name, text }) =>
+	text.split(/\r?\n/).map((line, index) => ({ line, at: `${name}:${index + 1}` }))
+);
 
 // The doc aligns values in columns, so `240  4% 42%` has runs of spaces. An
 // earlier version of this scan required single spaces and silently matched
 // nothing on exactly the lines that had drifted.
 const QUOTED = /--([a-z0-9-]+):\s*([\d.]+\s+[\d.]+%\s+[\d.]+%)/g;
 
-describe("design-system.md token values", () => {
+/** The Source Files section of the index page: the doc's map from a concern to a file. */
+function sourceFilesTable(): string {
+	const index = page("index.md");
+	const start = index.indexOf("\n## Source Files\n");
+	expect(start, "the Source Files heading has moved off index.md").toBeGreaterThan(-1);
+
+	const section = index.slice(start + 1);
+	const next = section.indexOf("\n## ", 1);
+	return next === -1 ? section : section.slice(0, next);
+}
+
+/** The Tailwind Utility Reference section, and the number of the line it starts on in its page. */
+function utilityReference(): { section: string; firstLine: number } {
+	const utilities = page("utilities-editor-scrollbar.md");
+	const start = utilities.indexOf("\n## Tailwind Utility Reference\n");
+	expect(start, "the Tailwind Utility Reference heading has moved").toBeGreaterThan(-1);
+	const end = utilities.indexOf("\n## ", start + 1);
+	return {
+		section: utilities.slice(start, end === -1 ? undefined : end),
+		firstLine: utilities.slice(0, start + 1).split("\n").length,
+	};
+}
+
+describe("design-system token values", () => {
 	const declared = declaredValues();
 
-	it("reads both files", () => {
+	it("reads the stylesheet and every page", () => {
 		expect(css.length).toBeGreaterThan(1000);
+		expect(pages.length).toBeGreaterThan(10);
 		expect(doc.length).toBeGreaterThan(1000);
 		expect(declared.size).toBeGreaterThan(40);
 	});
@@ -51,22 +95,17 @@ describe("design-system.md token values", () => {
 
 	it("quotes only values that index.css actually declares", () => {
 		const stale: string[] = [];
-		const lines = doc.split(/\r?\n/);
 
-		lines.forEach((line, i) => {
+		lines.forEach(({ line, at }) => {
 			for (const m of line.matchAll(QUOTED)) {
 				const token = m[1];
 				const quoted = m[2].split(/\s+/).join(" ");
 				const values = declared.get(token);
 				if (!values) {
-					stale.push(
-						`design-system.md:${i + 1}  --${token} is not declared in index.css`
-					);
+					stale.push(`${at}  --${token} is not declared in index.css`);
 				} else if (!values.has(quoted)) {
 					stale.push(
-						`design-system.md:${i + 1}  --${token}: doc says "${quoted}", index.css has ${[
-							...values,
-						]
+						`${at}  --${token}: doc says "${quoted}", index.css has ${[...values]
 							.map((v) => `"${v}"`)
 							.join(" / ")}`
 					);
@@ -110,12 +149,7 @@ describe("design-system.md token values", () => {
 	// checkable where the prose around it is not, and this cannot go stale
 	// itself: it reads whatever the table currently names.
 	it("names source files that exist on disk", () => {
-		const start = doc.indexOf("\n## Source Files\n");
-		expect(start, "the Source Files heading has moved").toBeGreaterThan(-1);
-
-		const section = doc.slice(start + 1);
-		const next = section.indexOf("\n## ", 1);
-		const table = next === -1 ? section : section.slice(0, next);
+		const table = sourceFilesTable();
 
 		// First column only, backtick-quoted: `| \`app/src/index.css\` | … |`.
 		const paths = [...table.matchAll(/^\| `([^`]+)` \|/gm)].map((m) => m[1]);
@@ -133,10 +167,7 @@ describe("design-system.md token values", () => {
 	// PascalCase word; it has to appear in the file the row names. Lowercase
 	// words, hyphenated tokens and directories (`hero/`) are prose.
 	it("names only symbols its Source Files row's file contains", () => {
-		const start = doc.indexOf("\n## Source Files\n");
-		const section = doc.slice(start + 1);
-		const next = section.indexOf("\n## ", 1);
-		const table = next === -1 ? section : section.slice(0, next);
+		const table = sourceFilesTable();
 
 		const BACKTICKED = /`([A-Za-z_$][\w$]*)(?:\([^`]*\))?`/g;
 		const CASED_WORD = /\b(?:[a-z]+[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*)\b/g;
@@ -169,7 +200,6 @@ describe("design-system.md token values", () => {
 	// the switch sat that way - stranded when two branches' edits to the page
 	// merged. Fenced blocks are skipped: a snippet may hold a `|` line of its own.
 	it("has no table row stranded without its header and separator", () => {
-		const lines = doc.split(/\r?\n/);
 		const SEPARATOR = /^\|(?:\s*:?-+:?\s*\|)+\s*$/;
 
 		const stranded: string[] = [];
@@ -179,16 +209,16 @@ describe("design-system.md token values", () => {
 		const endRun = (end: number) => {
 			if (runStart === -1) return;
 			tables++;
-			const isTable = end - runStart >= 2 && SEPARATOR.test(lines[runStart + 1]);
+			const isTable = end - runStart >= 2 && SEPARATOR.test(lines[runStart + 1].line);
 			if (!isTable) {
 				stranded.push(
-					`design-system.md:${runStart + 1}-${end}  ${end - runStart} pipe line(s) with no header and separator: ${lines[runStart].slice(0, 60)}`
+					`${lines[runStart].at}-${lines[end - 1].at}  ${end - runStart} pipe line(s) with no header and separator: ${lines[runStart].line.slice(0, 60)}`
 				);
 			}
 			runStart = -1;
 		};
 
-		lines.forEach((line, i) => {
+		lines.forEach(({ line }, i) => {
 			if (/^\s*```/.test(line)) {
 				endRun(i);
 				inFence = !inFence;
@@ -216,10 +246,7 @@ describe("design-system.md token values", () => {
 	// when index.css defines it as a class, or when the app's own source writes
 	// it - the last covers the built-in utilities (`font-mono`, `hover:bg-accent`).
 	it("lists only utility classes something defines or the app writes", async () => {
-		const start = doc.indexOf("\n## Tailwind Utility Reference\n");
-		expect(start, "the Tailwind Utility Reference heading has moved").toBeGreaterThan(-1);
-		const end = doc.indexOf("\n## ", start + 1);
-		const section = doc.slice(start, end === -1 ? undefined : end);
+		const { section } = utilityReference();
 
 		// Variant prefixes (`hover:`, `dark:`) and an opacity suffix (`/10`) change
 		// when a class applies, not whether it exists.
@@ -291,10 +318,11 @@ describe("design-system.md token values", () => {
 	// `[data-density="comfortable"]` declarations, rather than trusting the
 	// doc's own table.
 	it("keeps the Chrome, Target and Icon Floors table in step with index.css", () => {
-		const start = doc.indexOf("### Chrome, Target and Icon Floors");
+		const floors = page("spacing-and-floors.md");
+		const start = floors.indexOf("\n## Chrome, Target and Icon Floors\n");
 		expect(start, "the Chrome, Target and Icon Floors heading has moved").toBeGreaterThan(-1);
-		const next = doc.indexOf("\n### ", start + 1);
-		const section = next === -1 ? doc.slice(start) : doc.slice(start, next);
+		const next = floors.indexOf("\n## ", start + 1);
+		const section = next === -1 ? floors.slice(start) : floors.slice(start, next);
 
 		const rows = [
 			...section.matchAll(/\| `(--spacing-[a-z-]+)` \| `[a-z-]+` \| (\d+)px \| (\d+)px \|/g),
@@ -382,23 +410,23 @@ describe("design-system.md token values", () => {
 		];
 
 		const hits: string[] = [];
-		const check = (lineNo: number, line: string) => {
+		const check = (at: string, line: string) => {
 			for (const [label, pattern] of banned) {
 				if (pattern.test(line)) {
-					hits.push(`design-system.md:${lineNo}  ${label}: ${line.trim().slice(0, 88)}`);
+					hits.push(`${at}  ${label}: ${line.trim().slice(0, 88)}`);
 				}
 			}
 		};
 
 		let inFence = false;
 		let scannedBlocks = 0;
-		doc.split(/\r?\n/).forEach((line, i) => {
+		lines.forEach(({ line, at }) => {
 			if (/^\s*```/.test(line)) {
 				inFence = !inFence;
 				if (inFence) scannedBlocks++;
 				return;
 			}
-			if (inFence) check(i + 1, line);
+			if (inFence) check(at, line);
 		});
 		expect(inFence, "a fenced block is never closed").toBe(false);
 		expect(
@@ -408,20 +436,16 @@ describe("design-system.md token values", () => {
 
 		// The Tailwind Utility Reference is tables, not fences, and is where the
 		// bare status foregrounds were last found.
-		const start = doc.indexOf("\n## Tailwind Utility Reference\n");
-		expect(start, "the Tailwind Utility Reference heading has moved").toBeGreaterThan(-1);
-		const end = doc.indexOf("\n## ", start + 1);
-		const firstLine = doc.slice(0, start + 1).split("\n").length;
-		const tableRows = doc
-			.slice(start, end === -1 ? undefined : end)
+		const { section, firstLine } = utilityReference();
+		const tableRows = section
 			.split("\n")
-			.map((line, i) => ({ line, lineNo: firstLine + i }))
+			.map((line, i) => ({ line, at: `utilities-editor-scrollbar.md:${firstLine + i}` }))
 			.filter(({ line }) => line.startsWith("|"));
 		expect(
 			tableRows.length,
 			"no utility-table rows found - has the table moved?"
 		).toBeGreaterThan(10);
-		for (const { line, lineNo } of tableRows) check(lineNo, line);
+		for (const { line, at } of tableRows) check(at, line);
 
 		expect(hits.join("\n")).toBe("");
 	});

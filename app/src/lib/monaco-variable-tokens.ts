@@ -6,25 +6,22 @@
  */
 
 /**
- * The `{{token}}` affordances of a single-line field, expressed for Monaco.
+ * The `{{token}}` affordances of a single-line field, expressed for Monaco (#1220, #1320). A
+ * `VariableInput` paints a strip of real DOM tokens over its `<input>`, so a variable there can
+ * carry a colour, a tooltip and a popover trigger. A Monaco editor draws its own text and has no
+ * DOM to hang them on, so the same three answers arrive as decorations (the colour), and as the
+ * app's own tooltip and the shared `VariablePopover` drawn over the token's screen rectangle (the
+ * reading and the editing).
  *
- * A `VariableInput` paints a strip of real DOM tokens over its `<input>`, so a
- * variable there can carry a colour, a tooltip and a popover trigger. A Monaco
- * editor has no DOM to hang them on - its text is drawn by the editor - so the
- * same three answers arrive as decorations (the colour), and as the app's own
- * tooltip and the shared `VariablePopover` drawn over the token's screen
- * rectangle (the reading and the editing). Issues #1220 and #1320.
+ * This module is the pure half: where the tokens are in a model, and which class paints each state.
+ * The tooltip, the popover and the mouse handlers live in
+ * `components/shared/EditorVariableTokens/`, where React is.
  *
- * This module is the pure half: where the tokens are in a model, and which
- * class paints each state. The tooltip, the popover and the mouse handlers live
- * in `components/shared/EditorVariableTokens/`, which is where React is.
- *
- * **The states, and their classes, are `EditableVariable`'s.** The overlay
- * strip paints `text-destructive-text` (wavy-underlined) /
- * `text-muted-foreground` / `text-primary-text` through Tailwind; Monaco's
- * `inlineClassName` needs a plain global class, so `index.css` declares one
- * per state built from the same tokens. A reader who sees the same `{{name}}`
- * in a URL and in the body beneath it sees one paint.
+ * **The states, and their classes, are `EditableVariable`'s.** The overlay strip paints
+ * `text-destructive-text` (wavy-underlined) / `text-muted-foreground` / `text-primary-text` through
+ * Tailwind; Monaco's `inlineClassName` needs a plain global class, so `index.css` declares one per
+ * state built from the same tokens, and the same `{{name}}` in a URL and in the body beneath it
+ * gets one paint.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -41,19 +38,17 @@ export interface VariableTokenRange {
 	/** 1-based column just past the final `}` (or the closing quote). */
 	endColumn: number;
 	/**
-	 * How a script's span should be classified, when that differs from the
-	 * merged ladder (`classifyVariableToken`'s default) - see
-	 * `lib/script-variable-tokens.ts`. Always `undefined` for a body-language
-	 * token, which has only the one reading.
+	 * How a script's span should be classified, when that differs from the merged ladder
+	 * (`classifyVariableToken`'s default); see `lib/script-variable-tokens.ts`. Always `undefined`
+	 * for a body-language token, which has only the one reading.
 	 */
 	scriptHint?: ScriptTokenHint;
 }
 
 /**
- * What a model can be read through, so the scan needs no Monaco instance.
- *
- * The two methods `ITextModel` already has, and the whole surface a test has to
- * stand up - the reason this file is testable in the node environment.
+ * What a model can be read through, so the scan needs no Monaco instance: the two methods
+ * `ITextModel` already has, and the whole surface a test has to stand up, which is why this file is
+ * testable in the node environment.
  */
 export interface ScannableModel {
 	getLineCount(): number;
@@ -61,17 +56,14 @@ export interface ScannableModel {
 }
 
 /**
- * Every `{{name}}` in the model, line by line.
+ * Every `{{name}}` in the model, line by line. Per line rather than over `getValue()`: Monaco
+ * addresses text as line and column, so a whole-document scan would have to map offsets back to
+ * positions itself, and `VARIABLE_PATTERN` does not cross a newline anyway (`[^{}]+` matches one,
+ * but a token spanning lines is a mis-typed brace, not a variable anything resolves).
  *
- * Per line rather than over `getValue()`: Monaco addresses text as line and
- * column, so a whole-document scan would have to map offsets back to positions
- * itself - and `VARIABLE_PATTERN` does not cross a newline anyway (`[^{}]+`
- * matches one, but a token spanning lines is a mis-typed brace, not a variable
- * anything resolves).
- *
- * @param maxLines Stop after this many lines. A response body pasted into an
- * editor can be tens of thousands of lines, and painting the ones nobody has
- * scrolled to costs the same as painting the ones they have.
+ * @param maxLines Stop after this many lines. A response body pasted into an editor can be tens of
+ *        thousands of lines, and painting the ones nobody has scrolled to costs the same as
+ *        painting the ones they have.
  */
 export function variableTokenRanges(model: ScannableModel, maxLines = 5000): VariableTokenRange[] {
 	const ranges: VariableTokenRange[] = [];
@@ -105,10 +97,8 @@ export function variableTokensInLine(line: string, lineNumber: number): Variable
 }
 
 /**
- * The class that paints each state, declared in `index.css`.
- *
- * Prefixed and spelled out rather than composed, so a search for the class in
- * the stylesheet finds the one that produced it.
+ * The class that paints each state, declared in `index.css`. Prefixed and spelled out rather than
+ * composed, so a search for the class in the stylesheet finds the one that produced it.
  */
 const TOKEN_CLASS: Record<string, string> = {
 	resolved: "vayu-variable-token-resolved",
@@ -123,19 +113,17 @@ const TOKEN_CLASS: Record<string, string> = {
 export type VariableTokenMatcher = (model: ScannableModel) => VariableTokenRange[];
 
 /**
- * Which spans an editor paints, keyed by Monaco `language` (issue #1220 script
- * support) - what used to be a single regex gated by `BODY_LANGUAGES`
- * (`useVariableCompletionProvider.ts`), which is the `{{` **completion** list's
- * own gate and nothing about painting a token that is already there. A
- * language absent from this map is not decorated at all - the response
- * viewers' `plaintext`-adjacent modes that carry no variables, and anything
- * `useEditorVariableTokens` has not been taught yet.
+ * Which spans an editor paints, keyed by Monaco `language` (#1220 script support). Not gated by
+ * `BODY_LANGUAGES` (`useVariableCompletionProvider.ts`), which is the `{{` **completion** list's
+ * own gate and nothing about painting a token that is already there. A language absent from this
+ * map is not decorated at all: the response viewers' `plaintext`-adjacent modes that carry no
+ * variables, and anything `useEditorVariableTokens` has not been taught yet.
  *
- * The four body languages share one matcher: `{{name}}` reads the same in
- * `json`, `plaintext`, `graphql` and `xml`, so a fifth entry here would be a
- * fifth copy of the same function. `javascript` gets its own, because a script
- * names a variable through `pm.*` accessors and `replaceIn(...)` as well as a
- * bare `{{name}}`, each read differently - see `script-variable-tokens.ts`.
+ * The four body languages share one matcher: `{{name}}` reads the same in `json`, `plaintext`,
+ * `graphql` and `xml`, so a fifth entry here would be a fifth copy of the same function.
+ * `javascript` gets its own, because a script names a variable through `pm.*` accessors and
+ * `replaceIn(...)` as well as a bare `{{name}}`, each read differently (see
+ * `script-variable-tokens.ts`).
  */
 export const VARIABLE_TOKEN_MATCHERS: Record<string, VariableTokenMatcher> = {
 	json: variableTokenRanges,

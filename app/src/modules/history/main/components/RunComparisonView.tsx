@@ -6,19 +6,15 @@
  */
 
 /**
- * RunComparisonView
+ * The open load run against any other finished load run of the same request or collection: every
+ * latency percentile, both throughput measures, the reliability rows and the status-code merge, and
+ * for MCP runs that both counted them the failure classes, under the comparability warnings. It is
+ * the full diff behind the report's vs-baseline strip, and replaces the report's tabs in the same
+ * pane rather than opening a tab (#2164).
  *
- * The open load run against any other finished load run of the same request or
- * collection:
- * every latency percentile, both throughput measures, the reliability rows and
- * the status-code merge, under the comparability warnings. It is the full diff
- * behind the report's vs-baseline strip, and it replaces the report's
- * tabs in the same pane rather than opening a tab of its own (#2164).
- *
- * The compared run defaults to the pinned baseline when there is one and it is
- * not the open run, else the newest other run. The compared run is the base and
- * the open run the target, as in `BaselineComparison`: a delta reads "this run
- * against that one".
+ * The compared run defaults to the pinned baseline when there is one and it is not the open run,
+ * else the newest other run. The compared run is the base and the open run the target, as in
+ * `BaselineComparison`: a delta reads "this run against that one".
  */
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -43,7 +39,12 @@ import { DetailSkeleton, EmptyState, ErrorState, RUN_STATUS } from "@/components
 import { STATUS_CLASS_STYLE, httpStatusClass, statusCodeLabel } from "@/constants/http-status";
 import { formatNumber } from "@/lib/format-number";
 import { formatInstant } from "@/lib/time-value";
-import { compareReports, type MetricDelta } from "@/lib/run-compare";
+import {
+	ERROR_CLASS_KEYS,
+	compareReports,
+	type ErrorClassDeltas,
+	type MetricDelta,
+} from "@/lib/run-compare";
 import { runIdentityNoun } from "@/lib/run-reference-input";
 import { cn } from "@/lib/utils";
 import {
@@ -56,6 +57,7 @@ import {
 } from "@/queries";
 import type { Run, RunReport } from "@/types";
 import { comparableRuns } from "./comparable-runs";
+import { ERROR_CLASS_LABELS } from "./error-classes";
 import { METRIC_LABELS, formatValue } from "./run-comparison-format";
 import { ComparabilityWarnings, DeltaChange } from "./run-comparison-parts";
 import { NOT_RECORDED } from "./unrecorded-figures";
@@ -163,6 +165,57 @@ function StatusCodeTable({
 	);
 }
 
+/**
+ * The failed-MCP-reply classes of both runs (#3828). Empty unless both recorded
+ * them, so a baseline stored before the engine counted them draws nothing
+ * rather than a column of zeros that reads as a regression.
+ */
+function ErrorClassTable({ errorClasses }: { errorClasses: ErrorClassDeltas }) {
+	const classes = ERROR_CLASS_KEYS.filter((key) => errorClasses[key]);
+	if (classes.length === 0) return null;
+
+	return (
+		<section className="flex flex-col gap-2" aria-label="Error classes">
+			<h3 className="text-sm font-semibold text-foreground">Error classes</h3>
+			<Card className="overflow-hidden">
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead>Error class</TableHead>
+							{COLUMN_HEADS.map((head) => (
+								<TableHead key={head}>{head}</TableHead>
+							))}
+						</TableRow>
+					</TableHeader>
+					<TableBody>
+						{classes.map((key) => {
+							const { base, target } = errorClasses[key] ?? { base: 0, target: 0 };
+							const change = target - base;
+							return (
+								<TableRow key={key}>
+									<TableCell className="font-medium">
+										{ERROR_CLASS_LABELS[key]}
+									</TableCell>
+									<TableCell className="tabular-nums">
+										{formatNumber(base)}
+									</TableCell>
+									<TableCell className="tabular-nums">
+										{formatNumber(target)}
+									</TableCell>
+									<TableCell className="tabular-nums text-muted-foreground">
+										{change > 0 ? "+" : ""}
+										{formatNumber(change)}
+									</TableCell>
+								</TableRow>
+							);
+						})}
+					</TableBody>
+				</Table>
+			</Card>
+		</section>
+	);
+}
+
 /** The diff of one chosen run against the open one, once it is chosen. */
 function ComparisonPanel({
 	comparedId,
@@ -239,6 +292,7 @@ function ComparisonPanel({
 				</Table>
 			</Card>
 			<StatusCodeTable statusCodes={comparison.statusCodes} />
+			<ErrorClassTable errorClasses={comparison.errorClasses} />
 		</>
 	);
 }

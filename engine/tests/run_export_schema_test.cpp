@@ -52,10 +52,10 @@ json healthy_summary () {
         { "requests_sent", 100 }, { "requests_expected", 100 },
         { "sending_duration", 9.8 }, { "completed_while_sending", 97 },
         { "peak_concurrency", 5 }, { "avg_in_flight", 4.2 },
-        { "dropped_requests", 0 }, { "skipped_requests", 3 },
-        { "stalled_ms", 300.0 }, { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 },
-        { "bytes_received", 5000 }, { "http_version_downgraded", 0 },
-        { "connection_replays", 2 }, { "status_codes", { { "200", 100 } } },
+        { "dropped_requests", 0 }, { "skipped_requests", 3 }, { "stalled_ms", 300.0 },
+        { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 }, { "bytes_received", 5000 },
+        { "http_version_downgraded", 0 }, { "connection_replays", 2 },
+        { "status_codes", { { "200", 100 } } }, { "error_classes", json::object () },
         { "latency",
         { { "min", 1.0 }, { "max", 9.0 }, { "avg", 3.0 }, { "p50", 2.0 }, { "p75", 3.0 },
         { "p90", 4.0 }, { "p95", 5.0 }, { "p99", 8.0 }, { "p999", 9.0 } } },
@@ -599,6 +599,27 @@ TEST_F (RunExportSchemaTest, ARunWhoseDrainAStopCutValidatesAndIsNotJudged) {
     EXPECT_FALSE (whole["report"]["summary"].contains ("drainCut"));
 }
 
+// #3828: a run's failed `mcp` replies by class reach the document's summary
+// and validate; a run stored before them has no key. Mutation check: drop the
+// `errorClasses` pick in `summary_section` and the presence assertion fails;
+// drop the property from the schema and the validation does.
+TEST_F (RunExportSchemaTest, ARunsFailedRepliesByClassValidate) {
+    json summary             = healthy_summary ();
+    summary["status_codes"]  = { { "200", 90 }, { "0", 8 }, { "400", 2 } };
+    summary["error_classes"] = json::parse (
+    R"({"tool":6,"protocol":2,"transport":2,"protocolCodes":{"-32602":1,"other":1}})");
+    seed ("run_classes", vayu::RunStatus::Completed, summary);
+    const json document = expect_valid (json{ { "runId", "run_classes" } });
+    EXPECT_EQ (document["report"]["summary"].value ("errorClasses", json ()),
+    summary["error_classes"]);
+
+    json older = healthy_summary ();
+    older.erase ("error_classes");
+    seed ("run_classes_older", vayu::RunStatus::Completed, older);
+    const json whole = expect_valid (json{ { "runId", "run_classes_older" } });
+    EXPECT_FALSE (whole["report"]["summary"].contains ("errorClasses"));
+}
+
 // #2817: the allowlist has to name the saturation keys or the export drops the
 // level a plateau reports, and the schema has to name them or the document is
 // refused. Mutation check: drop "saturationRps" from CAPACITY_KEYS and the
@@ -635,6 +656,21 @@ TEST_F (RunExportSchemaTest, ARunWithABaseValidates) {
     EXPECT_FALSE (comparison["differences"].empty ());
     EXPECT_FALSE (comparison["deltas"].empty ());
     EXPECT_FALSE (comparison["statusCodes"].empty ());
+}
+
+// #3828: a comparison with classes in it, so the schema reads their shape.
+TEST_F (RunExportSchemaTest, AComparisonCarryingFailureClassesValidates) {
+    json healthy             = healthy_summary ();
+    healthy["error_classes"] = json{ { "tool", 1 } };
+    json failing             = failing_summary ();
+    failing["error_classes"] =
+    json{ { "transport", 4 }, { "tool", 6 }, { "protocolCodes", { { "other", 1 } } } };
+    seed ("run_healthy", vayu::RunStatus::Stopped, healthy);
+    seed ("run_failing", vayu::RunStatus::Completed, failing);
+    const json document =
+    expect_valid (json{ { "runId", "run_failing" }, { "baseRunId", "run_healthy" } });
+    EXPECT_EQ (document["comparison"]["errorClasses"],
+    json::parse (R"({"transport":{"base":0,"target":4},"tool":{"base":1,"target":6}})"));
 }
 
 // #2386: a second with no completion is stored without percentile keys, and

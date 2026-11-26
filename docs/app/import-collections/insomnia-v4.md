@@ -18,7 +18,7 @@ Parses an Insomnia "Export v4" JSON document into the Vayu draft model. Insomnia
 > `engine/tests/fixtures/import-conformance.json` was recorded from the parser
 > this replaced and is asserted against on every build - it is simply read by
 > `engine/src/core/import_document.cpp` now, behind
-> [`POST /import/parse`](../../engine/api-reference.md#post-importparse), rather
+> [`POST /import/parse`](../../engine/api-reference/import.md#post-importparse), rather
 > than in the renderer. Module names in C++ style below name that file's
 > functions; the app holds no parser.
 
@@ -208,7 +208,7 @@ Lossy / dropped, summary:
 
 ## Malformed exports
 
-Insomnia itself only emits arrays and string mime types, so the shapes below mean a hand-edited or script-mangled file. Each throws `Error("Malformed Insomnia export: <detail>")`, which `ImportModal` shows verbatim - previously they surfaced as a raw `TypeError` ("Cannot read properties of undefined (reading 'map')") or, for a cycle, a `RangeError`. Nothing is persisted either way: the parse happens before any write.
+Insomnia itself only emits arrays and string mime types, so the shapes below mean a hand-edited or script-mangled file. Each throws `Error("Malformed Insomnia export: <detail>")`, which `ImportModal` shows verbatim, rather than a raw `TypeError` ("Cannot read properties of undefined (reading 'map')") or, for a cycle, a `RangeError`. Nothing is persisted either way: the parse happens before any write.
 
 | Input | Detail |
 |-------|--------|

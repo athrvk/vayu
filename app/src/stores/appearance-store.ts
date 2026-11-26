@@ -6,24 +6,19 @@
  */
 
 /**
- * Appearance store
+ * The renderer-only interface preferences (UI font, interface scale, corner roundedness, interface
+ * density), and the single place each one is written. Seeded from localStorage at module load;
+ * `useAppearance` re-asserts them against the live DOM on mount, and `useMenuActions` bridges the
+ * View menu's zoom items into `nudgeScale` / `resetScale`.
  *
- * The renderer-only interface preferences - UI font, interface scale, corner
- * roundedness, interface density - and the single place each one is written. Seeded from
- * localStorage at module load. `useAppearance` re-asserts them against the live
- * DOM on mount; `useMenuActions` bridges the View menu's zoom items into
- * `nudgeScale` / `resetScale`.
+ * A store, not `useState` in the hook: the settings slider and the native Ctrl+= / Ctrl+- / Ctrl+0
+ * accelerators must move the *same* scale, and the hook is mounted twice (the app shell and the
+ * Appearance panel), so per-instance state let the panel read "100%" while the window rendered
+ * 133%.
  *
- * Why a store rather than `useState` inside the hook: scale now has two inputs.
- * The settings slider and the native Ctrl+= / Ctrl+- / Ctrl+0 accelerators must
- * move the *same* value, and the hook is mounted twice (the app shell and the
- * Appearance panel). Per-instance state let the panel keep reading "100%" while
- * the window rendered 133% - the desync this store exists to remove.
- *
- * Persistence is one localStorage key per preference, written by the action
- * rather than by zustand's `persist`: the pre-paint script in index.html reads
- * those exact keys before React mounts, and `SETTINGS_STORAGE_KEYS` clears them
- * on "Reset app settings".
+ * One localStorage key per preference, written by the action rather than by zustand's `persist`:
+ * the pre-paint script in index.html reads those exact keys before React mounts, and
+ * `SETTINGS_STORAGE_KEYS` clears them on "Reset app settings".
  */
 
 import { create } from "zustand";
@@ -48,14 +43,10 @@ import {
 } from "@/constants/appearance";
 
 /**
- * localStorage, or null where there is none.
- *
- * The state below is seeded at module load, so an import from a context with no
- * DOM - a node-environment test reaching the `@/stores` barrel - would
- * otherwise throw before a single action ran. index.html's pre-paint script
- * already makes the same concession for these same four preferences
- * ("localStorage unavailable - the hooks apply on mount"): a cosmetic
- * preference degrades to its default rather than taking the renderer down.
+ * localStorage, or null where there is none. The state below is seeded at module load, so an import
+ * with no DOM (a node-environment test reaching the `@/stores` barrel) would otherwise throw before
+ * any action ran. index.html's pre-paint script makes the same concession for these four
+ * preferences: a cosmetic preference degrades to its default rather than taking the renderer down.
  */
 function storage(): Storage | null {
 	try {
@@ -79,9 +70,8 @@ function applyRadius(radius: UiRadius): void {
 }
 
 /**
- * "default" removes the attribute rather than setting it explicitly: the
- * tightened `--spacing` lives on `:root` itself in index.css, and only
- * "comfortable" needs a selector to override it.
+ * "default" removes the attribute: the tightened `--spacing` lives on `:root` itself in index.css,
+ * and only "comfortable" needs a selector to override it.
  */
 function applyDensity(density: UiDensity): void {
 	if (density === "comfortable") {

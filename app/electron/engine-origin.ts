@@ -8,48 +8,41 @@
 /**
  * The renderer's CORS, done by the shell rather than by the engine.
  *
- * The invariant: **the engine serves no browser and emits no CORS header.** It
- * refuses every non-`OPTIONS` request that carries an `Origin` (any value,
- * `null` included) and every request whose `Host` is not its own loopback
- * address, so a page in the user's browser can neither read it nor drive it.
+ * The invariant: **the engine serves no browser and emits no CORS header.** It refuses every
+ * non-`OPTIONS` request that carries an `Origin` (any value, `null` included) and every request
+ * whose `Host` is not its own loopback address, so a page in the user's browser can neither read it
+ * nor drive it.
  *
- * The renderer is a browser context as well, so this bridge is the only reason
- * it can talk to the engine at all. On the session the main window uses, every
- * request to `engineOrigin()` loses its `Origin` and `Referer` (both name the
- * renderer's location) and every response from it gains the headers the
- * renderer's own CORS check asks for. Both builds need all of it: in
- * development the renderer is the Vite server, and packaged it is
- * `vayu-app://app` (#2380), a real origin that sends an `Origin` and a
- * preflight like any other.
+ * The renderer is a browser context too, so this bridge is the only reason it can talk to the
+ * engine at all. On the session the main window uses, every request to `engineOrigin()` loses its
+ * `Origin` and `Referer` (both name the renderer's location) and every response from it gains the
+ * headers the renderer's own CORS check asks for. Both builds need all of it: in development the
+ * renderer is the Vite server, and packaged it is `vayu-app://app` (#2380), a real origin that
+ * sends an `Origin` and a preflight like any other.
  *
- * **The URL filter is the whole boundary.** Chromium's filter is every
- * candidate origin, because it is registered once and the port is chosen at
- * runtime; the handlers then touch only the one the session's engine has
- * (`isEngineUrl`), and the bridge grants nothing beyond that origin. It is safe only
- * because nothing but the app's own document runs in this session: the OAuth
- * windows load third-party pages in `oauth:` partitions of their own, and
- * `window-navigation.ts` keeps the main window on the app. Loading untrusted
- * content into this session would hand it the engine.
+ * **The URL filter is the whole boundary.** Chromium's filter is every candidate origin, because it
+ * is registered once and the port is chosen at runtime; the handlers then touch only the one the
+ * session's engine has (`isEngineUrl`), and the bridge grants nothing beyond that origin. It is
+ * safe only because nothing but the app's own document runs in this session: the OAuth windows load
+ * third-party pages in `oauth:` partitions of their own, and `window-navigation.ts` keeps the main
+ * window on the app. Loading untrusted content into this session would hand it the engine.
  *
- * Electron keeps one listener per `webRequest` event per session, and a second
- * registration silently replaces the first. A future concern that needs these
- * events therefore joins this module (widen the filter, add its own branch to
- * the handlers) instead of registering beside it; `engine-origin.test.ts` fails
- * on a `webRequest` registration anywhere else under `electron/`.
+ * Electron keeps one listener per `webRequest` event per session, and a second registration
+ * silently replaces the first, so a future concern that needs these events joins this module (widen
+ * the filter, add its own branch to the handlers) instead of registering beside it;
+ * `engine-origin.test.ts` fails on a `webRequest` registration anywhere else under `electron/`.
  *
- * Kept free of Electron at runtime so the handlers are unit-tested over plain
- * `details` objects; `installEngineOriginBridge` is the one place they meet a
- * real session.
+ * Kept free of Electron at runtime so the handlers are unit-tested over plain `details` objects;
+ * `installEngineOriginBridge` is the one place they meet a real session.
  */
 
 import type { Session } from "electron";
 import { ENGINE_CANDIDATE_ORIGINS, engineOrigin } from "./engine-endpoint.js";
 
 /**
- * What Chromium matches before any handler runs. One host, one scheme, the
- * candidate ports (#2118): `localhost:9876` and `[::1]:9876` reach the same
- * engine but are not the renderer's address for it, so a request to either
- * keeps its `Origin` and the engine refuses it.
+ * What Chromium matches before any handler runs: one host, one scheme, the candidate ports (#2118).
+ * `localhost:9876` and `[::1]:9876` reach the same engine but are not the renderer's address for
+ * it, so a request to either keeps its `Origin` and the engine refuses it.
  */
 export const ENGINE_REQUEST_FILTER = {
 	urls: ENGINE_CANDIDATE_ORIGINS.map((origin) => `${origin}/*`),
@@ -112,9 +105,8 @@ export interface EngineResponseDetails {
 }
 
 /**
- * The preflight's question, or null for any other request. A preflight is an
- * `OPTIONS` carrying `Access-Control-Request-Method`; a bare `OPTIONS` is an
- * ordinary request.
+ * The preflight's question, or null for any other request: a preflight is an `OPTIONS` carrying
+ * `Access-Control-Request-Method`, and a bare `OPTIONS` is an ordinary request.
  */
 export function preflightAsk(details: EngineRequestDetails): PreflightAsk | null {
 	if (details.method !== "OPTIONS") return null;
@@ -132,13 +124,11 @@ export function withoutRendererLocation(
 }
 
 /**
- * The response with the CORS headers the renderer's check needs. Every request
- * gets `Access-Control-Allow-Origin: *`; a preflight's answer also echoes the
- * method and headers it asked for. Any copy the engine already sent is replaced,
- * not appended to: a doubled `*, *` fails the check.
- *
- * The wildcard is enough because the renderer never sends credentials to the
- * engine; a credentialed request would need the origin echoed instead.
+ * The response with the CORS headers the renderer's check needs: `Access-Control-Allow-Origin: *`
+ * on every request, and on a preflight's answer the method and headers it asked for too. Any copy
+ * the engine already sent is replaced, not appended to: a doubled `*, *` fails the check. The
+ * wildcard is enough because the renderer never sends the engine credentials; a credentialed
+ * request would need the origin echoed instead.
  */
 export function withEngineCors(
 	responseHeaders: Record<string, string[]> | undefined,
@@ -158,10 +148,9 @@ export function withEngineCors(
 }
 
 /**
- * The bridge's handlers, holding the one piece of state they share: a response's
- * details do not carry the request's headers, so what a preflight asked for is
- * kept by request id from the moment it is sent until its response or its
- * failure arrives.
+ * The bridge's handlers and the one piece of state they share: a response's details do not carry
+ * the request's headers, so what a preflight asked for is kept by request id from the moment it is
+ * sent until its response or its failure arrives.
  */
 export function createEngineOriginBridge() {
 	const asks = new Map<number, PreflightAsk>();

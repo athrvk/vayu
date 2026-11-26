@@ -6,18 +6,13 @@
  */
 
 /**
- * One `pm.sendRequest` a script made (#3633): a summary row that expands into
- * the exchange. The Console draws it in its summary line's place, and the
- * Setup / teardown card under a lifecycle row.
- *
- * Composed from the per-concern primitives rather than `UnifiedResponseViewer`:
- * that viewer puts each body and the header lists on tabs of their own, never
- * shows the sent header lines, and pins its panels at 500px, where a script
- * request wants both bodies, both header lists and the timing in one short
- * stack.
- *
- * The record is masked by the engine where it is built, so every value is
- * drawn as written: a `<redacted>` header is the engine's word, not ours.
+ * One `pm.sendRequest` a script made (#3633): a summary row expanding into the exchange, drawn by
+ * the Console in its summary line's place and by the Setup / teardown card under a lifecycle row.
+ * Built from the per-concern primitives, not `UnifiedResponseViewer`, which tabs each body and
+ * header list apart, never shows sent header lines and pins panels at 500px, where a script request
+ * wants both bodies, both header lists and the timing in one short stack. The engine masks the
+ * record where it builds it, so values are drawn as written: a `<redacted>` header is the engine's
+ * word.
  */
 
 import { useMemo, useState } from "react";
@@ -86,8 +81,8 @@ export function ScriptRequestRow({ record, className }: ScriptRequestRowProps) {
 }
 
 /**
- * The expansion. A `Card` of its own, so it declares the surface its rules
- * read on: it nests inside the Console's sunken slab as well as inside a card.
+ * The expansion, a `Card` of its own so it declares the surface its rules read on, nesting in the
+ * Console's sunken slab as well as a card.
  */
 function ScriptRequestDetail({
 	record,
@@ -100,8 +95,8 @@ function ScriptRequestDetail({
 }) {
 	const { request } = record;
 	const requestHeaders = request.sentHeaders || request.headers || {};
-	// Memoized: a base64 body decodes to fresh bytes on every call, and an
-	// image preview keyed on them would make a new object URL per render.
+	// Memoized: a base64 body decodes to fresh bytes each call, and an image preview keyed on them
+	// would mint an object URL per render.
 	const response = useMemo(
 		() => (record.response ? responseHeadFromTrace(record.response) : undefined),
 		[record.response]
@@ -163,8 +158,8 @@ function ScriptRequestDetail({
 }
 
 /**
- * A body in a fixed band: `ResponseBody`'s editor fills its parent, and this
- * stack has no height of its own to give it.
+ * A body in a fixed band: `ResponseBody`'s editor fills its parent, and this stack has no height to
+ * give it.
  */
 function BodySection({
 	title,

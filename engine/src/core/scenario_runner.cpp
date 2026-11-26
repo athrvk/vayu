@@ -27,6 +27,7 @@
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/core/transaction_histograms.hpp"
 #include "vayu/core/vayu_extensions.hpp"
+#include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/sse_stream.hpp"
@@ -47,28 +48,26 @@ int64_t runner_now_ms () {
     .count ();
 }
 
-/**
- * Whether the exchange's error is the run's cancel landing (#3397): its
- * transfer answered `Cancelled`, or the late OAuth 2.0 token request ahead of
- * it was cancelled, which `acquire_token` reports as the network failure it
- * cannot tell a cancel from (`transport_failure` in `oauth_client.cpp`). Read
- * only while a Stop is latched, so a token endpoint that is down stays an error.
- */
+/// Whether the exchange's error is the run's cancel landing (#3397): its
+/// transfer answered `Cancelled`, or the late OAuth 2.0 token request ahead of
+/// it was cancelled, which `acquire_token` reports as a network failure it
+/// cannot tell from a cancel (`transport_failure` in `oauth_client.cpp`). Read
+/// only while a Stop is latched, so a token endpoint that is down stays an
+/// error.
 bool ended_by_cancel (const vayu::http::routes::ExchangeOutcome& exchange) {
     return exchange.response.error_code == vayu::ErrorCode::Cancelled ||
     exchange.refusal_code == "oauth2_network_error";
 }
 
 /**
- * Decide what one exchange amounts to, onto @p record's outcome and error.
- *
- * The order is deliberate: a step that did not complete is `Errored` whatever
- * its scripts reported, and a script that threw is `Errored` rather than
- * `Failed`, because "the assertion did not hold" and "the assertion never ran"
- * are different facts and only the first one means the run learned something.
- * Each slot holds every level's scripts folded together (#2522), so a throw or
- * a failed test at the collection or a folder counts as the request's would.
- * A step the run's Stop cut short is `Stopped` rather than `Errored` (#3397).
+ * Decides what one exchange amounts to, onto @p record's outcome and error. The
+ * order is deliberate: a step that did not complete is `Errored` whatever its
+ * scripts reported, and a script that threw is `Errored`, not `Failed`, because
+ * "the assertion did not hold" and "the assertion never ran" are different
+ * facts and only the first means the run learned something. Each slot holds
+ * every level's scripts folded together (#2522), so a throw or failed test at
+ * the collection or a folder counts as the request's would. A step the run's
+ * Stop cut short is `Stopped`, not `Errored` (#3397).
  */
 void classify_step (const vayu::http::routes::ExchangeOutcome& exchange,
 bool stop_requested,
@@ -86,10 +85,10 @@ StepRecord& record) {
         exchange.pre_script_result, "pre-request");
         return;
     }
-    // After the script check and before everything that reads a response: a
-    // script that asked to skip and then threw did both, and the throw is the
-    // fact worth reporting. A skip itself is not a failure and carries no
-    // error - but it is never a pass either (issue #180).
+    // After the script check, before anything reading a response: a script that
+    // asked to skip and then threw did both, and the throw is the fact worth
+    // reporting. A skip is no failure and carries no error, but never a pass
+    // either (#180).
     if (!exchange.sent) {
         record.outcome = StepOutcome::Skipped;
         return;
@@ -112,14 +111,11 @@ StepRecord& record) {
 
 /**
  * What this step's assertions came to, or `std::nullopt` for a step that made
- * none (issue #724).
- *
- * Both scripts, because that is what `build_script_result_node` serializes onto
- * the trace (issue #810) - the tally and the stored list count the same things,
- * so a step does not change its numbers when its row arrives. It also counts
- * what `describe_failed_tests` already fails the step on, which is what the two
- * disagreed about: a step could be `failed` by an assertion its own tally said
- * nothing about.
+ * none (#724). Both scripts, because `build_script_result_node` serializes both
+ * onto the trace (#810), so the tally and the stored list count the same things
+ * and a step keeps its numbers when its row arrives. It also counts what
+ * `describe_failed_tests` fails the step on, so a step cannot be `failed` by an
+ * assertion its own tally says nothing about.
  */
 std::optional<StepTestTally> tally_tests (const vayu::ScriptResult& pre_script_result,
 const vayu::ScriptResult& post_script_result) {
@@ -140,17 +136,14 @@ const vayu::ScriptResult& post_script_result) {
 }
 
 /**
- * @brief This run's own latency percentiles, from the steps it actually sent.
- *
- * A nearest-rank quantile over a plain sorted vector, not
- * `MetricsCollector::calculate_percentiles` (issue #1564): that collector is
- * shared and already ticking for the run's live SSE frames, sized and tuned
- * for a concurrent load run's histogram, so feeding it here only to read a
- * snapshot back at the very end would make its otherwise-idle live numbers
- * start reflecting a design-mode run mid-flight - a behaviour nobody asked
- * for. A collection run's sample count is bounded by iterations x steps
- * rather than by a load run's duration, so a sort is cheap enough to redo once
- * at the run's own finish point.
+ * This run's own latency percentiles, from the steps it sent: a nearest-rank
+ * quantile over a sorted vector, not `MetricsCollector::calculate_percentiles`
+ * (#1564). That collector is shared, already ticking for the run's live SSE
+ * frames and tuned for a concurrent load run's histogram, so feeding it here to
+ * read a snapshot at the end would make its idle live numbers reflect a
+ * design-mode run mid-flight. A collection run's sample count is bounded by
+ * iterations x steps, not a load run's duration, so one sort at the finish is
+ * cheap.
  */
 MetricsCollector::Percentiles percentiles_from_latencies (std::vector<double> latencies) {
     MetricsCollector::Percentiles result;
@@ -177,15 +170,12 @@ MetricsCollector::Percentiles percentiles_from_latencies (std::vector<double> la
 
 /**
  * The verdict one step's response gets, or `std::nullopt` for a step nothing
- * judged (issue #681).
- *
- * The resolution the design-mode hook does per response - walk to the binding,
- * read the document, parse the index - happened once when the plan resolved and
- * once more when this run parsed @p index, so what is left here is the check
- * itself. That is what the binding carrying the schemas buys: a run of 200
- * steps would otherwise re-read and re-parse a document's whole schema index
- * 200 times, and would be free to get a different answer each time if a sync
- * landed mid-run.
+ * judged (#681). The design-mode hook's per-response resolution (walk to the
+ * binding, read the document, parse the index) happened once at plan time and
+ * once when this run parsed @p index, so only the check is left. That is what
+ * the binding carrying the schemas buys: a 200-step run would otherwise re-read
+ * and re-parse a document's whole schema index 200 times, free to get a
+ * different answer if a sync landed mid-run.
  */
 std::optional<vayu::core::ValidationVerdict> validate_step_response (const SpecBinding& spec,
 const std::optional<ResponseSchemaIndex>& index,
@@ -207,9 +197,9 @@ const std::string& run_id) {
         content_type != response.headers.end () ? content_type->second : std::string (),
         response.body);
     } catch (const std::exception& e) {
-        // A validator that threw is not a response that failed, and it is
-        // certainly not a step that did - the design-mode hook's rule, for its
-        // reason. The step keeps its outcome and loses only its verdict.
+        // A validator that threw is not a failed response, still less a failed
+        // step (the design-mode hook's rule, for its reason): the step keeps
+        // its outcome and loses only its verdict.
         vayu::utils::log_warning ("run",
         "Step schema validation failed: " + std::string (e.what ()),
         { { "runId", run_id } });
@@ -218,8 +208,8 @@ const std::string& run_id) {
 }
 
 /// The step's identity, added to the design-mode trace. `restore-response.ts`
-/// reads the trace it already knows and ignores these; the app's step list
-/// (phase 3) reads these to say which step a row belongs to.
+/// reads the trace it knows and ignores these; the app's step list reads them
+/// to say which step a row belongs to.
 void stamp_step_identity (nlohmann::json& trace, const StepRecord& record) {
     trace["iteration"] = record.iteration;
     trace["stepIndex"] = record.step_index;
@@ -232,15 +222,15 @@ void stamp_step_identity (nlohmann::json& trace, const StepRecord& record) {
         trace["dataRowIndex"] = *record.data_row_index;
     }
     // Absent, not `0`, on every row but the one an error ended its iteration
-    // at, so a row of a run where nothing was lost reads as it always has.
+    // at, so a row of a run where nothing was lost carries no such key.
     if (record.steps_not_run > 0) {
         trace["stepsNotRun"] = record.steps_not_run;
     }
-    // The *same object* the SSE frame carries, on the node design mode already
-    // writes (`execution.cpp`'s `record_design_result`) - so the step list, the
-    // restored response pane and the live frame cannot come to disagree about
-    // what one response was judged to be. Absent when the step carries no
-    // verdict, which is the state that means "nobody judged this".
+    // The *same object* the SSE frame carries, on the node design mode writes
+    // (`execution.cpp`'s `record_design_result`), so the step list, the
+    // restored response pane and the live frame cannot disagree about one
+    // response's verdict. Absent when the step has no verdict, meaning "nobody
+    // judged this".
     if (record.validation) {
         trace["validation"] = build_validation_payload (*record.validation);
     }
@@ -273,10 +263,10 @@ ScenarioStepIndex build_step_index (const ScenarioPlan& plan) {
     ScenarioStepIndex index;
     for (size_t position = 0; position < plan.steps.size (); ++position) {
         index.by_name[plan.steps[position].name].push_back (position);
-        // A step whose request carries no id - the plan tests build such steps,
-        // and nothing in this type forbids one - is indexed by name alone
-        // rather than under an empty key that `setNextRequest("")` could never
-        // reach anyway (the binding refuses an empty target).
+        // A step whose request has no id (plan tests build such steps, and this
+        // type allows one) is indexed by name alone, not under an empty key
+        // `setNextRequest("")` could never reach (the binding refuses an empty
+        // target).
         if (!plan.steps[position].request_id.empty ()) {
             index.by_request_id[plan.steps[position].request_id].push_back (position);
         }
@@ -289,10 +279,9 @@ resolve_next_step (const ScenarioStepIndex& index, const std::string& target) {
     NextStepResolution resolution;
 
     // Postman's runner reads the string "null" as the stop form real `null`
-    // already means here, and the quoted spelling is endemic in collections
-    // written against it. A step actually named `null` is the more specific
-    // answer and wins - which is why this asks the name index rather than
-    // answering on the string alone.
+    // means here, and the quoted spelling is endemic in collections written for
+    // it. A step actually named `null` is the more specific answer and wins, so
+    // this asks the name index rather than the string alone.
     if (target == "null" && !index.by_name.contains (target)) {
         resolution.kind = NextStepResolution::Kind::EndIteration;
         return resolution;
@@ -356,9 +345,9 @@ size_t resolve_max_steps_per_iteration (int configured, size_t plan_steps) {
 
 std::string describe_steps_cap_exceeded (size_t max_steps_per_iteration,
 const std::deque<std::string>& recent_steps) {
-    // A jump reaches the runner as a bare target, whether a script's
-    // `setNextRequest`, a `control.switch` or a `control.loop` made it, so the
-    // message names every source rather than guess at one.
+    // A jump reaches the runner as a bare target, from a script's
+    // `setNextRequest`, a `control.switch` or a `control.loop`, so the message
+    // names every source rather than guess.
     return "Iteration exceeded maxStepsPerIteration (" +
     std::to_string (max_steps_per_iteration) +
     ") - a jump keeps sending it back, either setNextRequest or control.switch "
@@ -439,21 +428,18 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     if (record.validation) {
         data["validation"] = build_validation_payload (*record.validation);
     }
-    // The stored request this step ran (issue #831), so a step of a run being
-    // *watched* has the same way back to its request that a stored one does -
-    // the moment that link is worth most is the failure the reader is watching
-    // arrive, not the report written after it. One id is constant-size, which
-    // is what keeps it inside the ring rule the tally below states. Absent
-    // when the plan step names no stored request, on the same terms as
-    // everything else here: an empty id is not a link.
+    // The stored request this step ran (#831), so a watched step has the way
+    // back to its request a stored one does, most valuable for the failure the
+    // reader is watching arrive. One constant-size id, inside the ring rule the
+    // tally below states. Absent when the plan step names no stored request: an
+    // empty id is not a link.
     if (!record.request_id.empty ()) {
         data["requestId"] = record.request_id;
     }
-    // The assertions, as two numbers (issue #724). The list itself is on the
-    // stored row: a frame carries what is constant-size, so a step that made
-    // 400 assertions cannot push the rest of the run out of the tick ring.
-    // Absent on the same terms as everything else here - a step that asserted
-    // nothing sends no node rather than a `0/0` that reads as a result.
+    // The assertions as two numbers (#724); the list is on the stored row. A
+    // frame carries only constant-size data, so a step with 400 assertions
+    // cannot push the rest of the run out of the tick ring. Absent for a step
+    // that asserted nothing, rather than a `0/0` that reads as a result.
     if (record.tests) {
         data["tests"] = { { "passed", record.tests->passed },
             { "failed", record.tests->failed } };
@@ -535,12 +521,12 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
 
     nlohmann::json summary;
     // A request is a step that sent (#2822): a skipped step is in
-    // `scenario.steps_executed` and in neither of these. The report takes
+    // `scenario.steps_executed` and neither of these. The report takes
     // `status_codes` as the run's distribution and `total_requests` as its
-    // size, so the two count one population, and both are stored because the
+    // size, so both count one population, and both are stored because the
     // result rows stop at `maxScenarioStoredSteps`. Written even when empty:
-    // `{}` is a run in which no step sent, which the report must not read as
-    // an older summary that stored no distribution.
+    // `{}` is a run in which no step sent, not an older summary that stored no
+    // distribution.
     const auto requests_sent = vayu::count_status_failures (inputs.status_codes).total;
     summary["total_requests"] = requests_sent;
     summary["status_codes"]   = std::move (codes);
@@ -551,11 +537,12 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     // Written at 0 too, as the load path does: the report reads a missing key
     // as 0 either way, but a stored 0 says the run counted and found none.
     summary["http_version_downgraded"] = inputs.http_version_downgraded;
+    // Always written, `{}` included, the load path's rule (#3828).
+    summary["error_classes"] = inputs.error_classes.to_json ();
 
-    // The steps that sent, the same sample a latency budget judges. A run in
-    // which none did stores only `count: 0`: a block of zeros would read as
-    // steps that answered instantly, and the report route leaves the section
-    // out on this marker.
+    // The steps that sent, the sample a latency budget judges. A run in which
+    // none did stores only `count: 0`: a block of zeros would read as instant
+    // answers, and the report route leaves the section out on this marker.
     const auto& percentiles = inputs.latency.percentiles;
     summary["latency"]      = { { "count", percentiles.count } };
     if (percentiles.count > 0) {
@@ -576,57 +563,53 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
         // Stored beside the counts it qualifies, as `failOnSchemaError` is
         // beside its tally: "1 errored, 0 not run" is a different run with it.
         { "stop_on_error", inputs.stop_on_error } };
-    // `control.transaction`'s own percentiles (issue #1515) - absent for a
-    // run that declared none, matching `coverage`'s own absent-when-inactive
-    // rule above.
+    // `control.transaction`'s percentiles (#1515), absent for a run that
+    // declared none, as `coverage` is.
     if (!inputs.transactions.empty ()) {
         summary["scenario"]["transactions"] = inputs.transactions;
     }
-    // Its own top-level section rather than a member of `scenario`: coverage is
-    // about the contract, not about the sequence, and the report route surfaces
-    // it beside `thresholdValidation` for the same reason. Absent - never an
-    // empty object - for a run that was not measured against one.
+    // A top-level section, not a member of `scenario`: coverage is about the
+    // contract, not the sequence, and the report route shows it beside
+    // `thresholdValidation` for that reason. Absent, never an empty object, for
+    // a run not measured against one.
     if (!inputs.coverage.empty ()) {
         summary["coverage"] = inputs.coverage;
     }
-    // This run's custom metrics (issue #1500), under the same top-level
-    // `customMetrics` key the load path writes - one report section for
-    // both run modes, in `run_manager.cpp::build_run_summary_payload`'s
-    // shape, so `GET /runs/:id/report` reads it identically either way.
+    // This run's custom metrics (#1500), under the top-level `customMetrics`
+    // key the load path writes, in
+    // `run_manager.cpp::build_run_summary_payload`'s shape, so
+    // `GET /runs/:id/report` reads one section for both modes.
     if (inputs.custom_metrics.has_value ()) {
         summary["customMetrics"] = build_custom_metrics_payload (*inputs.custom_metrics);
     }
     if (!inputs.lifecycle.empty ()) {
         summary["lifecycle"] = inputs.lifecycle;
     }
-    // Beside coverage rather than inside it, and on the same absent-when-not-
-    // measured terms: the two answer different questions about one contract -
-    // coverage says which of it the run touched, this says whether what came
-    // back matched what it declares. A run of an unbound collection produces
-    // neither, and a zero here would read as a contract it met.
+    // Beside coverage, not inside it, on the same absent-when-not-measured
+    // terms: coverage says which of the contract the run touched, this whether
+    // what came back matched it. A run of an unbound collection produces
+    // neither, and a zero here would read as a contract met.
     //
-    // The load pass's payload builder, so the two run modes store one shape
-    // (issue #681 on #682's block), with the two things only this mode knows
-    // added on top.
+    // The load pass's payload builder, so both modes store one shape (#681 on
+    // #682's block), plus the two things only this mode knows.
     if (auto validation = build_sampled_validation_payload (inputs.validation);
     !validation.empty ()) {
         // **The denominator is every step, not a reservoir.** #682's block is
         // sampled by construction and its readers say so; this one is not, and
-        // a reader told "no sampled response failed" about a run that checked
-        // all of them has been told something narrower than the truth.
+        // "no sampled response failed" about a run that checked them all says
+        // less than the truth.
         validation["exact"] = true;
         // Stored with the tally it qualifies: a report read months later cannot
-        // recover the flag from the run's config if the config was pruned, and
-        // "3 failed" means a different run depending on it.
+        // recover the flag from a pruned config, and "3 failed" means a
+        // different run depending on it.
         validation["failOnSchemaError"] = inputs.fail_on_schema_error;
         summary["schemaValidation"]     = std::move (validation);
     }
-    // The run's verdict against the budgets its config declared (issue
-    // #1564), in the same shape and through the same writer a load run's
-    // summary uses - `GET /runs/:id/report`'s `apply_stored_summary` reads
-    // this key generically off either mode's stored summary. Omitted when
-    // the run declared no budgets, the same absent-not-zeroed rule every
-    // other optional section here follows.
+    // The verdict against the run's declared budgets (#1564), in the shape and
+    // through the writer a load run's summary uses; `apply_stored_summary`
+    // (`GET /runs/:id/report`) reads this key off either mode. Omitted when the
+    // run declared no budgets, the absent-not-zeroed rule of every optional
+    // section here.
     if (inputs.thresholds.has_value ()) {
         summary["thresholds"] = build_threshold_outcome_payload (*inputs.thresholds);
     }
@@ -658,21 +641,19 @@ struct StepContext {
     size_t max_trace_body_bytes = 0;
     /// `maxDesignResponseBodyBytes`, read once for the run (issue #1157).
     size_t max_response_bytes = 0;
-    /// `maxElementBodyBytes`, read once for the run the same way (issue
-    /// #1514's reopen) - a step of a collection run is a design-mode send,
-    /// so it reads the same bound `ExchangeInputs::max_element_body_bytes`
-    /// carries on that path.
+    /// `maxElementBodyBytes`, read once for the run (#1514): a collection-run
+    /// step is a design-mode send, so it reads the bound
+    /// `ExchangeInputs::max_element_body_bytes` carries on that path.
     size_t max_element_body_bytes = 0;
     /// The plan-wide first/last position of every scope-spanning element
     /// (issue #1515's `control.loop` / `control.transaction`), computed
     /// once before the run's first iteration.
     const std::unordered_map<std::string, vayu::core::ElementSpan>& element_spans;
-    /// Every controller kind's own state (issue #1515's `control.once`,
-    /// `control.throughput`, `control.transaction`) - one map for the
-    /// run's whole life, since a sequential run is #1512's single implicit
-    /// user. A reference member, not a value: every iteration's
-    /// `StepContext` shares the one map a controller must keep counting
-    /// into across iterations, not a fresh one each time.
+    /// Every controller kind's state (#1515's `control.once`,
+    /// `control.throughput`, `control.transaction`), one map for the run's
+    /// whole life, since a sequential run is #1512's single implicit user. A
+    /// reference: every iteration's `StepContext` shares the one map a
+    /// controller keeps counting into across iterations.
     std::unordered_map<std::string, int64_t>& controller_state;
     /// The token cache a step's OAuth 2.0 config acquires through after its
     /// pre-request script (`ExchangeInputs::token_cache`, #2521).
@@ -685,13 +666,11 @@ struct StepContext {
 
 /**
  * The exchange one step performs: its inputs, the row bound into them, and the
- * send itself.
- *
- * Composition left every `{{data.column}}` written as it stands, because only
- * this loop knows which row is bound. A token naming a column the row does not
- * carry ends the step here rather than sending a request with a hole in it - the
- * partially bound request is still kept, because the trace is where the user
- * sees the token that had no column.
+ * send. Composition left every `{{data.column}}` written, because only this
+ * loop knows which row is bound. A token naming a column the row lacks ends the
+ * step here rather than sending a request with a hole in it; the partially
+ * bound request is kept, because the trace is where the user sees the token
+ * that had no column.
  *
  * @return the binding failure, empty when the step was sent.
  */
@@ -703,9 +682,8 @@ const StepContext& ctx,
 const ScenarioStep& step,
 vayu::http::routes::ExchangeOutcome& exchange) {
     vayu::http::routes::ExchangeInputs inputs;
-    // A copy, not a move: the pre-request script writes back into
-    // this request, and the next iteration must start from the
-    // composed one rather than from whatever the last pass left.
+    // A copy, not a move: the pre-request script writes back into this request,
+    // and the next iteration must start from the composed one.
     inputs.request          = step.request;
     inputs.elements         = step.elements;
     inputs.request_id       = step.request_id;
@@ -730,13 +708,12 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     // The files the plan already checked (`ScenarioExecution::files`); a step
     // re-checks nothing it saw at plan time.
     inputs.files = ctx.execution->files.get ();
-    // The one caller that sets it: `pm.execution` throws
-    // everywhere else, because nowhere else has a sequence to
-    // redirect (issue #355).
+    // The one caller that sets it: `pm.execution` throws everywhere else, since
+    // nowhere else has a sequence to redirect (#355).
     inputs.in_scenario = true;
-    // A `timer.pacing` element's `step.before` dispatch (issue #1498) reads
-    // these off the run it belongs to - a design send's own `ExchangeInputs`
-    // leaves all four null, which is what keeps pacing meaningless there.
+    // A `timer.pacing` element's `step.before` dispatch (#1498) reads these off
+    // its run; a design send's `ExchangeInputs` leaves all four null, which
+    // keeps pacing meaningless there.
     inputs.pacing_state    = &ctx.context->pacing_state;
     inputs.rng             = &ctx.context->rng;
     inputs.timers_override = &ctx.context->timers_override;
@@ -746,34 +723,27 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     // (#3460), never waiting out a timeout.
     inputs.cancel = &ctx.context->should_stop;
     inputs.stop   = &ctx.context->should_stop;
-    // `metric.record` and `pm.metrics` (issue #1500) record into this run's
-    // own collector - a design send binds neither and reports "not
-    // available here" instead.
+    // `metric.record` and `pm.metrics` (#1500) record into this run's
+    // collector; a design send binds neither and reports "not available here".
     inputs.record_metric = [&ctx] (const std::string& name,
                            vayu::core::CustomMetricType type, double value) {
         ctx.context->metrics_collector->record_custom_metric (name, type, value);
     };
 
-    // The data pass, per iteration and before the send: composition
-    // left every `{{data.column}}` written as it stands, because
-    // only this loop knows which row is bound. A token naming a
-    // column the row does not carry ends the step here rather than
-    // sending a request with a hole in it.
+    // The data pass, per iteration, before the send (the docblock above says
+    // why here).
     std::string data_bind_error;
     if (ctx.data_row_index) {
         inputs.iteration_data = &ctx.data_rows[*ctx.data_row_index];
     }
-    // Through the step's own templates rather than re-splitting
-    // the request here, and through the one binder every
-    // executor drives, so a step cannot bind differently
-    // depending on which one ran it - fields first, then the
-    // credentials the plan deliberately left unresolved, which
-    // is the order `apply_auth` makes load-bearing (issue #591) -
-    // and the iteration's identity last (issue #994). A collection
-    // run is one user walking the sequence, so `{{$vu}}` is 1 here
-    // and `{{$iteration}}` is the run's own iteration index. Auth that waits on
-    // the step's scripts (issue #2473) lands in `late_auth`, which the exchange
-    // applies after the pre-request script.
+    // Through the step's own templates, not a re-split, and through the one
+    // binder every executor drives, so a step binds the same whichever ran it:
+    // fields first, then the credentials the plan left unresolved, the order
+    // `apply_auth` makes load-bearing (#591), and the iteration's identity last
+    // (#994). A collection run is one user walking the sequence, so `{{$vu}}`
+    // is 1 and `{{$iteration}}` the run's iteration index. Auth waiting on the
+    // step's scripts (#2473) lands in `late_auth`, which the exchange applies
+    // after the pre-request script.
     if (auto bound = bind_step_iteration (inputs.request, step, ctx.data_rows,
         ctx.data_row_index,
         IterationIdentity{ SOLE_VIRTUAL_USER, ctx.iteration }, inputs.late_auth);
@@ -785,24 +755,21 @@ vayu::http::routes::ExchangeOutcome& exchange) {
         exchange = vayu::http::routes::execute_exchange (
         script_engine, *cookie_jar, cookie_scope, scopes, std::move (inputs));
     } else {
-        // Nothing was sent and no script ran. The partially bound
-        // request is kept anyway: the trace is where the user sees
-        // the `{{data.*}}` token that had no column, which is the
-        // thing they have to go and fix.
+        // Nothing was sent and no script ran. The partially bound request is
+        // kept: the trace is where the user sees the `{{data.*}}` token that
+        // had no column, the thing to fix.
         exchange.request = std::move (inputs.request);
         exchange.sent    = false;
     }
     return data_bind_error;
 }
 
-/**
- * The URL a `step` frame carries: credentials masked as an export masks them
- * (the password of `user:pass@`, the value of a credential query parameter and
- * of the one the step's own auth wrote) but written as `<redacted>`, which a
- * frame shows where an export leaves a blank, then cut to
- * `STEP_FRAME_URL_MAX_BYTES` on a character boundary. Masked first, so a
- * credential straddling the cut cannot survive as a prefix of itself.
- */
+/// The URL a `step` frame carries: credentials masked as an export masks them
+/// (the password of `user:pass@`, a credential query parameter's value, the one
+/// the step's own auth wrote), but as `<redacted>` where an export leaves a
+/// blank, then cut to `STEP_FRAME_URL_MAX_BYTES` on a character boundary.
+/// Masked first, so a credential straddling the cut cannot survive as a prefix
+/// of itself.
 std::string step_frame_url (const vayu::Request& request) {
     std::vector<std::string> auth_params;
     if (!request.auth_query_param.empty ()) {
@@ -815,13 +782,10 @@ std::string step_frame_url (const vayu::Request& request) {
     std::string_view (masked).substr (0, STEP_FRAME_URL_MAX_BYTES)));
 }
 
-/**
- * What the step did, as the row and the frame a reader sees.
- *
- * A row that could not bind is this step's failure and is not classifiable from
- * the exchange - there is no exchange. It errors rather than skipping: a skip is
- * a script's decision, this is a request that could not be built.
- */
+/// What the step did, as the row and the frame a reader sees. A row that could
+/// not bind is the step's failure and not classifiable, as there is no
+/// exchange; it errors rather than skips: a skip is a script's decision, this a
+/// request that could not be built.
 StepRecord record_step (const StepContext& ctx,
 const ScenarioStep& step,
 const vayu::http::routes::ExchangeOutcome& exchange,
@@ -833,10 +797,7 @@ ScenarioSummaryInputs& summary) {
     record.step_index     = step.index;
     record.step_name      = step.name;
     record.request_id     = step.request_id;
-    // A row that could not bind is this step's failure and is not
-    // classifiable from the exchange - there is no exchange. It
-    // errors rather than skipping: a skip is a script's decision,
-    // this is a request that could not be built.
+    // A bind failure errors (the docblock above).
     if (!data_bind_error.empty ()) {
         record.outcome = StepOutcome::Errored;
         record.error   = data_bind_error;
@@ -855,10 +816,10 @@ ScenarioSummaryInputs& summary) {
         record.body_bytes =
         exchange.response.stream_body_bytes.value_or (exchange.response.body_size);
     }
-    // The assertions this step made (issue #724), for the frame a
-    // live watcher reads. A step whose row could not bind ran no
-    // script and gets no tally - `exchange` is the default one. Nor does a
-    // stopped step: a test script judging a cancelled send is no verdict.
+    // The step's assertions (#724), for the frame a live watcher reads. A step
+    // whose row could not bind ran no script and gets no tally (`exchange` is
+    // the default one); nor does a stopped step, since a test judging a
+    // cancelled send is no verdict.
     if (record.outcome != StepOutcome::Stopped) {
         record.tests = tally_tests (exchange.pre_script_result, exchange.post_script_result);
     }
@@ -869,31 +830,28 @@ ScenarioSummaryInputs& summary) {
         record.script_ms = exchange.script_ms;
     }
 
-    // What the contract says about what came back (issue #681).
-    // Only for a step that sent: a skipped step and one whose data
-    // row would not bind produced no response, and a `checked:
-    // false` verdict for them would be reporting on a request
-    // nobody made - the same reading that erases `response` from
-    // their trace below. A stopped step's send was cut short, so it
-    // brought back nothing to judge either.
+    // What the contract says about the response (#681), only for a step that
+    // sent: a skipped step and one whose row would not bind produced none, and
+    // a `checked: false` verdict would report on a request nobody made, the
+    // reading that erases `response` from their trace below. A stopped step's
+    // send was cut short and brought back nothing to judge either.
     if (exchange.sent && record.outcome != StepOutcome::Stopped) {
         record.validation = validate_step_response (ctx.execution->spec,
         ctx.schema_index, step, exchange.response, ctx.context->run_id);
         if (record.validation) {
-            // The step's name and status ride the tally so a failure
-            // example read far from the step list still says which
-            // step produced it - the load pass's reason, unchanged.
+            // The step's name and status ride the tally so a failure example
+            // read far from the step list still names its step, the load pass's
+            // reason.
             summary.validation.record (
             *record.validation, record.step_name, record.status_code);
         }
     }
 
-    // The opt-in, applied before flow control reads the outcome. It
-    // demotes **only a step that passed everything else**: a step
-    // already failing an assertion or a transport error keeps the
-    // error that named it, because that is the one a reader has to
-    // fix first. With the flag off - the default - a schema failure
-    // changes nothing here and lives entirely in its own channel.
+    // The opt-in, applied before flow control reads the outcome. It demotes
+    // **only a step that passed everything else**: one already failing an
+    // assertion or a transport error keeps the error that named it, the one a
+    // reader must fix first. With the flag off (the default) a schema failure
+    // changes nothing here and lives in its own channel.
     if (ctx.fail_on_schema_error && record.outcome == StepOutcome::Passed &&
     record.validation && record.validation->checked && !record.validation->valid) {
         record.outcome = StepOutcome::Failed;
@@ -903,14 +861,14 @@ ScenarioSummaryInputs& summary) {
 }
 
 /**
- * Where this iteration goes after a step that did not error, decided before
- * the row is written: an instruction that cannot be honoured is this step's
- * error, and the record has to say so while the row and the SSE event are
- * still ahead of us. An errored step's own instruction is never read here
- * (issue #2526): it came from a script that did not finish.
+ * Where this iteration goes after a step that did not error, decided before the
+ * row is written: an instruction that cannot be honoured is this step's error,
+ * and the record must say so while the row and the SSE event are still ahead.
+ * An errored step's own instruction is never read here (#2526): it came from a
+ * script that did not finish.
  *
- * @return the position the iteration continues at; @p end_iteration is set
- *         when it does not continue at all.
+ * @return the position the iteration continues at; @p end_iteration is set when
+ *         it does not continue.
  */
 size_t decide_next_step (const vayu::http::routes::ExchangeOutcome& exchange,
 const ScenarioStepIndex& step_index,
@@ -921,10 +879,9 @@ size_t max_steps_per_iteration,
 StepRecord& record,
 bool& end_iteration) {
     size_t next_position = position + 1;
-    // The test script ran later, so its instruction wins over the
-    // pre-request script's - "last call wins", across the two scripts as
-    // within one. A skip comes only from the pre-request script; the binding
-    // throws in a test script.
+    // The test script ran later, so its instruction wins over the pre-request
+    // script's ("last call wins", across scripts as within one). A skip comes
+    // only from the pre-request script; the binding throws in a test script.
     const auto& control =
     exchange.post_script_result.control.kind != vayu::ScriptControl::Kind::None ?
     exchange.post_script_result.control :
@@ -945,9 +902,9 @@ bool& end_iteration) {
             end_iteration = true;
             break;
         }
-        // Three answers, not two: a target may also *be* the stop form -
+        // Three answers, not two: a target may *be* the stop form,
         // `setNextRequest("null")`, which Postman's runner reads as the real
-        // `null` this switch's other arm handles.
+        // `null` the other arm handles.
         switch (auto next = resolve_next_step (step_index, control.target); next.kind) {
         case NextStepResolution::Kind::Unresolved:
             record.outcome = StepOutcome::Errored;
@@ -965,12 +922,10 @@ bool& end_iteration) {
 }
 
 
-/**
- * The plan positions after @p position that this iteration has not attempted:
- * what an error at @p position cost it. A position an earlier backward jump
- * already ran is not a loss, and one before @p position that a forward jump
- * passed over was the script's decision.
- */
+/// The plan positions after @p position this iteration has not attempted: what
+/// an error at @p position cost it. A position an earlier backward jump already
+/// ran is no loss, and one before @p position a forward jump passed over was
+/// the script's decision.
 size_t count_steps_not_run (const std::vector<bool>& attempted, size_t position) {
     const auto after =
     std::next (attempted.begin (), static_cast<std::ptrdiff_t> (position + 1));
@@ -992,6 +947,37 @@ bool kept_before_successes (StepOutcome outcome) {
 }
 
 /**
+ * A sent step in the run's tallies, as the load path's `handle_result` counts
+ * a completion: its status, its failed `mcp` reply's class (#3828), its stream
+ * and protocol, and its latency when its transfer ran.
+ */
+void tally_sent_step (const StepContext& ctx,
+const vayu::Response& response,
+const StepRecord& record,
+ScenarioSummaryInputs& summary) {
+    // A failed reply under a 2xx or 3xx goes under `0`, where the load path's
+    // `record_error` puts it, so the error rate and its budget count it; the
+    // step's row and coverage keep the status the server sent.
+    const bool failed_behind_success =
+    vayu::http::mcp_failure_behind_success_status (response) != nullptr;
+    ++summary.status_codes[failed_behind_success ? 0 : record.status_code];
+    if (const auto& reply = response.mcp_reply) {
+        if (const auto& error_class = reply->error_class) {
+            summary.error_classes.record (*error_class, reply->code);
+        }
+    }
+    if (const auto completion = stream_completion_of (response)) {
+        ctx.context->metrics_collector->record_stream_completion (*completion);
+    }
+    if (response.http_version_downgraded) {
+        ++summary.http_version_downgraded;
+    }
+    if (response.transfer_attempted) {
+        summary.latencies.push_back (record.latency_ms);
+    }
+}
+
+/**
  * What the step leaves behind: its trace, the run's tallies, the stored row and
  * the live frame.
  */
@@ -1006,10 +992,9 @@ ScenarioStepStore& store) {
     vayu::http::routes::build_result_trace (exchange.request, exchange.response);
     if (!exchange.sent) {
         // A skipped step has no response, and the empty one
-        // `build_result_trace` writes for a default `Response`
-        // would read in the step's expanded view as a server that
-        // answered with nothing. The row keeps the request, which
-        // is what the step actually amounted to.
+        // `build_result_trace` writes for a default `Response` would read in
+        // the expanded view as a server answering nothing. The row keeps the
+        // request, what the step amounted to.
         record.trace.erase ("response");
     }
     stamp_step_identity (record.trace, record);
@@ -1017,10 +1002,10 @@ ScenarioStepStore& store) {
         record.trace["scriptMs"] = *record.script_ms;
     }
     vayu::json::cap_trace_bodies (record.trace, ctx.max_trace_body_bytes);
-    // A streaming step's events (#3235), parsed back out of the body the way
-    // a load sample's are (`GET /runs/:id/samples`), into the `events` node a
-    // design stream's trace carries. After the body cap, as there: the list
-    // carries its own bound, and it reads the response's whole held body.
+    // A streaming step's events (#3235), parsed back out of the body as a load
+    // sample's are (`GET /runs/:id/samples`), into the `events` node a design
+    // stream's trace carries. After the body cap, as there: the list carries
+    // its own bound and reads the whole held body.
     if (const auto& events = exchange.response.stream_events; exchange.sent && events) {
         const auto& text_path = exchange.response.stream_text_path;
         record.trace["events"] =
@@ -1029,28 +1014,25 @@ ScenarioStepStore& store) {
         std::nullopt, text_path ? &text_path->steps : nullptr);
     }
 
-    // What the scripts produced, on the node design mode already
-    // writes and `restore-response.ts` already reads (issue #724).
-    // Without it a step's detail could only ever show the one-line
-    // summary `classify_step` folded the assertions into, while the
-    // same request sent on its own shows every one of them.
+    // What the scripts produced, on the node design mode writes and
+    // `restore-response.ts` reads (#724); otherwise a step's detail could show
+    // only `classify_step`'s one-line summary, where the same request sent
+    // alone shows every assertion.
     //
-    // After the body cap for the reason `record_design_result`
-    // gives: `cap_trace_bodies` walks the request and response body
-    // nodes and does not reach this one, so writing it here makes
-    // that impossible to misread as covered. Only when the scripts
-    // said something - an empty node would put a Tests pane's worth
-    // of nothing on every stored step.
+    // After the body cap for `record_design_result`'s reason:
+    // `cap_trace_bodies` walks only the request and response body nodes, so
+    // writing this after it cannot be misread as covered. Only when the scripts
+    // said something: an empty node would put a Tests pane of nothing on every
+    // stored step.
     if (auto scripts = vayu::http::routes::build_script_result_node (
         exchange.pre_script_result, exchange.post_script_result, ctx.max_trace_body_bytes);
     !scripts.empty ()) {
         record.trace["scripts"] = std::move (scripts);
     }
-    // Every compiled element's outcome (issue #1514), `step.before` /
-    // `step.after` / `step.between` alike - `assert.*` failures already
-    // travel inside `scripts` above too (`describe_failed_tests` reads them
-    // from the same `tests` list a script's own `pm.test` writes to), so
-    // this is the per-element detail beside that one-line summary.
+    // Every compiled element's outcome (#1514), `step.before` / `step.after` /
+    // `step.between` alike: the per-element detail beside the one-line summary,
+    // `assert.*` failures already being in `scripts` above
+    // (`describe_failed_tests` reads the `tests` list `pm.test` writes to).
     if (!record.elements.empty ()) {
         nlohmann::json elements = nlohmann::json::array ();
         for (const auto& outcome : record.elements) {
@@ -1070,29 +1052,17 @@ ScenarioStepStore& store) {
     }
 
     ++summary.steps_executed;
-    // Only a step that actually sent counts towards coverage - or, on the
-    // same terms, towards the run's threshold inputs (issue #1564): a
-    // skipped step exercised no operation and made no request, so it belongs
-    // in neither an error-rate denominator nor a latency percentile. A step
+    // Only a step that sent counts towards coverage and the run's threshold
+    // inputs (#1564): a skipped step exercised no operation, so it belongs in
+    // neither an error-rate denominator nor a latency percentile. A step
     // refused at the wire's edge (the residual pass, the file rule, the
-    // pre-send gate) is an errored request with no duration, so it is counted
-    // but not timed; a transport failure that ran keeps its duration, the
-    // load path's population (#2384). A stopped step is in neither, as a load
-    // run's stop-cancelled request is not (#2136, #3397).
+    // pre-send gate) is an errored request with no duration, counted but not
+    // timed; a transport failure that ran keeps its duration, the load path's
+    // population (#2384). A stopped step is in neither, as a load run's
+    // stop-cancelled request is not (#2136, #3397).
     if (exchange.sent && record.outcome != StepOutcome::Stopped) {
         coverage.record (step.index, record.status_code);
-        ++summary.status_codes[record.status_code];
-        // Every stream that ended, success or failure, as the load path counts
-        // them (`handle_result`).
-        if (const auto completion = stream_completion_of (exchange.response)) {
-            ctx.context->metrics_collector->record_stream_completion (*completion);
-        }
-        if (exchange.response.http_version_downgraded) {
-            ++summary.http_version_downgraded;
-        }
-        if (exchange.response.transfer_attempted) {
-            summary.latencies.push_back (record.latency_ms);
-        }
+        tally_sent_step (ctx, exchange.response, record, summary);
     }
     if (record.tests) {
         summary.assertions.passed += record.tests->passed;
@@ -1113,9 +1083,9 @@ ScenarioStepStore& store) {
     row.status_text = record.status_text;
     row.latency_ms  = record.latency_ms;
     row.error       = record.error;
-    // A header value off the wire, or the wire request's body, can carry
-    // a byte that is not UTF-8, which becomes U+FFFD instead of throwing
-    // (store_result does the same).
+    // A header value off the wire, or the wire request's body, can hold a
+    // non-UTF-8 byte, which becomes U+FFFD instead of throwing (as in
+    // store_result).
     row.trace_data =
     record.trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
     store.add (std::move (row), kept_before_successes (record.outcome));
@@ -1125,21 +1095,21 @@ ScenarioStepStore& store) {
 }
 
 /**
- * `step.between` (issue #1514): `timer.think` and anything else phased here
- * run after this step's own outcome is decided - so a wait never counts
- * against the step's own latency - and before flow control reads it, so a
- * `Stop` mid-wait ends the run promptly rather than after one more step.
- * Called only for a step whose row bound and did not already error.
+ * `step.between` (#1514): `timer.think` and anything else phased here run after
+ * the step's outcome is decided, so a wait never counts against its latency,
+ * and before flow control reads it, so a `Stop` mid-wait ends the run promptly,
+ * not after one more step. Called only for a step whose row bound and did not
+ * already error.
  *
- * `between_control` is read, not discarded: `control.loop` (issue #1515) is
- * the one `step.between` kind that can decide where the iteration goes next,
- * through `ScriptControl`, chronologically the latest decision of the step
- * and so the one "last call wins" already gives priority to.
+ * `between_control` is read, not discarded: `control.loop` (#1515) is the one
+ * `step.between` kind that can decide where the iteration goes, through
+ * `ScriptControl`, the step's chronologically latest decision and so the one
+ * "last call wins" favours.
  *
- * `control.transaction`'s own `includeTimers` (issue #1569) folds this step's
- * between-phase wait into an *open* transaction's running sum - see
- * `fold_between_wait_into_open_transactions`'s own comment for why "open"
- * excludes the folder's last member.
+ * `control.transaction`'s `includeTimers` (#1569) folds this step's
+ * between-phase wait into an *open* transaction's running sum;
+ * `fold_between_wait_into_open_transactions` says why "open" excludes the
+ * folder's last member.
  */
 void run_step_between (const StepContext& base,
 const ScenarioStep& step,
@@ -1185,13 +1155,11 @@ StepRecord& record) {
     }
 }
 
-/**
- * `control.transaction` (#3054): every transaction @p step is a member of,
- * settled once the step's outcome and the iteration's next position are known
- * (`settle_transactions`, the load path's rule too), and each pass that closed
- * here recorded. A close is the one outcome carrying `duration_us`, with its
- * declared name in `message`.
- */
+/// `control.transaction` (#3054): settles every transaction @p step is a member
+/// of once the step's outcome and the iteration's next position are known
+/// (`settle_transactions`, the load path's rule too), and records each pass
+/// that closed here. A close is the one outcome carrying `duration_us`, its
+/// declared name in `message`.
 void settle_step_transactions (const StepContext& ctx,
 const ScenarioStep& step,
 const vayu::http::routes::ExchangeOutcome& exchange,
@@ -1223,11 +1191,9 @@ TransactionHistograms& transactions) {
 }
 
 /**
- * One iteration: a walk over the plan rather than a pass through it.
- *
- * A script may send it backwards, forwards or out early, so the position is a
- * variable and the loop is bounded by the per-iteration budget rather than by
- * the plan's length.
+ * One iteration: a walk over the plan, not a pass through it. A script may send
+ * it backwards, forwards or out early, so the position is a variable and the
+ * loop is bounded by the per-iteration budget, not the plan's length.
  *
  * @return the plan positions an errored step's end of the iteration cost it
  *         (`count_steps_not_run`); 0 for an iteration that ended any other way.
@@ -1281,12 +1247,8 @@ TransactionHistograms& transactions) {
             return 0;
         }
 
-        // `step.between` (issue #1514): `timer.think` and anything else
-        // phased here run after this step's own outcome is decided - so a
-        // wait never counts against the step's own latency - and before flow
-        // control reads it, so a `Stop` mid-wait ends the run promptly rather
-        // than after one more step. Skipped entirely for a step whose row
-        // could not bind (no exchange ran) or that already errored.
+        // `step.between` (#1514); `run_step_between` says when and why. Skipped
+        // for a step whose row could not bind or that already errored.
         if (data_bind_error.empty () &&
         record.outcome != StepOutcome::Errored && step.elements) {
             run_step_between (base, step, exchange, record);
@@ -1476,9 +1438,8 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
 namespace {
 
 /// Step rows stored for @p run_id after a failed write. The write is chunked,
-/// so the chunks that landed before the failure stay: report those, not zero.
-/// A database that cannot be read either stores nothing as far as anyone can
-/// tell.
+/// so chunks that landed before the failure stay: report those, not zero. A
+/// database that cannot be read stores nothing as far as anyone can tell.
 size_t stored_step_count (vayu::db::Database& db, const std::string& run_id) {
     try {
         return db.get_results_without_traces (run_id).size ();
@@ -1547,24 +1508,23 @@ RunManager& manager) {
     vayu::RunStatus final_status = vayu::RunStatus::Completed;
 
     // Built before the first send and read after the last, so a run that throws
-    // mid-sequence still reports the operations it did exercise. Inactive for a
-    // collection bound to nothing, in which case it records nothing and builds
-    // nothing (issue #629).
+    // mid-sequence still reports the operations it exercised. Inactive for a
+    // collection bound to nothing: it records and builds nothing (#629).
     CoverageTally coverage = make_coverage_tally (*execution);
 
-    // Whether the contract is a gate for this run, read once: it is a property
-    // of who asked for the run, exactly as `allowScriptRequests` is, and a
-    // value re-read per step could not change but could be got wrong twice.
+    // Whether the contract gates this run, read once: a property of who asked
+    // for the run, as `allowScriptRequests` is; re-read per step it could not
+    // change but could be got wrong twice.
     const bool fail_on_schema_error = read_fail_on_schema_error (context->config);
     summary.fail_on_schema_error = fail_on_schema_error;
     const bool stop_on_error     = read_stop_on_error (context->config);
     summary.stop_on_error        = stop_on_error;
 
-    // The one parse of the document's schema index this run pays for, before
-    // the first send rather than per step. `std::nullopt` - an unbound
-    // collection, a document with no index, one that will not parse - is "not
-    // measured", never an empty contract that would pass every body;
-    // `validate_step_response` turns it into the reason the binding recorded.
+    // The run's one parse of the schema index, before the first send, not per
+    // step. `std::nullopt` (an unbound collection, a document with no index,
+    // one that will not parse) is "not measured", never an empty contract that
+    // passes every body; `validate_step_response` turns it into the reason the
+    // binding recorded.
     const auto schema_index = ResponseSchemaIndex::parse (execution->spec.response_schemas);
 
     // Outside the `try` so a failing setup's outcome reaches the report from
@@ -1572,9 +1532,9 @@ RunManager& manager) {
     std::vector<vayu::core::ElementOutcome> setup_outcomes;
     try {
         // Only from Pending (#3340): a Stop that reached the row before this
-        // run registered found no context and left the row Stopped, and a
-        // deleted row is gone. Either way the run ends here, running no step
-        // and writing no status over the one that refused it.
+        // run registered found no context and left it Stopped, and a deleted
+        // row is gone. Either way the run ends here, running no step and
+        // writing no status over the one that refused it.
         if (!db
             .transition_run_status (context->run_id,
             { vayu::RunStatus::Pending }, vayu::RunStatus::Running)
@@ -1585,9 +1545,9 @@ RunManager& manager) {
             return;
         }
 
-        // Which jar every step reads and writes: one per environment, so "log
-        // in on step 1, reuse the session on step 2" is the jar's existing
-        // behaviour rather than anything this runner adds.
+        // The jar every step reads and writes: one per environment, so "log in
+        // on step 1, reuse the session on step 2" is the jar's own behaviour,
+        // nothing this runner adds.
         std::optional<std::string> environment_id;
         if (auto it = context->config.find ("environmentId");
         it != context->config.end () && it->is_string () &&
@@ -1617,23 +1577,22 @@ RunManager& manager) {
         // lifecycle node, so their scripts' requests ride them (#3633).
         vayu::core::record_script_requests (script_config, db);
 
-        // One engine for the whole run: QuickJS contexts are pooled and reset
-        // per execution, so a per-step engine would pay for a runtime setup per
-        // step and buy nothing.
+        // One engine for the run: QuickJS contexts are pooled and reset per
+        // execution, so a per-step engine would pay a runtime setup per step
+        // for nothing.
         vayu::runtime::ScriptEngine script_engine (script_config);
 
         const auto max_trace_body_bytes = static_cast<size_t> (db.get_config_int (
         "maxTraceBodyBytes", static_cast<int> (constants::json::MAX_TRACE_BODY_BYTES)));
-        // Run-scoped, like every other read-once property above: a collection
-        // run is one run, and steps that left by different routes (issue #705,
-        // epic decision 3 of #704), added different headers (#1229) or read a
-        // different bound (#1157) because Settings changed mid-sequence would
-        // make its results unreproducible. A step is a design-mode send, so
-        // the headers take the design scope's compression setting and the
-        // bound is the design one. Every step's send reads these, and so does
-        // a `script.setup` / `script.teardown` `pm.sendRequest`, with the
-        // run's timeout as the steps' own requests carry it (#2841) and the
-        // run's Stop as its cancel (#3371).
+        // Run-scoped, like every read-once property above: steps that left by
+        // different routes (#705, epic decision 3 of #704), added different
+        // headers (#1229) or read a different bound (#1157) because Settings
+        // changed mid-sequence would make the run unreproducible. A step is a
+        // design-mode send, so the headers take the design scope's compression
+        // setting and the bound is the design one. Every step's send reads
+        // these, as does a `script.setup` / `script.teardown` `pm.sendRequest`,
+        // with the run's timeout as the steps' requests carry it (#2841) and
+        // the run's Stop as its cancel (#3371).
         const vayu::runtime::ScriptSendInputs script_send{
             .transport       = vayu::http::resolve_transport_policy (db),
             .default_headers = vayu::http::resolve_default_header_policy (
@@ -1644,9 +1603,9 @@ RunManager& manager) {
             .cancel = &context->should_stop,
             .stop   = &context->should_stop,
         };
-        // Same reason, same read-once-for-the-run rule (issue #1514's
-        // reopen): a step's `extract.json` / `assert.jsonpath` must not read
-        // a different bound because Settings changed mid-sequence.
+        // Read once for the same reason (#1514): a step's `extract.json` /
+        // `assert.jsonpath` must not read a different bound because Settings
+        // changed mid-sequence.
         const auto max_element_body_bytes = vayu::http::routes::element_body_bound (db);
         const auto sse_limits = vayu::http::read_sse_limits (db);
         ScenarioStepStore store (
@@ -1664,30 +1623,30 @@ RunManager& manager) {
         // ordinary case and keeps `pm.iterationData` undefined throughout.
         const auto& data_rows = execution->data_rows;
 
-        // `control.loop` / `control.transaction`'s own supports (issue
-        // #1515): the plan-wide span every scope-spanning kind reads to
-        // recognise its folder's first or last member, one controller-state
-        // map for the run's whole life (#1512's single implicit user, so
-        // never cleared between iterations - `control.once` must survive
-        // every one of them), and one histogram per declared transaction
-        // name, allocated up front so recording it takes no lock.
+        // `control.loop` / `control.transaction`'s supports (#1515): the
+        // plan-wide span every scope-spanning kind reads to recognise its
+        // folder's first or last member; one controller-state map for the run's
+        // whole life (#1512's single implicit user, never cleared between
+        // iterations, since `control.once` must survive them all); and one
+        // histogram per declared transaction name, allocated up front so
+        // recording takes no lock.
         const auto element_spans = compute_element_spans (plan);
         std::unordered_map<std::string, int64_t> controller_state;
         TransactionHistograms transactions (plan);
 
-        // The run's resolved size, ahead of the first step and once (issue
-        // #1398). This run publishes no `metrics` ticks to carry it the way a
-        // load run carries `requestsExpected`, so the frame is where the
-        // number lives; a watcher that connects past its eviction from the
-        // ring reports no fraction rather than a wrong one.
+        // The run's resolved size, once, ahead of the first step (#1398). This
+        // run publishes no `metrics` ticks to carry it as a load run carries
+        // `requestsExpected`, so the frame is where the number lives; a watcher
+        // connecting after its eviction from the ring reports no fraction
+        // rather than a wrong one.
         context->append_event ("plan",
         build_plan_payload (plan.steps.size (), asked.iterations).dump ());
 
-        // `script.setup` (#1499): the lifecycle set's once-per-run elements -
-        // never inherited per step, which is what `collection_only` refuses
-        // at write time - on the same `scopes` and `script_engine` every
-        // step's own scripts share, so a setup write is visible to step 1
-        // exactly as a prior step's would be.
+        // `script.setup` (#1499): the lifecycle set's once-per-run elements
+        // (never inherited per step, which `collection_only` refuses at write
+        // time), on the `scopes` and `script_engine` every step's scripts
+        // share, so a setup write is visible to step 1 as a prior step's would
+        // be.
         if (auto setup_failure = run_scenario_setup (
             script_engine, scopes, script_send, lifecycle, setup_outcomes)) {
             throw std::runtime_error ("script.setup failed: " + *setup_failure);
@@ -1701,16 +1660,14 @@ RunManager& manager) {
 
             // Row `i % rows` binds to iteration `i`. An explicit `iterations`
             // above the row count wraps rather than running short, and every
-            // record below carries the index so the wrap is visible.
+            // record carries the index so the wrap is visible.
             std::optional<size_t> data_row_index;
             if (!data_rows.empty ()) {
                 data_row_index = iteration % data_rows.size ();
             }
 
-            // An iteration is a walk over the plan rather than a pass through
-            // it: a script may send it backwards, forwards or out early, so the
-            // position is a variable and the loop is bounded by the budget
-            // above rather than by the plan's length.
+            // Bounded by the budget above, not the plan's length
+            // (`run_iteration` says why).
             const StepContext step_ctx{ context, execution, schema_index,
                 script_send.transport, script_send.default_headers, cookie_scope,
                 data_rows, data_row_index, iteration, asked.iterations,
@@ -1745,10 +1702,10 @@ RunManager& manager) {
         final_status = context->stop_decides_outcome () ? vayu::RunStatus::Stopped :
                                                           vayu::RunStatus::Completed;
 
-        // `script.teardown`: `pm.info.run` reads this pass's own totals, and a
-        // throwing teardown - `ElementPipeline::run` turns it into this
-        // element's own "error" outcome rather than propagating - never
-        // changes `final_status`, already decided above.
+        // `script.teardown`: `pm.info.run` reads this pass's totals, and a
+        // throwing teardown never changes `final_status`, already decided above
+        // (`ElementPipeline::run` turns the throw into the element's "error"
+        // outcome).
         vayu::runtime::RunSummaryInfo run_summary_info;
         run_summary_info.requests_sent     = summary.steps_executed;
         run_summary_info.error_rate        = summary.steps_executed > 0 ?
@@ -1767,7 +1724,7 @@ RunManager& manager) {
         // Once, at the very end and after teardown, so its variable writes are
         // saved with every step's (#3249): per-step persistence would be N x M
         // diff-and-write cycles against the DB mutex for a value only this
-        // run's later steps read. Best-effort, exactly as design mode's is.
+        // run's later steps read. Best-effort, as design mode's is.
         scopes.persist (db);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run", "Scenario run error",
@@ -1786,20 +1743,16 @@ RunManager& manager) {
     summary.custom_metrics = context->metrics_collector->custom_metric_summaries ();
     summary.stream = context->metrics_collector->stream_totals ();
 
-    // The run's verdict against its declared budgets (issue #1564), judged
-    // once off the numbers just tallied above - never re-derived later, on
-    // the same "decide once, from data already in hand" principle
-    // `engine/CLAUDE.md` states for a locked read-decide-write (there is no
-    // lock here: this whole function runs on the run's own single worker
-    // thread, so the principle is about not reading two different snapshots
-    // of the run's own tallies, not about concurrency). `RunSummaryInputs`
-    // is the load path's shape; a collection run builds one populated with
-    // only what `evaluate_thresholds`'s metric table actually reads
-    // (latency, status codes, throughput, assertions) rather than an
-    // adapter converting between the two summary shapes - no such adapter
-    // exists elsewhere in the engine, and most of `RunSummaryInputs`'
-    // fields (peak concurrency, dropped requests, a load run's queue wait)
-    // describe a concurrent load run this run mode has no counterpart for.
+    // The verdict against the declared budgets (#1564), judged once off the
+    // numbers just tallied, never re-derived: `engine/CLAUDE.md`'s "decide
+    // once, from data in hand", here about not reading two snapshots of the
+    // run's tallies, not about locking (this function runs on the run's single
+    // worker thread). `RunSummaryInputs` is the load path's shape; a collection
+    // run fills only what `evaluate_thresholds`'s metric table reads (latency,
+    // status codes, throughput, assertions) rather than going through an
+    // adapter, which nothing in the engine has, since most of its fields (peak
+    // concurrency, dropped requests, a load run's queue wait) have no
+    // counterpart in this mode.
     summary.latency = summarize_latencies (summary.latencies);
     RunSummaryInputs threshold_inputs;
     // Off the status tally, not the latencies: a step refused before the wire
@@ -1818,20 +1771,19 @@ RunManager& manager) {
         populations.exact           = summary.assertions;
         threshold_inputs.assertions = populations;
     }
-    // `metric.record` / `pm.metrics` (issue #1500) share the same collector
-    // `summary.custom_metrics` was just read from above - without this, a
-    // declared `custom.<name>.<stat>` budget would report "no data" on a
-    // collection run despite the value sitting right there in the summary.
+    // `metric.record` / `pm.metrics` (#1500) share the collector
+    // `summary.custom_metrics` was read from; without this a declared
+    // `custom.<name>.<stat>` budget would report "no data" on a collection run
+    // with the value in the summary.
     threshold_inputs.custom_metrics = summary.custom_metrics;
     // A stream budget reads the same section, over the same duration (#3235).
     threshold_inputs.stream          = summary.stream;
     threshold_inputs.test_duration_s = summary.duration_s;
     summary.thresholds = evaluate_thresholds (context->config, threshold_inputs);
 
-    // A stopped run keeps reporting Stopped regardless of verdict, and a run
-    // that already threw keeps Failed for the reason it threw - `failRun`
-    // judges only a run that reached its own natural end, the same guard
-    // `finish_load_test` applies (`run_manager.cpp`).
+    // A stopped run reports Stopped whatever the verdict, and a run that threw
+    // keeps Failed for its reason: `failRun` judges only a run that reached its
+    // natural end, the guard `finish_load_test` applies (`run_manager.cpp`).
     if (final_status == vayu::RunStatus::Completed && summary.thresholds &&
     summary.thresholds->failed > 0 && thresholds_fail_run (context->config)) {
         final_status = vayu::RunStatus::Failed;

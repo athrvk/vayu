@@ -6,9 +6,8 @@
  */
 
 /**
- * The two halves of the heading outline `heading-level.ts` describes: a
- * `Heading` takes its element from the outline, and a `HeadingSection` moves
- * the outline one level down for what it wraps (#3498).
+ * The two halves of `heading-level.ts`'s outline (#3498): a `Heading` takes its element from it,
+ * and a `HeadingSection` moves it a level down for what it wraps.
  */
 
 import { createElement, type ComponentProps, type ReactNode } from "react";
@@ -20,8 +19,8 @@ import {
 } from "./heading-level";
 
 /**
- * Headings inside sit at `level`, or one below the heading that introduces
- * this section. Placed right after that heading, around what it titles.
+ * Headings inside sit at `level`, or one below the heading introducing this section; place it right
+ * after that heading, around what it titles.
  */
 export function HeadingSection({ level, children }: { level?: HeadingLevel; children: ReactNode }) {
 	const parent = useHeadingLevel();
@@ -31,9 +30,8 @@ export function HeadingSection({ level, children }: { level?: HeadingLevel; chil
 
 interface HeadingProps extends ComponentProps<"h2"> {
 	/**
-	 * What it renders as where there is no outline. Each caller names its own,
-	 * because what a title is there differs: a card title is still a heading, an
-	 * empty state's line is a paragraph, a crumb is text.
+	 * What it renders as without an outline, named per caller as it differs: a card title is still
+	 * a heading, an empty state's line a paragraph, a crumb text.
 	 */
 	outside: HeadingTag | "p" | "span";
 	/** Pins the element regardless of the outline - a card that is its own page. */
@@ -43,8 +41,7 @@ interface HeadingProps extends ComponentProps<"h2"> {
 /** A title at the outline's level: `h{level}` inside it, `outside` beyond it. */
 export function Heading({ outside, as, ...props }: HeadingProps) {
 	const level = useHeadingLevel();
-	// `createElement`, not a capitalised variable in JSX: the tag is a string,
-	// and the hooks lint reads a component chosen during render as one created
-	// during it.
+	// `createElement`, not a capitalised JSX variable: the tag is a string, and the hooks lint
+	// reads a component chosen during render as created during it.
 	return createElement(as ?? (level === null ? outside : `h${level}`), props);
 }

@@ -6,12 +6,9 @@
  */
 
 /**
- * The documentation links the renderer may open, by key.
- *
- * Keyed rather than URL-taking on purpose: the renderer cannot ask for an
- * arbitrary URL, so `shell:openAppLink` does not hand the web layer a general
- * "open anything" capability. Same links as the Help menu. The keys are
- * mirrored by `openAppLink`'s parameter type in `preload.ts` and
+ * The documentation links the renderer may open, by key. Keyed, not URL-taking, so
+ * `shell:openAppLink` gives the web layer no general "open anything" capability. Same links as the
+ * Help menu. The keys are mirrored by `openAppLink`'s parameter type in `preload.ts` and
  * `src/types/electron.d.ts`, neither of which can import from here.
  */
 

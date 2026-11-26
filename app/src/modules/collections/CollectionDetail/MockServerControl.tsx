@@ -6,25 +6,20 @@
  */
 
 /**
- * Start and stop a mock server for the collection on screen (issue #481 phase 2).
+ * Start and stop a mock server for the collection on screen (issue #481 phase 2). The *contextual*
+ * starter: a mock needs a collection, and this header is the one surface that has one. The Services
+ * drawer lists everything running and can stop any of it, but has no collection to start one from,
+ * which is why it has no "New mock" and this control exists.
  *
- * This is the *contextual* starter: a mock needs a collection, and this header
- * is the one surface that already has one. The Services drawer owns the list of
- * everything running and can stop any of them, but it has no collection to
- * start one from - which is why the group there has no "New mock" affordance
- * and this control exists instead.
+ * A mock's route table is a snapshot taken at start, so there is no "restart": stopping and
+ * starting again is the only way to pick up an edit, and the tooltip saying so is cheaper than a
+ * restart button that hides it.
  *
- * A mock's route table is a snapshot taken at start, so there is nothing to
- * "restart" - stopping and starting again is the only way to pick up an edit,
- * and saying so in the tooltip is cheaper than a restart button that hides it.
- *
- * The button starts directly and the options dialog sits beside it (issue
- * #570). A dialog on the way in would make the common case - serve this
- * collection with nothing set - two clicks to serve the uncommon one, which is
- * the wrong trade and the one the acceptance criteria pin: latency and error
- * rate are for the load run you point at the mock, not for poking a route by
- * hand. `NewIssuerDialog` has no equivalent split because an issuer has no
- * defaults-only case worth one click.
+ * The button starts directly and the options dialog sits beside it (issue #570): a dialog on the
+ * way in would make the common case (serve with nothing set) cost two clicks to serve the uncommon
+ * one, the trade the acceptance criteria pin, as latency and error rate are for the load run aimed
+ * at the mock, not for poking a route by hand. `NewIssuerDialog` has no such split: an issuer has
+ * no defaults-only case worth one click.
  */
 
 import {
@@ -64,9 +59,8 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 	const running = mockForCollection(mocksQuery.data ?? [], collectionId);
 
 	/**
-	 * Without @p options the payload is `{ collectionId }` alone, exactly as it
-	 * was before the dialog existed - the engine's own defaults rather than this
-	 * surface restating them.
+	 * Without @p options the payload is `{ collectionId }` alone: the engine's own defaults, not
+	 * this surface restating them.
 	 */
 	const start = (options?: MockServerOptions) =>
 		startMock.mutate(
@@ -79,14 +73,11 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 						"success"
 					);
 				},
-				// The engine refuses a collection with no requests and one whose
-				// requests it cannot fit, and both messages name the reason. A
-				// generic fallback would turn "nothing to serve" into "could not
-				// start", which is the half that is not actionable.
-				//
-				// From the dialog the same message is a Callout in the form, so
-				// there is no toast: the dialog stays open on a failure, and a
-				// toast behind it would report it twice and lose it once.
+				// The engine refuses a collection with no requests and one whose requests it cannot
+				// fit, and both messages name the reason; a generic fallback would turn "nothing to
+				// serve" into the unactionable "could not start". From the dialog the message is a
+				// Callout in the form, so no toast: the dialog stays open on a failure, and a toast
+				// behind it would report it twice and lose it once.
 				onError: (error) => {
 					if (options) return;
 					showToast(
@@ -107,13 +98,11 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 					disabled={startMock.isPending}
 				>
 					{/*
-					 * Play and Square are the pair the design system names for
-					 * this control, but they live in two branches of this
-					 * component - a stopped server needs a labelled button, a
-					 * running one an icon in a chip row - so nothing crossfades
-					 * between them without merging the two controls (#1689).
-					 * What does change in place is the pending state of each,
-					 * and that is what swaps here.
+					 * Play and Square are the design system's pair for this control, but they live
+					 * in two branches of this component (a stopped server's labelled button, a
+					 * running one's icon in a chip row), so nothing crossfades between them without
+					 * merging the two controls (#1689). What changes in place is each one's pending
+					 * state, and that is what swaps here.
 					 */}
 					<IconSwap
 						state={startMock.isPending ? "starting" : "idle"}
@@ -172,7 +161,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 				{/* A server that is up is a run state, so the glyph takes the
 				    `--status-*` family's text pair - the bare indicator token
 				    misses even the 3:1 icon bar on a light surface (2.21:1,
-				    design-system.md). */}
+				    design-system/accent-and-status.md). */}
 				<ServerCog
 					className="size-icon-sm shrink-0 text-status-success-text"
 					aria-hidden="true"

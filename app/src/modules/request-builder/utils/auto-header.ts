@@ -6,35 +6,19 @@
  */
 
 /**
- * A header a *setting* adds to the request, and takes back when the setting
- * changes.
+ * A header a *setting* adds to the request and takes back when the setting changes: the body mode's
+ * `Content-Type` (`panels/body/content-type.ts`) and the Event stream toggle's
+ * `Accept: text/event-stream` (#574), one rule so neither copy misses the other's fixes. Its parts:
  *
- * The rule was written once for the body mode's `Content-Type` (see
- * `panels/body/content-type.ts` for the bug that produced it: nothing removed
- * the header, so one visit to GraphQL left `Content-Type: application/json` on
- * the request for good). The Event stream toggle needs exactly the same rule
- * for `Accept: text/event-stream` (issue #574), so it lives here rather than
- * being written a second time - a hand-rolled copy of a primitive does not
- * receive the primitive's fixes, and this one has three parts that are easy to
- * get subtly different:
+ * - **ownership by marker, never by value.** A header the *user* typed must survive the setting
+ *   changing and is indistinguishable by value; the row's `source` is the fact (#1481).
+ * - **never override a declaration.** A request already declaring the header, even differently,
+ *   keeps it; replacing it would be worse than the bug this fixes.
+ * - **one array, one pass.** Removing the old header and adding the new happen together: two
+ *   `updateField("headers")` calls would compute the second against the pre-first headers.
  *
- * - **ownership by marker, never by value.** A header the *user* typed must
- *   survive the setting changing, and it is indistinguishable by value.
- *   Ownership used to live in a ref the provider held, keyed by row id and
- *   value - which meant nothing survived a reload, and a stale auto-written
- *   row was then indistinguishable from the user's own (issue #1481). The
- *   `source` field on the row itself is the fact, stored where the row is.
- * - **never override a declaration**. A request that already declares the
- *   header - even with a *different* value - keeps what it has; silently
- *   replacing it would be a worse version of the bug this exists to fix.
- * - **one array, one pass**. Removing the old header and adding the new one are
- *   done together, because a caller doing them as two `updateField("headers")`
- *   calls would compute the second against the headers it had before the first.
- *
- * A disabled row does not count as declaring the header - it is not sent, so
- * the request would go out without it. Editing a marked row's key or value by
- * hand clears the marker (`KeyValueEditor`'s `handleUpdate`) - once retyped, it
- * is the user's, and stays even if the new value happens to match.
+ * A disabled row declares nothing: it is not sent. Hand-editing a marked row's key or value clears
+ * the marker (`KeyValueEditor`'s `handleUpdate`): retyped, it is the user's, even if it matches.
  */
 
 import type { AutoHeaderSource, KeyValueEntry, KeyValueItem } from "@/types";
@@ -51,14 +35,9 @@ const isNamed = (item: KeyValueEntry, name: string) =>
 	item.key.trim().toLowerCase() === name.toLowerCase();
 
 /**
- * The value this setting should add, or null if nothing should be added.
- *
- * Null when the setting requires no header, and null when the request already
- * declares one.
- *
- * Typed on `KeyValueEntry` rather than the UI's `KeyValueItem`: the rule reads
- * only `key` and `enabled`, and the importers ask the same question of rows
- * that have no `id` yet.
+ * The value this setting should add, or null: when it needs no header, or the request already
+ * declares one. Typed on `KeyValueEntry`, not `KeyValueItem`: it reads only `key` and `enabled`,
+ * and importers ask it of rows with no `id` yet.
  */
 export function autoHeaderToAdd(
 	name: string,
@@ -100,11 +79,10 @@ export interface AutoHeaderSwitch {
  * @param name     Header name this record owns a row for (`Content-Type`, `Accept`).
  * @param required The value the setting now needs, or null when it needs none.
  * @param headers  The request's current header rows.
- * @param source   Which setting is asking - the marker it writes and reads.
+ * @param source   Which setting is asking: the marker it writes and reads.
  *
- * Switching between two settings that need the *same* header keeps the row
- * rather than removing and re-adding it, which would churn the Headers tab and
- * lose the row's position.
+ * Two settings needing the *same* header keep the row rather than remove and re-add it, which would
+ * churn the Headers tab and lose its position.
  */
 export function switchAutoHeader(
 	name: string,
@@ -123,9 +101,8 @@ export function switchAutoHeader(
 }
 
 /**
- * What the Event stream setting changes on a request: the flag, its `Accept`
- * row and, going off, the stream text path (#3773) and first content marker
- * (#3774).
+ * What the Event stream setting changes: the flag, its `Accept` row and, going off, the text path
+ * (#3773) and first content marker (#3774).
  */
 export interface StreamPatch {
 	stream: boolean;
@@ -135,14 +112,10 @@ export interface StreamPatch {
 }
 
 /**
- * The request fields that turning Event stream on or off writes, as one patch
- * for `setRequest`.
- *
- * The flag and the `Accept: text/event-stream` row are one change (see the
- * "one array, one pass" rule above), so every surface that toggles the setting
- * - the Settings tab's switch and the Body tab's "Enable event stream" action
- * - takes this patch rather than setting `stream` alone, which would leave the
- * request without the header a stream server negotiates on.
+ * The fields turning Event stream on or off writes, as one `setRequest` patch. Flag and `Accept`
+ * row are one change ("one array, one pass"), so every toggle (the Settings tab's switch, the Body
+ * tab's "Enable event stream") takes this patch rather than set `stream` alone, which would leave
+ * out the header a stream server negotiates on.
  */
 export function streamPatch(
 	request: {
@@ -154,9 +127,8 @@ export function streamPatch(
 ): StreamPatch {
 	const next = switchAutoHeader(ACCEPT_HEADER, on ? SSE_ACCEPT : null, request.headers, "stream");
 	const patch: StreamPatch = { stream: on, headers: next.headers };
-	// A path and a marker belong to a stream: the engine refuses one stored
-	// beside a buffered request, so the fields empty with the toggle rather
-	// than the save sending a pair it would refuse.
+	// A path and a marker belong to a stream: the engine refuses one beside a buffered request, so
+	// they empty with the toggle rather than have the save send a pair it refuses.
 	if (on) return patch;
 	if (request.streamTextPath) patch.streamTextPath = DEFAULT_STREAM_TEXT_PATH;
 	if (request.streamFirstContentMarker)

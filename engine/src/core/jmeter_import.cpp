@@ -6,9 +6,8 @@
  */
 
 /**
- * @file core/jmeter_import.cpp
- * @brief The `.jmx` walker and the JMeter-class-to-element-kind mapping table
- *        (issue #1518). See the header for the shape and the validation rule.
+ * The `.jmx` walker and the JMeter-class-to-element-kind table (#1518); the
+ * header has the shape and the validation rule.
  */
 
 #include "vayu/core/jmeter_import.hpp"
@@ -39,11 +38,10 @@ namespace {
 using json = nlohmann::ordered_json;
 
 // ---------------------------------------------------------------------------
-// pugixml property readers - a JMeter test element's own configuration is a
-// flat list of `<stringProp name="...">`, `<boolProp name="...">`,
-// `<intProp>` / `<longProp>` and `<collectionProp>` / `<elementProp>` children
-// directly under it, found by `name`, never by position. A number may be any
-// of the scalar tags, flat or nested (`scalar_text`).
+// pugixml property readers. A JMeter element's configuration is a flat list of
+// `<stringProp name="...">`, `<boolProp>`, `<intProp>` / `<longProp>` and
+// `<collectionProp>` / `<elementProp>` children, found by `name`, never by
+// position. A number may be any scalar tag, flat or nested (`scalar_text`).
 // ---------------------------------------------------------------------------
 
 pugi::xml_node find_prop (const pugi::xml_node& element, const char* tag, std::string_view name) {
@@ -150,10 +148,10 @@ pugi::xml_node collection_prop (const pugi::xml_node& element, std::string_view 
     return find_prop (element, "collectionProp", name);
 }
 
-/// JMeter's `${name}` becomes Vayu's `{{name}}` - a simple variable reference
-/// only; a JMeter function call (`${__time()}`, `${__P(prop,default)}`) has
-/// no Vayu equivalent and is left exactly as written, which resolves to
-/// nothing at send time the same way an unresolved `{{token}}` does.
+/// JMeter's `${name}` becomes Vayu's `{{name}}`, a simple reference only. A
+/// function call (`${__time()}`, `${__P(prop,default)}`) has no Vayu equivalent
+/// and is left as written, resolving to nothing at send time like an unresolved
+/// `{{token}}`.
 std::string rewrite_variables (const std::string& text) {
     static const std::regex reference (R"(\$\{([A-Za-z_][A-Za-z0-9_]*)\})");
     return std::regex_replace (text, reference, "{{$1}}");
@@ -221,17 +219,16 @@ struct Ctx {
     HttpDefaults defaults;
 };
 
-/// Where the walk currently appends - a folder and the root collection share
-/// this same shape (issue #710's `OperationFolders`, mirrored here rather
-/// than reused: that type is `import_document.cpp`'s own anonymous-namespace
-/// helper, and a `.jmx` folder's own rules - one elements array per folder,
-/// no tag/path naming rule - differ enough that sharing it would fold two
-/// unrelated "how does a folder get named" questions into one type).
+/// Where the walk appends: a folder and the root collection share this shape.
+/// It mirrors `import_document.cpp`'s `OperationFolders` (#710) rather than
+/// reusing it: that type is local to that file, and a `.jmx` folder's rules
+/// (one elements array per folder, no tag/path naming) differ enough that
+/// sharing would fold two unrelated naming questions into one type.
 ///
 /// A sibling is stamped with its `order` as it is added: samplers and
-/// controllers count in one sequence, the document's own, so the two lists
-/// flatten back into the plan's tree order (#2573). The counter belongs to the
-/// collection being built, not to the sink: a `ThreadGroup` hands its parent's
+/// controllers count in one sequence, the document's, so the two lists flatten
+/// back into the plan's tree order (#2573). The counter belongs to the
+/// collection being built, not the sink: a `ThreadGroup` hands its parent's
 /// sink on, and its members continue the parent's numbering.
 struct Sink {
     json& requests;
@@ -260,14 +257,11 @@ using KindConfig = std::pair<std::string, json>;
 using KindConfigs = std::vector<KindConfig>;
 
 /**
- * @p config against the live registry, as the one element of a throwaway
- * array (`Registry::validate` takes the whole list a request or collection
- * would carry). `ElementOwner::Collection` throughout: the only owner
- * restriction the registry enforces is `collection_only` refusing a
- * *request* owner, so validating as a collection is the strictly more
- * permissive check and never wrongly accepts something a request placement
- * would refuse - nothing this parser builds is placement-sensitive in the
- * other direction.
+ * @p config checked against the live registry as the one element of a throwaway
+ * array (`Registry::validate` takes a whole list). Always as
+ * `ElementOwner::Collection`: the registry's only owner rule is
+ * `collection_only` refusing a request owner, so this is the more permissive
+ * check, and nothing this parser builds is placement-sensitive the other way.
  */
 std::optional<json> make_valid_element (Ctx& ctx, const std::string& kind, json config) {
     const json candidate = json::array ({ json{ { "id", "el_check" },
@@ -276,10 +270,10 @@ std::optional<json> make_valid_element (Ctx& ctx, const std::string& kind, json 
         ctx.tally.add (kind + "_unmappable");
         return std::nullopt;
     }
-    // `std::make_optional`, not a bare `json{...}` return: nlohmann's own
-    // `operator ValueType()` template competes with `optional`'s converting
-    // constructor for an implicit return conversion (`-Wconversion`);
-    // direct-initializing considers the constructor alone.
+    // `std::make_optional`, not a bare `json{...}`: nlohmann's
+    // `operator ValueType()` competes with `optional`'s converting constructor
+    // for the implicit return conversion (`-Wconversion`); direct-initializing
+    // considers the constructor alone.
     return std::make_optional (
     json{ { "kind", kind }, { "enabled", true }, { "config", std::move (config) } });
 }
@@ -303,14 +297,13 @@ long match_number_at (const std::vector<std::string>& list, size_t index) {
     return end != text.c_str () ? parsed : 1;
 }
 
-/// One `extract.json` per reference-name / path pair of a JSON Extractor,
-/// which JMeter configures as parallel `;`-separated lists. The default values
-/// and match numbers are read by the same index; a list that ends early leaves
-/// the rest with no fallback and the first match. Names and paths of unequal
-/// length, or an empty name or path inside the lists, pair nothing - JMeter
-/// refuses such a processor at run time too - so the caller counts the
-/// processor as unrecognised rather than guessing which name goes with which
-/// path.
+/// One `extract.json` per reference-name / path pair of a JSON Extractor, which
+/// JMeter configures as parallel `;`-separated lists. Defaults and match
+/// numbers are read by the same index; a list that ends early leaves the rest
+/// with no fallback and the first match. Names and paths of unequal length, or
+/// an empty one inside the lists, pair nothing (JMeter refuses such a processor
+/// at run time too), so the caller counts the processor unrecognised rather
+/// than guess the pairing.
 KindConfigs parse_json_extractors (const pugi::xml_node& el) {
     const std::vector<std::string> variables =
     split_list (text_prop (el, "JSONPostProcessor.referenceNames"), ';');
@@ -371,21 +364,18 @@ std::optional<KindConfig> parse_boundary_extractor (const pugi::xml_node& el) {
     return KindConfig{ "extract.boundary", std::move (config) };
 }
 
-/// JMeter's Response Assertion carries its match texts under a
-/// `collectionProp` whose own name is `Asserion.test_strings` - a typo in
-/// JMeter's own XML schema, present in every `.jmx` file JMeter itself has
-/// ever written, so a reader that "fixes" it reads nothing back.
+/// JMeter's Response Assertion keeps its match texts under a `collectionProp`
+/// named `Asserion.test_strings`: a typo in JMeter's schema, in every `.jmx`
+/// JMeter writes, so a reader that "fixes" it reads nothing.
 ///
 /// `Assertion.test_type` is a bitmask (1 Matches, 2 Contains, 4 Not, 8 Equals,
-/// 16 Substring, 32 Or). Several patterns without Or all have to hold, so each
-/// becomes its own `assert.contains` carrying the same mode and Not. Every
-/// refusal path here - an unmapped test field, a
-/// response-code assertion with Not set (`assert.status` has no `negate`), an
-/// Or assertion with more than one pattern (no Vayu kind expresses "any of
-/// these") - is tallied under `ResponseAssertion_unrecognised`, the same kind
-/// the caller's generic fallback uses, except the Or case, which is distinct
-/// enough (a mapping this parser understands but cannot express) to get its
-/// own `ResponseAssertion_or` tally instead.
+/// 16 Substring, 32 Or). Several patterns without Or must all hold, so each
+/// becomes its own `assert.contains` with the same mode and Not. Every refusal
+/// (an unmapped test field; a response-code assertion with Not, since
+/// `assert.status` has no `negate`) is tallied as
+/// `ResponseAssertion_unrecognised`, the caller's generic fallback kind; an Or
+/// with several patterns (no Vayu kind says "any of these") is understood but
+/// not expressible, so it gets its own `ResponseAssertion_or`.
 KindConfigs parse_response_assertions (Ctx& ctx, const pugi::xml_node& el) {
     pugi::xml_node strings = collection_prop (el, "Asserion.test_strings");
     if (!strings) {
@@ -425,17 +415,17 @@ KindConfigs parse_response_assertions (Ctx& ctx, const pugi::xml_node& el) {
         return KindConfigs{ { "assert.status", json{ { "in", std::move (codes) } } } };
     }
 
-    // Or with more than one pattern means "any of these"; the mapper can only
-    // emit one `assert.contains` row, which would mean "all of these" instead.
-    // A single pattern with Or set is just that pattern.
+    // Or with several patterns means "any of these", but each `assert.contains`
+    // row must hold, "all of these". A single pattern with Or is just that
+    // pattern.
     if ((test_type & 32) != 0 && texts.size () > 1) {
         ctx.tally.add ("ResponseAssertion_or");
         return {};
     }
 
-    // Pattern kind by bit, in JMeter's own precedence: Equals first, then
-    // Substring (a plain text contains), then Matches or Contains (both a
-    // regular-expression search in JMeter, so both land on `matches`).
+    // Pattern kind by bit, in JMeter's precedence: Equals, then Substring (a
+    // plain contains), then Matches or Contains (both a regex search in JMeter,
+    // so both are `matches`).
     std::string mode;
     if ((test_type & 8) != 0) {
         mode = "equals";
@@ -455,12 +445,11 @@ KindConfigs parse_response_assertions (Ctx& ctx, const pugi::xml_node& el) {
     } else if (field.empty () || field == "Assertion.response_data") {
         target = "body";
     } else {
-        // Request Data, Request Headers, Response Message, or Document (a
-        // parsed-DOM view of the body) - none has an `assert.contains` field
-        // to land on. Guessing "body" would assert against text the source
-        // never named as its target; refused instead, tallied the same way
-        // any other recognised class this parser could not extract enough
-        // from is.
+        // Request Data, Request Headers, Response Message or Document (a
+        // parsed-DOM view of the body) has no `assert.contains` field. Guessing
+        // "body" would assert against text the source never named, so it is
+        // refused and tallied like any recognised class this parser could not
+        // extract.
         ctx.tally.add ("ResponseAssertion_unrecognised");
         return {};
     }
@@ -498,10 +487,9 @@ std::optional<KindConfig> parse_size_assertion (const pugi::xml_node& el) {
     if (end == size.c_str ()) {
         return std::nullopt;
     }
-    // JMeter's own operator codes: 1 Equal, 2 NotEqual, 3 Greater, 4
-    // GreaterEqual (or Less/LessEqual on some versions) - the exact numbering
-    // has drifted across JMeter releases, so only the unambiguous Equal case
-    // is mapped precisely; anything else keeps `assert.size`'s own default.
+    // JMeter's operator codes (1 Equal, 2 NotEqual, 3 Greater, 4 GreaterEqual,
+    // or Less/LessEqual on some versions) have drifted across releases, so only
+    // Equal is mapped precisely; anything else keeps `assert.size`'s default.
     const long op = long_prop (el, "SizeAssertion.operator", 1);
     return KindConfig{ "assert.size",
         json{ { "bytes", bytes }, { "op", op == 1 ? "eq" : "lte" } } };
@@ -591,10 +579,9 @@ std::optional<KindConfig> parse_constant_throughput_timer (const pugi::xml_node&
         json{ { "everyMs", every_ms }, { "perUser", per_user } } };
 }
 
-/// JSR223 and BeanShell pre/post-processors both carry their body under a
-/// `script` string prop; imported **disabled**, per the issue's own mapping
-/// table, since a Groovy or BeanShell script is not JavaScript and running it
-/// as one would be silent nonsense rather than a refused import.
+/// JSR223 and BeanShell pre/post-processors carry their body under a `script`
+/// string prop. Imported disabled, per #1518's mapping table: Groovy or
+/// BeanShell run as JavaScript would be silent nonsense, not a refused import.
 std::optional<KindConfig> parse_script_processor (const pugi::xml_node& el, const char* kind) {
     std::string body = string_prop (el, "script");
     if (body.empty ()) {
@@ -626,18 +613,16 @@ KindConfigs at_most_one (std::optional<KindConfig> kc) {
     return configs;
 }
 
-/// Every `.jmx` config element this parser has an element-kind mapping for -
-/// the recognised half of the flat dispatch in `dispatch_child` below.
-/// Returns nothing both for an unrecognised @p tag and for one this
-/// parser recognises but could not extract enough from (an empty pattern, an
-/// unparsable number). Every refusal is tallied exactly once, here: the bare
-/// tag for one no parser looked at, the parser's own kind (`_unrecognised`,
-/// `_or`, `_unmappable`) for one it did, so the caller counts nothing.
+/// Every `.jmx` config element with an element-kind mapping: the recognised
+/// half of `dispatch_child`'s flat dispatch. Nothing both for an unrecognised
+/// @p tag and for a recognised one this parser could not extract (an empty
+/// pattern, an unparsable number). Each refusal is tallied once, here (the bare
+/// tag when no parser looked, the parser's own `_unrecognised` / `_or` /
+/// `_unmappable` kind when one did), so the caller counts nothing.
 std::vector<json>
 build_leaf_elements (Ctx& ctx, std::string_view tag, const pugi::xml_node& el) {
-    // `parse_response_assertions` tallies its own refusals (either the shared
-    // `_unrecognised` kind or its own `ResponseAssertion_or`), so it is kept
-    // out of the generic empty-result tally below.
+    // `parse_response_assertions` tallies its own refusals, so it stays out of
+    // the generic empty-result tally below.
     if (tag == "ResponseAssertion") {
         return validated_elements (ctx, parse_response_assertions (ctx, el));
     }
@@ -681,16 +666,16 @@ build_leaf_elements (Ctx& ctx, std::string_view tag, const pugi::xml_node& el) {
 }
 
 // ---------------------------------------------------------------------------
-// Folder-shaping controllers - JMeter class -> a folder plus its own
-// `control.*` element, or `std::nullopt` when this parser has no faithful
-// translation (a plain grouping folder is still created either way).
+// Folder-shaping controllers - JMeter class -> a folder plus its `control.*`
+// element, or `std::nullopt` with no faithful translation (the plain grouping
+// folder is created either way).
 // ---------------------------------------------------------------------------
 
-/// `"${name}" == "value"` or `${name} != value` - the two shapes JMeter's own
-/// If Controller UI produces for a simple comparison - into `control.if`'s
-/// `{{name}} == value` grammar. Anything else (a JavaScript expression, a
-/// function call, `&&`/`||`) has no translation and is left unmapped, which
-/// still imports the folder as a plain grouping.
+/// `"${name}" == "value"` or `${name} != value`, the two shapes JMeter's If
+/// Controller UI writes for a simple comparison, into `control.if`'s
+/// `{{name}} == value`. Anything else (a JavaScript expression, a function
+/// call, `&&` / `||`) is left unmapped; the folder still imports as a plain
+/// grouping.
 std::optional<std::string> translate_if_condition (const std::string& condition) {
     static const std::regex simple (
     R"re(^\s*"?\$\{([A-Za-z_][A-Za-z0-9_]*)\}"?\s*(==|!=)\s*"?([^"]*?)"?\s*$)re");
@@ -701,12 +686,11 @@ std::optional<std::string> translate_if_condition (const std::string& condition)
     return "{{" + match[1].str () + "}} " + match[2].str () + " " + match[3].str ();
 }
 
-/// `ThroughputController.style` 1 is "Percent Executions", the only style
-/// `control.throughput` expresses. Style 0 caps the *number* of executions
-/// (`maxThroughput`), which has no percent to import; it is refused so the
-/// caller tallies it instead of reading a stale or default percent as if it
-/// were the plan's intent. An absent style is read as percent, as hand-written
-/// plans leave it out.
+/// `ThroughputController.style` 1, "Percent Executions", is the only style
+/// `control.throughput` expresses. Style 0 caps the number of executions
+/// (`maxThroughput`) and has no percent, so it is refused and tallied rather
+/// than reading a stale or default percent as the plan's intent. An absent
+/// style reads as percent, as hand-written plans leave it out.
 std::optional<KindConfig> parse_throughput_controller (const pugi::xml_node& el) {
     constexpr long TOTAL_EXECUTIONS_STYLE = 0;
     if (long_prop (el, "ThroughputController.style", 1) == TOTAL_EXECUTIONS_STYLE) {
@@ -744,11 +728,10 @@ std::optional<KindConfig> parse_controller (std::string_view tag, const pugi::xm
     if (tag == "ThroughputController") {
         return parse_throughput_controller (el);
     }
-    // `SwitchController` selects by list index or a JMeter variable, neither
-    // of which maps onto `control.switch`'s named-case grammar without
-    // inventing case names JMeter never declared - left unmapped; the folder
-    // still imports as a plain grouping, tallied by the caller like any other
-    // recognised class this parser could not extract enough from.
+    // `SwitchController` selects by list index or a JMeter variable; neither
+    // maps onto `control.switch`'s named cases without inventing names JMeter
+    // never declared. Left unmapped: the folder imports as a plain grouping,
+    // tallied by the caller.
     return std::nullopt;
 }
 
@@ -863,24 +846,23 @@ void merge_http_defaults (const pugi::xml_node& el, json& variables) {
 // The walk itself.
 // ---------------------------------------------------------------------------
 
-/// Whether a JMeter element runs at all - the `enabled="false"` attribute the
-/// GUI writes when a user toggles an element off. Absent means true, JMeter's
-/// own default for an element the format never bothered to state either way.
+/// Whether a JMeter element runs at all: `enabled="false"` is what the GUI
+/// writes for an element toggled off, and absent means true, JMeter's default.
 bool jmeter_enabled (const pugi::xml_node& el) {
     return el.attribute ("enabled").as_bool (true);
 }
 
-/// A `<hashTree>`'s direct children, paired: a test element followed by its
-/// own (possibly empty) `<hashTree>`, in document order - JMeter's own
-/// serialization shape. @p visit receives the element and that following
-/// tree, an empty node when there is none, and sees a disabled element too.
+/// A `<hashTree>`'s direct children, paired as JMeter serializes them: a test
+/// element, then its own (possibly empty) `<hashTree>`, in document order.
+/// @p visit gets the element and that tree, an empty node when there is none,
+/// and sees disabled elements too.
 template <typename Visit>
 void for_each_pair (const pugi::xml_node& hash_tree, Visit&& visit) {
     pugi::xml_node child = hash_tree.first_child ();
     while (child) {
         if (std::string_view (child.name ()) == "hashTree") {
-            // A stray hashTree with nothing before it - malformed input;
-            // step over it rather than misreading it as some element's own.
+            // A stray hashTree with nothing before it is malformed: stepped
+            // over, not read as some element's own.
             child = child.next_sibling ();
             continue;
         }
@@ -898,14 +880,12 @@ void for_each_pair (const pugi::xml_node& hash_tree, Visit&& visit) {
 
 /// `for_each_pair` over the enabled elements only.
 ///
-/// A disabled element - and everything nested under it, since JMeter itself
-/// never runs a disabled element's children either - is skipped here rather
-/// than by each caller: this is the one place every walk in the file passes
-/// through, so a caller cannot forget the check the way a request the user
-/// turned off silently reappearing as active on import would suggest one did.
-/// Each disabled element met is tallied, so a pre-pass over the same tree
-/// reads `for_each_pair` and checks `jmeter_enabled` itself rather than tally
-/// it twice.
+/// A disabled element and everything under it (JMeter never runs a disabled
+/// element's children) is skipped here, not by each caller: every walk in the
+/// file passes through this, so none can forget the check and import a request
+/// the user turned off as active. Each disabled element met is tallied, so a
+/// pre-pass over the same tree uses `for_each_pair` and checks `jmeter_enabled`
+/// itself rather than tally twice.
 template <typename Visit>
 void for_each_paired_child (Ctx& ctx, const pugi::xml_node& hash_tree, Visit&& visit) {
     for_each_pair (hash_tree,
@@ -927,11 +907,11 @@ json make_folder () {
 void walk_hash_tree (const pugi::xml_node& hash_tree, Sink sink, Ctx& ctx);
 
 /// What the import takes from, or must report of, a setup/teardown thread
-/// group. JMeter has no scripting concept for one: the only thing carried out
-/// is a JSR223/BeanShell element found directly inside it, concatenated if more
-/// than one exists. Its samplers (a realistic "log in during setup" plan) have
-/// no `script.setup`/`.teardown` equivalent, and importing them as requests
-/// would run them on every pass instead of once.
+/// group. JMeter has no scripting concept for one: only a JSR223/BeanShell
+/// element directly inside it is carried, concatenated when there are several.
+/// Its samplers (a "log in during setup" plan) have no `script.setup` /
+/// `.teardown` equivalent, and as requests they would run every pass instead of
+/// once.
 struct GroupContents {
     /// The bodies of the JSR223/BeanShell elements directly inside, joined.
     std::string script;
@@ -995,13 +975,11 @@ json header_manager_rows (const pugi::xml_node& header_manager) {
     return headers;
 }
 
-/// `HTTPsampler.Files` (`HTTPFileArgs`/`HTTPFileArg`) as `form-data` parts,
-/// reusing `imported_file_part`'s shape (issue #1657) rather than a second
-/// one. Nested inside the sampler itself rather than a sibling tag
-/// `for_each_paired_child` would tally on its own, so a file arg with no
-/// usable name - nothing for the field to key on, the same "nothing dropped
-/// quietly" rule the sibling-tag fallback follows - is tallied here instead
-/// of imported as a nameless row.
+/// `HTTPsampler.Files` (`HTTPFileArgs` / `HTTPFileArg`) as `form-data` parts in
+/// `imported_file_part`'s shape (#1657). They nest inside the sampler, not as a
+/// sibling tag `for_each_paired_child` would tally, so a file arg with no
+/// usable name (nothing to key the field on) is tallied here rather than
+/// imported as a nameless row.
 json jmeter_file_fields (Ctx& ctx, const pugi::xml_node& el) {
     json fields                = json::array ();
     const pugi::xml_node files = element_prop (el, "HTTPsampler.Files");
@@ -1035,27 +1013,25 @@ json argument_rows (const std::vector<std::pair<std::string, std::string>>& pair
 }
 
 /// Whether JMeter appends a sampler's arguments to the URL's query for
-/// @p method, rather than sending them as the request body. Only the methods
-/// with no body go in the query; every other one (POST, PUT, PATCH, a custom
-/// verb) sends them as the body.
+/// @p method: only for the methods with no body. Every other one (POST, PUT,
+/// PATCH, a custom verb) sends them as the body.
 bool arguments_go_in_query (std::string_view method) {
     const std::string name = vayu::utils::ascii_upper (trimmed (method));
     return name == "GET" || name == "DELETE" || name == "HEAD" || name == "OPTIONS";
 }
 
-/// A sampler's own `HTTPsampler.Arguments` and `HTTPsampler.Files`, as the
-/// shape JMeter sends them in:
+/// A sampler's `HTTPsampler.Arguments` and `HTTPsampler.Files`, in the shape
+/// JMeter sends them:
 ///
-/// - file parts: a `form-data` body, with any regular arguments folded in
-///   beside them (a file has no query-string or raw-body form to take instead,
-///   so multipart is the only wire form it has, flag or no flag);
-/// - `HTTPSampler.postBodyRaw` with at least one argument: the raw-body case,
-///   the first argument's value as a `text` body, whatever the method;
+/// - file parts: a `form-data` body with any regular arguments beside them (a
+///   file has no query or raw-body form, so multipart is its only wire form,
+///   flag or not);
+/// - `HTTPSampler.postBodyRaw` with at least one argument: the first argument's
+///   value as a `text` body, whatever the method;
 /// - otherwise by @p method: `params` rows for GET, DELETE, HEAD and OPTIONS,
-///   a body for every other one - `form-data` when
-///   `HTTPSampler.DO_MULTIPART_POST` is set, `x-www-form-urlencoded` if not
-///   (#3191). Rows left in `params` for a POST would be joined into the URL's
-///   query, which is not where JMeter sends them.
+///   else a body, `form-data` when `HTTPSampler.DO_MULTIPART_POST` is set and
+///   `x-www-form-urlencoded` if not (#3191). Rows left in `params` for a POST
+///   would join into the URL's query, where JMeter does not send them.
 void apply_sampler_arguments (Ctx& ctx,
 const pugi::xml_node& el,
 std::string_view method,
@@ -1149,13 +1125,12 @@ void stamp_timeout (Ctx& ctx, const HttpDefaults& effective, json& request) {
     }
 }
 
-/// One `<HTTPSamplerProxy>`, plus whatever its own `<hashTree>` scopes to it
-/// alone (a `HeaderManager` and any extractor/assertion/timer/processor
-/// nested directly under it - the common, flat `.jmx` shape this parser
-/// targets). A `HeaderManager` or processor further up the tree is not
-/// resolved onto it; the HTTP Request Defaults in scope are (`ctx.defaults`):
-/// their path stands in for an empty one, and their timeouts for ones the
-/// sampler leaves unset.
+/// One `<HTTPSamplerProxy>` plus what its own `<hashTree>` scopes to it (a
+/// `HeaderManager` and any extractor/assertion/timer/processor nested directly
+/// under it, the flat `.jmx` shape this parser targets). A `HeaderManager` or
+/// processor further up is not resolved onto it; the HTTP Request Defaults in
+/// scope are (`ctx.defaults`): their path stands in for an empty one, their
+/// timeouts for ones the sampler leaves unset.
 json build_http_sampler (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& own_tree) {
     json request;
     request["name"]        = el.attribute ("testname").as_string ("Request");
@@ -1174,10 +1149,9 @@ json build_http_sampler (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_nod
     request["params"] = std::move (params);
     request["body"]   = std::move (body);
     request["auth"]   = json{ { "mode", "inherit" } };
-    // JMeter offers two mutually-exclusive ways to follow a redirect - its own
-    // "Follow Redirects" (the default) and HttpClient's "Redirect
-    // Automatically" - either one means Vayu's single `followRedirects` is
-    // true; only unchecking both turns it off.
+    // JMeter's "Follow Redirects" (the default) and HttpClient's "Redirect
+    // Automatically" are mutually exclusive; either means Vayu's one
+    // `followRedirects` is true, and only unchecking both turns it off.
     request["followRedirects"] = bool_prop (el, "HTTPSampler.follow_redirects", true) ||
     bool_prop (el, "HTTPSampler.auto_redirects", false);
 
@@ -1209,17 +1183,14 @@ Sink parent) {
             folder["elements"].push_back (std::move (*built));
         }
     } else if (tag != "GenericController") {
-        // A controller with no `control.*` element to build: a
-        // `SwitchController` or `WhileController` (no mapping at all), a
-        // `LoopController` set to JMeter's "forever" (`loops <= 0`), an
-        // `IfController` whose condition does not match
-        // `translate_if_condition`'s grammar, or a `ThroughputController` in
-        // "total executions" style. The folder still imports and still groups
-        // its members in source order, but the logic that shaped it is gone,
-        // so it is tallied the same way `build_leaf_elements` tallies a
-        // recognised class it could not extract enough from - never silently,
-        // per issue #1443. A `GenericController` only groups, so it is the
-        // one exception: nothing was lost to report.
+        // A controller with no `control.*` element: a `SwitchController` or
+        // `WhileController` (no mapping), a `LoopController` set to "forever"
+        // (`loops <= 0`), an `IfController` outside `translate_if_condition`'s
+        // grammar, or a `ThroughputController` in "total executions" style. The
+        // folder still groups its members in source order, but its logic is
+        // gone, so it is tallied as `build_leaf_elements` tallies a recognised
+        // class, never silently (#1443). A `GenericController` only groups, so
+        // it lost nothing to report.
         ctx.tally.add (std::string (tag) + "_unrecognised");
     }
     int next_order = 0;
@@ -1247,12 +1218,12 @@ std::string counted_unit (const std::string& value, const char* unit) {
     return value + " " + unit + (value == "1" ? "" : "s");
 }
 
-/// What a thread group asks of a run, in the terms of Vayu's load profile -
-/// `nullopt` for a group that is pure defaults (one thread, one pass, no
-/// duration), which has nothing to set. A single thread starts at once, so its
-/// ramp-up is not part of the profile; a duration counts only with the
-/// scheduler on, as in JMeter. Values stay as written, and parts are joined by
-/// `;` because the app lists several of these names comma-separated.
+/// What a thread group asks of a run, in Vayu's load-profile terms, or
+/// `nullopt` for pure defaults (one thread, one pass, no duration). A single
+/// thread starts at once, so its ramp-up is not part of it; a duration counts
+/// only with the scheduler on, as in JMeter. Values stay as written, and parts
+/// are joined by `;` because the app lists several of these names
+/// comma-separated.
 std::optional<std::string> thread_group_profile (const pugi::xml_node& group) {
     const auto value_or = [] (std::string text, const char* fallback) {
         return text.empty () ? std::string (fallback) : std::move (text);
@@ -1336,13 +1307,11 @@ void dispatch_lifecycle_group (Ctx& ctx, std::string_view tag, const pugi::xml_n
     ctx.tally.add (std::string (tag), std::max (dropped, 1));
 }
 
-/// Every logic controller that imports as a folder holding its members in
-/// source order. The first six may also gain a `control.*` element from
-/// `parse_controller`; the rest have no element-kind equivalent for their
-/// looping or selection semantic, so the folder is all they get and the
-/// caller tallies `<Tag>_unrecognised` for each (`build_controller_folder`) -
-/// except a `GenericController` (Simple Controller), which only groups and so
-/// has nothing to report.
+/// Every logic controller that imports as a folder of its members in source
+/// order. The first six may gain a `control.*` element from `parse_controller`;
+/// the rest have no equivalent for their looping or selection, so the folder is
+/// all they get and `build_controller_folder` tallies `<Tag>_unrecognised`,
+/// except a `GenericController` (Simple Controller), which only groups.
 bool is_folder_controller (std::string_view tag) {
     static constexpr auto TAGS = std::to_array<std::string_view> ({
     "LoopController",
@@ -1397,13 +1366,11 @@ void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& o
         merge_http_defaults (el, sink.variables);
         return;
     }
-    // Everything JMeter itself never asked this parser to model - listeners
-    // (every one of which serializes as `<ResultCollector>` regardless of
-    // which report a user picked), `CookieManager`, `CSVDataSet`,
-    // `AuthManager`, `XPathExtractor`, a stray `ConfigTestElement` that is not
-    // HTTP defaults - is counted by its own tag name inside
-    // `build_leaf_elements`, so a future kind for any one of them costs nothing
-    // to wire up.
+    // Everything this parser does not model (listeners, which all serialize as
+    // `<ResultCollector>`; `CookieManager`, `CSVDataSet`, `AuthManager`,
+    // `XPathExtractor`, a `ConfigTestElement` that is not HTTP defaults) is
+    // counted by its tag inside `build_leaf_elements`, so a future kind for any
+    // of them is wired in one place.
     for (json& built : build_leaf_elements (ctx, tag, el)) {
         sink.elements.push_back (std::move (built));
     }

@@ -41,7 +41,6 @@ void Logger::init (const std::string& log_dir, std::string_view source) {
     file_level_ = default_file_level ();
     ensure_log_directory ();
 
-    // Open log file with timestamp
     auto now  = std::chrono::system_clock::now ();
     auto time = std::chrono::system_clock::to_time_t (now);
 
@@ -63,10 +62,9 @@ void Logger::init (const std::string& log_dir, std::string_view source) {
     prune_old_logs (log_dir_, file_prefix (),
     static_cast<std::size_t> (vayu::core::constants::logging::RETAINED_FILES));
 
-    // The pre-#1557 generation is never one of the N kept above - it has its
-    // own prefix, so `prune_old_logs` never sees it - and nothing else in the
-    // engine mentions it, so an install that predates the split would carry
-    // it forever otherwise.
+    // The pre-#1557 files have their own prefix, so `prune_old_logs` never
+    // counts them among the N kept and nothing else in the engine removes them:
+    // without this, an install older than the split keeps them forever.
     remove_legacy_log_files (log_dir_, vayu::core::constants::logging::LEGACY_FILE_PREFIX);
 }
 
@@ -118,10 +116,8 @@ std::string format_ts (std::chrono::system_clock::time_point now) {
     return ts_stream.str ();
 }
 
-// Console verbosity buys INFO and DEBUG; ERROR and WARNING are unconditional
-// so a quiet run still sees an engine failure. One expression rather than a
-// chain of branches that all assigned the same `true`, which said nothing
-// about which condition earned it.
+// Console verbosity buys INFO and DEBUG; ERROR and WARNING are unconditional so
+// a quiet run still sees an engine failure.
 bool should_print_to_console (Logger::Level level, int verbosity) {
     using Level = Logger::Level;
     return level == Level::ERROR || level == Level::WARNING ||
@@ -169,8 +165,8 @@ int pid) {
 
 void Logger::write_to_console_locked (const LogRecord& record, const std::string& ts) {
     std::ostringstream console_line;
-    // "HH:MM:SS.mmm LEVEL cat      msg k=v ..." - the same shape on every
-    // console, engine or (once #1558 lands) app.
+    // "HH:MM:SS.mmm LEVEL cat      msg k=v ...": the same shape on every
+    // console, engine or app (#1558).
     console_line << ts.substr (11, 12) << ' ' << std::left << std::setw (7)
                  << level_console_name (record.level) << std::setw (9)
                  << std::string (record.cat) << record.msg;
@@ -311,10 +307,9 @@ prune_old_logs (const std::string& log_dir, std::string_view file_prefix, std::s
         if (fs::remove (candidates[i], remove_ec)) {
             ++deleted;
         }
-        // The generation's rotated half, if it has one. Removed with its
-        // parent so a `.1` cannot outlive the file it rotated out of and sit
-        // in the directory forever, which is the growth this prune exists to
-        // stop.
+        // The generation's rotated half, if it has one, removed with its parent
+        // so a `.1` cannot outlive the file it rotated out of and sit in the
+        // directory forever: the growth this prune exists to stop.
         fs::remove (candidates[i].string () + ".1", remove_ec);
     }
     return deleted;

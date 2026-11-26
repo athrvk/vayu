@@ -44,9 +44,9 @@
 #include "vayu/http/grant_secret.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
-// The `POST /execute` core - `ScriptVariableScopes`, the exchange itself - now
-// shared with the scenario runner and therefore declared where `vayu_core` can
-// see it. Included here so route TUs keep naming it through routes.hpp.
+// The `POST /execute` core - `ScriptVariableScopes`, the exchange itself - is
+// shared with the scenario runner, so it is declared where `vayu_core` can see
+// it. Included here so route TUs keep naming it through routes.hpp.
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/url_parts.hpp"
@@ -85,9 +85,6 @@ class SseStreamManager;
 
 namespace vayu::http::routes {
 
-/**
- * @brief Common utilities for route handlers
- */
 inline int64_t now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
@@ -95,11 +92,12 @@ inline int64_t now_ms () {
 }
 
 /**
- * @brief The error code an error body carries when its call site does not name one.
+ * @brief The error code an error body carries when its call site does not name
+ *        one.
  *
  * Codes are per-status rather than per-message so a caller can branch on the
- * class of failure without string-matching the message, and so the ~50 existing
- * call sites needed no per-site invention. A route that has a more specific code
+ * class of failure without string-matching the message, and so a call site
+ * needs no code of its own. A route that has a more specific code
  * (`invalid_config`, the `oauth2_*` family) passes it explicitly.
  */
 inline const char* default_error_code (int status) {
@@ -117,15 +115,14 @@ inline const char* default_error_code (int status) {
 }
 
 /**
- * @brief The one error body shape the engine emits: `{"error": {"code", "message"}}`.
+ * @brief The one error body shape the engine emits:
+ *        `{"error": {"code", "message"}}`.
  *
- * The engine used to emit two shapes - this nested one from `/config` and
- * `/oauth2`, and a flat `{"error": "<message>"}` from `send_error` and the
- * testable-core route helpers. The app's shared http-client reads
- * `errorData.error.message`, and on a flat body that is `undefined` (a string
- * carries no `.message`), so every validation message the CRUD routes built was
- * dropped and surfaced as a bare "HTTP 400" (issue #173). Build error bodies
- * here rather than inline, so a new route cannot reintroduce the split.
+ * One shape, because the app's shared http-client reads
+ * `errorData.error.message`: on a flat `{"error": "<message>"}` body that is
+ * `undefined` (a string carries no `.message`), and every validation message
+ * would surface as a bare "HTTP 400" (#173). Build error bodies here rather
+ * than inline, so a new route cannot add a second shape.
  *
  * Extra per-error detail belongs *inside* the nested object (see `item_error`
  * in import.cpp), which keeps `error` the single place a client has to look.
@@ -178,20 +175,20 @@ struct RouteError {
 /**
  * "Did what it was asked, or here is the response to send instead."
  *
- * Every field applier and every guard below returns this. It used to be
- * `std::optional<std::pair<int, nlohmann::json>>`, where an *empty* optional
- * meant success - a shape that reads backwards at every call site (`if (err)`
- * on the failure path, `return std::nullopt` to mean "fine") and that lets a
- * dropped return value pass silently for "no error". With `std::expected` the
- * type carries which way is up: `if (!result) return result;` propagates, and
- * `result.error()` is the only way to reach the response.
+ * Every field applier and every guard below returns this. An optional refusal
+ * (`std::optional<std::pair<int, nlohmann::json>>`, empty meaning success)
+ * reads backwards at every call site (`if (err)` on the failure path,
+ * `return std::nullopt` to mean "fine") and lets a dropped return value pass
+ * silently for "no error". With `std::expected` the type carries which way is
+ * up: `if (!result) return result;` propagates, and `result.error()` is the
+ * only way to reach the response.
  */
 using RouteResult = std::expected<void, RouteError>;
 
 /**
  * Build the refusal. One status in, and both halves of the error come out of
- * it - the duplication that used to spell the status twice
- * (`std::make_pair (400, error_body (400, ...))`) is gone with it.
+ * it, so the status is never spelled twice
+ * (`std::make_pair (400, error_body (400, ...))`).
  */
 [[nodiscard]] inline std::unexpected<RouteError>
 route_error (int status, const std::string& message, std::string_view code = {}) {
@@ -306,12 +303,12 @@ std::string_view code = {}) {
 /**
  * @brief Answer the exception a resource write's `catch` caught (#2423).
  *
- * A `catch (const std::exception&)` that answered 400 for everything told a
- * person with a full disk that their request was invalid, and the app does not
- * retry a 4xx. The cases, by what the caller can do:
+ * A 400 for everything would tell a person with a full disk that their request
+ * was invalid, and the app does not retry a 4xx. The cases, by what the caller
+ * can do:
  *
  * - not a storage failure (a JSON parse error, a validation throw): 400 with
- *   the exception's text, as before;
+ *   the exception's text;
  * - `SQLITE_FULL`: 507 `insufficient_storage` - free space and try again;
  * - `SQLITE_BUSY` / `SQLITE_LOCKED`: 503 `unavailable` with `Retry-After: 1`;
  * - any other SQLite failure: 500 `internal_error`.
@@ -400,7 +397,7 @@ int64_t stored_updated_at) {
  * millisecond, or two writes would share an entity tag.
  */
 inline int64_t next_updated_at (int64_t previous) {
-    return std::max (now_ms (), previous + 1);
+    return (std::max)(now_ms (), previous + 1);
 }
 
 /** The `ETag` of a 200 answer that carries the row's `updatedAt`. */
@@ -702,13 +699,10 @@ string_field_type_error (const char* key, const nlohmann::json& value) {
 /**
  * The one null-vs-absent rule for resource writes (POST create / PUT update).
  *
- * Before issue #95 each resource - and in places each *field* - invented its
- * own reading of a null: `collections.variables: null` reset to `{}`,
- * `collections.name: null` meant "keep", and `environments.variables: null`
- * stored the literal four-character string `null` because that handler had no
- * guard at all. The rule below replaces all of that, is identical across
- * collections, requests and environments, and is stated once in
- * `docs/engine/api-reference.md`:
+ * One rule across collections, requests and environments (#95), stated once in
+ * `docs/engine/api-reference/resource-writes.md`, so no resource or field reads
+ * a null its own way (a reset to `{}` in one, "keep" in another, the literal
+ * string `null` stored in a third):
  *
  *   - On create (POST): absent and `null` both mean "use the default".
  *   - On update (PUT): absent means "keep the current value"; `null` means
@@ -749,25 +743,24 @@ bool is_create) {
  * (e.g. `{}` for variables, `{"mode":"none"}` for a collection's auth).
  *
  * Every field routed through here is **object-shaped**, and the helper rejects
- * anything else with a 400 naming the field. It used to dump whatever it was
- * handed, so `{"variables": 42}` stored `42` and `{"auth": "bearer"}` stored
- * `"bearer"` - blobs that parse as JSON but are not the object each reader
- * expects, and every reader degrades quietly (`parse_variables` yields no
- * variables, `parse_auth` yields no auth, so the request goes out bare). The
- * write returned 200 and the user found out from the wire. That is the same
- * defect the `"null"`-string fix closed, one level up: it removed a bad
- * *value*, this removes a bad *shape*. Array-shaped fields have their own
- * validating helper (`apply_key_value_field` for `params` / `headers`).
+ * anything else with a 400 naming the field. Dumping whatever it is handed
+ * would store `42` for `{"variables": 42}` and `"bearer"` for
+ * `{"auth": "bearer"}` - blobs that parse as JSON but are not the object each
+ * reader expects, and every reader degrades quietly (`parse_variables` yields
+ * no variables, `parse_auth` yields no auth, so the request goes out bare)
+ * behind a 200. The null rule refuses a bad *value*; this refuses a bad
+ * *shape*. Array-shaped fields have their own validating helper
+ * (`apply_key_value_field` for `params` / `headers`).
  *
  * `[[nodiscard]]` because dropping the returned error is exactly the silent
  * acceptance this helper exists to prevent.
  *
- * A serialized value over `json::MAX_FIELD_SIZE` is refused with a `413`
- * naming the field, its size and the cap, rather than stored (issue #1485):
- * the list route substitutes a default for a column this large when it reads
- * it back, so a write this helper let through could never be read back whole
- * except by id - refusing it here is the one place that keeps the two reads
- * from disagreeing about the same row.
+ * A serialized value over `json::MAX_FIELD_SIZE` is refused with a `413` naming
+ * the field, its size and the cap, rather than stored (#1485): the list route
+ * substitutes a default for a column this large when it reads it back, so a
+ * write this helper let through could never be read back whole except by id -
+ * refusing it here is the one place that keeps the two reads from disagreeing
+ * about the same row.
  */
 [[nodiscard]] inline RouteResult apply_json_field (const nlohmann::json& json,
 const char* key,
@@ -834,11 +827,10 @@ apply_variables_field (const nlohmann::json& json, std::string& out, bool is_cre
 }
 
 /**
- * Same rule for a field stored as a dumped **array** of KeyValueEntry
- * (`params` / `headers` on a request, `headers` on a saved example). A null
- * resets to `[]`; a present value must be an array whose every entry carries
- * string `key`/`value` and boolean `enabled`. Returns the 400 on a malformed
- * entry.
+ * Same rule for a field stored as a dumped **array** of KeyValueEntry (`params`
+ * / `headers` on a request, `headers` on a saved example). A null resets to
+ * `[]`; a present value must be an array whose every entry carries string
+ * `key`/`value` and boolean `enabled`. Returns the 400 on a malformed entry.
  *
  * Here rather than in requests.cpp because saved examples store the same shape
  * and must validate it the same way - a second copy would drift the moment the
@@ -846,7 +838,7 @@ apply_variables_field (const nlohmann::json& json, std::string& out, bool is_cre
  *
  * This stores what the body states and nothing else. A request's `params` is
  * also written by its `url`: `apply_request_fields` reconciles the query rows
- * when a body states `url` and no `params` (issue #3551).
+ * when a body states `url` and no `params` (#3551).
  */
 [[nodiscard]] inline RouteResult
 apply_key_value_field (const nlohmann::json& json, const char* key, std::string& out, bool is_create) {
@@ -887,11 +879,11 @@ apply_key_value_field (const nlohmann::json& json, const char* key, std::string&
 }
 
 /**
- * Same null-vs-absent rule for `elements` (issue #1513): a null resets to
- * `[]`; a present value must be an array the registry accepts -
- * `vayu::core::Registry::validate` carries the shape check, the kind lookup
- * and each entry's config-schema validation, so this stays a thin wrapper
- * rather than a second copy of any of that.
+ * Same null-vs-absent rule for `elements` (#1513): a null resets to `[]`; a
+ * present value must be an array the registry accepts -
+ * `vayu::core::Registry::validate` carries the shape check, the kind lookup and
+ * each entry's config-schema validation, so this stays a thin wrapper rather
+ * than a second copy of any of that.
  */
 [[nodiscard]] inline RouteResult apply_elements_field (const nlohmann::json& json,
 const char* key,
@@ -909,7 +901,7 @@ vayu::core::ElementOwner owner = vayu::core::ElementOwner::Request) {
         out = "[]";
         return {};
     }
-    // The engine assigns an `el_` id when the caller sends none (issue #1513's
+    // The engine assigns an `el_` id when the caller sends none (#1513's
     // storage contract), validated *after* - a client that names no id at all
     // gets one rather than a 400 asking it to invent one itself. A non-array
     // `value` is left alone; `validate` below is what names that refusal.
@@ -923,20 +915,19 @@ vayu::core::ElementOwner owner = vayu::core::ElementOwner::Request) {
 }
 
 /**
- * Refuse `preRequestScript`, `postRequestScript` and `tests` (issue #1514's
- * cut-over): the owner's decision was a clean cut, not a transitional read/
- * write alias, so every route that used to accept a script as one of these
- * keys now refuses it outright, naming its own replacement field. Checked
- * against every spelling `script_parts.hpp` used to accept (`preRequestScripts`
- * / `postRequestScripts` included), so a caller cannot dodge the refusal by
- * sending the list form instead of the singular one.
+ * Refuse `preRequestScript`, `postRequestScript` and `tests` (#1514's
+ * cut-over): a clean cut by the owner's decision, not a transitional read/write
+ * alias, so every route refuses a script under one of these keys, naming its
+ * own replacement field. The list spellings (`preRequestScripts` /
+ * `postRequestScripts`) are refused too, so a caller cannot dodge the refusal
+ * by sending the list form instead of the singular one.
  *
- * @p replacement names the field this route actually reads a script.pre/
- * script.post from now - `elements` for every route but a single-target
- * `POST /runs`, whose own script slot is `requestElements` instead (issue
- * #1594): that endpoint's `elements` key means the run-level timers/scripts
- * override, not a script source, so pointing the message at it would send a
- * caller who follows it straight into a second refusal.
+ * @p replacement names the field this route actually reads a
+ * script.pre/script.post from - `elements` for every route but a single-target
+ * `POST /runs`, whose own script slot is `requestElements` instead (#1594):
+ * that endpoint's `elements` key means the run-level timers/scripts override,
+ * not a script source, so pointing the message at it would send a caller who
+ * follows it straight into a second refusal.
  *
  * A plain message rather than a `RouteResult`: callers answer with it two
  * different ways (`route_error` here, a bare 400 in `read_execute_payload`),
@@ -1173,8 +1164,8 @@ bool is_create) {
  * called by the create and update cores rather than from
  * `apply_collection_fields` / `apply_environment_fields`: `POST /import/apply`
  * and `POST /specs/sync` reach those with names an importer wrote, and one that
- * is blank succeeds today. Stored names are never trimmed - a name with
- * content keeps its surrounding spaces.
+ * is blank succeeds there. Stored names are never trimmed - a name with content
+ * keeps its surrounding spaces.
  */
 inline RouteResult reject_blank_name (const nlohmann::json& json) {
     if (!json.contains ("name") || !json["name"].is_string ()) {
@@ -1259,11 +1250,11 @@ inline RouteResult reject_inline_private_key (const nlohmann::json& json) {
 }
 
 /**
- * `id` is engine-owned (issue #97): every id in the database comes from
+ * `id` is engine-owned (#97): every id in the database comes from
  * `generate_id`, so a create that carries one is a 400 rather than a silently
- * honoured - or silently ignored - field. `POST /import/apply` already rejects
- * a per-item `id` the same way (`claim_temp_id` in import.cpp), so neither
- * route lets a client mint ids and the two cannot drift on the answer.
+ * honoured - or silently ignored - field. `POST /import/apply` rejects a
+ * per-item `id` the same way (`claim_temp_id` in import.cpp), so neither route
+ * lets a client mint ids and the two cannot drift on the answer.
  *
  * Presence alone is the trigger, `null` included. This is the one place the
  * null-vs-absent rule does not apply, because `id` is not a settable field with
@@ -1285,7 +1276,7 @@ inline RouteResult reject_client_supplied_id (const nlohmann::json& json) {
  * redundant. A body `id` that disagrees with it is a 400 rather than a silently
  * ignored field: the payload describes a write to two different records, and
  * guessing which one the caller meant is how a PUT to one id carrying another
- * id's body quietly rewrites the wrong record (issue #97).
+ * id's body quietly rewrites the wrong record (#97).
  *
  * Runs before the record lookup, so the answer to a malformed body does not
  * depend on whether the target happens to exist.
@@ -1304,10 +1295,10 @@ const std::string& path_id) {
 
 /**
  * The per-resource field appliers, shared by the single-resource create/update
- * cores and by `POST /import/apply` (issue #96). Bulk import must store exactly
- * what `POST /<resource>` would store, so it calls these rather than
- * re-deriving the null-vs-absent rule or the per-field validation - a second
- * copy would drift the moment a field is added.
+ * cores and by `POST /import/apply` (#96). Bulk import must store exactly what
+ * `POST /<resource>` would store, so it calls these rather than re-deriving the
+ * null-vs-absent rule or the per-field validation - a second copy would drift
+ * the moment a field is added.
  *
  * Each fails with the response to send when a no-default field is missing or
  * null (or, for collections, when the proposed parent would form a cycle).
@@ -1326,7 +1317,7 @@ RouteResult apply_environment_fields (vayu::db::Environment& e,
 const nlohmann::json& json,
 bool is_create);
 /**
- * Saved example responses (issue #481) follow the same rule, and the same
+ * Saved example responses (#481) follow the same rule, and the same
  * shared-applier reason: `POST /import/apply` writes examples nested under
  * their request item, so both paths must agree on what a field means and where
  * the body cap sits. Defined in examples.cpp.
@@ -1401,7 +1392,7 @@ class SiblingSlots {
 };
 
 /**
- * Hex-encoded SHA-256 of an OpenAPI document's text (issue #637) - what
+ * Hex-encoded SHA-256 of an OpenAPI document's text (#637) - what
  * `spec_documents.hash` stores and what a run's snapshot is stamped with.
  * Defined in specs.cpp.
  */
@@ -1428,28 +1419,28 @@ const httplib::Request& req,
 httplib::Response& res);
 
 /**
- * Puts a spec write's two indexes onto @p spec - `operations` (issue #629) and
- * `responseSchemas` (issue #628) - **both derived here from `spec.content`**
- * (issues #853 and #860), returning the caller-facing error when the document
- * cannot be read or its schema index is over the cap. A caller that sends
- * either gets a `400`: they are the engine's to compute, like `hash`.
+ * Puts a spec write's two indexes onto @p spec - `operations` (#629) and
+ * `responseSchemas` (#628) - **both derived here from `spec.content`** (#853,
+ * #860), returning the caller-facing error when the document cannot be read or
+ * its schema index is over the cap. A caller that sends either gets a `400`:
+ * they are the engine's to compute, like `hash`.
  *
  * One copy for all three writers - `POST /specs`, `POST /import/apply`'s spec
  * section and `POST /specs/sync` - because a document stored through one path
  * and re-stored through another must carry the same indexes, or a run's
  * coverage and its verdicts would depend on how the document arrived. A
  * document declaring no operation leaves the column empty, which is "no index",
- * not "declares nothing". Requires `spec.content` to be set already, which every
- * caller does before the hash. Defined in specs.cpp.
+ * not "declares nothing". Requires `spec.content` to be set already, which
+ * every caller does before the hash. Defined in specs.cpp.
  *
  * @param index_cap Bytes the serialized `responseSchemas` index may occupy -
  *        `spec_size_cap(db)`, the document's own cap rather than a second knob.
- * @param document_out Optional: the DOM the indexes were derived from, moved out
- *        for a caller that needs the document itself as well. `POST /specs/sync`
- *        does - it writes the example rows the stored document documents (issue
- *        #869) - and taking the DOM from here rather than reading the same bytes
- *        again is what keeps one read behind everything one write says about a
- *        document. Untouched when the read fails.
+ * @param document_out Optional: the DOM the indexes were derived from, moved
+ *        out for a caller that needs the document itself as well.
+ *        `POST /specs/sync` does - it writes the example rows the stored
+ *        document documents (#869) - and taking the DOM from here rather than
+ *        reading the same bytes again is what keeps one read behind everything
+ *        one write says about a document. Untouched when the read fails.
  */
 std::optional<std::string> read_spec_indexes (const nlohmann::json& item,
 vayu::db::SpecDocument& spec,
@@ -1457,8 +1448,8 @@ size_t index_cap,
 nlohmann::ordered_json* document_out = nullptr);
 
 /**
- * The example rows one draft request's documented responses become, in the shape
- * a write of them takes (issue #869).
+ * The example rows one draft request's documented responses become, in the
+ * shape a write of them takes (#869).
  *
  * Shared by `POST /specs/diff`, which reports what an apply would write, and
  * `POST /specs/sync`, which writes it - so the rows a caller is shown and the
@@ -1472,7 +1463,7 @@ nlohmann::json draft_example_rows (const std::vector<vayu::core::DraftExample>& 
  * The spec routes do not call this directly: they call
  * `spec_contract_subtree_ids`, which passes the boundary a contract stops at.
  * The boundary has no default, so a caller cannot take the whole subtree by
- * leaving it out (issue #3034). Defined in spec_sync.cpp.
+ * leaving it out (#3034). Defined in spec_sync.cpp.
  *
  * @param descend_into A child it refuses is left out with its own descendants.
  */
@@ -1483,7 +1474,7 @@ const std::function<bool (const vayu::db::Collection&)>& descend_into);
 
 /**
  * Every collection in the contract @p root binds: the subtree, stopped at a
- * child bound to a *different* document (issues #721, #3034).
+ * child bound to a *different* document (#721, #3034).
  *
  * One walk for the five routes that answer for a collection's contract -
  * `POST /specs/sync`, which refuses to touch anything outside it,
@@ -1562,12 +1553,12 @@ class SpecTreeMove {
 /**
  * Every request stored beneath @p subtree, in one canonical order.
  *
- * Shared by `POST /specs/match`, `POST /specs/bind` (issue #862) and
- * `POST /specs/diff` (issue #854) because a preview and the write it previews
- * must consider the same requests in the same order - each of those routes
- * reports indices into this list, and a write that walked its own would act on a
- * pairing the preview never showed. Defined in spec_sync.cpp, beside the subtree
- * walk it completes.
+ * Shared by `POST /specs/match`, `POST /specs/bind` (#862) and
+ * `POST /specs/diff` (#854) because a preview and the write it previews must
+ * consider the same requests in the same order - each of those routes reports
+ * indices into this list, and a write that walked its own would act on a
+ * pairing the preview never showed. Defined in spec_sync.cpp, beside the
+ * subtree walk it completes.
  */
 std::vector<vayu::db::Request> collection_subtree_requests (vayu::db::Database& db,
 const std::vector<vayu::db::Collection>& all,
@@ -1609,14 +1600,14 @@ nlohmann::json spec_operation_json (const vayu::core::DeclaredOperation& operati
  * `next` value, and by a `"safe"` `POST /specs/sync`, which creates the
  * operations a document added and must build exactly the request the diff said
  * it would. `examples` is not here: a sync derives those rows from the document
- * it stores (issue #869) and the diff adds them to its own answer. Defined in
+ * it stores (#869) and the diff adds them to its own answer. Defined in
  * spec_diff.cpp.
  */
 nlohmann::json draft_request_fields_json (const vayu::core::DraftRequest& draft);
 
 /**
  * The three-way comparison behind both `POST /specs/diff` and a `"safe"`
- * `POST /specs/sync` (issue #871).
+ * `POST /specs/sync` (#871).
  *
  * Its members are what a caller has to hold together to read a
  * `vayu::core::SpecDiff` at all: the diff indexes into the fetched drafts and
@@ -1669,7 +1660,7 @@ std::vector<vayu::core::DeclaredOperation> declined_identities (
 const std::vector<vayu::db::DeclinedOperation>& records);
 
 /**
- * What a design-mode response should be checked against (issue #628).
+ * What a design-mode response should be checked against (#628).
  *
  * `bound == false` is the one state that means **no verdict node at all**: the
  * request's collection ancestry binds no document, so nothing here was ever
@@ -1692,9 +1683,9 @@ DesignSchemaResolution resolve_design_schema_index (vayu::db::Database& db,
 const std::optional<std::string>& request_id);
 
 /**
- * The verdict one design-mode response gets (issue #628), or `std::nullopt`
- * when the request's collection ancestry binds no document - the state that
- * means no verdict node at all. Defined in specs.cpp.
+ * The verdict one design-mode response gets (#628), or `std::nullopt` when the
+ * request's collection ancestry binds no document - the state that means no
+ * verdict node at all. Defined in specs.cpp.
  */
 std::optional<vayu::core::ValidationVerdict> validate_design_response (vayu::db::Database& db,
 const std::optional<std::string>& request_id,
@@ -1702,14 +1693,14 @@ const vayu::Response& response);
 
 /**
  * Rejects a collection write whose `openapi` binding names a spec that will not
- * exist once the write lands (issue #637).
+ * exist once the write lands (#637).
  *
- * Outside `apply_collection_fields` for the same reason `reject_missing_collection`
- * is outside `apply_request_fields`: `POST /import/apply` runs the applier over
- * rows whose spec section is still unwritten, so an existence check inside it
- * would refuse a legal bulk import. @p pending names what the caller is about to
- * write in the same transaction; every path but import passes an empty set.
- * Defined in specs.cpp.
+ * Outside `apply_collection_fields` for the same reason
+ * `reject_missing_collection` is outside `apply_request_fields`:
+ * `POST /import/apply` runs the applier over rows whose spec section is still
+ * unwritten, so an existence check inside it would refuse a legal bulk import.
+ * @p pending names what the caller is about to write in the same transaction;
+ * every path but import passes an empty set. Defined in specs.cpp.
  */
 RouteResult reject_unbindable_spec (vayu::db::Database& db,
 const std::string& openapi,
@@ -1717,9 +1708,9 @@ const std::unordered_set<std::string>& pending);
 
 /**
  * Fills in the `specHash` / `syncedAt` a binding was written without, from the
- * stored document it names (issue #709). Rewrites @p openapi in place; a
- * binding that is unbound, complete, or names a document this database does not
- * hold is left exactly as it was.
+ * stored document it names (#709). Rewrites @p openapi in place; a binding that
+ * is unbound, complete, or names a document this database does not hold is left
+ * exactly as it was.
  *
  * Called by `POST /collections` immediately after `reject_unbindable_spec` and
  * inside the same lock scope, because the two ask about the same row and the
@@ -1759,9 +1750,8 @@ const nlohmann::json& json,
 const std::optional<std::string>& request_id);
 
 /**
- * The outcome of reading one of `POST /execute`'s boolean opt-outs:
- * `transient` (issue #382), `persistVariables` (#1904) or `includeParsedBody`
- * (#2544).
+ * The outcome of reading one of `POST /execute`'s boolean opt-outs: `transient`
+ * (#382), `persistVariables` (#1904) or `includeParsedBody` (#2544).
  *
  * `value` is what the payload asked for, or the flag's default when it is
  * absent or `null`; `ok == false` means the field was present with a
@@ -1792,13 +1782,13 @@ ExecuteFlag read_persist_variables_flag (const nlohmann::json& json);
 /**
  * Read the `includeParsedBody` flag off a `POST /execute` payload (default
  * `true`). `false` answers `body: null` and skips the parse that builds it
- * (issue #2544); `bodyRaw`, the stored trace and the scripts are unchanged.
+ * (#2544); `bodyRaw`, the stored trace and the scripts are unchanged.
  */
 ExecuteFlag read_include_parsed_body_flag (const nlohmann::json& json);
 
 /**
- * The outcome of reading a payload's `stream` flag and its caps (issue #573;
- * `POST /runs` reads it through here too since #576).
+ * The outcome of reading a payload's `stream` flag and its caps (#573;
+ * `POST /runs` reads it through here too, #576).
  *
  * `ok == false` carries the 400 the route answers with. Every rejection here is
  * loud rather than a fallback, because the flag changes the *execution model* -
@@ -1821,20 +1811,20 @@ struct StreamFlag {
 };
 
 /**
- * Read `stream`, `maxStreamDurationMs`, `maxStreamEvents` and
- * `streamTextPath` off a `POST /execute` or `POST /runs` payload, check its
+ * Read `stream`, `maxStreamDurationMs`, `maxStreamEvents` and `streamTextPath`
+ * off a `POST /execute` or `POST /runs` payload, check its
  * `streamFirstContentMarker` (#3774), and refuse the combinations that cannot
  * mean anything. The marker is checked and not kept: a single-request run
  * compiles it off the payload (`single_request_stream_bounds`), and a design
  * send, which reports no stream timings (each relayed event carries its own
  * `receivedAt`), accepts it so a by-id compose's payload sends as it is.
  *
- * **Both endpoints read through this one function** (issue #576), so the two
- * cannot drift on what a cap is called, what type it takes or what range it
- * accepts - a load run declares a stream in exactly the spelling a send does.
- * What differs is downstream and not here: `POST /execute` hands the transfer
- * to `SseStreamManager` and relays its events live, while `POST /runs` turns
- * the caps into `Request::stream_bounds` and lets the load event loop end the
+ * **Both endpoints read through this one function** (#576), so the two cannot
+ * drift on what a cap is called, what type it takes or what range it accepts -
+ * a load run declares a stream in exactly the spelling a send does. What
+ * differs is downstream and not here: `POST /execute` hands the transfer to
+ * `SseStreamManager` and relays its events live, while `POST /runs` turns the
+ * caps into `Request::stream_bounds` and lets the load event loop end the
  * transfer by them.
  *
  * One combination is refused, because a stream **is** its run row:
@@ -1843,10 +1833,9 @@ struct StreamFlag {
  * `POST /runs/:id/stop` to find. (`POST /runs` never reaches that check: it
  * rejects `transient` before this runs.)
  *
- * Scripts were refused here too until phase 3 (issue #575). They now run: the
- * pre-request script before the transfer starts, exactly as on a buffered send,
- * and the post-request script once the stream has terminated, reading the
- * bounded event list as `pm.response.events`.
+ * Scripts run (#575): the pre-request script before the transfer starts,
+ * exactly as on a buffered send, and the post-request script once the stream
+ * has terminated, reading the bounded event list as `pm.response.events`.
  *
  * Extracted from the handler so sse_stream_test.cpp can drive it directly,
  * matching the suite's other route-core tests.
@@ -1951,21 +1940,20 @@ struct DataRow {
 DataRow read_data_row (const nlohmann::json& json, size_t max_bytes);
 
 /**
- * How a send-with-row's credentials are resolved (issue #642).
+ * How a send-with-row's credentials are resolved (#642).
  *
  * `resolution` is what `build_request` must be told, and it is `Defer` exactly
- * when `credentials` is non-empty or `after_scripts` is set: a `{{data.column}}`
- * inside a credential has to carry the row's value *before* `apply_auth`
- * collapses a username and a password into one base64 `Authorization` value,
- * since after that the token is unreadable and goes out as base64 of its own
- * literal text (issue #591), and a name the pre-request script may define has
- * to wait for that script for the same reason (issue #2473). The ordinary send
- * - every credential static - keeps resolving auth inside the build, byte for
- * byte as it did before this existed.
+ * when `credentials` is non-empty or `after_scripts` is set: a
+ * `{{data.column}}` inside a credential has to carry the row's value *before*
+ * `apply_auth` collapses a username and a password into one base64
+ * `Authorization` value, since after that the token is unreadable and goes out
+ * as base64 of its own literal text (#591), and a name the pre-request script
+ * may define has to wait for that script for the same reason (#2473). The
+ * ordinary send - every credential static - resolves auth inside the build.
  *
- * `ok == false` carries the 400 the route answers with. There is one: an
- * OAuth 2.0 config carrying a token deferral would otherwise bind, which no
- * deferral can serve.
+ * `ok == false` carries the 400 the route answers with. There is one: an OAuth
+ * 2.0 config carrying a token deferral would otherwise bind, which no deferral
+ * can serve.
  */
 struct SendRowAuth {
     bool ok = true;
@@ -1999,16 +1987,15 @@ struct SendRowAuth {
  *
  * An ordinary send - a credential spelling no token at all - returns `Apply`
  * with an empty template and no refusal, having parsed nothing. Whether the
- * send carries a *row* is deliberately not asked (issue #1055): a credential
- * carrying only the `{{$vu}}` / `{{$iteration}}` identity is bindable without
- * one, and a `{{data.*}}` that does need a row is refused by name at the bind,
- * the way the same token in the URL already was.
+ * send carries a *row* is deliberately not asked (#1055): a credential carrying
+ * only the `{{$vu}}` / `{{$iteration}}` identity is bindable without one, and a
+ * `{{data.*}}` that does need a row is refused by name at the bind, as the same
+ * token in the URL is.
  *
- * @p bound_columns are the bare names the row can bind (issue #1007), so a
- * credential written `{{username}}` is deferred and joined against the row the
- * way `{{data.username}}` always was. Empty for a send with no row, and for a
- * caller that has not read the row's columns - which resolves those names from
- * the scopes, as it did before there was a row to ask.
+ * @p bound_columns are the bare names the row can bind (#1007), so a credential
+ * written `{{username}}` is deferred and joined against the row as
+ * `{{data.username}}` is. Empty for a send with no row, and for a caller that
+ * has not read the row's columns - which resolves those names from the scopes.
  *
  * Extracted from the handler (execution.cpp) so send_with_row_test.cpp can
  * drive it directly, matching the suite's other route-core tests.
@@ -2017,7 +2004,7 @@ SendRowAuth plan_send_row_auth (const nlohmann::json& json,
 const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**
- * The outcome of reading `POST /runs`' top-level `data` rows (issue #993).
+ * The outcome of reading `POST /runs`' top-level `data` rows (#993).
  *
  * `set` is null when the payload carried none - the ordinary load run, which
  * must stay distinguishable from a run whose rows happen to be empty, since a
@@ -2032,11 +2019,11 @@ struct LoadDataRows {
     bool ok = true;
     std::string error;
     std::unique_ptr<vayu::core::LoadDataSet> set;
-    /// How this run's credentials resolve (issue #1055), read off the same
-    /// payload. Carried beside @ref set rather than inside it because a
-    /// credential spelling `{{$vu}}` defers on a run that has no rows at all;
-    /// default - and so `Apply` - for a scenario run, whose steps resolved
-    /// their own auth when the plan did.
+    /// How this run's credentials resolve (#1055), read off the same payload.
+    /// Carried beside @ref set rather than inside it because a credential
+    /// spelling `{{$vu}}` defers on a run that has no rows at all; default -
+    /// and so `Apply` - for a scenario run, whose steps resolved their own auth
+    /// when the plan did.
     vayu::core::LoadAuthPlan auth;
 };
 
@@ -2054,19 +2041,19 @@ struct LoadDataRows {
  * @p is_scenario refuses the field by name: a collection run states its rows as
  * `scenario.data`, where they are bound per iteration and shared by every step,
  * and a payload carrying both would have one of the two silently dropped. The
- * same holds for `dataFileName` / `dataFileHash` (issue #2051) and
- * `dataFileCastNumbers` (issue #2540), which otherwise ride the set through
+ * same holds for `dataFileName` / `dataFileHash` (#2051) and
+ * `dataFileCastNumbers` (#2540), which otherwise ride the set through
  * `core::read_data_file_fields`.
  *
- * Extracted from the handler (execution.cpp) so load_data_test.cpp can
- * drive it directly, matching the suite's other route-core tests.
+ * Extracted from the handler (execution.cpp) so load_data_test.cpp can drive it
+ * directly, matching the suite's other route-core tests.
  */
 LoadDataRows read_load_data_set (const nlohmann::json& json,
 const vayu::core::ScenarioLimits& limits,
 bool is_scenario);
 
 /**
- * The stream-only half of a recorded design result (issue #573).
+ * The stream-only half of a recorded design result (#573).
  *
  * Passed to `record_design_result` rather than written by the stream worker
  * itself, so "what a design run persists" stays one decision in one place -
@@ -2091,22 +2078,21 @@ struct StreamRecord {
  * outcome (#3677) - `warn` for a failed Send, `debug` otherwise, category
  * `http`, one record per call - whether or not the send is transient.
  *
- * @param run_id `std::nullopt` for a **transient** execution (issue #382),
- *        which records nothing at all - the single choke point that rule lives
- *        at.
+ * @param run_id `std::nullopt` for a **transient** execution (#382), which
+ *        records nothing at all - the single choke point that rule lives at.
  * @param stream The streaming additions, or nullptr for an ordinary send.
- * @param validation The schema verdict this response already got (issue #628),
- *        stored verbatim on the trace. `std::nullopt` writes no node, which is
- *        what an unbound collection - and a stream, whose body is an event
- *        stream rather than a document any response schema describes - means.
+ * @param validation The schema verdict this response already got (#628), stored
+ *        verbatim on the trace. `std::nullopt` writes no node, which is what an
+ *        unbound collection - and a stream, whose body is an event stream
+ *        rather than a document any response schema describes - means.
  * @param scripts What this send's scripts produced, from
  *        `build_script_result_node` - the *same* object the buffered path also
- *        returns in its `/execute` body (issue #725). A property of the
- *        execution rather than of the transport, which is why it is a parameter
- *        here and not a `StreamRecord` field: a send whose results were stored
- *        only when it happened to stream is how a restored Tests tab came to be
- *        empty for every ordinary send. An empty object writes no node, so a
- *        request with no scripts stores nothing.
+ *        returns in its `/execute` body (#725). A property of the execution
+ *        rather than of the transport, which is why it is a parameter here and
+ *        not a `StreamRecord` field: storing results only when a send streams
+ *        would leave a restored Tests tab empty for every ordinary send. An
+ *        empty object writes no node, so a request with no scripts stores
+ *        nothing.
  * @return The stored result row's id, which the buffered `/execute` answer
  *         returns beside `runId` (#3704); `std::nullopt` for a transient send
  *         and when the row could not be written.
@@ -2118,13 +2104,13 @@ const vayu::Response& response,
 const StreamRecord* stream                                     = nullptr,
 const std::optional<vayu::core::ValidationVerdict>& validation = std::nullopt,
 const nlohmann::json& scripts = nlohmann::json::object (),
-/// This exchange's element outcomes (issue #1514), the same array
-/// `build_response_json` also returns - one object, two homes, on the
-/// `scripts` precedent above. An empty array writes no node.
+/// This exchange's element outcomes (#1514), the same array
+/// `build_response_json` also returns - one object, two homes, on the `scripts`
+/// precedent above. An empty array writes no node.
 const nlohmann::json& elements = nlohmann::json::array (),
-/// `timing.engineMs` of the live body (issue #2132), stored flat on the trace
-/// beside `totalMs` so a restored response shows the figure the live one did.
-/// Absent for a send that measured none: a stream, the auth-failure reply.
+/// `timing.engineMs` of the live body (#2132), stored flat on the trace beside
+/// `totalMs` so a restored response shows the figure the live one did. Absent
+/// for a send that measured none: a stream, the auth-failure reply.
 std::optional<double> engine_ms = std::nullopt,
 /// `timing.scriptMs` of the live body (#3676), stored flat beside `engineMs`:
 /// the pre-request, test and `pm.sendRequest` time `engineMs` leaves out.
@@ -2377,8 +2363,7 @@ std::pair<int, nlohmann::json> (*core) (vayu::db::Database&, const nlohmann::jso
 vayu::db::Database& db);
 
 /**
- * @brief Callback type for graceful shutdown
- * Called when /shutdown endpoint is hit to perform platform-specific cleanup
+ * @brief What `/shutdown` calls for the daemon's platform-specific cleanup.
  */
 using ShutdownCallback = std::function<void ()>;
 
@@ -2398,24 +2383,24 @@ struct RouteContext {
     vayu::core::RunManager& run_manager;
     ShutdownCallback on_shutdown; // Optional graceful-shutdown callback
     vayu::http::OAuth2AuthorizeManager& authorize_manager; // Owned by Server; see server.hpp
-    /// The design-mode cookie jar (issue #301). Owned by Server; read by
-    /// `/execute` (which sends through it) and by `/cookies` (which shows and
-    /// clears it). Not reachable from the load path - see cookie_jar.hpp.
+    /// The design-mode cookie jar (#301). Owned by Server; read by `/execute`
+    /// (which sends through it) and by `/cookies` (which shows and clears it).
+    /// Not reachable from the load path - see cookie_jar.hpp.
     vayu::http::CookieJar& cookie_jar;
-    /// The local OAuth 2.0 mock issuers (issue #479). Owned by Server; see
-    /// server.hpp for why it is declared before server_.
+    /// The local OAuth 2.0 mock issuers (#479). Owned by Server; see server.hpp
+    /// for why it is declared before server_.
     vayu::http::MockIssuerManager& mock_issuer_manager;
-    /// The webhook inboxes (issue #480). Owned by Server; read by `/inbox`.
+    /// The webhook inboxes (#480). Owned by Server; read by `/inbox`.
     vayu::http::InboxManager& inbox_manager;
-    /// The collection mock servers (issue #481 phase 2). Owned by Server; read
-    /// by `/mock`.
+    /// The collection mock servers (#481 phase 2). Owned by Server; read by
+    /// `/mock`.
     vayu::http::MockServerManager& mock_server_manager;
-    /// The streaming consumers (issue #573). Owned by Server; started by
-    /// `/execute`, read by `/runs/:id/events`, stopped by `/runs/:id/stop`.
+    /// The streaming consumers (#573). Owned by Server; started by `/execute`,
+    /// read by `/runs/:id/events`, stopped by `/runs/:id/stop`.
     vayu::http::SseStreamManager& sse_manager;
-    /// The `GET /runs` row summaries (issue #1150). Owned by Server; read by
-    /// `/runs` alone, which is the one endpoint a visible history surface
-    /// polls. See run_summary_cache.hpp for why a run id keys it exactly.
+    /// The `GET /runs` row summaries (#1150). Owned by Server; read by `/runs`
+    /// alone, which is the one endpoint a visible history surface polls. See
+    /// run_summary_cache.hpp for why a run id keys it exactly.
     vayu::http::RunSummaryCache& run_summary_cache;
     /// The secret every write to `/file-grants` and `/file-roots` must carry
     /// (#2356). Owned by Server; read through `admit_file_trust_write`. A

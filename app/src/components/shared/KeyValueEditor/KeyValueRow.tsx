@@ -78,11 +78,6 @@ interface KeyValueRowProps {
 /**
  * The resolved form of a row that contains `{{variables}}`, on demand.
  *
- * It used to be a column holding an equal third of the table, printing
- * `key=value` - the two cells to its left, joined - on every row whether or not
- * anything in it resolved. Most rows have no variable, so most of that third
- * was an echo.
- *
  * **A marker rather than bare row-hover.** Hovering the row itself would fire
  * underneath the variable token's own tooltip, which already answers "what does
  * *this* variable resolve to" - two hover surfaces in one space, one of them

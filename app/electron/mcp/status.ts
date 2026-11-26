@@ -6,18 +6,16 @@
  */
 
 /**
- * @file status.ts
- * @brief What `mcp:status` and `mcp:connectClient` answer, kept out of `main.ts`
- *        so the answers can be tested without Electron.
+ * @brief What `mcp:status` and `mcp:connectClient` answer, kept out of `main.ts` so the answers can
+ *        be tested without Electron.
  *
- *        A server that is enabled but not listening used to be visible only in
- *        the app log, while Settings kept offering the connect URL: an agent
- *        pointed at it either failed or, worse, reached whatever other program
- *        held the port (#2368). The failure is therefore part of the status,
- *        and a client is never registered against a listener that is not up.
+ * A server that is enabled but not listening is otherwise visible only in the app log while
+ * Settings keeps offering the connect URL: an agent pointed at it either fails or, worse, reaches
+ * whatever other program holds the port (#2368). The failure is therefore part of the status, and a
+ * client is never registered against a listener that is not up.
  *
- *        Electron-free and SDK-free on purpose: `main.ts` imports it eagerly
- *        (`startup-import-graph.test.ts`).
+ * Electron-free and SDK-free on purpose: `main.ts` imports it eagerly
+ * (`startup-import-graph.test.ts`).
  */
 
 import { mcpEndpointUrl } from "../constants.js";

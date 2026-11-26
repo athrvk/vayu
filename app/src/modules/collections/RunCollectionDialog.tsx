@@ -6,84 +6,58 @@
  */
 
 /**
- * RunCollectionDialog
+ * Starts a collection run. The scenario *is* the folder: the sequence is its requests by `order`
+ * (with Recursive, its sub-folders and requests as one list by the shared `order`, depth-first, a
+ * sub-folder's whole subtree where it sits, #2535), the order the sidebar shows. No step list is
+ * authored here; one would be a second source of truth for an ordering the tree owns.
  *
- * Starts a collection run. Two options and nothing else, because the scenario
- * *is* the folder: the sequence is its requests by `order` (and, with
- * Recursive, its sub-folders and requests as one list by the shared `order`,
- * depth-first, a sub-folder's whole subtree where the sub-folder sits, #2535),
- * which is the order the sidebar already shows, top to bottom. There is no step
- * list to author here, and inventing one would be a second source of truth for
- * an ordering the tree already owns.
+ * The engine resolves the whole plan before answering, so a collection with no requests, a step
+ * that will not compose, or a plan over `maxScenarioSteps` comes back as a `400` with no run
+ * created, shown here rather than as a toast because it names the step to fix.
  *
- * The engine resolves the whole plan before it answers, so a collection with no
- * requests, a step that will not compose, or a plan over `maxScenarioSteps` all
- * come back as a `400` with no run created. That message is shown here rather
- * than as a toast: it names the step that failed, which is the thing the user
- * has to go and fix.
+ * A **data file** (issue #402) changes what Iterations means: with rows and no explicit count, the
+ * run is one pass per row. The file pre-filled and the columns diffed against come from the
+ * contract *in scope*, the nearest declared ancestor (issue #729): a sub-collection run under a
+ * declaring parent binds the parent's rows. The rows ride the payload and are dropped on unmount;
+ * they are user data of unknown sensitivity, so neither side stores the set. A bound cell reaches
+ * the request it was substituted into, which the run stores with that step's exchange (issue #731).
+ * A **load** run binds the same rows one per iteration, from a cursor every virtual user shares,
+ * wrapping for as long as the run lasts (issue #449), so the picker is told which run it is for
+ * rather than being wrong about one.
  *
- * A data file is the third option (issue #402), and it changes what Iterations
- * means: with rows and no explicit count, the run is one pass per row. Which
- * file it pre-fills, and which columns that file is diffed against, come from
- * the contract *in scope* - the nearest declared ancestor, as everywhere else
- * in the feature (issue #729): running a sub-collection under a declaring
- * parent binds the parent's rows, so reading the sub-collection's own id left
- * exactly that run with no pre-fill and no diff. The rows
- * ride the payload and are dropped when this dialog unmounts - they are user
- * data of unknown sensitivity, so neither side stores the set. What a bound
- * cell reaches is the request it was substituted into, which the run stores
- * with the rest of that step's exchange (issue #731).
- * A **load** run binds the same rows differently - one per iteration, from a
- * cursor every virtual user shares, wrapping for as long as the run lasts
- * (issue #449) - which is why the picker is told which run it is for rather
- * than describing one of the two and being wrong about the other.
+ * **Load test** (issue #357) is a different *executor* over the same plan: `concurrency` virtual
+ * users each walking the sequence with their own cookies, closed-loop, on the event loop. The
+ * switch lives here, not in the request builder's `LoadTestConfigDialog`, whose target is the open
+ * request; a scenario's target is a folder, picked here, and a collection picker there would be a
+ * second way to choose a scenario beside the tree that owns the choice.
  *
- * **Load test** is the fourth (issue #357), and it is a different *executor*
- * over the same plan: `concurrency` virtual users each walking the sequence with
- * their own cookies, closed-loop, on the event loop. The switch lives here
- * rather than in the request builder's `LoadTestConfigDialog` because that
- * dialog's target is the request that is open; a scenario's target is a folder,
- * and the folder is picked here. Giving that dialog a collection picker would be
- * a second way to choose a scenario beside the tree that already owns the
- * choice.
+ * **Fail steps on schema errors** (issue #720) is the renderer's only writer of the engine's
+ * `failOnSchemaError`; MCP's `run_collection` is the other (issue #766), with the same top-level
+ * key and omitted-when-off rule, so agent and dialog runs are stored alike. It sits on the run, not
+ * on a request or the collection, because it decides what "failed" means for *this* run's report,
+ * which records it.
  *
- * **Fail steps on schema errors** is the fifth (issue #720), and it is the
- * renderer's only writer of the engine's `failOnSchemaError`: the flag was
- * readable in a stored report and settable by nobody, while the docs told users
- * to set it. MCP's `run_collection` is the other writer (issue #766), over the
- * same top-level key and with the same omitted-when-off rule, so a run started
- * by an agent and one started here are stored alike. It belongs on the run
- * rather than on a request or the collection
- * because it decides what "failed" means for *this* run's report, which is
- * where the report records it.
+ * **Stop the iteration on a script error** (issue #2526) writes the engine's `stopOnError` on the
+ * same terms: top-level, design mode only, omitted when off. Off is the engine's default and
+ * Postman's: a step whose script threw is reported on its step and the iteration walks on.
  *
- * **Stop the iteration on a script error** is the sixth (issue #2526), the
- * renderer's writer of the engine's `stopOnError`, on the same terms as the
- * switch above: top-level, design-mode only, omitted when off. Off is the
- * engine's default and Postman's: a step whose script threw is reported on its
- * step and the iteration walks on.
+ * **Pass/fail budgets** (issue #1564, at their state below), and **the stream caps** (issue #3235),
+ * shown only when a request the run sends has `stream` set, load test or not. The engine reads
+ * whether a step streams off each stored request, so the run sends no `stream` (a `400` on a
+ * collection run) and carries only the two top-level caps, which bound the streaming steps and
+ * nothing else.
  *
- * **Pass/fail budgets** are the seventh (issue #1564, at their state below),
- * and **the stream caps** the eighth (issue #3235), shown only when a request
- * the run sends has `stream` set, load test or not. Whether a step streams is
- * read off each stored request by the engine, so the run sends no `stream`
- * (a `400` on a collection run) and carries only the two caps, top-level, which
- * bound the streaming steps and nothing else.
+ * **Wait out Retry-After** (issue #3799), the request dialog's engine option, in load mode only:
+ * the design-mode runner has no virtual user to hold back. Drawn by the shared `RetryAfterFields`,
+ * kept in the profile state (reset on every mount, like the rest) and sent only while on.
  *
- * **Wait out Retry-After** is the ninth (issue #3799), the same engine option the
- * request dialog offers, in load mode only: the design-mode runner has no virtual
- * user to hold back. It is drawn by the shared `RetryAfterFields`, lives in the
- * profile state (reset on every mount, like the rest), and rides the payload only
- * while on.
- *
- * Only the three closed-loop modes exist for a scenario (`SCENARIO_LOAD_MODES`),
- * so the load profile is the request dialog's own `ProfilePicker` and
- * `ProfileFields` narrowed to them. `constant_rps` is a `400` engine-side - an
- * open-loop arrival rate over a multi-step sequence is an arrival-rate executor,
- * which Vayu does not implement - and Capacity Discovery judges one p99 where a
- * sequence has one per step. The profile starts from the dialog's own numbers
- * and is neither read from nor written to the request dialog's saved config:
- * that memo describes one request, and a sequence multiplies its load.
+ * A scenario has only the three closed-loop modes (`SCENARIO_LOAD_MODES`), so the profile is the
+ * request dialog's `ProfilePicker` and `ProfileFields` narrowed to them. `constant_rps` is a `400`
+ * engine-side (an open-loop arrival rate over a multi-step sequence is an arrival-rate executor,
+ * which Vayu does not implement), and Capacity Discovery judges one p99 where a sequence has one
+ * per step. The profile starts from the dialog's own numbers and is never read from or written to
+ * the request dialog's saved config: that memo describes one request, and a sequence multiplies its
+ * load.
  */
 
 import { Fragment, useCallback, useMemo, useRef, useState } from "react";
@@ -178,22 +152,18 @@ import type { RunOAuth2Config } from "./runOAuth2Configs";
 
 export interface RunCollectionDialogProps {
 	/**
-	 * The collection to run.
-	 *
-	 * Non-null, because the caller mounts this component only once a folder has
-	 * been chosen and unmounts it when the dialog closes. That mount **is** the
-	 * reset: the options start at their defaults every time, where a
-	 * always-mounted dialog would carry the previous folder's Recursive and
-	 * Iterations over silently, and resetting them in an effect would be a
-	 * cascading render for something React already models as identity.
+	 * The collection to run. Non-null: the caller mounts this only once a folder is chosen and
+	 * unmounts it on close, and that mount **is** the reset. The options start at their defaults
+	 * every time, where an always-mounted dialog would silently carry the previous folder's
+	 * Recursive and Iterations, and a reset in an effect would be a cascading render for what React
+	 * models as identity.
 	 */
 	collection: Collection;
 	onOpenChange: (open: boolean) => void;
 	/**
-	 * Where focus goes when the dialog closes. Radix restores it to whatever held
-	 * it before the dialog opened, which for a dialog opened from a row's menu is
-	 * a menu item that is gone: focus lands on `<body>` (#3443). A caller that
-	 * knows the row calls `preventDefault` and focuses it.
+	 * Where focus goes on close. Radix restores it to whatever held it before the dialog opened,
+	 * which for a dialog opened from a row's menu is a menu item that is gone, so focus lands on
+	 * `<body>` (#3443). A caller that knows the row calls `preventDefault` and focuses it.
 	 */
 	onCloseAutoFocus?: (event: Event) => void;
 }
@@ -209,19 +179,15 @@ const SEQUENCE_PROFILE_COPY: ProfilePickerCopy = {
 };
 
 /**
- * The `elements` run override (issue #1495). `timers` applies to every
- * collection run, load test or not - `RunContext`'s constructor reads it off
- * the payload the same way regardless of run shape (`run_manager.cpp`), and
- * `timer.pacing`/`timer.think` honour it in the sequential runner exactly as
- * they do under load (issue #1552's reopen). Under load, `"off"` reaches
- * every `timer.*` kind (since #1498's reopen fix), but `fixedMs`/
- * `{minMs, maxMs}` do not yet reach `timer.pacing`/`timer.throughput` there
- * (#1620) - the sequential run this dialog also drives has no such gap, since
- * it has no separate pre-scheduling hook to thread the override through.
- * `scripts` stays load-only: the design send and the sequential run already
- * run every `script.*` element inline, so a choice between inline and
- * deferred has nothing to say until a run is on the event loop. Matches
- * `docs/engine/api-reference.md`'s "elements" block exactly.
+ * The `elements` run override (issue #1495). `timers` applies to every collection run, load test or
+ * not: `RunContext`'s constructor reads it off the payload whatever the run shape
+ * (`run_manager.cpp`), and `timer.pacing`/`timer.think` honour it in the sequential runner as under
+ * load (issue #1552's reopen). Under load `"off"` reaches every `timer.*` kind (#1498's reopen
+ * fix), but `fixedMs`/`{minMs, maxMs}` do not yet reach `timer.pacing`/`timer.throughput` there
+ * (#1620); the sequential run has no such gap, as it has no separate pre-scheduling hook to thread
+ * the override through. `scripts` stays load-only: the design send and the sequential run already
+ * run every `script.*` element inline, so inline vs deferred means nothing until a run is on the
+ * event loop. Matches `docs/engine/api-reference/load-runs.md`'s "elements" block.
  */
 const TIMERS_DEFAULT = "asConfigured";
 const SCRIPTS_DEFAULT = "asMarked";
@@ -230,10 +196,9 @@ const NO_COLUMNS: string[] = [];
 const NO_COLLECTION_IDS: string[] = [];
 
 /**
- * One token's check. Its own component so the gate callback keeps its identity
- * across renders: the guard reports in an effect keyed on it. The per-request
- * `OAuth2DeferredNote` is left out - it asks `/compose` about one request, and a
- * run's steps are many.
+ * One token's check, its own component so the gate callback keeps its identity across renders (the
+ * guard reports in an effect keyed on it). Without the per-request `OAuth2DeferredNote`: it asks
+ * `/compose` about one request, and a run's steps are many.
  */
 function RunTokenGuard({
 	entry,
@@ -284,26 +249,21 @@ export default function RunCollectionDialog({
 	const [recursive, setRecursive] = useState(false);
 	const [iterations, setIterations] = useState("1");
 	/*
-	 * Whether the user has typed in the Iterations field, which the value alone
-	 * cannot say: a deliberately typed `1` and the untouched default read the
-	 * same, and picking a file used to clear both. One of those is a count the
-	 * user chose, and clearing it turns "run this sequence once" into a full
-	 * pass per row - the opposite of what they asked for, silently.
+	 * Whether the user has typed in Iterations, which the value cannot say: a typed `1` and the
+	 * untouched default read alike, and clearing a chosen `1` on a file pick would silently turn
+	 * "run this sequence once" into a pass per row.
 	 *
-	 * A ref rather than state: nothing renders from it, and the pre-fill below
-	 * resolves asynchronously - a state value captured in that effect's closure
-	 * would be the one from mount, and would clear a `1` typed while the file
-	 * was still being read.
+	 * A ref, not state: nothing renders from it, and the pre-fill below resolves asynchronously, so
+	 * a state value in that effect's closure would be the mount's and clear a `1` typed while the
+	 * file was being read.
 	 */
 	const iterationsTouched = useRef(false);
 	const [dataFileError, setDataFileError] = useState<string | null>(null);
 	const [loadTest, setLoadTest] = useState(false);
 	/**
-	 * Whether the bound contract is a gate for this run (issue #720).
-	 *
-	 * Off by default, the engine's own default and the #628-era decision: a
-	 * schema verdict is its own channel, and folding it into the step outcome
-	 * would make every undocumented field look like a broken test.
+	 * Whether the bound contract gates this run (issue #720). Off by default, the engine's default
+	 * and the #628-era decision: a schema verdict is its own channel, and folding it into the step
+	 * outcome would make every undocumented field look like a broken test.
 	 */
 	const [failOnSchemaError, setFailOnSchemaError] = useState(false);
 	/**
@@ -324,49 +284,37 @@ export default function RunCollectionDialog({
 		"asMarked" | "allInline" | "allDeferred"
 	>(SCRIPTS_DEFAULT);
 	/**
-	 * Pass/fail budgets (issue #1564), the same disclosure and payload shape
-	 * `LoadTestConfigDialog` uses - reused rather than copied (`budgets.ts`),
-	 * since a collection run is now judged against them too, load test or not.
+	 * Pass/fail budgets (issue #1564), with `LoadTestConfigDialog`'s disclosure and payload shape
+	 * (shared in `budgets.ts`): a collection run is judged against them too, load test or not.
 	 */
 	const [budgets, setBudgets] = useState<BudgetDraft>(emptyBudgetDraft);
 	/**
-	 * The `custom.<name>.<stat>` rows (issue #1579) - judged for a design-mode
-	 * collection run exactly as the six fixed budgets above are (issue #1564):
-	 * `execute_scenario_run` folds `summary.custom_metrics` into the same
-	 * `RunSummaryInputs` it evaluates thresholds against for every run mode,
-	 * load test or not (`scenario_runner.cpp`). Not gated on the switch.
+	 * The `custom.<name>.<stat>` rows (issue #1579), judged for a design-mode collection run as the
+	 * six fixed budgets are (issue #1564): `execute_scenario_run` folds `summary.custom_metrics`
+	 * into the `RunSummaryInputs` it evaluates thresholds against in every run mode
+	 * (`scenario_runner.cpp`). Not gated on the switch.
 	 */
 	const [customBudgets, setCustomBudgets] = useState<CustomBudgetDraft[]>([]);
 	const [failRun, setFailRun] = useState(false);
 	const [budgetsOpen, setBudgetsOpen] = useState(false);
 
 	/*
-	 * The contract this run is measured against, resolved through the chain
-	 * rather than read off the collection being run (issue #729).
+	 * The contract this run is measured against, resolved through the chain rather than read off
+	 * the collection being run (issue #729): the nearest declared ancestor, the documented rule
+	 * (`docs/app/variable-resolution.md`) and the engine's at plan time, so under a declaring
+	 * parent the file to pre-fill and the columns to diff against are the parent's. Keyed as
+	 * `useSendWithRow` keys its own read, by the collection that *declared* the contract (the one a
+	 * pick declares for), falling back to this collection's id, which the store holds when no
+	 * contract is in scope.
 	 *
-	 * Nearest declared ancestor, the documented rule
-	 * (`docs/app/variable-resolution.md`) and the one the engine applies at plan
-	 * time: running a sub-collection under a declaring parent binds the parent's
-	 * rows, so the file to pre-fill and the columns to diff against are the
-	 * parent's too. Keyed the way `useSendWithRow` keys its own read - by the
-	 * collection that *declared* the contract, since that is the collection a
-	 * pick declares for - and falling back to this collection's own id, which
-	 * is what the store holds when no contract is in scope at all.
+	 * Also the file that contract last ran with, pre-filled (issue #599; through the chain, #729;
+	 * shared with the load dialog, #1039). Part of the mount-is-reset contract: one default is "the
+	 * file you declared", not a value carried from a previous open. The hook owns the one-attempt
+	 * rule, the row cap and the moved-file note; this dialog keeps the iterations coupling below, a
+	 * fact about the engine's default for a collection run, not about the file.
 	 *
-	 * ...and the file that contract was last run with, pre-filled (issue #599;
-	 * through the chain since #729; shared with the load dialog since #1039).
-	 *
-	 * Still part of the dialog's mount-is-reset contract: the options start at
-	 * their defaults every time this component appears, and one of those
-	 * defaults is "the file you declared" rather than a value carried over from
-	 * a previous open. The hook owns the one-attempt rule, the row cap and the
-	 * moved-file note; what stays here is the half that is *this* dialog's -
-	 * the iterations coupling below, which is a fact about the engine's default
-	 * for a collection run and not about the file.
-	 *
-	 * `collection` is handed over because the row this dialog was opened with
-	 * stands ahead of the query's copy of itself: the walk must find a contract
-	 * it declares even on a render where the query has not answered.
+	 * `collection` is passed because the row this dialog opened with is ahead of the query's copy
+	 * of itself: the walk must find a contract it declares even before the query answers.
 	 */
 	const {
 		file: dataFile,
@@ -377,10 +325,9 @@ export default function RunCollectionDialog({
 		declaringCollectionId,
 	} = useDeclaredDataFile(collection.id, {
 		collection,
-		// Same rule as a hand-picked file: a pristine `1` becomes "one pass per
-		// row", a typed one is the user's. It rides `onPrefill` rather than the
-		// hook because it is a fact about the engine's default for a *collection*
-		// run - the load dialog shares the pre-fill and must not share this.
+		// Same rule as a hand-picked file: a pristine `1` becomes "one pass per row", a typed one
+		// is the user's. On `onPrefill`, not in the hook: it is the engine's default for a
+		// *collection* run, and the load dialog shares the pre-fill but must not share this.
 		onPrefill: () => {
 			if (!iterationsTouched.current) {
 				setIterations((current) => (current === "1" ? "" : current));
@@ -391,10 +338,9 @@ export default function RunCollectionDialog({
 	const writer = useDataContractWriter(declaringCollectionId);
 
 	/*
-	 * The requests this run sends: the collection's own, and with Recursive every
-	 * descendant's - including one that declares a contract of its own, because
-	 * a run binds one data set to every step it sends whatever each folder
-	 * declares. Which is why this is not `collectionsUnderContract`.
+	 * The requests this run sends: the collection's own and, with Recursive, every descendant's,
+	 * including one declaring its own contract, since a run binds one data set to every step
+	 * whatever each folder declares. Hence not `collectionsUnderContract`.
 	 */
 	const { data: collections = [] } = useCollectionsQuery();
 	const auditedCollectionIds = useMemo(
@@ -404,10 +350,9 @@ export default function RunCollectionDialog({
 	const fileColumns = dataFile?.parsed.columns ?? NO_COLUMNS;
 	const { audit } = useColumnAudit(auditedCollectionIds, fileColumns);
 	/*
-	 * Whether any request this run sends streams (#3235): the engine reads the
-	 * flag off each stored request, so the run declares nothing itself and the
-	 * stream caps are offered only when there is a step for them to bound. The
-	 * same full-row query the audit above reads, which TanStack dedupes.
+	 * Whether any request this run sends streams (#3235): the engine reads the flag off each stored
+	 * request, so the run declares nothing and the stream caps are offered only when a step exists
+	 * for them to bound. The audit's full-row query, which TanStack dedupes.
 	 */
 	const { requestsByCollection } = useFullCollectionRequests(auditedCollectionIds);
 	const anyStreams = auditedCollectionIds.some((id) =>
@@ -415,10 +360,10 @@ export default function RunCollectionDialog({
 	);
 
 	/*
-	 * A duration-based load run is the only one a token's lifetime can cut short
-	 * (issue #3199): the engine keeps one credential per distinct token the
-	 * requests send, and the guard says whether each stays valid for the whole
-	 * run. A pass-count run has no length to judge, so nothing is asked.
+	 * Only a duration-based load run can be cut short by a token's lifetime (issue #3199): the
+	 * engine keeps one credential per distinct token the requests send, and the guard says whether
+	 * each stays valid for the whole run. A pass-count run has no length to judge, so nothing is
+	 * asked.
 	 */
 	const oauth2DurationSeconds = loadTest && usesDuration(profile.mode) ? profile.duration : null;
 	const oauth2Configs = useRunOAuth2Configs(
@@ -442,10 +387,9 @@ export default function RunCollectionDialog({
 	const oauthGated = oauth2Configs.some(({ key }) => gatedKeys.has(key));
 
 	/*
-	 * Empty is a meaningful value only with a data file: it means "one pass per
-	 * row", which is the engine's own default when `iterations` is absent from
-	 * the payload. Without a file there is no row count to fall back to, so an
-	 * empty field is simply invalid.
+	 * Empty means something only with a data file: "one pass per row", the engine's default when
+	 * `iterations` is absent from the payload. Without a file there is no row count to fall back
+	 * to, so empty is invalid.
 	 */
 	const iterationsBlank = iterations.trim() === "";
 	const explicitIterations = iterationsBlank ? undefined : Number(iterations);
@@ -455,11 +399,9 @@ export default function RunCollectionDialog({
 			: Number.isInteger(explicitIterations) && explicitIterations >= MIN_ITERATIONS;
 
 	/*
-	 * A load run is shaped by its profile, not by the design-mode `iterations`
-	 * above (which stops applying to it - Fixed passes has a pass count of its
-	 * own). Refused here rather than sent and refused engine-side, and against
-	 * the Settings ceilings, which the engine does not know: the user can see
-	 * what is wrong while the field still has focus.
+	 * A load run is shaped by its profile, not by the design-mode `iterations` (Fixed passes has
+	 * its own pass count). Refused here rather than engine-side, and against the Settings ceilings
+	 * the engine does not know, so the user sees what is wrong while the field still has focus.
 	 */
 	const profileError = scenarioProfileError(profile, limits);
 	const streamCapsError = anyStreams ? scenarioStreamCapError(profile, limits) : null;
@@ -480,14 +422,11 @@ export default function RunCollectionDialog({
 	const canRun = settingsValid && !oauthGated && !heldBy;
 
 	/*
-	 * The chosen file against the contract in scope (issue #599), and against
-	 * the requests this run sends (issue #2050). Warnings, never blockers: a
-	 * column a request references and the file lacks fails loudly engine-side
-	 * at bind time, and a file that carries extra columns is simply a file with
-	 * extra columns. What they buy is hearing about it here rather than at
-	 * iteration 1. The contract diff is for a pre-filled file that drifted on
-	 * disk; once a pick's declare lands it is empty by construction, and the
-	 * requests are what is left to compare against.
+	 * The chosen file against the contract in scope (issue #599) and the requests this run sends
+	 * (issue #2050). Warnings, never blockers: a referenced column the file lacks fails loudly
+	 * engine-side at bind time, and extra columns are just extra columns; the gain is hearing it
+	 * here, not at iteration 1. The contract diff is for a pre-filled file that drifted on disk;
+	 * after a pick's declare it is empty by construction, leaving the requests to compare against.
 	 */
 	const fileWarnings = dataFile
 		? [
@@ -497,25 +436,21 @@ export default function RunCollectionDialog({
 		: [];
 
 	/*
-	 * A pick declares the contract from the picked file (issue #2050), for the
-	 * collection whose contract this run binds against; Remove clears it, through
-	 * the picker's `onRemove` below, since a file the picker refuses also arrives
-	 * here as `null` and must leave the contract alone. The pre-fill never comes
-	 * through here, so reopening the dialog writes nothing. A declare that fails
-	 * does not touch the selection: the run still sends the previewed rows, and
-	 * picking again is the retry.
+	 * A pick declares the contract from the picked file (issue #2050), for the collection whose
+	 * contract this run binds against; Remove clears it through the picker's `onRemove`, because a
+	 * file the picker refuses also arrives here as `null` and must leave the contract alone. The
+	 * pre-fill never comes through here, so reopening the dialog writes nothing. A failed declare
+	 * leaves the selection: the run still sends the previewed rows, and picking again is the retry.
 	 *
-	 * Picking a file also clears the *pristine* `1`, so the field shows what the
-	 * run will do (one pass per row) instead of quietly contradicting the preview
-	 * above it. A count the user typed is theirs and is left alone - including a
-	 * typed `1`, which is why this reads the touched flag and not the value.
+	 * A pick also clears the *pristine* `1`, so the field shows what the run will do (one pass per
+	 * row) rather than contradicting the preview above it. A typed count, a typed `1` included, is
+	 * the user's; hence the touched flag, not the value.
 	 */
 	const handleSelectDataFile = (next: SelectedDataFile | null) => {
 		setDataFile(next);
 		if (next) {
-			// A file the user picks by hand replaces whatever was pre-filled, so
-			// the note about a file that could not be re-read has nothing left to
-			// say.
+			// A hand-picked file replaces the pre-fill, so the note about a file that could not be
+			// re-read has nothing left to say.
 			dismissNote();
 			writer.declare(next);
 		}
@@ -536,13 +471,11 @@ export default function RunCollectionDialog({
 	const handleRun = () => {
 		if (!canRun) return;
 		const thresholds = buildThresholds(budgets, failRun, customBudgets, anyStreams);
-		// Top-level, matching where the engine reads it
-		// (`validate_elements_run_override` looks at the run payload directly,
-		// not inside `scenario`) - and, unlike `mode`/`concurrency`/`duration`
-		// below, not gated by `loadTest`: `timers` is honoured by the
-		// sequential runner too. Omitted per-field at the engine's own
-		// defaults, the same "absent already means what the user asked for"
-		// rule `failOnSchemaError` follows below.
+		// Top-level, where the engine reads it (`validate_elements_run_override` reads the run
+		// payload, not `scenario`), and, unlike `mode`/`concurrency`/`duration` below, not gated by
+		// `loadTest`: the sequential runner honours `timers` too. Each field is omitted at the
+		// engine's default, the "absent already means what the user asked for" rule
+		// `failOnSchemaError` follows below.
 		const elementsOverride = {
 			...(timersOverride !== TIMERS_DEFAULT ? { timers: timersOverride } : {}),
 			...(loadTest && scriptsOverride !== SCRIPTS_DEFAULT
@@ -557,14 +490,10 @@ export default function RunCollectionDialog({
 		startRun.mutate(
 			{
 				/*
-				 * The presence of `mode` is what makes this a load run - the
-				 * engine reads exactly that, so a design-mode payload keeps its
-				 * meaning by carrying no mode at all rather than by carrying a
-				 * flag that says "not a load run".
-				 *
-				 * `iterations` here is the top-level total of passes (Fixed passes);
-				 * the design-mode count rides inside `scenario` below, and only
-				 * when the switch is off.
+				 * `mode`'s presence is what makes this a load run (the engine reads exactly that),
+				 * so a design-mode payload carries no mode rather than a "not a load run" flag.
+				 * `iterations` here is the top-level pass total (Fixed passes); the design-mode
+				 * count rides inside `scenario` below, only with the switch off.
 				 */
 				...loadFields,
 				...streamCaps,
@@ -573,17 +502,15 @@ export default function RunCollectionDialog({
 					source: "collection",
 					collectionId: collection.id,
 					recursive,
-					// Omitted, not sent as the row count: the engine resolves the
-					// default, and a client that computed its own would be a
-					// second copy of a rule only one side can enforce.
-					// A load run shapes itself from the profile (Fixed passes sends
-					// its own top-level total), so this count is design-mode only.
+					// Omitted, not sent as the row count: the engine resolves the default, and a
+					// client that computed its own would be a second copy of a rule only one side
+					// can enforce. Design mode only: a load run takes its shape from the profile
+					// (Fixed passes sends its own top-level total).
 					...(!loadTest && explicitIterations !== undefined
 						? { iterations: explicitIterations }
 						: {}),
-					// The parsed rows themselves - the same array the preview
-					// showed, never a re-parse - and which file they came from, by
-					// name and content hash, never path (#2051), and how it was
+					// The parsed rows (the array the preview showed, never a re-parse), which file
+					// they came from by name and content hash, never path (#2051), and how it was
 					// read (#2540).
 					...(dataFile
 						? {
@@ -598,39 +525,30 @@ export default function RunCollectionDialog({
 				// resolved `{{variables}}` against a different one than Send does
 				// would be a different request wearing the same name.
 				...(activeEnvironmentId ? { environmentId: activeEnvironmentId } : {}),
-				// Sent only when the user asked for the gate. The engine's
-				// default is off, so absent already says what a `false` would,
-				// and the run snapshot then carries the key exactly when the
-				// flag changed what "failed" means in the report.
-				//
-				// Never on a load run: only the design-mode runner demotes a
-				// step on a schema failure (the load executor validates once the
-				// run has drained), so a load payload carrying it would promise
+				// Sent only when the user asked for the gate: the engine's default is off, so
+				// absent says what `false` would, and the run snapshot carries the key exactly when
+				// it changed what "failed" means in the report. Never on a load run: only the
+				// design-mode runner demotes a step on a schema failure (the load executor
+				// validates once the run has drained), so a load payload carrying it would promise
 				// a gate nothing applies.
 				...(!loadTest && failOnSchemaError ? { failOnSchemaError: true } : {}),
 				// Same two rules as the key above: omitted when off, and never on a
 				// load run, whose executor does not read it.
 				...(!loadTest && stopOnError ? { stopOnError: true } : {}),
-				// Top-level like `elements` and `failOnSchemaError` above, and on
-				// the same "absent already says what the user asked for" rule:
-				// `buildThresholds` returns `undefined` with nothing declared,
-				// which leaves a run that opened this dialog and touched nothing
-				// measured but not judged, exactly as before this issue (#1564).
+				// Top-level like `elements` and `failOnSchemaError`, on the same "absent says what
+				// the user asked for" rule: `buildThresholds` returns `undefined` with nothing
+				// declared, so a run from an untouched dialog is measured but not judged (#1564).
 				...(thresholds ? { thresholds } : {}),
 			},
 			{
 				onSuccess: ({ runId }) => {
-					// Attach before the tab opens: the stream is replayable from
-					// offset 0, so nothing is missed either way, and the tab finds
-					// the store already pointed at this run.
-					//
-					// Which stream, though, is the whole difference between the
-					// two executors. A design-mode run emits one `step` event per
-					// step execution and no metric ticks; a load run emits ticks
-					// at 10 Hz and no steps. Attaching the wrong listener is not a
-					// degraded view, it is a permanently empty one - so the live
-					// surface follows the executor: the dashboard for a load run,
-					// the runner tab for a sequence.
+					// Attach before the tab opens: the stream replays from offset 0, so nothing is
+					// missed either way, and the tab finds the store already pointed at this run.
+					// Which stream depends on the executor: a design-mode run emits one `step`
+					// event per step execution and no metric ticks, a load run ticks at 10 Hz and
+					// emits no steps, and the wrong listener is a permanently empty view, not a
+					// degraded one. So the dashboard takes a load run and the runner tab a
+					// sequence.
 					if (loadFields) {
 						// The object the engine was sent, so the dashboard shows the
 						// mode and ramp the run was started with.
@@ -829,16 +747,12 @@ export default function RunCollectionDialog({
 					</div>
 
 					{/*
-					 * Pass/fail budgets (issue #1564) - the disclosure itself is
-					 * not gated by `loadTest`, unlike Scripts above: the engine
-					 * now judges a design-mode collection run against the six
-					 * fixed budgets exactly as it already judges a load run, so
-					 * those apply to both. The custom rows inside it are the
-					 * exception and carry their own gate; see there.
-					 * Same card treatment as `LoadTestConfigDialog`'s own
-					 * disclosure, for the reason that one gives: a section that
-					 * revealed loose fields on the dialog background would read
-					 * as unrelated to what disclosed them.
+					 * Pass/fail budgets (issue #1564). Not gated by `loadTest`, unlike Scripts
+					 * above: the engine judges a design-mode collection run against the six fixed
+					 * budgets as it does a load run, and the custom rows inside follow the same
+					 * rule. Card treatment as in `LoadTestConfigDialog`, for its reason: fields
+					 * revealed loose on the dialog background would read as unrelated to what
+					 * disclosed them.
 					 */}
 					<DisclosureCard
 						open={budgetsOpen}
@@ -874,13 +788,10 @@ export default function RunCollectionDialog({
 						))}
 
 						{/*
-						 * Custom metric budgets - not gated by `loadTest`,
-						 * same as the six fixed budgets above and for the same
-						 * reason: `custom.<name>.<stat>` is judged for a
-						 * design-mode collection run exactly as it is for a
-						 * load run (`execute_scenario_run`, #1564's own
-						 * every-run-mode rule extends to #1500's custom
-						 * metrics too).
+						 * Custom metric budgets, not gated by `loadTest` either:
+						 * `custom.<name>.<stat>` is judged for a design-mode collection run as for
+						 * a load run (`execute_scenario_run`; #1564's every-run-mode rule covers
+						 * #1500's custom metrics).
 						 */}
 						<div className="space-y-1.5">
 							<span className="block text-xs font-medium leading-none">

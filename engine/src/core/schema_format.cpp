@@ -6,9 +6,8 @@
  */
 
 /**
- * @file core/schema_format.cpp
- * @brief The `format` predicates behind `find_format_checker` (issue #2581).
- *        See the header for why they exist and why they are not regexes.
+ * The `format` predicates behind `find_format_checker` (#2581); the header says
+ * why they exist and why they are not regexes.
  */
 
 #include "vayu/core/schema_format.hpp"

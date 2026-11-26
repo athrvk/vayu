@@ -9,12 +9,9 @@ import { create } from "zustand";
 import type { FileReferenceNeeds, ImportNotice } from "@/modules/collections/import-notices";
 
 /**
- * What one applied file lost or changed, kept after the import dialog is gone
- * (issue #2109).
- *
- * The preview shows this ledger before the apply and the dialog then discards
- * it; this is the copy that outlives it. It holds the lines `importNotices`
- * wrote and the file-reference needs read off the drafts, not the drafts: those
+ * What one applied file lost or changed, kept after the import dialog is gone (#2109): the preview
+ * shows this ledger before the apply and the dialog then discards it. It holds the lines
+ * `importNotices` wrote and the file-reference needs read off the drafts, not the drafts, which
  * carry every request body and the spec document.
  */
 export interface ImportReport {
@@ -50,9 +47,8 @@ interface ImportReportState {
 	 */
 	reports: Record<string, ImportReport>;
 	/**
-	 * Keep a file's report under each of its roots. A report with nothing in it,
-	 * or a file that created no collection, has nowhere to be shown and is not
-	 * stored.
+	 * Keep a file's report under each of its roots. An empty report, or a file that created no
+	 * collection, has nowhere to be shown and is not stored.
 	 */
 	record: (report: ImportReport) => void;
 	/** Drop the report `rootId` carries, and with it the copy under the file's other roots. */

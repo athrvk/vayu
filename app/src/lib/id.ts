@@ -5,18 +5,12 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * ID Generation Utilities
- */
+/** ID generation utilities. */
 
-/**
- * Generate a short random ID
- */
+/** A short random ID. */
 export const generateId = (): string => Math.random().toString(36).substring(2, 11);
 
-/**
- * Generate a UUID v4
- */
+/** A UUID v4. */
 export const generateUUID = (): string => {
 	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
 		const r = (Math.random() * 16) | 0;

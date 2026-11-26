@@ -6,26 +6,12 @@
  */
 
 /**
- * Headers Format Utilities
- *
- * Text form for the Headers tab's Bulk Edit mode.
- *
- * The canonical separator is a colon - `Header-Name: value` - because that is
- * how HTTP itself writes a header, how every tool the user copies from prints
- * one, and what the panel's own placeholder has always shown.
- *
- * It was not what the parser accepted. `parseHeadersFromText` matched
- * `/^([^=]+)=\s*(.*)$/` and nothing else, so the three lines the placeholder
- * offered as an example - `Authorization: Bearer token` and friends - matched no
- * line at all. A user who followed the placeholder, or pasted real headers from
- * curl or devtools, switched back to Table View and found every header gone.
- * There was no error: unmatched lines are skipped, and skipping all of them
- * produces an empty array, which the panel wrote over the previous headers.
- *
- * Both separators are accepted now, and the *earlier* one in the line wins. That
- * resolves the ambiguous cases the way a reader would: `Authorization: Bearer
- * a=b` splits at the colon (the `=` belongs to the value), `X-Legacy=a:b` splits
- * at the equals, so anything already typed in the old form still round-trips.
+ * Text form for the Headers tab's Bulk Edit. The canonical separator is a colon,
+ * `Header-Name: value`: how HTTP writes a header, how every tool the user copies from prints one,
+ * and what the placeholder shows. Both separators are accepted, the *earlier* in the line winning,
+ * which reads ambiguous lines as a person would: `Authorization: Bearer a=b` splits at the colon,
+ * `X-Legacy=a:b` at the equals. A line neither form reads is dropped and reported
+ * (`unreadHeaderLines`, #3694).
  */
 
 import type { KeyValueItem } from "@/types";
@@ -39,13 +25,9 @@ import {
 } from "./kv-line";
 
 /**
- * Format headers array to text format for bulk edit
- * Format: "Header-Name: value" (one per line); a disabled row is prefixed
- * `// ` (issue #1480) - the one marker the text form has for a state the
- * table already shows as an unticked checkbox.
- *
- * Every row the table holds is offered: there is no protected version row to
- * hide since issue #1229, and what the engine adds is not in this list at all.
+ * Headers as Bulk Edit text: `Header-Name: value` per line, a disabled row prefixed `// ` (#1480),
+ * the text form's one marker for the table's unticked checkbox. Every row is offered: what the
+ * engine adds is not in this list (#1229).
  */
 export const formatHeadersToText = (headers: KeyValueItem[]): string => {
 	return headers
@@ -55,27 +37,18 @@ export const formatHeadersToText = (headers: KeyValueItem[]): string => {
 };
 
 /**
- * Read every non-blank line, splitting at whichever of `:` or `=` comes first.
- *
- * A header name may contain neither, so the earliest of the two is always the
- * separator - which is why this cannot simply be shared with the params parser,
- * whose keys *may* contain a colon. See `kv-line.ts` for the rule both follow.
- *
- * A line is unparsed when it carries neither, or when the separator is the first
- * character - `: value` names no header, and writing an empty key into the table
- * would produce a row the user cannot identify.
+ * Every non-blank line, split at whichever of `:` or `=` comes first: a header name may contain
+ * neither, so the earliest is always the separator, which is why this is not the params parser,
+ * whose keys may contain a colon (`kv-line.ts` has the shared rule). A line with neither, or
+ * starting with its separator (`: value` names no header), is unparsed: an empty-key row is one
+ * nobody can identify.
  */
 const scanHeaderLines = (text: string): ScannedLine[] => scanKeyValueLines(text, HEADER_SEPARATORS);
 
 /**
- * Parse text format to headers array
- * Format: "Header-Name: value" (one per line); "Header-Name=value" also
- * accepted; a leading `// ` disables the row (issue #1480).
- *
- * Every row is rebuilt fresh, so a `source` marker (issue #1481) on a row that
- * passes through Bulk Edit is dropped, matched or not: the text form is the
- * user restating every row by hand, which is not different from retyping one
- * in the table.
+ * Bulk Edit text as header rows: `Header-Name: value` per line, `Header-Name=value` accepted, a
+ * leading `// ` disabling the row (#1480). Every row is rebuilt, so a `source` marker (#1481) does
+ * not survive Bulk Edit, matched or not: the text form is the user restating every row by hand.
  *
  * @param text - Headers in text format
  * @returns Array of KeyValueItem
@@ -97,21 +70,17 @@ export const parseHeadersFromText = (text: string): KeyValueItem[] => {
 };
 
 /**
- * The lines `parseHeadersFromText` drops, with their 1-based line numbers (blank
- * lines count but are not reported), so a commit can say what it did not read
- * (#3694).
+ * The lines `parseHeadersFromText` drops, with 1-based line numbers (blank lines counted, not
+ * reported), so a commit can say so (#3694).
  */
 export const unreadHeaderLines = (text: string): UnreadLine[] =>
 	unreadLinesOf(scanHeaderLines(text));
 
 /**
- * Whether committing `text` would change nothing about `headers` (issue
- * #1480) - opening Bulk edit and pressing Table with no typing must not
- * re-enable every row, retype every value through the trim, or dirty the
- * request. Compares by content, not by text: both sides are normalised the
- * same way `formatHeadersToText`/`parseHeadersFromText` already would, so an
- * incidental difference in spacing or row order that the round trip itself
- * would erase does not count as a change.
+ * Whether committing `text` changes nothing about `headers` (#1480): opening Bulk edit and pressing
+ * Table untyped must not re-enable every row, retrim every value or dirty the request. Compared by
+ * content, both sides normalised as the format/parse round trip would, so spacing or order the
+ * round trip erases is no change.
  */
 export const isNoOpHeadersEdit = (text: string, headers: KeyValueItem[]): boolean => {
 	const normalize = (list: KeyValueItem[]) =>

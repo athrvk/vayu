@@ -8,29 +8,26 @@
 /**
  * One small JSON object in a file under `userData`, read once and written whole.
  *
- * What the main process's three settings files (`window-state.json`,
- * `response-cache-clear.json`, `mcp-config.json`) need and nothing more: a
- * handful of keys, read at startup, written when they change. They used to be
- * `electron-store`, whose `conf` underneath statically imports Ajv, ajv-formats,
- * semver, dot-prop and atomically for schemas, migrations and watching that
- * none of the three used - measured at 63-77 ms inside Electron to import and
- * construct, and `window-state.ts` constructs its store at module scope, so all
- * of it ran before `app.whenReady` on every launch.
+ * What the main process's three settings files (`window-state.json`, `response-cache-clear.json`,
+ * `mcp-config.json`) need and nothing more: a handful of keys, read at startup, written when they
+ * change. Not `electron-store`: its `conf` statically imports Ajv, ajv-formats, semver, dot-prop
+ * and atomically for schemas, migrations and watching that none of the three use, measured at 63-77
+ * ms inside Electron to import and construct, and `window-state.ts` constructs its store at module
+ * scope, so all of it would run before `app.whenReady` on every launch.
  *
- * The file format is unchanged - the same name under the same directory, the
- * same tab-indented JSON object - so an existing user's files are read as they
- * are, and a downgrade reads what this writes.
+ * The file format is `electron-store`'s (the same name under the same directory, the same
+ * tab-indented JSON object), so an existing user's files are read as they are, and a downgrade
+ * reads what this writes.
  *
  * Three behaviours are kept on purpose:
- *   - An unreadable or corrupt file is an empty store, never a throw. A store
- *     read during startup that threw would leave the app with no window on
- *     every launch until the user found and deleted a hidden file (what
- *     `clearInvalidConfig` was set for on all three).
- *   - The first write over such a file renames it to `<name>.json.corrupt-<ms>`
- *     first (#2433), so what the empty store replaces survives. One copy is kept
- *     per store: a later corruption replaces the earlier copy.
- *   - A write is a temp file renamed over the original, so a crash mid-write
- *     leaves the previous file rather than a truncated one.
+ *   - An unreadable or corrupt file is an empty store, never a throw. A store read during startup
+ *     that threw would leave the app with no window on every launch until the user found and
+ *     deleted a hidden file (what `clearInvalidConfig` was set for on all three).
+ *   - The first write over such a file renames it to `<name>.json.corrupt-<ms>` first (#2433), so
+ *     what the empty store replaces survives. One copy is kept per store: a later corruption
+ *     replaces the earlier copy.
+ *   - A write is a temp file renamed over the original, so a crash mid-write leaves the previous
+ *     file rather than a truncated one.
  */
 
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";

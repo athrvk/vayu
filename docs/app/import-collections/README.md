@@ -11,13 +11,13 @@ are detected, parsed into Vayu's internal draft model, and persisted.
 **The parse is the engine's** since issue
 [#877](https://github.com/athrvk/vayu/issues/877). Every format below is read by
 `engine/src/core/import_document.cpp`, behind
-[`POST /import/parse`](../../engine/api-reference.md#post-importparse), and the
+[`POST /import/parse`](../../engine/api-reference/import.md#post-importparse), and the
 app calls it. There is no parser in `app/src` any more, and that is the point:
 the renderer's stack was the *second* reader of a document, which is what
 [#853](https://github.com/athrvk/vayu/issues/853) set out to end - and while it
 existed, an agent over MCP could bind, diff, sync and export a spec but could
 not import one. It can now (`import_document`, see
-[mcp.md](../../engine/mcp.md)).
+[mcp/load-and-specs.md](../../engine/mcp/load-and-specs.md)).
 
 **Code:** `engine/src/core/import_document.cpp` (the parse),
 `app/src/services/importers/` (the batch ledger, the temp ids and the apply).
@@ -68,7 +68,7 @@ fewer than the documents picked whenever one could not be read or was inlined
 into another.
 
 An agent has no dialog, so it takes the whole of that in one call:
-[`POST /import`](../../engine/api-reference.md#post-import) is the parse, the
+[`POST /import`](../../engine/api-reference/import.md#post-import) is the parse, the
 flattening and the apply together. The app deliberately does not use it - a
 person picks which files of a batch to import and toggles two options between
 the parse and the apply.
@@ -104,9 +104,9 @@ command carried that Vayu cannot - each a single sentence.
 
 `detectBatch(documents, opts, intake)` returns one `BatchEntry` per picked file,
 in pick order, and **every picked file gets a row** - that is the property the
-whole module exists for. The dialog used to read `e.dataTransfer.files[0]` with
-no `multiple` on the input, so dropping a folder's worth of specs imported the
-first and discarded the rest without a word (issue #666). A row saying
+whole module exists for. A dialog that read only `e.dataTransfer.files[0]` with
+no `multiple` on the input would import the first spec of a dropped folder and
+discard the rest without a word (issue #666). A row saying
 "Unrecognised format" is the flow working; no row is the bug.
 
 An entry carries the bundled `raw` text, its `result` **or** its `error`, the
@@ -202,7 +202,7 @@ query: composition writes its value into the URL's `:name` segment instead.
 Every parser states the query some other way - Postman splits it out of the URL
 into `params[]`, Insomnia keeps a `parameters[]` beside a verbatim URL, the
 OpenAPI parsers synthesize params for a URL that never had a query - so an
-imported request used to go on the wire with its query missing, silently, until
+imported request would go on the wire with its query missing, silently, until
 the user happened to edit the Params table once (issue #590).
 
 `parse_import` closes that with one pass over every request draft,
@@ -242,17 +242,14 @@ in the payload can reference another (`parentTempId`, `collectionTempId`) while 
 exist yet, and they are never stored. The orchestrator throws if it sees an unstamped
 draft.
 
-This used to mint real `col_…` / `req_…` / `env_…` UUIDs, because the orchestrator created
-items one POST at a time and had to wire the tree itself - which is the only reason
-`POST /<resource>` ever accepted a client-supplied `id`. It no longer does: since #97 a
-create carrying an `id` is a `400`, on the single-resource routes and per item in
-`/import/apply` alike.
+They are not `col_…` / `req_…` / `env_…` UUIDs: a create carrying an `id` is a `400` (#97),
+on the single-resource routes and per item in `/import/apply` alike.
 
 ### 3. Persist - `orchestrator.ts`
 
 `ImportOrchestrator` takes an injected `ImportApi` (easy to fake in tests) and exposes
 `run(result, opts)`, which flattens the draft tree into **one**
-[`POST /import/apply`](../../engine/api-reference.md#post-importapply) call:
+[`POST /import/apply`](../../engine/api-reference/import.md#post-importapply) call:
 
 - Collections are flattened depth-first - **collection → its requests → child
   collections** - carrying `parentTempId` (`null` for a root) and, below a root,
@@ -276,7 +273,7 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
   payload, then one transaction), so a *rejected* payload persisted nothing and the error
   the modal shows is the engine's, naming the item that broke. The engine names it by
   `tempId` (inside the error object - see
-  [api-reference](../../engine/api-reference.md));
+  [api-reference](../../engine/api-reference/index.md));
   `importFailureMessage` (`services/importers/failure-message.ts`) resolves that back to
   the name shown in the preview, since `c37` means nothing to whoever chose the file.
   The old per-item loop needed
@@ -361,7 +358,7 @@ imported without its examples looks exactly like a document that documented none
 One renderer path still needs a document as a *tree*: `ref-bundler.ts`, which
 inlines the files a multi-file OpenAPI document references before anything is
 parsed or stored (issue #649). It reads through
-[`POST /import/document`](../../engine/api-reference.md#post-importdocument) -
+[`POST /import/document`](../../engine/api-reference/import.md#post-importdocument) -
 `core::read_document` and nothing else - so it holds no parser of its own, and
 `js-yaml` is gone from production `src/`.
 
@@ -538,10 +535,10 @@ from the jar, and folding one declaration at a time into a single joined `Cookie
 would mean inventing a merge the document never wrote, so mapping them is a recorded
 non-goal and naming the loss is the honest half. `unmapped_body` is a `requestBody`
 declaring only media types with no Vayu mode and no binary schema - an `image/png` whose
-schema is an object, say - which used to return `{ mode: "none" }` on the same path as
-*no body at all*, reporting nothing skipped; an operation that declared no body is still not
-counted, because it lost nothing. A whole-file body (`application/octet-stream`, or a
-`format: binary` schema) is no longer one of them: it imports as a `binary` body with no
+schema is an object, say - which would return `{ mode: "none" }` on the same path as
+*no body at all*, reporting nothing skipped, so it is counted; an operation that declares no
+body is not counted, because it lost nothing. A whole-file body (`application/octet-stream`, or a
+`format: binary` schema) is not one of them: it imports as a `binary` body with no
 file chosen.
 
 `file_body` is not a loss either. Every whole-file body - Postman's `file` mode, an Insomnia
@@ -698,8 +695,8 @@ outgoing request rather than emptied, so an imported collection using a faker
 value Vayu does not have shows it instead of hiding it.
 
 ### Sampler::sample
-`Sampler::sample(schema)` - generates a sample value for an OpenAPI/Swagger schema,
-used to build request-body stubs. It is **bounded and resilient**, not a naive one-level walk:
+`Sampler::sample(schema)` - generates a sample value for an OpenAPI/Swagger schema
+and builds request-body stubs. It is **bounded and resilient**, not a naive one-level walk:
 
 - Recurses up to `MAX_DEPTH = 6`.
 - Resolves `$ref` via the injected `resolveRef`, with a per-path `Set` **cycle guard**

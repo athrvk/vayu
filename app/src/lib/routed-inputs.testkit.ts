@@ -24,8 +24,13 @@
  * workflow lists the union per filter, and `routed-inputs.test.ts` compares the
  * two - so a path added to a guard is red until it is routed, and a path routed
  * that no guard reads is red too.
+ *
+ * The engine suite has the same defect for the pages and schemas under `docs/`
+ * that its tests open (`ENGINE_DOC_READING_GUARDS`, #3846); those readers are
+ * C++, so the registry is the only part of the mechanism they share.
  */
 
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -41,6 +46,47 @@ export const repoRoot = join(here, "..", "..", "..");
  */
 export function fromRepoRoot(path: string): string {
 	return join(repoRoot, ...path.split("/"));
+}
+
+/**
+ * A registry entry that ends in `/` names a directory of pages, and the filter
+ * lists it as the `**` glob under it. A split page becomes a directory of pages
+ * (`docs/app/COMPONENTS/`), and one entry then answers for every page added
+ * to it, where a list of file names would need an edit per page.
+ */
+export function filterGlob(entry: string): string {
+	return entry.endsWith("/") ? `${entry}**` : entry;
+}
+
+/**
+ * Whether a registry entry routes @p path: the file itself, or the directory it
+ * sits under. A guard that reads one page of a split directory asserts this, so
+ * moving the page out of the directory is red here and not silently unrouted.
+ */
+export function entryCovers(entry: string, path: string): boolean {
+	return entry.endsWith("/") ? path.startsWith(entry) : entry === path;
+}
+
+/** Every `.md` file under a directory, at any depth, in name order. */
+export function markdownFiles(directory: string): string[] {
+	return readdirSync(directory)
+		.sort()
+		.flatMap((name) => {
+			const path = join(directory, name);
+			if (statSync(path).isDirectory()) return markdownFiles(path);
+			return name.endsWith(".md") ? [path] : [];
+		});
+}
+
+/**
+ * Whether an entry still names something. A file entry must exist. A directory
+ * entry must hold at least one `.md` file at any depth: a glob over an empty or
+ * renamed directory matches nothing, routes nothing, and would read as routed.
+ */
+export function entryExists(entry: string, root: string = repoRoot): boolean {
+	const path = join(root, ...entry.split("/"));
+	if (!entry.endsWith("/")) return existsSync(path);
+	return existsSync(path) && statSync(path).isDirectory() && markdownFiles(path).length > 0;
 }
 
 /**
@@ -60,6 +106,9 @@ export const TESTKIT_PATH = "app/src/lib/routed-inputs.testkit.ts";
  * it or quietly stop being that guard's own list. It is usually a `.test.ts`,
  * but a `.testkit.ts` a suite imports is a reader too - the fixture it opens
  * turns those suites red exactly the same way.
+ *
+ * `paths` entries are files, except in `DOC_READING_GUARDS`, where an entry
+ * ending in `/` names a directory of pages (`filterGlob`, `entryExists`).
  */
 interface ReadingGuard {
 	readonly reader: string;
@@ -75,17 +124,18 @@ interface ReadingGuard {
 export const DOC_READING_GUARDS = {
 	scriptTypedefs: {
 		reader: "app/src/hooks/script-typedefs.docs-compile.test.ts",
-		paths: ["docs/engine/scripting.md", "docs/app/pm-api-compatibility.md"],
+		paths: ["docs/engine/scripting/", "docs/app/pm-api-compatibility.md"],
 	},
 	/*
-	 * The same two pages, read for a different question (#1223): the script
+	 * The same pages, read for a different question (#1223): the script
 	 * panels stopped stating the `pm.*` rules in prose, so this guard is what
 	 * holds each rule to the surface it moved to - the completion table for a
-	 * member's rule, these pages for a hook's.
+	 * member's rule, these pages for a hook's. It names the two scripting pages
+	 * that hold a hook's rule, and the directory entry routes them.
 	 */
 	scriptRules: {
 		reader: "app/src/modules/request-builder/components/RequestTabs/panels/script-rules.test.ts",
-		paths: ["docs/engine/scripting.md", "docs/app/pm-api-compatibility.md"],
+		paths: ["docs/engine/scripting/", "docs/app/pm-api-compatibility.md"],
 	},
 	/*
 	 * The anchor an app link carries (#2576): `pmApiCompatibility` opens the
@@ -98,52 +148,53 @@ export const DOC_READING_GUARDS = {
 	},
 	designSystem: {
 		reader: "app/src/design-system-doc.test.ts",
-		paths: ["docs/design-system.md"],
+		paths: ["docs/design-system/"],
 	},
 	/*
-	 * The second reader of that page, and the one that reads its prose: the
-	 * Type Scale Conventions table names the weight of the micro/badge step,
-	 * which the components either match or do not (#1199). `design-system-doc`
-	 * checks the page's colour *values* against `index.css` and says so - a
-	 * table cell is not a value, and neither guard covers the other's half.
+	 * The second reader of those pages, and the one that reads their prose: the
+	 * Type Scale Conventions table on `typography.md` names the weight of the
+	 * micro/badge step, which the components either match or do not (#1199).
+	 * `design-system-doc` checks the colour *values* against `index.css` and says
+	 * so - a table cell is not a value, and neither guard covers the other's
+	 * half. The directory entry routes the page.
 	 */
 	typeScale: {
 		reader: "app/src/components/ui/type-scale.test.ts",
-		paths: ["docs/design-system.md"],
+		paths: ["docs/design-system/"],
 	},
 	/*
-	 * The third reader of that page, and the second of its prose (#1282): the
-	 * Accessibility section enumerates the `jsx-a11y` rules suppressed at the
-	 * line, and the guard holds that list to what `app/src` actually carries. A
-	 * site edited out of the doc alone is the drift it exists to catch, so the
-	 * page is one of its inputs in the same sense the sources are.
+	 * The third reader, and the second of the prose (#1282): `accessibility.md`
+	 * enumerates the `jsx-a11y` rules suppressed at the line, and the guard
+	 * holds that list to what `app/src` actually carries. A site edited out of
+	 * the page alone is the drift it exists to catch, so the page is one of its
+	 * inputs in the same sense the sources are.
 	 */
 	a11ySuppressions: {
 		reader: "app/src/components/a11y-suppressions.test.ts",
-		paths: ["docs/design-system.md"],
+		paths: ["docs/design-system/"],
 	},
 	/*
-	 * The fourth reader of that page (#1202), and the only one that checks it
-	 * against something other than the app's own source: the x-height table in
-	 * the Typography section states what each bundled face measures, and the
-	 * guard parses the `@fontsource` files to hold the table to them. A number
-	 * edited into the page alone is the drift it exists to catch.
+	 * The fourth reader (#1202), and the only one that checks the pages against
+	 * something other than the app's own source: the x-height table on
+	 * `typography.md` states what each bundled face measures, and the guard
+	 * parses the `@fontsource` files to hold the table to them. A number edited
+	 * into the page alone is the drift it exists to catch.
 	 */
 	fontMetrics: {
 		reader: "app/src/constants/appearance.font-metrics.test.ts",
-		paths: ["docs/design-system.md"],
+		paths: ["docs/design-system/"],
 	},
 	rendererState: {
 		reader: "app/src/state-management-doc.test.ts",
 		paths: [
-			"docs/app/state-management.md",
+			"docs/app/state-management/",
 			"docs/app/architecture.md",
-			"docs/app/api-integration.md",
+			"docs/app/api-integration/",
 		],
 	},
 	rowPersistence: {
 		reader: "app/src/modules/collections/row-persistence-claims.test.ts",
-		paths: ["docs/app/data-driven-runs.md", "docs/app/COMPONENTS.md"],
+		paths: ["docs/app/data-driven-runs.md", "docs/app/COMPONENTS/"],
 	},
 	/*
 	 * The same page, read for what it says about how a data file's cells are
@@ -156,20 +207,31 @@ export const DOC_READING_GUARDS = {
 	},
 	/*
 	 * The one guard whose input is a *number* in prose (#1431): the MCP tool
-	 * registry grows by a tool, and every page that says how many there are
-	 * stays on the figure that was true when it was written - 24 on two pages,
-	 * 49 on two more, against 68 in `TOOLS`. The pages that name no count are
-	 * listed too, so the guard covers them from the day one is added. The
-	 * resource and prompt totals ride the same pages (#2108).
+	 * registry grows by a tool, and a page that states how many there are stays
+	 * on the figure that was true when it was written - 24 on two pages, 49 on
+	 * two more, against 68 in `TOOLS`. So no page states one except the
+	 * generated `docs/engine/mcp/tools.md`, and this guard fails a page that
+	 * does. The pages that name no count are listed too, so the guard covers
+	 * them from the day one is added. The resource and prompt totals ride the
+	 * same pages (#2108).
 	 */
 	mcpToolCount: {
 		reader: "app/electron/mcp/tool-count-docs.test.ts",
 		paths: [
 			"docs/index.md",
-			"docs/engine/mcp.md",
+			"docs/engine/mcp/",
 			"docs/compare/vayu-vs-bruno.md",
 			"docs/compare/vayu-vs-postman.md",
 		],
+	},
+	/*
+	 * `docs/engine/mcp/tools.md` is the tool table and the count, rendered from
+	 * the registry (#3848); the guard holds the committed page equal to the
+	 * render. The write roster in `safety.md` is read by `mcpToolCount` above.
+	 */
+	mcpToolsDoc: {
+		reader: "app/electron/mcp/tools-doc.fresh.test.ts",
+		paths: ["docs/engine/mcp/"],
 	},
 	/*
 	 * The JMeter comparison page's claim about which logic controllers the
@@ -188,7 +250,7 @@ export const DOC_READING_GUARDS = {
 	 */
 	agentReference: {
 		reader: "app/src/lib/agent-reference.docs.test.ts",
-		paths: ["docs/engine/mcp.md"],
+		paths: ["docs/engine/mcp/"],
 	},
 	/*
 	 * The app-side logger (#1558) is a from-scratch port of the engine's
@@ -556,9 +618,8 @@ export const ROOT_READING_GUARDS = {
 		paths: ["scripts/perf/measure-app.mjs"],
 	},
 	/*
-	 * The README states the MCP tool count twice, so the doc guard above reads
-	 * it as well - the same number, drifting for the same reason (#1431), and
-	 * the resource and prompt totals with it (#2108).
+	 * The README is read by the doc guard of the same name above: it is the
+	 * page a count drifted on first (#1431), and it states none now.
 	 */
 	mcpToolCount: {
 		reader: "app/electron/mcp/tool-count-docs.test.ts",
@@ -589,6 +650,40 @@ export const ROOT_READING_GUARDS = {
 	},
 } as const satisfies Record<string, ReadingGuard>;
 
+/**
+ * Every engine test that reads a file under `docs/`, with the files it reads.
+ *
+ * The engine mirror of `DOC_READING_GUARDS`, for the same defect (#3846): the
+ * `engine` filter excludes Markdown and routes nothing under `docs/`, so an
+ * edit to one of these ran no C++ test and failed on the next unrelated engine
+ * change. A reader here is C++ and cannot import this module, so
+ * `routed-inputs.test.ts` holds it to naming each file it reads instead.
+ */
+export const ENGINE_DOC_READING_GUARDS = {
+	/* Holds the `pm.response.to` words and `.` names the page lists to what the
+	   runtime accepts. */
+	pmApiCompatibility: {
+		reader: "engine/tests/script_chai_conformance_test.cpp",
+		paths: ["docs/app/pm-api-compatibility.md"],
+	},
+	/* The run-report export is validated against its schema by the schema test
+	   and, through this header, by the Markdown and HTML export tests. */
+	runExportSchema: {
+		reader: "engine/tests/run_export_schema_support.hpp",
+		paths: ["docs/engine/run-export.schema.json"],
+	},
+	/* The same schema `DOC_READING_GUARDS` routes to the app, read by the
+	   engine's own log tests. */
+	logRecordSchema: {
+		reader: "engine/tests/log_record_schema_test.cpp",
+		paths: ["docs/engine/log-record.schema.json"],
+	},
+	logCapture: {
+		reader: "engine/tests/log_capture.hpp",
+		paths: ["docs/engine/log-record.schema.json"],
+	},
+} as const satisfies Record<string, ReadingGuard>;
+
 function union(guards: Record<string, ReadingGuard>): readonly string[] {
 	return [...new Set(Object.values(guards).flatMap((guard) => guard.paths))];
 }
@@ -600,6 +695,7 @@ function union(guards: Record<string, ReadingGuard>): readonly string[] {
 export const ROUTED_DOC_PAGES = union(DOC_READING_GUARDS);
 export const ROUTED_ENGINE_PATHS = union(ENGINE_READING_GUARDS);
 export const ROUTED_ROOT_PATHS = union(ROOT_READING_GUARDS);
+export const ROUTED_ENGINE_DOC_PAGES = union(ENGINE_DOC_READING_GUARDS);
 
 export const WORKFLOW_PATH = fromRepoRoot(".github/workflows/pr-tests.yml");
 
@@ -610,11 +706,40 @@ export const WORKFLOW_PATH = fromRepoRoot(".github/workflows/pr-tests.yml");
  * #1121) and the root half later still (#1130), and the table is what made the
  * third kind of input cost an entry here rather than a third copy of the same
  * assertions.
+ *
+ * `suite` is the one whose job reads the filter, and so whose fingerprint has to
+ * cover it. `readers` is how a reader proves it is the guard's own list: an app
+ * test imports this module, a C++ test names the file it opens.
  */
 export const ROUTED_INPUTS = [
-	{ filter: "app_doc_fixtures", guards: DOC_READING_GUARDS, routed: ROUTED_DOC_PAGES },
-	{ filter: "app_engine_inputs", guards: ENGINE_READING_GUARDS, routed: ROUTED_ENGINE_PATHS },
-	{ filter: "app_root_inputs", guards: ROOT_READING_GUARDS, routed: ROUTED_ROOT_PATHS },
+	{
+		filter: "app_doc_fixtures",
+		suite: "app",
+		readers: "import",
+		guards: DOC_READING_GUARDS,
+		routed: ROUTED_DOC_PAGES,
+	},
+	{
+		filter: "app_engine_inputs",
+		suite: "app",
+		readers: "import",
+		guards: ENGINE_READING_GUARDS,
+		routed: ROUTED_ENGINE_PATHS,
+	},
+	{
+		filter: "app_root_inputs",
+		suite: "app",
+		readers: "import",
+		guards: ROOT_READING_GUARDS,
+		routed: ROUTED_ROOT_PATHS,
+	},
+	{
+		filter: "engine_doc_fixtures",
+		suite: "engine",
+		readers: "name",
+		guards: ENGINE_DOC_READING_GUARDS,
+		routed: ROUTED_ENGINE_DOC_PAGES,
+	},
 ] as const;
 
 /**

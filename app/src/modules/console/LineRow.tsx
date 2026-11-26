@@ -6,11 +6,10 @@
  */
 
 /**
- * A line a Send's script wrote, or the error it threw (#3673), in the session
- * Console (#3634): the time, the
- * level in the gutter the response pane's Console and the Logs tab draw
- * (`LEVEL_TONE`, `LogGutter`), the script that wrote it, and the message as
- * written. Nothing to open, so no button.
+ * A line a Send's script wrote, or the error it threw (#3673), in the session Console (#3634): the
+ * time, the level in the gutter the response pane's Console and the Logs tab draw (`LEVEL_TONE`,
+ * `LogGutter`), the script that wrote it, and the message as written. Nothing to open, so no
+ * button.
  */
 
 import { memo } from "react";

@@ -6,35 +6,30 @@
  */
 
 /**
- * In-memory GraphQL schema cache. The request builder sets the active target
- * and triggers ensureSchema; Monaco providers read getActiveSchema(). One
- * editor is visible at a time, so a single active target is sufficient.
+ * In-memory GraphQL schema cache. The request builder sets the active target and triggers
+ * ensureSchema; Monaco providers read getActiveSchema(). One editor is visible at a time, so a
+ * single active target is enough.
  *
- * **The key is the endpoint plus the credentials it is reached with**, not the
- * endpoint alone. Since introspection composes engine-side (#228) it sends the
- * request's auth, so two environments pointing the same URL at different
- * credentials are two different results: keyed on the URL alone, the first
- * environment's schema - or its 401 - would be served to the second. Callers
- * never build the key; they hand over a target and the store derives it, so a
- * hand-written key cannot drift from a stored one.
+ * **The key is the endpoint plus the credentials it is reached with**, not the endpoint alone.
+ * Introspection composes engine-side (#228) and sends the request's auth, so two environments
+ * pointing one URL at different credentials are two results: keyed on the URL alone, the first
+ * environment's schema (or its 401) would be served to the second. Callers never build the key;
+ * they hand over a target and the store derives it, so a hand-written key cannot drift from a
+ * stored one.
  *
- * The credentials in the key are the **resolved** ones (#383). Keyed on the
- * auth block as typed, `{"mode":"inherit"}` is one value forever: editing the
- * ancestor collection it inherits from, or the environment variable its token
- * interpolates, left the key identical and served the schema fetched with the
- * old credential. The invariant is: if the wire request would differ, the key
- * differs. Callers hand over `resolvedAuth` alongside the unresolved `auth`
- * they still send.
+ * The credentials in the key are the **resolved** ones (#383). Keyed on the auth block as typed,
+ * `{"mode":"inherit"}` is one value forever: editing the ancestor collection it inherits from, or
+ * the environment variable its token interpolates, would leave the key identical and serve the
+ * schema fetched with the old credential. The invariant: if the wire request would differ, the key
+ * differs. Callers hand over `resolvedAuth` beside the unresolved `auth` they still send.
  *
- * Headers are deliberately *not* part of the key: a header row is edited
- * keystroke by keystroke and re-keying on it would re-introspect the endpoint
- * as the user types. A hand-typed `Authorization` therefore still needs the
- * Refresh button, exactly as before this cache learned about auth.
+ * Headers are deliberately *not* part of the key: a header row is edited keystroke by keystroke,
+ * and re-keying on it would re-introspect the endpoint as the user types. So a hand-typed
+ * `Authorization` still needs the Refresh button.
  *
- * **Loading on its own is conditional; loading on request is not.**
- * `ensureSchema` only introspects an endpoint the user has already contacted
- * (`approved-endpoints.ts`), judged on the URL the introspection would be sent
- * to. `refreshSchema` is the user asking, so it always goes and, in doing so,
+ * **Loading on its own is conditional; loading on request is not.** `ensureSchema` only introspects
+ * an endpoint the user has already contacted (`approved-endpoints.ts`), judged on the URL the
+ * introspection would be sent to. `refreshSchema` is the user asking, so it always goes and
  * approves the endpoint it reached.
  */
 
@@ -52,13 +47,10 @@ import { approveEndpoint, isEndpointApproved } from "./approved-endpoints";
 export type SchemaStatus = "idle" | "loading" | "ready" | "error";
 
 /**
- * An endpoint to introspect: what to compose, plus the preview-resolved values
- * that decide identity.
- *
- * `resolvedUrl` and `resolvedAuth` are identity only and are never sent - the
- * wire request comes back from compose. They are in the key because they move
- * when a variable *value* changes, or when an ancestor's auth does, which no id
- * in the scope can see.
+ * An endpoint to introspect: what to compose, plus the preview-resolved values that decide
+ * identity. `resolvedUrl` and `resolvedAuth` are identity only and never sent (the wire request
+ * comes back from compose); they are in the key because they move when a variable *value* changes,
+ * or an ancestor's auth does, which no id in the scope can see.
  */
 export interface SchemaTarget extends IntrospectionTarget {
 	resolvedUrl: string;
@@ -88,18 +80,16 @@ export interface SchemaEntry {
 }
 
 /**
- * How many parsed schemas to retain. Each is a fully built `GraphQLSchema` -
- * megabytes for a large API - and the realistic working set is one per open
- * endpoint, so a handful covers switching between them without the cache
- * growing for the life of the process.
+ * How many parsed schemas to retain. Each is a fully built `GraphQLSchema`, megabytes for a large
+ * API, and the realistic working set is one per open endpoint, so a handful covers switching
+ * between them without the cache growing for the life of the process.
  */
 export const SCHEMA_CACHE_MAX_ENTRIES = 8;
 
 /*
- * A per-process salt over the identity digest. The store is in-memory and never
- * persisted, but the key is a plain object property visible to anything holding
- * the store - a bearer token spelled out there is a secret sitting somewhere it
- * is not needed, and the digest costs nothing.
+ * A per-process salt over the identity digest. The store is in-memory and never persisted, but the
+ * key is a plain object property visible to anything holding the store: a bearer token spelled out
+ * there is a secret where it is not needed, and the digest costs nothing.
  */
 const SALT = (() => {
 	const bytes = new Uint32Array(2);
@@ -108,12 +98,10 @@ const SALT = (() => {
 })();
 
 /**
- * A 64-bit FNV-1a digest of the salted input, as hex.
- *
- * Identity only - never a security boundary, and never reversed. Two variants
- * with different offset bases give 64 bits, which for a cache holding single
- * digits of entries makes a collision (the wrong schema served) unreachable in
- * practice, where a 32-bit digest merely makes it unlikely.
+ * A 64-bit FNV-1a digest of the salted input, as hex. Identity only, never a security boundary and
+ * never reversed. Two variants with different offset bases give 64 bits, which for a cache of
+ * single-digit entries makes a collision (the wrong schema served) unreachable in practice, where
+ * 32 bits only makes it unlikely.
  */
 function digest(input: string): string {
 	const salted = `${SALT}:${input}`;
@@ -157,23 +145,15 @@ interface SchemaCacheState {
 	 */
 	awaitingLoad: Record<string, true>;
 	/**
-	 * Point at a target, by the key it hashes to.
-	 *
-	 * The target itself was kept beside the key for a while, because a surface
-	 * outside the request builder - the context bar's GraphQL section - offered a
-	 * Refresh, and `refreshSchema` takes a target rather than a key. That Refresh
-	 * is gone (#1224), and nothing else ever asked for the target back, so the
-	 * field went with it rather than staying as state nobody reads. Whoever needs
-	 * one again should hold the target it already has, the way `GraphQLBody`
-	 * does.
+	 * Point at a target, by the key it hashes to. Only the key is kept: nothing reads the target
+	 * back since the context bar's Refresh went (#1224), so a caller that needs one holds the
+	 * target it already has, as `GraphQLBody` does.
 	 */
 	setActiveTarget: (target: SchemaTarget | null) => void;
 	/**
-	 * Stop pointing at this target, if it is still the one being pointed at.
-	 *
-	 * Guarded rather than an unconditional clear: a request switch mounts the
-	 * next GraphQL body before the old one's cleanup runs, so an unconditional
-	 * clear on unmount would blank the target that was just set.
+	 * Stop pointing at this target, if it is still the one pointed at. Guarded rather than an
+	 * unconditional clear: a request switch mounts the next GraphQL body before the old one's
+	 * cleanup runs, so an unconditional clear on unmount would blank the target just set.
 	 */
 	clearActiveTarget: (target: SchemaTarget) => void;
 	getActiveEntry: () => SchemaEntry | null;
@@ -194,10 +174,9 @@ interface SchemaCacheState {
 }
 
 /**
- * Write one entry, marking it most-recently-used and evicting past the cap.
- *
- * The active entry is never evicted: it is the one the visible editor completes
- * against, and dropping it would silently downgrade a working editor.
+ * Write one entry, marking it most-recently-used and evicting past the cap. The active entry is
+ * never evicted: the visible editor completes against it, and dropping it would silently downgrade
+ * a working editor.
  */
 function withEntry(
 	state: SchemaCacheState,
@@ -268,12 +247,11 @@ export const useSchemaCache = create<SchemaCacheState>((set, get) => ({
 		if (!target.url) return;
 		const key = schemaCacheKey(target);
 		/*
-		 * Keep the last good schema through the refresh, and through its failure.
-		 * Nulling it on the way into `loading` downgraded the editor to
-		 * syntax-only for the length of every manual refresh (markers flickering
-		 * in and out), and nulling it again on error threw away a schema that is
-		 * still the best answer available - a refresh that 401s does not make the
-		 * types the user was completing against wrong.
+		 * Keep the last good schema through the refresh and through its failure. Nulled on the way
+		 * into `loading`, the editor would drop to syntax-only for every manual refresh (markers
+		 * flickering in and out); nulled on error, it would lose a schema that is still the best
+		 * answer available, since a refresh that 401s does not make the types the user was
+		 * completing against wrong.
 		 */
 		const previous = get().byKey[key];
 		const lastGood = previous?.schema ?? null;

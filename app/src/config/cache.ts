@@ -6,10 +6,8 @@
  */
 
 /**
- * TanStack Query Cache Configuration
- *
- * Centralized staleTime / gcTime / retry policies. Per-query overrides should
- * pull from here instead of hardcoding durations.
+ * TanStack Query staleTime / gcTime / retry policies, in one place: a per-query override reads from
+ * here instead of hard-coding a duration.
  */
 
 const SECOND = 1000;
@@ -23,10 +21,9 @@ export const QUERY_CACHE = {
 	DEFAULT_QUERY_RETRY: 2,
 	DEFAULT_MUTATION_RETRY: 1,
 	/**
-	 * A query's retry delay while the engine is starting (`queryRetryDelay`).
-	 * Bounds how long data lags an engine that has just begun listening; a
-	 * refused connect to a closed localhost port costs microseconds, so the
-	 * attempts it adds are free.
+	 * A query's retry delay while the engine is starting (`queryRetryDelay`). It bounds how long
+	 * data lags an engine that has just begun listening; a refused connect to a closed localhost
+	 * port costs microseconds, so the attempts it adds are free.
 	 */
 	ENGINE_START_RETRY_DELAY_MS: 250,
 
@@ -37,11 +34,9 @@ export const QUERY_CACHE = {
 	RUNS_STALE_TIME_MS: 5 * MINUTE,
 	RUNS_GC_TIME_MS: 30 * MINUTE,
 	/**
-	 * The History charts' downsampled series (#2547). Short on purpose: it is at
-	 * most `HISTORY_SERIES_MAX_POINTS` ticks and one request to read again, so
-	 * holding it half an hour after the view closes buys nothing. The raw paged
-	 * series (server vitals) keeps `RUNS_GC_TIME_MS`, because re-reading it is a
-	 * page per 5,000 rows.
+	 * The History charts' downsampled series and server vitals (#2547, #2611). Short on purpose:
+	 * each is at most `HISTORY_SERIES_MAX_POINTS` points and one request to read again, so holding
+	 * it half an hour after the view closes buys nothing.
 	 */
 	RUN_SERIES_GC_TIME_MS: 1 * MINUTE,
 

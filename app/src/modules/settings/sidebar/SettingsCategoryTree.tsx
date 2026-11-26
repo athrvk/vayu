@@ -6,24 +6,17 @@
  */
 
 /**
- * Settings Category Tree
+ * The settings categories in two sections: App Settings (the client-side panels of the app-panels
+ * registry) and Engine Settings (the category registry, filled by `/config`).
  *
- * Sidebar list of settings categories, split into two sections:
- * - App Settings - client-side panels, declared in the app-panels registry.
- * - Engine Settings - the category registry, populated by the `/config` API.
+ * Plus the search spanning both, so an entry is found without guessing which category owns it:
+ * typing filters the shared settings index (`useSettingsIndex`, over `lib/settings-index.ts`) by
+ * labels, descriptions and engine keys, and picking a result selects the owning category and asks
+ * the main view to reveal the entry.
  *
- * Plus the search that spans both: ~45 engine entries and 7 app panels used to
- * be findable only by guessing which category owned them. Typing filters the
- * shared settings index (`useSettingsIndex`, over `lib/settings-index.ts`) by
- * labels, descriptions and engine keys; picking a result selects the owning
- * category and asks the main view to reveal that entry.
- *
- * The box's text lives in `settings-store` rather than here, so the command
- * palette's "Search settings for …" row can hand its query over and land the
- * user on an already-filtered sidebar.
- *
- * Category rows share a single selected treatment (the app's `--primary`
- * accent); there is no per-category color.
+ * The box's text lives in `settings-store`, so the command palette's "Search settings for …" row
+ * can hand its query over and land the user on an already-filtered sidebar. Category rows share one
+ * selected treatment (the `--primary` accent), no per-category colour.
  */
 
 import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
@@ -48,16 +41,13 @@ interface CategoryMeta {
 	label: string;
 	icon: LucideIcon;
 	/**
-	 * The named icon motion this row's glyph answers its own hover with
-	 * (#1707). Read from whichever registry owns the category rather than
-	 * mapped here: a category row is a navigation affordance like a rail
-	 * entry, and the tree draws fifteen glyphs generically without learning
-	 * which one it has (`ActivityRail` makes the same argument).
+	 * The named icon motion this row's glyph answers its own hover with (#1707), read from
+	 * whichever registry owns the category, not mapped here: a category row is a navigation
+	 * affordance like a rail entry, and the tree draws fifteen glyphs generically (`ActivityRail`
+	 * makes the same argument).
 	 *
-	 * Optional so the unreachable fallback below can omit it - an entry with
-	 * no motion renders no attribute at all, since React drops an undefined
-	 * one, which matters because an empty `data-icon-motion` would still match
-	 * the block's default-duration rule.
+	 * Optional so the unreachable fallback below can omit it: React drops an undefined attribute,
+	 * and an empty `data-icon-motion` would still match the block's default-duration rule.
 	 */
 	motion?: IconMotion;
 }
@@ -92,9 +82,8 @@ export default function SettingsCategoryTree() {
 	const onItemOpened = useDrawerItemOpened();
 	const { isLoading, error, refetch } = useConfigQuery();
 
-	// Selecting a category shows its panel in the settings tab. The tree now
-	// lives in the Drawer (not inside the settings tab), so it must open/focus
-	// that tab itself - mirroring VariablesCategoryTree.
+	// Selecting a category shows its panel in the settings tab. The tree lives in the Drawer, not
+	// the settings tab, so it opens or focuses that tab itself, as VariablesCategoryTree does.
 	const selectCategory = (category: SettingsCategory, highlightKey?: string) => {
 		setSelectedCategory(category, highlightKey);
 		openTab({ type: "settings", entityId: null });
@@ -122,19 +111,14 @@ export default function SettingsCategoryTree() {
 				aria-current={isSelected ? "true" : undefined}
 				onClick={() => selectCategory(category)}
 				className={cn(
-					// h-8: shared drawer row height (see CollectionItem).
-					// A stable base plus a `data-active` modifier, not a full
-					// class-swap ternary: swapping the whole string makes
-					// `transition-colors` interpolate between two structurally
-					// different class lists instead of one changing value, so the
-					// selected state snapped instead of fading in - the same bug
-					// already fixed in `TabStrip.tsx`.
-					// `group`: the glyph's motion fires from the `:hover` /
-					// `:focus-visible` of a `[data-slot="button"]` or a `.group`
-					// ancestor (the `Icon motion` block in `index.css`), and this
-					// is a hand-rolled `<button>` that is neither. Without it
-					// every row carries the attribute and nothing ever moves -
-					// dead CSS that looks wired up.
+					// h-8: the shared drawer row height (see CollectionItem). A stable base plus a
+					// `data-active` modifier, not a whole-string ternary: swapping the whole string
+					// makes `transition-colors` interpolate between two different class lists
+					// rather than one changing value, so the selected state snaps instead of fading
+					// (as in `TabStrip.tsx`). `group`: the glyph's motion fires from the `:hover` /
+					// `:focus-visible` of a `[data-slot="button"]` or a `.group` ancestor (the
+					// `Icon motion` block in `index.css`), and this hand-rolled `<button>` is
+					// neither; without it the attribute is dead CSS that looks wired up.
 					"group w-full flex h-8 items-center gap-3 px-4 text-left text-sm transition-colors",
 					"data-[active=false]:text-foreground data-[active=false]:hover:bg-accent",
 					"data-[active=true]:bg-primary-tint data-[active=true]:text-primary data-[active=true]:font-medium"
@@ -241,13 +225,10 @@ export default function SettingsCategoryTree() {
 							</div>
 						) : error ? (
 							/*
-							 * Was a hand-rolled two-line notice with no way out: the engine
-							 * comes back and nothing in the sidebar re-asks, so the only
-							 * recovery was reloading the app. Same ErrorState + `refetch` the
-							 * Variables tree uses for its own section failures, with that
-							 * tree's inline padding so the failure line sits on the left edge
-							 * like every other row rather than centring in the pane variant's
-							 * p-8.
+							 * A retry, as the engine coming back makes nothing in the sidebar
+							 * re-ask: the Variables tree's ErrorState + `refetch`, with that tree's
+							 * inline padding so the failure line sits on the left edge like every
+							 * other row rather than centring in the pane variant's p-8.
 							 */
 							<ErrorState
 								variant="inline"

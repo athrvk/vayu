@@ -17,34 +17,27 @@ function kindWords(kind: TrashEntry["kind"]): string {
 }
 
 /**
- * Raise the toast a soft delete offers: "Moved "<name>" to the Trash" with an
- * Undo that restores the row.
- *
- * Lives here rather than beside one of its callers because four surfaces delete
- * into the Trash - the collection tree (`useTreeCrud`), the Variables view's
- * environment deletes (#2970), the Examples panel (#2971) and the client
- * certificates card (#2973) - and a second, hand-rolled toast would not receive
- * this one's fixes. `restoreClientState` is whatever the caller threw away on
- * the client and wants back once the engine has restored the row; it runs only
- * after a restore that landed.
+ * Raise the toast a soft delete offers: "Moved "<name>" to the Trash" with an Undo that restores
+ * the row. Here rather than beside a caller because four surfaces delete into the Trash (the
+ * collection tree's `useTreeCrud`, the Variables view's environment deletes, #2970, the Examples
+ * panel, #2971, and the client certificates card, #2973), and a second, hand-rolled toast would not
+ * receive this one's fixes. `restoreClientState` is whatever the caller threw away on the client
+ * and wants back once the engine has restored the row; it runs only after a restore that landed.
  */
 export function useTrashUndo() {
 	const restoreTrashMutation = useRestoreTrashMutation();
 	const showToast = useToastStore((s) => s.showToast);
 
 	/**
-	 * Take the delete back.
+	 * Take the delete back. The engine's delete is soft (#988), so this restores the row that was
+	 * just stamped, not a re-creation, and the whole subtree a collection's delete took comes back
+	 * with it.
 	 *
-	 * The engine's delete is soft (issue #988), so this is a restore of the row
-	 * that was just stamped - not a re-creation - and the whole subtree a
-	 * collection's delete took comes back with it.
-	 *
-	 * The failure path is the reason this is not a bare `mutateAsync`. Undo can
-	 * genuinely fail: the toast outlives its own click by design, and by then
-	 * the item's parent collection may itself have been deleted (a 409 naming
-	 * it) or the retention purge may have swept it (a 404). The engine's message
-	 * says which and what to do next, so it is surfaced as it stands - an undo
-	 * that silently does nothing is the one outcome worse than no undo.
+	 * The failure path is why this is not a bare `mutateAsync`. Undo can genuinely fail: the toast
+	 * outlives its own click by design, and by then the item's parent collection may itself have
+	 * been deleted (a 409 naming it) or the retention purge may have swept it (a 404). The engine's
+	 * message says which and what to do next, so it is surfaced as it stands: an undo that silently
+	 * does nothing is the one outcome worse than no undo.
 	 */
 	const undoDelete = useCallback(
 		async (entityId: string, name: string, restoreClientState: () => void) => {
@@ -55,13 +48,11 @@ export function useTrashUndo() {
 				// at a row that is still in the trash.
 				restoreClientState();
 				/*
-				 * An undo can put the folder back somewhere new: if its parent
-				 * went to the trash too while this toast was up - and the
-				 * "never" duration setting keeps a toast up until it is
-				 * dismissed - the engine restores it as a tree root. Same
-				 * sentence the Trash view's Restore raises, from the same
-				 * function, because a field one caller reads and the other
-				 * drops is how the two answers drift apart.
+				 * An undo can put the folder back somewhere new: if its parent went to the trash
+				 * too while this toast was up (the "never" duration setting keeps a toast up until
+				 * dismissed), the engine restores it as a tree root. The same sentence the Trash
+				 * view's Restore raises, from the same function, because a field one caller reads
+				 * and the other drops is how the two answers drift apart.
 				 */
 				const notice = restoreNotice(restored, name);
 				if (notice) showToast({ message: notice, variant: "info" });
@@ -77,18 +68,15 @@ export function useTrashUndo() {
 	);
 
 	/**
-	 * Say where it went, and offer it straight back.
-	 *
-	 * No explicit duration: the toast takes the `info` default, scaled by the
-	 * user's own notification setting, exactly as the tree's drag-and-drop undo
-	 * does. A longer hardcoded window would override a preference the user
-	 * set - including "never", which means "wait for me" - and it would be
-	 * buying something the feature already has: this toast is the fast path, and
-	 * the Trash view is the same undo with the retention window behind it, so a
+	 * Say where it went, and offer it straight back. No explicit duration: the toast takes the
+	 * `info` default, scaled by the user's own notification setting, as the tree's drag-and-drop
+	 * undo does. A longer hardcoded window would override a preference the user set (including
+	 * "never", which means "wait for me") and buy what the feature already has: this toast is the
+	 * fast path, and the Trash view is the same undo with the retention window behind it, so a
 	 * missed toast costs a click rather than the data.
 	 *
-	 * The undo itself is offered no undo. Deleting it again is one click away in
-	 * the view it just came back to.
+	 * The undo itself is offered no undo: deleting it again is one click away in the view it just
+	 * came back to.
 	 */
 	return useCallback(
 		(

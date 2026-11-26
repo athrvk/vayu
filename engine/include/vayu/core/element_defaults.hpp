@@ -8,7 +8,6 @@
  */
 
 /**
- * @file element_defaults.hpp
  * @brief What an element's config means when a key is absent (issue #3045).
  *
  * Each constant is read by the kind's code (`config.value (key, DEFAULT)`)

@@ -5,10 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file http/routes/metrics.cpp
- * @brief Metrics streaming routes (SSE endpoints for real-time stats)
- */
+/** Metrics routes: the time-series JSON reads and the live SSE stream. */
 
 #include <algorithm>
 #include <array>
@@ -69,10 +66,9 @@ parse_stored_payload (const Row& row, const char* kind, const std::string& run_i
 }
 
 /**
- * The current path: each `metric_ticks` row already *is* one `data[]` entry, so
- * the reader parses and forwards it. Pagination is tick-aligned by
- * construction - a page boundary can no longer land inside a tick and hand the
- * client a half-populated bucket.
+ * Each `metric_ticks` row already is one `data[]` entry, so the reader parses
+ * and forwards it; pagination is tick-aligned by construction, so a page edge
+ * cannot split a tick into a half-populated bucket.
  */
 template <typename Row>
 nlohmann::json stored_payload_series (const std::vector<Row>& rows,
@@ -105,8 +101,8 @@ constexpr auto BUCKET_MAX_KEYS =
 std::to_array<std::string_view> ({ "latency_p50_ms", "latency_p95_ms",
 "latency_p99_ms", "current_concurrency", "backpressure" });
 
-/// The tick keys a `MetricTickBucket` averages (`current_rps` since #2547,
-/// `window_avg_in_flight` since #2821, the rest since #2393).
+/// The tick keys a `MetricTickBucket` averages (`current_rps`, #2547;
+/// `window_avg_in_flight`, #2821; the rest, #2393).
 constexpr auto BUCKET_MEAN_KEYS =
 std::to_array<std::string_view> ({ "current_rps", "current_send_rate",
 "window_avg_in_flight", "window_avg_latency_ms", "window_avg_queue_wait_ms" });
@@ -296,20 +292,14 @@ std::optional<int64_t> parse_max_points (std::string_view raw) {
 }
 
 /**
- * Testable core of the time-series JSON endpoint, returning {http_status,
- * json_body}, behind `GET /runs/:id/metrics`.
- *
- * A missing run is a definitive 404 with the `{"error": {"code", "message"}}`
- * shape `send_error` uses. Otherwise it returns the run's per-tick objects (the app's
- * snake_case `LoadTestMetrics` shape, consumed without a transformer) in the
- * `{data, pagination}` envelope, read straight from `metric_ticks`. A run with
- * no ticks returns an empty `data` array, not a 404 - the run exists.
- *
- * `limit`/`offset` arrive already parsed and clamped by the caller (limit
- * default 5000, capped at 50000; offset floored at 0) - the raw query-param
- * parsing stays in the route. Extracted so the wiring (404 vs 200 + envelope,
- * pagination) is covered without an in-process HTTP server - see
- * stats_route_test.cpp. Exceptions propagate to the route's try/catch (500).
+ * Testable core of `GET /runs/:id/metrics`, {http_status, json_body}. A missing
+ * run is a definitive 404 in `send_error`'s `{"error": {"code", "message"}}`
+ * shape; otherwise the run's per-tick objects (the app's snake_case
+ * `LoadTestMetrics`, consumed untransformed) in the `{data, pagination}`
+ * envelope, read from `metric_ticks`. No ticks is an empty `data`, not a 404:
+ * the run exists. `limit` / `offset` arrive parsed and clamped (limit default
+ * 5000, capped at 50000; offset floored at 0). Exceptions propagate to the
+ * route's try/catch (500); `stats_route_test.cpp` covers the wiring.
  */
 std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
 const std::string& run_id,
@@ -336,18 +326,13 @@ std::optional<int64_t> max_points) {
 }
 
 /**
- * Testable core of `GET /runs/:id/monitor` - the external server vitals scraped
- * during a run, in the same `{data, pagination}` envelope the tick series uses.
- *
- * Its own endpoint rather than extra keys on the tick objects: those keys are
- * the `GET /runs/:id/metrics` contract, and monitor samples arrive on the
- * user's scrape cadence rather than the tick cadence, so they do not line up
- * row for row. A run that configured no monitor returns an empty `data` array,
- * not a 404 - the run exists and simply scraped nothing. A missing run is the
- * same definitive 404 the tick series returns.
- *
- * With @p max_points set (#2611) the whole series comes back as at most that
- * many samples, folded by `MonitorSampleBucket`; see the declaration.
+ * Testable core of `GET /runs/:id/monitor`: the server vitals scraped during a
+ * run, in the tick series' `{data, pagination}` envelope. Its own endpoint
+ * because the tick objects' keys are `GET /runs/:id/metrics`' contract and
+ * samples arrive on the user's scrape cadence, not the tick's, so the rows do
+ * not line up. No monitor is an empty `data`, not a 404; a missing run is the
+ * tick series' 404. With @p max_points (#2611) the whole series comes back as
+ * at most that many samples, folded by `MonitorSampleBucket`.
  */
 std::pair<int, nlohmann::json> run_monitor_series_response (vayu::db::Database& db,
 const std::string& run_id,
@@ -375,10 +360,9 @@ std::optional<int64_t> max_points) {
 
 namespace {
 
-// Parse and clamp the pagination query params shared by the time-series routes.
-// Raw parsing stays here; the extracted core is handed clean, clamped ints.
-// limit: default 5000, invalid/<=0 -> 5000, capped at RUN_TIME_SERIES_PAGE_MAX.
-// offset: <0 -> 0.
+// The time-series routes' pagination params, clamped here so the core gets
+// clean ints: limit default 5000 (invalid or <= 0 too), capped at
+// RUN_TIME_SERIES_PAGE_MAX; offset < 0 is 0.
 std::pair<int64_t, int64_t> parse_time_series_pagination (const httplib::Request& req) {
     int64_t limit  = 5000;
     int64_t offset = 0;
@@ -483,13 +467,11 @@ std::chrono::steady_clock::time_point now) {
 }
 
 /**
- * The frame a live stream ends on. It carries the run's status, so the client
- * can tell a failed run from a finished one without going back for the report
- * (issue #1415).
- *
- * Omitted rather than guessed when the row is not terminal: the stream waits
- * for the run to settle first, so that means the wait hit its bound or the
- * status write itself failed. The client then falls back to the report.
+ * The frame a live stream ends on, carrying the run's status so the client
+ * tells a failed run from a finished one without the report (#1415). Omitted,
+ * not guessed, when the row is not terminal: the stream awaited settling, so
+ * the wait hit its bound or the status write failed, and the client falls back
+ * to the report.
  */
 std::string live_completion_frame (vayu::db::Database& db, const std::string& run_id) {
     nlohmann::json completion_event;
@@ -539,13 +521,11 @@ live_metrics_unavailable_response (vayu::db::Database& db, const std::string& ru
 namespace {
 
 /**
- * The live stream itself: every tick the run's topic has published from
- * @p start_offset on, then its completion event.
- *
- * Always answers `false` - the provider is done when this returns, whether the
- * run ended, the client went away or the server is stopping (@p stopping,
- * #2683), which ends it with no completion event because the run has not
- * completed.
+ * The live stream: every tick the run's topic published from @p start_offset
+ * on, then its completion event. Always answers `false` (the provider is done),
+ * whether the run ended, the client left or the server is stopping
+ * (@p stopping, #2683), which ends it with no completion event as the run has
+ * not completed.
  */
 bool stream_live_metrics (vayu::db::Database& db,
 const std::string& run_id,

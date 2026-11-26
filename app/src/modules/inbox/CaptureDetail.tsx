@@ -6,16 +6,13 @@
  */
 
 /**
- * One captured request, rendered through the shared viewer family.
+ * One captured request, through the shared viewer family. A capture is an exchange with no
+ * response: `UnifiedResponseViewer` given a request alone reads it as the body's home (tab "Body",
+ * panels sized to the card), and `CaptureRaw` prints the raw HTTP text. The same components as an
+ * outbound request on purpose: a webhook you received should read like a request you sent.
  *
- * A capture is an exchange with no response. `UnifiedResponseViewer` given a
- * request alone reads it as the body's home (tab "Body", panels sized to the
- * card), and `CaptureRaw` prints the raw HTTP text. Rendering an inbound
- * request with the same components as an outbound one is the point: a webhook
- * you received should read like a request you sent.
- *
- * A base64 body (#3109) reaches the viewer as its decoded bytes, never as the
- * base64 text, which would read as a payload and is not one.
+ * A base64 body (#3109) reaches the viewer as its decoded bytes, never as the base64 text, which
+ * would read as a payload and is not one.
  */
 
 import { useMemo } from "react";

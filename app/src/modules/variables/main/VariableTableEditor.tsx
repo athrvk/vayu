@@ -6,40 +6,24 @@
  */
 
 /**
- * Unified Variable Editor
+ * The variables table for every scope (globals, an environment, a collection), configured by
+ * `config`: data source and mutations, colours and icons, header content, and extra actions (an
+ * environment's delete).
  *
- * A single configurable editor component that handles all variable types:
- * - Globals
- * - Environments
- * - Collections
+ * **It does not mount `components/shared/KeyValueEditor`, a settled decision** (#564, confirmed in
+ * #587). A hand-rolled copy of a primitive misses the primitive's fixes, but this is a different
+ * table, not a copy: the shared one is a fixed grid of key, value and a row action that commits on
+ * every change; this one adds a per-row type select and a secret toggle, masks the value cell,
+ * commits text on blur and toggles at once, and orders rows by a `createdAt` stamp rather than a
+ * trailing-blank rule. Folding it in would take a dynamic column model, a commit model and
+ * variables-domain fields on `KeyValueItem`: a redesign of the primitive for one consumer, paid for
+ * by its three existing ones.
  *
- * The editor is configured via the `config` prop which determines:
- * - Data source and mutations
- * - UI colors and icons
- * - Header content
- * - Additional actions (e.g., delete for environments)
- *
- * **This table does not mount `components/shared/KeyValueEditor`, and that is a
- * settled decision rather than an omission** (#564, reconsidered and confirmed
- * in #587). The repo's standing rule is that a hand-rolled copy of a primitive
- * never receives the primitive's fixes, so the exclusion needs a reason that
- * survives re-reading: this is not a copy of that table, it is a different
- * table. The shared primitive is a fixed grid of key, value and a row action,
- * committing on every change; this one adds a per-row type select and a secret
- * toggle, masks the value cell, commits text on blur and toggles immediately,
- * and orders rows by a `createdAt` stamp instead of by a trailing-blank rule.
- * Folding it in means giving the shared table a dynamic column model, a commit
- * model, and variables-domain fields on `KeyValueItem` - a redesign of the
- * primitive to serve one consumer, paid for by its three existing ones.
- *
- * What the rule does bind here is the *reveal* control, which was extracted out
- * of this file into `ui/secret-input` and then went on receiving fixes this
- * table never got (the `tabIndex={-1}` removal, `aria-pressed`). The value cell
- * mounts `SecretInput` for exactly that reason. `key-value-parity.test.tsx`
- * pins what the two tables must keep in common - control height, checkbox
- * clearance and sizing, the shared destructive row-action variant, and this
- * reveal control - so the next fix to either side fails loudly instead of
- * drifting.
+ * The rule does bind the reveal control, extracted from this file into `ui/secret-input`, which
+ * then got fixes this table never had (the `tabIndex={-1}` removal, `aria-pressed`); the value cell
+ * mounts `SecretInput` for that reason. `key-value-parity.test.tsx` pins what the two tables keep
+ * in common (control height, checkbox clearance and sizing, the shared destructive row-action
+ * variant, this reveal control), so the next fix to either side fails loudly instead of drifting.
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
@@ -91,18 +75,13 @@ import {
 
 export interface VariableRowData {
 	/**
-	 * Editor-local row identity, never persisted (`toVariableValue` builds the
-	 * payload field by field, so this cannot leak into a scope's variables).
-	 *
-	 * A variable has no stable identity of its own: `key` is editable, so
-	 * keying by it moves state on rename, and `createdAt` is absent on rows
-	 * written before the field existed. Rows were therefore reconciled by array
-	 * position, which is the one thing that *changes* on a delete - reveal a
-	 * secret, delete that row, and the row shifting up into its position
-	 * inherited the mounted `SecretInput`, values and all, so a secret the user
-	 * never revealed was displayed (#621). The id gives the row an identity for
-	 * as long as the editor is mounted; React's `key` and therefore every piece
-	 * of per-row UI state follow the row rather than its index.
+	 * Editor-local row identity, never persisted (`toVariableValue` builds the payload field by
+	 * field, so it cannot leak). A variable has no stable identity of its own: `key` is editable,
+	 * so keying by it moves state on rename, and `createdAt` is absent on rows written before the
+	 * field existed. Keyed by array position, which changes on a delete, the row shifting up
+	 * inherited the deleted row's mounted `SecretInput`, value and all, so a secret the user never
+	 * revealed was displayed (#621). The id follows the row for as long as the editor is mounted,
+	 * and React's `key` and every piece of per-row UI state with it.
 	 */
 	id: string;
 	key: string;
@@ -120,17 +99,15 @@ export interface VariableRowData {
 	createdAt?: number;
 	isNew?: boolean;
 	/**
-	 * Whatever the stored value carries that this table has no column for (a
-	 * Postman import's `description`), written back untouched so editing a
-	 * variable does not drop it.
+	 * What the stored value carries that this table has no column for (a Postman import's
+	 * `description`), written back untouched so an edit does not drop it.
 	 */
 	extra?: Record<string, unknown>;
 }
 
 /**
- * Monotonic within the session, which is all "stable" has to mean here: ids
- * live and die with the mounted editor and are never compared against anything
- * outside it.
+ * Monotonic within the session, all "stable" has to mean here: ids live and die with the mounted
+ * editor and are never compared against anything outside it.
  */
 let lastRowId = 0;
 function nextRowId(): string {
@@ -138,10 +115,7 @@ function nextRowId(): string {
 	return `vrow-${lastRowId}`;
 }
 
-/**
- * The trailing "type here to add one" row. Takes an id so a reseed can hand it
- * the one the current blank row already has.
- */
+/** The trailing "type here to add one" row; a reseed passes the current blank row's id. */
 function blankRow(id: string = nextRowId()): VariableRowData {
 	return { id, key: "", value: "", enabled: true, secret: false, type: "string", isNew: true };
 }
@@ -149,19 +123,11 @@ function blankRow(id: string = nextRowId()): VariableRowData {
 type VariableEditorType = "globals" | "environment" | "collection";
 
 /**
- * Row-wise equality over every field a row carries.
- *
- * Used to tell "the cache echo of the save I just made" from "someone typed
- * while it was in flight", which is the difference between clearing the dirty
- * flag and silently losing an edit. Compared by value rather than by array
- * identity on purpose: a reseed that happens to produce identical rows must
- * count as unchanged, and identity would call it a change and leave the editor
- * dirty forever.
- *
- * `id` is deliberately not part of the comparison: it is UI identity, not user
- * data, so a row that only changed id has nothing for a save to write, and
- * counting it as a change would be the same "dirty forever" bug in a new
- * disguise.
+ * Row-wise equality over every field a row carries, telling "the cache echo of the save I just
+ * made" from "someone typed while it was in flight": clearing the dirty flag versus silently losing
+ * an edit. By value, not array identity: a reseed producing identical rows must count as unchanged,
+ * or the editor stays dirty forever. `id` is excluded: it is UI identity, not user data, so
+ * counting it would be the same dirty-forever bug.
  */
 function sameRows(a: VariableRowData[], b: VariableRowData[]): boolean {
 	if (a.length !== b.length) return false;
@@ -211,21 +177,16 @@ function rowFromValue(key: string, value: VariableValue, id?: string): VariableR
 }
 
 /**
- * The rows the user has actually edited since `baseline`, as a diff rather
- * than a snapshot: a key the diff does not name is a key the save should
- * never touch, which is what lets `mergeVariableChanges` carry a concurrent
- * write for it through untouched. A key present in `baseline` but no longer
- * among the rows is a deletion.
+ * The rows the user has edited since `baseline`, as a diff, not a snapshot: a key the diff does not
+ * name is one the save never touches, which is what lets `mergeVariableChanges` carry a concurrent
+ * write for it through. A key in `baseline` but no longer among the rows is a deletion.
  *
- * A row with a name problem (`nameProblems`) writes nothing, and the variable it
- * stands for is still present: only the explicit Delete removes a key, so a
- * name the user is mid-way through fixing never costs them the variable (#3251).
- * The exception is a stored name the engine would refuse (a legacy blank or
- * padded key): keeping it would make every save a 400, and `{{ name }}` could
- * never reach it, so it is dropped from the blob while the row stays on screen
- * to be named.
- * Names are trimmed here, so the payload key is the one the engine accepts
- * whatever the row currently holds.
+ * A row with a name problem (`nameProblems`) writes nothing, and its variable stays: only the
+ * explicit Delete removes a key, so a name the user is fixing never costs them the variable
+ * (#3251). The exception is a stored name the engine would refuse (a legacy blank or padded key):
+ * keeping it would make every save a 400, and `{{ name }}` could never reach it, so it is dropped
+ * from the blob while the row stays on screen to be named. Names are trimmed here, so the payload
+ * key is the one the engine accepts.
  */
 function computeUserChanges(rows: VariableRowData[], baseline: VariableMap): VariableChanges {
 	const changes: VariableChanges = {};
@@ -322,11 +283,10 @@ interface SavePlan {
 }
 
 /**
- * The user's own changes merged onto the freshest map, never the editor's whole
- * copy, which would carry a key an MCP agent wrote after this editor last
- * reseeded back to its pre-agent value (#1439). A key both sides moved is left
- * out until the user chooses (#3353): saving it would be choosing for them.
- * Payload order is by `createdAt` so the round trip preserves display order.
+ * The user's own changes merged onto the freshest map, never the editor's whole copy, which would
+ * revert a key an MCP agent wrote after this editor last reseeded (#1439). A key both sides moved
+ * is left out until the user chooses (#3353): saving it would be choosing for them. Payload order
+ * is by `createdAt`, so the round trip keeps display order.
  */
 function planSave(snapshot: EditorSnapshot): SavePlan {
 	// Names are trimmed on commit, not per keystroke: a trailing space typed
@@ -346,10 +306,9 @@ function planSave(snapshot: EditorSnapshot): SavePlan {
 }
 
 /**
- * The baseline once `plan` has landed: the map it wrote, so the save's own
- * history is never mistaken for a later external change. A conflicted key it
- * held back keeps the baseline it had, or the conflict would vanish as if the
- * user had chosen.
+ * The baseline once `plan` has landed: the map it wrote, so the save's own write is never mistaken
+ * for a later external change. A conflicted key it held back keeps its old baseline, or the
+ * conflict would vanish as if the user had chosen.
  */
 function baselineAfter(plan: SavePlan, current: VariableMap): VariableMap {
 	return plan.conflicts.reduce((next, { key }) => withKeyFrom(next, key, current), plan.payload);
@@ -361,10 +320,9 @@ interface SaveHandlers {
 }
 
 /**
- * Runs a mutation and reports through both of TanStack's channels. The per-call
- * callbacks fire as the mutation settles, but only while its observer has
- * listeners, so never once the editor has unmounted; the promise always
- * settles. The caller acts on whichever arrives first.
+ * Runs a mutation and reports through both of TanStack's channels: the per-call callbacks fire as
+ * it settles, but only while its observer has listeners, so never once the editor has unmounted;
+ * the promise always settles. The caller acts on whichever arrives first.
  */
 function sendThrough<V>(
 	mutateAsync: (variables: V, options: SaveHandlers) => Promise<unknown>,
@@ -450,10 +408,9 @@ const EDITOR_CONFIGS = {
 interface VariableEditorProps {
 	config: VariableEditorConfig;
 	/**
-	 * Embedded mode strips the standalone-screen chrome (title header, info
-	 * banner, count footer) so the editor can be slotted inside another
-	 * container - e.g. the Variables tab of CollectionDetail - without
-	 * duplicating headings or fighting the host layout.
+	 * Embedded mode drops the standalone chrome (title header, info banner, count footer) so the
+	 * editor can sit inside another container, such as CollectionDetail's Variables tab, without
+	 * doubled headings or a fight with the host layout.
 	 */
 	embedded?: boolean;
 }
@@ -462,7 +419,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const { type, globalsData, isLoading, error, environment, collection } = config;
 	const editorConfig = EDITOR_CONFIGS[type];
 
-	// Queries and mutations based on type
 	const globalsQuery = useGlobalsQuery();
 	const updateGlobalsMutation = useUpdateGlobalsMutation();
 	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
@@ -472,11 +428,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const setSelectedCategory = useVariablesStore((s) => s.setSelectedCategory);
 	const setActiveEnvironment = useSetActiveEnvironmentMutation();
 	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
-	// Per-field selectors, not a bare `useSaveStore()`: the whole-store call
-	// subscribed this editor to every field the store holds - `status`,
-	// `lastErrorMessage`, `activeContextId`, `contexts` - so a save anywhere
-	// else in the app re-rendered this editor even though only these stable
-	// action references are ever read (issue #1714).
+	// Per-field selectors, not a bare `useSaveStore()`: the whole store would subscribe this editor
+	// to `status`, `lastErrorMessage`, `activeContextId` and `contexts`, re-rendering it on every
+	// save in the app though only these stable actions are read (#1714).
 	const registerContext = useSaveStore((s) => s.registerContext);
 	const unregisterContext = useSaveStore((s) => s.unregisterContext);
 	const updateContext = useSaveStore((s) => s.updateContext);
@@ -499,11 +453,10 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const rowProblems = useMemo(() => nameProblems(variables), [variables]);
 	const performSaveRef = useRef<() => Promise<SaveOutcome>>(() => Promise.resolve("saved"));
 	/**
-	 * The map the user's edits are diffed against - the state a save last
-	 * agreed with the server on. Advanced on every full reseed, on a
-	 * successful save (`baselineAfter`), and per key when the user picks a
-	 * side of a conflict. Saves run one at a time, so the save that advances
-	 * it last is the one that carried the latest rows.
+	 * The map the user's edits are diffed against: the state a save last agreed on with the server.
+	 * Advanced on every full reseed, on a successful save (`baselineAfter`), and per key when the
+	 * user picks a side of a conflict. Saves run one at a time, so the save that advances it last
+	 * carried the latest rows.
 	 */
 	const baselineRef = useRef<VariableMap>({});
 	/**
@@ -527,13 +480,11 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// as `useSaveManager.attemptAutoSave` keeps them.
 	const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const retryAttemptRef = useRef(0);
-	// The dirty flag, readable from an effect without being one of its
-	// dependencies - the row-init effect has to know whether the user has
-	// uncommitted edits *at the moment the cache changes under it*, and taking
-	// the state as a dep would re-run the effect on every flip of the flag.
+	// The dirty flag, readable from an effect without being one of its dependencies: the row-init
+	// effect must know whether there are uncommitted edits when the cache changes under it, and the
+	// state as a dep would re-run the effect on every flip of the flag.
 	const hasPendingChangesRef = useRef(false);
 
-	// Determine context ID and name
 	const contextId =
 		type === "globals"
 			? "globals-editor"
@@ -560,8 +511,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		return type === "environment" ? { type, environment: owner } : { type, collection: owner };
 	}, [type, ownerId, ownerName]);
 
-	// Get data based on type (memoized so the fallback empty object is stable
-	// across renders and doesn't re-fire the init effect at L390)
+	// Memoised so the fallback empty object is stable across renders and does not re-fire the init
+	// effect below.
 	const dataVariables = useMemo(
 		() =>
 			type === "globals"
@@ -572,11 +523,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		[type, globalsData?.variables, environment?.variables, collection?.variables]
 	);
 
-	// Determine loading and error states
 	const isDataLoading = type === "globals" ? (isLoading ?? globalsQuery.isLoading) : false;
 	const dataError = type === "globals" ? (error ?? globalsQuery.error) : null;
 
-	// Keep variablesRef in sync
 	useEffect(() => {
 		variablesRef.current = variables;
 	}, [variables]);
@@ -589,21 +538,18 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	}, [reportPending, contextId]);
 
 	/**
-	 * Compare-and-clear: only drop the dirty flag if the rows are still the ones
-	 * this save wrote.
+	 * Compare-and-clear: drop the dirty flag only if the rows are still the ones this save wrote.
 	 *
-	 * A save snapshots `variablesRef` when it starts, so anything typed before it
-	 * lands is not in the payload. Clearing unconditionally marked those edits
-	 * saved - the debounce and the blur handler both skip a clean editor - and
-	 * they never reached the engine. Staying dirty leaves the normal paths (blur,
-	 * Cmd+S, the quit flush) to write them.
+	 * A save snapshots `variablesRef` when it starts, so anything typed before it lands is not in
+	 * the payload. Clearing unconditionally would mark those edits saved (the blur handler skips a
+	 * clean editor) and they would never reach the engine; staying dirty leaves the normal paths
+	 * (blur, Cmd+S, the quit flush) to write them.
 	 *
-	 * A row the save held back (`heldBack`, a name problem or an open conflict)
-	 * is the same case: its edit is on screen and in no payload, and a clean
-	 * editor would reseed the row away on the next cache echo (#3251, #3353).
-	 * The Dock then says "Unsaved changes" rather than "Saved", which the held
-	 * row would make untrue, and so it does for an edit typed while the save was
-	 * in flight.
+	 * A row the save held back (`heldBack`: a name problem or an open conflict) is the same case:
+	 * its edit is on screen and in no payload, and a clean editor would reseed the row away on the
+	 * next cache echo (#3251, #3353). The Dock then says "Unsaved changes" rather than "Saved",
+	 * which the held row would make untrue, as it does for an edit typed while the save was in
+	 * flight.
 	 */
 	const finishSave = useCallback(
 		(id: string, snapshot: VariableRowData[], heldBack: boolean): SaveOutcome => {
@@ -620,12 +566,11 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	);
 
 	/**
-	 * After a save lands, each row it wrote is stored under the name it carried,
-	 * which is what `baseKey` records. Without it a renamed row keeps pointing at
-	 * its old name and, if its name is later cleared, the save would delete the
-	 * wrong variable. Matched by row id against the live rows, so an edit typed
-	 * while the save was in flight is kept; a row nothing changed for keeps its
-	 * object, so `VariableRow`'s memo holds.
+	 * After a save lands, each row it wrote is stored under the name it carried, which `baseKey`
+	 * records; otherwise a renamed row keeps pointing at its old name and, if that name is later
+	 * cleared, the save deletes the wrong variable. Matched by row id against the live rows, so an
+	 * edit typed mid-flight is kept; a row nothing changed for keeps its object, so `VariableRow`'s
+	 * memo holds.
 	 */
 	const recordStoredNames = useCallback(
 		(saved: VariableRowData[], problems: Map<string, unknown>) => {
@@ -666,9 +611,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		if (type === "environment") {
 			if (!environment) return null;
 			const { id, name } = environment;
-			// No `isActive`: absent means "keep" on a PUT, and echoing the cached
-			// value back would let a variable edit re-activate this environment
-			// from a stale read - deactivating whichever one the engine actually
+			// No `isActive`: absent means "keep" on a PUT, and echoing a stale cached value would
+			// let a variable edit re-activate this environment, deactivating the one the engine
 			// holds. Only the switch writes it.
 			return (variables, handlers) =>
 				sendThrough(mutateEnvironment, { id, name, variables }, handlers);
@@ -698,21 +642,18 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	);
 
 	/**
-	 * Sends one save and hands its verdict to `settle`, exactly once, as soon as
-	 * the mutation answers - so the next queued save starts there and then. A
-	 * failure is reported here, once; `runSave` in the store takes that report
-	 * as already published. A throw before the request goes out is a failure
-	 * like any other, so the queue is never left waiting on a save that is not
-	 * in flight.
+	 * Sends one save and hands its verdict to `settle` exactly once, as soon as the mutation
+	 * answers, so the next queued save starts then. A failure is reported here, once; the store's
+	 * `runSave` takes that report as already published. A throw before the request goes out is a
+	 * failure like any other, so the queue never waits on a save that is not in flight.
 	 */
 	const startSave = useCallback(
 		(target: SaveTarget, settle: (outcome: SaveOutcome) => void) => {
 			const { contextId: id, send: sendTo } = target;
-			// A save whose turn comes after the editor let go of its id (a switch, an
-			// unmount) reports nothing under that id: the id was discarded with the
-			// rows, and a report would revive it as an entry no editor owns - a
-			// "Not saved" nothing could ever clear. Its failure is still told, as
-			// the plain toast any write that lands after its editor left gets.
+			// A save whose turn comes after the editor let go of its id (a switch, an unmount)
+			// reports nothing under it: the id went with the rows, and a report would revive it as
+			// an entry no editor owns, a "Not saved" nothing could ever clear. Its failure is still
+			// told, as the plain toast any write landing after its editor left gets.
 			const live = id === seededContextRef.current;
 			let settled = false;
 			const finish = (outcome: SaveOutcome) => {
@@ -767,10 +708,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	}, []);
 
 	/**
-	 * `useSaveManager`'s backoff for a failed save: not for a `final` one, which
-	 * the engine would refuse again, nor once the edit is gone or the editor has
-	 * moved on. The delay is read when the failure lands, so a settings change
-	 * applies to the next retry.
+	 * `useSaveManager`'s backoff for a failed save: not for a `final` one, which the engine would
+	 * refuse again, nor once the edit is gone or the editor has moved on. The delay is read when
+	 * the failure lands, so a settings change applies to the next retry.
 	 */
 	const scheduleRetry = useCallback(
 		(id: string, outcome: SaveOutcome) => {
@@ -795,10 +735,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	);
 
 	/**
-	 * Runs `first`, then each save that queued behind it, one at a time. The
-	 * promise never rejects: the verdict is the result, so an un-awaited call
-	 * (blur, a toggle) has no rejection to leave unhandled. Only the last save
-	 * of a run arms a retry; one queued behind a failure is that retry already.
+	 * Runs `first`, then each save queued behind it, one at a time. Never rejects: the verdict is
+	 * the result, so an un-awaited call (blur, a toggle) leaves no unhandled rejection. Only a
+	 * run's last save arms a retry; one queued behind a failure already is that retry.
 	 */
 	const runSaves = useCallback(
 		(first: SaveTarget): Promise<SaveOutcome> => {
@@ -819,12 +758,11 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	);
 
 	/**
-	 * Every save goes through here, serialised as `useSaveManager`'s are. Two
-	 * saves in flight could land out of order and move the baseline back to the
-	 * older map, and a second `mutate` on the same mutation also silences the
-	 * first one's callbacks, so its promise would never settle. A save asked for
-	 * mid-flight waits; one asked for while another for the same id is already
-	 * waiting joins it, and that save reads the latest rows when it starts.
+	 * Every save goes through here, serialised as `useSaveManager`'s are: two in flight could land
+	 * out of order and move the baseline back to the older map, and a second `mutate` on the same
+	 * mutation silences the first one's callbacks, so its promise would never settle. A save asked
+	 * for mid-flight waits; one asked for while another for the same id is waiting joins it, and
+	 * that save reads the latest rows when it starts.
 	 */
 	const requestSave = useCallback((): Promise<SaveOutcome> => {
 		// A save starting now supersedes a retry; its own verdict re-arms one.
@@ -860,7 +798,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		[contextId, clearRetry]
 	);
 
-	// Register save context on mount
 	useEffect(() => {
 		registerContext({
 			id: contextId,
@@ -879,60 +816,44 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// so nothing is left for this id's report to describe.
 	useEffect(() => () => discard(contextId), [contextId, discard]);
 
-	// Update context when hasPendingChanges changes
 	useEffect(() => {
 		updateContext(contextId, { hasPendingChanges });
 	}, [contextId, hasPendingChanges, updateContext]);
 
-	// Handle blur - save when user leaves the field.
-	//
-	// There is no debounce here and never was: `saveTimeoutRef` was cleared in
-	// three places and assigned in none, so the three `clearTimeout` calls it
-	// guarded were always no-ops. Saves fire on blur and on the toggles.
-	// Ref-backed rather than depending on the `hasPendingChanges` state value:
-	// every row's text field takes this as `onBlur`, so a dep that changes
-	// identity on every flip of that flag - or, with `VariableRow` now `memo`-
-	// wrapped (issue #1716), any dependency at all beyond what a ref can hold -
-	// would defeat every row's memo the same way a dep on `items` did in
-	// `KeyValueEditor`. `hasPendingChangesRef` already tracks the same flag
-	// synchronously for `markDirty`/`finishSave` above.
+	// Saves fire on blur and on the toggles; there is no debounce. Ref-backed rather than depending
+	// on the `hasPendingChanges` state: every row's text field takes this as `onBlur`, and with
+	// `VariableRow` `memo`-wrapped (#1716) any dependency beyond what a ref can hold would defeat
+	// every row's memo, as a dep on `items` did in `KeyValueEditor`. `hasPendingChangesRef` tracks
+	// the same flag synchronously for `markDirty`/`finishSave`.
 	const handleBlur = useCallback(() => {
 		if (hasPendingChangesRef.current) {
 			void performSaveRef.current();
 		}
 	}, []);
 
-	// Initialize variables from data (sorted by createdAt: oldest first, newest at bottom).
-	// `contextId` is the identity of the active data source, so the effect
-	// reseeds when the user switches between globals / a specific environment /
-	// collection.
-	// The seed is gated on `hasPendingChangesRef`, a flag written synchronously by
-	// the editor and by a save's completion. Deriving the rows while rendering
-	// would mean reading that ref during render, which is the defect the guard
-	// exists to prevent; moving the guard into state would make it one render late
-	// and let a save echo overwrite keystrokes again - so the seed stays here.
+	// Seeds the rows from data, sorted by `createdAt` (oldest first, newest at the bottom).
+	// `contextId` identifies the active data source, so switching between globals, an environment
+	// and a collection reseeds. The seed is gated on `hasPendingChangesRef`, written synchronously
+	// by the editor and by a save's completion: deriving the rows while rendering would read that
+	// ref during render, the defect the guard exists to prevent, and a guard in state would be one
+	// render late and let a save echo overwrite keystrokes, so the seed stays here.
 	useEffect(() => {
 		const isNewDataSource = seededContextRef.current !== contextId;
 		seededContextRef.current = contextId;
 		const freshMap = dataVariables;
 		freshMapRef.current = freshMap;
 
-		// A save's `onSuccess` writes the query cache, which arrives back here as
-		// a new `dataVariables` - the same scope, still dirty if anything was
-		// typed while that save was in flight, or genuinely a concurrent write
-		// (an MCP agent's `update_environment`/`update_globals`) that has
-		// nothing to do with this editor's own save. Rebuilding rows from it
-		// would revert anything typed since the last seed, so the row array is
-		// left alone either way - only a *different* entity overwrites
-		// uncommitted edits. What must not wait for the editor to go clean is
-		// knowing whether the fresh map moved a key the user is also editing:
-		// #1439 was exactly that - an editor that waits still sends its whole
-		// stale local map on the next save, silently overwriting the write it
-		// was waiting out. So the diff against `baseline` is recomputed here
-		// too, purely to report a conflict; `planSave` recomputes the same
-		// diff at save time and is what actually keeps both sides' work,
-		// merging onto the freshest map rather than this editor's own copy of
-		// it (`mergeVariableChanges`, shared with the context bar's commit).
+		// A save's `onSuccess` writes the query cache, which arrives here as a new `dataVariables`
+		// for the same scope: still dirty if something was typed while that save was in flight, or
+		// a genuine concurrent write (an MCP agent's `update_environment`/`update_globals`).
+		// Rebuilding rows from it would revert anything typed since the last seed, so the rows stay
+		// either way; only a *different* entity overwrites uncommitted edits. What must not wait
+		// for the editor to go clean is knowing whether the fresh map moved a key the user is also
+		// editing (#1439: an editor that waits still sends its whole stale map on the next save,
+		// overwriting the write it waited out). So the diff against `baseline` is recomputed here,
+		// only to report a conflict; `planSave` recomputes it at save time and keeps both sides'
+		// work by merging onto the freshest map (`mergeVariableChanges`, shared with the context
+		// bar's commit).
 		if (!isNewDataSource && hasPendingChangesRef.current) {
 			setConflicts(conflictsOf(readLive()));
 			return;
@@ -941,15 +862,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		baselineRef.current = freshMap;
 		setConflicts([]);
 
-		// A reseed of the *same* scope keeps the ids the rows already have,
-		// matched by the name the variable is stored under. Most reseeds are the
-		// cache echo of a save this editor just made, and minting fresh ids
-		// there would remount every row - masking a secret the user had revealed
-		// and dropping focus out of whatever field they were in - for a redraw
-		// of the same data. A rename is safe: the row keeps its id through the
-		// edit, so the current rows already carry the new name by the time the
-		// echo arrives. A *different* scope gets fresh ids, because its rows are
-		// different rows that happen to share names.
+		// A reseed of the *same* scope keeps the rows' ids, matched by the name the variable is
+		// stored under: most reseeds are the cache echo of this editor's own save, and fresh ids
+		// would remount every row (masking a revealed secret, dropping focus) for a redraw of the
+		// same data. A rename is safe: the row keeps its id through the edit, so the rows already
+		// carry the new name when the echo arrives. A *different* scope gets fresh ids: its rows
+		// are different rows that happen to share names.
 		const carriedIds = new Map<string, string>();
 		let carriedBlankId: string | undefined;
 		if (!isNewDataSource) {
@@ -962,20 +880,17 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			rowFromValue(key, val, carriedIds.get(key))
 		);
 		rows.push(blankRow(carriedBlankId));
-		// The ref with the state, not a render later: `seededContextRef` already
-		// names this scope, and a save started before the next render must not
-		// read the previous scope's rows under it.
+		// The ref with the state, not a render later: `seededContextRef` already names this scope,
+		// and a save started before the next render must not read the previous scope's rows.
 		variablesRef.current = rows;
 		setVariables(rows);
 	}, [contextId, dataVariables, readLive]);
 
 	/*
-	 * Id-based and ref-backed, with an empty-ish dep list (`[markDirty]`,
-	 * itself stable): `variables` in these deps would give both callbacks a new
-	 * identity on every keystroke, which is exactly what `React.memo` on
-	 * `VariableRow` cannot see through (issue #1716). Reading `variablesRef`
-	 * rather than the `index` the row used to be told keeps them stable across
-	 * a row's whole lifetime, not just across one render's array.
+	 * Id-based and ref-backed, with a dep list of only `[markDirty]` (itself stable): `variables`
+	 * there would give both callbacks a new identity per keystroke, which `React.memo` on
+	 * `VariableRow` cannot see through (#1716). Reading `variablesRef` rather than an `index` prop
+	 * keeps them stable for a row's whole lifetime, not just one render's array.
 	 */
 	const updateVariable = useCallback(
 		(id: string, field: keyof VariableRowData, value: string | boolean) => {
@@ -990,21 +905,19 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				(trimVariableName(newVariables[index].key) || newVariables[index].value)
 			) {
 				newVariables[index].isNew = false;
-				// This runs from an input event, not from render: the stamp orders newly
-				// added rows and has to be the real clock, not a render-stable value.
-				// Now inside a useCallback body rather than a plain render-scoped
-				// function, which is what let react-hooks/purity stop flagging it.
+				// From an input event, not render: the stamp orders newly added rows and must be
+				// the real clock, not a render-stable value. Inside a `useCallback` body, which is
+				// why react-hooks/purity does not flag it.
 				newVariables[index].createdAt = Date.now(); // new ones sort to bottom
 				newVariables[index].type = newVariables[index].type ?? "string";
 				newVariables.push(blankRow());
 			}
 
 			setVariables(newVariables);
-			// Keep the ref in sync immediately (not just via the post-render effect):
-			// the secret toggle calls performSaveRef.current() synchronously right
-			// after this, and the save reads variablesRef.current - a stale ref
-			// would persist the pre-edit value and the backend re-sync would then
-			// revert the change. Mirrors removeVariable.
+			// Sync the ref now, not via the post-render effect: the secret toggle calls
+			// `performSaveRef.current()` right after this and the save reads
+			// `variablesRef.current`; a stale ref would persist the pre-edit value and the backend
+			// re-sync would revert the change. Mirrors `removeVariable`.
 			variablesRef.current = newVariables;
 			markDirty();
 		},
@@ -1041,20 +954,18 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		[markDirty, readLive]
 	);
 
-	// Wraps the ref-held save so a row can trigger an immediate save
-	// (the enabled checkbox, the type select, the secret toggle) with a
-	// callback identity that never changes - `performSaveRef.current` is
-	// always the latest save, so nothing needs to be in these deps at all.
+	// Wraps the ref-held save so a row (the enabled checkbox, the type select, the secret toggle)
+	// can save at once through a callback that never changes: `performSaveRef.current` is always
+	// the latest save, so the deps are empty.
 	const commitNow = useCallback(() => {
 		void performSaveRef.current();
 	}, []);
 
 	/**
-	 * The user's side of a conflict. A save leaves a conflicted key out until
-	 * this runs, and this saves at once - the same "toggle acts now" pattern the
-	 * enabled checkbox and the secret button use. Either way the key's baseline
-	 * becomes the other writer's value: "keep mine" then reads the row as the
-	 * user's change over it, "take theirs" first replaces the row with it.
+	 * The user's side of a conflict. A save leaves a conflicted key out until this runs, and this
+	 * saves at once, the "toggle acts now" pattern of the enabled checkbox and the secret button.
+	 * Either way the key's baseline becomes the other writer's value: "keep mine" then reads the
+	 * row as the user's change over it, "take theirs" first replaces the row with it.
 	 */
 	const keepMine = useCallback((key: string) => {
 		baselineRef.current = withKeyFrom(baselineRef.current, key, freshMapRef.current);
@@ -1064,11 +975,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 	const takeTheirs = useCallback(
 		(key: string) => {
-			// Computed synchronously and assigned to the ref directly, not inside
-			// the `setVariables` updater: the save `keepMine` starts reads
-			// `variablesRef.current` before this render commits, and a functional
-			// updater's body does not run until then. Mirrors `updateVariable` /
-			// `removeVariable`.
+			// Computed and assigned to the ref directly, not in a `setVariables` updater: the save
+			// `keepMine` starts reads `variablesRef.current` before this render commits, and an
+			// updater's body runs only then. Mirrors `updateVariable` / `removeVariable`.
 			const next = withTheirs(variablesRef.current, key, freshMapRef.current[key]);
 			setVariables(next);
 			variablesRef.current = next;
@@ -1077,7 +986,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		[keepMine]
 	);
 
-	// Environment-specific handlers
 	const handleDeleteEnvironment = async () => {
 		if (type !== "environment" || !environment) return;
 		const { id, name } = environment;
@@ -1105,10 +1013,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	};
 
 	/*
-	 * Subscribed (`activeEnvironmentId` above), not read through
-	 * `getState()`: a one-shot read during render does not re-render when the
-	 * switch lands, so this button kept offering "Set as active" for the
-	 * environment that had just become active.
+	 * Subscribed (`activeEnvironmentId` above), not read through `getState()`: a one-shot read
+	 * during render does not re-render when the switch lands, so the button would keep offering
+	 * "Set as active" for the environment that had just become active.
 	 */
 	const isActiveEnvironment =
 		type === "environment" && environment && activeEnvironmentId === environment.id;
@@ -1136,7 +1043,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 	return (
 		<div className="flex flex-col h-full">
-			{/* Header */}
 			{!embedded && (
 				<div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/50">
 					<div className="flex items-center gap-2">
@@ -1180,7 +1086,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				</div>
 			)}
 
-			{/* Info Banner */}
 			{!embedded && (
 				<div
 					className={cn(
@@ -1239,18 +1144,16 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			)}
 
 			{/*
-			 * This scrolls, and `overflow-y-auto` computes `overflow-x` to `auto`
-			 * too, so the box clips on all four sides at its padding box. Embedded
-			 * (Collection Detail) it carries `p-0`, so anything flush against the
-			 * left edge loses the outer half of its focus ring; standalone it
-			 * carries `p-4` and nothing notices. The clearance that fixes it lives
-			 * on the checkbox cell below, not here - see the comment there.
+			 * This scrolls, and `overflow-y-auto` computes `overflow-x` to `auto` too, so the box
+			 * clips at its padding box on all four sides. Embedded (Collection Detail) it carries
+			 * `p-0`, so anything flush left loses the outer half of its focus ring; standalone it
+			 * carries `p-4` and nothing notices. The clearance lives on the checkbox cell in
+			 * `VariableRow`, not here (see the comment there).
 			 *
-			 * The same scroll is what a narrow pane or a 200% scale lands on
-			 * (#3494): the Variable and Value headers carry a width floor, so
-			 * below the sum of the columns the table scrolls sideways instead of
-			 * squeezing the two inputs, which the other columns' fixed widths
-			 * leave all of the slack to.
+			 * A narrow pane or a 200% scale lands on the same scroll (#3494): the Variable and
+			 * Value headers carry a width floor, so below the columns' sum the table scrolls
+			 * sideways rather than squeezing the two inputs, which the other columns' fixed widths
+			 * leave all the slack to.
 			 */}
 			<div className={cn("flex-1 overflow-y-auto", embedded ? "p-0" : "p-4")}>
 				<table className="w-full">
@@ -1276,12 +1179,11 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					</thead>
 					<tbody>
 						{/*
-						 * Keyed by row id, not by index (#621) - see the note on the
-						 * `id` field of `VariableRowData`. `VariableRow` is `memo`-wrapped
-						 * (issue #1716): `updateVariable`/`removeVariable`/`commitNow` are
-						 * ref-backed and stable across a keystroke, and every row but the
-						 * one whose `item` actually changed keeps the identical `variable`
-						 * reference this map handed it last render, so only that row
+						 * Keyed by row id, not index (#621; see the `id` field of
+						 * `VariableRowData`). `VariableRow` is `memo`-wrapped (#1716):
+						 * `updateVariable`/`removeVariable`/`commitNow` are ref-backed and stable
+						 * across a keystroke, and every row but the changed one keeps the identical
+						 * `variable` reference this map handed it last render, so only that row
 						 * re-renders.
 						 */}
 						{variables.map((variable) => (
@@ -1301,7 +1203,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				</table>
 			</div>
 
-			{/* Footer */}
 			{!embedded && (
 				<div className="px-4 py-2 border-t border-border bg-muted/50 text-xs text-muted-foreground">
 					{(() => {

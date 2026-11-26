@@ -6,15 +6,12 @@
  */
 
 /**
- * @file list-page.ts
- * @brief The arguments and row shaping the paged whole-list reads share:
- *        `list_collections`, `list_requests`, `get_cookies` and `list_trash`
- *        (#2443).
+ * @brief The arguments and row shaping the paged whole-list reads share: `list_collections`,
+ *        `list_requests`, `get_cookies` and `list_trash` (#2443).
  *
- * The engine filters and pages (`q` / `limit` / `offset`); the summary
- * projection is this side's, because it runs after the secret withholding: a
- * request's `url` is masked by reading its `auth` (an API key placed in the
- * query), so a row projected first would lose what masks it.
+ * The engine filters and pages (`q` / `limit` / `offset`); the summary projection is this side's
+ * because it runs after the secret withholding: a request's `url` is masked by reading its `auth`
+ * (an API key placed in the query), so a row projected first would lose what masks it.
  */
 
 import { z } from "zod";

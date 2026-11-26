@@ -6,19 +6,19 @@
  */
 
 /**
- * @file core/run_compare.cpp
- * @brief `compareReports` (`app/src/lib/run-compare.ts`) in C++, for the
- *        run-report export's comparison block (#2127).
+ * `compareReports` (`app/src/lib/run-compare.ts`) in C++, for the run-report
+ * export's comparison block (#2127).
  *
- * Every reading rule is the app's, JavaScript semantics included: a value is
- * a number only when finite, a string only when non-empty, a flag only when
- * `true`; a number is spelled as `String(number)` spells it. A figure the
- * report flags as unrecorded reads as absent (`recorded_number_node`).
+ * Every reading rule is the app's, JavaScript semantics included: a number only
+ * when finite, a string only when non-empty, a flag only when `true`, a number
+ * spelled as `String(number)` spells it. A figure the report flags as
+ * unrecorded reads as absent (`recorded_number_node`).
  */
 
 #include "vayu/core/run_compare.hpp"
 
 #include "js_json.hpp"
+#include "vayu/core/mcp_error_counts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/parse.hpp"
 
@@ -30,6 +30,7 @@
 #include <initializer_list>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -460,6 +461,43 @@ void collect_codes (const json& report, const char* side, json& merged) {
     }
 }
 
+// --- error classes ----------------------------------------------------------------
+
+// The classes `summary.errorClasses` counts (#3828) are `MCP_ERROR_CLASS_NAMES`.
+// `protocolCodes` is the finer split of `protocol` and is not compared.
+
+/// A report's `summary.errorClasses` is recorded when it is an object: `{}`
+/// says nothing failed, and an absent or non-object value says the run never
+/// counted. A side that never counted is not one with zero failures, so a
+/// comparison against it has no figure.
+bool has_recorded_error_classes (const json& report) {
+    const json* classes = walk (report, { "summary", "errorClasses" });
+    return classes != nullptr && classes->is_object ();
+}
+
+/// `{class: {base, target}}` for every class either run counted as a finite
+/// number (the other run's missing count is 0), and `{}` unless both runs
+/// recorded their classes.
+ordered error_class_deltas (const json& base, const json& target) {
+    ordered out = ordered::object ();
+    if (!has_recorded_error_classes (base) || !has_recorded_error_classes (target)) {
+        return out;
+    }
+    for (const std::string_view key : MCP_ERROR_CLASS_NAMES) {
+        const Path path  = { "summary", "errorClasses", key };
+        const json* from = number_node (base, path);
+        const json* to   = number_node (target, path);
+        if (from == nullptr && to == nullptr) {
+            continue;
+        }
+        ordered counts   = ordered::object ();
+        counts["base"]   = from == nullptr ? ordered (0) : ordered (*from);
+        counts["target"] = to == nullptr ? ordered (0) : ordered (*to);
+        out[std::string (key)] = std::move (counts);
+    }
+    return out;
+}
+
 } // namespace
 
 nlohmann::ordered_json
@@ -472,10 +510,11 @@ compare_run_reports (const nlohmann::json& base, const nlohmann::json& target) {
     collect_codes (base, "base", codes);
     collect_codes (target, "target", codes);
 
-    ordered out        = ordered::object ();
-    out["differences"] = differences (base, target);
-    out["deltas"]      = std::move (deltas);
-    out["statusCodes"] = ordered (codes);
+    ordered out         = ordered::object ();
+    out["differences"]  = differences (base, target);
+    out["deltas"]       = std::move (deltas);
+    out["statusCodes"]  = ordered (codes);
+    out["errorClasses"] = error_class_deltas (base, target);
     return out;
 }
 

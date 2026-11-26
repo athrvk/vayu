@@ -20,7 +20,7 @@
  * different verdicts on the same pair of runs - so this file is where the two
  * meet, the way `data-changed.conformance.test.ts` and
  * `variable-resolution.conformance.test.ts` do for their own mirrors. It
- * reaches across the boundary the way `tools.test.ts` already reaches for
+ * reaches across the boundary the way `tools/load.tools.test.ts` already reaches for
  * `@/constants`: a test may, production code may not.
  *
  * The cases are the contract, and they are shared with the engine:
@@ -249,6 +249,65 @@ describe("run comparison mirror", () => {
 		const expected = { "200": { base: 10, target: 0 }, "301": { base: 0, target: 0 } };
 		expect(mainCompare("a", "b", report, {}).statusCodes).toEqual(expected);
 		expect(rendererCompare("a", "b", report, {}).statusCodes).toEqual(expected);
+	});
+
+	/*
+	 * The fixture proves the sides agree; these pin the answer. Two copies that
+	 * both returned `{}` for every pair would agree forever, and an unrecorded
+	 * side read as 0 would fake a regression against it (#3828).
+	 */
+	test("errorClasses are compared only when both runs recorded them", () => {
+		const recorded = (errorClasses: unknown) => ({ summary: { errorClasses } });
+		const none = { summary: {} };
+		const cases = [
+			{
+				name: "both recorded: every class either counted, 0 for the side that did not",
+				base: recorded({ transport: 2, tool: 10, protocolCodes: { "-32602": 3 } }),
+				target: recorded({ protocol: 9, tool: 1 }),
+				expected: {
+					transport: { base: 2, target: 0 },
+					protocol: { base: 0, target: 9 },
+					tool: { base: 10, target: 1 },
+				},
+			},
+			{
+				name: "the base never recorded",
+				base: none,
+				target: recorded({ tool: 5 }),
+				expected: {},
+			},
+			{
+				name: "the target never recorded",
+				base: recorded({ tool: 5 }),
+				target: {},
+				expected: {},
+			},
+			{ name: "neither recorded", base: none, target: none, expected: {} },
+			{
+				name: "a recorded {} reads as 0",
+				base: recorded({}),
+				target: recorded({ protocol: 3 }),
+				expected: { protocol: { base: 0, target: 3 } },
+			},
+			{ name: "both {}", base: recorded({}), target: recorded({}), expected: {} },
+			{
+				name: "a value that is not a number is not counted",
+				base: recorded({ transport: "many", protocol: null, tool: 7 }),
+				target: recorded({ protocol: true, tool: 2 }),
+				expected: { tool: { base: 7, target: 2 } },
+			},
+			{
+				name: "a block that is not an object is not recorded",
+				base: recorded([1, 2]),
+				target: recorded({ tool: 1 }),
+				expected: {},
+			},
+		];
+
+		for (const { base, target, expected } of cases) {
+			expect(mainCompare("a", "b", base, target).errorClasses).toEqual(expected);
+			expect(rendererCompare("a", "b", base, target).errorClasses).toEqual(expected);
+		}
 	});
 
 	test("both sides label the same metrics with the same direction", () => {

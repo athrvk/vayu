@@ -11,62 +11,36 @@ interface LabelSwapProps {
 	/** The text to show right now, e.g. `isExecuting ? "Sending" : "Send"`. */
 	label: string;
 	/**
-	 * Every value `label` can take, e.g. `["Send", "Sending"]`. Sizes the box to
-	 * the widest one so a swap never resizes its container - only the text
-	 * fades. This has to be given explicitly rather than inferred from `label`
-	 * over time: a set built by remembering past values would start too narrow
-	 * on first render and still resize once a wider state is seen for the first
-	 * time, which is the exact jump this component exists to prevent. If the
-	 * caller can't enumerate every value up front (a count, a status string
-	 * from data), this component is the wrong fit - a data-derived label has no
-	 * fixed "widest" to reserve.
+	 * Every value `label` takes (`["Send", "Sending"]`), sizing the box to the widest so a swap
+	 * only fades the text. Given explicitly, not remembered from `label`: a remembered set starts
+	 * too narrow and resizes when a wider state first appears, the jump this prevents. A label that
+	 * cannot be enumerated up front (a count, a status from data) has no widest to reserve: wrong
+	 * fit.
 	 */
 	states: readonly string[];
 	className?: string;
 }
 
 /**
- * A label that fades to its new text instead of popping, and never resizes
- * the control around it - the Send → Sending → Send case.
- *
- * Same trick as `TabLabel` (`tabs.tsx`): every candidate string sits in the
- * same grid cell, invisible and `h-0`, so the column is sized by the widest
- * one while only the live text contributes height. `TabLabel` takes a single
- * string because a tab has one bold-vs-not distinction; this takes the whole
- * enumerable set because a button's states are typically unrelated words
- * ("Send"/"Sending"), not one word in two weights.
- *
- * `key={label}` on the live span remounts it on every change, which is what
- * makes `.enter-fade` (`index.css`) run again - `@starting-style` only fires
- * for an element's first frame, so without the remount a `label` update would
- * just repaint the same node with no transition. Entry only, by the same
- * limitation `.enter-fade` documents everywhere else: React removes the old
- * text node synchronously, so there is no fade-out half without JS-driven
- * motion, which this design system rules out. A fast toggle (Send → Sending
- * → Send within one `.enter-fade` duration) does not crossfade - the
- * in-flight node is torn down and the next one starts its own fade from
- * scratch, which reads as a quick flicker rather than a smooth crossfade.
- * That is an accepted trade for staying JS-free, not an oversight.
- *
- * `label` is always a member of `states` (that is what makes the width
- * reservation correct), so a bare `key={label}` and a bare `key={state}`
- * do collide on whichever twin equals the current label. This was suspected
- * as the cause of a real, reported directional bug (Send → Sending fades,
- * Sending → Send does not) - but tested directly and ruled out: React scopes
- * a mapped array as its own keyspace, separate from a sibling's, so there is
- * no reconciler collision here and no console warning either. The live span
- * remounts correctly both directions. The actual asymmetry lives elsewhere -
- * most likely a heavy render landing in the same commit as the label change
- * on one direction and not the other, which can starve the browser of the
- * paint `@starting-style` needs - not in this component.
+ * A label that fades to its new text instead of popping and never resizes its control (Send →
+ * Sending → Send). `TabLabel`'s trick (`tabs.tsx`): every candidate in one grid cell, invisible and
+ * `h-0`, so the widest sizes the column and only the live text adds height. `TabLabel` takes one
+ * string (a tab's bold-or-not); this takes the set, as a button's states are unrelated words.
+ * `key={label}` remounts the live span so `.enter-fade` (`index.css`) reruns, as `@starting-style`
+ * fires only on an element's first frame. Entry only: React removes the old node synchronously, and
+ * JS motion is ruled out; a toggle faster than one fade restarts it, a quick flicker, accepted to
+ * stay JS-free. `label` is always in `states`, so `key={label}` and a twin's `key={state}` match,
+ * but React keys a mapped array apart from its siblings: no collision, no warning, and the live
+ * span remounts both ways. (Tested when a reported Send → Sending fade but not back was blamed on
+ * it; the asymmetry lies outside, likely a heavy render in the same commit starving
+ * `@starting-style`'s paint.)
  */
 export function LabelSwap({ label, states, className }: LabelSwapProps) {
 	return (
 		/*
-		 * `data-slot` on both halves, the way `tabs.tsx` marks `TabLabel`'s own
-		 * reserve twin. The twins render the same strings as the live cell, so
-		 * `getByText` cannot tell them apart, and without a handle a test that
-		 * means "the label says X" has no way to say so.
+		 * `data-slot` on both halves, as `tabs.tsx` marks `TabLabel`'s twin: the twins repeat the
+		 * live strings, so `getByText` cannot tell them apart and a test of "the label says X"
+		 * needs a handle.
 		 */
 		<span data-slot="label-swap" className={cn("grid", className)}>
 			{states.map((state) => (

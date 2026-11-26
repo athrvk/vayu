@@ -8,9 +8,8 @@
  */
 
 /**
- * @file crypto_js_shim.hpp
- * @brief The `crypto-js` the `require()` shelf hands out (#2578): Vayu's own
- *        code with crypto-js's shape, not the library.
+ * The `crypto-js` the `require()` shelf hands out (#2578): Vayu's own
+ * code with crypto-js's shape, not the library.
  *
  * It covers what Postman's signing scripts call - the hashers and their HMACs,
  * `enc.Hex` / `Latin1` / `Utf8` / `Base64`, and `lib.WordArray` - and nothing

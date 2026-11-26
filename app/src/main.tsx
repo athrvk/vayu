@@ -17,12 +17,10 @@ import App from "./App";
 import "./index.css";
 
 /**
- * Whatever `ErrorBoundary` cannot reach: an error thrown outside a component's
- * render (an event handler, a timer, a raw DOM listener) and a rejected
- * promise nobody awaited (#1558). Registered once, for the process's whole
- * life - React's own render errors still go through `ErrorBoundary`, which is
- * a narrower, more specific report (a component stack) than either listener
- * below can build.
+ * Whatever `ErrorBoundary` cannot reach: an error thrown outside a component's render (an event
+ * handler, a timer, a raw DOM listener) and a rejected promise nobody awaited (#1558). Registered
+ * once, for the process's whole life. React's own render errors still go through `ErrorBoundary`, a
+ * narrower, more specific report (a component stack) than either listener below can build.
  */
 window.addEventListener("error", (event) => {
 	logError(event.error instanceof Error ? event.error : new Error(event.message), "high", {
@@ -44,30 +42,22 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 		<ErrorBoundary>
 			<QueryClientProvider client={queryClient}>
 				{/*
-				 * One tooltip delay for the whole app.
+				 * One tooltip delay for the whole app: a nested provider re-establishes Radix's
+				 * 700ms default for its subtree rather than inheriting, so a nested provider is the
+				 * exception that has to justify itself.
 				 *
-				 * This was a bare provider, so Radix's 700ms default governed almost
-				 * everything while two components set 150ms locally - and two more
-				 * mounted bare nested providers, which *re-establish* 700ms for their
-				 * subtree rather than inheriting. `TIMING.TOOLTIP_DELAY_MS` described
-				 * itself as "used across the app" and reached none of it.
-				 *
-				 * A nested provider is now the exception that has to justify itself.
-				 *
-				 * `disableHoverableContent`: every `TooltipContent` in this app is
-				 * read-only text (`rg -U '<TooltipContent[\s\S]*?</TooltipContent>' src
-				 * --glob '*.tsx'` finds no interactive element inside one) - none needs
-				 * the grace-area gap hoverable content exists for. Radix's default
-				 * builds that gap as a polygon from the pointer's *exit point* to the
-				 * content's edges, and only closes once a later `pointermove` lands
-				 * outside it - so a fast flick across two adjacent triggers (the
-				 * rail's icons, stacked with no gap) can exit trigger A with its last
-				 * tracked position already over trigger B, and no further move ever
-				 * lands outside that hull. The first tooltip then never closes and the
-				 * second never opens, until some other move does land outside it.
-				 * `disableHoverableContent` closes on leave immediately instead -
-				 * matching every read-only tooltip's own content, and the macOS
-				 * system tooltip it mirrors.
+				 * `disableHoverableContent`: every `TooltipContent` in this app is read-only text
+				 * (`rg -U '<TooltipContent[\s\S]*?</TooltipContent>' src --glob '*.tsx'` finds no
+				 * interactive element inside one), so none needs the grace-area gap hoverable
+				 * content exists for. Radix's default builds that gap as a polygon from the
+				 * pointer's exit point to the content's edges, and closes only once a later
+				 * `pointermove` lands outside it, so a fast flick across two adjacent triggers (the
+				 * rail's icons, stacked with no gap) can exit trigger A with its last tracked
+				 * position already over trigger B, and no further move ever lands outside that
+				 * hull: the first tooltip never closes and the second never opens until some other
+				 * move does. `disableHoverableContent` closes on leave immediately instead,
+				 * matching every read-only tooltip's own content and the macOS system tooltip it
+				 * mirrors.
 				 */}
 				<TooltipProvider delayDuration={TIMING.TOOLTIP_DELAY_MS} disableHoverableContent>
 					<App />

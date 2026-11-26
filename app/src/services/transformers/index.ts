@@ -6,12 +6,8 @@
  */
 
 /**
- * Transformers Index
- *
- * Central export for all data transformers.
- * These transformers handle conversion between frontend and backend formats:
- * - Date conversion (number timestamps → ISO strings)
- * - Data structure transformation (arrays → objects)
+ * The data transformers between the engine's wire shapes and the app's: number timestamps to ISO
+ * strings, and arrays to objects.
  */
 
 export { RequestTransformer, type BackendRequest, type RawRequest } from "./request-transformer";

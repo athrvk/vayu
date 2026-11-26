@@ -6,14 +6,11 @@
  */
 
 /**
- * Which runs are long enough to be worth asking about (issue #1357).
- *
- * The wake lock is off by default: an app that silently overrides the user's
- * power settings is a worse citizen than one that lets a short run finish
- * before the machine idles out. What is left is the case the setting exists
- * for - a run the user starts and walks away from - and that case announces
- * itself in the config, so the app asks then rather than making the user find
- * a preference first.
+ * Which runs are long enough to be worth asking about (issue #1357). The wake lock is off by
+ * default: an app that silently overrides the user's power settings is a worse citizen than one
+ * that lets a short run finish before the machine idles out. What is left is the case the setting
+ * exists for, a run the user starts and walks away from, which announces itself in the config, so
+ * the app asks then rather than making the user find a preference first.
  */
 
 import { durationSeconds } from "@/constants/load-test";
@@ -21,33 +18,26 @@ import type { LoadTestRunConfig } from "@/stores/dashboard-store";
 import { pluralize } from "./format";
 
 /**
- * A run at least this long is worth an ask.
- *
- * Ten minutes, and the number is a judgement rather than a measurement: the
- * app cannot read the machine's sleep timer. No Electron API reports it, the
- * value differs per power source, and even the true number would not answer
- * the question - the timer counts from the user's last input, not from the
- * run's start, so the same run suspends or does not depending on when its
+ * A run at least this long is worth an ask. Ten minutes is a judgement rather than a measurement:
+ * the app cannot read the machine's sleep timer. No Electron API reports it, the value differs per
+ * power source, and the true number would not answer the question anyway: the timer counts from the
+ * user's last input, not the run's start, so the same run suspends or not depending on when its
  * owner walked away.
  *
- * So this is a proxy for "a run the user is likely to leave", placed among the
- * timers it wants to sit under: Windows' balanced plan sleeps at 15 minutes on
- * battery, GNOME at 20, and a MacBook on battery goes within a few minutes of
- * idle. Ten covers the first two and gives up on the third, which nothing short
- * of asking about almost every run could catch.
- *
- * The costs either side are not symmetric - a needless ask costs one click, a
- * missing one costs the run - so when this moves, it should move down.
+ * So this is a proxy for "a run the user is likely to leave", placed among the timers it wants to
+ * sit under: Windows' balanced plan sleeps at 15 minutes on battery, GNOME at 20, and a MacBook on
+ * battery goes within a few minutes of idle. Ten covers the first two and gives up on the third,
+ * which nothing short of asking about almost every run could catch. The costs are not symmetric (a
+ * needless ask costs one click, a missing one costs the run), so when this moves, it should move
+ * down.
  */
 export const LONG_RUN_SECONDS = 600;
 
 /**
- * How long the run says it will take, or `null` when it does not say.
- *
- * An iterations run has no duration at all - it ends when the work does - so
- * there is no number here to compare, and nothing to ask about. A ramp run
- * carries its total in `duration`; `rampUpDuration` is the fallback for a
- * config that named only the ramp.
+ * How long the run says it will take, or `null` when it does not say. An iterations run has no
+ * duration (it ends when the work does), so there is nothing to compare or ask about. A ramp run
+ * carries its total in `duration`; `rampUpDuration` is the fallback for a config that named only
+ * the ramp.
  */
 export function runLengthSeconds(config: LoadTestRunConfig | null | undefined): number | null {
 	if (!config) return null;

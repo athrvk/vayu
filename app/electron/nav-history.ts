@@ -6,22 +6,18 @@
  */
 
 /**
- * The two navigation gestures only the main process can hear (#1245).
+ * The two navigation gestures only the main process can hear (#1245). The renderer handles the
+ * mouse's thumb buttons itself as ordinary pointer buttons; these two it cannot see at all:
  *
- * The renderer sees the mouse's thumb buttons as ordinary pointer buttons and
- * handles them itself. These two it cannot see at all:
+ * - **`app-command`** is how Windows and Linux deliver the same thumb buttons when the OS routes
+ *   them as application commands rather than mouse buttons, which a driver's default profile does
+ *   on Windows.
+ * - **`swipe`** is the macOS three-finger swipe, delivered to the window by AppKit and never as a
+ *   DOM event. It fires only while the system's "swipe between pages" gesture is enabled, so
+ *   honouring it honours that setting rather than inventing a gesture.
  *
- * - **`app-command`** is how Windows and Linux deliver the same thumb buttons
- *   when the OS routes them as application commands rather than as mouse
- *   buttons, which is what a driver's default profile does on Windows.
- * - **`swipe`** is the macOS three-finger swipe, delivered to the window by
- *   AppKit and never as a DOM event. It fires only while the system's "swipe
- *   between pages" gesture is enabled, so honouring it is honouring that
- *   setting rather than inventing a gesture.
- *
- * Kept out of main.ts so it can be tested, the way `window-navigation.ts` is:
- * main.ts creates windows and starts the engine at import time, which no unit
- * test can do.
+ * Kept out of main.ts so it can be tested, as `window-navigation.ts` is: main.ts creates windows
+ * and starts the engine at import time, which no unit test can do.
  */
 
 export type NavDirection = "back" | "forward";
@@ -47,12 +43,10 @@ export function navigationForAppCommand(command: string): NavDirection | null {
 }
 
 /**
- * Which way a swipe navigates, or `null` for a vertical one.
- *
- * The direction is the fingers', not the navigation's, so the two are opposites:
- * dragging the page to the right uncovers what was before it, which is Back.
- * That is what Safari and Chrome do with the same gesture on the same hardware,
- * and matching them is the whole reason to answer the gesture at all.
+ * Which way a swipe navigates, or `null` for a vertical one. The direction is the fingers', not the
+ * navigation's, so the two are opposites: dragging the page right uncovers what was before it,
+ * which is Back. Safari and Chrome do the same with this gesture on the same hardware, and matching
+ * them is the whole reason to answer it.
  */
 export function navigationForSwipe(direction: string): NavDirection | null {
 	if (direction === "right") return "back";
@@ -61,12 +55,10 @@ export function navigationForSwipe(direction: string): NavDirection | null {
 }
 
 /**
- * Report the window's navigation gestures to `navigate`.
- *
- * Both events are subscribed unconditionally rather than per platform: each
- * fires only where its platform delivers it, and a `process.platform` branch
- * here would be a second, quieter statement of that same fact - one that goes
- * wrong the first time a platform gains the other gesture.
+ * Report the window's navigation gestures to `navigate`. Both events are subscribed on every
+ * platform: each fires only where its platform delivers it, and a `process.platform` branch here
+ * would be a second, quieter statement of that fact, one that goes wrong the first time a platform
+ * gains the other gesture.
  */
 export function watchNavigationGestures(
 	window: GesturingWindow,

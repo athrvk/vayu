@@ -6,26 +6,21 @@
  */
 
 /**
- * Entity Draft Store
+ * The unsaved drafts of the manual save-button editors (`useEntityDraft`), by entity key, so a
+ * draft outlives the editor that holds it (#3459): `Shell.tsx` mounts only the tab on screen, so
+ * looking at a request unmounts the whole collection screen, and a draft in component state would
+ * go with it without a word.
  *
- * The unsaved drafts of the manual save-button editors (`useEntityDraft`), by
- * entity key, so a draft outlives the editor that holds it (#3459). `Shell.tsx`
- * mounts only the tab on screen, so looking at a request unmounts the whole
- * collection screen; with the draft in component state that threw an unsaved
- * script away without a word.
+ * Clean is absence: an entry exists only while its draft differs from what the editor last read as
+ * persisted. `baseline` is the persisted value the draft diverged from, so a change that lands
+ * while the editor is away still arrives as a conflict (`externalValue`), not as the draft.
  *
- * Clean is absence: an entry exists only while its draft differs from what the
- * editor last read as persisted. `baseline` is the persisted value the draft
- * diverged from, which is how a change that lands while the editor is away
- * still arrives as a conflict (`externalValue`) rather than as the draft.
+ * A key is `<entityId>:<field>` (`entityDraftKey`), so everything one entity holds drops together
+ * (`dropForEntities`) when its tab closes or it is deleted. A draft is opaque here; the key decides
+ * its type, and `useEntityDraft` reads it back as the `T` it wrote.
  *
- * A key is `<entityId>:<field>` (`entityDraftKey`), so everything one
- * entity holds can be dropped together (`dropForEntities`): closing its tab or
- * deleting it throws the draft away. An entry's draft is opaque here; the key
- * decides its type, and `useEntityDraft` reads it back as the `T` it wrote.
- *
- * In memory only, never `persist`ed: a draft can carry a credential, and an
- * unsaved edit does not outlive the app - the quit flush saves it or asks.
+ * In memory only, never `persist`ed: a draft can carry a credential, and an unsaved edit does not
+ * outlive the app (the quit flush saves it or asks).
  */
 
 import { create } from "zustand";
@@ -85,12 +80,10 @@ export const collectionAuthDraftKey = (collectionId: string) =>
 	entityDraftKey(collectionId, "auth");
 
 /**
- * The collection's unsaved Auth-tab draft, or undefined when it has none (#1483).
- *
- * The Inheritance Chain card and the context bar's `CollectionAuthSection`
- * read the stored collection, which says nothing about a mode picked and not
- * yet saved; this is what lets both describe the picker rather than contradict
- * it, whether or not the Auth tab is mounted.
+ * The collection's unsaved Auth-tab draft, or undefined when it has none (#1483). The Inheritance
+ * Chain card and the context bar's `CollectionAuthSection` read the stored collection, which says
+ * nothing about a mode picked and not yet saved; this lets both describe the picker rather than
+ * contradict it, whether or not the Auth tab is mounted.
  */
 export function useCollectionAuthDraft(
 	collectionId: string | undefined
