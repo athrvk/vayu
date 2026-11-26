@@ -407,6 +407,10 @@
                 "properties": {
                   "index": {"type": "number"},
                   "name": {"type": "string"},
+                  "label": {
+                    "description": "An mcp step's `<method> <tool>` (#3829), e.g. `tools/call search`, read from the stored request's literal method and tool name, never from substituted text; absent for every other step.",
+                    "type": "string"
+                  },
                   "requestId": {"type": "string"},
                   "method": {"type": "string"},
                   "executed": {"type": "number"},

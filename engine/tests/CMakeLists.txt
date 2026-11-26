@@ -256,6 +256,7 @@ add_executable(vayu_tests
     scenario_load_test.cpp
     scenario_load_variables_test.cpp
     scenario_plan_test.cpp
+    scenario_plan_tokens_test.cpp
     scenario_runner_data_test.cpp
     scenario_runner_events_test.cpp
     scenario_runner_flow_test.cpp

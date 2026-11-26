@@ -124,6 +124,21 @@ mcp_derived_headers (std::string_view wire_body, const std::optional<McpTool>& t
 [[nodiscard]] std::string mcp_header_value (std::string_view value);
 
 /**
+ * @brief An `mcp` step's label in a scenario load run's breakdown (#3829):
+ *        `<method> <name>`, e.g. `tools/call search`, the name being
+ *        `params.name` of a `tools/call` or `prompts/get`.
+ *
+ * @p content is the *stored* body text, never the composed one, so no
+ * substituted value (a secret's included) can reach the label. The method
+ * alone for every other method (`resources/read`'s `uri` names no tool and can
+ * carry a credential) and for a name that is absent, empty, not a string or
+ * holds `{{`. Empty when @p content is not one JSON object within
+ * `constants::request_body::MAX_JSON_DEPTH`, or has no non-empty string
+ * `method` free of `{{`.
+ */
+[[nodiscard]] std::string mcp_step_label (std::string_view content);
+
+/**
  * @brief A stored `mcpTool` object (`{name, inputSchema?}`) as what a send
  *        reads of it, or why it cannot be one. An `outputSchema` member stays
  *        in the blob and is not read here.

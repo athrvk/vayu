@@ -286,6 +286,31 @@ std::string mcp_header_value (std::string_view value) {
     std::string (SENTINEL_SUFFIX);
 }
 
+std::string mcp_step_label (std::string_view content) {
+    const auto parsed = utils::parse_ordered_json (
+    content, vayu::core::constants::request_body::MAX_JSON_DEPTH);
+    if (!parsed || !parsed->is_object ()) {
+        return {};
+    }
+    const auto is_bound_later = [] (std::string_view text) {
+        return text.find ("{{") != std::string_view::npos;
+    };
+    const auto* method = string_member (*parsed, "method");
+    if (method == nullptr || method->empty () || is_bound_later (*method)) {
+        return {};
+    }
+    // `resources/read`'s `uri` is what `Mcp-Name` mirrors too, but it names no
+    // tool and can carry a credential (`user:pass@`, a token query).
+    const std::string_view source = name_source (*method);
+    const auto* params            = object_member (*parsed, "params");
+    const auto* name =
+    source != "name" || params == nullptr ? nullptr : string_member (*params, source);
+    if (name == nullptr || name->empty () || is_bound_later (*name)) {
+        return *method;
+    }
+    return *method + " " + *name;
+}
+
 std::expected<McpTool, std::string> read_mcp_tool (const nlohmann::json& value) {
     if (!value.is_object ()) {
         return std::unexpected ("'mcpTool' must be an object");

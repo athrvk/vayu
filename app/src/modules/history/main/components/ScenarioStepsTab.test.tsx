@@ -59,6 +59,23 @@ describe("the step table", () => {
 		expect(within(rows[1]).getByText("120ms")).toBeTruthy();
 	});
 
+	it("shows the engine's label beside the name of a step that has one (#3829)", () => {
+		// An MCP step's name is the request's name; the label says which call it
+		// made, and it is the only place the table says so.
+		render(
+			<ScenarioStepsTab
+				steps={[{ ...STEPS[0], name: "Search", label: "tools/call a" }, STEPS[1]]}
+				virtualUsers={1}
+			/>
+		);
+
+		const [labelled, plain] = screen.getAllByRole("row").slice(1);
+		expect(within(labelled).getByText("Search")).toBeTruthy();
+		expect(within(labelled).getByText("tools/call a")).toBeTruthy();
+		expect(within(plain).getByText("List orders")).toBeTruthy();
+		expect(screen.getAllByText("tools/call a")).toHaveLength(1);
+	});
+
 	it("draws each step's method as the coloured, abbreviated MethodBadge", () => {
 		// A step's method went through an outline `Badge` with no method colour
 		// and no `DEL` abbreviation (#2317).

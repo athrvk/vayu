@@ -74,6 +74,7 @@ The caps are always sent for such a run rather than elided as "the engine has de
 A collection run takes the caps without `stream` (issue #3235): the engine reads the flag off each stored request, so `RunCollectionDialog` sends top-level `maxStreamDurationMs` / `maxStreamEvents` (seconds converted to ms) only when a request it runs streams, for a design run and a load run alike, and never `stream`, which is a `400` there.
 
 Under load a stream is bounded by construction, and **reaching a cap is a successful completion, not a timeout** - so a streaming run's clean error rate is not evidence the caps went unused.
+An `mcp` request is the exception: a stream a cap ends before its final response is an `mcp_transport` error ([stream endings](../../engine/api-reference/load-runs.md#streaming-under-load-stream)).
 The report answers that with a `stream` section (`RunReport.stream`): the per-completion event distribution, the totals, a derived `eventsPerSecond`, `capped` - how many streams a cap ended rather than the server - and `timeToFirstEvent` (issue #3234), the wait from submitting the request to each stream's first event.
 That is not `phases.firstByte`, which ends at the response headers: a gateway that answers `200` at once and then thinks reads fast there and slow here.
 It is absent when no stream delivered a timed event, and it stops at the first event of any kind, so an API that opens with a preamble event (Anthropic's `message_start`, an OpenAI role-only chunk) reads near zero on it.
