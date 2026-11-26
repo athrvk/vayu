@@ -33,9 +33,9 @@ happens around it.
 | **Assertions** | JSONPath, JSON Schema (draft-07) and a `tools/list`-style snapshot, on the run itself | The documented scenario step keys have no assertion field\*\*\* |
 | **Load shapes** | Constant rate, constant users, a ramp-up, a fixed iteration count, a capacity search | Concurrency, rate, duration or count, warm-up, open loop, stepped stairs\*\*\* |
 | **CI gate on a run** | A thresholds block judges the run; the command line starts a run and does not exit on a verdict | Thresholds and baseline regression exit `10`\*\*\* |
-| **Per-call output** | Aggregates only: run summaries, a history report, an HTML, Markdown and JSON export | One NDJSON line per call from the CLI\*\*\* |
+| **Per-call output** | Aggregates plus a bounded set of kept traces (failures, status exemplars, slowest, a sample); no record of every call | One NDJSON line per call from the CLI\*\*\* |
 | **Failure classes in reports** | `tool`, `protocol` and `transport` counts per run, compared run to run | `isError` results counted apart from thrown errors\*\*\* |
-| **Authorization** | Request auth only; no MCP OAuth discovery, no step-up retry | Full OAuth flow, re-authorization and step-up\*\*\*\* |
+| **Authorization** | Request auth, plus a sign-in discovered from an MCP server URL and a Re-authorize offer in the request builder; a run never re-authorizes | Full OAuth flow, re-authorization and step-up\*\*\*\* |
 | **Scale-out** | One process on one machine | `--load-workers` child processes\*\*\* |
 
 \* **Source:** the Inspector's [overview](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector):
@@ -83,8 +83,9 @@ turning green on a `200`. Detail:
 [The `mcp` reply](../engine/api-reference/request-body.md#the-mcp-reply).
 
 Vayu speaks only the modern era. A legacy-era server, the kind that opens with `initialize`
-and a session id, is reached by hand-built steps: an explicit `initialize` request, then
-`extract.header` on `Mcp-Session-Id` feeding the later calls. There is no automatic fallback
+and a session id, can be approached with hand-built steps (an explicit `initialize` request, then
+`extract.header` on `Mcp-Session-Id` feeding the later calls), which this page does not
+promise works against every server. There is no automatic fallback
 and no hidden session state, and a refusal names the era mismatch instead of retrying
 ([the reply reader](../engine/api-reference/request-body.md#the-mcp-reply)). If most of
 your servers are legacy-era, or speak stdio, that alone decides it.
@@ -160,18 +161,21 @@ the better tool, and several of these are not close:
   are typed by hand, and there is no MCP-specific browser for tools, resources and prompts.
 - **Your server uses stdio, or the legacy era.** Vayu has no stdio transport and speaks
   the modern Streamable HTTP era only.
-- **You need MCP's authorization flow.** The Inspector runs the OAuth flow, re-authorizes
-  and steps up on `insufficient_scope`. Vayu sends the auth a request carries and reports a
-  `403 insufficient_scope` as a `transport` failure naming the missing scope; a run never
-  re-authorizes, and OAuth discovery for MCP servers is not built.
+- **You need MCP's authorization flow across a whole session.** The Inspector runs the OAuth
+  flow in all three clients and steps up on `insufficient_scope`. Vayu's request builder
+  discovers a server's OAuth endpoints (protected-resource and authorization-server
+  metadata, PKCE, dynamic registration) and offers a Re-authorize after a `403
+  insufficient_scope`, but that is a button, not an automatic flow. A run reports the `403`
+  as a `transport` failure naming the missing scope, never re-authorizes, and a load run
+  cannot sign in. Detail:
+  [discovery from an MCP server URL](../engine/api-reference/authentication.md#discovered-from-an-mcp-server-url).
 - **You want its load features.** Stepped and ramped stairs, a warm-up, a weighted mix with
   an exact ratio, baselines with a regression budget, a `--load-max-p99`-style exit code
   for CI, an NDJSON line per call, session churn and `--load-workers` are documented on
-  its page. Vayu has no stepped stairs, no weighted mix, no baseline-regression budget that
+  its page. Vayu has no user-declared stepped stairs (its capacity search steps adaptively), no weighted mix, no baseline-regression budget that
   fails a run, no per-call NDJSON and no multi-process generator.
 - **You test notifications or the other MCP surfaces.** Subscriptions, `listen` and
-  notification fan-out load, the Apps, Skills and Tasks surfaces, conformance testing and
-  tracking of the spec are outside Vayu. It is not an LLM playground or an evals tool;
+  notification fan-out load, and the Apps, Skills and Tasks surfaces are outside Vayu. It is not an LLM playground or an evals tool;
   MCPJam describes itself as one.
 
 ## When to choose Vayu
