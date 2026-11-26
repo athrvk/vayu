@@ -209,7 +209,7 @@ The entries below span three categories: the `data_retention` keys govern how mu
 
 #### Proxy settings
 
-Four `network_performance` entries decide how **every** outbound request leaves the machine - design sends, load runs, SSE streams, OAuth token acquisition, `POST /import/fetch` (which spec re-fetch and `$ref` bundling ride) and the monitor scrape alike.
+Four `network_performance` entries decide how **every** outbound request leaves the machine - design sends, load runs, SSE streams, OAuth token acquisition, `POST /import/fetch` (which spec re-fetch and `$ref` bundling ride), `POST /import/mcp` and the monitor scrape alike.
 They are read at the point of use, so a change applies to the next transfer with no restart; a load run and a collection run read the policy **once at run start** and hold it for the run, because libcurl reuses a pooled connection only when its proxy configuration matches.
 
 | Key | Default | Values | Effect |

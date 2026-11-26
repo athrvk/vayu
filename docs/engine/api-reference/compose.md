@@ -144,7 +144,7 @@ Where the engine itself writes a query pair into a URL, it uses Postman's rule (
 
 ## URL schemes
 
-Only `http` and `https` URLs are sent, on every send path: Send, a load or collection run, a streaming request, History replay, MCP, `pm.sendRequest`, an OAuth 2.0 token request, `POST /import/fetch` and the server-vitals monitor.
+Only `http` and `https` URLs are sent, on every send path: Send, a load or collection run, a streaming request, History replay, MCP, `pm.sendRequest`, an OAuth 2.0 token request, `POST /import/fetch`, `POST /import/mcp` and the server-vitals monitor.
 The scheme is read case-insensitively from the URL as it stands just before the transfer - after composition, a data row's bind, the pre-request script and the residual pass, and as the transfer is handed it ([Query encoding](#query-encoding)) - so a `{{baseUrl}}` that resolves to `file:///etc` is refused like a typed one, and so is `file:///etc` with a leading space.
 A refused send never reaches the network: status `0`, error code `INVALID_URL`, and the message `Cannot send this request: scheme 'file' is not supported - only http and https URLs can be sent`, naming the scheme as written.
 A `pm.sendRequest` gets the same code and message as its callback's `err`.
@@ -181,7 +181,7 @@ Postman sends such a host as typed and the lookup fails; libcurl without IDN wou
 ## Reserved local ports
 
 No request the engine sends reaches Vayu itself:
-the engine's own port (the `--port` it bound, 9876 by default) and the MCP server's port (the daemon's `--mcp-port`, 9877 when it is started without one) are refused on this machine, on every send path - Send, a load or collection run, a streaming request, History replay, MCP, `pm.sendRequest`, an OAuth 2.0 token request, `POST /import/fetch` and the server-vitals monitor.
+the engine's own port (the `--port` it bound, 9876 by default) and the MCP server's port (the daemon's `--mcp-port`, 9877 when it is started without one) are refused on this machine, on every send path - Send, a load or collection run, a streaming request, History replay, MCP, `pm.sendRequest`, an OAuth 2.0 token request, `POST /import/fetch`, `POST /import/mcp` and the server-vitals monitor.
 The API's [gate](index.md#who-may-call-the-api) admits a loopback request with no `Origin`, which is exactly what the engine's own client sends, so without this a request in an imported collection could read and write everything the API holds (issue [#2355](https://github.com/athrvk/vayu/issues/2355)).
 
 "This machine" is any loopback spelling - `127.0.0.0/8` (`127.1` and other shorthand included), `::1`, `::ffff:127.0.0.1`, `localhost` in any case with or without a trailing dot - and the unspecified `0.0.0.0` and `::`, which connect to the local host.

@@ -45,6 +45,7 @@ add_executable(vayu_tests
     ../src/http/routes/globals.cpp
     ../src/http/routes/health.cpp
     ../src/http/routes/import.cpp
+    ../src/http/routes/import_mcp.cpp
     ../src/http/routes/inbox.cpp
     ../src/http/routes/metrics.cpp
     ../src/http/routes/mock_issuer.cpp
@@ -145,6 +146,7 @@ add_executable(vayu_tests
     if_match_route_test.cpp
     implied_content_type_test.cpp
     import_apply_route_test.cpp
+    import_mcp_test.cpp
     import_parse_insomnia_test.cpp
     import_parse_openapi_test.cpp
     import_parse_postman_body_test.cpp
@@ -180,6 +182,7 @@ add_executable(vayu_tests
     main.cpp
     managed_listener_test.cpp
     mcp_body_test.cpp
+    mcp_fixture_server_test.cpp
     mcp_reply_test.cpp
     metric_record_test.cpp
     metrics_collector_test.cpp
@@ -522,6 +525,7 @@ set(vayu_scratch_database_suites
     IfMatchRouteTest
     IfMatchServerTest
     ImportApplyRouteTest
+    ImportMcpApplyTest
     ImportParseRoute
     InboxListenerTest
     InboxStorageTest

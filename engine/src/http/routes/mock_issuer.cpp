@@ -1101,6 +1101,12 @@ void handle_resource (Issuer& issuer, const httplib::Request& req, httplib::Resp
 
 /// Every route a running issuer serves, bound to @p issuer.
 void serve_issuer_routes (Issuer& issuer) {
+    // httplib compiles each route path into a std::regex, and libstdc++ fills
+    // its `ctype<char>::narrow` cache with unsynchronised writes, so two issuers
+    // starting on two handler threads race in a fresh process (ThreadSanitizer
+    // reports it). One registration at a time keeps the cache single-writer.
+    static std::mutex registration_mutex;
+    const std::lock_guard<std::mutex> registering (registration_mutex);
     using Handler = void (*) (Issuer&, const httplib::Request&, httplib::Response&);
     const auto bind = [&issuer] (Handler handler) {
         return [&issuer, handler] (const httplib::Request& req,

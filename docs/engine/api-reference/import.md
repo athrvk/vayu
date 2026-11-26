@@ -297,13 +297,93 @@ The preview tree lists them in the same order.
 - `400` `Invalid 'importScripts': must be a boolean` (and the same for `importEnvironments`, `fileName`, `sourceUrl`, `unresolvedRefs`).
 - `413` `Import document is N bytes, over the limit of M (raise the 'maxSpecDocumentBytes' setting to allow more)`.
 
-**Body cap (`POST /import`, `/import/parse`, `/import/document`).**
-The management API buffers a request body before a route sees it, so these three routes are bounded from the `Content-Length` header, before the body is read:
+**Body cap (`POST /import`, `/import/parse`, `/import/document`, `/import/mcp`).**
+The management API buffers a request body before a route sees it, so these four routes are bounded from the `Content-Length` header, before the body is read:
 a body over `maxSpecDocumentBytes` plus half again plus 1 MiB (headroom for the JSON string escaping of the document) answers `413` `Request body is N bytes, over the limit of M for an import (raise the 'maxSpecDocumentBytes' setting to allow more)`.
 The limit is read live, so a raised setting applies to the next request.
 A chunked body is refused with `411` like on every route (see [Request bodies](index.md#request-bodies)).
 The exact check on the `content` string described below still runs after the parse.
 A client that streams a very large body may see the connection closed rather than the `413`, since the body is not read.
+
+## POST /import/mcp
+
+Import from a live MCP server (issue [#3838](https://github.com/athrvk/vayu/issues/3838)): ask it what it offers and answer the tree [`POST /import/parse`](#post-importparse) answers.
+[`POST /import/apply`](#post-importapply) persists it unchanged and the import preview reads it as any other format.
+Reads only - nothing is stored.
+
+Every call is a modern-era (`2026-07-28`) Streamable HTTP POST sent as an `mcp` body ([The `mcp` body](request-body.md#the-mcp-body)).
+The envelope, `_meta` and the derived headers are the ones a saved request sends.
+The reply is read by the same reader ([The `mcp` reply](request-body.md#the-mcp-reply)), an event stream included.
+In order:
+
+1. `server/discover`, **best effort**, for the collection's name (`serverInfo.name`).
+   A server older than the method is read on, and the collection is named after the URL's host.
+   That is JSON-RPC `-32601`, or the plain `400` a legacy-era server answers with.
+   A version refusal (`-32022`) and every other failure (a refused connection, a `401`/`403`, a `5xx`) fail the import.
+2. `tools/list`, then `resources/list` and `resources/templates/list`, then `prompts/list`, each as `include` asks and each **following `nextCursor`** until a page carries none.
+   A server that answers `resources/templates/list` with `-32601` lists no templates.
+   Any other failure of a list call fails the import.
+
+**Request:**
+```json
+{
+  "url": "https://mcp.example.com/mcp",
+  "headers": [{ "name": "X-Tenant", "value": "acme" }],
+  "auth": { "mode": "bearer", "token": "..." },
+  "include": { "tools": true, "resources": false, "prompts": false }
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `url` | string, **required** | The server's endpoint, `http` or `https`, with no `user:password@` (a `400`: put credentials in `auth` or `headers`). Stored as given in every generated request's `url`, so a key in its query string is stored too. |
+| `headers` | `[{name, value}]` or object | Sent on every call, read by the rule [`POST /execute`](execute.md#post-execute) reads them by: a name is trimmed and must be a token, a value cannot hold CR, LF or NUL. |
+| `auth` | `{mode: "bearer", token}` | The shape a saved request's auth has. Written as `Authorization: Bearer <token>` (trimmed), unless `headers` already names `Authorization`, which wins. No other mode. |
+| `include` | object | `tools` (default `true`), `resources` and `prompts` (default `false`), each a boolean. An unknown member, and an `include` that leaves nothing included, is a `400`. |
+
+**Response:** `200` - `{collections, environments, globals, meta}`, the `POST /import/parse` shape, `meta.format` `MCP server`.
+One root collection named after the server, holding a folder per included primitive:
+
+| Folder | One request per | Body (`mode: "mcp"`) | Named by |
+|--------|-----------------|----------------------|----------|
+| `Tools` | listed tool | `{"method": "tools/call", "params": {"name": <tool>, "arguments": {}}}` | `name` |
+| `Resources` | listed resource, then resource template | `{"method": "resources/read", "params": {"uri": <uri>}}`; a template's `uriTemplate` as written, with `URI template: <uriTemplate>` leading its description | `name`, else the URI |
+| `Prompts` | listed prompt | `{"method": "prompts/get", "params": {"name": <prompt>, "arguments": {}}}` | `name` |
+
+Every request is a `POST` to `url` described by the entry's `description`, with the `Content-Type: application/json` row an `mcp` body carries and `inherit` auth.
+The body is a bare call (no `jsonrpc` or `id`), so the engine stamps the envelope and `_meta` at send.
+The tool's schema (`mcpTool`), arguments drawn from it and assertions are not filled in (issue [#3839](https://github.com/athrvk/vayu/issues/3839)).
+An entry with no usable identity is skipped and counted in `meta.skipped` as `malformed_item`.
+That is a tool or prompt with no non-empty `name`, a resource with no `uri`, or a template with no `uriTemplate`.
+
+**No credential reaches the tree.**
+With `auth`, the root collection's auth is `{"mode": "bearer", "token": "{{mcpToken}}"}` over a secret collection variable `mcpToken` left empty, for the user to fill.
+A `headers` line whose name is a credential's (`Authorization`, `Cookie`, `X-API-Key` and the rest of the set the logger redacts) is carried onto each request with its value blank and the row disabled.
+The request says which header the server wanted without holding or sending it.
+Every other line is carried as sent.
+
+**Bounds.**
+The server is one a user typed, so each call is held on every side (`constants::import_mcp`):
+- a reply of at most 4 MiB, and 32 MiB of replies across the import;
+- 20 seconds per call (an event stream a server keeps open ends there) and 120 seconds for the whole import, a call being given no more than what is left;
+- no redirect followed;
+- at most 100 pages per list, a list that hands back a cursor it was already sent stopped at once, and 10,000 entries across the import.
+
+An engine shutdown cancels a call in flight.
+Vayu's own engine and MCP ports are refused as on every send path ([Reserved local ports](compose.md#reserved-local-ports)); every other loopback server is reachable.
+The transfer leaves through the [transport policy](health-config.md#proxy-settings).
+Header and token values are never logged.
+
+**Errors:**
+- `400` `Invalid 'url': ...` (`Invalid 'url': put credentials in auth or headers, not the URL` for a URL with userinfo), `Invalid 'headers': ...`, `Invalid 'auth': ...`, `Invalid 'include': ...`, or `Body must be a JSON object`; nothing is sent.
+- `413` `<method> failed: <reason>` for a reply over 4 MiB, `The server's replies came to more than 33554432 bytes, the most one import reads`, or `The server lists more than 10000 tools, resources and prompts, the most one import reads`.
+- `502` `<method> failed: <reason>`, where the reason is the reply reader's own message:
+  - `server supports 2025-11-25, 2025-06-18; this request is 2026-07-28` for a version refusal;
+  - `insufficient_scope: needs "<scopes>"` for a `403` naming them;
+  - `HTTP 400 with no JSON-RPC error: the server looks legacy-era ...` for a legacy server's list call;
+  - a transfer's own error (a refused connection, a timeout, a reserved port).
+- `502` `<method> answered with no '<key>' list`, `<method> repeated a cursor it had already been sent, so the list would never end`, or `<method> still had a nextCursor after 100 pages, the most one import follows`.
+- `502` `The import ran past its 120000 ms total at <method>, the longest one import takes`: a timeout is a `502` here, as it is on `POST /import/fetch`.
 
 ## POST /import
 

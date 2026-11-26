@@ -486,6 +486,8 @@ std::string required_content_type (const json& body) {
     std::string (postman::content_type_of_language (*language));
 }
 
+} // namespace
+
 /**
  * `withRequiredContentType(headers, body)`: the imported headers plus the
  * Content-Type this body cannot go without.
@@ -497,7 +499,7 @@ std::string required_content_type (const json& body) {
  * refuses Content-Type (@p refused: Postman's `disabledSystemHeaders`, #1765)
  * gets none.
  */
-json with_required_content_type (json headers, const json& body, bool refused = false) {
+json with_required_content_type (json headers, const json& body, bool refused) {
     const std::string required = required_content_type (body);
     if (required.empty () || refused) {
         return headers;
@@ -520,6 +522,8 @@ json with_required_content_type (json headers, const json& body, bool refused = 
     { "enabled", true }, { "source", "body-mode" } });
     return headers;
 }
+
+namespace {
 
 /**
  * `joinExec(event)`: a Postman `event` entry's script lines, joined. A `script`

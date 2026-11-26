@@ -1340,6 +1340,34 @@ constexpr const char* EVENT_ERROR    = "error";
 } // namespace import_fetch
 
 /**
+ * @brief What `POST /import/mcp` reads from a live MCP server (#3838).
+ *
+ * The server is one a user typed and nothing else vouches for, so every call
+ * is bounded on all three sides it could hold the engine to: the bytes of one
+ * reply, its time, and how many calls a listing takes. The time is a total
+ * rather than a stall window because a reply may be an event stream, which a
+ * server can keep open with notifications for ever.
+ */
+namespace import_mcp {
+/// The most one reply's body may hold; a `tools/list` page with full schemas
+/// is tens of KiB.
+constexpr size_t MAX_REPLY_BYTES = size_t{ 4 } * 1024 * 1024;
+/// One call's whole bound, an event-stream reply included.
+constexpr int CALL_TIMEOUT_MS = 20000;
+/// The most pages one list method is followed for: a server that hands back
+/// the cursor it was sent would otherwise be asked for ever.
+constexpr size_t MAX_PAGES = 100;
+/// The most entries (tools, resources, templates and prompts together) one
+/// import reads, each of which becomes a stored request.
+constexpr size_t MAX_ITEMS = 10000;
+/// The whole import's bound, every call together: without it a server could
+/// hold one request open for `MAX_PAGES` calls of `CALL_TIMEOUT_MS` each.
+constexpr long long TOTAL_TIMEOUT_MS = 120000;
+/// The most reply bytes one import reads, every call together.
+constexpr size_t MAX_TOTAL_BYTES = size_t{ 32 } * 1024 * 1024;
+} // namespace import_mcp
+
+/**
  * @brief What the management API reads as a request body (issue #1824).
  */
 namespace request_body {

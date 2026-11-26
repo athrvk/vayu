@@ -100,7 +100,7 @@ Clearing every jar also clears the ones `GET /cookies` leaves out because their 
 ## Client certificates
 
 An mTLS endpoint asks the client to present a certificate, and a certificate is a property of **where you are calling**, not of one request - the transfer that needs it is as often an OAuth token fetch, a redirect or a script's `pm.sendRequest` as it is the request you are looking at.
-So the engine keeps a registry of host to certificate and applies the matching entry itself, on every outbound path: design sends, load runs, SSE streams, `pm.sendRequest`, the OAuth token endpoint, `POST /import/fetch` and the monitor scrape.
+So the engine keeps a registry of host to certificate and applies the matching entry itself, on every outbound path: design sends, load runs, SSE streams, `pm.sendRequest`, the OAuth token endpoint, `POST /import/fetch`, `POST /import/mcp` and the monitor scrape.
 Nothing on a request names a certificate.
 
 Rows are read into the [transport policy](health-config.md#proxy-settings) at the point of use, so a change reaches the next transfer without a restart - and, exactly like the proxy, a load run and a collection run read the registry **once at run start** and hold it, because libcurl reuses a pooled connection only when its TLS identity matches.

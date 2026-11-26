@@ -583,6 +583,7 @@ add_library(vayu_core STATIC
     src/core/operation_match.cpp
     src/core/import_document.cpp
     src/core/jmeter_import.cpp
+    src/core/mcp_import.cpp
     src/core/script_api_scan.cpp
     src/core/script_config.cpp
     src/core/openapi_document.cpp
@@ -850,6 +851,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/scripting.cpp
         src/http/routes/script_types.cpp
         src/http/routes/import.cpp
+        src/http/routes/import_mcp.cpp
         src/http/routes/diagnostics.cpp
         src/http/routes/oauth.cpp
         src/http/routes/oauth_authorize.cpp

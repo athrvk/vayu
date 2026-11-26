@@ -1406,8 +1406,9 @@ std::string spec_content_hash (const std::string& content);
 size_t spec_size_cap (vayu::db::Database& db);
 
 /**
- * Pre-routing guard for the three import routes that carry a whole document in
- * their body (`POST /import`, `/import/parse`, `/import/document`): answers 413
+ * Pre-routing guard for the import routes (`POST /import`, `/import/parse`,
+ * `/import/document`, and `/import/mcp`, whose body carries no document but is
+ * an import all the same, #3838): answers 413
  * from the `Content-Length` header, before cpp-httplib buffers the body, when it
  * exceeds the live `maxSpecDocumentBytes` plus JSON-escaping headroom. The
  * route's own exact check on the document still runs after the parse (#1782).

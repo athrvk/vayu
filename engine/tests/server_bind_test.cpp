@@ -206,17 +206,20 @@ httplib::Response& res) {
 
 } // namespace
 
+// Mutation check: drop a path from `reject_oversized_import` and its case is
+// Unhandled.
 TEST_F (ServerBindTest, AnOversizedImportBodyIsRefusedWith413BeforeItIsRead) {
-    httplib::Response res;
-    // The default cap is 10 MiB, so the limit is 16 MiB: 20 MiB is refused.
-    EXPECT_EQ (
-    guard_outcome (*db_, "/import/parse", std::to_string (20U * 1024U * 1024U), res),
-    httplib::Server::HandlerResponse::Handled);
-    EXPECT_EQ (res.status, 413);
-    const auto parsed = nlohmann::json::parse (res.body);
-    EXPECT_NE (parsed.at ("error").at ("message").get<std::string> ().find (
-               "maxSpecDocumentBytes"),
-    std::string::npos);
+    for (const char* path : { "/import", "/import/parse", "/import/document", "/import/mcp" }) {
+        httplib::Response res;
+        // The default cap is 10 MiB, so the limit is 16 MiB: 20 MiB is refused.
+        EXPECT_EQ (guard_outcome (*db_, path, std::to_string (20U * 1024U * 1024U), res),
+        httplib::Server::HandlerResponse::Handled)
+        << path;
+        EXPECT_EQ (res.status, 413) << path;
+        const auto parsed = nlohmann::json::parse (res.body, nullptr, false);
+        EXPECT_NE (parsed.dump ().find ("maxSpecDocumentBytes"), std::string::npos)
+        << path << ": " << res.body;
+    }
 }
 
 TEST_F (ServerBindTest, TheImportBodyLimitFollowsTheLiveSetting) {
