@@ -472,7 +472,7 @@ class McpFixtureServer {
         }
         const std::size_t end = settings.tools_page_size == 0 ?
         total :
-        std::min (total, offset + settings.tools_page_size);
+        (std::min)(total, offset + settings.tools_page_size);
         nlohmann::json page   = nlohmann::json::array ();
         for (std::size_t at = offset; at < end; ++at) {
             page.push_back (settings.tools.at (at));
