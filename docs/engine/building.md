@@ -1194,6 +1194,25 @@ lock's justification is the `-j4` blow-up, and a cheaper group is not one that
 survives overlapping - that is its own experiment.
 Do not shrink `vayu_scratch_database_suites` without one.
 
+**The list is not derived from the `temp_database.hpp` include, and the numbers
+say why (#3852).** Deriving it - every suite declared in a test file that
+includes the header, directly or through a fixture header - would lock 371
+suites instead of 137. Measured on a 4-core Linux box (Debug, 7,993 tests, all
+green): serial 1,186s, of which the listed suites are 2,754 tests and 636s
+(54%, down from the 81% above, which was measured on 2,070 tests) and the
+derived set 4,044 tests and 816s (69%). The 234 newly locked suites
+(1,290 tests, 179s) share a file with a database suite but open no database of
+their own: `ElementsTimersLoadTest` (40s) and `SseConsumer` (22s) are
+timer- and socket-bound, and 70-odd-test parameter tables such as
+`RunConfigValidation` are only process starts. With the lock forced on as
+Windows runs it and the preset's `-j8`, the list finished in 619s and 613s and
+the derived set in 788s and 803s, 29% slower by the best run of each. On
+Windows the locked group is the wall, so that 179s of serial work lands
+directly on it. The strace derivation in the `CMakeLists.txt` comment (every
+suite run alone, which opened a `*.db`) is the method to repeat, and the two
+guards stay as the cheap exact checks. Unlocked, the same suite is 219s at
+`-j8`.
+
 Isolation is the **default** on every platform now, so a hand-run `ctest -j` is
 safe wherever it happens. No preset sets
 `VAYU_TEST_NO_SCRATCH_ISOLATION`, which skips the scratch directory entirely and

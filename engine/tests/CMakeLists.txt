@@ -460,6 +460,17 @@ vayu_embed_windows_manifest(vayu_tests)
 # The list was derived by tracing: every suite run alone under `strace` that
 # opened a `*.db` file, which agreed with a source read everywhere but one
 # false positive. Re-derive it the same way rather than by eye.
+#
+# **Why it is a list and not "every suite in a file that includes
+# `temp_database.hpp`"** (#3852). Measured on linux-dev, 7,993 tests, the
+# lock forced on as Windows runs it, ctest -j8, best of two: the list as it
+# stands (137 suites, 2,754 tests, 636s of the 1,186s serial run) finished in
+# 613s; the derived set (371 suites, 4,044 tests, 816s) in 788s, 29% longer.
+# The 234 extra suites are pure-logic or timer- and socket-bound tests that
+# share a file with database ones, and on Windows each would queue behind the
+# lock for nothing - two of them, `ElementsTimersLoadTest` and `SseConsumer`,
+# are 62s of the 179s added. The strace derivation above is what separates
+# them, so the list stays and so do both guards.
 set(vayu_scratch_database_suites
     AuthRefreshTuningTest
     AuthResolverOAuth2Test
