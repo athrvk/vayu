@@ -2424,6 +2424,11 @@ export interface RunScenarioStepStat {
 	index: number;
 	/** `requests.name` - what the sequence calls this step. */
 	name: string;
+	/**
+	 * An MCP step's `<method> <tool>` (#3829), e.g. `tools/call search`, drawn beside
+	 * {@link name}; absent on every other step and before #3829.
+	 */
+	label?: string;
 	requestId: string;
 	method: string;
 	/** Step executions across every virtual user and iteration. */

@@ -87,7 +87,7 @@ The paginated `GET /runs` list row cannot carry the manifest and instead carries
 The history row reads it because a run whose work is a sequence has no `url` or `method` for the ordinary row to show, and that is true of both executors.
 
 A scenario load run's **report** carries the per-step breakdown the design-mode runner has no need for:
-`scenario.steps[]` (`{index, name, requestId, method, executed, errors, httpErrors, noResponse, latency:{min,p50,p95,p99,max}}`) plus `virtualUsers`, `iterationsAbandoned` and, once a pass completed,
+`scenario.steps[]` (`{index, name, label?, requestId, method, executed, errors, httpErrors, noResponse, latency:{min,p50,p95,p99,max}}`) plus `virtualUsers`, `iterationsAbandoned` and, once a pass completed,
 `passDuration` (`{count, mean, min, p50, p95, p99, max}` in ms, #3570: each completed pass from the claim of its first step to the completion of its last, timer waits between steps included, abandoned passes left out).
 It stores no per-step `results` rows, so that array is the only per-step record such a run keeps.
 
@@ -95,6 +95,10 @@ It also carries `scenario.assertions` (`{passed, failed}`, #2820) when the run m
 It counts assertions, where `scenario.failed` counts step executions in which one failed (#2824, once however many), and the report's error rate stays HTTP-only, so a run of `200`s that failed every assertion reads a 0% error rate and a non-zero `assertions.failed`.
 **Absent**, never `{0, 0}`, for a run with no such assertion, a collection run and a report stored before the field.
 It is the report's top-level `assertions.exact` too (#3537), and the renderer reads that block, falling back to `scenario.assertions` from an older engine, through `reportAssertionsOf` (`components/shared/run-assertions.ts`): the verdict (`reportOutcome`) directly, `RunKeyMetrics`' fourth tile and the Overview's Assertions card through `exactAssertionsOf`.
+
+A step's `label` (#3829) is the engine's name for what the step ran, `tools/call search` for an MCP step, and is present only on those; `name` stays the request's name and the step's identity.
+The Steps table draws it beside the name in a muted monospace (`StepLabelCell`), so a sequence of tool calls reads as which call each step made.
+The engine renders the report's exports, so the app has no second place that formats the steps.
 
 A step's `errors` is the run's one error definition (a response outside 2xx/3xx, or no response) and equals `httpErrors + noResponse`.
 Only a `noResponse` execution, or a jump the run could not honour (#2974), ends its iteration; an HTTP error status does not.

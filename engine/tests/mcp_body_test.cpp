@@ -310,6 +310,60 @@ TEST (McpHeaderValue, EncodesWhatIsNotPlainAsciiAsTheSpecTableDoes) {
 }
 
 // ---------------------------------------------------------------------------
+// The step label (#3829).
+// ---------------------------------------------------------------------------
+
+// A call names what `Mcp-Name` would mirror, written bare or as an envelope.
+// Mutation check: return `*method` alone after the name lookup in
+// `mcp_step_label` and this reddens.
+TEST (McpStepLabel, NamesTheMethodAndWhatItsMcpNameMirrors) {
+    EXPECT_EQ (mcp_step_label (kToolsCall), "tools/call execute_sql");
+    EXPECT_EQ (mcp_step_label (R"({"jsonrpc":"2.0","id":7,"method":"prompts/get","params":{"name":"greet"}})"),
+    "prompts/get greet");
+}
+
+// A method with no tool or prompt name is labelled by the method, whatever
+// `params` holds. `resources/read`'s `uri` is what `Mcp-Name` mirrors, but it
+// names no tool and can carry a credential, so the exported label never copies
+// it. Mutation check: test `source.empty ()` instead of `source != "name"` in
+// `mcp_step_label` and the `resources/read` cases redden.
+TEST (McpStepLabel, AMethodThatNamesNoToolIsTheMethodAlone) {
+    EXPECT_EQ (mcp_step_label (R"({"method":"tools/list"})"), "tools/list");
+    EXPECT_EQ (mcp_step_label (R"({"method":"tools/list","params":{"name":"not-a-target"}})"),
+    "tools/list");
+    EXPECT_EQ (mcp_step_label (R"({"method":"resources/read","params":{"uri":"file:///app/config.json"}})"),
+    "resources/read");
+    EXPECT_EQ (mcp_step_label (R"({"method":"resources/read","params":{"uri":"https://user:pw@host/r?token=abc"}})"),
+    "resources/read");
+}
+
+// A name a data row or the iteration binds is a different call per iteration,
+// and so is a missing or empty one: the method is all one label can say.
+TEST (McpStepLabel, ANameNotFixedAtPlanTimeIsTheMethodAlone) {
+    EXPECT_EQ (mcp_step_label (R"({"method":"tools/call","params":{"name":"{{data.tool}}"}})"),
+    "tools/call");
+    EXPECT_EQ (mcp_step_label (R"({"method":"tools/call","params":{"name":"run_{{$vu}}"}})"),
+    "tools/call");
+    EXPECT_EQ (mcp_step_label (R"({"method":"tools/call","params":{"name":""}})"), "tools/call");
+    EXPECT_EQ (mcp_step_label (R"({"method":"tools/call","params":{"name":7}})"), "tools/call");
+    EXPECT_EQ (mcp_step_label (R"({"method":"tools/call"})"), "tools/call");
+}
+
+// Text that is not one object, or names no usable method, gets no label.
+TEST (McpStepLabel, ACallWithNoReadableMethodHasNoLabel) {
+    EXPECT_EQ (mcp_step_label (R"({"method":{{m}}})"), "");
+    EXPECT_EQ (mcp_step_label (""), "");
+    EXPECT_EQ (mcp_step_label (R"(["tools/call"])"), "");
+    EXPECT_EQ (mcp_step_label (R"({"params":{"name":"search"}})"), "");
+    EXPECT_EQ (mcp_step_label (R"({"method":"{{method}}","params":{"name":"search"}})"), "");
+    const std::string one_past = R"({"method":"tools/call","params":)" +
+    vayu::tests::nested_object_text (
+    vayu::core::constants::request_body::MAX_JSON_DEPTH, "1") +
+    "}";
+    EXPECT_EQ (mcp_step_label (one_past), "");
+}
+
+// ---------------------------------------------------------------------------
 // The stored tool.
 // ---------------------------------------------------------------------------
 

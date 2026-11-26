@@ -43,11 +43,11 @@
 
 2,110 iterations started, 2,090 completed, 15 abandoned, 5 cut short
 
-| Step                   | Executed | Errors | Assertions              | p50 (ms) | p95 (ms) | p99 (ms) |
-| ---------------------- | -------- | ------ | ----------------------- | -------- | -------- | -------- |
-| Log in                 | 2,105    | 0      | 2,105 passed, 0 failed  | 42       | 88       | 131      |
-| Add to cart            | 2,098    | 9      | 2,080 passed, 18 failed | 35       | 97       | 210      |
-| Pay \| confirm \<now\> | 2,090    | 3      | -                       | 120      | 310      | 480      |
+| Step                                                 | Executed | Errors | Assertions              | p50 (ms) | p95 (ms) | p99 (ms) |
+| ---------------------------------------------------- | -------- | ------ | ----------------------- | -------- | -------- | -------- |
+| Log in                                               | 2,105    | 0      | 2,105 passed, 0 failed  | 42       | 88       | 131      |
+| Add to cart                                          | 2,098    | 9      | 2,080 passed, 18 failed | 35       | 97       | 210      |
+| Pay \| confirm \<now\> (tools/call charge\|\<card\>) | 2,090    | 3      | -                       | 120      | 310      | 480      |
 
 ## Transactions
 

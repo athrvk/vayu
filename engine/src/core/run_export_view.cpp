@@ -1672,13 +1672,23 @@ ReportCell count_cell (const ordered& source, std::string_view key) {
 }
 
 /// The step's name, or its position when the document names none.
-ReportText step_label (const ordered& step, std::size_t position) {
+ReportText step_name (const ordered& step, std::size_t position) {
     if (std::string name = text_at (step, { "name" }); !name.empty ()) {
         return user (std::move (name));
     }
     const double index =
     number_at (step, { "index" }).value_or (static_cast<double> (position));
     return words ("Step " + format_run_count (index + 1));
+}
+
+/// @ref step_name, followed by an `mcp` step's call in parentheses (#3829).
+ReportText step_label (const ordered& step, std::size_t position) {
+    ReportText name   = step_name (step, position);
+    std::string label = text_at (step, { "label" });
+    if (label.empty ()) {
+        return name;
+    }
+    return name + words (" (") + user (std::move (label)) + words (")");
 }
 
 Row step_row (const ordered& step, std::size_t position) {

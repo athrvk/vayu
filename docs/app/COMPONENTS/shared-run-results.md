@@ -337,9 +337,10 @@ the count it lists says "Showing N of M" rather than reading as the whole set.
 
 What a scenario load run's step table is drawn from, shared so a step reads the same
 while the run is live and after it (#2823): `StepLabelCell` (position, an optional
-method badge, name), `ExecutedCell` (with the "(n short)" marker only when handed an
-`expectedPerStep`), `ErrorsCell` (red at non-zero, the HTTP-error / no-response split on
-hover when both halves are known) and `ScenarioFacts` (virtual users, iterations started,
+method badge, name, an optional engine label such as `tools/call search`, #3829),
+`ExecutedCell` (with the "(n short)" marker only when handed an `expectedPerStep`),
+`ErrorsCell` (red at non-zero, the HTTP-error / no-response split on hover when both
+halves are known) and `ScenarioFacts` (virtual users, iterations started,
 completed, and abandoned while non-zero). `SequenceBadge` is the neutral outline
 "SEQUENCE" chip that stands where a method sits; History's request bar and the live
 `LiveSequencePanel` both wear it. History's `ScenarioStepsTab` supplies the finished
