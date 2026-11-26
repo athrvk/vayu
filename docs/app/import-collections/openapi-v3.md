@@ -218,7 +218,7 @@ Why optional value-less parameters import **disabled** (issues #622, #658): the 
 | `application/json` (also any key starting with `application/json` or ending in `+json`, via `findJsonMedia`) | `{ mode: "json", content }` | `content = JSON.stringify(media.example ?? sampleSchema(media.schema), null, 2)`. The media-object `example` wins over the schema; if neither exists, `{}`. |
 | `text/plain` | `{ mode: "text", content }` | the media object's `example` as the text it is, else empty (the schema is not sampled for text bodies) |
 | `application/xml`, `text/xml`, or any `+xml` type | `{ mode: "xml", content }` | the same: the `example` as the text it is, else empty - a Vayu skeleton export writes an `xml` body exactly this way |
-| `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per field from `schemaFormFields(schema)` |
+| `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per field from `Sampler::form_fields(schema)` |
 | `multipart/form-data` | `{ mode: "form-data", fields }` | same as urlencoded, except a `format: binary` field becomes a **file part** (see [File parts](#file-parts)) |
 | `application/octet-stream` (any schema), else the first media type whose schema is one `format: binary` string (`$ref` and the first composed branch followed) | `{ mode: "binary", file: { src: "", contentType } }` | a **whole-file body** with no file chosen: the spec names the upload, never the file. `contentType` is that media type, lowered and without parameters; a wildcard such as `image/*` gives none, and the send derives one from the file. Counted as `file_body` |
 | no `content`, or none of the above | `{ mode: "none" }` | |
@@ -265,13 +265,14 @@ JSON is preferred: `findJsonMedia` is checked first and takes precedence over te
 
 `Sampler::form_fields` is the form-body wrapper over this: it samples the schema, returns the keys of the result (none for a non-object sample), and marks each field text or file. The file flag is read off the **property schema**, not the sampled value: the sampler turns a `format: binary` string into `""`, which no longer says anything about the field. See [Request body generation](#request-body-generation).
 
-**Options.** A default `SampleOptions` is everything above, the rule set the OpenAPI import and its conformance fixture hold. A caller that is not an OpenAPI import (the MCP import, which samples a tool's `inputSchema` against itself as the `$ref` root) opts into three more, each off by default:
+**Options.** A default `SampleOptions` is everything above, the rule set the OpenAPI import and its conformance fixture hold. A caller that is not an OpenAPI import (the MCP import, which samples a tool's `inputSchema` against itself as the `$ref` root) opts into four more, each off by default:
 
 | Option | Effect when on |
 |--------|----------------|
 | `use_default` | a schema's `default` is a pinned value, ranked `const` → `default` → `example` → `examples[0]` |
-| `required_only` | an object samples only the properties its `required` array names, in `required` order; no `required` samples to `{}`, and a required name `properties` does not declare is skipped |
+| `required_only` | an object samples only the properties its `required` array names, in `required` order; no `required` samples to `{}`, and a required name `properties` does not declare stubs to `""`. A node that also composes (`allOf` / `oneOf` / `anyOf`) keeps its own required properties and takes the first branch's members beside them, its own winning |
 | `enum_any_type` | a non-empty `enum` samples to `enum[0]` for every scalar `type` and for no `type`, not for `type: string` alone |
+| `honour_bounds` | a stub clears the lower bounds the schema states: `minimum` / numeric `exclusiveMinimum` above zero (an integer rounds up), `minLength` as a string of `a`s, `minItems` as that many copies of the sampled item. Strings and item counts are capped (`MAX_BOUNDED_STRING_LENGTH`, `MAX_BOUNDED_ITEMS`); `pattern` and `format` are not read |
 
 ## Auth / security
 

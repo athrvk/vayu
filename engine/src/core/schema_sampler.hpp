@@ -29,6 +29,10 @@
 #include "js_json.hpp"
 #include "openapi_walk.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <set>
@@ -40,6 +44,15 @@ namespace vayu::core {
 /// The sampler's depth cap. A deeper schema samples to `{}`: a stub the user
 /// edits beats a walk that does not end.
 constexpr int MAX_SAMPLE_DEPTH = 6;
+
+/// The most items a `minItems` array is stubbed to under `honour_bounds`. A tool
+/// schema is read from a server, and arrays of arrays each asking for a billion
+/// items would otherwise allocate without end; 8 keeps a MAX_SAMPLE_DEPTH-deep
+/// nest in the hundreds of thousands of values.
+constexpr std::size_t MAX_BOUNDED_ITEMS = 8;
+
+/// The longest `minLength` string stubbed to; a string does not multiply by nesting.
+constexpr std::size_t MAX_BOUNDED_STRING_LENGTH = 1024;
 
 /// A `$ref` chain already followed on this branch, copied per branch: two
 /// sibling properties may each name the same shared schema without either being
@@ -59,14 +72,24 @@ struct SampleOptions {
 
     /// An object samples only the properties its `required` array names, in
     /// `required` order; no `required` samples to `{}`. A name `required` lists
-    /// that `properties` does not declare has no schema to sample and is
-    /// skipped.
+    /// that `properties` does not declare has no schema to sample and stubs to
+    /// `""`, so the value carries every name `required` lists. A node that also
+    /// composes (`allOf` / `oneOf` / `anyOf`) keeps its own required properties
+    /// and takes the first branch's members beside them, its own winning.
     bool required_only = false;
 
     /// A non-empty `enum` samples to `enum[0]` for every scalar `type` and for
     /// no `type` at all. The importer takes it for `type: string` alone, so an
     /// `integer` enum there samples to `0`, a value the enum does not allow.
     bool enum_any_type = false;
+
+    /// A stub clears the lower bounds a schema states, so a value the schema
+    /// refuses is not sent: a number `minimum` / numeric `exclusiveMinimum` above
+    /// zero (an integer rounds up to a whole number), a string `minLength` of
+    /// `a`s, an array `minItems` copies of its sampled item. Capped at
+    /// `MAX_BOUNDED_ITEMS` / `MAX_BOUNDED_STRING_LENGTH`. `pattern` and
+    /// `format` are not read.
+    bool honour_bounds = false;
 };
 
 class SchemaSampler {
@@ -200,6 +223,45 @@ class SchemaSampler {
         (options_.enum_any_type && (type.empty () || is_scalar_type (type)));
     }
 
+    /// The non-negative whole number @p node states under @p key, clamped to
+    /// @p cap, when `honour_bounds` is on; 0 otherwise.
+    [[nodiscard]] std::size_t
+    bounded_size (const json* node, const char* key, std::size_t cap) const {
+        const json* bound = options_.honour_bounds ? js::prop (node, key) : nullptr;
+        if (bound == nullptr || !bound->is_number ()) {
+            return 0;
+        }
+        const double wanted = bound->get<double> ();
+        if (!(wanted > 0)) {
+            return 0;
+        }
+        return wanted >= static_cast<double> (cap) ? cap : static_cast<std::size_t> (wanted);
+    }
+
+    /// 0, or under `honour_bounds` the smallest value of the type that clears
+    /// `minimum` and a numeric `exclusiveMinimum` when 0 does not. Whole values
+    /// are written as integers, so a `number` stub of 1 stores `1`, not `1.0`.
+    [[nodiscard]] json numeric_stub (const json* node, bool integer) const {
+        double stub = 0;
+        if (options_.honour_bounds) {
+            const json* minimum   = js::prop (node, "minimum");
+            const json* exclusive = js::prop (node, "exclusiveMinimum");
+            if (minimum != nullptr && minimum->is_number ()) {
+                const double bound = minimum->get<double> ();
+                stub = (std::max)(stub, integer ? std::ceil (bound) : bound);
+            }
+            if (exclusive != nullptr && exclusive->is_number ()) {
+                const double bound = exclusive->get<double> ();
+                stub = (std::max)(stub, integer ? std::floor (bound) + 1 : bound + 1);
+            }
+        }
+        constexpr double MAX_EXACT_INTEGER = 9e15; // below 2^53, so the cast is exact
+        if (stub == std::floor (stub) && stub < MAX_EXACT_INTEGER) {
+            return json (static_cast<std::int64_t> (stub));
+        }
+        return json (stub);
+    }
+
     /**
      * The stub a scalar type is sampled as, or nothing for a structured one.
      * `make_optional`, not a bare return: copy-initializing an `optional<json>`
@@ -214,10 +276,11 @@ class SchemaSampler {
             return std::make_optional (*first_enum);
         }
         if (type == "string") {
-            return std::make_optional (json (""));
+            return std::make_optional (json (std::string (
+            bounded_size (node, "minLength", MAX_BOUNDED_STRING_LENGTH), 'a')));
         }
         if (type == "integer" || type == "number") {
-            return std::make_optional (json (0));
+            return std::make_optional (numeric_stub (node, type == "integer"));
         }
         if (type == "boolean") {
             return std::make_optional (json (false));
@@ -228,33 +291,98 @@ class SchemaSampler {
         return std::nullopt;
     }
 
-    /// The members of an object schema, each sampled. With `required_only`,
-    /// only those `required` names, in `required` order.
-    [[nodiscard]] json
-    sample_properties (const json* node, int depth, const SeenRefs& seen) const {
-        const json* properties = js::as_record (js::prop (node, "properties"));
-        json sampled           = json::object ();
-        if (properties == nullptr) {
-            return sampled;
-        }
-        if (!options_.required_only) {
-            for (auto entry = properties->begin (); entry != properties->end (); ++entry) {
-                sampled[entry.key ()] = walk (&entry.value (), depth + 1, seen);
-            }
-            return sampled;
-        }
+    /// Each `required` name of @p node, in `required` order: sampled from its
+    /// `properties` entry, or stubbed to `""` when there is none. A name that is
+    /// not a string is skipped.
+    [[nodiscard]] json sample_required (const json* node,
+    const json* properties,
+    int depth,
+    const SeenRefs& seen) const {
+        json sampled         = json::object ();
         const json* required = js::prop (node, "required");
         if (required == nullptr || !required->is_array ()) {
             return sampled;
         }
         for (const json& name : *required) {
             const std::string* key = js::as_str (&name);
-            const json* member = key != nullptr ? js::prop (properties, *key) : nullptr;
-            if (member != nullptr) {
-                sampled[*key] = walk (member, depth + 1, seen);
+            if (key == nullptr) {
+                continue;
             }
+            const json* member = js::prop (properties, *key);
+            sampled[*key] =
+            member != nullptr ? walk (member, depth + 1, seen) : json ("");
         }
         return sampled;
+    }
+
+    /// The members of an object schema, each sampled. With `required_only`,
+    /// only those `required` names (`sample_required`).
+    [[nodiscard]] json
+    sample_properties (const json* node, int depth, const SeenRefs& seen) const {
+        const json* properties = js::as_record (js::prop (node, "properties"));
+        if (options_.required_only) {
+            return sample_required (node, properties, depth, seen);
+        }
+        json sampled = json::object ();
+        if (properties == nullptr) {
+            return sampled;
+        }
+        for (auto entry = properties->begin (); entry != properties->end (); ++entry) {
+            sampled[entry.key ()] = walk (&entry.value (), depth + 1, seen);
+        }
+        return sampled;
+    }
+
+    /// A node that composes through @p branch. Under `required_only` the node's
+    /// own required properties are kept: the branch alone would drop what the
+    /// node itself requires (`{"required":["a"],"oneOf":[{"required":["b"]}]}`).
+    /// The node's members come first and win; the branch adds the members the
+    /// node does not name, and only an object branch does.
+    [[nodiscard]] json
+    sample_composed (const json* node, const json* branch, int depth, SeenRefs seen) const {
+        if (!options_.required_only) {
+            return walk (branch, depth + 1, std::move (seen));
+        }
+        json own         = sample_properties (node, depth, seen);
+        json from_branch = walk (branch, depth + 1, std::move (seen));
+        if (own.empty ()) {
+            return from_branch;
+        }
+        if (from_branch.is_object ()) {
+            for (auto entry = from_branch.begin (); entry != from_branch.end (); ++entry) {
+                if (!own.contains (entry.key ())) {
+                    own[entry.key ()] = std::move (entry.value ());
+                }
+            }
+        }
+        return own;
+    }
+
+    /// An array's stub: its `items` sampled once (`minItems` copies under
+    /// `honour_bounds`), else `prefixItems` position by position, else `[]`.
+    [[nodiscard]] json sample_array (const json* node, int depth, const SeenRefs& seen) const {
+        const json* items = js::prop (node, "items");
+        if (js::truthy (items)) {
+            const json item         = walk (items, depth + 1, seen);
+            json sampled            = json::array ();
+            const std::size_t count = (std::max)(std::size_t{ 1 },
+            bounded_size (node, "minItems", MAX_BOUNDED_ITEMS));
+            for (std::size_t copy = 0; copy < count; ++copy) {
+                sampled.push_back (item);
+            }
+            return sampled;
+        }
+        // 3.1's JSON-Schema-2020-12 tuple form: `items` absent,
+        // `prefixItems` naming each position's own schema instead.
+        if (const json* tuple = js::prop (node, "prefixItems");
+        tuple != nullptr && tuple->is_array () && !tuple->empty ()) {
+            json sampled = json::array ();
+            for (const json& position : *tuple) {
+                sampled.push_back (walk (&position, depth + 1, seen));
+            }
+            return sampled;
+        }
+        return json::array ();
     }
 
     [[nodiscard]] json walk (const json* node, int depth, SeenRefs seen) const {
@@ -280,7 +408,7 @@ class SchemaSampler {
         }
 
         if (const json* branch = first_branch (node)) {
-            return walk (branch, depth + 1, std::move (seen));
+            return sample_composed (node, branch, depth, std::move (seen));
         }
 
         const std::string type = declared_type (node);
@@ -288,23 +416,7 @@ class SchemaSampler {
             return *stub;
         }
         if (type == "array") {
-            const json* items = js::prop (node, "items");
-            if (js::truthy (items)) {
-                json sampled = json::array ();
-                sampled.push_back (walk (items, depth + 1, std::move (seen)));
-                return sampled;
-            }
-            // 3.1's JSON-Schema-2020-12 tuple form: `items` absent,
-            // `prefixItems` naming each position's own schema instead.
-            if (const json* tuple = js::prop (node, "prefixItems");
-            tuple != nullptr && tuple->is_array () && !tuple->empty ()) {
-                json sampled = json::array ();
-                for (const json& position : *tuple) {
-                    sampled.push_back (walk (&position, depth + 1, seen));
-                }
-                return sampled;
-            }
-            return json::array ();
+            return sample_array (node, depth, seen);
         }
         // No type, or one this sampler has no stub for: fall back to walking the
         // properties, which is what a schema with only `properties` declares.

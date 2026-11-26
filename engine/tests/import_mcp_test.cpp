@@ -280,6 +280,25 @@ TEST (ImportMcpRoute, AToolsRequiredArgumentsAreSampledFromItsSchema) {
     EXPECT_EQ (arguments_of (tools.at (3)), json::object ());
 }
 
+TEST (ImportMcpRoute, ArgumentsSatisfyAToolsComposedRequiredAndItsMinimums) {
+    McpFixtureServer server;
+    server.set_tools (json::parse (R"([
+      {"name":"either","description":"Runs either",
+       "inputSchema":{"type":"object",
+         "properties":{"a":{"type":"string"},"page":{"type":"integer","minimum":1}},
+         "required":["a","page","undeclared"],
+         "oneOf":[{"required":["a"]},{"required":["b"]}]}}])"));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    const json tools = folder_of (result, "Tools").at ("requests");
+    ASSERT_EQ (tools.size (), 1U);
+
+    // The tool's own required names survive its `oneOf`, the integer clears
+    // `minimum: 1`, and a required name no property declares is still sent.
+    EXPECT_EQ (arguments_of (tools.at (0)),
+    json::parse (R"({"a":"","page":1,"undeclared":""})"));
+}
+
 TEST (ImportMcpRoute, AToolsSchemaIsStoredAsMcpToolWithoutItsOutputSchema) {
     McpFixtureServer server;
     server.set_tools (schema_tools ());

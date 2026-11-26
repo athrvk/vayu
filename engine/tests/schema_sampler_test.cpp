@@ -51,6 +51,12 @@ SampleOptions with_enum_any_type () {
     return options;
 }
 
+SampleOptions with_honour_bounds () {
+    SampleOptions options;
+    options.honour_bounds = true;
+    return options;
+}
+
 /// A chain of @p levels nested object schemas, each holding the next under
 /// `c`, ending in a string. The string sits at depth @p levels.
 std::string chain_of (int levels) {
@@ -289,13 +295,57 @@ TEST (SchemaSamplerRequiredOnly, NoRequiredArraySamplesToAnEmptyObject) {
     ordered_json::object ());
 }
 
-TEST (SchemaSamplerRequiredOnly, ARequiredNameWithNoSchemaOrNoStringIsSkipped) {
+TEST (SchemaSamplerRequiredOnly,
+ARequiredNameWithNoSchemaStubsToAnEmptyStringAndANonStringIsSkipped) {
     const ordered_json sampled = sample_of (R"({
         "type":"object",
         "required":["ghost",7,"a"],
         "properties":{"a":{"type":"integer"}}})",
     with_required_only ());
-    EXPECT_EQ (sampled, ordered_json::parse (R"({"a":0})"));
+    EXPECT_EQ (sampled, ordered_json::parse (R"({"ghost":"","a":0})"));
+    // No `properties` at all: every required name is still carried.
+    EXPECT_EQ (sample_of (R"({"required":["x","y"]})", with_required_only ()),
+    ordered_json::parse (R"({"x":"","y":""})"));
+    // Default options sample no `required` list, so the importer's output is unchanged.
+    EXPECT_EQ (sample_of (R"({"required":["x"]})"), ordered_json::object ());
+}
+
+TEST (SchemaSamplerRequiredOnly, AComposedNodeKeepsItsOwnRequiredProperties) {
+    const std::string schema = R"({
+        "type":"object","properties":{"a":{"type":"string"}},"required":["a"],
+        "oneOf":[{"required":["a"]},{"required":["b"]}]})";
+    EXPECT_EQ (sample_of (schema, with_required_only ()), ordered_json::parse (R"({"a":""})"));
+    // Without the option the first branch is the whole answer, as it is for the importer.
+    EXPECT_EQ (sample_of (schema), ordered_json::object ());
+    // A first branch that names other members does not displace the node's own.
+    EXPECT_EQ (sample_of (R"({
+        "type":"object","properties":{"a":{"type":"string"}},"required":["a"],
+        "oneOf":[{"properties":{"b":{"type":"integer"}},"required":["b"]}]})",
+               with_required_only ()),
+    ordered_json::parse (R"({"a":"","b":0})"));
+}
+
+TEST (SchemaSamplerRequiredOnly, TheNodesOwnMembersWinAndTheBranchAddsTheRest) {
+    const ordered_json sampled = sample_of (R"({
+        "properties":{"a":{"type":"integer"}},"required":["a"],
+        "allOf":[{"$ref":"#/$defs/Base"}],
+        "$defs":{"Base":{"type":"object","required":["a","id"],
+            "properties":{"a":{"type":"string"},"id":{"type":"integer"}}}}})",
+    with_required_only ());
+    EXPECT_EQ (sampled, ordered_json::parse (R"({"a":0,"id":0})"));
+}
+
+TEST (SchemaSamplerRequiredOnly, ANodeWithNoRequiredPropertiesOfItsOwnIsItsBranch) {
+    EXPECT_EQ (sample_of (R"({"allOf":[{"type":"string"}]})", with_required_only ()),
+    ordered_json (""));
+    EXPECT_EQ (sample_of (R"({"oneOf":[{"type":"object","required":["k"],
+        "properties":{"k":{"type":"integer"}}}]})",
+               with_required_only ()),
+    ordered_json::parse (R"({"k":0})"));
+    // A non-object branch beside own members adds nothing.
+    EXPECT_EQ (sample_of (R"({"required":["a"],"anyOf":[{"type":"string"}]})",
+               with_required_only ()),
+    ordered_json::parse (R"({"a":""})"));
 }
 
 TEST (SchemaSamplerRequiredOnly, FiltersNestedObjectsAndObjectsBehindARef) {
@@ -371,23 +421,89 @@ TEST (SchemaSamplerEnumAnyType, StatedValuesStillOutrankTheEnum) {
 }
 
 // ---------------------------------------------------------------------------
+// honour_bounds
+// ---------------------------------------------------------------------------
+
+TEST (SchemaSamplerHonourBounds, AMinimumAboveZeroIsTheStub) {
+    EXPECT_EQ (sample_of (R"({"type":"integer","minimum":1})", with_honour_bounds ()),
+    ordered_json (1));
+    EXPECT_EQ (sample_of (R"({"type":"integer","minimum":2.5})", with_honour_bounds ()),
+    ordered_json (3));
+    EXPECT_EQ (sample_of (R"({"type":"number","minimum":0.5})", with_honour_bounds ()),
+    ordered_json (0.5));
+    // A bound 0 already clears leaves the typed zero.
+    EXPECT_EQ (sample_of (R"({"type":"integer","minimum":-5})", with_honour_bounds ()),
+    ordered_json (0));
+    // Off by default: the importer's stub is a typed zero.
+    EXPECT_EQ (sample_of (R"({"type":"integer","minimum":1})"), ordered_json (0));
+}
+
+TEST (SchemaSamplerHonourBounds, AnExclusiveMinimumIsClearedByOneStepAbove) {
+    EXPECT_EQ (sample_of (R"({"type":"integer","exclusiveMinimum":0})", with_honour_bounds ()),
+    ordered_json (1));
+    EXPECT_EQ (sample_of (R"({"type":"integer","exclusiveMinimum":2.5})", with_honour_bounds ()),
+    ordered_json (3));
+    EXPECT_EQ (sample_of (R"({"type":"number","exclusiveMinimum":0})", with_honour_bounds ()),
+    ordered_json (1));
+    EXPECT_EQ (sample_of (R"({"type":"integer","minimum":5,"exclusiveMinimum":2})",
+               with_honour_bounds ()),
+    ordered_json (5));
+}
+
+TEST (SchemaSamplerHonourBounds, AHugeMinimumNeverOverflowsTheCast) {
+    const ordered_json stub =
+    sample_of (R"({"type":"number","minimum":1e300})", with_honour_bounds ());
+    EXPECT_TRUE (stub.is_number_float ()) << stub.dump ();
+}
+
+TEST (SchemaSamplerHonourBounds, AMinLengthIsAStringOfThatLength) {
+    EXPECT_EQ (sample_of (R"({"type":"string","minLength":3})", with_honour_bounds ()),
+    ordered_json ("aaa"));
+    EXPECT_EQ (sample_of (R"({"type":"string","minLength":3})"), ordered_json (""));
+    const ordered_json capped =
+    sample_of (R"({"type":"string","minLength":1000000000})", with_honour_bounds ());
+    EXPECT_EQ (capped.get<std::string> ().size (), vayu::core::MAX_BOUNDED_STRING_LENGTH);
+    // An enum still outranks the bound: its member is the value the schema allows.
+    EXPECT_EQ (sample_of (R"({"type":"string","minLength":3,"enum":["ok"]})",
+               with_honour_bounds ()),
+    ordered_json ("ok"));
+}
+
+TEST (SchemaSamplerHonourBounds, AMinItemsIsThatManyWalkedItems) {
+    EXPECT_EQ (sample_of (R"({"type":"array","minItems":3,"items":{"type":"integer","minimum":1}})",
+               with_honour_bounds ()),
+    ordered_json::parse ("[1,1,1]"));
+    EXPECT_EQ (sample_of (R"({"type":"array","minItems":3,"items":{"type":"integer"}})"),
+    ordered_json::parse ("[0]"));
+    EXPECT_EQ (sample_of (R"({"type":"array","minItems":0,"items":{"type":"integer"}})",
+               with_honour_bounds ()),
+    ordered_json::parse ("[0]"));
+    const ordered_json capped =
+    sample_of (R"({"type":"array","minItems":1000000000,"items":{"type":"integer"}})",
+    with_honour_bounds ());
+    EXPECT_EQ (capped.size (), vayu::core::MAX_BOUNDED_ITEMS);
+}
+
+// ---------------------------------------------------------------------------
 // The options compose
 // ---------------------------------------------------------------------------
 
-TEST (SchemaSamplerOptions, AllThreeTogetherSampleAToolArgumentSet) {
+TEST (SchemaSamplerOptions, AllFourTogetherSampleAToolArgumentSet) {
     SampleOptions all;
     all.use_default            = true;
     all.required_only          = true;
     all.enum_any_type          = true;
+    all.honour_bounds          = true;
     const ordered_json sampled = sample_of (R"({
         "type":"object",
-        "required":["unit","count"],
+        "required":["unit","count","page"],
         "properties":{
+            "page":{"type":"integer","minimum":1},
             "count":{"type":"integer","default":10},
             "unit":{"type":"integer","enum":[1,2]},
             "label":{"type":"string"}}})",
     all);
-    EXPECT_EQ (sampled, ordered_json::parse (R"({"unit":1,"count":10})"));
+    EXPECT_EQ (sampled, ordered_json::parse (R"({"unit":1,"count":10,"page":1})"));
 }
 
 } // namespace

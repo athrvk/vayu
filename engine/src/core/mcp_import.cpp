@@ -94,7 +94,8 @@ const json* input_schema_of (const json& tool) {
  */
 json sampled_arguments (const json& schema) {
     const SchemaSampler sampler (schema,
-    SampleOptions{ .use_default = true, .required_only = true, .enum_any_type = true });
+    SampleOptions{
+    .use_default = true, .required_only = true, .enum_any_type = true, .honour_bounds = true });
     json arguments = sampler.sample (&schema);
     return arguments.is_object () ? std::move (arguments) : json::object ();
 }
