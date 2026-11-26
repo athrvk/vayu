@@ -1176,15 +1176,15 @@ performance statement, not a correctness one** - `ctest -j` is safe on any
 platform through the scratch directories alone, so a suite missing from it
 contends rather than breaks.
 
-Measured locally on a 4-core box (Debug, 2070 tests, green in all four runs):
-299.6s serial, 84.8s at `-j4`, 58.6s at `-j8`, and 243.7s at `-j4` with the lock
-forced on - the last being the model Windows runs. That ratio was the honest
-ceiling of this approach: the locked group is 817 of the 2070 tests but **81% of
-the serial wall**, because the route and load fixtures that dominate the suite's
-duration all open a database. The six fixtures the earlier analysis measured on
-Windows (197 tests, 57.2s, 19% of the wall here - within a point of the Windows
-figures, which is what makes this box a usable proxy for the *shape* of the
-suite) are only the visible tip of that group.
+Measured on a 4-core Linux box (Debug, 7,993 tests, #3852), with the lock
+forced on as Windows runs it and `-j8`: 219s unlocked, 613s with the list (best
+of two). The listed suites are 2,754 tests but 636s of the 1,186s serial run
+(54%), because the route and load fixtures that dominate the suite's duration
+all open a database. **The list is not derived from the `temp_database.hpp`
+include**: that set is 371 suites, 4,044 tests and 816s serial, and finished in
+788s, 29% slower. Its 234 extra suites share a file with a database suite but
+open none (`ElementsTimersLoadTest` and `SseConsumer` are timer- and socket-bound),
+and on Windows the locked group is the wall. The `CMakeLists.txt` comment has the method.
 
 With #838's changes the locked group is cheap enough that the hybrid model beats a serial run on
 Windows.
@@ -1193,25 +1193,6 @@ Note what this does *not* change: the group is still locked on Windows. The
 lock's justification is the `-j4` blow-up, and a cheaper group is not one that
 survives overlapping - that is its own experiment.
 Do not shrink `vayu_scratch_database_suites` without one.
-
-**The list is not derived from the `temp_database.hpp` include, and the numbers
-say why (#3852).** Deriving it - every suite declared in a test file that
-includes the header, directly or through a fixture header - would lock 371
-suites instead of 137. Measured on a 4-core Linux box (Debug, 7,993 tests, all
-green): serial 1,186s, of which the listed suites are 2,754 tests and 636s
-(54%, down from the 81% above, which was measured on 2,070 tests) and the
-derived set 4,044 tests and 816s (69%). The 234 newly locked suites
-(1,290 tests, 179s) share a file with a database suite but open no database of
-their own: `ElementsTimersLoadTest` (40s) and `SseConsumer` (22s) are
-timer- and socket-bound, and 70-odd-test parameter tables such as
-`RunConfigValidation` are only process starts. With the lock forced on as
-Windows runs it and the preset's `-j8`, the list finished in 619s and 613s and
-the derived set in 788s and 803s, 29% slower by the best run of each. On
-Windows the locked group is the wall, so that 179s of serial work lands
-directly on it. The strace derivation in the `CMakeLists.txt` comment (every
-suite run alone, which opened a `*.db`) is the method to repeat, and the two
-guards stay as the cheap exact checks. Unlocked, the same suite is 219s at
-`-j8`.
 
 Isolation is the **default** on every platform now, so a hand-run `ctest -j` is
 safe wherever it happens. No preset sets
