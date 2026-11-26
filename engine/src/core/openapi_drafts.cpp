@@ -9,9 +9,9 @@
  * The requests an import of a document would build (#865); the header says what
  * a draft is and why it is not an identity.
  *
- * A port of `app/src/services/importers/openapi-v3.ts`, `openapi-v2.ts`, their
- * shared half and the schema sampler, held to the same answers, not the same
- * code: the sync diff compares a stored request against a draft, so wherever
+ * A port of `app/src/services/importers/openapi-v3.ts`, `openapi-v2.ts` and
+ * their shared half, with the schema sampler in `schema_sampler.hpp`, held to
+ * the same answers, not the same code: the sync diff compares a stored request against a draft, so wherever
  * the readers differ it reports a field changed for a document that did not.
  * What looks like a JavaScript idiom in C++ clothing is that faithfulness: `??`
  * falling through `null` but not `false`, `String(x)` on a non-string,
@@ -32,6 +32,7 @@
 
 #include "js_json.hpp"
 #include "openapi_walk.hpp"
+#include "schema_sampler.hpp"
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/path_template.hpp"
@@ -44,7 +45,6 @@
 #include <cmath>
 #include <cstdio>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -81,26 +81,21 @@ void tally_add_count (ImportTally* tally, std::string_view kind, int count) {
 
 
 // ---------------------------------------------------------------------------
-// The schema sampler (`app/src/services/importers/schema-sampler.ts`)
+// The document's view of the schema sampler (`schema_sampler.hpp`)
 // ---------------------------------------------------------------------------
 
-/// The sampler's depth cap. A deeper schema samples to `{}`, as the renderer's
-/// does: a stub the user edits beats a walk that does not end.
-constexpr int MAX_SAMPLE_DEPTH = 6;
-
-/// A `$ref` chain already followed on this branch, copied per branch exactly as
-/// the renderer's `new Set([...seenRefs, ref])` is: two sibling properties may
-/// each name the same shared schema without either being a cycle.
-using SeenRefs = std::set<std::string>;
-
+/// The sampler over one OpenAPI document, which a `$ref` resolves against, with
+/// the importer's rules (`SampleOptions` at its defaults), plus the readers of a
+/// form schema that need the document too.
 class Sampler {
     public:
-    explicit Sampler (const json& document) : document_ (document) {
+    explicit Sampler (const json& document)
+    : document_ (document), schemas_ (document) {
     }
 
-    /// `sampleSchema(schema, resolveRef)`.
+    /// The stub @p schema samples to.
     [[nodiscard]] json sample (const json* schema) const {
-        return walk (schema, 0, SeenRefs{});
+        return schemas_.sample (schema);
     }
 
     /**
@@ -121,8 +116,8 @@ class Sampler {
         if (!sampled.is_object ()) {
             return fields;
         }
-        const json* properties =
-        as_record (prop (resolve_to_schema (schema, 0, SeenRefs{}), "properties"));
+        const json* properties = as_record (
+        prop (schemas_.resolve_to_schema (schema, 0, SeenRefs{}), "properties"));
         for (auto entry = sampled.begin (); entry != sampled.end (); ++entry) {
             DraftField field;
             field.key     = entry.key ();
@@ -138,7 +133,7 @@ class Sampler {
     /// any `$ref` or first composed branch. An array of them is not: one body
     /// sends one file.
     [[nodiscard]] bool declares_file (const json* schema) const {
-        const json* resolved      = resolve_to_schema (schema, 0, SeenRefs{});
+        const json* resolved = schemas_.resolve_to_schema (schema, 0, SeenRefs{});
         const std::string* format = as_str (prop (resolved, "format"));
         return format != nullptr && *format == "binary";
     }
@@ -154,50 +149,13 @@ class Sampler {
 
     private:
     const json& document_;
-
-    /// The schema a node ultimately denotes, following `$ref` and the first
-    /// `allOf` / `oneOf` / `anyOf` branch under the sampler's cap and guard.
-    /// Separate because the walk returns a value and the form-field lookup
-    /// needs the declaration.
-    [[nodiscard]] const json*
-    resolve_to_schema (const json* node, int depth, SeenRefs seen) const {
-        if (depth > MAX_SAMPLE_DEPTH || node == nullptr || !node->is_structured ()) {
-            return nullptr;
-        }
-        if (const std::string* ref = as_str (prop (node, "$ref"))) {
-            if (seen.count (*ref) != 0) {
-                return nullptr;
-            }
-            const json* resolved = walk::resolve_ref (document_, *ref);
-            seen.insert (*ref);
-            return resolve_to_schema (resolved, depth + 1, std::move (seen));
-        }
-        const json* branch = first_branch (node);
-        if (branch != nullptr) {
-            return resolve_to_schema (branch, depth + 1, std::move (seen));
-        }
-        return node;
-    }
-
-    /// `schema.allOf ?? schema.oneOf ?? schema.anyOf`, and only when it is a
-    /// non-empty array - the first entry of it, which is the whole of what the
-    /// renderer's sampler reads from a composed schema.
-    [[nodiscard]] static const json* first_branch (const json* schema) {
-        for (const char* key : { "allOf", "oneOf", "anyOf" }) {
-            const json* branch = prop (schema, key);
-            if (branch == nullptr || branch->is_null ()) {
-                continue; // `??` falls through `null` and `undefined` alone.
-            }
-            return branch->is_array () && !branch->empty () ? &(*branch)[0] : nullptr;
-        }
-        return nullptr;
-    }
+    SchemaSampler schemas_;
 
     /// Whether a property schema declares a file upload. A `type: array` of
     /// binary items is the multi-file field, imported as one file row - one file
     /// the user can attach beats a text row that sends nothing.
     [[nodiscard]] bool is_binary (const json* node, int depth, SeenRefs seen) const {
-        const json* schema = resolve_to_schema (node, depth, seen);
+        const json* schema = schemas_.resolve_to_schema (node, depth, seen);
         if (schema == nullptr) {
             return false;
         }
@@ -208,143 +166,6 @@ class Sampler {
         const std::string* type = as_str (prop (schema, "type"));
         return type != nullptr && *type == "array" &&
         is_binary (prop (schema, "items"), depth + 1, std::move (seen));
-    }
-
-    /**
-     * The value a schema states, whatever its type: a `const`, an `example`, or
-     * the first of 3.1's `examples`. `const` outranks `example`: JSON Schema
-     * says the value must be exactly this, where `example` is an annotation.
-     */
-    [[nodiscard]] static const json* stated_value (const json* node) {
-        if (const json* constant = prop (node, "const")) {
-            return constant;
-        }
-        if (const json* example = prop (node, "example")) {
-            return example;
-        }
-        // 3.1 replaced the singular `example` with an `examples` array.
-        if (const json* examples = prop (node, "examples");
-        examples != nullptr && examples->is_array () && !examples->empty ()) {
-            return &(*examples)[0];
-        }
-        return nullptr;
-    }
-
-    /**
-     * The type this sampler stubs for. 3.1 writes a nullable field as a type
-     * array (`["string", "null"]`) where 3.0 wrote `nullable: true`; the first
-     * non-null member is sampled, since a typed stub is what the user edits and
-     * only an all-`"null"` type has nothing else. A non-string member is still
-     * the one found, and then matches no arm below, as it matches no `case` in
-     * the renderer's switch.
-     */
-    [[nodiscard]] static std::string declared_type (const json* node) {
-        const json* declared = prop (node, "type");
-        if (declared == nullptr) {
-            return {};
-        }
-        if (declared->is_string ()) {
-            return declared->get<std::string> ();
-        }
-        if (!declared->is_array ()) {
-            return {};
-        }
-        for (const json& member : *declared) {
-            if (!(member.is_string () && member.get_ref<const std::string&> () == "null")) {
-                return member.is_string () ? member.get<std::string> () : std::string ();
-            }
-        }
-        return "null";
-    }
-
-    /**
-     * The stub a scalar type is sampled as, or nothing for a structured one.
-     * `make_optional`, not a bare return: copy-initializing an `optional<json>`
-     * from a `json` pits nlohmann's `operator ValueType()` against `optional`'s
-     * converting constructor, which GCC reports as an ambiguity under
-     * `-Werror`.
-     */
-    [[nodiscard]] static std::optional<json>
-    scalar_stub (const json* node, const std::string& type) {
-        if (type == "string") {
-            const json* values = prop (node, "enum");
-            if (values != nullptr && values->is_array () && !values->empty ()) {
-                return std::make_optional ((*values)[0]);
-            }
-            return std::make_optional (json (""));
-        }
-        if (type == "integer" || type == "number") {
-            return std::make_optional (json (0));
-        }
-        if (type == "boolean") {
-            return std::make_optional (json (false));
-        }
-        if (type == "null") {
-            return std::make_optional (json (nullptr));
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] json walk (const json* node, int depth, SeenRefs seen) const {
-        // `typeof node === "object"` in the renderer, which an array satisfies -
-        // and an array falls through every branch below to an empty object.
-        if (depth > MAX_SAMPLE_DEPTH || node == nullptr || !node->is_structured ()) {
-            return json::object ();
-        }
-        if (const std::string* ref = as_str (prop (node, "$ref"))) {
-            if (seen.count (*ref) != 0) {
-                return json::object (); // cycle guard
-            }
-            const json* resolved = walk::resolve_ref (document_, *ref);
-            if (resolved == nullptr || resolved->is_null ()) {
-                return json::object ();
-            }
-            seen.insert (*ref);
-            return walk (resolved, depth + 1, std::move (seen));
-        }
-
-        if (const json* stated = stated_value (node)) {
-            return *stated;
-        }
-
-        if (const json* branch = first_branch (node)) {
-            return walk (branch, depth + 1, std::move (seen));
-        }
-
-        const std::string type = declared_type (node);
-        if (auto stub = scalar_stub (node, type)) {
-            return *stub;
-        }
-        if (type == "array") {
-            const json* items = prop (node, "items");
-            if (truthy (items)) {
-                json sampled = json::array ();
-                sampled.push_back (walk (items, depth + 1, std::move (seen)));
-                return sampled;
-            }
-            // 3.1's JSON-Schema-2020-12 tuple form: `items` absent,
-            // `prefixItems` naming each position's own schema instead.
-            if (const json* tuple = prop (node, "prefixItems");
-            tuple != nullptr && tuple->is_array () && !tuple->empty ()) {
-                json sampled = json::array ();
-                for (const json& position : *tuple) {
-                    sampled.push_back (walk (&position, depth + 1, seen));
-                }
-                return sampled;
-            }
-            return json::array ();
-        }
-        // No type, or one this sampler has no stub for: fall back to walking the
-        // properties, which is what a schema with only `properties` declares.
-        const json* properties = as_record (prop (node, "properties"));
-        if (properties == nullptr) {
-            return json::object ();
-        }
-        json sampled = json::object ();
-        for (auto entry = properties->begin (); entry != properties->end (); ++entry) {
-            sampled[entry.key ()] = walk (&entry.value (), depth + 1, seen);
-        }
-        return sampled;
     }
 };
 

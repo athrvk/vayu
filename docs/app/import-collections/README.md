@@ -694,29 +694,15 @@ A `$name` outside the supported set is left written as `{{$name}}` in the
 outgoing request rather than emptied, so an imported collection using a faker
 value Vayu does not have shows it instead of hiding it.
 
-### Sampler::sample
-`Sampler::sample(schema)` - generates a sample value for an OpenAPI/Swagger schema
-and builds request-body stubs. It is **bounded and resilient**, not a naive one-level walk:
-
-- Recurses up to `MAX_DEPTH = 6`.
-- Resolves `$ref` via the injected `resolveRef`, with a per-path `Set` **cycle guard**
-  (a re-seen ref → `{}`); a failed/`null` resolution → `{}`.
-- Returns a pinned value verbatim, `const` → `example` → `examples[0]`. `const` wins because
-  JSON Schema makes it the only permitted value; `examples` is OpenAPI 3.1's plural form.
-- For `allOf` / `oneOf` / `anyOf`, walks the **first** branch (precedence `allOf → oneOf → anyOf`).
-- Samples a 3.1 type array (`type: ["string", "null"]`) from its first non-`"null"` member.
-- Type defaults: `string` → `""` (or `enum[0]`), `integer`/`number` → `0`, `boolean` →
-  `false`, `null` → `null`, `array` → `[sample(items)]` (or `[]`), `object`/untyped → expands
-  `properties` recursively (else `{}`).
-
-`schemaFormFields(schema, resolveRef)` in the same module returns the sampled stub's own keys
-(`[]` when it samples to a non-object), each flagged `file` or not. It is how the v3 parser
-reads urlencoded / multipart field names, so a form schema behind `$ref` or `allOf` resolves
-as far as a JSON body does instead of reading a `properties` key that isn't there. The `file`
-flag comes from the property schema (`format: binary`, or an array of it) rather than the
-sampled value, which flattens a binary string to `""` and cannot be told from a text field.
-
-(the sampler, `engine/src/core/openapi_drafts.cpp`)
+### SchemaSampler::sample
+`SchemaSampler::sample(schema)` (`engine/src/core/schema_sampler.hpp`) generates a
+sample value for a JSON Schema and builds the OpenAPI/Swagger request-body stubs.
+Its rules - the depth cap, the `$ref` cycle guard, the pinned-value precedence, the
+first-branch composition, the type defaults and the opt-in `SampleOptions` - are
+on one page: [`SchemaSampler::sample`](./openapi-v3.md#schemasamplersample-schema--stub-value).
+`Sampler::form_fields` (`engine/src/core/openapi_drafts.cpp`) returns the sampled
+stub's own keys, each flagged `file` or not; it is how the v3 parser reads
+urlencoded / multipart field names.
 
 ---
 

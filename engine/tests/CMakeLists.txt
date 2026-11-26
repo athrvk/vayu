@@ -264,6 +264,7 @@ add_executable(vayu_tests
     scenario_runner_events_test.cpp
     scenario_runner_flow_test.cpp
     scenario_runner_test.cpp
+    schema_sampler_test.cpp
     schema_validation_test.cpp
     script_api_scan_test.cpp
     script_assertion_error_test.cpp
