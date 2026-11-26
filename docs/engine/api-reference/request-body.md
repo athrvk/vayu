@@ -196,7 +196,7 @@ A failed reply carries one of three stable wire names:
 
 | `errorClass` | When |
 |---|---|
-| `transport` | the transfer failed (no reply); a non-2xx status with no JSON-RPC error; a 2xx with no JSON-RPC response; an event stream that ended before the final response |
+| `transport` | the transfer failed (no reply); a non-2xx status with no JSON-RPC error; a 2xx with no JSON-RPC response; an event stream a cap or the server's close ended before the final response |
 | `protocol` | the final response carries an `error` member, whatever the status (`-32020` header mismatch, `-32022` version refusal, `-32600` and the rest) |
 | `tool` | the call succeeded and `result.isError` is `true` |
 

@@ -21,10 +21,10 @@
  *
  * `reply_with` chooses how that answer arrives - one JSON object, a
  * request-scoped event stream of two progress notifications and then the
- * response, or that stream cut before the response - and what it says: the
- * result, a tool error, a JSON-RPC error, a `-32022` version refusal, or the
- * plain `400` a legacy-era server answers a modern request with, or a `403`
- * naming the scope the token lacks.
+ * response, that stream cut before the response, or progress notifications
+ * that never end - and what it says: the result, a tool error, a JSON-RPC
+ * error, a `-32022` version refusal, the plain `400` a legacy-era server
+ * answers a modern request with, or a `403` naming the scope the token lacks.
  * `reply_in_turn` gives each call its own outcome from a list, for a run that
  * has to mix them.
  *
@@ -36,6 +36,7 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -69,6 +70,9 @@ enum class McpReplyShape : std::uint8_t {
     EventStream,
     /// The two notifications, and the stream ends there.
     EventStreamCut,
+    /// Progress notifications until the client hangs up; the response never
+    /// comes, so only a cap can end the stream (#3831).
+    EventStreamEndless,
 };
 
 /// What the fixture's answer to an accepted call says.
@@ -115,6 +119,7 @@ class McpFixtureServer {
     }
 
     ~McpFixtureServer () {
+        stopping_.store (true);
         svr_.stop ();
         if (thread_.joinable ()) {
             thread_.join ();
@@ -268,12 +273,36 @@ class McpFixtureServer {
         return frame;
     }
 
-    static std::string progress_event (int progress) {
+    /// The pause between an endless stream's notifications, which only paces
+    /// the writes; no assertion reads it.
+    static constexpr std::chrono::milliseconds ENDLESS_EVENT_PACE{ 5 };
+
+    /// A progress notification; @p total absent, as on an endless stream.
+    static std::string progress_event (int progress, std::optional<int> total = 2) {
+        nlohmann::json params{ { "progressToken", "p1" }, { "progress", progress } };
+        if (total) {
+            params["total"] = *total;
+        }
         const nlohmann::json note{ { "jsonrpc", "2.0" },
-            { "method", "notifications/progress" },
-            { "params",
-            { { "progressToken", "p1" }, { "progress", progress }, { "total", 2 } } } };
+            { "method", "notifications/progress" }, { "params", params } };
         return "event: message\ndata: " + note.dump () + "\n\n";
+    }
+
+    /// Ends when a write fails, which is the client hanging up, or when the
+    /// fixture stops.
+    void stream_endlessly (httplib::Response& res) const {
+        res.set_chunked_content_provider (
+        "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
+            for (int progress = 1; !stopping_.load (); ++progress) {
+                const std::string note = progress_event (progress, std::nullopt);
+                if (!sink.write (note.data (), note.size ())) {
+                    return false;
+                }
+                std::this_thread::sleep_for (ENDLESS_EVENT_PACE);
+            }
+            sink.done ();
+            return true;
+        });
     }
 
     static void send_frame (httplib::Response& res, const nlohmann::json& frame, McpReplyShape shape) {
@@ -288,10 +317,10 @@ class McpFixtureServer {
         res.set_content (stream, "text/event-stream");
     }
 
-    static void answer (const httplib::Request& req,
+    void answer (const httplib::Request& req,
     httplib::Response& res,
     McpReplyShape shape,
-    McpReplyOutcome outcome) {
+    McpReplyOutcome outcome) const {
         if (outcome == McpReplyOutcome::LegacyBadRequest) {
             res.status = 400;
             res.set_content ("Bad Request: No valid session ID provided", "text/plain");
@@ -326,6 +355,10 @@ class McpFixtureServer {
             "application/json");
             return;
         }
+        if (shape == McpReplyShape::EventStreamEndless) {
+            stream_endlessly (res);
+            return;
+        }
         if (outcome == McpReplyOutcome::UnsupportedVersion) {
             res.status = 400;
         }
@@ -342,6 +375,7 @@ class McpFixtureServer {
     std::vector<McpReplyOutcome> turns_;
     std::size_t turns_from_ = 0; // the call turns_[0] answers
     std::atomic<std::size_t> requests_{ 0 };
+    std::atomic<bool> stopping_{ false };
 };
 
 } // namespace vayu::tests
