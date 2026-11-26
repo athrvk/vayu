@@ -1,12 +1,11 @@
 ---
 description: >-
-  How Vayu's import pipeline turns a Postman, Insomnia, OpenAPI or Swagger file into a collection - detection, parsing, and what gets skipped.
+  How Vayu's import pipeline turns a Postman, Insomnia, OpenAPI, Swagger or JMeter file, or a live MCP server, into a collection - detection, parsing, and what gets skipped.
 ---
 
 # Import Collections - Parser Architecture
 
-Developer reference for Vayu's import subsystem: how raw Postman / Insomnia / OpenAPI files
-are detected, parsed into Vayu's internal draft model, and persisted.
+Developer reference for Vayu's import subsystem: how raw Postman / Insomnia / OpenAPI files are detected, parsed into Vayu's internal draft model, and persisted.
 
 **The parse is the engine's** since issue
 [#877](https://github.com/athrvk/vayu/issues/877). Every format below is read by
@@ -39,6 +38,7 @@ not import one. It can now (`import_document`, see
 | OpenAPI 3.0 | `openapi` starts with `3.` | [openapi-v3.md](./openapi-v3.md) |
 | OpenAPI 2.0 (Swagger) | `swagger` is `2.0` (string or number) | [openapi-v2.md](./openapi-v2.md) |
 | JMeter `.jmx` test plan | the raw text contains `<jmeterTestPlan` | [jmeter.md](./jmeter.md) |
+| MCP server (live URL) | none: no document, the engine asks the server ([`POST /import/mcp`](../../engine/api-reference/import.md#post-importmcp)) | [mcp-server.md](./mcp-server.md) |
 
 ---
 
@@ -78,9 +78,9 @@ the parse and the apply.
 Entry is per **file**, not per import: the File tab takes a multi-file drop or
 selection, and "Import folder" takes a whole directory (`webkitdirectory`,
 recursing, filtered to `IMPORTABLE_EXTENSIONS` - `.json` / `.yaml` / `.yml` /
-`.jmx`). The
-URL and Paste tabs are single by construction and travel the same path as a
-one-entry batch, so there is no second flow beside this one to drift from it.
+`.jmx`). The URL, Paste and MCP server tabs are single by construction and travel the same path as a
+one-entry batch, so there is no second flow beside this one to drift from it. The MCP server tab has no
+document at all: the engine builds the tree from a live server ([mcp-server.md](./mcp-server.md)).
 
 A file dropped **anywhere on the window** opens the dialog with it (#2252),
 the way a Dock or taskbar drop does (#1364): `useWindowFileDrop` queues the

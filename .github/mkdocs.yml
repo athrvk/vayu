@@ -185,6 +185,7 @@ nav:
           - OpenAPI 3.0: app/import-collections/openapi-v3.md
           - Swagger 2.0: app/import-collections/openapi-v2.md
           - JMeter .jmx: app/import-collections/jmeter.md
+          - MCP server: app/import-collections/mcp-server.md
   - Build from Source:
       - Overview: building.md
       - Engine: engine/building.md
