@@ -1082,12 +1082,16 @@ class McpReplyRunTest : public ::testing::Test {
     /// The collection run's stored step rows.
     std::vector<db::Result> run_sequentially (const std::vector<json>& elements,
     size_t iterations                   = ITERATIONS,
-    const std::optional<StepSend>& send = std::nullopt) {
+    const std::optional<StepSend>& send = std::nullopt,
+    const json& thresholds              = nullptr) {
         auto execution = plan (elements, send.value_or (mcp_step ()));
         execution.request.iterations = iterations;
-        const json config            = { { "scenario",
+        json config                  = { { "scenario",
         { { "source", "collection" }, { "collectionId", "col_mcp" },
         { "iterations", iterations } } } };
+        if (!thresholds.is_null ()) {
+            config["thresholds"] = thresholds;
+        }
         const std::string run_id = "run_mcp_sequential_" + std::to_string (++runs_);
         last_run_id_ = run_id;
         run_row (run_id, RunType::Scenario, config);
@@ -1426,6 +1430,23 @@ TEST_F (McpReplyRunTest, ACollectionRunCountsItsFailedRepliesByClassAsErrors) {
     << report.dump ();
     EXPECT_EQ (report["summary"]["failedRequests"], 7);
     EXPECT_DOUBLE_EQ (report["summary"]["errorRate"].get<double> (), 17.5);
+}
+
+// #3830: the class budgets judge the counts the run tallied, and a missed one
+// fails it. Mutation check: drop the `error_classes` copy into the threshold
+// inputs in `execute_scenario_run` and every actual reads 0.
+TEST_F (McpReplyRunTest, ACollectionRunsErrorClassBudgetsJudgeItsFailedReplies) {
+    server_->reply_in_turn (McpReplyShape::Json, mixed_turns ());
+    run_sequentially ({}, 40, std::nullopt,
+    { { "maxToolErrors", 3 }, { "maxProtocolErrorRatePct", 5 }, { "failRun", true } });
+    const auto validation = last_report ()["thresholdValidation"];
+    ASSERT_EQ (validation["checks"].size (), 2u) << validation.dump ();
+    EXPECT_EQ (validation["checks"][0]["actual"], 4) << validation.dump ();
+    EXPECT_EQ (validation["checks"][1]["actual"], 5.0) << validation.dump ();
+    EXPECT_EQ (validation["failed"], 1) << validation.dump ();
+    const auto stored = db_->get_run (last_run_id_);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, RunStatus::Failed);
 }
 
 // #3795: a run of a refused call names the scope on what it keeps, counts the

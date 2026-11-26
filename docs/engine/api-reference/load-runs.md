@@ -217,6 +217,12 @@ Without the block a run is measured and not judged, and its report has no such s
     "streamTimeToFirstEventP95Ms": 800, // ceiling, ms, streaming runs; > 0 and <= 86400000
     "streamTimeToFirstMatchP95Ms": 900, // ceiling, ms, streams with a first content marker; > 0 and <= 86400000
     "streamEventsPerSecondMin": 200,    // floor, events per second, streaming runs; > 0
+    "maxToolErrors": 5,        // ceiling, count of failed mcp replies of the class; 0-1000000000000
+    "maxProtocolErrors": 0,    // ceiling, count
+    "maxTransportErrors": 0,   // ceiling, count
+    "maxToolErrorRatePct": 1,  // ceiling, percent of the run's requests; 0-100
+    "maxProtocolErrorRatePct": 0, // ceiling, percent
+    "maxTransportErrorRatePct": 0, // ceiling, percent
     "failRun": true            // a missed budget sets status "failed"; default false
   }
 }
@@ -256,6 +262,11 @@ It judges the first event of any kind, so an API that opens with a preamble even
 `streamTimeToFirstMatchP95Ms` (issue #3774) is the budget for that first token: it judges `stream.timeToFirstMatch.p95`, the wait for a request's first content marker (`streamFirstContentMarker`), the same figure the report prints.
 It is unevaluated, and so counts toward `failed`, whenever no completion's marker arrived: on a run with no `stream` section, on one whose requests declare no marker, and on one whose content never came.
 A stream that never matched is no measurement, never a fast one, so this budget cannot pass on a run that did not measure it.
+
+`maxToolErrors`, `maxProtocolErrors` and `maxTransportErrors` (issue #3830) are ceilings on the run's failed `mcp` replies of one [failure class](request-body.md#the-mcp-reply), the counts [`summary.errorClasses`](runs.md#get-runsrunidreport) reports: `tool`, `protocol` and `transport`.
+`maxToolErrorRatePct`, `maxProtocolErrorRatePct` and `maxTransportErrorRatePct` are the same counts as a percentage of the run's requests, the denominator `maxErrorRatePct` divides by.
+`0` is a legal ceiling for all six ("no tool call may fail"), and a run with requests and no failed reply of the class, an `mcp` run or not, is evaluated at `0` and meets it.
+A run that sent no request is unevaluated on all six, as on `maxErrorRatePct`, so a class budget cannot pass a run that measured nothing.
 
 **Every run mode is judged** (issue #1564): a single-request load run, a scenario load run and a **collection** (sequential, design-mode) run all evaluate the same `thresholds` block against their own numbers and store the same `thresholdValidation` shape.
 A collection run's error rate and latency percentiles are drawn from the steps it actually sent (a step a script or an unbound data row skipped counts toward neither), and its assertion tally, every `assert.*` outcome and `pm.test` call of every step it ran, is all exact:

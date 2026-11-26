@@ -954,6 +954,31 @@ TEST (RunExportBuilder, FailedAssertionsKeepMetBudgetsFromPassing) {
     }
 }
 
+/// A missed MCP error-class budget (#3830) fails the verdict, which names it in
+/// words and units as the app's `THRESHOLD_METRICS` does. Mutation check: drop
+/// the class rows from `BUDGET_METRICS` and the detail reads the raw keys.
+TEST (RunExportBuilder, AMissedErrorClassBudgetFailsTheVerdictInItsOwnWords) {
+    const json missed = {
+        { "checks",
+        json::array ({ { { "metric", "maxToolErrors" }, { "limit", 5 },
+                       { "actual", 20.0 }, { "passed", false }, { "evaluated", true } },
+        { { "metric", "maxTransportErrorRatePct" }, { "limit", 1 },
+        { "actual", 2.5 }, { "passed", false }, { "evaluated", true } } }) },
+        { "passed", 0 }, { "failed", 2 }
+    };
+    RunExportInput input;
+    input.run = judged_run ("completed", missed, 0.0);
+    vayu::core::RunExportNotes notes;
+    const auto document = vayu::core::build_run_export_document (input, notes);
+    EXPECT_EQ (document.at ("verdict").at ("state"), "failed");
+    EXPECT_EQ (document.at ("verdict").at ("reason"), "budgets_missed");
+    const std::string detail =
+    vayu::core::build_run_report_view (document).verdict.detail.flat ();
+    EXPECT_NE (detail.find ("tool errors <= 5 missed (20)"), std::string::npos) << detail;
+    EXPECT_NE (detail.find ("transport error rate <= 1.0% missed (2.5%)"), std::string::npos)
+    << detail;
+}
+
 /// The export carries the report's `assertions` block member by member, and
 /// only what the report holds (#3537).
 TEST (RunExportBuilder, CarriesTheAssertionBlock) {
