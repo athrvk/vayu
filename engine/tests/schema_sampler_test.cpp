@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
 
 #include <nlohmann/json.hpp>
 
@@ -55,7 +56,10 @@ SampleOptions with_enum_any_type () {
 std::string chain_of (int levels) {
     std::string text = R"({"type":"string"})";
     for (int level = 0; level < levels; ++level) {
-        text = R"({"type":"object","properties":{"c":)" + text + "}}";
+        std::string wrapped = R"({"type":"object","properties":{"c":)";
+        wrapped += text;
+        wrapped += "}}";
+        text = std::move (wrapped);
     }
     return text;
 }

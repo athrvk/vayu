@@ -11,8 +11,9 @@
  *
  * A port of `app/src/services/importers/openapi-v3.ts`, `openapi-v2.ts` and
  * their shared half, with the schema sampler in `schema_sampler.hpp`, held to
- * the same answers, not the same code: the sync diff compares a stored request against a draft, so wherever
- * the readers differ it reports a field changed for a document that did not.
+ * the same answers, not the same code: the sync diff compares a stored request
+ * against a draft, so wherever the readers differ it reports a field changed
+ * for a document that did not.
  * What looks like a JavaScript idiom in C++ clothing is that faithfulness: `??`
  * falling through `null` but not `false`, `String(x)` on a non-string,
  * `JSON.stringify`'s number formatting. A rule's reason is in the header or the
