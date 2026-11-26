@@ -377,7 +377,11 @@ Header and token values are never logged.
 **Errors:**
 - `400` `Invalid 'url': ...` (`Invalid 'url': put credentials in auth or headers, not the URL` for a URL with userinfo), `Invalid 'headers': ...`, `Invalid 'auth': ...`, `Invalid 'include': ...`, or `Body must be a JSON object`; nothing is sent.
 - `413` `<method> failed: <reason>` for a reply over 4 MiB, `The server's replies came to more than 33554432 bytes, the most one import reads`, or `The server lists more than 10000 tools, resources and prompts, the most one import reads`.
-- `502` `<method> failed: <reason>`, where the reason is the reply reader's own message: `server supports 2025-11-25, 2025-06-18; this request is 2026-07-28` for a version refusal, `insufficient_scope: needs "<scopes>"` for a `403` naming them, `HTTP 400 with no JSON-RPC error: the server looks legacy-era ...` for a legacy server's list call, or a transfer's own error (a refused connection, a timeout, a reserved port).
+- `502` `<method> failed: <reason>`, where the reason is the reply reader's own message:
+  - `server supports 2025-11-25, 2025-06-18; this request is 2026-07-28` for a version refusal;
+  - `insufficient_scope: needs "<scopes>"` for a `403` naming them;
+  - `HTTP 400 with no JSON-RPC error: the server looks legacy-era ...` for a legacy server's list call;
+  - a transfer's own error (a refused connection, a timeout, a reserved port).
 - `502` `<method> answered with no '<key>' list`, `<method> repeated a cursor it had already been sent, so the list would never end`, or `<method> still had a nextCursor after 100 pages, the most one import follows`.
 - `502` `The import ran past its 120000 ms total at <method>, the longest one import takes`: a timeout is a `502` here, as it is on `POST /import/fetch`.
 
