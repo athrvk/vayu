@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildImportReport, importToastMessage } from "./import-report";
-import { collection, result } from "./import-preview.testkit";
+import { collection, request, result } from "./import-preview.testkit";
 import type { ImportReport } from "@/stores";
 
 function report(overrides: Partial<ImportReport> = {}): ImportReport {
@@ -92,5 +92,33 @@ describe("buildImportReport - client certificates left unticked (#2363)", () => 
 
 	it("keeps no line when every candidate was ticked", () => {
 		expect(buildImportReport(withCandidates(), ["col_1"], [0, 1]).notices).toEqual([]);
+	});
+});
+
+describe("buildImportReport - an MCP import (#3843)", () => {
+	const mcpImport = () =>
+		result({
+			collections: [
+				collection({
+					variables: { mcpToken: { value: "", enabled: true, secret: true } },
+					requests: [
+						request({ headers: [{ key: "X-API-Key", value: "", enabled: false }] }),
+					],
+				}),
+			],
+			meta: { format: "MCP server" },
+		});
+
+	it("keeps the token and credential-header lines the preview showed", () => {
+		const kept = buildImportReport(mcpImport(), ["col_1"]);
+		expect(kept.notices.map((n) => n.text)).toEqual([
+			"The token is not stored in the collection - set the mcpToken variable before you send",
+			"1 header holds a credential and arrives blank and disabled - fill it in before you send",
+		]);
+	});
+
+	it("counts them among the things to finish in the toast", () => {
+		const kept = buildImportReport(mcpImport(), ["col_1"]);
+		expect(importToastMessage([kept])).toContain("; 2 things to finish");
 	});
 });

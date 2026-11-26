@@ -40,8 +40,8 @@ export function canConnectMcp(form: McpFormState): boolean {
 
 /**
  * What `POST /import/mcp` is sent. A blank or disabled header row is the table's spare or one the
- * user switched off, so it goes nowhere; a named row with no value is sent as it stands and the
- * engine's own refusal says which.
+ * user switched off, so it goes nowhere; a named row with no value is sent as it stands. The
+ * engine refuses a header with no name at send and one carrying CR, LF or NUL, not an empty value.
  */
 export function mcpImportRequest(form: McpFormState): ImportMcpRequest {
 	const headers = form.headers

@@ -57,12 +57,7 @@ import {
 	unselectedCertificateCount,
 	withCertificateTicked,
 } from "@/services/importers/client-certificate-selection";
-import {
-	describeCarriedOver,
-	describeCounts,
-	importNotices,
-	mcpTokenNotice,
-} from "./import-notices";
+import { describeCarriedOver, describeCounts, importResultNotices } from "./import-notices";
 import { NoticeList } from "./NoticeList";
 import { ImportClientCertificates } from "./ImportClientCertificates";
 import { ImportMcpForm } from "./ImportMcpForm";
@@ -83,6 +78,7 @@ import {
 } from "@/services/importers/batch";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { fileBaseName } from "@/lib/file-path";
+import { IMPORT_MCP_FORMAT } from "@/constants/import";
 import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
 import { Callout, MethodBadge, FieldError } from "@/components/shared";
 import { isCommitEnter } from "@/lib/keyboard";
@@ -194,8 +190,8 @@ export function ImportModal() {
 
 	/**
 	 * Which run of each tab is current (issue #893). A generation rather than an abort path per
-	 * stage, because the writes are what must stop and there are four kinds: the fetch, the detect,
-	 * an option re-parse and the apply's outcomes. Each captures its tab's number at the start and
+	 * stage, because the writes are what must stop and there are five kinds: the fetch, the detect,
+	 * the MCP connect, an option re-parse and the apply's outcomes. Each captures its tab's number at the start and
 	 * drops its patch if the number has moved (the dialog closed or the tab was reset), so a parse
 	 * finishing after a close cannot write a preview into the state the dialog next opens with.
 	 *
@@ -203,7 +199,8 @@ export function ImportModal() {
 	 */
 	const generation = useRef<Record<Tab, number>>({ file: 0, url: 0, paste: 0, mcp: 0 });
 	/**
-	 * Each tab's in-flight call's cancel. The generation stops the writes; this stops the work.
+	 * Each tab's in-flight call's cancel. The generation stops the writes; this stops the wait: the
+	 * engine keeps talking to an MCP server until its own bound.
 	 * Only the URL download and the MCP connect have one: they are the stages that go on costing
 	 * after nobody is listening (the engine reads the rest of a 10 MB document either way).
 	 */
@@ -506,7 +503,8 @@ export function ImportModal() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isOpen, pendingFiles]);
 
-	// Fetching a URL is the only source a user can enter twice by hand, so it needs the guard. The
+	// Fetching a URL and connecting to an MCP server are the sources a user can enter twice by hand,
+	// so they need the guard. The
 	// same phase disables the drop zone, the folder picker and the Paste button (a second drop
 	// mid-read races the first as a second fetch does) and puts the progress panel on screen (issue
 	// #882).
@@ -589,8 +587,7 @@ export function ImportModal() {
 				phase: "preview",
 			});
 		} catch (e) {
-			// Only a reset or a close aborts, and a banner would wait for the next open.
-			if (abort.signal.aborted) return;
+			// A cancel (`supersede`) moved the generation, so `patchTab` drops its AbortError.
 			patchTab("mcp", at, { progress: null, error: (e as Error).message, phase: "error" });
 		} finally {
 			if (inFlight.current.mcp === abort) delete inFlight.current.mcp;
@@ -776,7 +773,7 @@ export function ImportModal() {
 		redetect({ importEnvironments, importScripts: v });
 	};
 
-	// Shared by all three tab panels; the inner conditionals already switch on
+	// Shared by all four tab panels; the inner conditionals already switch on
 	// the active tab, and only the active panel is mounted.
 	const panelBody = (
 		<>
@@ -787,6 +784,11 @@ export function ImportModal() {
 							result={single.result}
 							importEnvironments={importEnvironments}
 							selectedCertificates={single.selectedCertificates}
+							source={
+								single.result.meta.format === IMPORT_MCP_FORMAT
+									? entryLabel(single)
+									: undefined
+							}
 							onDismiss={() => resetTab(tab)}
 						/>
 					) : (
@@ -1168,11 +1170,14 @@ function PreviewView({
 	result,
 	importEnvironments,
 	selectedCertificates,
+	source,
 	onDismiss,
 }: {
 	result: ImportResult;
 	importEnvironments: boolean;
 	selectedCertificates: readonly number[] | undefined;
+	/** What the result was read from when `meta.fileName` does not say: the MCP server's URL. */
+	source?: string;
 	onDismiss: () => void;
 }) {
 	const { meta, collections, environments, globals } = result;
@@ -1193,9 +1198,9 @@ function PreviewView({
 					/>
 				}
 			>
-				{meta.fileName && (
+				{(meta.fileName ?? source) && (
 					<span className="font-mono text-label text-muted-foreground">
-						{meta.fileName}
+						{meta.fileName ?? source}
 					</span>
 				)}
 			</Callout>
@@ -1247,13 +1252,10 @@ function PreviewView({
 				</p>
 			)}
 			<NoticeList
-				notices={[
-					...mcpTokenNotice(result),
-					...importNotices(
-						meta,
-						unselectedCertificateCount(result, selectedCertificates)
-					),
-				]}
+				notices={importResultNotices(
+					result,
+					unselectedCertificateCount(result, selectedCertificates)
+				)}
 			/>
 			<ImportFileFolders results={[result]} />
 		</div>
@@ -1326,7 +1328,10 @@ function BatchRow({
 	// wherever it is named.
 	const name = entryLabel(entry);
 	const notices = result
-		? importNotices(result.meta, unselectedCertificateCount(result, entry.selectedCertificates))
+		? importResultNotices(
+				result,
+				unselectedCertificateCount(result, entry.selectedCertificates)
+			)
 		: [];
 	return (
 		<label className="flex items-start gap-2 py-1 pl-1 text-xs">

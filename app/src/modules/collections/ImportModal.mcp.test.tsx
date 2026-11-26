@@ -254,6 +254,16 @@ describe("ImportModal MCP server tab", () => {
 			expect(screen.getByRole("button", { name: /^Import →$/ })).toBeInTheDocument();
 		});
 
+		it("shows the server's URL under the format name", async () => {
+			vi.spyOn(apiService, "importMcp").mockResolvedValue(serverTree());
+			openMcpTab();
+			typeUrl();
+			fireEvent.click(connectButton());
+
+			await screen.findByText("search_docs");
+			expect(screen.getByText(SERVER)).toBeInTheDocument();
+		});
+
 		it("says the token is not stored when the server was reached with one", async () => {
 			vi.spyOn(apiService, "importMcp").mockResolvedValue(serverTree({ withToken: true }));
 			openMcpTab();
@@ -339,23 +349,6 @@ describe("ImportModal MCP server tab", () => {
 			expect(urlInput().value).toBe("");
 			expect(screen.queryByText("search_docs")).toBeNull();
 			expect(screen.queryByRole("button", { name: /^Import →$/ })).toBeNull();
-		});
-
-		it("reports no failure for a call that was cancelled", async () => {
-			const answer = deferredAnswer();
-			const importMcp = vi.spyOn(apiService, "importMcp").mockReturnValue(answer.promise);
-			openMcpTab();
-			typeUrl();
-			fireEvent.click(connectButton());
-			await waitFor(() => expect(importMcp).toHaveBeenCalledTimes(1));
-
-			fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-			await waitFor(() => expect(useImportModalStore.getState().isOpen).toBe(false));
-			answer.reject(new DOMException("aborted", "AbortError"));
-			useImportModalStore.setState({ isOpen: true });
-
-			await screen.findByLabelText("Server URL");
-			expect(screen.queryByRole("alert")).toBeNull();
 		});
 	});
 

@@ -62,7 +62,7 @@ export function ImportMcpForm({ form, onChange, onConnect, busy }: ImportMcpForm
 					</Button>
 				</div>
 				<p className="text-label text-muted-foreground">
-					Stored as written in every request, so keep a key out of the query string.
+					A key in the query string is saved with the collection.
 				</p>
 			</div>
 

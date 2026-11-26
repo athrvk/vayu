@@ -109,9 +109,9 @@ no `multiple` on the input would import the first spec of a dropped folder and
 discard the rest without a word (issue #666). A row saying
 "Unrecognised format" is the flow working; no row is the bug.
 
-An entry carries the bundled `raw` text, its `result` **or** its `error`, the
-unresolved-ref count, and its `included` state. Three row states are not
-failures and are not errors:
+An entry carries the bundled `raw` text (`null` for an MCP entry, which has no
+document), its `result` **or** its `error`, the unresolved-ref count, and its
+`included` state. Three row states are not failures and are not errors:
 
 | Row state | What it means |
 |---|---|

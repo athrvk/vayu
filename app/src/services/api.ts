@@ -1118,8 +1118,8 @@ export const apiService = {
 	/**
 	 * Ask a live MCP server what it offers and get the same tree `parseImport` answers (#3838).
 	 * Reads only: nothing is stored until `applyImport`. The engine makes several calls to the
-	 * server (up to 120 s in all), so the budget is {@link IMPORT_MCP_BUDGET_MS}, not the
-	 * `defaultTimeout` setting.
+	 * server within the engine's whole-import bound, so the budget is {@link IMPORT_MCP_BUDGET_MS},
+	 * not the `defaultTimeout` setting.
 	 *
 	 * @param signal cancels the wait. The engine keeps talking to the server until its own bound,
 	 *        but nothing here acts on the answer, so a closed dialog is not held open by it. An
