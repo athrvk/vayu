@@ -9,7 +9,11 @@
 
 import { httpClient, ApiError, EngineUnreachableError } from "./http-client";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
-import { IMPORT_FETCH_EVENTS, IMPORT_FETCH_STALL_TIMEOUT_MS } from "@/constants/import";
+import {
+	IMPORT_FETCH_EVENTS,
+	IMPORT_FETCH_STALL_TIMEOUT_MS,
+	IMPORT_MCP_TOTAL_TIMEOUT_MS,
+} from "@/constants/import";
 import type { AllowFolderReply } from "@/types/electron";
 import {
 	RequestTransformer,
@@ -80,6 +84,7 @@ import type {
 	ImportFetchResponse,
 	ImportApplyRequest,
 	ImportParseRequest,
+	ImportMcpRequest,
 	ImportApplyResponse,
 	CreateSpecRequest,
 	SpecBindRequest,
@@ -157,6 +162,13 @@ const APP_ORIGIN: RunOrigin = { kind: "app" };
  * buffered form client-side while the engine keeps reading.
  */
 const IMPORT_FETCH_BUDGET_MS = IMPORT_FETCH_STALL_TIMEOUT_MS + PROXIED_TIMEOUT_GRACE_MS;
+
+/**
+ * The client's budget for `POST /import/mcp`: the engine's whole-import bound plus the grace, so
+ * the engine's own 502 for an overrun arrives before the client aborts. The route is a single
+ * buffered POST (no stream), so this is a total, not an idle gap.
+ */
+const IMPORT_MCP_BUDGET_MS = IMPORT_MCP_TOTAL_TIMEOUT_MS + PROXIED_TIMEOUT_GRACE_MS;
 
 /** A config entry's value as a number, `0` when the cache is cold or the value unreadable. */
 function configuredMs(key: string): number {
@@ -1101,6 +1113,26 @@ export const apiService = {
 	 */
 	async parseImport(payload: ImportParseRequest): Promise<ImportResult> {
 		return await httpClient.post<ImportResult>(API_ENDPOINTS.IMPORT_PARSE, payload);
+	},
+
+	/**
+	 * Ask a live MCP server what it offers and get the same tree `parseImport` answers (#3838).
+	 * Reads only: nothing is stored until `applyImport`. The engine makes several calls to the
+	 * server (up to 120 s in all), so the budget is {@link IMPORT_MCP_BUDGET_MS}, not the
+	 * `defaultTimeout` setting.
+	 *
+	 * @param signal cancels the wait. The engine keeps talking to the server until its own bound,
+	 *        but nothing here acts on the answer, so a closed dialog is not held open by it. An
+	 *        abort raises an `AbortError`, so a caller can tell its own cancel from a failure.
+	 */
+	async importMcp(
+		payload: ImportMcpRequest,
+		options?: { signal?: AbortSignal }
+	): Promise<ImportResult> {
+		return await httpClient.post<ImportResult>(API_ENDPOINTS.IMPORT_MCP, payload, {
+			timeout: IMPORT_MCP_BUDGET_MS,
+			...(options?.signal ? { signal: options.signal } : {}),
+		});
 	},
 
 	/**

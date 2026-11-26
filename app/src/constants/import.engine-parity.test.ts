@@ -25,7 +25,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { IMPORT_FETCH_EVENTS, IMPORT_FETCH_STALL_TIMEOUT_MS } from "./import";
+import {
+	IMPORT_FETCH_EVENTS,
+	IMPORT_FETCH_STALL_TIMEOUT_MS,
+	IMPORT_MCP_TOTAL_TIMEOUT_MS,
+} from "./import";
 
 /** Held in the testkit, so CI routes an edit to the header back to this suite. */
 const [CONSTANTS_HPP] = ENGINE_READING_GUARDS.importEvents.paths.map(fromRepoRoot);
@@ -61,5 +65,15 @@ describe("the import-fetch stall bound matches the engine", () => {
 		const match = constantsHpp.match(/constexpr\s+long\s+STALL_TIMEOUT_MS\s*=\s*(\d+)\s*;/);
 		if (!match) throw new Error("constants.hpp declares no long STALL_TIMEOUT_MS");
 		expect(IMPORT_FETCH_STALL_TIMEOUT_MS).toBe(Number(match[1]));
+	});
+});
+
+describe("the import-mcp total bound matches the engine", () => {
+	it("mirrors constants::import_mcp::TOTAL_TIMEOUT_MS", () => {
+		const match = constantsHpp.match(
+			/constexpr\s+long\s+long\s+TOTAL_TIMEOUT_MS\s*=\s*(\d+)\s*;/
+		);
+		if (!match) throw new Error("constants.hpp declares no long long TOTAL_TIMEOUT_MS");
+		expect(IMPORT_MCP_TOTAL_TIMEOUT_MS).toBe(Number(match[1]));
 	});
 });

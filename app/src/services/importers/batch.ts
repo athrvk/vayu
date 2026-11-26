@@ -92,8 +92,10 @@ export interface BatchEntry {
 	/**
 	 * The bundled text - what was parsed, and what an option toggle re-parses.
 	 * Identical to the file's own bytes unless it referenced other documents.
+	 * `null` for an entry built from an already-parsed result (`mcpBatchEntry`):
+	 * there is no document to re-parse, so `reparseBatch` leaves it alone.
 	 */
-	raw: string;
+	raw: string | null;
 	/** External `$ref`s nothing could reach, already stamped into `result.meta`. */
 	unresolvedRefs: number;
 	/** What the bundling fetched and refused, named; carried onto `result.meta.refReport`. */
@@ -199,6 +201,27 @@ export function applicableEntries(entries: BatchEntry[]): BatchEntry[] {
  */
 export function entryLabel(entry: BatchEntry): string {
 	return entry.fileName || entry.sourceUrl || "Pasted document";
+}
+
+/**
+ * The entry for a result the engine already built from a live MCP server (`POST /import/mcp`,
+ * #3843). It has no document: `raw` is `null`, and the server URL stands where a file's name
+ * would, so `entryLabel` names it.
+ */
+export function mcpBatchEntry(result: ImportResult, url: string): BatchEntry {
+	return {
+		id: `mcp:${url}`,
+		fileName: "",
+		relativePath: "",
+		specPath: "",
+		sourceUrl: url,
+		raw: null,
+		unresolvedRefs: 0,
+		result,
+		error: null,
+		bundledInto: null,
+		included: true,
+	};
 }
 
 const NO_REFS: RefReport = { fetched: [], refused: [] };
@@ -420,6 +443,16 @@ async function parseEntry(
 }
 
 /**
+ * Whether an option toggle has anything to re-parse in this entry. A bundled sibling and an
+ * applied entry keep what they have; so does a document-less one (`raw` is `null`): an MCP import
+ * carries no scripts or environments for the toggles to act on, and posting nothing to
+ * `/import/parse` would only turn a good result into an error.
+ */
+function isReparsable(entry: BatchEntry): boolean {
+	return entry.raw !== null && !entry.bundledInto && !entry.outcome;
+}
+
+/**
  * Re-parse a batch after an option toggle, from the text already bundled. Nothing is re-fetched:
  * `raw` is the bundled document and the refs that stayed unresolved still are, so the count is
  * restated, not recomputed; a re-parse that dropped it would quietly un-report a loss the user was
@@ -434,12 +467,12 @@ export async function reparseBatch(
 	// A toggle re-parses every entry that has one - the same round trip per file
 	// the first parse was - so it reports the same counter rather than looking
 	// instant and then blocking for a folder's worth of them.
-	const reparses = entries.filter((entry) => !entry.bundledInto && !entry.outcome).length;
+	const reparses = entries.filter(isReparsable).length;
 	report("parsing", 0, reparses);
 	let done = 0;
 	return await Promise.all(
 		entries.map(async (entry) => {
-			if (entry.bundledInto || entry.outcome) return entry;
+			if (entry.raw === null || !isReparsable(entry)) return entry;
 			const parsed = await parseEntry(entry.raw, opts, {
 				...(entry.fileName ? { fileName: entry.fileName } : {}),
 				...(entry.sourceUrl ? { sourceUrl: entry.sourceUrl } : {}),
