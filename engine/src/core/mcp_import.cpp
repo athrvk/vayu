@@ -20,9 +20,10 @@
 #include <utility>
 #include <vector>
 
+#include "schema_sampler.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/openapi_document.hpp"
-#include "vayu/core/query_encoding.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/utils/log_redact.hpp"
 
 namespace vayu::core {
@@ -38,6 +39,11 @@ struct EntryRequest {
     /// The call's method and `params`.
     std::string method;
     json params;
+    /// The `{name, inputSchema}` the `mcp` body stores, or null for none.
+    json mcp_tool = nullptr;
+    /// The tool's schema is one a send refuses, so `mcp_tool` is null (a tool
+    /// with no schema is not this).
+    bool tool_schema_unusable = false;
 };
 
 using EntryReader = std::optional<EntryRequest> (*) (const json& entry);
@@ -72,14 +78,57 @@ json uri_params (const std::string& uri) {
     return params;
 }
 
+/// The tool's `inputSchema` when it is an object, the one shape both the
+/// sampler and `mcpTool` take.
+const json* input_schema_of (const json& tool) {
+    const auto found = tool.find ("inputSchema");
+    return found != tool.end () && found->is_object () ? &*found : nullptr;
+}
+
+/**
+ * The arguments a call to a tool described by @p schema carries: the required
+ * ones only, each as its schema states it (a `const`, a `default`, an `enum`'s
+ * first member) and otherwise a typed stub. Stubs, not `{{variables}}`: a name
+ * still written at send is refused (`resolve_residual_tokens`), so a
+ * placeholder would leave the generated run failing until it is edited.
+ */
+json sampled_arguments (const json& schema) {
+    const SchemaSampler sampler (schema,
+    SampleOptions{ .use_default = true, .required_only = true, .enum_any_type = true });
+    json arguments = sampler.sample (&schema);
+    return arguments.is_object () ? std::move (arguments) : json::object ();
+}
+
+/// What an `mcp` body stores of a tool, or null when `read_mcp_tool` refuses it
+/// (an `x-mcp-header` that is not a usable header name): `POST /import/apply`
+/// refuses the whole tree over one such body, so it is left out of the request.
+/// `outputSchema` is not stored; nothing reads it.
+json storable_tool (const std::string& name, const json* schema) {
+    json tool    = json::object ();
+    tool["name"] = name;
+    if (schema != nullptr) {
+        tool["inputSchema"] = *schema;
+    }
+    if (!vayu::http::read_mcp_tool (nlohmann::json (tool))) {
+        return nullptr;
+    }
+    return tool;
+}
+
 std::optional<EntryRequest> tool_request (const json& tool) {
-    auto name = nonempty_string (tool, "name");
+    const auto name = nonempty_string (tool, "name");
     if (!name) {
         return std::nullopt;
     }
-    json params = named_call_params (*name);
-    return EntryRequest{ std::move (*name), description_of (tool), "tools/call",
-        std::move (params) };
+    const json* schema = input_schema_of (tool);
+    json params        = named_call_params (*name);
+    if (schema != nullptr) {
+        params["arguments"] = sampled_arguments (*schema);
+    }
+    EntryRequest request{ *name, description_of (tool), "tools/call", std::move (params) };
+    request.mcp_tool             = storable_tool (*name, schema);
+    request.tool_schema_unusable = request.mcp_tool.is_null ();
+    return request;
 }
 
 std::optional<EntryRequest> prompt_request (const json& prompt) {
@@ -140,29 +189,46 @@ std::string bare_call (const EntryRequest& entry) {
     return call.dump (2);
 }
 
-json request_draft (EntryRequest entry, const McpServerListing& listing, const json& header_rows) {
-    json body              = json::object ();
-    body["mode"]           = "mcp";
-    body["content"]        = bare_call (entry);
+/// Every generated request expects a `200`; the MCP reply's own failure classes
+/// (a JSON-RPC error, a tool's `isError`) are judged by the engine without an
+/// element. No `assert.jsonschema` from a tool's `outputSchema`: that kind reads
+/// draft-07, which a 2020-12 schema can fail by construction (#3763).
+json expected_status_elements () {
+    json config       = json::object ();
+    config["in"]      = json::array ({ 200 });
+    json element      = json::object ();
+    element["kind"]   = "assert.status";
+    element["config"] = std::move (config);
+    json elements     = json::array ();
+    elements.push_back (std::move (element));
+    return elements;
+}
+
+json request_draft (EntryRequest entry, const json& header_rows) {
+    json body       = json::object ();
+    body["mode"]    = "mcp";
+    body["content"] = bare_call (entry);
+    if (!entry.mcp_tool.is_null ()) {
+        body["mcpTool"] = std::move (entry.mcp_tool);
+    }
     json request           = json::object ();
     request["name"]        = std::move (entry.name);
     request["description"] = std::move (entry.description);
     request["method"]      = "POST";
-    request["url"]         = listing.url;
-    request["params"] =
-    json (reconcile_query_rows (nlohmann::json::array (), listing.url));
-    request["headers"]  = with_required_content_type (header_rows, body);
-    request["body"]     = std::move (body);
-    request["auth"]     = json{ { "mode", "inherit" } };
-    request["elements"] = json::array ();
+    request["url"]         = "{{" + std::string (MCP_BASE_URL_VARIABLE) + "}}";
+    request["params"]      = json::array ();
+    request["headers"]     = with_required_content_type (header_rows, body);
+    request["body"]        = std::move (body);
+    request["auth"]        = json{ { "mode", "inherit" } };
+    request["elements"]    = expected_status_elements ();
     return request;
 }
 
 /// Appends a request per usable entry of @p entries to @p requests, counting
-/// each one with no identity as a `malformed_item`.
+/// each one with no identity as a `malformed_item` and each tool whose schema a
+/// send would refuse as an `unusable_tool_schema`, named by the tool.
 void append_requests (const json& entries,
 EntryReader read,
-const McpServerListing& listing,
 const json& header_rows,
 json& requests,
 ImportTally& tally) {
@@ -172,7 +238,12 @@ ImportTally& tally) {
             tally.add ("malformed_item");
             continue;
         }
-        requests.push_back (request_draft (std::move (*request), listing, header_rows));
+        if (request->tool_schema_unusable) {
+            tally.set_subject (request->name);
+            tally.add ("unusable_tool_schema");
+            tally.set_subject ("");
+        }
+        requests.push_back (request_draft (std::move (*request), header_rows));
     }
 }
 
@@ -188,11 +259,16 @@ json folder_draft (std::string_view name, json requests) {
     return folder;
 }
 
-/// The root's auth and variables: a bearer import's token as a secret
-/// variable the user fills, never the token itself.
-void set_root_auth (json& root, bool bearer) {
-    json variables = json::object ();
-    if (!bearer) {
+/// The root's auth and variables: the endpoint every request sends to, and a
+/// bearer import's token as a secret variable the user fills, never the token
+/// itself.
+void set_root_scope (json& root, const McpServerListing& listing) {
+    json variables                                 = json::object ();
+    json base_url                                  = json::object ();
+    base_url["value"]                              = listing.url;
+    base_url["enabled"]                            = true;
+    variables[std::string (MCP_BASE_URL_VARIABLE)] = std::move (base_url);
+    if (!listing.bearer) {
         root["variables"] = std::move (variables);
         root["auth"]      = json{ { "mode", "none" } };
         return;
@@ -235,30 +311,28 @@ json mcp_import_result (const McpServerListing& listing) {
 
     if (listing.tools) {
         json tools = json::array ();
-        append_requests (*listing.tools, tool_request, listing, header_rows, tools, tally);
+        append_requests (*listing.tools, tool_request, header_rows, tools, tally);
         add_folder ("Tools", std::move (tools));
     }
     if (listing.resources) {
         json resources = json::array ();
-        append_requests (*listing.resources, resource_request, listing,
-        header_rows, resources, tally);
+        append_requests (*listing.resources, resource_request, header_rows, resources, tally);
         if (listing.resource_templates) {
             append_requests (*listing.resource_templates, template_request,
-            listing, header_rows, resources, tally);
+            header_rows, resources, tally);
         }
         add_folder ("Resources", std::move (resources));
     }
     if (listing.prompts) {
         json prompts = json::array ();
-        append_requests (
-        *listing.prompts, prompt_request, listing, header_rows, prompts, tally);
+        append_requests (*listing.prompts, prompt_request, header_rows, prompts, tally);
         add_folder ("Prompts", std::move (prompts));
     }
 
     json root           = json::object ();
     root["name"]        = listing.name;
     root["description"] = "";
-    set_root_auth (root, listing.bearer);
+    set_root_scope (root, listing);
     root["elements"]          = json::array ();
     const std::size_t folders = children.size ();
     root["children"]          = std::move (children);

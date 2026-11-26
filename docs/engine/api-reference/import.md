@@ -255,8 +255,9 @@ The fixed kinds, in the order they are reported (`ORDER` in `ImportTally::items(
 | `script_unsupported` | A Postman enabled event with a `script.src`, or script text under a `listen` other than `prerequest` / `test`, which has no element to become |
 | `script_unsupported_insomnia` | An Insomnia request, folder or workspace whose imported, non-blank script uses the `insomnia` object, which Vayu does not define; the script is kept and throws when it runs. Counted once per owner, only with `importScripts` on, the owner under `requests` |
 
-Three kinds are counted but are not in that order, so they come after it, in first-encountered order:
-`elements_invalid` (an `elements` array, from a document a Vayu export wrote, that fails the element registry's validation and is not applied), `mock_example_missing` (a stored mock setting that names an example the document does not carry) and `vayu_extension_invalid` (a piece of an `x-vayu-*` extension that fails its check; the standard reading stays in place).
+Four kinds are counted but are not in that order, so they come after it, in first-encountered order:
+`elements_invalid` (an `elements` array, from a document a Vayu export wrote, that fails the element registry's validation and is not applied), `mock_example_missing` (a stored mock setting that names an example the document does not carry),
+`vayu_extension_invalid` (a piece of an `x-vayu-*` extension that fails its check; the standard reading stays in place) and `unusable_tool_schema` (an MCP tool whose `inputSchema` a send refuses, the tool under `requests`; see [`POST /import/mcp`](#post-importmcp)).
 Not every kind is a loss: `default_response` and `url_without_raw` count a mapping the import made rather than something it dropped (see `docs/app/import-collections/postman.md`), and so does `file_body`:
 a whole-file body (Postman `file`, Insomnia binary, an OpenAPI `application/octet-stream` or `format: binary` body) imports as a `binary` body naming the file, and the count, with its `requests`, says which bodies have a file to relink or choose.
 **Every file reference an import writes** - a binary body's `file`, a form-data file part - carries the path the document named, which the engine sends only once the file is picked again or lies under an allowed folder.
@@ -336,7 +337,7 @@ In order:
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `url` | string, **required** | The server's endpoint, `http` or `https`, with no `user:password@` (a `400`: put credentials in `auth` or `headers`). Stored as given in every generated request's `url`, so a key in its query string is stored too. |
+| `url` | string, **required** | The server's endpoint, `http` or `https`, with no `user:password@` (a `400`: put credentials in `auth` or `headers`). Stored as given in the root collection's `mcpBaseUrl` variable, so a key in its query string is stored too. |
 | `headers` | `[{name, value}]` or object | Sent on every call, read by the rule [`POST /execute`](execute.md#post-execute) reads them by: a name is trimmed and must be a token, a value cannot hold CR, LF or NUL. |
 | `auth` | `{mode: "bearer", token}` | The shape a saved request's auth has. Written as `Authorization: Bearer <token>` (trimmed), unless `headers` already names `Authorization`, which wins. No other mode. |
 | `include` | object | `tools` (default `true`), `resources` and `prompts` (default `false`), each a boolean. An unknown member, and an `include` that leaves nothing included, is a `400`. |
@@ -346,13 +347,24 @@ One root collection named after the server, holding a folder per included primit
 
 | Folder | One request per | Body (`mode: "mcp"`) | Named by |
 |--------|-----------------|----------------------|----------|
-| `Tools` | listed tool | `{"method": "tools/call", "params": {"name": <tool>, "arguments": {}}}` | `name` |
+| `Tools` | listed tool | `{"method": "tools/call", "params": {"name": <tool>, "arguments": <sampled>}}`, plus `mcpTool` (below) | `name` |
 | `Resources` | listed resource, then resource template | `{"method": "resources/read", "params": {"uri": <uri>}}`; a template's `uriTemplate` as written, with `URI template: <uriTemplate>` leading its description | `name`, else the URI |
 | `Prompts` | listed prompt | `{"method": "prompts/get", "params": {"name": <prompt>, "arguments": {}}}` | `name` |
 
-Every request is a `POST` to `url` described by the entry's `description`, with the `Content-Type: application/json` row an `mcp` body carries and `inherit` auth.
+Every request is a `POST` to `{{mcpBaseUrl}}`, a collection variable on the root holding the `url` the import was sent, described by the entry's `description`, with the `Content-Type: application/json` row an `mcp` body carries and `inherit` auth.
 The body is a bare call (no `jsonrpc` or `id`), so the engine stamps the envelope and `_meta` at send.
-The tool's schema (`mcpTool`), arguments drawn from it and assertions are not filled in (issue [#3839](https://github.com/athrvk/vayu/issues/3839)).
+Every request carries one element, `assert.status` with `in: [200]`; the MCP reply's own failure classes (a JSON-RPC error, a tool's `isError`) need none.
+There is no `assert.jsonschema` from a tool's `outputSchema`: that kind reads draft-07, which a 2020-12 schema can fail by construction (issue [#3763](https://github.com/athrvk/vayu/issues/3763)).
+
+**A tool's schema (issue [#3839](https://github.com/athrvk/vayu/issues/3839)).**
+A tool with an object `inputSchema` stores `mcpTool: {name, inputSchema}` in its body, so the `x-mcp-header` mirrors are derived at send ([The `mcp` body](request-body.md#the-mcp-body)); `outputSchema` is not stored.
+A tool with no such schema stores `mcpTool: {name}`.
+`arguments` is drawn from the `inputSchema` (`$ref` resolved against the schema itself, so `#/$defs/x` works): only the properties `required` names, each as its schema states it, in order of preference a `const`, a `default`, an `example`, an `enum`'s first member, then a typed stub (`""`, `0`, `false`, `{}`, `[]`).
+These are values, not `{{variables}}`, so the generated collection runs as it stands: a name left unresolved at send is refused, and a placeholder would fail every run until it was edited.
+A tool with no `required` array is called with `{}`.
+
+A tool whose `inputSchema` a send would refuse (an `x-mcp-header` that is not a string or a header name, or one repeated) keeps its request and sampled `arguments` but gets no `mcpTool`, because `POST /import/apply` refuses a whole tree over one such body.
+It is counted in `meta.skipped` as `unusable_tool_schema`, naming the tool under `requests`.
 An entry with no usable identity is skipped and counted in `meta.skipped` as `malformed_item`.
 That is a tool or prompt with no non-empty `name`, a resource with no `uri`, or a template with no `uriTemplate`.
 

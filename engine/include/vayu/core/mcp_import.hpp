@@ -24,6 +24,16 @@
  * call, so the engine stamps the envelope, `_meta` and the derived headers at
  * send exactly as it does for a request a person wrote.
  *
+ * A tool's request carries what a person's would: `mcpTool` (`{name,
+ * inputSchema}`, so the `x-mcp-header` mirrors are derived at send) and
+ * `arguments` sampled from the `inputSchema` (`SchemaSampler`): the required
+ * properties only, each as the schema states it (`const`, `default`, an enum's
+ * first member) and otherwise a typed stub. Stubs, never `{{variables}}`, so
+ * the generated collection runs as it stands. Every request expects a `200`
+ * (`assert.status`); the MCP reply's own failure classes need no element.
+ * Every request's `url` is `{{mcpBaseUrl}}`, a root collection variable holding
+ * the endpoint.
+ *
  * **No credential reaches the tree.** A bearer token the import was sent with
  * becomes the collection's `bearer` auth over `{{mcpToken}}`, a secret
  * collection variable left empty for the user to fill; each request inherits
@@ -46,6 +56,9 @@ namespace vayu::core {
 /// The collection variable a bearer-authenticated import's auth reads.
 inline constexpr std::string_view MCP_TOKEN_VARIABLE = "mcpToken";
 
+/// The collection variable holding the server's endpoint, every request's `url`.
+inline constexpr std::string_view MCP_BASE_URL_VARIABLE = "mcpBaseUrl";
+
 /// `meta.format` of an MCP import.
 inline constexpr std::string_view MCP_IMPORT_FORMAT = "MCP server";
 
@@ -55,7 +68,7 @@ inline constexpr std::string_view MCP_IMPORT_FORMAT = "MCP server";
  *        listed nothing gets an empty folder.
  */
 struct McpServerListing {
-    /// The server's endpoint, every generated request's `url`.
+    /// The server's endpoint, the value of the root's `mcpBaseUrl` variable.
     std::string url;
     /// The root collection's name: `serverInfo.name`, else the URL's host.
     std::string name;
@@ -81,8 +94,12 @@ struct McpServerListing {
  * An entry with no usable identity (a tool or prompt without a non-empty
  * string `name`, a resource without a `uri`, a template without a
  * `uriTemplate`) is skipped and counted under `meta.skipped` as
- * `malformed_item`. A request is named by the entry's `name` (a resource or
- * template without one by its URI) and described by its `description`.
+ * `malformed_item`. A tool whose `inputSchema` `read_mcp_tool` refuses (an
+ * `x-mcp-header` that is not a usable header name) keeps its request and its
+ * sampled arguments but no `mcpTool`, and is counted as `unusable_tool_schema`
+ * naming the tool: apply refuses the whole tree over one such body. A request
+ * is named by the entry's `name` (a resource or template without one by its
+ * URI) and described by its `description`.
  */
 [[nodiscard]] nlohmann::ordered_json mcp_import_result (const McpServerListing& listing);
 
