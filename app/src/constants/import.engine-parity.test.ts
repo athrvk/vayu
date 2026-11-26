@@ -28,12 +28,15 @@ import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit
 import {
 	IMPORT_FETCH_EVENTS,
 	IMPORT_FETCH_STALL_TIMEOUT_MS,
+	IMPORT_MCP_FORMAT,
+	IMPORT_MCP_TOKEN_VARIABLE,
 	IMPORT_MCP_TOTAL_TIMEOUT_MS,
 } from "./import";
 
 /** Held in the testkit, so CI routes an edit to the header back to this suite. */
-const [CONSTANTS_HPP] = ENGINE_READING_GUARDS.importEvents.paths.map(fromRepoRoot);
+const [CONSTANTS_HPP, MCP_IMPORT_HPP] = ENGINE_READING_GUARDS.importEvents.paths.map(fromRepoRoot);
 const constantsHpp = readFileSync(CONSTANTS_HPP, "utf8");
+const mcpImportHpp = readFileSync(MCP_IMPORT_HPP, "utf8");
 
 /** One `constexpr const char* NAME = "value";` from the engine header. */
 function engineString(name: string): string {
@@ -75,5 +78,24 @@ describe("the import-mcp total bound matches the engine", () => {
 		);
 		if (!match) throw new Error("constants.hpp declares no long long TOTAL_TIMEOUT_MS");
 		expect(IMPORT_MCP_TOTAL_TIMEOUT_MS).toBe(Number(match[1]));
+	});
+});
+
+describe("the import-mcp names match the engine", () => {
+	/** One `inline constexpr std::string_view NAME = "value";` from `mcp_import.hpp`. */
+	function engineView(name: string): string {
+		const match = mcpImportHpp.match(
+			new RegExp(`constexpr\\s+std::string_view\\s+${name}\\s*=\\s*"([^"]*)"\\s*;`)
+		);
+		if (!match) throw new Error(`mcp_import.hpp declares no string_view ${name}`);
+		return match[1];
+	}
+
+	it.each([
+		["MCP_IMPORT_FORMAT", IMPORT_MCP_FORMAT],
+		["MCP_TOKEN_VARIABLE", IMPORT_MCP_TOKEN_VARIABLE],
+	])("%s", (engineName, rendererValue) => {
+		expect(rendererValue).not.toBe("");
+		expect(engineView(engineName)).toBe(rendererValue);
 	});
 });

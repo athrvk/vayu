@@ -15,6 +15,7 @@
  */
 export const IMPORT_STAGE_LABELS = {
 	reading: "Reading files",
+	connecting: "Asking the server",
 	fetching: "Downloading",
 	bundling: "Resolving references",
 	parsing: "Reading documents",
@@ -50,3 +51,11 @@ export const IMPORT_FETCH_STALL_TIMEOUT_MS = 30_000;
  * before the client gives up.
  */
 export const IMPORT_MCP_TOTAL_TIMEOUT_MS = 120_000;
+
+/**
+ * What an MCP import's tree is named, mirroring `MCP_IMPORT_FORMAT` and `MCP_TOKEN_VARIABLE`
+ * (`mcp_import.hpp`; `import.engine-parity.test.ts` pins both). The format says the tree came from
+ * a server, and the variable is the secret one a bearer import leaves empty for the user to fill.
+ */
+export const IMPORT_MCP_FORMAT = "MCP server";
+export const IMPORT_MCP_TOKEN_VARIABLE = "mcpToken";

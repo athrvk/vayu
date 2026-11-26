@@ -320,7 +320,10 @@ export const ENGINE_READING_GUARDS = {
 	},
 	importEvents: {
 		reader: "app/src/constants/import.engine-parity.test.ts",
-		paths: ["engine/include/vayu/core/constants.hpp"],
+		paths: [
+			"engine/include/vayu/core/constants.hpp",
+			"engine/include/vayu/core/mcp_import.hpp",
+		],
 	},
 	dataFileNesting: {
 		reader: "app/src/constants/data-files.engine-parity.test.ts",

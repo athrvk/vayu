@@ -30,6 +30,7 @@ import type {
 } from "@/services/importers/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { containsVariableToken } from "@/constants/variables";
+import { IMPORT_MCP_FORMAT, IMPORT_MCP_TOKEN_VARIABLE } from "@/constants/import";
 import { isBlankScriptElement } from "@/lib/elements";
 import { formatNumber } from "@/lib/format-number";
 import { parentFolder } from "@/lib/file-path";
@@ -615,6 +616,23 @@ export function importNotices(meta: ImportMeta, unticked = 0): ImportNotice[] {
 	return [
 		...notices.filter((n) => n.tier === "action"),
 		...notices.filter((n) => n.tier === "note"),
+	];
+}
+
+/**
+ * The line for an MCP import made with a bearer token (#3843). The engine never returns the token:
+ * the root collection reads a secret `mcpToken` variable it leaves empty, so the requests send
+ * nothing until the user fills it. The variable's presence is the engine's own record that a token
+ * was given, so the line follows the result and not the form.
+ */
+export function mcpTokenNotice(result: ImportResult): ImportNotice[] {
+	if (result.meta.format !== IMPORT_MCP_FORMAT) return [];
+	if (!result.collections.some((c) => IMPORT_MCP_TOKEN_VARIABLE in c.variables)) return [];
+	return [
+		{
+			tier: "action",
+			text: `The token is not stored in the collection - set the ${IMPORT_MCP_TOKEN_VARIABLE} variable before you send`,
+		},
 	];
 }
 

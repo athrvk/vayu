@@ -27,6 +27,7 @@ import {
 	describeCounts,
 	fileReferenceNeeds,
 	importNotices,
+	mcpTokenNotice,
 } from "./import-notices";
 import { stubNumberLocale } from "@/test/number-locale";
 import { collection, request, result } from "./import-preview.testkit";
@@ -1072,5 +1073,28 @@ describe("importNotices - client certificates left unticked (#2363)", () => {
 			"2 client certificates not imported - add them in Settings",
 			"1 per-request proxy setting not imported",
 		]);
+	});
+});
+
+describe("mcpTokenNotice (#3843)", () => {
+	const tokenVariable = { mcpToken: { value: "", enabled: true, secret: true } };
+	const treeOf = (format: string, variables: CollectionDraft["variables"]) =>
+		result({ collections: [collection({ variables })], meta: { format } });
+
+	it("tells the user to fill the variable a bearer import leaves empty", () => {
+		const [notice, ...rest] = mcpTokenNotice(treeOf("MCP server", tokenVariable));
+		expect(rest).toEqual([]);
+		expect(notice.tier).toBe("action");
+		expect(notice.text).toBe(
+			"The token is not stored in the collection - set the mcpToken variable before you send"
+		);
+	});
+
+	it("says nothing for an import made without a token", () => {
+		expect(mcpTokenNotice(treeOf("MCP server", {}))).toEqual([]);
+	});
+
+	it("leaves another format's variable of the same name alone", () => {
+		expect(mcpTokenNotice(treeOf("Postman Collection v2.1", tokenVariable))).toEqual([]);
 	});
 });
