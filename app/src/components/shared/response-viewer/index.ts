@@ -5,21 +5,15 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Shared Response Viewer Components
- *
- * Centralized response display components used across the application.
- */
-
 // Main exports
 export { default as UnifiedResponseViewer } from "./UnifiedResponseViewer";
 export { default as ResponseBody } from "./ResponseBody";
-// An MCP tool result drawn above the raw reply: the request builder's Body tab
-// (#3841). Mounted there only, where the request's mode says the reply is MCP.
+// The MCP tool result above the raw reply, mounted only in the request builder's Body tab, where
+// the request's mode says the reply is MCP (#3841).
 export { default as McpResultView } from "./McpResultView";
 export type { McpResultViewProps } from "./McpResultView";
-// One file, three variants: the collapsible table, the compact slab, and the
-// Headers *tab* that stacks two tables with an empty state.
+// Three variants: the collapsible table, the compact slab, and the Headers *tab* stacking two
+// tables with an empty state.
 export {
 	default as HeadersViewer,
 	CompactHeadersViewer,
@@ -27,53 +21,45 @@ export {
 	ResponseHeadersPanel,
 } from "./HeadersViewer";
 export type { ResponseHeadersPanelProps } from "./HeadersViewer";
-// Says what a captured load-run response is *not* - truncated, dropped for
-// budget, or binary. Rendered by both surfaces that show captured samples.
+// What a captured load-run response is *not* (truncated, dropped for budget, binary), for both
+// surfaces showing captured samples.
 export { CapturedResponseNotice } from "./CapturedResponseNotice";
 export type { CapturedResponseNoticeProps } from "./CapturedResponseNotice";
-// The Events timeline. Shared because two surfaces show the same list from two
-// sources: the request builder's live/restored stream, and a load run's
-// captured sample, whose events the engine parses back out of the stored body
-// (issue #657). A second copy here would be a second set of truncation
-// disclosures to keep honest.
+// The Events timeline, shared as two surfaces show it from two sources: the request builder's
+// live/restored stream, and a load run's captured sample, whose events the engine parses out of the
+// stored body (#657). A second copy would be a second set of truncation disclosures to keep honest.
 export { default as ResponseEvents } from "./ResponseEvents";
 export type { ResponseEventsProps } from "./ResponseEvents";
 export { StatusCodeBadge } from "./StatusCodeBadge";
 export type { StatusCodeBadgeProps } from "./StatusCodeBadge";
-// Whether one response matched the schema its contract declares. Exported now
-// that a second surface shows it - the collection run's step list beside the
-// response pane's status bar - because a hand-rolled second chip would not
-// receive this one's three-state wording (issue #681).
+// Whether a response matched its contract's schema, exported for the collection run's step list
+// beside the status bar, as a second chip would miss the three-state wording (#681).
 export { ValidationChip } from "./ValidationChip";
 export type { ValidationChipProps } from "./ValidationChip";
-// What a step's assertions came to, beside the verdict above and on the same
-// absent-is-not-zero terms (issue #724). Here rather than in the step list
-// because it summarises a *response*, like everything else in this folder, and
-// the live and restored halves of a run must not word it two ways.
+// A step's assertions, beside the verdict on its absent-is-not-zero terms (#724); here, not in the
+// step list, as it summarises a *response*, and a run's live and restored halves must word it
+// alike.
 export { TestsChip } from "./TestsChip";
 export type { TestsChipProps } from "./TestsChip";
 
-// The "Large response" callout, shared by the two panes that cap a body at
-// `LARGE_BODY_BYTES`: the Body tab here and the request builder's Raw tab.
+// The "Large response" callout of the two panes capping a body at `LARGE_BODY_BYTES`: the Body tab
+// here and the request builder's Raw tab.
 export { LargeBodyNotice } from "./LargeBodyNotice";
 export type { LargeBodyNoticeProps } from "./LargeBodyNotice";
 
-// Pieces shared by the two response viewers. They are two different shells -
-// seven tabs from live context, three from a stored run - so these are the
-// parts that were genuinely identical, not an attempt to merge the shells.
+// Pieces shared by the two response viewers, two different shells (eight tabs from live context,
+// two to four from a stored sample): the parts genuinely identical, not a merge of the shells.
 export { ResponseStatusBar } from "./ResponseStatusBar";
-// The "HTTP/1.1, not HTTP/2" line the bar draws, for a surface whose viewer has
-// no bar: a collection run's step card (#3262).
+// The bar's "HTTP/1.1, not HTTP/2" line, for a viewer without a bar: a collection run's step card
+// (#3262).
 export { HttpVersionDowngradeNote } from "./HttpVersionDowngradeNote";
 export type { HttpVersionDowngradeNoteProps } from "./HttpVersionDowngradeNote";
 export { ResponseActions } from "./ResponseActions";
 export type { ResponseStatusBarProps } from "./ResponseStatusBar";
 export type { ResponseActionsProps } from "./ResponseActions";
 
-// The five network phases, as one descriptor list. Five components render the
-// same DNS -> Connect -> TLS -> TTFB -> Download breakdown; adding a phase used
-// to mean finding all five, and two of them had already drifted. See
-// `timing-phases.ts` for what drifted and why colour lives there.
+// The five network phases as one descriptor list, as five components render the DNS -> Connect ->
+// TLS -> TTFB -> Download breakdown; `timing-phases.ts` says why colour lives there.
 export { PHASE_TIPS } from "./phase-tips";
 export {
 	TIMING_PHASES,
@@ -99,9 +85,8 @@ export type {
 export { default as TimingPhaseTiles } from "./TimingPhaseTiles";
 export type { TimingPhaseTilesProps } from "./TimingPhaseTiles";
 
-// The sampled-exchange shell - the summary row, the expansion, the error block
-// and the timing tiles - that the history detail's stored samples render. See
-// the file header for what two shells had drifted into before they shared this.
+// The sampled-exchange shell (summary row, expansion, error block, timing tiles) the history
+// detail's stored samples render.
 export { SampledExchange } from "./SampledExchange";
 export type { SampledExchangeProps, ExchangeState } from "./SampledExchange";
 
@@ -109,18 +94,15 @@ export type { SampledExchangeProps, ExchangeState } from "./SampledExchange";
 export {
 	detectBodyType,
 	formatBody,
-	// Where the pane stops formatting a body and shows a raw prefix. Exported
-	// because the mapping that builds `ResponseState` reads it too: above this
-	// size the indented copy it used to build is one nothing will ever render.
-	// The Raw tab reads it for its own prefix.
+	// Where the pane stops formatting and shows a raw prefix. Exported as the `ResponseState`
+	// mapping reads it too (above it, no indented copy will ever render), and the Raw tab for its
+	// own prefix.
 	LARGE_BODY_BYTES,
-	// The response pane's own latency wording ("34 ms", "5.00 s"). Exported so a
-	// surface outside the viewer - the context bar's Recent sends rows - states
-	// a latency the way the pane states it, instead of growing a second rule for
-	// when milliseconds become seconds.
+	// The pane's latency wording ("34 ms", "5.00 s"), exported so the context bar's Recent sends
+	// rows state a latency as the pane does, not by a second rule for when ms become seconds.
 	formatResponseTime,
-	// Milliseconds between two epoch stamps, absent when either is unknown: the
-	// Timing tab's first event reads it beside the Events rows (#3775).
+	// Milliseconds between two epoch stamps, absent when either is unknown, for the Timing tab's
+	// first event beside the Events rows (#3775).
 	elapsedBetween,
 	getMonacoLanguage,
 	buildRawRequest,

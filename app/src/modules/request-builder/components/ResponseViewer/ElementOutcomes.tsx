@@ -6,27 +6,19 @@
  */
 
 /**
- * ElementOutcomes (issue #1512)
+ * What each of a step's non-script elements did (extractors, assertions, timers) (#1512), beside
+ * `TestResults`, which keeps the script kinds' `pm.test` outcomes. `TestResults`' card layout, one
+ * icon per outcome. A row's message (an assertion's failure, an extractor's miss reason, an
+ * element's error, a `control.transaction`'s name) prints inline, as does a timer's wait
+ * (`waitedMs`, 0 for a silenced timer and still worth saying, #1941). It wraps in full, since a
+ * miss reason ("no match for '$.data.token'") is what tells two rows of a kind apart (#3051); the
+ * card's `title` repeats it, and an errored element is never a bare chip (#2522). A row names its
+ * element (`name` if any, the kind beside it), and a collection's element names its collection. A
+ * required extractor's `missing` failed the step, so it takes failure colours and says required.
  *
- * What each of a step's non-script elements did - extractors, assertions and
- * timers - beside `TestResults`, which stays the script kinds' `pm.test`
- * outcomes in their own unchanged shape. Same card layout as `TestResults`,
- * one icon per outcome rather than a pass/fail split. A row's message - an
- * assertion's failure text, an extractor's miss reason, the error an element
- * raised, a `control.transaction`'s name - prints inline, and so does a timer's
- * wait (`waitedMs`, which is 0 for a silenced timer and still worth saying)
- * (#1941). The message was on hover only for a failure, which left an errored
- * element as a bare chip with its one explanation hidden (#2522); it wraps in
- * full, since a miss reason ("no match for '$.data.token'") is what tells two
- * rows of one kind apart (#3051), and the card's `title` repeats it. A row names
- * its element - `name` when it has one, the kind beside it - and a collection's
- * element says which collection it came from. A required extractor's `missing`
- * failed the step, so it takes the failure's colours and says it was required.
- *
- * `notRun` is the draft elements Send left out for being incomplete (#3066),
- * drawn after the outcomes in the muted colours of `skipped` but worded "Not
- * run - needs ...": the engine never saw them, and a row that read as one the
- * engine skipped would hide that the check was never asked to run.
+ * `notRun` is the incomplete draft elements Send left out (#3066), after the outcomes in
+ * `skipped`'s muted colours but worded "Not run - needs ...": the engine never saw them, and
+ * reading as engine-skipped would hide that the check was never asked to run.
  */
 
 import {
@@ -49,7 +41,7 @@ export interface ElementOutcomesProps {
 	outcomes: readonly ElementOutcome[];
 	/** Incomplete draft elements Send left out of the payload (#3066). */
 	notRun?: readonly LeftOutElement[];
-	/** See {@link TestResultsProps.inset} - same convention, same reason. */
+	/** See {@link TestResultsProps.inset}: same convention, same reason. */
 	inset?: boolean;
 }
 

@@ -13,14 +13,11 @@ import { FileReferenceNeedsView } from "../ImportFileFolders";
 import { NoticeList } from "../NoticeList";
 
 /**
- * What the import preview said was lost or changed, kept on the collection it
- * created until the user dismisses it (issue #2109).
- *
- * The toast that announces an import can expire, and the dialog that showed
- * the ledger is gone, so this is the copy that outlives both. It draws the same
- * `NoticeList` and file-reference list the preview does rather than a second
- * rendering of them. Renders nothing for a collection no import recorded a
- * report for, which is nearly every collection.
+ * What the import preview said was lost or changed, kept on the collection it created until the
+ * user dismisses it (issue #2109): the import toast can expire and the ledger dialog is gone, so
+ * this is the copy that outlives both. It draws the preview's own `NoticeList` and file-reference
+ * list, not a second rendering. Renders nothing for a collection with no recorded report, which is
+ * nearly every collection.
  */
 export function ImportNotesCallout({ rootId }: { rootId: string }) {
 	const report = useImportReportStore(selectImportReport(rootId));

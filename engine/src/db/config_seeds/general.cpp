@@ -18,9 +18,8 @@ namespace vayu::db::config_seeds {
 
 namespace {
 // The `{value,label}` array for "dbSynchronous". SQLite's synchronous levels
-// are its own enumeration, not ours, so the list is literal - but it belongs
-// in the `options` column rather than spelled out as "0 = Off, 1 = ..." prose
-// over an integer input, which is what the entry used to do.
+// are its enumeration, not ours, so the list is literal, but it belongs in
+// `options`, not as "0 = Off, 1 = ..." prose over an integer input.
 std::string db_synchronous_options_json () {
     const nlohmann::json options = { { { "value", "0" },
                                      { "label", "Off (can corrupt on power loss)" } },
@@ -34,15 +33,14 @@ std::string db_synchronous_options_json () {
 // CORE (general_engine)
 // The engine's own machinery: how much work it runs in parallel, and how
 // SQLite is tuned underneath it. Everything a *request* or a *run* is
-// measured or bounded by lives in one of the other categories - #703 moved
-// the request defaults to Network & connectivity and the ceilings to Limits,
+// measured or bounded by lives in one of the other categories (#703: the
+// request defaults are in Network & connectivity and the ceilings in Limits),
 // leaving the four settings that describe the engine itself.
 // =============================================================================
 void seed_general (ConfigSeeder& seed, int64_t now) {
     // Not restart_required: `run_manager` reads this at the start of every run
-    // and builds that run's EventLoop from it, so a change is in force for the
-    // next run started. It carried the flag until #873, which told the user to
-    // restart for a setting the engine had already picked up.
+    // and builds that run's EventLoop from it, so a change holds from the next
+    // run (#873).
     seed (keywords ({ "cores", "parallelism" }) (ConfigEntry{ "workers",
     std::to_string (std::thread::hardware_concurrency ()), "integer", "Worker threads",
     "Number of background worker threads. Higher values improve throughput on "

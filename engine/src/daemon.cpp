@@ -7,11 +7,8 @@
 
 
 /**
- * @file daemon.cpp
- * @brief Vayu Engine daemon entry point
- *
- * This is the background process that handles high-concurrency requests.
- * It exposes a Control API for the Electron app to communicate with.
+ * The engine daemon's entry point: the background process the Electron app
+ * drives over its HTTP control API.
  */
 
 #include <atomic>
@@ -61,13 +58,12 @@ void request_stop () {
 
 /// The single-instance lock, released when this goes out of scope.
 ///
-/// `run_daemon` declares it before the `Database`, so locals destroyed in
-/// reverse order close the database (its checkpoint included) before the lock
-/// is released: a successor that takes the lock never meets this engine's
-/// connection at its startup probe (issue #2420). An early return or a
-/// throw releases it the same way. Taken before the database opens, so the
-/// startup reconcile that fails `running` runs can only meet rows no live
-/// engine owns (issue #2422).
+/// `run_daemon` declares it before the `Database`, so reverse-order destruction
+/// closes the database (its checkpoint included) before the lock is released: a
+/// successor that takes the lock never meets this engine's connection at its
+/// startup probe (issue #2420). An early return or a throw releases it the same
+/// way. Taken before the database opens, so the startup reconcile that fails
+/// `running` runs can only meet rows no live engine owns (issue #2422).
 class InstanceLock {
     public:
     InstanceLock () = default;
@@ -171,7 +167,6 @@ int run_daemon (std::span<char* const> args) {
     const std::string log_dir = vayu::platform::path_join (data_dir, "logs");
     const std::string db_dir  = vayu::platform::path_join (data_dir, "db");
 
-    // Initialize logger
     vayu::utils::Logger::instance ().init (log_dir, "engine");
 
     // Taken while this is the only thread, because it writes the environment,
@@ -187,7 +182,6 @@ int run_daemon (std::span<char* const> args) {
         "Fixed mmap threshold refused; freed large blocks may stay resident");
     }
 
-    // Check for single instance
     std::string lock_path = vayu::platform::path_join (data_dir, "vayu.lock");
     InstanceLock instance_lock;
     if (!instance_lock.acquire (lock_path)) {
@@ -196,21 +190,18 @@ int run_daemon (std::span<char* const> args) {
 
     vayu::utils::Logger::instance ().set_verbosity (verbosity);
 
-    // Setup signal handlers using platform abstraction
     vayu::platform::setup_signal_handlers (
     vayu::platform::make_shutdown_handler (g_signal, [] () {
-        // `_Exit` and not `exit` (#945): this runs inside the signal
-        // handler, and `exit` would run every atexit handler and static
-        // destructor *while the worker threads are still using what they
-        // destroy* - the database, the curl globals, the logger. A second
-        // Ctrl-C is asking for the process to stop now, so it stops now; the
-        // ordered teardown is the first Ctrl-C's job, in the main loop. No
-        // logging here either (#3346): the logger's mutex may be held by the
-        // thread this signal interrupted.
+        // `_Exit` and not `exit` (#945): this runs inside the signal handler,
+        // and `exit` would run every atexit handler and static destructor
+        // *while the worker threads still use what they destroy*: the database,
+        // the curl globals, the logger. A second Ctrl-C asks the process to
+        // stop now, so it stops now; the ordered teardown is the first Ctrl-C's
+        // job, in the main loop. No logging here either (#3346): the logger's
+        // mutex may be held by the thread this signal interrupted.
         std::_Exit (1);
     }));
 
-    // Initialize database
     std::string db_path = vayu::platform::path_join (db_dir, "vayu.db");
     vayu::db::Database db (db_path);
     try {
@@ -240,14 +231,13 @@ int run_daemon (std::span<char* const> args) {
     vayu::utils::Logger::instance ().set_max_file_bytes (db.get_config_int (
     "maxLogFileBytes", vayu::core::constants::logging::DEFAULT_MAX_FILE_BYTES));
 
-    // Initialize curl
     vayu::http::global_init ();
 
-    // Create RunManager and start its background TTL sweeper so retained
-    // runs (completed but kept for /runs/:id/live replay) get evicted even in
-    // headless flows that never hit /runs/:id/live or POST /runs. The provider is
-    // re-read each sweep tick, so changing liveRetentionMs from the UI takes
-    // effect without restarting the daemon (0 = evict immediately).
+    // RunManager's background TTL sweeper evicts retained runs (completed, kept
+    // for /runs/:id/live replay) even in headless flows that never hit
+    // /runs/:id/live or POST /runs. The provider is re-read each sweep tick, so
+    // a liveRetentionMs change from the UI applies without restarting the
+    // daemon (0 = evict immediately).
     vayu::core::RunManager run_manager;
     run_manager.start_sweeper (
     [&db] () -> int64_t { return db.get_config_int ("liveRetentionMs", 60000); });
@@ -262,12 +252,10 @@ int run_daemon (std::span<char* const> args) {
         vayu::http::set_mcp_port (*parsed.mcp_port);
     }
 
-    // Create and start HTTP server
     vayu::http::Server server (db, run_manager, port, grant_secret, reported_data_dir);
 
-    // Set shutdown callback for /shutdown endpoint
-    // This callback is invoked before the server stops, allowing us to
-    // trigger the graceful shutdown sequence in the main loop
+    // `/shutdown` calls this before the server stops; it starts the graceful
+    // shutdown sequence in the main loop.
     server.set_shutdown_callback ([&] () {
         vayu::utils::log_info (
         "shutdown", "Shutdown callback invoked - signaling main loop to exit");
@@ -276,10 +264,10 @@ int run_daemon (std::span<char* const> args) {
 
     // A listener that never came up and one that was asked to stop both leave
     // the wait loop below with `is_running()` false, and telling them apart is
-    // the whole of #983: a taken port used to print the listening banner, fall
-    // into the graceful path and exit 0, so the app saw an engine that had
-    // simply died. The teardown is shared - the lock file and curl's global
-    // state must be released either way - and only the exit code differs.
+    // the whole of #983: a taken port would print the listening banner, take
+    // the graceful path and exit 0, so the app would see an engine that had
+    // simply died. The teardown is shared (the lock file and curl's global
+    // state are released either way); only the exit code differs.
     int exit_code = 0;
     if (!server.start ()) {
         // `start()` has already logged the reason, which puts it on stderr and
@@ -289,12 +277,12 @@ int run_daemon (std::span<char* const> args) {
         std::cerr.flush ();
         exit_code = 1;
     } else {
-        // After the listener, never before it: the refresh is O(database size)
-        // and used to be taken in the `Database` constructor, ahead of the
-        // first `/health`. It reads through a connection of its own, so the
-        // app's first requests are served alongside it. It holds what the
-        // session started from; the refresh at shutdown below adds what the
-        // session wrote (#2421).
+        // After the listener, never before it: the refresh is O(database size),
+        // so it is not taken in the `Database` constructor ahead of the first
+        // `/health`. It reads through a connection of its own, so the app's
+        // first requests are served alongside it. It holds what the session
+        // started from; the refresh at shutdown below adds what the session
+        // wrote (#2421).
         db.start_recovery_backup_refresh ();
     }
 
@@ -328,11 +316,10 @@ int run_daemon (std::span<char* const> args) {
     "Server stopped in " + std::to_string (server_stop_elapsed) + "ms");
 
     // Stop every active run and JOIN its worker before anything it holds a
-    // reference to is torn down. The loop this replaced stopped waiting once
-    // `active_count()` hit zero - which a worker reaches at retain_run, its
-    // last statement, with the thread still unwinding - and gave up entirely
-    // after 5s, leaving detached workers writing to `db` and calling into curl
-    // while both were destroyed underneath them.
+    // reference to is torn down. `active_count()` reaching zero is not enough:
+    // a worker reaches it at retain_run, its last statement, with the thread
+    // still unwinding, and a worker not joined goes on writing to `db` and
+    // calling into curl while both are destroyed underneath it.
     //
     // The order below is load-bearing: workers joined, then the recovery
     // backup's final refresh, then curl's global teardown, then `server` /
@@ -363,7 +350,6 @@ int run_daemon (std::span<char* const> args) {
 
     vayu::utils::log_info ("shutdown", "Goodbye!");
 
-    // Force flush logs
     vayu::utils::Logger::instance ().flush ();
 
     // 1 = the listener never took its port (see the start() check above); 0 =
@@ -380,13 +366,13 @@ int main (int argc, char* argv[]) {
         // an escape from `main` aborts with no message and a status no caller
         // can tell from a crash.
         //
-        // The `Database` constructor's refusals land here on purpose (the
-        // `try` in `run_daemon` guards `init`, not the constructor): a
-        // database written by a newer schema (#1514) and one that could not
-        // be examined because it is locked, the disk is full or read-only
-        // (#2420). Each message names the path and what to do, and this is
-        // what puts it on stderr with exit status 1. `Logger::init` and
-        // `Server` also throw where nothing else catches.
+        // The `Database` constructor's refusals land here on purpose (the `try`
+        // in `run_daemon` guards `init`, not the constructor): a database
+        // written by a newer schema (#1514), and one that could not be examined
+        // because it is locked or the disk is full or read-only (#2420). Each
+        // message names the path and what to do; this puts it on stderr with
+        // exit status 1. `Logger::init` and `Server` also throw where nothing
+        // else catches.
         std::cerr << "vayu-engine: " << e.what () << "\n";
         vayu::utils::log_error ("startup", std::string ("vayu-engine: ") + e.what ());
         return 1;

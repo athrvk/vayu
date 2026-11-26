@@ -6,25 +6,14 @@
  */
 
 /**
- * Engine settings category registry
+ * The seven engine settings categories, declared once and in sidebar order, mirroring
+ * `app-panels.ts` on the client side. One array is the single label per category (for the sidebar
+ * tree's label and icon and the main view's title and description) and the written-down order.
  *
- * The seven engine categories, declared once and in sidebar order - mirroring
- * `app-panels.ts` on the client side.
+ * **Order is by likelihood of visit** (#586), not by how the engine seeds them.
  *
- * This replaces two hand-maintained maps: `ENGINE_CATEGORY_META` in the sidebar
- * tree (label + icon) and `CATEGORY_TITLES` in the settings main view (title +
- * description). They named the same five categories with two independently
- * edited copies of the label, and the sidebar's order was whatever
- * `Object.keys` returned. An array fixes both: one label per category, and the
- * order is written down.
- *
- * **Order is by likelihood of visit** (#586), not by how the engine happens to
- * seed them. It used to put the least-visited category second and the one users
- * arrive with questions about last.
- *
- * **Labels are sentence case**, like the app panels above them in the sidebar.
- * The two registries meet at a section boundary, and Title Case on one side of
- * it was the only thing that made the seam visible.
+ * **Labels are sentence case**, like the app panels above them in the sidebar: the two registries
+ * meet at a section boundary, and Title Case on one side would make the seam visible.
  */
 
 import type { ComponentType } from "react";
@@ -42,23 +31,20 @@ export interface EngineSettingsCategoryMeta {
 	description: string;
 	icon: LucideIcon;
 	/**
-	 * Which named motion this category's glyph plays on hover or focus of the
-	 * sidebar row it sits in - the same field `AppSettingsPanel` carries, so
-	 * `categoryMeta` can read one shape from either registry.
+	 * The named motion this category's glyph plays on hover or focus of its sidebar row: the field
+	 * `AppSettingsPanel` carries, so `categoryMeta` reads one shape from either registry.
 	 */
 	motion?: IconMotion;
 	/**
-	 * Cards rendered above this category's config entries, in order, for engine
-	 * surfaces that are not config entries - a registry with its own CRUD routes
-	 * (issue #707), a diagnostic that sends rather than stores (issue #708).
-	 * `GET /config` describes neither, so the generic entry renderer cannot draw
-	 * them.
+	 * Cards rendered above this category's config entries, in order, for engine surfaces that are
+	 * not config entries: a registry with its own CRUD routes (#707), a diagnostic that sends
+	 * rather than stores (#708). `GET /config` describes neither, so the generic entry renderer
+	 * cannot draw them.
 	 *
-	 * Declared here rather than branched on in `SettingsMain`, for the reason
-	 * `app-panels.ts` exists on the client side: the view looks components up,
-	 * it does not carry a list of category names it treats specially. They save
-	 * on their own - the Save bar above belongs to the config entries - which is
-	 * the same split `CookiesCard` has inside the General panel.
+	 * Declared here, not branched on in `SettingsMain`, for the reason `app-panels.ts` exists: the
+	 * view looks components up rather than carry a list of categories it treats specially. They
+	 * save on their own (the Save bar belongs to the config entries), the split `CookiesCard` has
+	 * inside the General panel.
 	 */
 	Cards?: readonly ComponentType[];
 }
@@ -66,9 +52,9 @@ export interface EngineSettingsCategoryMeta {
 export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] = [
 	{
 		id: "general_engine",
-		// Not "General & Engine": it sits under a heading already reading
-		// "Engine Settings", so "& Engine" was noise, and it put a second
-		// "General" in the same sidebar as the app panel of that name.
+		// Not "General & Engine": under a heading already reading "Engine Settings", "& Engine" is
+		// noise, and it would put a second "General" in the sidebar beside the app panel of that
+		// name.
 		label: "Core",
 		description:
 			"Base capacity, threading model and storage internals of Vayu's engine - the settings a run is built on",
@@ -80,16 +66,15 @@ export const ENGINE_SETTINGS_CATEGORIES: readonly EngineSettingsCategoryMeta[] =
 		label: "Network & connectivity",
 		// Widened by #703, which moved the request transport defaults in and
 		// the OAuth renewal watchdog out: the shelf is the wire itself, not
-		// only the throughput knobs it used to hold.
+		// only the throughput knobs.
 		description:
 			"The wire itself: what a new request starts with, how many transfers a worker keeps open, and how long a name resolution is reused",
 		icon: Network,
 		motion: ICON_MOTION.pulse,
-		// The client-certificate registry (#707) and the connection test (#708)
-		// land here rather than in a category of their own: they are how a
-		// request leaves this machine, and the proxy and trust settings they
-		// belong beside are here. The test is last of the two, and above the
-		// entries, because it is the thing you use *after* changing one of them.
+		// The client-certificate registry (#707) and the connection test (#708) live here, not in a
+		// category of their own: they are how a request leaves this machine, beside the proxy and
+		// trust settings. The test is the last of the two, and above the entries, as it is used
+		// *after* changing one of them.
 		Cards: [ClientCertificatesCard, ConnectionTestCard],
 	},
 	{

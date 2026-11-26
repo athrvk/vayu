@@ -6,27 +6,21 @@
  */
 
 /**
- * HistoryDetail Component
+ * The run tab. Routes by run type to `DesignRunView` (an editable copy of the request that was
+ * sent) or `LoadTestDetail` (the load-test report).
  *
- * The run tab. Routes to `DesignRunView` (an editable copy of the request that
- * was sent) or `LoadTestDetail` (the load-test report) by run type.
+ * It fetches the **run**, not only the report, because the two answer different questions.
+ * `GET /runs/:id/report` is a load-test aggregate: for a design run the percentiles come from one
+ * sample and `metadata.configuration` is missing, so it cannot say what the run's auth, scripts or
+ * redirect settings were. `GET /runs/:id` can, and for a design run carries the stored exchange. So
+ * the report is fetched only for a load run, and only once it has finished; a run still executing
+ * shows `LoadRunInProgress`.
  *
- * It fetches the **run**, not only the report, because the two endpoints answer
- * different questions. `GET /runs/:id/report` is a load-test aggregate: run it
- * against a design run and the percentiles all come from one sample, and
- * `metadata.configuration` is missing entirely - so it cannot say what a design
- * run's auth, scripts or redirect settings were. `GET /runs/:id` can, and for a
- * design run it also carries the stored exchange. The report is therefore
- * fetched only for a load run, and only once it has finished: a run still
- * executing shows `LoadRunInProgress` instead.
- *
- * The header deliberately does not show the URL. `DesignRunView` renders the
- * builder's own URL bar directly below it, and two URL bars stacked one above
- * the other read as a bug. What stays is the run's identity - the request's name
- * (the collection's for a sequence, the type when neither is known), its start
- * time and status - and the run's own comment (#2270). The run id is a small
- * copyable detail beneath, not the title: it names nothing a reader can tell
- * runs apart by.
+ * The header does not show the URL: `DesignRunView` renders the builder's own URL bar directly
+ * below, and two stacked URL bars read as a bug. It keeps the run's identity (the request's name,
+ * the collection's for a sequence, the type when neither is known; the start time and status) and
+ * the run's comment (#2270). The run id is a small copyable detail beneath, not the title: it names
+ * nothing a reader tells runs apart by.
  */
 
 import { Check, Copy, History } from "lucide-react";
@@ -98,7 +92,6 @@ export default function HistoryDetail() {
 	const { data: collections = [] } = useCollectionsQuery();
 	const { copy } = useCopy();
 
-	// Get selectedRunId from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const selectedRunId = activeTab?.type === "run" ? activeTab.entityId : null;
 
@@ -113,23 +106,20 @@ export default function HistoryDetail() {
 	const isScenarioRun = run?.type === "scenario";
 
 	/*
-	 * A **load** run's report is what this pane shows, so it is waited on below.
-	 *
-	 * A scenario run has a report too, but this pane must not wait for it: while
-	 * the sequence is still executing, the live `step` stream is the content, and
-	 * blocking on a report that does not describe a finished run yet would leave
-	 * the tab on a skeleton for the length of the run. `ScenarioRunView` asks for
-	 * the report itself, through the same query key, and renders around whatever
-	 * has arrived. This pane reads a finished scenario run's report only to judge
-	 * the pill (#3543), and neither the skeleton nor the error state waits on it.
+	 * A **load** run's report is what this pane shows, so it is waited on below. A scenario run has
+	 * one too, but this pane must not wait for it: while the sequence executes the live `step`
+	 * stream is the content, and blocking on a report of an unfinished run would hold the tab on a
+	 * skeleton for the length of the run. `ScenarioRunView` asks for the report itself, through the
+	 * same query key, and renders around what has arrived. This pane reads a finished scenario
+	 * run's report only to judge the pill (#3543); neither the skeleton nor the error state waits
+	 * on it.
 	 */
 	const isLoadRun = !!run && !isDesignRun && !isScenarioRun;
 	const isRunLive = useRunLiveness(selectedRunId, run?.status);
 	/*
-	 * A load run the engine is still executing has a report, but not a result:
-	 * the numbers are the requests so far, and caching them is what froze this
-	 * tab on a half-finished run (#1934). Nothing is fetched until the run
-	 * ends; `runDetailOptions` polls the run's status, so this flips to the
+	 * A load run the engine is still executing has a report but not a result: the numbers are the
+	 * requests so far, and caching them froze this tab on a half-finished run (#1934). Nothing is
+	 * fetched until the run ends; `runDetailOptions` polls the run's status, so this flips to the
 	 * report without the tab being closed.
 	 */
 	const isLoadRunInProgress = isRunLive && isLoadRun;
@@ -141,15 +131,13 @@ export default function HistoryDetail() {
 		error: reportError,
 		refetch: refetchReport,
 	} = useRunReportQuery(judgesFromReport ? selectedRunId : null, run?.status);
-	// The verdict refines the pill of a load run, as it does on the dashboard
-	// header and the sidebar row (#2130), and of a collection run, which History
-	// marks failed for a failed or errored step or a missed budget (#3539, #3543).
-	// A report that has not arrived, or that cannot say, leaves the row's answer.
-	// A design run keeps the plain glyph.
+	// The verdict refines the pill of a load run, as on the dashboard header and the sidebar row
+	// (#2130), and of a collection run, which History marks failed for a failed or errored step or
+	// a missed budget (#3539, #3543). A report not yet arrived, or that cannot say, leaves the
+	// row's answer; a design run keeps the plain glyph.
 	const fromReport = isScenarioRun ? collectionReportOutcome(report) : reportOutcome(report);
 	const judgement = !run || isDesignRun ? null : (fromReport ?? rowOutcome(run));
 
-	// No run selected
 	if (!selectedRunId) {
 		return (
 			<EmptyState
@@ -160,22 +148,18 @@ export default function HistoryDetail() {
 		);
 	}
 
-	// Loading state. A skeleton rather than a spinner, matching every other
-	// detail pane: it holds the shape of the header that is about to land
-	// instead of only saying "busy".
+	// A skeleton rather than a spinner, as every other detail pane: it holds the shape of the
+	// header about to land instead of only saying "busy".
 	if (loadingRun || (showsReport && loadingReport)) {
 		return <DetailSkeleton label="Loading run report" rows={5} />;
 	}
 
-	// Error state. Previously a hand-rolled pane whose only action was "Back to
-	// History" - it walked the user away from the run instead of offering the
-	// one thing that might work, a retry. A transient engine hiccup left no way
-	// back in short of re-selecting the run.
+	// A retry, the one thing that might work, rather than a walk away from the run: a transient
+	// engine hiccup would otherwise need a re-select.
 	//
-	// A deleted run is the other case entirely, and the tab strip is where it
-	// arrives from: tabs persist, so a run deleted in another window (or before
-	// the last quit) rehydrates into this pane on launch. Retrying a 404 can
-	// only fail again, so that one offers the move that works instead.
+	// A deleted run is the other case, and it arrives from the tab strip: tabs persist, so a run
+	// deleted in another window (or before the last quit) rehydrates into this pane on launch.
+	// Retrying a 404 can only fail again, so that one offers the move that works instead.
 	if (runError || !run) {
 		if (isRunNotFound(runError)) {
 			return (
@@ -224,18 +208,15 @@ export default function HistoryDetail() {
 		<div className="flex flex-col h-full bg-background">
 			{/*
 			 * Run identity header. No back button: this is a tab, closed from the
-			 * tab strip, and History lives in the left nav. The old "Back to
-			 * history" only called activateDrawerView("history"), which toggled the
-			 * drawer open/closed rather than navigating anywhere.
+			 * tab strip, and History lives in the left nav.
 			 */}
 			<div className="border-b border-border bg-card px-6 py-3 shrink-0">
 				{/*
 				 * Wraps instead of squeezing (#3494). The name group keeps a floor
-				 * (`min-w-[12rem]`), so when the buttons would take it below that they drop
-				 * to a second line; inside the group the status pill and the timestamp
-				 * wrap under the name before the name is clipped. Without the floor a
-				 * long timestamp and two labelled buttons left the name a few
-				 * characters wide at a narrow pane or a 200% scale.
+				 * (`min-w-[12rem]`), so buttons that would take it below that drop to a second
+				 * line, and inside the group the status pill and timestamp wrap under the name
+				 * before the name is clipped. Without the floor a long timestamp and two labelled
+				 * buttons leave the name a few characters wide at a narrow pane or 200% scale.
 				 */}
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
 					<div className="flex min-w-[12rem] flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">

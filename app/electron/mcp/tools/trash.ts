@@ -6,7 +6,6 @@
  */
 
 /**
- * @file trash.ts
  * @brief Naming a trash entry for the purge prompt, and the engine's refusals
  *        in its own words (#988, #1071).
  */
@@ -45,12 +44,10 @@ function isTrashKind(kind: unknown): kind is TrashRow["kind"] {
 }
 
 /**
- * Read one trash entry by id off `GET /trash` - there is no single-entry route,
- * the same reason {@link EngineClient.getCollection} scans the collection list.
- *
- * Thrown rather than defaulted, on {@link readCascadeScope}'s reasoning: an
- * entry nobody could read must not become a purge prompt carrying a name and
- * counts nobody verified. A kind this build does not know is refused the same
+ * Read one trash entry by id off `GET /trash`: there is no single-entry route, the reason
+ * {@link EngineClient.getCollection} scans the collection list. Thrown rather than defaulted, on
+ * {@link readCascadeScope}'s reasoning: an entry nobody could read must not become a purge prompt
+ * carrying a name and counts nobody verified. A kind this build does not know is refused the same
  * way, rather than described as one it does (#2970).
  */
 export async function readTrashEntry(

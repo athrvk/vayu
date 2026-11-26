@@ -29,24 +29,21 @@ interface AppUpdateState {
 	/** Silent path only: the update is downloaded and ready to install on restart. */
 	readyToInstall: boolean;
 	/**
-	 * Silent path only: 0 to 1 while the update is downloading in the
-	 * background (1 while its installer is being verified), **null** before a
-	 * download reports progress and once it ends, whichever way -
+	 * Silent path only: 0 to 1 while the update downloads in the background (1 while its installer
+	 * is verified); **null** before a download reports progress and once it ends, either way.
 	 * `readyToInstall` is what tells the banner to stop rendering a bar.
 	 */
 	downloadProgress: number | null;
 	/**
-	 * Silent path only: a download is in flight and the banner should say so. True
-	 * wherever `downloadProgress` is known, and also - after a failure - for a
-	 * retried download that has not reported a tick yet, when the progress is
-	 * still null. A first download stays hidden until it has a tick to show.
+	 * Silent path only: a download is in flight and the banner should say so. True wherever
+	 * `downloadProgress` is known, and also, after a failure, for a retried download with no tick
+	 * yet (progress still null). A first download stays hidden until it has a tick to show.
 	 */
 	downloading: boolean;
 	/**
-	 * Silent path only: the downloaded installer's build-provenance attestation
-	 * did not verify (issue #2372), so it will not be installed. Replaces
-	 * `readyToInstall` for that version; cleared by the next announcement or
-	 * verified download.
+	 * Silent path only: the downloaded installer's build-provenance attestation did not verify
+	 * (#2372), so it will not be installed. Replaces `readyToInstall` for that version; cleared by
+	 * the next announcement or verified download.
 	 */
 	verificationFailure: UpdateVerificationFailure | null;
 	/** Silent path only: the download itself failed (issue #3338). */
@@ -67,12 +64,11 @@ function progressOf(download: UpdateDownloadState): number | null {
 }
 
 /**
- * The update the banner names. The download state is the authority on the
- * version, and the only record of it after a reload: `update:available` is not
- * replayed, so a renderer that mounts with a download already `verified` or
- * `failed` has no announcement to name it from. The synthesized `releaseUrl` is
- * empty because nothing in the renderer reads it - `openReleasePage` is
- * answered by the main process from the URL the updater offered.
+ * The update the banner names. The download state is the authority on the version, and its only
+ * record after a reload: `update:available` is not replayed, so a renderer that mounts with a
+ * download already `verified` or `failed` has no announcement to name it from. The synthesized
+ * `releaseUrl` is empty because nothing in the renderer reads it: the main process answers
+ * `openReleasePage` from the URL the updater offered.
  */
 function currentUpdate(
 	available: AvailableUpdate | null,
@@ -93,16 +89,15 @@ function notifyReady(version: string): void {
 }
 
 /**
- * Subscribes to main-process auto-update events and exposes the state the
- * update banner renders from. No-op outside Electron.
+ * Subscribes to main-process auto-update events and exposes the state the update banner renders
+ * from. No-op outside Electron.
  *
- * The silent path's download is read from the main process's single
- * `UpdateDownloadState` (issue #3338): fetched once on mount, so a reloaded
- * renderer still offers a verified update, then followed through
- * `update:state`. `update:available` still supplies what the state does not
- * carry (strategy, install command). A snapshot read on mount never notifies;
- * only a live arrival in `verified` does, so a reload does not announce the same
- * update again. `dismissed` is not part of the snapshot and resets on reload.
+ * The silent path's download is the main process's single `UpdateDownloadState` (#3338): fetched
+ * once on mount, so a reloaded renderer still offers a verified update, then followed through
+ * `update:state`. `update:available` supplies what the state does not carry (strategy, install
+ * command). A snapshot read on mount never notifies; only a live arrival in `verified` does, so a
+ * reload does not announce the same update again. `dismissed` is not in the snapshot and resets on
+ * reload.
  */
 export function useAppUpdate(): AppUpdateState {
 	const [available, setAvailable] = useState<AvailableUpdate | null>(null);
@@ -195,12 +190,10 @@ export function useAppUpdate(): AppUpdateState {
 		void window.electronAPI?.quitForUpdate();
 	}, []);
 
-	// Only surface once we have something actionable and the user hasn't
-	// dismissed it - "actionable" now includes a download already in flight,
-	// so the silent path's progress bar shows before the update is ready
-	// rather than only once it is. A failed verification or download is the
-	// outcome that must not be swallowed by the silent path's "nothing to show
-	// yet".
+	// Surface only something actionable the user has not dismissed. Actionable includes a download
+	// in flight, so the silent path's progress bar shows before the update is ready, and a failed
+	// verification or download, the outcome the silent path's "nothing to show yet" must not
+	// swallow.
 	const shouldShow =
 		!dismissed &&
 		update !== null &&

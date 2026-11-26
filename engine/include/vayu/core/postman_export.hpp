@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/postman_export.hpp
  * @brief A collection out as a Postman Collection v2.1.0 document, written the
  *        way Postman's own "Export > Collection v2.1" writes one.
  *

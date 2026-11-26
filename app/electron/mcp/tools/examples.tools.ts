@@ -6,7 +6,6 @@
  */
 
 /**
- * @file examples.tools.ts
  * @brief A saved request's examples: list, create, update and delete.
  */
 
@@ -267,12 +266,11 @@ interface ExampleEdits {
 }
 
 /**
- * `update_request_example`'s write. `PUT` merge-patches, so stated fields are
- * sent as they are, with no read. `headers` replaces the stored list, so it
- * becomes one read-merge-write under the example's version (`mergeAndWrite`)
- * when a row written back withheld keeps its stored value, and, while secrets
- * are withheld, whenever it is given, so a stored row the session could not
- * read is named when the write drops it (#3550).
+ * `update_request_example`'s write. `PUT` merge-patches, so stated fields are sent as they are,
+ * with no read. `headers` replaces the stored list, so it becomes a read-merge-write under the
+ * example's version (`mergeAndWrite`) when a row written back withheld keeps its stored value, and,
+ * while secrets are withheld, whenever it is given, so a stored row the session could not read is
+ * named when the write drops it (#3550).
  */
 async function writeExampleEdits(
 	ctx: ToolContext,

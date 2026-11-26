@@ -6,16 +6,14 @@
  */
 
 /**
- * @file core/import_document.cpp
- * @brief The four import parsers, engine-side (issue #877). See the header for
- *        what moved and why.
+ * The four import parsers, engine-side (#877); the header says what moved and
+ * why.
  *
- * A port of `app/src/services/importers/` - `postman.ts`, `insomnia-v4.ts`,
- * `postman-environment.ts`, their shared half (`shared.ts`,
- * `oauth2-import.ts`, `var-normalize.ts`) and the factory that dispatches
- * between them - kept to the *same answers* rather than to the same code. The
- * OpenAPI half is deliberately not here: it is `core::import_drafts_of`, the
- * #865 builder, with this file composing the collection around it.
+ * A port of `app/src/services/importers/` (`postman.ts`, `insomnia-v4.ts`,
+ * `postman-environment.ts`, their shared half `shared.ts` / `oauth2-import.ts`
+ * / `var-normalize.ts`, and the dispatching factory), held to the same answers,
+ * not the same code. OpenAPI is not here: it is `core::import_drafts_of`, the
+ * #865 builder, and this file composes the collection around it.
  */
 
 #include "vayu/core/import_document.hpp"
@@ -111,14 +109,14 @@ postman_raw_body (const std::string& content, const std::string* language) {
  * `importedFilePart(entry, src, contentType?)`: a multipart part that uploads a
  * file.
  *
- * The path is kept exactly as the source wrote it; it names a file on the
- * exporting machine, which the send rule (`vayu/http/file_ref.hpp`) refuses
- * until the user picks it again or allows its folder. A part declared
- * *without* a path - an OpenAPI document names the upload, never the file
- * (#425) - is a row showing "Choose file".
+ * The path is kept as the source wrote it: it names a file on the exporting
+ * machine, which the send rule (`vayu/http/file_ref.hpp`) refuses until the
+ * user picks it again or allows its folder. A part declared without a path (an
+ * OpenAPI document names the upload, never the file, #425) is a row showing
+ * "Choose file".
  *
- * Not anonymous-namespace-local: `jmeter_import.cpp` reuses this shape
- * verbatim for `HTTPsampler.Files` (#1657) rather than building a second one.
+ * Not anonymous-namespace-local: `jmeter_import.cpp` reuses it for
+ * `HTTPsampler.Files` (#1657).
  */
 nlohmann::ordered_json imported_file_part (nlohmann::ordered_json entry,
 const std::string& src,
@@ -158,13 +156,11 @@ using json = nlohmann::ordered_json;
 using namespace js;
 
 /**
- * A document that claimed a format and then contradicted it.
- *
- * Only the Insomnia parser raises one: it is the one format whose export is a
- * flat resource list, so a `resources` that is not an array or a row that is
- * not an object leaves nothing to walk, where every other parser can step over
- * a malformed member and count it. The message is shown to the user verbatim,
- * so it names the format and the field.
+ * A document that claimed a format and then contradicted it. Only the Insomnia
+ * parser raises one: its export is a flat resource list, so a `resources` that
+ * is not an array, or a row that is not an object, leaves nothing to walk,
+ * where the other parsers step over a malformed member and count it. The
+ * message is shown verbatim, so it names the format and the field.
  */
 class MalformedImport : public std::runtime_error {
     public:
@@ -356,30 +352,28 @@ std::int64_t import_clock_ms () {
 /**
  * `toVarRecord(vars)`: a variable array as Vayu's `{name: {value, enabled}}`.
  *
- * A key is trimmed the way `{{ name }}` is (`trim_variable_name`), because the
- * write routes refuse a padded one (#3251) and one such row would fail the
- * whole atomic import; a key that trims to nothing is skipped like an empty
- * one, uncounted. Two keys that trim alike collide, and the later wins.
+ * A key is trimmed as `{{ name }}` is (`trim_variable_name`): the write routes
+ * refuse a padded one (#3251), and one such row would fail the whole atomic
+ * import. A key that trims to nothing is skipped, uncounted, like an empty one;
+ * two keys that trim alike collide and the later wins.
  *
  * `type: "secret"` is `secret: true`; `string`, `number` and `boolean` are
- * Vayu's own variable types of the same name and stored as `type`, which
- * casts the value for a script exactly as Postman's typed variable does.
- * `"default"` is Postman's own unset marker - every environment and globals
- * export the app can produce stamps it on every ordinary variable - so it
- * stores nothing and counts no more than an absent `type` does.
+ * stored as Vayu's own variable types of those names, which cast a script's
+ * value as Postman's typed variable does. `"default"` is Postman's unset marker
+ * (every environment and globals export stamps it on ordinary variables), so it
+ * stores and counts nothing, as an absent `type`.
  *
- * @p keep_description is set for a collection's or folder's variables, which
- * the Postman exporter writes back with their `description`; the environment
- * exporter writes none, so there it is dropped.
- * @p skipped_variable_metadata counts a row whose `description` (when not
- * kept) or a declared `type` Vayu has no counterpart for (`"any"`, a custom
- * string) was read and discarded, once per row however many it carried.
+ * @p keep_description is set for a collection's or folder's variables, whose
+ * `description` the Postman exporter writes back; the environment exporter
+ * writes none, so there it is dropped. @p skipped_variable_metadata counts a
+ * row whose `description` (when not kept) or a declared `type` Vayu has no
+ * counterpart for (`"any"`, a custom string) was discarded, once per row.
  *
- * Each row is stamped `createdAt = created_base + its position in the array`
- * (#3252): the stored blob's keys come back sorted, and the app lists a scope
- * by `createdAt`, so the stamp is the only carrier of the file's order. The
- * caller reads the clock once per import (`import_clock_ms`), which keeps the
- * stamps strictly increasing however fast the loop runs.
+ * Each row is stamped `createdAt = created_base + its array position` (#3252):
+ * the stored blob's keys come back sorted and the app lists a scope by
+ * `createdAt`, so the stamp alone carries the file's order. The caller reads
+ * the clock once per import (`import_clock_ms`), keeping the stamps strictly
+ * increasing however fast the loop runs.
  */
 json to_var_record (const json* vars,
 int& skipped_variable_metadata,
@@ -425,10 +419,9 @@ std::int64_t created_base) {
     return out;
 }
 
-/// Depth-first over a draft tree's requests, for the two counts the preview
-/// promises - read off the drafts rather than tallied as they are built, so the
-/// number and the rows cannot disagree - and for the trust the parse route
-/// derives onto them. @p Tree is `json` or `const json`.
+/// Depth-first over a draft tree's requests, for the preview's two counts (read
+/// off the drafts, so the number and the rows cannot disagree) and for the
+/// trust the parse route derives onto them. @p Tree is `json` or `const json`.
 template <typename Tree, typename Visit>
 void walk_requests (Tree& collections, Visit visit) {
     for (auto& collection : collections) {
@@ -472,13 +465,13 @@ int count_examples (const json& collections) {
 
 /// The Content-Type @p body must be sent with, or "" when it needs no row.
 ///
-/// The app-side half of the engine's own `implied_content_type`
-/// (`http/form_body.cpp`), which is what actually reaches the wire; this one
-/// writes the header *row* an imported request carries, so the user can see it.
-/// `json` and `text` are deliberately absent: the engine derives each at send
-/// time (`application/json`, `text/plain`) with no row, as the Body panel
-/// writes none for `text`. A `text` body that declared `html` or `javascript`
-/// is the exception, because those go out under their own type (#2539).
+/// The app-side half of the engine's `implied_content_type`
+/// (`http/form_body.cpp`), which is what reaches the wire; this one writes the
+/// header row an imported request shows the user. `json` and `text` are absent:
+/// the engine derives each at send time (`application/json`, `text/plain`) with
+/// no row, as the Body panel writes none for `text`. A `text` body that
+/// declared `html` or `javascript` is the exception, sent under its own type
+/// (#2539).
 std::string required_content_type (const json& body) {
     const std::string mode = body.at ("mode").get<std::string> ();
     if (mode == "graphql" || mode == "jsonrpc" || mode == "mcp") {
@@ -497,13 +490,12 @@ std::string required_content_type (const json& body) {
  * `withRequiredContentType(headers, body)`: the imported headers plus the
  * Content-Type this body cannot go without.
  *
- * An imported GraphQL request had none at all and went out under libcurl's
- * default `x-www-form-urlencoded`, which most GraphQL servers answer with a
- * 400. A request that already declares the header keeps what it has, including
- * a deliberate `application/graphql`; a disabled row does not count as
- * declaring one, since it is not sent. A request that refuses Content-Type
- * (@p refused: Postman's `disabledSystemHeaders`, issue #1765) is sent with
- * none, so none is added.
+ * Without it a GraphQL request goes out under libcurl's default
+ * `x-www-form-urlencoded`, which most GraphQL servers answer with a 400. A
+ * request that declares the header keeps it, a deliberate `application/graphql`
+ * included; a disabled row is not sent, so it declares nothing. A request that
+ * refuses Content-Type (@p refused: Postman's `disabledSystemHeaders`, #1765)
+ * gets none.
  */
 json with_required_content_type (json headers, const json& body, bool refused = false) {
     const std::string required = required_content_type (body);
@@ -532,7 +524,7 @@ json with_required_content_type (json headers, const json& body, bool refused = 
 /**
  * `joinExec(event)`: a Postman `event` entry's script lines, joined. A `script`
  * that is itself a string is the script's text - Postman's SDK reads one as
- * `{exec: [text]}` - and used to import as nothing at all.
+ * `{exec: [text]}`.
  */
 std::string join_exec (const json* event) {
     const json* script = prop (event, "script");
@@ -558,12 +550,10 @@ std::string join_exec (const json* event) {
 
 /**
  * Writes @p pre / @p post as `script.pre` / `script.post` elements on
- * @p item['elements'] (issue #1514's cut-over: `elements` is the only script
- * source an import payload can carry now - `preRequestScript` /
- * `postRequestScript` are refused on the write routes `POST /import/apply`
- * shares with `PUT /requests/:id` and `PUT /collections/:id`). A blank
- * script contributes no entry, matching the old fields' "" default reading
- * as "no script".
+ * @p item['elements'] (#1514): `elements` is the only script source an import
+ * payload carries, since the write routes `POST /import/apply` shares with
+ * `PUT /requests/:id` and `PUT /collections/:id` refuse `preRequestScript` /
+ * `postRequestScript`. A blank script contributes no entry.
  */
 void set_script_elements (json& item, const std::string& pre, const std::string& post) {
     json elements = json::array ();
@@ -818,22 +808,19 @@ std::string promoted_cache_separator (const json& config) {
 }
 
 /**
- * `mapPostmanOAuth2(d)`: a Postman v2.1 `oauth2` block, @p detail flattened
- * to text and @p attributes the block as written, for the members that are
- * lists.
+ * `mapPostmanOAuth2(d)`: a Postman v2.1 `oauth2` block, @p detail flattened to
+ * text and @p attributes the block as written, for the members that are lists.
  *
- * A minimal export carrying only a pre-fetched `accessToken` imports as a
- * bearer token, which is immediately executable. @p losses counts what Vayu
- * has nowhere to carry (issue #1460): `state`, which Vayu always generates
- * and validates itself per authorization attempt rather than storing (a
- * fixed imported value would undermine the CSRF check it exists for), a
- * pre-fetched `accessToken` that arrives *alongside* an explicit grant
- * config, where the general shape below always drives a fresh fetch through
- * that grant and a seed token has no field to ride in, and an extra request
- * parameter `read_oauth2_params` cannot carry. `tokenName` is not counted
- * here - it lands in `credentialsId` below, the field Vayu's own token cache
- * already reads to keep otherwise-identical configs apart. With no
- * `tokenName`, a promoted `audience` or `resource` lands there instead.
+ * An export carrying only a pre-fetched `accessToken` imports as a bearer
+ * token, executable at once. @p losses counts what Vayu has nowhere to carry
+ * (#1460): `state`, which Vayu generates and checks per authorization attempt
+ * (a fixed imported value would undermine the CSRF check it exists for); an
+ * `accessToken` beside an explicit grant, where the grant always drives a fresh
+ * fetch and a seed token has no field; and an extra request parameter
+ * `read_oauth2_params` cannot carry. `tokenName` is not counted: it lands in
+ * `credentialsId`, which Vayu's token cache already reads to keep
+ * otherwise-identical configs apart. With no `tokenName`, a promoted `audience`
+ * or `resource` lands there instead.
  */
 json map_postman_oauth2 (const std::map<std::string, std::string>& detail,
 const json* attributes,
@@ -1099,9 +1086,9 @@ OAuth2ImportLosses& oauth2_losses) {
     if (*type == "oauth2") {
         return map_postman_oauth2 (detail, attributes, oauth2_losses);
     }
-    // AWS Signature is `awsv4` on the wire (the v2.1.0/v2.0.0 schema's enum) and
-    // `aws` internally; the two names diverge, so matching on `"aws"` here is
-    // what silently dropped every real SigV4 export.
+    // AWS Signature is `awsv4` on the wire (the v2.1.0/v2.0.0 schema's enum)
+    // and `aws` internally; matching on `"aws"` would drop every real SigV4
+    // export.
     for (const postman::ConfigAuthType& named : postman::CONFIG_AUTH_TYPES) {
         if (*type != named.postman) {
             continue;
@@ -1236,12 +1223,11 @@ struct PostmanCounts : OAuth2ImportLosses {
     // A GET or HEAD that carries a body Postman prunes before sending and
     // Vayu sends - see `body_survives_pruning` (#2540).
     int body_on_get = 0;
-    // `client_certificates` registry candidates built from a request's own
-    // `certificate` (issue #1656), one per distinct (host, port) this import
-    // resolved a usable candidate for - see `pm_certificate`. Deduped by
-    // `client_certificate_signatures` so two requests naming the same host
-    // and cert do not double-write, keyed on the same pair `port.value_or
-    // (-1)` stands in for "every port".
+    // `client_certificates` registry candidates from a request's own
+    // `certificate` (#1656, `pm_certificate`), one per distinct (host, port)
+    // resolved. Deduped by `client_certificate_signatures` so two requests
+    // naming the same host and cert do not double-write; `port.value_or (-1)`
+    // stands for "every port".
     json client_certificates = json::array ();
     std::map<std::pair<std::string, int>, std::string> client_certificate_signatures;
     // The requests each per-request counter grew on, by tally kind - see
@@ -1256,14 +1242,13 @@ struct PostmanCounts : OAuth2ImportLosses {
 
 /**
  * `graphqlContent(graphql)`: Postman keeps a GraphQL body as
- * `{query, variables}` where `variables` is the *text* of the Variables pane.
+ * `{query, variables}`, `variables` being the text of the Variables pane.
  *
- * GraphQL-over-HTTP wants a map and Vayu's own serializer writes one, so the
- * string is parsed here; embedding it verbatim put
+ * GraphQL-over-HTTP wants a map, and Vayu's serializer writes one, so the
+ * string is parsed here; embedded verbatim it puts
  * `"variables": "{\"limit\": 10}"` on the wire. A variables string that is not
- * valid JSON is kept as-is rather than dropped - the text is the only copy of
- * the user's work - and every other key rides along untouched for the same
- * reason.
+ * JSON is kept as is, being the only copy of the user's work, and every other
+ * key rides along for the same reason.
  */
 std::string graphql_content (const json* graphql) {
     if (graphql == nullptr || !graphql->is_object ()) {
@@ -1357,10 +1342,9 @@ json pm_body (const json* body, PostmanCounts& counts) {
     }
     if (const json* disabled = prop (node, "disabled");
     disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ()) {
-        // Postman's own "prevent request body from being sent" toggle. Vayu
-        // has no disabled-body concept to preserve the switch itself, but
-        // sending the body anyway - the request-time effect the user turned
-        // off - is the one outcome importing it active can never be worth.
+        // Postman's "prevent request body from being sent" toggle. Vayu has no
+        // disabled body to keep the switch in, and sending the body the user
+        // turned off is never the right import.
         counts.disabled_body += 1;
         return json{ { "mode", "none" } };
     }
@@ -1477,21 +1461,18 @@ std::string host_path_url (const json* url) {
     }
 
     const bool has_path = append_postman_path (url, out);
-    // Neither part contributed anything: there is no URL to assemble, the same
-    // answer an absent `raw` used to give.
+    // Neither part contributed anything: there is no URL to assemble.
     return host.empty () && !has_path ? std::string () : out;
 }
 
 /**
- * A request's path variables as Params rows (issue #1764): @p declared -
- * already table rows, in the order the source lists them - each marked
- * `in: "path"`. Only what the source declares: a `:name` the URL spells with
- * no declared entry gets no row here, because the Params tab shows one for it
- * without a stored row (`displayPathRows`), and a synthesised row would be
- * exported back as a `url.variable` entry the source never had. The URL keeps
- * its `:name` segments verbatim; composition writes each row's value into its
- * segment at send time, so two requests on the same name keep their own
- * values rather than sharing one variable.
+ * A request's path variables as Params rows (#1764): @p declared, already table
+ * rows in source order, each marked `in: "path"`. Only what the source
+ * declares: a `:name` with no declared entry gets no row, as the Params tab
+ * shows it without one (`displayPathRows`) and a synthesised row would export
+ * back as a `url.variable` the source never had. The URL keeps its `:name`
+ * segments; composition writes each row's value into its segment at send time,
+ * so two requests on one name keep their own values.
  */
 json path_variable_rows (json declared) {
     for (json& row : declared) {
@@ -1581,8 +1562,7 @@ std::pair<std::string, json> pm_url (const json* url, PostmanCounts& counts) {
     return { std::move (split.base), std::move (params) };
 }
 
-/// `pmEvents(node)`: the `event[]` entries that are objects. A `null` in that
-/// array used to throw on `e.listen`.
+/// `pmEvents(node)`: the `event[]` entries that are objects.
 std::vector<const json*> pm_events (const json* node) {
     std::vector<const json*> events;
     const json* declared = prop (node, "event");
@@ -1630,20 +1610,18 @@ bool has_script_src (const json* event) {
 }
 
 /**
- * @p events as `script.pre` / `script.post` elements on @p item, one element
- * per event and in the order the document lists them - Postman runs every
- * event of a listen, and a level whose `test` precedes its `prerequest`
- * exports back in that order. An event Postman marks `disabled: true` is one
- * its runtime skips, so it imports turned off rather than running; a blank
- * script contributes nothing.
+ * @p events as `script.pre` / `script.post` elements on @p item, one per event
+ * in document order: Postman runs every event of a listen, and a level whose
+ * `test` precedes its `prerequest` exports back in that order. An event Postman
+ * marks `disabled: true` imports turned off; a blank script contributes
+ * nothing.
  *
- * The scripts that will run are read for the Postman APIs Vayu does not run
- * (#2576) and @p item is named in @p counts if it uses any; a disabled event
- * runs nothing, so it names nothing. An enabled event Vayu cannot import - a
- * `script.src` (its `exec` is not imported either), or a `listen` other than
- * the two Vayu has a phase for, with script text - is counted as
- * `script_unsupported` (#2541) instead of vanishing; its owner is named by
- * the caller, which knows whether it is a request, a folder or the collection.
+ * The scripts that will run are scanned for Postman APIs Vayu does not run
+ * (#2576), naming @p item in @p counts; a disabled event runs nothing, so names
+ * nothing. An enabled event Vayu cannot import (a `script.src`, whose `exec` is
+ * not imported either, or a `listen` other than Vayu's two phases, with script
+ * text) is counted as `script_unsupported` (#2541); the caller names its owner,
+ * knowing whether it is a request, a folder or the collection.
  */
 void set_event_elements (json& item, const std::vector<const json*>& events, PostmanCounts& counts) {
     json elements = json::array ();
@@ -1684,11 +1662,11 @@ void set_event_elements (json& item, const std::vector<const json*>& events, Pos
 
 /**
  * Whether a `protocolProfileBehavior` names something Vayu stores but does not
- * apply (issue #1765): a key outside the set the engine honours, with a value
- * that is not Postman's default, or a `disabledSystemHeaders` entry for a
- * header whose removal would break HTTP/1.1 framing (`host`,
- * `content-length`). Counted once per request as `protocol_behavior`, or once per declaring
- * folder or collection as `protocol_behavior_folder`.
+ * apply (#1765): a key outside the set the engine honours with a non-default
+ * value, or a `disabledSystemHeaders` entry whose removal would break HTTP/1.1
+ * framing (`host`, `content-length`). Counted once per request as
+ * `protocol_behavior`, or once per declaring folder or collection as
+ * `protocol_behavior_folder`.
  */
 bool names_unapplied_protocol_behavior (const json& behavior) {
     for (auto member = behavior.begin (); member != behavior.end (); ++member) {
@@ -1761,22 +1739,21 @@ json inherit_protocol_behavior (const json& inherited, const json* own) {
  * `pmRedirects(item)`: the item-level `protocolProfileBehavior`.
  *
  * Postman writes it exactly when the user overrides redirect handling, and the
- * engine's `followRedirects` defaults to **true** - so an omitted `false`
- * silently follows the 3xx the request exists to inspect. Only well-typed
- * values are read: a coerced `"false"` would read as the user's setting while
- * being the opposite of it. `strictSSL` follows the same rule onto
- * `verifySSL`, which likewise defaults to `true`.
+ * engine's `followRedirects` defaults to true, so an omitted `false` follows
+ * the 3xx the request exists to inspect. Only well-typed values are read: a
+ * coerced `"false"` would read as the user's setting while being its opposite.
+ * `strictSSL` maps onto `verifySSL` by the same rule, also defaulting to
+ * `true`.
  *
- * Issue #1765 adds the three settings Vayu now applies per request -
- * `disableCookies`, `disableUrlEncoding` and `disabledSystemHeaders` (the
- * names set to `true`, lowercased, in source order) - and keeps the whole
- * object as `postmanProtocolBehavior`, JSON text in source member order, for
- * the export to write back.
+ * It also maps `disableCookies`, `disableUrlEncoding` and
+ * `disabledSystemHeaders` (#1765; the names set to `true`, lowercased, in
+ * source order) and keeps the whole object as `postmanProtocolBehavior`, JSON
+ * text in source member order, for the export to write back.
  *
- * The settings read are @p effective, the request's own object resolved
- * through its folders (`inherit_protocol_behavior`; #2538). What is counted
- * and carried for the export is @p own, the request's object alone: a folder's
- * is counted where it is declared and never written onto the request.
+ * The settings read are @p effective, the request's object resolved through its
+ * folders (`inherit_protocol_behavior`, #2538). What is counted and carried for
+ * the export is @p own alone: a folder's is counted where it is declared and
+ * never written onto the request.
  */
 void pm_redirects (const json* own, const json& effective, json& request, int& skipped_protocol_behavior) {
     if (own != nullptr && names_unapplied_protocol_behavior (*own)) {
@@ -1811,11 +1788,10 @@ void pm_redirects (const json* own, const json& effective, json& request, int& s
     if (own == nullptr) {
         return;
     }
-    // Text, not an object, on the `postmanResponse` precedent: an object would
-    // lose its member order the moment it crossed the engine's JSON reader
-    // between the parse and the apply.
-    // Over the field cap it is dropped rather than failing the whole apply;
-    // the export then regenerates what the typed columns say.
+    // Text, not an object, as `postmanResponse` is: an object would lose its
+    // member order crossing the engine's JSON reader between the parse and the
+    // apply. Over the field cap it is dropped, not failing the apply; the
+    // export then regenerates it from the typed columns.
     std::string carrier = own->dump (-1, ' ', false, json::error_handler_t::replace);
     if (carrier.size () <= vayu::core::constants::json::MAX_FIELD_SIZE) {
         request["postmanProtocolBehavior"] = std::move (carrier);
@@ -1845,13 +1821,12 @@ std::optional<std::string> pm_stored_response (const json& saved) {
 }
 
 /// The status a saved response documents, or nothing when its `code` is not one
-/// a mock can serve. A `code` that is absent or not a number is not judged: the
-/// example imports as a 200, which is what Postman shows for one. A number must
-/// be an integer value from 200 to 599 - `404.0` and `4.04e2` are, `200.5` is
-/// not, and neither a 1xx interim response, `0` nor `600`. `POST /import/apply`
-/// refuses an out-of-range status (#3117) and ignores a non-integer one, storing
-/// the default 200, so an unservable code is left out here rather than failing
-/// the document or becoming a different status. The status is returned as an
+/// a mock can serve. An absent or non-number `code` is not judged: the example
+/// imports as a 200, as Postman shows one. A number must be an integer value
+/// from 200 to 599 (`404.0` and `4.04e2` are; `200.5`, a 1xx, `0` and `600` are
+/// not). `POST /import/apply` refuses an out-of-range status (#3117) and stores
+/// a non-integer as the default 200, so an unservable code is left out here
+/// rather than failing the document or becoming another status. Returned as an
 /// `int`, because the apply reads only a JSON integer.
 std::optional<int> saved_response_status (const json* code) {
     namespace limits = vayu::core::constants::request_example;
@@ -1868,9 +1843,7 @@ std::optional<int> saved_response_status (const json* code) {
 /**
  * `pmExamples(item)`: Postman's saved responses (`item.response[]`).
  *
- * Read by nothing until the engine had a table to hold them, so importing a
- * collection whose whole value was its documented responses produced one with
- * none. A saved response with no `code` documents a 200, which is what Postman
+ * A saved response with no `code` documents a 200, which is what Postman
  * shows for one. What no column models - the request it was recorded against,
  * the status text, preview settings, cookies, response time, the header rows
  * as written - rides along as `postmanResponse` for the Postman export.
@@ -1941,23 +1914,21 @@ std::string pm_description_text (const std::string* text, const std::string* nes
 }
 
 /**
- * A Postman request's own `certificate`, mapped to a `client_certificates`
- * registry candidate keyed on the request's own resolved host (issue #1656) -
- * Vayu certificates belong to a host, not a request (`engine/CLAUDE.md`), so
- * this cannot become a request field.
+ * A Postman request's own `certificate`, as a `client_certificates` registry
+ * candidate keyed on the request's resolved host (#1656): Vayu certificates
+ * belong to a host, not a request (`engine/CLAUDE.md`), so this cannot be a
+ * request field.
  *
- * The candidate is added to @p counts only when it would pass the same check
- * `POST /client-certificates` runs (`vayu::http::client_cert_rejection`):
- * `pm_request`'s own `url` still carrying an unresolved `{{var}}` host (the
- * common case - most Postman collections name `{{baseUrl}}`, not a literal
- * host), an unreadable `cert.src` (a path from the exporting machine, which is
- * the common case for a real-world export) or a second request naming a
- * different certificate for a (host, port) this import already claimed all
- * fall back to the existing `skipped_certificate` tally instead - "cannot
- * resolve", per the issue's own acceptance criteria, is not limited to "no
- * host to key on". `POST /import/apply` reuses the exact same check-and-write
- * `POST /client-certificates` uses, best-effort, so a candidate that passes
- * here needs no new registry semantics to actually land.
+ * The candidate is added to @p counts only when it would pass the check
+ * `POST /client-certificates` runs (`vayu::http::client_cert_rejection`). A
+ * `url` still carrying a `{{var}}` host (most Postman collections name
+ * `{{baseUrl}}`), an unreadable `cert.src` (usually a path from the exporting
+ * machine) or a second request naming a different certificate for a (host,
+ * port) already claimed falls back to the `skipped_certificate` tally: "cannot
+ * resolve", per #1656's acceptance criteria, is not only "no host to key on".
+ * `POST /import/apply` reuses `POST /client-certificates`'s check-and-write,
+ * best-effort, so a candidate that passes here lands with no new registry
+ * semantics.
  */
 void pm_certificate (const json* cert, const std::string& url, PostmanCounts& counts) {
     if (!truthy (cert)) {
@@ -1971,15 +1942,13 @@ void pm_certificate (const json* cert, const std::string& url, PostmanCounts& co
     const vayu::http::UrlParts parts = vayu::http::parse_url_parts (url);
     const std::string host =
     vayu::utils::ascii_lower (vayu::http::join_host (parts.host));
-    // `{{baseUrl}}`-style hosts are the common Postman shape.
-    // `client_cert_rejection` has no rule against a `{`/`}` byte in a host -
-    // nothing hand-typed into the Settings card would ever carry one - so this
-    // is a Postman-specific check with no primitive to reuse, catching what
-    // would otherwise become a bogus host for `POST /client-certificates`'s
-    // own check below to pass or reject on unpredictable grounds.
-    // A scheme or port still written as `{{name}}` parses (#3454) with the
-    // braces outside the host; the entry would register for more than the
-    // request reaches, so it is counted as unresolvable like a templated host.
+    // `{{baseUrl}}`-style hosts are the common Postman shape, and
+    // `client_cert_rejection` has no rule against a `{` / `}` byte in a host
+    // (nothing typed into the Settings card carries one), so this
+    // Postman-specific check stops a bogus host reaching that check's
+    // unpredictable answer. A scheme or port still written as `{{name}}` parses
+    // (#3454) with the braces outside the host; the entry would register for
+    // more than the request reaches, so it counts as unresolvable too.
     const auto has_brace = [] (const std::string& text) {
         return text.find_first_of ("{}") != std::string::npos;
     };
@@ -2140,9 +2109,8 @@ json pm_request (const json* item, const json& inherited, PostmanCounts& counts)
     pm_certificate (prop (rq, "certificate"), url, counts);
     if (truthy (prop (rq, "proxy"))) {
         // Vayu's proxy config is workspace/run-scoped (`TransportPolicy`,
-        // `engine/CLAUDE.md`), not per-request - unlike `certificate`, there is
-        // no per-request field this could ever land in, so this stays a
-        // permanent tally rather than a deferred mapping (issue #1656).
+        // `engine/CLAUDE.md`), not per-request: unlike `certificate` there is
+        // no field it could land in, so this is a permanent tally (#1656).
         counts.skipped_proxy += 1;
     }
     const std::vector<const json*> events = pm_events (item);
@@ -2231,10 +2199,9 @@ json pm_folder (const json* node, const json& inherited, PostmanCounts& counts) 
     int position = 0;
     if (const json* items = prop (node, "item"); items != nullptr && items->is_array ()) {
         for (const json& child : *items) {
-            // A `null` or scalar entry - hand-edited or script-filtered JSON,
-            // which the v2.0 detector's permissive fallback happily accepts -
-            // used to throw a bare TypeError naming no item and no format,
-            // failing an otherwise well-formed file whole.
+            // A `null` or scalar entry (hand-edited or script-filtered JSON,
+            // which the v2.0 detector's permissive fallback accepts) is counted
+            // as malformed rather than failing an otherwise well-formed file.
             const json* entry = as_record (&child);
             if (entry == nullptr) {
                 counts.skipped_malformed += 1;
@@ -2447,21 +2414,17 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
 // ---------------------------------------------------------------------------
 
 /**
- * Postman exports an environment as its own file, separate from the collection
- * export - which is why the collection parser correctly returns no
- * environments. This reads that separate file, and the *globals* file too:
- * they share a document shape and therefore a parser, so the mapping rules
- * (secret flag, enabled precedence, `{{ var }}` normalisation) cannot drift
- * between them. Only the destination differs.
- *
- * Either way the result has no collections at all, the only parser that
- * produces that.
+ * A Postman environment export, or a globals export: both are files of their
+ * own (so the collection parser returns no environments) and share one document
+ * shape, so one parser keeps the mapping rules (secret flag, enabled
+ * precedence, `{{ var }}` normalisation) from drifting. Only the destination
+ * differs. The result has no collections, the only parser's that does not.
  */
 json parse_postman_variables (const json& parsed, const ImportOptions& options, bool globals) {
-    // Gated at parse time, matching the Insomnia parser: with the option off
-    // the draft carries nothing and the counts report 0, so the preview shows
-    // what will actually be created. The one toggle covers both scopes - it
-    // reads "Import environments & variables", and globals are variables.
+    // Gated at parse time, as the Insomnia parser is: with the option off the
+    // draft carries nothing and the counts report 0, so the preview shows what
+    // will be created. One toggle covers both scopes: it reads "Import
+    // environments & variables", and globals are variables.
     int skipped_variable_metadata = 0;
     const json variables          = options.import_environments ?
     to_var_record (prop (&parsed, "values"), skipped_variable_metadata, false,
@@ -2578,13 +2541,12 @@ json insomnia_path_variables (const json* rows) {
 }
 
 /**
- * Insomnia sends `Authorization: <prefix> <token>`, where an empty PREFIX field
- * means "Bearer". Vayu's bearer mode always writes "Bearer", so a different
- * scheme (`Token`, `JWT`) is preserved as an explicit Authorization header
- * instead of being silently rewritten - the engine sends an `apikey` header
- * value verbatim, so the wire bytes match what Insomnia would have sent. A
- * prefix differing only in case stays on the native bearer mode: HTTP auth
- * schemes are case-insensitive (RFC 7235 s2.1).
+ * Insomnia sends `Authorization: <prefix> <token>`, an empty prefix meaning
+ * "Bearer". Vayu's bearer mode always writes "Bearer", so another scheme
+ * (`Token`, `JWT`) is kept as an explicit Authorization header, which the
+ * engine sends verbatim as an `apikey` value, matching Insomnia's wire bytes. A
+ * prefix differing only in case stays on bearer: auth schemes are
+ * case-insensitive (RFC 7235 s2.1).
  */
 json insomnia_bearer (const json* auth) {
     const std::string token = nv (as_string (prop (auth, "token")));
@@ -2711,12 +2673,10 @@ json insomnia_auth (const json* auth, InsomniaCounts& counts) {
         return json{ { "mode", "inherit" } };
     }
     if (named == "none") {
-        // Insomnia's own explicit "No Auth" - distinct from an absent
-        // `authentication` object, which means "inherit". An explicit `none`
-        // must terminate inheritance the same way Postman's own `noauth`
-        // does in `map_postman_auth`: falling through to `inherit` here would
-        // send a folder's credentials to a request the user explicitly opted
-        // out of them for.
+        // Insomnia's explicit "No Auth", unlike an absent `authentication`,
+        // which means "inherit". It must end inheritance as Postman's `noauth`
+        // does in `map_postman_auth`; `inherit` would send a folder's
+        // credentials to a request the user opted out.
         return json{ { "mode", "none" } };
     }
     counts.unsupported_auth += 1;
@@ -2763,13 +2723,13 @@ json with_cookie_api_key (json headers, const json* auth, InsomniaCounts& counts
 /**
  * What a folder or workspace stores for its `authentication`. A collection
  * never inherits, so an absent one is `none`, which the send-time walk passes
- * through. A folder that declares an auth Vayu cannot carry is `noauth`
- * instead, so the walk ends there as it does in Insomnia and the requests under
- * it do not take an outer folder's or the workspace's credentials in its place:
- * Insomnia's own No Authentication (`type: "none"`, not disabled), a type with
- * no Vayu mode (counted as `unsupported_auth`) and a cookie-placed API key
- * (counted as `security_unmapped_apikey_cookie`). The workspace has nothing
- * above it to shut out, so the same cases stay `none` there.
+ * through. A folder declaring an auth Vayu cannot carry is `noauth` instead, so
+ * the walk ends there as in Insomnia and its requests do not take an outer
+ * folder's or the workspace's credentials: Insomnia's No Authentication
+ * (`type: "none"`, not disabled), a type with no Vayu mode (counted as
+ * `unsupported_auth`) and a cookie-placed API key (counted as
+ * `security_unmapped_apikey_cookie`). The workspace has nothing above it, so
+ * those cases stay `none` there.
  */
 json insomnia_collection_auth (const json* authentication, bool workspace, InsomniaCounts& counts) {
     const json* type = prop (as_record (authentication), "type");
@@ -2821,13 +2781,11 @@ json multipart_fields (const json* rows) {
 
 /**
  * A GraphQL body for a document that arrived without an envelope
- * (`toGraphQLEnvelope`).
- *
- * Insomnia's `application/graphql` body is usually the envelope, but it may be
- * the bare query document - and a bare document stored verbatim went on the
- * wire as the whole HTTP body, which is not JSON and carries no `query` a
- * GraphQL server can read. Nothing showed it: the editor's raw-string fallback
- * renders a bare document exactly as it renders a healthy one.
+ * (`toGraphQLEnvelope`). Insomnia's `application/graphql` body is usually the
+ * envelope but may be the bare query document, which stored verbatim goes on
+ * the wire as the whole body: not JSON, with no `query` a server can read.
+ * Nothing would show it, as the editor's raw-string fallback renders a bare
+ * document like a healthy one.
  */
 std::string to_graphql_envelope (const std::string& body) {
     const size_t begin = body.find_first_not_of (" \t\n\r\f\v");
@@ -2897,10 +2855,9 @@ json insomnia_body (const json* body, InsomniaCounts& counts) {
     if (mime == "application/graphql") {
         return json{ { "mode", "graphql" }, { "content", to_graphql_envelope (text) } };
     }
-    // Both spellings a client sends XML under. They used to fall through to the
-    // unlisted branch, which keeps the text as `text` - readable, but a mode
-    // that requires no Content-Type, so the imported request sent its SOAP
-    // envelope as `x-www-form-urlencoded`.
+    // Both spellings a client sends XML under. Falling through to the unlisted
+    // branch would keep the text as `text`, a mode that requires no Content-Type,
+    // so the request would send its SOAP envelope as `x-www-form-urlencoded`.
     if (mime == "application/xml" || mime == "text/xml") {
         return json{ { "mode", "xml" }, { "content", text } };
     }
@@ -2964,9 +2921,8 @@ void add_env_var (const std::string& name, const json& node, json& out) {
 
 /**
  * Insomnia's per-request `settingSendCookies` / `settingStoreCookies`
- * (booleans, both on by default). Vayu has one flag, `disableCookies`, that
- * keeps the request away from the cookie jar in both directions - it neither
- * reads nor writes - so either setting explicitly `false` sets it: importing
+ * (booleans, both on by default). Vayu's one `disableCookies` keeps the request
+ * off the cookie jar both ways, so either set to `false` sets it: importing
  * only the other half would leave a jar interaction the user switched off.
  * Absent, `true` and non-boolean values leave the field absent, the engine's
  * default.
@@ -3029,12 +2985,10 @@ bool calls_insomnia_api (const json* node) {
 }
 
 /**
- * An Insomnia export's resource tree - a v4 resource list, or the flattened
- * list a v5 document becomes - indexed by parent.
- *
- * The walk is a member function rather than a recursive lambda so each step of
- * it - a request, a folder, the environments - reads as its own thing; the
- * counts and the skipped-feature tally are the state every step writes into.
+ * An Insomnia export's resource tree (a v4 resource list, or the list a v5
+ * document flattens to), indexed by parent. The walk's steps (a request, a
+ * folder, the environments) are member functions writing into the counts and
+ * the skipped-feature tally.
  */
 class InsomniaTree {
     public:
@@ -3173,13 +3127,12 @@ class InsomniaTree {
     }
 
     /**
-     * Puts @p siblings in the order Insomnia lists them, ascending
-     * `metaSortKey`, folders and requests together (#2573), and answers whether
-     * it did. A parent where any sibling that becomes a draft lacks a numeric
-     * key is left as it is: a partial order would place the keyed ones against
-     * the others by a guess, so it states none and the parent keeps its
-     * folders-first listing. What becomes no draft (gRPC, WebSocket, ...) takes
-     * no position and is moved behind the rest.
+     * Puts @p siblings in Insomnia's order, ascending `metaSortKey`, folders
+     * and requests together (#2573), and answers whether it did. A parent where
+     * any sibling that becomes a draft lacks a numeric key is left as is: a
+     * partial order would place keyed ones against the rest by a guess, so the
+     * parent keeps its folders-first listing. What becomes no draft (gRPC,
+     * WebSocket, ...) takes no position and moves behind the rest.
      */
     static bool rank_by_sort_key (std::vector<const json*>& siblings) {
         const bool all_keyed = std::ranges::all_of (siblings, [] (const json* sibling) {
@@ -3231,9 +3184,8 @@ class InsomniaTree {
     }
 
     json build_collection (const json* node, bool workspace) {
-        // Insomnia cannot emit a cycle (`parentId` is a single edge), but a
-        // mangled file can - and an unguarded walk answers that with a stack
-        // overflow.
+        // Insomnia cannot emit a cycle (`parentId` is one edge), but a mangled
+        // file can, and an unguarded walk overflows the stack.
         const std::string id = resource_key (prop (node, "_id"));
         if (!visited_.insert (id).second) {
             throw MalformedImport ("resource \"" + id + "\" appears twice in the folder tree");
@@ -3641,13 +3593,10 @@ bool has_scheme (const std::string& url) {
 }
 
 /**
- * RFC 3986's `remove_dot_segments`, which is what `new URL` applies to the path
- * it resolves.
- *
- * Segment-wise rather than character-wise, which is the same answer with one
- * thing to say out loud: a path whose *last* segment is `.` or `..` keeps its
- * trailing slash (`/a/b/..` is `/a/`, not `/a`), so the removed segment leaves
- * an empty one behind rather than nothing.
+ * RFC 3986's `remove_dot_segments`, as `new URL` applies it. Segment-wise, the
+ * same answer with one point to note: a path whose last segment is `.` or `..`
+ * keeps its trailing slash (`/a/b/..` is `/a/`), so the removed segment leaves
+ * an empty one behind.
  */
 std::string remove_dot_segments (const std::string& path) {
     std::vector<std::string> segments;
@@ -3684,12 +3633,10 @@ std::string remove_dot_segments (const std::string& path) {
 /**
  * `new URL(reference, base).toString()`, for the one place an import needs it:
  * a relative `servers[0].url` against the URL the document was fetched from.
- *
- * Reference resolution only - no percent-normalization, no IDNA - because the
- * two inputs are a document's own server URL and a URL the app fetched from,
- * both of which arrive as text a user typed or a server wrote. Returns nothing
- * when @p base is not absolute, which is `new URL`'s `TypeError` and which the
- * caller reports as an unresolved base rather than guessing a host.
+ * Reference resolution only, no percent-normalization or IDNA, since both
+ * inputs are text a user typed or a server wrote. Nothing when @p base is not
+ * absolute (`new URL`'s `TypeError`), which the caller reports as an unresolved
+ * base rather than guessing a host.
  */
 std::optional<std::string>
 resolve_url (const std::string& reference, const std::string& base) {
@@ -3774,28 +3721,26 @@ bool has_unresolved_template (const std::string& url) {
 
 /**
  * `resolveServerUrl(server, sourceUrl, tally)`: `servers[0]` as the
- * `{{baseUrl}}` every imported request is written against (issue #719).
+ * `{{baseUrl}}` every imported request is written against (#719).
  *
- * Taken verbatim, that field produces a URL a request can never reach in two
- * ways, both silently. A Server Object may template its URL -
- * `{protocol}://{hostname}/api/v3` - and those single braces are **not** Vayu
- * variables (only the path is rewritten), so the literal survived into every
- * request line and failed at connect with nothing said. And a server URL may be
- * relative, in which case OpenAPI says it is relative to where the document
- * itself lives.
+ * Taken verbatim it can make a URL no request reaches, silently, two ways. A
+ * Server Object may template its URL (`{protocol}://{hostname}/api/v3`), and
+ * single braces are not Vayu variables (only the path is rewritten), so the
+ * literal fails at connect. And a server URL may be relative, which OpenAPI
+ * resolves against where the document lives.
  *
- * So: substitute the defaults the document declares (the specification
- * *requires* a default on every server variable, so a complete document always
- * resolves), then resolve what is left against the source URL when it needs
- * one. Anything still unresolvable is kept exactly as written and counted - a
- * base the user can see is unfinished beats a host Vayu invented.
+ * So the declared defaults are substituted (the specification requires a
+ * default on every server variable, so a complete document always resolves),
+ * then what is left is resolved against the source URL when it needs one.
+ * Anything still unresolvable is kept as written and counted: a base the user
+ * can see is unfinished beats a host Vayu invented.
  *
- * A document that names no server URL at all (no `servers`, an empty array, a
- * `servers[0]` that is not an object or carries no `url`, an empty `url`) has
- * nothing to resolve: no `{{baseUrl}}` variable is created and the loss is
- * counted as `no_server_url`, which is not `unresolved_base_url` (that one
- * keeps a URL the document did write). OpenAPI's implicit default server `/`
- * is deliberately the same case when `servers` is absent: it names no host.
+ * A document naming no server URL (no `servers`, an empty array, a `servers[0]`
+ * that is not an object or has no or an empty `url`) has nothing to resolve: no
+ * `{{baseUrl}}` variable is created and the loss counts as `no_server_url`, not
+ * `unresolved_base_url` (which keeps a URL the document did write). OpenAPI's
+ * implicit default server `/` is the same case when `servers` is absent: it
+ * names no host.
  */
 std::string
 resolve_server_url (const json* server, const std::string& source_url, ImportTally& tally) {
@@ -3843,11 +3788,10 @@ json scheme_to_auth_v3 (const json* scheme) {
     }
     if (*type == "apiKey") {
         const json* in = prop (node, "in");
-        // 3.x's apiKey has a third placement `cookie`, which Vayu's apikey
-        // mode has no slot for (only header/query) - reinterpreting it as a
-        // header would send the credential somewhere the document never
-        // named, so this is left unmapped like any other scheme Vayu cannot
-        // execute, not silently misplaced.
+        // 3.x's apiKey also has `cookie`, which Vayu's apikey mode (header and
+        // query) has no slot for. Reading it as a header would send the
+        // credential where the document never named, so it is left unmapped
+        // like any scheme Vayu cannot execute.
         if (in != nullptr && *in == "cookie") {
             return json{ { "mode", "none" } };
         }
@@ -3885,11 +3829,10 @@ json scheme_to_auth_v2 (const json* scheme) {
     return json{ { "mode", "none" } };
 }
 
-/// The scheme name and node a collection's auth is built from: the one the
-/// document's top-level `security` requires, else the first one it defines.
-/// Carrying the name too (not only the node) is what lets a per-operation
-/// `security` entry recognise "this names the same scheme the collection
-/// already took" and answer `inherit` rather than a redundant explicit mode.
+/// The scheme a collection's auth is built from: the one the top-level
+/// `security` requires, else the first defined. The name rides with the node so
+/// a per-operation `security` naming the same scheme answers `inherit`, not a
+/// redundant explicit mode.
 struct PrimaryScheme {
     std::string name;
     const json* node = nullptr;
@@ -3935,29 +3878,26 @@ std::string_view unmapped_security_kind (const json* scheme) {
 }
 
 /**
- * A per-operation `security` requirement as an override onto the collection's
- * auth (issue #1444), or `nullopt` when the operation names no override and
- * the request should keep today's answer, `inherit`.
+ * A per-operation `security` requirement as an override of the collection's
+ * auth (#1444), or `nullopt` when the operation names none and the request
+ * keeps `inherit`.
  *
- * `security: []` is OpenAPI's explicit "this operation takes no auth" and is
- * the one case that must never fall back to `inherit` - that is exactly the
- * defect this issue fixes. A requirement naming the scheme the collection
- * already took is answered as `inherit` too, since the two modes would be
- * identical and `inherit` keeps following the collection if its auth is later
- * edited. Anything Vayu cannot resolve to one concrete mode - more than one
- * requirement (an OR of alternatives), a requirement naming more than one
- * scheme (an AND), a requirement naming a scheme the document never declares,
- * or a scheme type Vayu has no mode for (`mutualTLS`, `openIdConnect`, an
- * unrecognised `type`) - is left on `inherit`, the safe default that sends
- * what the collection already sends rather than guessing, and counted under
- * its own `security_unmapped_*` kind rather than one shared bucket, so the
- * import summary says which of the four reasons applied.
+ * `security: []` is OpenAPI's explicit "no auth" and must never fall back to
+ * `inherit`. A requirement naming the scheme the collection took answers
+ * `inherit` too: the modes would be identical, and `inherit` follows the
+ * collection if its auth is edited later. What Vayu cannot resolve to one
+ * concrete mode (several requirements, an OR; one naming several schemes, an
+ * AND; an undeclared scheme; a type with no mode, `mutualTLS`, `openIdConnect`
+ * or an unrecognised `type`) stays on `inherit`, which sends what the
+ * collection sends rather than guessing, and is counted under its own
+ * `security_unmapped_*` kind, so the summary says which of the four reasons
+ * applied.
  *
  * Every non-`nullopt` return is `std::make_optional`, never a bare `json`:
- * copy-initializing an `optional<json>` from a `json` puts nlohmann's
- * `operator ValueType()` up against `optional`'s converting constructor,
- * which GCC's release build reports as an ambiguity under `-Werror` (the same
- * reason `scalar_stub` in `openapi_drafts.cpp` does).
+ * copy-initializing an `optional<json>` from a `json` pits nlohmann's
+ * `operator ValueType()` against `optional`'s converting constructor, an
+ * ambiguity GCC's release build reports under `-Werror` (as for `scalar_stub`
+ * in `openapi_drafts.cpp`).
  */
 std::optional<json> operation_auth_override (const json* op_security,
 const json* schemes,
@@ -4040,15 +3980,13 @@ json draft_body (const DraftBody& body) {
 }
 
 /**
- * `x-vayu-mock` (issue #1649) onto @p request - which saved example a mock
- * server answers with. `"random"` needs no target; `"fixed"` names the
- * `examples` map key the exporter wrote it under (`spec_example_key`, issue
- * #1457, is exactly that key), resolved here to a position in @p examples
- * rather than an id - no id exists yet for a row this import has not
- * created. A key the document no longer carries an example for degrades the
- * way `elements_invalid` does: counted, and the request keeps
- * `pick_example`'s own "first" default rather than naming a target that is
- * not there.
+ * `x-vayu-mock` (#1649) onto @p request: which saved example a mock server
+ * answers with. `"random"` needs no target; `"fixed"` names the `examples` key
+ * the exporter wrote it under (`spec_example_key`, #1457), resolved to a
+ * position in @p examples, since no id exists yet for a row this import has not
+ * created. A key the document no longer has an example for degrades as
+ * `elements_invalid` does: counted, and the request keeps `pick_example`'s
+ * "first" default.
  */
 void apply_mock_extension (const std::optional<nlohmann::ordered_json>& mock,
 const std::vector<DraftExample>& examples,
@@ -4100,9 +4038,9 @@ json draft_request (const SpecRequestDraft& entry, ImportTally& tally) {
         json row = { { "name", example.name }, { "status", example.status },
             { "headers", std::move (rows) }, { "body", example.body },
             { "contentType", example.content_type } };
-        // Engine-side provenance only (issue #1457): the renderer never reads
-        // it, but `POST /import/apply` must carry it through to the stored
-        // row so the bound export can find its way back to this entry.
+        // Engine-side provenance (#1457): the renderer never reads it, but
+        // `POST /import/apply` carries it to the stored row so the bound export
+        // can find its way back to this entry.
         if (example.spec_example_key) {
             row["specExampleKey"] = *example.spec_example_key;
         }
@@ -4118,12 +4056,11 @@ json draft_request (const SpecRequestDraft& entry, ImportTally& tally) {
     request["headers"]     = std::move (headers);
     request["body"]        = draft_body (draft.body);
     request["auth"]        = json{ { "mode", "inherit" } };
-    // `x-vayu-elements` (issue #1518): a document a Vayu export wrote may
-    // carry elements (scripts included) back. Validated here, against the
-    // same registry a stored request's own write goes through, so a document
-    // hand-edited into an invalid array degrades the same way any other
-    // dropped import content does - counted, never silently applied - rather
-    // than failing the whole document at parse time.
+    // `x-vayu-elements` (#1518): a document a Vayu export wrote may carry
+    // elements (scripts included) back. Validated here against the registry a
+    // stored request's write uses, so a hand-edited invalid array is counted
+    // like other dropped content, never applied, and never fails the whole
+    // document at parse time.
     if (entry.elements && entry.elements->is_array () && !entry.elements->empty ()) {
         if (Registry::instance ().validate (*entry.elements, ElementOwner::Request)) {
             tally.add ("elements_invalid");
@@ -4241,12 +4178,11 @@ class OperationFolders {
     bool pathed_ = false;
 };
 
-/// The collection's own auth, built from its primary scheme - and tallied
-/// when that scheme is one Vayu cannot map, the same way an operation-level
-/// override tallies the identical scheme (`operation_auth_override`). Not
-/// tallied when `scheme.node` is null: that is "the document declares no
-/// security" (`scheme_to_auth_v3 (nullptr)` also answers `none`), which has
-/// nothing to report - only a *declared* scheme Vayu could not map is a loss.
+/// The collection's own auth, from its primary scheme, tallied when that scheme
+/// is one Vayu cannot map, as an operation-level override tallies it
+/// (`operation_auth_override`). A null `scheme.node` is "the document declares
+/// no security" (`scheme_to_auth_v3 (nullptr)` answers `none` too) and is not
+/// tallied: only a declared scheme Vayu could not map is a loss.
 json collection_primary_auth (const PrimaryScheme& scheme, bool v3, ImportTally& tally) {
     json auth = v3 ? scheme_to_auth_v3 (scheme.node) : scheme_to_auth_v2 (scheme.node);
     if (scheme.node != nullptr && auth.at ("mode") == "none") {
@@ -4664,12 +4600,11 @@ document_base (const json& document, bool v3, const ImportSource& source, Import
         prop (as_record (prop (&document, "components")), "securitySchemes"));
         return base;
     }
-    // 2.0 states its base as three fields rather than a server URL. A
-    // `basePath` of exactly `/` adds nothing (any other trailing slash is
-    // trimmed from the assembled URL), and a document with no `host`
-    // has no base at all: `{{baseUrl}}` is then not a variable, every
-    // request's URL starts with the token unresolved, and the loss is counted
-    // as `no_server_url` (the 3.x branch counts the same case).
+    // 2.0 states its base as three fields, not a server URL. A `basePath` of
+    // exactly `/` adds nothing (any other trailing slash is trimmed from the
+    // assembled URL). A document with no `host` has no base: `{{baseUrl}}` is
+    // then not a variable, every request's URL starts with the unresolved
+    // token, and the loss counts as `no_server_url`, as in the 3.x branch.
     const std::string* wire_scheme = as_str (array_at (prop (&document, "schemes"), 0));
     const std::string* declared_base = as_str (prop (&document, "basePath"));
     const std::string base_path =
@@ -4809,10 +4744,10 @@ walk::Dialect dialect) {
     }
     tree.fill_root (root);
     // The document itself, so the import can store it and bind this collection
-    // to it in the same atomic call (#637). `raw` and not a re-serialization:
-    // the engine hashes the bytes it stores, and a sync compares against that
-    // hash. Neither index is beside it - the engine derives both from the very
-    // bytes it stores (#853, #860).
+    // to it in one atomic call (#637). `raw`, not a re-serialization: the
+    // engine hashes the bytes it stores, and a sync compares against that hash.
+    // Neither index is sent; the engine derives both from those bytes (#853,
+    // #860).
     root["spec"] = json{ { "content", raw } };
 
     json collections = json::array ();
@@ -4946,23 +4881,21 @@ struct JoinedRow {
 };
 
 /**
- * `joinParamsIntoUrls(result)`: restore the app's url/params invariant on every
- * request a parser produced.
+ * `joinParamsIntoUrls(result)`: restores the app's url/params invariant on
+ * every request a parser produced.
  *
- * A request built in the app carries its enabled query **inside `url`**, and
- * every execution path sends `url` verbatim while `params[]` stays editor state
- * (issue #590). The parsers write the other shape - Postman splits the query
- * out of the URL, Insomnia carries a `parameters[]` beside it - so an imported
- * request went on the wire with its query missing, silently, until the user
- * happened to edit the table once.
+ * A request built in the app carries its enabled query inside `url`; every
+ * execution path sends `url` verbatim, and `params[]` is editor state (#590).
+ * The parsers write the other shape (Postman splits the query out of the URL,
+ * Insomnia carries `parameters[]` beside it), so without this an imported
+ * request goes out with no query until the user edits the table.
  *
- * The OpenAPI path does **not** come through here: `SpecRequestDraft` already
- * promises a URL with its query joined in, because that is the URL the sync
- * diff compares a stored request against. Running this over one would append
- * the same rows twice.
+ * The OpenAPI path does not come through here: `SpecRequestDraft` already
+ * promises a URL with its query joined, the one the sync diff compares against,
+ * and running this over it would append the rows twice.
  *
- * @p encoding is the source format's rule (issue #1771): `Postman` for a
- * Postman collection, `UriComponent` for Insomnia and JMeter.
+ * @p encoding is the source format's rule (#1771): `Postman` for a Postman
+ * collection, `UriComponent` for Insomnia and JMeter.
  */
 void join_params_into_urls (json& collections, QueryEncoding encoding) {
     for (json& collection : collections) {
@@ -5052,13 +4985,13 @@ struct SiblingPositions {
 };
 
 /**
- * A draft's own `order` places it - a Postman item's or a JMeter element's
- * document position, an Insomnia item's rank by sort key, an `x-vayu-*` stored
- * order - and a draft stating none keeps the listing the other importers
- * produce, its folders first and its requests after them.
- * Ties fall to `sibling_order.hpp`'s rule, a folder before a request, then
- * list position. `draft-siblings.ts`'s `siblingPositions` is the app's copy,
- * pinned to this one by `import-conformance.json`'s payloads.
+ * A draft's own `order` places it (a Postman item's or JMeter element's
+ * document position, an Insomnia item's sort-key rank, an `x-vayu-*` stored
+ * order); a draft stating none keeps the other importers' listing, folders
+ * first, then requests. Ties fall to `sibling_order.hpp`'s rule: a folder
+ * before a request, then list position. `draft-siblings.ts`'s
+ * `siblingPositions` is the app's copy, pinned to this one by
+ * `import-conformance.json`'s payloads.
  */
 SiblingPositions sibling_positions (const json& folders, const json& requests) {
     struct Entry {
@@ -5095,16 +5028,15 @@ SiblingPositions sibling_positions (const json& folders, const json& requests) {
 }
 
 /**
- * Depth-first, parents before their requests before their children - the
- * temp-id order `assign-ids.ts` mints in. Where each child lands among its
- * siblings is its `order`, from `sibling_positions`.
+ * Depth-first, parents before their requests before their children: the temp-id
+ * order `assign-ids.ts` mints in. Each child's place among its siblings is its
+ * `order`, from `sibling_positions`.
  *
- * A root states no `order`: it is joining a list that already has occupants, and
- * the engine's create path appends after the stored roots. Sending the payload
- * index instead collided head-on with the existing roots' 0, 1, 2..., so an
- * import into a non-empty workspace interleaved itself through the user's tree
- * by tie lottery. Everything below a root keeps its explicit index - those
- * parents are new in this payload, so there is nothing to collide with.
+ * A root states no `order`: it joins a list that already has occupants, and the
+ * engine's create path appends after the stored roots. A payload index would
+ * collide with the existing roots' 0, 1, 2..., interleaving an import through a
+ * non-empty workspace by tie order. Below a root every parent is new in this
+ * payload, so explicit indexes cannot collide.
  */
 void flatten (const json& draft,
 const std::string* parent_temp_id,
@@ -5233,17 +5165,15 @@ const ImportSource& source) {
     ImportParse parsed;
 
     // How the parse's query rows join into each request's `url`, or nothing
-    // when the parse already wrote them. Only the OpenAPI path does -
-    // `SpecRequestDraft` promises a joined URL, because that is what the sync
-    // diff compares a stored request against - and running the join over one
-    // would append the same rows twice. Stated rather than derived from the
-    // format name, which would make a renamed dialect a silently doubled query.
+    // when the parse already wrote them, which only the OpenAPI path does
+    // (`SpecRequestDraft` promises a joined URL, the one the sync diff compares
+    // against; joining again would double the rows). Stated, not derived from
+    // the format name, so a renamed dialect cannot silently double its query.
     std::optional<QueryEncoding> join_encoding = QueryEncoding::UriComponent;
 
-    // A `.jmx` test plan is XML, and would only fail both of `read_document`'s
-    // readers (JSON then YAML) the same way genuinely unrecognised bytes do -
-    // checked first, on the raw text, so a `.jmx` upload gets this parser
-    // rather than "Unrecognised format".
+    // A `.jmx` test plan is XML, and would fail both of `read_document`'s
+    // readers (JSON, then YAML) as unrecognised bytes do, so it is checked
+    // first, on the raw text.
     if (is_jmeter_document (text)) {
         ImportTally tally;
         try {
@@ -5355,10 +5285,10 @@ nlohmann::ordered_json import_apply_payload (const nlohmann::ordered_json& resul
         environments.push_back (std::move (item));
     }
 
-    // Pass-through, no temp id: nothing else in the tree references a
-    // certificate candidate by one, and a format that never sets this key
-    // (every parser but Postman) gets the empty array `import_apply_response`
-    // already treats as "nothing to apply" (issue #1656).
+    // Passed through with no temp id: nothing in the tree references a
+    // certificate candidate, and a format that never sets this key (every
+    // parser but Postman) gets the empty array `import_apply_response` reads as
+    // "nothing to apply" (#1656).
     nlohmann::ordered_json client_certificates =
     result.value ("clientCertificates", nlohmann::ordered_json::array ());
 

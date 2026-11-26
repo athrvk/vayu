@@ -6,34 +6,28 @@
  */
 
 /**
- * useVariableResolver Hook
+ * Resolves `{{variables}}` in strings against the current variable context (globals, collection
+ * chain, active environment), cached per (collectionId, environmentId) via `useMemo`.
  *
- * Provides functions to resolve {{variables}} in strings using the current
- * variable context (globals, collection chain, active environment).
+ * Priority, highest wins: the bound data row (bare column names, only while one is picked) >
+ * environment > collection chain (leaf → root: closer to the leaf overrides closer to the root) >
+ * global.
  *
- * Resolution priority (highest wins): Bound data row (bare column names, only
- * while one is picked) > Environment > Collection chain (leaf → root) > Global
- * Within the collection chain, variables closer to the leaf override those closer to the root.
- * Cached per (collectionId, environmentId) via useMemo.
- *
- * The row tier is the one a caller opts into with `boundRow` (issue #1062).
- * Without it the preview is composition's, where a bound column keeps its
- * braces for the per-row bind; with it the preview is composition *and* that
- * bind, which is what a Send-with-row actually puts on the wire.
+ * The row tier is one a caller opts into with `boundRow` (#1062). Without it the preview is
+ * composition's, where a bound column keeps its braces for the per-row bind; with it the preview is
+ * composition *and* that bind, which is what a Send-with-row actually puts on the wire.
  *
  * A `{{$name}}` nothing defines is generated from the dynamic-variable table
- * (`lib/dynamic-variables.ts`) rather than looked up - see `resolveString`.
+ * (`lib/dynamic-variables.ts`) rather than looked up; see `resolveString`.
  *
- * **This is a preview, not the execution path.** Since issue #226 the engine
- * owns execution-time resolution (`POST /compose`); what this hook feeds is
- * display - tab titles, previews, the unresolved-token painting, the "why this
- * value" popover. The substitution rules live in `lib/variable-resolution.ts`
- * and are held to the engine's behaviour by the shared conformance fixture, so
- * the preview cannot quietly drift from what actually gets sent.
- * `getVariableOrigins` keeps the definitions that lost so the UI can explain
- * the winner - and, since issue #1064, the bound row above them, so the answer
- * it gives is the one the send will use rather than the one the scopes settled
- * on. Execution has no use for losers, so the engine has no analogue.
+ * **This is a preview, not the execution path.** The engine owns execution-time resolution
+ * (`POST /compose`, #226); this hook feeds display: tab titles, previews, the unresolved-token
+ * painting, the "why this value" popover. The substitution rules live in
+ * `lib/variable-resolution.ts` and are held to the engine's behaviour by the shared conformance
+ * fixture, so the preview cannot quietly drift from what actually gets sent. `getVariableOrigins`
+ * keeps the definitions that lost so the UI can explain the winner, and the bound row above them
+ * (#1064), so its answer is the one the send will use rather than the one the scopes settled on.
+ * Execution has no use for losers, so the engine has no analogue.
  */
 
 import { useMemo, useCallback } from "react";
@@ -47,8 +41,7 @@ import type {
 	VariableScope,
 } from "@/types";
 import { castByType } from "@/lib/variable-cast";
-// The chain this hook used to build itself, guard and all - see tree-utils for
-// why every `parentId` walk in the renderer now comes from one place.
+// See tree-utils for why every `parentId` walk in the renderer comes from one place.
 import { walkAncestors } from "@/modules/collections/tree-utils";
 import {
 	coerceVariableValue,
@@ -69,14 +62,11 @@ import type { DataFileRow } from "@/services/data-files";
 interface UseVariableResolverOptions {
 	collectionId?: string;
 	/**
-	 * The data row this preview is bound to, if one is picked (issue #1062).
-	 *
-	 * Only a Send-with-row has one. Composition never does - a payload is
-	 * composed once and a row is bound per iteration - so a caller without one
-	 * previews exactly what it always did, and the token a run will bind keeps
-	 * its braces. A caller *with* one previews the bind as well as the
-	 * composition, which is the whole difference: the row's cell answers a bare
-	 * column name above the environment, as it will on the wire.
+	 * The data row this preview is bound to, if one is picked (#1062). Only a Send-with-row has
+	 * one; composition never does (a payload is composed once and a row bound per iteration), so a
+	 * caller without one previews exactly what it always did, and the token a run will bind keeps
+	 * its braces. A caller *with* one previews the bind as well as the composition: the row's cell
+	 * answers a bare column name above the environment, as it will on the wire.
 	 */
 	boundRow?: DataFileRow;
 }
@@ -219,8 +209,7 @@ function buildOrigins(
 		}
 	}
 
-	// The winner is the *last enabled* definition, which is exactly the value
-	// the old overwrite-as-you-go loop arrived at.
+	// The winner is the *last enabled* definition.
 	for (const list of Object.values(result)) {
 		for (let i = list.length - 1; i >= 0; i--) {
 			if (list[i].enabled) {
@@ -259,12 +248,9 @@ export function useVariableResolver(
 
 	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	/*
-	 * Collection scope is explicit only. There used to be a session-store
-	 * fallback (`activeCollectionId`) for option-less callers, but nothing ever
-	 * wrote it - so it could only ever hold a value rehydrated from an old
-	 * build, silently scoping resolution to a collection the user had left. An
-	 * option-less caller now resolves against globals + environment, which is
-	 * what it was already getting on every fresh install.
+	 * Collection scope is explicit only: an option-less caller resolves against globals and the
+	 * environment. No session-store fallback: nothing writes one, so it could only hold a value
+	 * rehydrated from an old build, silently scoping resolution to a collection the user had left.
 	 */
 	const activeCollectionId = options?.collectionId ?? null;
 
@@ -298,20 +284,17 @@ export function useVariableResolver(
 	const variableMap = useMemo(() => winnersOf(originsByName), [originsByName]);
 
 	/**
-	 * What each scope answers **on its own** - the names it defines through
-	 * enabled rows, valued as its own accessor would read them (issue #1302).
+	 * What each scope answers **on its own**: the names it defines through enabled rows, valued as
+	 * its own accessor would read them (#1302). A different question from `variableMap`, which is
+	 * the point: `pm.collectionVariables.get` reads the collection chain and answers from it
+	 * whether or not the environment also defines the name, so a list built by filtering the
+	 * ladder's winners hides a collection's own `shop_domain` for no reason the caller can see.
+	 * Same origins, same "last enabled wins" rule (`scopeAnswer`, which `describeScopedRead` reads
+	 * too), one rung of the ladder instead of all of them.
 	 *
-	 * A different question from `variableMap`, and the difference is the point:
-	 * `pm.collectionVariables.get` reads the collection chain and answers from it
-	 * whether or not the environment also defines the name, so a list built by
-	 * filtering the ladder's winners hides a collection's own `shop_domain` for
-	 * no reason the caller can see. Same origins, same "last enabled wins" rule
-	 * (`scopeAnswer`, which `describeScopedRead` reads too), one rung of the
-	 * ladder instead of all of them.
-	 *
-	 * A name whose definitions in a scope are all disabled is absent here, for
-	 * the reason it is absent from `variableMap`: `get` reads enabled rows only,
-	 * so present-and-empty would offer a name the call cannot answer.
+	 * A name whose definitions in a scope are all disabled is absent here, for `variableMap`'s
+	 * reason: `get` reads enabled rows only, so present-and-empty would offer a name the call
+	 * cannot answer.
 	 */
 	const scopeVariableMaps = useMemo(() => {
 		const result: Record<VariableScope, Record<string, ResolvedVariable>> = {
@@ -358,32 +341,23 @@ export function useVariableResolver(
 	);
 
 	/**
-	 * The scope ladder, plus the bound row on top of it (issue #1064).
+	 * The scope ladder, plus the bound row on top of it (#1064). The row is layered on *here*
+	 * rather than inside `originsByName`, and the split is the point: `originsByName` is what
+	 * `variableMap` resolves from, so a row folded into it would make `getAllVariables` report a
+	 * row's cell as the variable's value and hand `ResolvedVariable` a scope nobody can write. This
+	 * function is display-only, exactly the layer where "what will actually be sent" belongs.
 	 *
-	 * The row is layered on *here* rather than inside `originsByName`, and the
-	 * split is the point: `originsByName` is what `variableMap` resolves from, so
-	 * a row folded into it would make `getAllVariables` report a row's cell as
-	 * the variable's value and hand `ResolvedVariable` a scope nobody can write.
-	 * This function is display-only - nothing about execution reads it - which is
-	 * exactly the layer where "what will actually be sent" belongs.
+	 * The row takes `winner` away from every definition beneath it rather than being appended
+	 * beside a scope that still claims to have won: two origins flagged as the winner is a list
+	 * that cannot be rendered honestly, and `winner` means "what the send will use" to every reader
+	 * of it.
 	 *
-	 * The row takes `winner` away from every definition beneath it, rather than
-	 * being appended beside a scope that still claims to have won. Two origins
-	 * flagged as the winner is a list that cannot be rendered honestly, and
-	 * `winner` means "what the send will use" to every reader of it.
-	 *
-	 * `{{data.column}}` reads the same cell a bare `{{column}}` does, by the
-	 * column name with the prefix stripped - `resolveTemplateWithRow`'s own
-	 * rule ("`{{data.column}}` answers from the same row" as the bare name,
-	 * "because they are one bind"). This used to look the *whole* name up in
-	 * `rowCells`, which is keyed by bare column names alone, so `data.shop`
-	 * never matched anything and the hover card fell back to the declared-
-	 * column description with no value - correct when no row is bound, wrong
-	 * once one is: the token is going to send exactly the bare spelling's
-	 * value, and a reader comparing the two hovers side by side saw one with a
-	 * value and one without for what is, at send time, the same cell.
-	 * `originsByName` itself is unaffected: `data.*` cannot be scope-defined,
-	 * so `defined` is always empty for it, exactly as before.
+	 * `{{data.column}}` reads the same cell a bare `{{column}}` does, by the column name with the
+	 * prefix stripped (`resolveTemplateWithRow`'s rule: they are one bind). `rowCells` is keyed by
+	 * bare column names alone, so a lookup by the whole name would never match `data.shop`, and
+	 * once a row is bound its hover card would show the declared-column description with no value
+	 * beside a bare spelling showing the value the token will send. `originsByName` itself is
+	 * unaffected: `data.*` cannot be scope-defined, so `defined` is always empty for it.
 	 */
 	const getVariableOrigins = useCallback(
 		(name: string): VariableOrigin[] => {
@@ -402,25 +376,21 @@ export function useVariableResolver(
 	);
 
 	/**
-	 * Scopes first, then the dynamic-variable table.
+	 * Scopes first, then the dynamic-variable table. The compatible order: a collection that
+	 * already defines a variable literally named `$guid` keeps its value, and only a name nothing
+	 * defines reaches a generator. Each generator is called *inside* the replace callback, so it
+	 * runs once per occurrence: two `{{$guid}}` in one body are two different ids, which is the
+	 * reason to write them.
 	 *
-	 * The order is the compatible one: a collection that already defines a
-	 * variable literally named `$guid` keeps its value, and only a name nothing
-	 * defines reaches a generator. Each generator is called *inside* the replace
-	 * callback, so it runs once per occurrence - two `{{$guid}}` in one body are
-	 * two different ids, which is the reason to write them.
+	 * An unknown `$name` keeps its braces rather than resolving to "": a typo'd generator silently
+	 * sending an empty field is the defect this table fixes (#186), and leaving
+	 * `{{$randomInteger}}` on the wire makes it visible in the request while `EditableVariable`
+	 * keeps painting the token as unresolved. An ordinary unknown name follows the same rule
+	 * (#1009): the preview shows the token the engine will send.
 	 *
-	 * An unknown `$name` keeps its braces rather than resolving to "". A typo'd
-	 * generator that sent an empty field silently is the defect this table was
-	 * added to fix (issue #186); leaving `{{$randomInteger}}` on the wire makes
-	 * it visible in the request, and `EditableVariable` keeps painting the token
-	 * as unresolved. Since issue #1009 an ordinary unknown name is the same
-	 * rule - the preview shows the token the engine will send.
-	 *
-	 * With a row bound the preview is the bind as well as the composition
-	 * (issue #1062): the row's cell answers a bare column name above every
-	 * scope, and `{{data.column}}` answers from the same row, because they are
-	 * one bind and the send would be a lie about the other one.
+	 * With a row bound the preview is the bind as well as the composition (#1062): the row's cell
+	 * answers a bare column name above every scope, and `{{data.column}}` answers from the same
+	 * row, because they are one bind and the preview would otherwise misreport the other one.
 	 */
 	const resolveString = useCallback(
 		(input: string, row?: DataFileRow, collectionId?: string): string => {

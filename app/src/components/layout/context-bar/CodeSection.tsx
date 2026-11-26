@@ -8,38 +8,31 @@
 /**
  * Copy this request as a runnable command.
  *
- * **Resolved is the default, and it is the differentiator.** The snippet is
- * generated from `POST /compose`'s output - the request with `{{variables}}`
- * substituted and `inherit` auth walked by the engine that will send it - so
- * what you paste into a terminal is what Vayu would put on the wire.
- * Template-based generators cannot promise that; they emit the request as
- * written, variables and all. Templated is still offered, because "the request
- * as written" is what you paste into a bug report.
+ * **Resolved is the default, and it is the differentiator.** The snippet is generated from
+ * `POST /compose`'s output, the request with `{{variables}}` substituted and `inherit` auth walked
+ * by the engine that will send it, so what you paste into a terminal is what Vayu would put on the
+ * wire; template-based generators emit the request as written, variables and all. Templated is
+ * still offered: the request as written is what you paste into a bug report.
  *
- * A request a pre-request script runs before composes with its `{{templates}}`
- * intact (#2521), so a `{{token}}` in the resolved snippet is not a failure to
- * resolve; the engine lists the names as `deferredVariables` and a note under
- * the snippet says the script sets them at send.
+ * A request a pre-request script runs before composes with its `{{templates}}` intact (#2521), so a
+ * `{{token}}` in the resolved snippet is not a failure to resolve: the engine lists the names as
+ * `deferredVariables`, and a note under the snippet says the script sets them at send.
  *
- * **Secrets are the leak vector here**, so resolved output is masked by
- * default and revealing is an explicit act. Masked values are every variable
- * the resolver marks secret plus the credential the auth mode carries - a
- * bearer token typed literally is exactly as sensitive as one that came from a
- * `{{token}}`.
+ * **Secrets are the leak vector here**, so resolved output is masked by default and revealing is an
+ * explicit act. Masked values are every variable the resolver marks secret plus the credential the
+ * auth mode carries: a bearer token typed literally is as sensitive as one from a `{{token}}`.
  *
- * **It composes the editor, not the saved row** (#2638), the way Send does:
- * see `code-composition.ts`. Templated mode stays on the saved row - there is
- * no RequestState-to-Request mapping to feed it the draft without a second
- * field list - and both saved-row cases say so under the snippet.
+ * **It composes the editor, not the saved row** (#2638), as Send does (see `code-composition.ts`).
+ * Templated mode stays on the saved row, as there is no RequestState-to-Request mapping to feed it
+ * the draft without a second field list, and both saved-row cases say so under the snippet.
  *
- * Composing happens when the section is expanded, when the user asks for it
- * again, when a builder takes the request on (a new key), and when a committed
- * write (the renderer's own PUT or an MCP agent's) lands on this request, never
- * per keystroke: the section is only mounted while expanded (see `Section.tsx`)
- * and the query is `staleTime: Infinity` behind an explicit refresh or an
- * invalidation (see `queries/compose-invalidation.ts`). The autosave PUT's
- * invalidation runs the same query function, which reads the draft again, so
- * an editor-composed snippet follows the editor to within the autosave delay.
+ * It composes when the section is expanded, when the user asks again, when a builder takes the
+ * request on (a new key), and when a committed write (the renderer's own PUT or an MCP agent's)
+ * lands on this request, never per keystroke: the section is mounted only while expanded (see
+ * `Section.tsx`) and the query is `staleTime: Infinity` behind an explicit refresh or an
+ * invalidation (see `queries/compose-invalidation.ts`). The autosave PUT's invalidation runs the
+ * same query function, which reads the draft again, so an editor-composed snippet follows the
+ * editor to within the autosave delay.
  */
 
 import { useState } from "react";
@@ -108,10 +101,9 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 	if (!request) return <SectionEmpty>No request loaded</SectionEmpty>;
 
 	/*
-	 * `stream` is laid over the composed payload rather than read out of it,
-	 * because only a by-id compose carries the flag (#3561); the editor's
-	 * inline compose does not. It comes from whatever the payload was composed
-	 * from - the draft, or else the row - and the jar note below reads the same.
+	 * `stream` is laid over the composed payload, not read out of it: only a by-id compose carries
+	 * the flag (#3561), not the editor's inline compose. It comes from what the payload was
+	 * composed from, the draft or else the row, and the jar note below reads the same.
 	 */
 	const editorSettings = mode === "resolved" ? composed.data?.editorSettings : null;
 	const settings = editorSettings ?? request;
@@ -126,9 +118,8 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 
 	const secrets = collectSecrets(getAllVariables(), source?.auth);
 
-	// Templated output holds `{{token}}`, not the value behind it, so there is
-	// nothing to reveal and nothing to hide - the toggle would be a control that
-	// changes nothing.
+	// Templated output holds `{{token}}`, not the value behind it, so there is nothing to reveal or
+	// hide, and the toggle would change nothing.
 	const maskable = mode === "resolved";
 	const snippet = source
 		? generateSnippet(target, source, { secrets, mask: maskable && !revealed })
@@ -246,11 +237,10 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 						</p>
 					))}
 					{/*
-					 * The jar is applied by libcurl at transfer time, so it is not in
-					 * the composed payload and cannot be in the snippet. Saying so is
-					 * the difference between a snippet that is incomplete and one that
-					 * is wrong - and a request that skips the jar (#1765) sends
-					 * exactly what the snippet shows, so it says that instead.
+					 * libcurl applies the jar at transfer time, so it is not in the composed
+					 * payload and cannot be in the snippet. Saying so separates an incomplete
+					 * snippet from a wrong one; a request that skips the jar (#1765) sends exactly
+					 * what the snippet shows, so it says that instead.
 					 */}
 					<p className="text-label text-muted-foreground m-0">
 						{settings.disableCookies

@@ -8,8 +8,7 @@
  */
 
 /**
- * @file tv4_glue.hpp
- * @brief The factory around the vendored `tv4` (engine/vendor/tv4, #2656).
+ * The factory around the vendored `tv4` (engine/vendor/tv4, #2656).
  *
  * `TV4_GLUE_OPEN + TV4_JS + TV4_GLUE_CLOSE` is the source the shelf evaluates.
  * The library is tv4 1.3.0's `tv4.js` minified by esbuild (the vendor README

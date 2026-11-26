@@ -236,7 +236,7 @@ TEST_F (ScriptRequestUrlTest, ABaseUrlTokenReadsAsTheHostAndThePartsAfterIt) {
     << "a read-only script rewrote the URL";
 }
 
-// The "Sign a request" example in docs/engine/scripting.md, as printed, on
+// The "Sign a request" example in docs/engine/scripting/console-and-examples.md, as printed, on
 // the URL an imported Postman collection stores.
 TEST_F (ScriptRequestUrlTest, TheDocsSigningExampleCanonicalizesABaseUrlRequest) {
     request.url       = "{{baseUrl}}/echo?b=2&a=1";
@@ -285,7 +285,7 @@ TEST_F (ScriptRequestUrlTest, AQueryEditOnABaseUrlKeepsTheTokenForThePassAfter) 
         EXPECT_EQ (target.url, expected) << script;
     }
 
-    // "Add or replace a query parameter" in docs/engine/scripting.md.
+    // "Add or replace a query parameter" in docs/engine/scripting/console-and-examples.md.
     request.url = "{{baseUrl}}/orders?page=2";
     const auto result =
     engine.execute_prerequest ("pm.request.url.query.upsert({ key: 'traceId', "

@@ -6,17 +6,14 @@
  */
 
 /**
- * The settings search corpus, assembled once.
+ * The settings search corpus, assembled once. `lib/settings-index.ts` is the pure half (it flattens
+ * catalogues and ranks matches, knowing nothing of React); this half says *which* catalogues: the
+ * app-panel registry, the app-settings catalogue, the engine category registry and the engine
+ * entries the `/config` query holds.
  *
- * `lib/settings-index.ts` is the pure half - it flattens catalogues and ranks
- * matches, and knows nothing about React. This is the half that says *which*
- * catalogues: the app-panel registry, the app-settings catalogue, the engine
- * category registry, and the engine entries the `/config` query holds.
- *
- * A hook rather than four imports repeated at each call site, because there are
- * now two call sites - the settings sidebar's search box and the palette's
- * settings source - and "one branch defines it, the other re-derives it inline"
- * is this codebase's most repeated wiring defect. One index, two UIs.
+ * A hook, not four imports at each call site: the settings sidebar's search box and the palette's
+ * settings source both read it, and "one branch defines it, the other re-derives it inline" is this
+ * codebase's most repeated wiring defect. One index, two UIs.
  */
 
 import { useMemo } from "react";

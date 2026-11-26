@@ -45,13 +45,13 @@ names (the bind owns them), `$` names (a generator is generated once, the
 iteration identity is bound), a name whose value reaches one of those, and a
 file path (a script can never choose which file is sent). The rest of this page
 says what each case means in detail; the engine's `POST /compose` contract is
-[`deferredVariables`](../engine/api-reference.md#deferredvariables).
+[`deferredVariables`](../engine/api-reference/compose.md#deferredvariables).
 
 **A third reader, MCP (issue #1207):** the same rule set is served as the MCP
 resource `vayu://variables/resolution`, and the `resolve_variables` tool
 answers which definition wins for a given collection/environment context and
 every definition it shadowed. See
-[MCP - Variables](../engine/mcp.md#variables).
+[MCP - Variables](../engine/mcp/saved-data.md#variables).
 
 **One matcher in the renderer.** `{{name}}` is recognised by
 `VARIABLE_PATTERN` in `app/src/constants/variables.ts` and nowhere else -
@@ -78,7 +78,7 @@ token's text before the lookup (`trim_variable_name`,
 from its trim - `" host"`, `"host "` - could therefore never be referenced, so
 the engine refuses to store one: `POST`/`PUT /environments`, `POST /globals` and
 `POST`/`PUT /collections` answer `400` naming the key
-([accepted field shapes](../engine/api-reference.md#accepted-field-shapes)). A
+([accepted field shapes](../engine/api-reference/resource-writes.md#accepted-field-shapes)). A
 space or dot *inside* a name (`my var`, `a.b`) is a name like any other. An
 import trims the names it reads and skips a row whose name trims to nothing, so
 a padded row in a document never fails the import. The variables table trims a
@@ -143,7 +143,7 @@ those refusals say.
 engine fills it wherever a dataset is known (a collection or scenario run's
 plan, a single-request load run, a single send carrying one row), and a client
 composing ahead of a run of its own states it explicitly as the `dataColumns`
-field of [`POST /compose`](../engine/api-reference.md#post-compose): an array
+field of [`POST /compose`](../engine/api-reference/compose.md#post-compose): an array
 of the data file's column names, absent or `null` meaning no dataset and
 composition exactly as before.
 
@@ -158,12 +158,12 @@ leaves it written as it stands, for a different reason.
 
 **The UI paints it as its own state, not as a broken variable.** Unresolved is
 the accurate word for what the resolvers do with the token, but it is the wrong
-thing to *show*: the builder used to render `{{data.email}}` red, hover it to
-"not defined", and offer to create a variable of that name - which, the
+thing to *show*: the builder does not render `{{data.email}}` red, hover it to
+"not defined", or offer to create a variable of that name - which, the
 namespace being disjoint, can never answer for the column. So a `data.*` token
 gets the muted run-time treatment (`RuntimeToken`) and a tooltip naming the run's
 data file, and no surface offers to create one. See
-[COMPONENTS.md](COMPONENTS.md#shared-variable-input-componentssharedvariableinput)
+[Shared Variable Input](COMPONENTS/shared-variable-input.md#shared-variable-input-componentssharedvariableinput)
 for the token states.
 
 A **collection run** is the one place that reading is not left to the user: a
@@ -175,7 +175,7 @@ run.
 
 The conformance fixture pins all three cases, so the two resolvers cannot
 drift on them. See
-[api-reference.md](../engine/api-reference.md#scenario-runs) for what the
+[api-reference/scenario-runs.md](../engine/api-reference/scenario-runs.md#scenario-runs) for what the
 engine does with the token once a row exists.
 
 ### `$vu` and `$iteration` are reserved too, for the same reason
@@ -188,7 +188,7 @@ executor substitutes them immediately before each send, because the value
 belongs to the iteration rather than to the request. A *script* resolves them
 (issue #1057): `pm.variables.replaceIn("{{$vu}}")` renders the number the
 request beside it was bound with, since by then the send has one - see
-[the scripting docs](../engine/scripting.md).
+[the scripting docs](../engine/scripting/index.md).
 
 Being reserved is what makes them bindable at all. A variable someone happens
 to name `$vu` does **not** answer for the identity - unlike `$guid`, where a
@@ -199,9 +199,9 @@ matched exactly, so `{{$vus}}` is an ordinary unknown `$name` and keeps its
 braces.
 
 **The UI paints them as their own state too** (issue #1101), for the reason the
-`data.*` paragraph above gives and one more. Until #1101 the builder rendered
-`{{$vu}}` red, hovered it to "not defined" and offered to create a variable of
-that name - the one offer that is guaranteed to change nothing, since the
+`data.*` paragraph above gives and one more. Painting
+`{{$vu}}` red, hovering it to "not defined" and offering to create a variable of
+that name would be the one offer that is guaranteed to change nothing, since the
 resolver answers the identity ahead of every scope. So they get the same muted
 `RuntimeToken` treatment, noted `not generated here` to tell them from the
 generator beside them, and no surface offers to create one. `{{$vus}}` keeps the
@@ -243,10 +243,10 @@ it does on a data-driven one. OAuth 2.0 is the exception for a row or the
 identity, and it is refused by name rather than sent wrong - its token is
 acquired against the token endpoint, never bound per iteration.
 
-### D18 - a bound row's bare column names outrank the environment (issue #1007)
+### D18 - a bound row's bare column names outrank the environment
 
 This repo labels the decisions #226 recorded D1, D2, D16, D17. This one is
-new, and it is not from #226: recorded here as **D18**.
+new, and it is not from #226: recorded here as **D18** (issue #1007).
 
 **What it costs.** #402 deliberately bought the property that attaching a data
 file to a collection cannot change what any existing token resolves to -
@@ -261,7 +261,7 @@ compatibility here: Postman binds a dataset's columns bare, so every imported
 data-driven collection is already written `{{username}}`, and #402's guarantee
 was making every one of those requests send the literal token instead of the
 row's value (see [`{{data.*}}` puts the row into the request
-itself](../engine/api-reference.md#scenario-runs)). A collection that never
+itself](../engine/api-reference/scenario-runs.md#scenario-runs)). A collection that never
 attaches a data file, or whose columns share no variable's name, pays nothing.
 
 **Why the reserved `data.*` spelling is kept too.** `{{data.username}}` still
@@ -295,7 +295,7 @@ still survives a tab switch and a return (issue #659), because neither of those
 is a send. Closing the request's tab does drop it, which is not the same act: it
 ends the memory rather than unbinding the row, and it is what bounds a map the
 provider would otherwise hold for the life of the session (issue #1271, see
-[`state-management.md`](state-management.md#requestbuildercontext---the-headers-a-setting-added)).
+[`state-management/request-builder-context.md`](state-management/request-builder-context.md#requestbuildercontext---the-headers-a-setting-added)).
 
 **Why the renderer can show this and composition cannot.** A plan is composed
 once, before any row exists to bind, so composition still defers both
@@ -330,10 +330,9 @@ JSON string; only what the row supplies is written for its field.
 **The paint stays the accent; the popover now says why (issue #1064).** The
 token *state* `VariableInput` paints is unchanged: a bare name still paints as
 a bound column only where no scope defines it, and a shadowed bare name still
-paints as the variable, in the same accent it always has. That was the open
-question this section used to leave for later, and it has been decided rather
-than merely left open: the accent stays, and the explanation is what moves.
-Opening `VariablePopover` on a shadowed name while a row is picked now names
+paints as the variable, in the same accent it always has. The accent stays,
+and the explanation is what moves.
+Opening `VariablePopover` on a shadowed name while a row is picked names
 the row as the origin - unstruck, above the definitions it beat, which render
 struck beneath it exactly as any other shadowed definition does - so the
 popover states plainly that the row's cell, not the environment's value, is
@@ -451,8 +450,8 @@ the request fields; the script editors do not, for the same interpolation reason
 as everywhere else in this document (D16).
 
 The script panel's **"Names mentioned:" chips** read the same three states
-(issue #604). They used to paint a name red whenever no scope defined it, which
-for a `data.*` name is always - the reading that made a working column look
+(issue #604). They do not paint a name red whenever no scope defines it, which
+for a `data.*` name is always - a reading that would make a working column look
 broken in a row whose whole job is to say whether a name resolves. A column
 reached by its **bare** name gets that same paint (issue #1063): a script reads
 one through `pm.iterationData.get("email")`, or through `pm.variables.get("email")`
@@ -469,7 +468,7 @@ Every surface that acts on a contract resolves it this way, including the **Run
 dialog**: running a sub-collection under a declaring parent offers the parent's
 declared file as the pre-fill and diffs the chosen file against the parent's
 columns, the same answer Send-with-row and the token painter give. See
-[COMPONENTS.md](COMPONENTS.md#shared-variable-input-componentssharedvariableinput)
+[Shared Variable Input](COMPONENTS/shared-variable-input.md#shared-variable-input-componentssharedvariableinput)
 for the paint and
 [Data-Driven Runs](data-driven-runs.md) for the file itself.
 
@@ -542,11 +541,11 @@ an unterminated one is a frozen window, not a wrong preview.
 
 **Collection scope is explicit only.** It comes from the `collectionId` option
 and nothing else; a caller that passes none resolves against globals +
-environment. There used to be a session-store fallback (`activeCollectionId`),
-but nothing ever wrote that field, so it could only ever hold a value
+environment. There is no session-store fallback (`activeCollectionId`):
+nothing writes that field, so it could only hold a value
 rehydrated from an old build - scoping a preview to a collection the user had
-left, or deleted, versions ago. It was removed in the `vayu.session` v2
-migration.
+left, or deleted, versions ago. The `vayu.session` v2
+migration drops it.
 
 The resolved `Record<string, ResolvedVariable>` is **derived** from that list
 (the origin carrying `winner: true`) rather than built beside it, so the two
@@ -617,8 +616,8 @@ the bar displayed. A token's popover does the same: its edit passes the
 `sourceId` of the definition it showed to `updateVariable`, and
 `useVariableWriter` writes to the collection or environment with that id, keeping
 the definition's `secret`, `type` and `createdAt` (a write still sets
-`enabled: true`). It used to write to the request's own collection whatever the winner was,
-so editing a value a chain's root defined put a copy in the leaf and left the root
+`enabled: true`). It does not write to the request's own collection whatever the winner is:
+that would put a copy of an edited root value in the leaf and leave the root
 untouched (#3683). A `sourceId` naming a collection or environment that no longer
 exists is a no-op, never a fall back to the request's collection; only a *create*,
 which has no definition and so no `sourceId`, lands in the request's own
@@ -662,8 +661,8 @@ The resolved map is then used by `resolveString(input)` (preview) and
 
 **A name nothing defines keeps its braces** (#1009), plain and `{{$name}}`
 alike. The token goes out on the wire, where it becomes a DNS or a `4xx`
-failure naming the thing that was never set; it used to resolve to the empty
-string, which sent `https://{{host}}/x` as `https:///x` - a different request,
+failure naming the thing that was never set; resolving it to the empty
+string would send `https://{{host}}/x` as `https:///x` - a different request,
 made silently. A definition that *exists* and holds an empty value still
 substitutes empty: the rule is about a name nothing answers, not about a blank
 answer. There is no way to escape a literal `{{`.
@@ -704,11 +703,11 @@ previews still resolve against the stored scopes. See
 [pm API compatibility](./pm-api-compatibility.md) for what that changes for a
 script.
 
-### One value composition refuses: a header a variable would forge (#738)
+### One value composition refuses: a header a variable would forge
 
 Substitution is textual everywhere, which is exactly right for a URL, a body and
 a form field - and wrong for one field, because a header line ends at CRLF and
-has no escape for it. A variable holding `ok\r\nX-Admin: true` written into
+has no escape for it (#738). A variable holding `ok\r\nX-Admin: true` written into
 `X-Note: {{note}}` would not put that text in `X-Note`: it would end the line
 and make `X-Admin: true` a header nobody wrote.
 
@@ -744,10 +743,10 @@ under the same code, before anything is rewritten. The same goes for the three
 header-name rules below. A buffered `POST /execute` answers `statusCode: 0`
 with the code as `refusalCode`; a streaming send answers a `400`.
 
-### The other one: a header a variable would repeat (#1051)
+### The other one: a header a variable would repeat
 
 A header *name* is substituted like anything else, so two names can come out of
-resolution as one: `{{tenant_header}}: acme` beside a literal
+resolution as one (#1051): `{{tenant_header}}: acme` beside a literal
 `X-Tenant: legacy` would send `X-Tenant` twice once the variable answers
 `X-Tenant`, where the request's rows show two different headers. Names are
 compared without case, so a `{{h}}` resolving to `authorization` would send a
@@ -778,10 +777,10 @@ in front of them. The pre-send gate is deliberately *not* the
 backstop here, and cannot be: by the time it sees a request the names are
 resolved, and a produced repeat looks exactly like a typed one.
 
-### And the name that resolves to nothing (#1084)
+### And the name that resolves to nothing
 
 The same file holds a second rule about a header *name*, one step further along:
-a name that resolves to the empty string. `{{blank}}: acme` with `blank` holding
+a name that resolves to the empty string (#1084). `{{blank}}: acme` with `blank` holding
 `""` - which is what an enabled row with a blank value is, an ordinary value
 rather than an exotic one - leaves a key with nothing in it, and the line that
 reaches the wire is `": acme"`, under no name at all. A strict server answers
@@ -819,10 +818,10 @@ refused there rather than sent. The collision rule keeps the narrower reach and
 loses nothing by it: a request that arrives already resolved cannot carry a
 collision to find, since two names that are already equal are already one key.
 
-### And the name that is not a name (#2467)
+### And the name that is not a name
 
 A header name pasted with a trailing blank - `Authorization ` - is a name no one
-meant, and sent as written it is the wire line `Authorization : Bearer x`, with a
+meant (#2467), and sent as written it is the wire line `Authorization : Bearer x`, with a
 space before the colon: a strict server answers `400` and a lenient one reads it
 as a header of another name. So every layer that reads a name does two things, in
 this order. It **trims** the spaces and tabs around it (SP and HTAB, nothing
@@ -1244,7 +1243,7 @@ while a row is bound, come that row's bare column names - the same D18 tier the
 ladder above adds, reached from a script - and then **environment → collection
 → global**, stopping at the first scope that has the name enabled: this page's
 priority order, read from the top down. See
-[scripting.md](../engine/scripting.md#variables-pmvariables) and
+[scripting/variables.md](../engine/scripting/variables.md#variables-pmvariables) and
 [pm API compatibility](./pm-api-compatibility.md) for the details.
 
 The collection scope a script reads is the **whole chain**, the same one
@@ -1287,7 +1286,7 @@ impossible while still answering the read. A disabled row is looked past
 wherever it sits, so unticking an inherited name in a descendant falls through
 to the ancestor's value rather than hiding it. See
 [pm API compatibility](./pm-api-compatibility.md) and
-[scripting.md](../engine/scripting.md#variables-pmvariables).
+[scripting/variables.md](../engine/scripting/variables.md#variables-pmvariables).
 
 #### Autocomplete inside the accessors
 
@@ -1383,7 +1382,7 @@ These rules make the offered set match what the call can actually read:
   scope, so a variable called `$vu` shadows nothing.
 
 The dotted `pm.*` completions (served by the engine, see
-[the scripting docs](../engine/scripting.md)) yield inside a string literal so
+[the scripting docs](../engine/scripting/index.md)) yield inside a string literal so
 the two lists never appear together.
 
 ---

@@ -6,19 +6,13 @@
  */
 
 /**
- * Turning a file the user chose into a path the engine can open - the part a
- * form-data file part (`FilePartCell`) and a binary body (`BinaryBodyPanel`)
- * share, so a fix to one reaches the other.
- *
- * **A path, never bytes.** The engine opens the file at send time, so the
- * renderer takes the path from the preload (`getFilePath`, Electron's
- * `webUtils`) and reads nothing. Outside Electron there is no path to take and
- * `src` comes back `""`; the caller keeps the reference unresolved then,
- * because a filename alone is not something the engine can open.
- *
- * **The picker's input is hidden, and cleared after every change**, since
- * the same file twice in a row is not a change event and the user could not
- * re-pick the file they just replaced.
+ * A chosen file as a path the engine can open, shared by a form-data file part (`FilePartCell`) and
+ * a binary body (`BinaryBodyPanel`) so one fix reaches both. **A path, never bytes**: the engine
+ * opens the file at send time, so the renderer takes the path from the preload (`getFilePath`,
+ * Electron's `webUtils`) and reads nothing. Outside Electron `src` is `""` and the caller keeps the
+ * reference unresolved, as a filename alone is not openable. **The picker's input is hidden and
+ * cleared after every change**, as the same file twice is no change event and could not be
+ * re-picked.
  */
 
 import { useCallback, useRef } from "react";
@@ -65,8 +59,8 @@ export function useFilePick(onPick: (file: PickedFile) => void) {
 			type: "file" as const,
 			className: "hidden",
 			onChange,
-			// The visible control is the button that calls `open`; this input
-			// is never a tab stop or announced on its own.
+			// The visible control is the button calling `open`; this input is never a tab stop or
+			// announced.
 			"aria-hidden": true as const,
 			tabIndex: -1,
 		},

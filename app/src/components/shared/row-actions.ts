@@ -6,16 +6,11 @@
  */
 
 /**
- * What a row's actions are, and how one is drawn - once, for both menus.
- *
- * A row exposes the same list two ways: the `⋯` button (`RowActionsMenu`) and
- * right-click (`RowContextMenu`, #1360). They are different Radix families, so
- * the item element differs, but the list is one list and the rules about it -
- * where the destructive separator falls, what a destructive item looks like -
- * are stated here rather than once per menu. A second copy would be free to
- * drift, and the one that drifted would be whichever the next reader did not
- * open. What an item *contains* is `RowActionBody`, a file over, because a
- * module that exports a component and helpers loses fast refresh.
+ * What a row's actions are and how one is drawn, once for both menus: the `⋯` button
+ * (`RowActionsMenu`) and right-click (`RowContextMenu`, #1360) are different Radix families with
+ * different item elements, but one list, and its rules (where the destructive separator falls, what
+ * a destructive item looks like) are stated here so neither copy drifts. What an item *contains* is
+ * `RowActionBody`, a file over, as a module exporting a component and helpers loses fast refresh.
  */
 
 import type { LucideIcon } from "lucide-react";
@@ -26,45 +21,34 @@ export interface RowAction {
 	label: string;
 	icon: LucideIcon;
 	/**
-	 * The named icon motion the glyph answers this item's hover with
-	 * (`ICON_MOTION`, `docs/design-system.md` → Motion → Icon motion). Optional:
-	 * most actions are a label with a glyph beside it and nothing to animate.
-	 * Declared here rather than at the two menus because the item is drawn once
-	 * for both of them (`RowActionBody`).
+	 * The named icon motion the glyph answers this item's hover with (`ICON_MOTION`,
+	 * `docs/design-system/motion.md` → Motion → Icon motion); optional, as most actions have
+	 * nothing to animate. Declared here as the item is drawn once for both menus.
 	 */
 	iconMotion?: IconMotion;
 	onSelect: () => void;
 	/**
-	 * The action opens a field that takes focus as it mounts (Rename, Add
-	 * collection). The menu runs it once it has closed rather than from
-	 * `onSelect`, because focus a field claims while the menu is still closing
-	 * is taken back (`useAfterMenuClose`, #3443).
+	 * The action opens a field that focuses on mount (Rename, Add collection): run once the menu
+	 * has closed, not from `onSelect`, as focus claimed while the menu closes is taken back
+	 * (`useAfterMenuClose`, #3443).
 	 */
 	opensField?: boolean;
 	/** Renders in destructive colour and is separated from the actions above. */
 	destructive?: boolean;
 	disabled?: boolean;
 	/**
-	 * Why the item is off, e.g. "Already first" - drawn beside the label by
-	 * `RowActionBody`, for both menus at once.
-	 *
-	 * Not a `DisabledHint` (`components/ui/disabled-hint.tsx`), which is the
-	 * primitive for every *other* gated control: that one works by giving a
-	 * wrapper span its own tab stop, and inside a menu that second stop competes
-	 * with the menu's own focus management - Radix owns the keyboard there, and
-	 * a disabled item is deliberately skipped by it. A menu row has horizontal
-	 * space a button does not, so the reason can simply be on the row, where it
-	 * is readable without hovering anything.
+	 * Why the item is off ("Already first"), drawn beside the label by `RowActionBody` in both
+	 * menus. Not a `DisabledHint` (`components/ui/disabled-hint.tsx`), every *other* gated
+	 * control's primitive: its wrapper span's own tab stop would compete with the menu's focus
+	 * management, as Radix owns the keyboard there and skips disabled items. A menu row has room,
+	 * so the reason reads on the row without hovering.
 	 */
 	disabledReason?: string;
 	/**
-	 * A value the item carries beside its label - the URL a Copy would put on
-	 * the clipboard - drawn in the same trailing column as `disabledReason`.
-	 *
-	 * The alternative was a tooltip on an always-visible icon button, which is
-	 * what the Services rows had: it read only on hover, only with a pointer,
-	 * and only for as long as the pointer stayed. In a menu the value is simply
-	 * on the row, where a screen reader reaches it in the item's own name.
+	 * A value the item carries beside its label (the URL a Copy would put on the clipboard), in
+	 * `disabledReason`'s trailing column. On the row, not in a tooltip on an always-visible icon
+	 * button, which reads only on hover, only with a pointer and only while it stays; here a screen
+	 * reader reaches it in the item's name.
 	 */
 	hint?: string;
 }
@@ -76,9 +60,8 @@ export interface RowActionRow {
 }
 
 /**
- * The actions in order, with the one rule about their grouping applied: the
- * first destructive action is fenced off from the ordinary ones above it, and
- * a menu that is destructive from its first item needs no fence.
+ * The actions in order with the one grouping rule applied: the first destructive action is fenced
+ * off from the ordinary ones above, and a menu destructive from its first item needs no fence.
  */
 export function rowActionRows(actions: RowAction[]): RowActionRow[] {
 	const firstDestructive = actions.findIndex((a) => a.destructive);
@@ -89,34 +72,24 @@ export function rowActionRows(actions: RowAction[]): RowActionRow[] {
 }
 
 /**
- * The classes an item takes, whichever menu is drawing it.
- *
- * `group` is here and not at the call sites for the same reason the rest of
- * this is: an icon motion fires from the `:hover`/`:focus-visible` of the glyph's
- * owner, a menu item is not a `[data-slot="button"]`, and one of the two menus
- * would have got the class and the other would not.
+ * The classes an item takes in either menu. `group` is here, not at call sites: an icon motion
+ * fires from its owner's `:hover`/`:focus-visible`, a menu item is no `[data-slot="button"]`, and
+ * one menu would otherwise lack it.
  */
 export function rowActionItemClass(action: RowAction): string {
 	return cn("group gap-2 text-sm", action.destructive && "text-destructive-text");
 }
 
 /**
- * A control that costs its row no width until the row is hovered or holds focus.
- *
- * `opacity-0` hides a control without giving back its space, so a hover-revealed
- * pin and delete kept 52px of the 260px history drawer from the name on every
- * row, and `hidden` would take the control out of the tab order. Collapsed it is
- * `absolute`: out of the row's flex flow (no width, no gap) yet still focusable,
- * pinned to the row's trailing corner so it adds no scrollable overflow. A
- * focused control makes the row `:focus-within`, which returns it to the flow, so
- * a keyboard user never lands on a control that is not there.
- *
- * `static`, not `relative`, on reveal: a flex item takes `z-index` without being
- * positioned, so a cluster's `z-10` over a stretched activator still holds.
- * `hover: none` devices never match `group-hover`, so they keep it revealed.
- *
- * The row is the `group` and must be positioned. A row whose actions are never
- * hidden (a state toggle) does not take this.
+ * A control costing its row no width until the row is hovered or focused. `opacity-0` keeps the
+ * space (a hover-revealed pin and delete took 52px of the 260px history drawer from every name),
+ * and `hidden` leaves the tab order. Collapsed it is `absolute`: out of the flex flow (no width, no
+ * gap) but focusable, pinned to the trailing corner so it adds no overflow. A focused control makes
+ * the row `:focus-within`, returning it to the flow, so a keyboard user never lands on an absent
+ * control. `static`, not `relative`, on reveal: a flex item takes `z-index` unpositioned, so a
+ * cluster's `z-10` over a stretched activator holds. `hover: none` devices never match
+ * `group-hover` and keep it shown. The row is the `group` and must be positioned; a row whose
+ * actions are never hidden (a state toggle) does not take this.
  */
 export const ROW_ACTIONS_REVEAL = [
 	"pointer-events-none absolute right-0 top-0 opacity-0 transition-opacity",

@@ -21,25 +21,24 @@ namespace vayu::http {
 /**
  * @brief Whether `build_request` resolves the config's `auth`, or leaves it.
  *
- * `Apply` is what every ordinary caller wants and is the default: the
- * credentials become an `Authorization` header (or a query parameter) as part
- * of building the request.
+ * `Apply`, the default, is what every ordinary caller wants: the credentials
+ * become an `Authorization` header (or a query parameter) as the request is
+ * built.
  *
- * `Defer` exists for the one caller shape that must touch the credentials
- * *before* they are encoded: a `{{data.column}}` token inside a credential has
- * to carry its row's value before `apply_auth` base64-encodes a username and
- * password into one header, because after that it is unreadable and would go
- * out as base64 of the literal token text (issue #591). The `{{$vu}}` /
- * `{{$iteration}}` identity is deferred for the same reason and on the same
- * rule (issue #1055): what decides a deferral is the token the credentials
- * carry, never the shape of the run, so a caller with no data set at all still
- * defers for an identity token and binds it per iteration. Such a caller parses
- * the auth itself, joins it against the iteration and applies it afterwards -
- * `vayu::core::bind_auth_row` is that step. A credential holding a name only
- * the variable scopes answer defers too (issue #2473), and is finished by
- * `routes::apply_late_auth` after the pre-request script instead. Those are
- * the only correct ways to finish a deferred build. A `Defer` whose auth is
- * never applied sends an unauthenticated request.
+ * `Defer` is for the one caller shape that must touch the credentials *before*
+ * they are encoded: a `{{data.column}}` token inside a credential has to carry
+ * its row's value before `apply_auth` base64-encodes a username and password
+ * into one header, after which it is unreadable and would go out as base64 of
+ * the literal token text (#591). The `{{$vu}}` / `{{$iteration}}` identity
+ * defers on the same rule (#1055): the token the credentials carry decides a
+ * deferral, never the shape of the run, so a caller with no data set at all
+ * still defers for an identity token and binds it per iteration. Such a caller
+ * parses the auth itself, joins it against the iteration and applies it
+ * afterwards - `vayu::core::bind_auth_row` is that step. A credential holding a
+ * name only the variable scopes answer defers too (#2473), and
+ * `routes::apply_late_auth` finishes it after the pre-request script instead.
+ * Those are the only correct ways to finish a deferred build; a `Defer` whose
+ * auth is never applied sends an unauthenticated request.
  */
 enum class AuthResolution : std::uint8_t { Apply, Defer };
 
@@ -64,14 +63,15 @@ struct RequestBuild {
 };
 
 /**
- * @brief Single request-construction pipeline for both execution paths.
+ * @brief The one request-construction pipeline, which both the design
+ *        (`/execute`) and load (`/runs`) paths call.
  *
  * Deserializes the request from `config`, applies the resolved `timeout_ms`,
- * and resolves auth (headers/url) via apply_auth. Both the design (`/execute`)
- * and load (`/runs`) paths call this so request construction lives in one place.
+ * and resolves auth (headers/url) via apply_auth.
  *
  * @param config     The run config JSON (HTTP fields at the root, plus `auth`).
- * @param db         Database handle for token lookup (reserved for oauth2; may be null).
+ * @param db         Database handle for the OAuth 2.0 token cache; may be null,
+ *                   which fails an oauth2 auth (`oauth2_no_database`).
  * @param timeout_ms The already-resolved request timeout to apply.
  * @param auth       Whether to resolve `auth` here (default) or leave it to the
  *                   caller - see @ref AuthResolution.

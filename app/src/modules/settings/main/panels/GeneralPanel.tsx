@@ -6,13 +6,9 @@
  */
 
 /**
- * GeneralPanel
- *
- * System-level app settings: the installed version and a manual update check,
- * auto-save behavior, start at login, data management (clear stored run
- * history), on-disk storage locations, and a reset-to-defaults for every
- * renderer preference. Client-side; the data actions talk to the engine's run
- * store via the existing API.
+ * System-level app settings: the installed version and an update check, auto-save, start at login,
+ * data management (clearing stored run history), storage locations, and a reset of every renderer
+ * preference. The data actions use the engine's run store through the existing API.
  */
 
 import { useState, useEffect } from "react";
@@ -70,15 +66,14 @@ async function countRuns(filter: Pick<RunListParams, "baseline" | "status"> = {}
 }
 
 /**
- * What `DELETE /runs` will do with the stored runs, read when Clear is pressed
- * so the dialog says only what is true. The engine keeps a pinned baseline and
- * a run still running or pending (#2429); the engine's own pass has the last
- * word, since either can change between this read and the call.
+ * What `DELETE /runs` will do with the stored runs, read when Clear is pressed so the dialog says
+ * only what is true. The engine keeps a pinned baseline and a running or pending run (#2429), and
+ * its own pass has the last word, as either can change between this read and the call.
  *
- * Counts, not rows (#2979): opening Settings must not download the history, so
- * what is kept is asked of the engine's filters. `status` takes one value, hence
- * two in-flight reads; `baseline=false` keeps a pinned run that is also running
- * out of the in-flight count, as the engine's own exemption does.
+ * Counts, not rows (#2979): opening Settings must not download the history, so what is kept is
+ * asked of the engine's filters. `status` takes one value, hence two in-flight reads;
+ * `baseline=false` keeps a pinned run that is also running out of the in-flight count, as the
+ * engine's exemption does.
  */
 async function readClearPlan(): Promise<ClearPlan> {
 	const [stored, pinned, running, pending] = await Promise.all([
@@ -170,13 +165,11 @@ export default function GeneralPanel() {
 	}, []);
 
 	/*
-	 * Confirmed through the app's own DeleteConfirmDialog rather than
-	 * `window.confirm`. The native dialog ignores the theme, the accent and the
-	 * roundedness setting entirely, and - being modal to the whole renderer -
-	 * it also blocks the JS thread, so the live dashboard stops updating behind
-	 * it. Every other destructive action in the app (deleting a run, a
-	 * collection, a request) already routes through this dialog, which also
-	 * focuses Cancel first so a reflexive Enter does not wipe the history.
+	 * Confirmed through the app's DeleteConfirmDialog, not `window.confirm`: the native dialog
+	 * ignores the theme, the accent and the roundedness setting, and, modal to the whole renderer,
+	 * blocks the JS thread so the live dashboard stops updating behind it. Every other destructive
+	 * action (deleting a run, a collection, a request) uses this dialog, which focuses Cancel first
+	 * so a reflexive Enter does not wipe the history.
 	 */
 	const reviewClear = async () => {
 		setPhase("reading");
@@ -228,14 +221,11 @@ export default function GeneralPanel() {
 	};
 
 	/*
-	 * Same in-app dialog as Clear run history, for the same reason: the native
-	 * `window.confirm` ignores the theme, the accent and the roundedness that
-	 * this panel exists to configure, and blocks the renderer thread while it is
-	 * open. It also focuses Cancel first, so a reflexive Enter does not reset.
-	 *
-	 * `confirmVariant="default"` rather than destructive: this is irreversible
-	 * but it removes nothing - a red button would overstate it next to the one
-	 * that really does delete run history.
+	 * The in-app dialog, for Clear run history's reasons (native `window.confirm` ignores the
+	 * theme, accent and roundedness this panel configures, and blocks the renderer thread); Cancel
+	 * is focused first, so a reflexive Enter does not reset. `confirmVariant="default"`, not
+	 * destructive: irreversible, but it removes nothing, and a red button would overstate it next
+	 * to the one that really deletes run history.
 	 */
 	const resetSettings = () => {
 		setConfirmReset(false);
@@ -331,10 +321,10 @@ export default function GeneralPanel() {
 							</Button>
 						</DisabledHint>
 					</div>
-					{/* This card shows and clears the runs; how many are kept, and for
-					    how long, are engine settings at the far end of the tree.
-					    Nothing here said so, so the two halves of run retention were
-					    findable only by already knowing both (#586). */}
+					{/*
+					 * This card shows and clears the runs; how many are kept, and for how long, are
+					 * engine settings at the far end of the tree, so it points there (#586).
+					 */}
 					<p className="text-xs text-muted-foreground mt-3">
 						How many runs are kept, and for how long, is set in{" "}
 						<Button

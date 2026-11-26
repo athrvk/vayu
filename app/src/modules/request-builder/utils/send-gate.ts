@@ -6,24 +6,16 @@
  */
 
 /**
- * When a Send may actually run - one predicate, two routes.
+ * When a Send may run: one predicate for the window handler in `RequestBuilderLayout` and the
+ * palette entry in `SendRequestCommandSurface`, since a second spelling would let the chord refuse
+ * a send the palette still offered, on the one screen where they must agree.
  *
- * The window handler in `RequestBuilderLayout` and the palette contribution in
- * `SendRequestCommandSurface` both have to answer this, and a second spelling of
- * it is the drift this file exists to prevent: the chord would refuse a send the
- * palette still offered, on the one screen where they must agree.
- *
- * `isStreaming` is the second half of "in flight": once the engine has answered
- * and the socket is open, `isExecuting` goes false while the run is very much
- * still running (`RequestBuilderProvider` clears it deliberately, so the Events
- * tab is not hidden behind "Sending…"). Send *is* Stop for the whole of that
- * window (#574), and neither route may quietly replace the open stream with a
- * new one - the run being replaced being exactly the one the button in front of
- * you would stop. Stopping is destructive, so it stays a deliberate click.
- *
- * The URL bar reads the two halves separately rather than calling this, because
- * it does not refuse a send there - it renders a different control: Stop while a
- * stream is open, a disabled Send otherwise.
+ * `isStreaming` is the second half of "in flight": once the engine answered and the socket is open,
+ * `isExecuting` is false (`RequestBuilderProvider` clears it so the Events tab is not hidden behind
+ * "Sending...") while the run goes on. Send *is* Stop for that window (#574), so neither route may
+ * replace the open stream with a new one, the run the button in front of you would stop. Stopping
+ * is destructive, so it stays a deliberate click. The URL bar reads the two halves itself: it
+ * refuses no send but renders Stop while a stream is open and a disabled Send otherwise.
  */
 export function canSendRequest(state: {
 	url: string;

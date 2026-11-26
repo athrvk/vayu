@@ -11,48 +11,33 @@ import { cn } from "@/lib/utils";
 
 export interface ProgressProps {
 	/**
-	 * How far through, 0 to 1 - or **null** when the total is not known.
-	 *
-	 * Null is not zero, and the two must not collapse into one another: a
-	 * download whose upstream declared no `Content-Length` is somewhere in the
-	 * middle of itself and simply cannot say where, while zero is a job that has
-	 * not started. Radix drops `aria-valuenow` for null, which is right - a
-	 * screen reader announcing "0 percent" of a half-finished download would be
-	 * stating a fraction nobody measured.
+	 * How far through, 0 to 1, or **null** when the total is unknown. Null is not zero: a download
+	 * with no `Content-Length` is somewhere in the middle and cannot say where, while zero has not
+	 * started. Radix drops `aria-valuenow` for null, rightly: "0 percent" of a half-finished
+	 * download states a fraction nobody measured.
 	 */
 	value: number | null;
 	/**
-	 * What is in progress, for assistive tech. Required: a bar is a number with
-	 * no noun in it, and a screen reader announcing "62 percent" of nothing is
-	 * not an accessible bar.
+	 * What is in progress, for assistive tech; required, as "62 percent" of nothing is not an
+	 * accessible bar.
 	 */
 	label: string;
 	className?: string;
 }
 
 /**
- * A determinate or indeterminate progress bar (issue #882).
- *
- * Radix owns the ARIA: the `progressbar` role, `aria-valuemin`/`max`, and
- * dropping `aria-valuenow` in the indeterminate state. Only `aria-busy` is added
- * here - Radix expresses that state as `data-state="indeterminate"`, which
- * styles a bar but tells a screen reader nothing.
- *
- * The track is `surface-sunken` because that is the app's one recessed fill that
- * reads on a card in both themes, and the fill is `bg-primary` per the accent
- * rule - `--primary-fill` is for solids that carry a white label, and this
- * carries none.
- *
- * Under reduced motion the indeterminate stripe stops moving, which is correct
- * and is why every caller of this state also shows a figure that keeps changing
- * (bytes received): the information is in the text, and the motion is only the
- * hint that something is still happening.
+ * A determinate or indeterminate progress bar (#882). Radix owns the ARIA (the role,
+ * `aria-valuemin`/`max`, no `aria-valuenow` when indeterminate); only `aria-busy` is added, as
+ * Radix's `data-state="indeterminate"` tells a screen reader nothing. The track is
+ * `surface-sunken`, the one recessed fill reading on a card in both themes; the fill is
+ * `bg-primary` per the accent rule (`--primary-fill` is for solids carrying a white label). Under
+ * reduced motion the stripe stops, so every indeterminate caller also shows a changing figure
+ * (bytes received): the information is in the text.
  */
 export function Progress({ value, label, className }: ProgressProps) {
 	const known = value !== null;
-	// Clamped before it reaches Radix, which warns on a value outside 0..max: an
-	// upstream that under-declares its `Content-Length` hands over more bytes
-	// than it said it would.
+	// Clamped before Radix, which warns outside 0..max: an upstream under-declaring
+	// `Content-Length` sends more bytes than it said.
 	const percent = known ? Math.round(Math.min(1, Math.max(0, value)) * 100) : null;
 
 	return (
@@ -61,8 +46,8 @@ export function Progress({ value, label, className }: ProgressProps) {
 			max={100}
 			aria-label={label}
 			{...(known ? {} : { "aria-busy": true })}
-			// `rounded-full` rather than a radius token: a track is a pill at every
-			// roundedness setting, which is the setting's documented exemption.
+			// `rounded-full`, not a radius token: a track is a pill at every roundedness, the
+			// setting's documented exemption.
 			className={cn("h-1.5 w-full overflow-hidden rounded-full surface-sunken", className)}
 		>
 			<ProgressPrimitive.Indicator

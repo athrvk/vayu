@@ -6,43 +6,32 @@
  */
 
 /**
- * ScenarioRunView
- *
  * The run tab for a collection run: what the sequence did, step by step.
  *
- * **Not `LoadTestDetail`.** A scenario run's `results[]` are step executions of
- * *different* requests, so the load report's percentiles and status
- * distribution would describe a sequence as though it were one request
- * repeated. The number a reader wants here is per step, and the outcomes.
+ * **Not `LoadTestDetail`.** A scenario run's `results[]` are step executions of *different*
+ * requests, so the load report's percentiles and status distribution would describe a sequence as
+ * one request repeated. The numbers wanted here are per step, and the outcomes.
  *
- * **Two sources, one list** (see `scenario-steps.ts`). While the run streams,
- * rows come from the `step` SSE events; once it is over, from the stored
- * `results` rows, which are the ones carrying an exchange to expand. The
- * changeover is the stream closing: `ScenarioRunService` refetches the report
- * on `complete`, and this view prefers stored rows the moment there are any.
+ * **Two sources, one list** (see `scenario-steps.ts`). While the run streams, rows come from the
+ * `step` SSE events; once it is over, from the stored `results` rows, which carry an exchange to
+ * expand. The changeover is the stream closing: `ScenarioRunService` refetches the report on
+ * `complete`, and this view prefers stored rows as soon as there are any. That preference also
+ * keeps a reopened tab honest: a completed run reopened later has no live steps and reads entirely
+ * from storage, including the disclosure that storage is not the whole run.
  *
- * That preference is also what keeps a re-opened tab honest. A completed run
- * reopened later has no live steps at all and reads entirely from storage -
- * including the disclosure that storage is not the whole run.
+ * **The list is bounded in cost, not in content** (#730). `maxScenarioStoredSteps` is 5,000. Two
+ * things keep that usable and neither drops a step: the four count chips are buttons that filter by
+ * outcome (the reader after a failure wants the failures), and the rows arrive through a growing
+ * window, the one the response pane's console output uses (`useGrowingWindow`, held here by
+ * `useFilteredSteps`), rather than a virtualiser this repo would have to maintain a scroll map for.
  *
- * **The list is bounded in cost, not in content** (issue #730).
- * `maxScenarioStoredSteps` is 5,000, and every one of them used to mount as a
- * card. Two things keep that usable and neither drops a step: the four count
- * chips are buttons that filter by outcome - the reader after a failure wants
- * the failures, and the numbers were already sitting there - and the rows
- * arrive through a growing window, the same one the response pane's console
- * output uses (`useGrowingWindow`, held here by `useFilteredSteps`), rather
- * than a virtualiser this repo would then have to maintain a scroll map for.
- *
- * **Two controls, one predicate** (issue #832). The chips narrow by outcome and
- * the search box narrows by step name, and `filterSteps` applies both at once -
- * "the failed executions of `POST /checkout`" is the question neither answers
- * alone, since a run's failures are spread across a dozen different steps and a
- * name is repeated once per iteration. One predicate also means one empty
- * state, which names whichever combination emptied the list. A live run runs
- * that predicate over the batch that just arrived rather than over the whole
- * run per commit, and produces only as many rows as the window shows -
- * `useFilteredSteps` keeps what it has matched (issues #1205, #1297).
+ * **Two controls, one predicate** (#832). The chips narrow by outcome and the search box by step
+ * name, and `filterSteps` applies both at once: "the failed executions of `POST /checkout`" is a
+ * question neither answers alone, as a run's failures spread across a dozen steps and a name
+ * repeats once per iteration. One predicate also means one empty state, naming whichever
+ * combination emptied the list. A live run runs the predicate over the batch that just arrived, not
+ * the whole run per commit, and produces only as many rows as the window shows (`useFilteredSteps`
+ * keeps what it has matched; #1205, #1297).
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -104,10 +93,8 @@ const EMPTY_STEPS: ScenarioStepRow[] = [];
 const EMPTY_SUMMARY: StepListSummary = emptyStepSummary();
 
 /**
- * Chip tint per outcome, matching the step rows.
- *
- * `skipped` has its own entry rather than sharing `passed`'s: the whole point
- * of the summary is that a step which never ran is not a pass.
+ * Chip tint per outcome, matching the step rows. `skipped` has its own entry, not `passed`'s: the
+ * point of the summary is that a step which never ran is not a pass.
  */
 const COUNT_CHIP: Record<StepOutcome, string> = {
 	passed: "bg-status-success-fill text-white",
@@ -118,11 +105,9 @@ const COUNT_CHIP: Record<StepOutcome, string> = {
 };
 
 /**
- * Whether the count chip for `outcome` is drawn: the first four always, zeros
- * included, but `stopped` only for a run a Stop cut short (#3397). Zero is the
- * answer for nearly every run, and a chip reading "0 stopped" on each of them
- * is noise; it stays while it is the active filter, so the control that is
- * pressed never vanishes under the reader.
+ * Whether `outcome`'s count chip is drawn: the first four always, zeros included, `stopped` only
+ * for a run a Stop cut short (#3397), as "0 stopped" on nearly every run is noise. It stays while
+ * it is the active filter, so the pressed control never vanishes under the reader.
  */
 function showsCountChip(outcome: StepOutcome, count: number, isActive: boolean): boolean {
 	return outcome !== "stopped" || count > 0 || isActive;
@@ -131,9 +116,8 @@ function showsCountChip(outcome: StepOutcome, count: number, isActive: boolean):
 export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const { data: report, isLoading } = useRunReportQuery(run.id);
 
-	// The live steps belong to this run only. The store holds one run at a
-	// time, so a tab for an older run must read an empty list rather than the
-	// steps of whatever is streaming now.
+	// The live steps belong to this run only: the store holds one run at a time, so an older run's
+	// tab reads an empty list, not the steps of whatever is streaming now.
 	const liveSteps = useScenarioRunStore((s) => (s.runId === run.id ? s.steps : EMPTY_STEPS));
 	const liveSummary = useScenarioRunStore((s) =>
 		s.runId === run.id ? s.summary : EMPTY_SUMMARY
@@ -153,23 +137,19 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const steps = usingStored ? storedSteps : liveSteps;
 
 	/*
-	 * What the header asks of the whole list, without reading the whole list.
-	 *
-	 * The stored rows arrive complete and change only when the report does, so
-	 * one pass per report answers for them. The live rows arrive one batch at a
-	 * time and carry their summary with them - folded by the store as they land
-	 * (issue #1153) - because a pass per commit is a pass over a list that grows
-	 * for the length of the run.
+	 * What the header asks of the whole list, without reading the whole list. The stored rows
+	 * arrive complete and change only with the report, so one pass per report answers for them. The
+	 * live rows arrive a batch at a time with their summary, folded by the store as they land
+	 * (#1153), because a pass per commit is a pass over a list that grows for the length of the
+	 * run.
 	 */
 	const storedSummary = useMemo(() => summarizeSteps(storedSteps), [storedSteps]);
 	const summary = usingStored ? storedSummary : liveSummary;
 
-	// The report's exact whole-run totals when it can give them, the rows on
-	// screen only as a fallback. A thinned run keeps every non-passing row but
-	// drops passes, so counting rows would undercount `passed` against the
-	// header's own step total - the report is the one source that agrees with it
-	// (issue #726). A live run has no report yet and reads its streaming rows
-	// until one lands.
+	// The report's exact whole-run totals when it can give them, the rows on screen only as a
+	// fallback. A thinned run keeps every non-passing row but drops passes, so counting rows would
+	// undercount `passed` against the header's own step total; the report is the one source that
+	// agrees with it (#726). A live run reads its streaming rows until a report lands.
 	const counts = useMemo(
 		() => outcomeCountsFromReport(report) ?? summary.counts,
 		[report, summary]
@@ -179,11 +159,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const notRun = stepsNotRunText(scenario?.stepsNotRun);
 
 	/*
-	 * Stoppable while the engine still owns the run, and that is two signals
-	 * rather than one. The stream says so for the tab that started the run; the
-	 * run's own status says so for a tab reopened onto a run that is still
-	 * executing - after a relaunch, or from History - which has no stream at all
-	 * and is exactly the case where waiting the run out hurts most.
+	 * Stoppable while the engine still owns the run, which takes two signals: the stream for the
+	 * tab that started the run, and the run's status for a tab reopened onto a run still executing
+	 * (after a relaunch, or from History), which has no stream and is where waiting the run out
+	 * hurts most.
 	 */
 	const isLive = useRunLiveness(run.id, run.status);
 
@@ -225,11 +204,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 	const [expanded, setExpanded] = useState<string | null>(null);
 	/*
-	 * One handler for every card, not one per card. `ScenarioStepCard` is
-	 * memoized, and a memo is only worth having if its props hold their identity
-	 * - an arrow function built per row per render would hand all 200 mounted
-	 * cards a new prop on every keystroke in the search box (issue #1153). The
-	 * card passes its own step back rather than closing over it.
+	 * One handler for every card, not one per card: `ScenarioStepCard` is memoized, and an arrow
+	 * function built per row per render would hand all 200 mounted cards a new prop on every
+	 * keystroke in the search box (#1153). The card passes its own step back rather than closing
+	 * over it.
 	 */
 	const toggle = useCallback((step: ScenarioStepRow) => {
 		const key = stepKey(step);
@@ -237,54 +215,41 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	}, []);
 
 	/*
-	 * Which outcome the list is showing, or all of them (issue #730).
-	 *
-	 * The chips above are the control rather than a filter bar beside them: the
-	 * outcome counts a reader already reads to find out that eleven steps failed
-	 * are the same counts they then want the list narrowed to. Held here and not
-	 * in the URL or the store - it is a way of looking at this tab, and a
-	 * remembered one would hide steps from the next reader of it.
+	 * Which outcome the list shows, or all (#730). The chips are the control, not a filter bar
+	 * beside them: the counts a reader reads to learn that eleven steps failed are the counts they
+	 * then want the list narrowed to. Held here, not in the URL or the store: it is a way of
+	 * looking at this tab, and a remembered one would hide steps from its next reader.
 	 */
 	const [outcomeFilter, setOutcomeFilter] = useState<StepOutcome | null>(null);
 
 	/*
-	 * And which step, by name (issue #832).
-	 *
-	 * The outcome chips cannot answer "show me every execution of
-	 * `POST /checkout`" - a 5,000-step run of a 40-request collection is 40
-	 * names repeated 125 times, and the failures a chip narrows to are spread
-	 * across a dozen different steps. Held beside the chip and on the same
-	 * terms: this is a way of looking at the tab, and a remembered one would
-	 * hide steps from whoever opens it next.
+	 * And which step, by name (#832). The chips cannot answer "every execution of
+	 * `POST /checkout`": a 5,000-step run of a 40-request collection is 40 names repeated 125
+	 * times, and the failures a chip narrows to spread across a dozen steps. Held beside the chip
+	 * on the same terms.
 	 */
 	const [query, setQuery] = useState("");
 	/*
-	 * Held across commits rather than recomputed per commit (issues #1205,
-	 * #1297). A narrowing filter ran its predicate over every row the run had
-	 * produced on every batch that arrived - the search lowercasing each step's
-	 * name as it went - because the store hands the view a new array each time.
-	 * The rows already matched cannot stop matching when more arrive at the end,
-	 * so `useFilteredSteps` counts the batch alone and produces only as much of
-	 * the window as is on screen; `appendKey` is what tells it this is the same
-	 * list only longer, and the store's epoch is the only thing that knows (a
-	 * replaced row and an appended one look alike from here). The stored rows
-	 * are their own key: they arrive complete and change only when the report
-	 * does.
+	 * Held across commits, not recomputed per commit (#1205, #1297): the store hands the view a new
+	 * array per batch, and a narrowing filter would otherwise run its predicate (the search
+	 * lowercasing each name) over every row produced so far. Rows already matched cannot stop
+	 * matching when more arrive at the end, so `useFilteredSteps` counts the batch alone and
+	 * produces only the part of the window on screen. `appendKey` tells it this is the same list,
+	 * only longer, and only the store's epoch knows that (a replaced row and an appended one look
+	 * alike from here). The stored rows are their own key: they arrive complete and change only
+	 * with the report.
 	 *
-	 * It owns the growing window too, because the two are one ordering: the
-	 * window is sized against the count, and the count is what says how far the
-	 * window has to be produced. The rows arrive as the list is scrolled and
-	 * nothing is withheld - `hasMore` drives a line saying how many are still to
-	 * come, and reaching the sentinel renders the next slice.
+	 * It owns the growing window too, as the two are one ordering: the window is sized against the
+	 * count, and the count says how far the window has to be produced. Nothing is withheld:
+	 * `hasMore` drives a line saying how many are still to come, and reaching the sentinel renders
+	 * the next slice.
 	 *
-	 * `run.id` and not the epoch is what keys that window (issue #1153). A
-	 * narrowed list is a new list and starts at its own top, which is what the
-	 * chips and the search box change, and the hook adds them to the key itself;
-	 * a live run's list is the *same* list getting longer, and resetting on its
-	 * length threw the reader back to the first 200 rows on every batch of steps
-	 * that arrived. The changeover to stored rows at run end is deliberately not
-	 * part of the key: the rows are the same ones, and snapping the window there
-	 * would undo a scroll at the exact moment the run finished.
+	 * `run.id`, not the epoch, keys that window (#1153). A narrowed list is a new list and starts
+	 * at its own top (the hook adds the chips and the search to the key itself); a live run's list
+	 * is the *same* list growing, and resetting on its length would throw the reader back to the
+	 * first 200 rows on every batch. The changeover to stored rows at run end is deliberately not
+	 * in the key: the rows are the same, and snapping the window would undo a scroll as the run
+	 * finished.
 	 */
 	const shownSteps = useFilteredSteps(
 		steps,
@@ -294,12 +259,11 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	);
 
 	/*
-	 * Both controls narrow one list, so one empty state answers for both and
-	 * names whichever combination emptied it - they are cleared in different
-	 * places, and a reader told "no failed steps" over a list their search
-	 * emptied clears the wrong one. `null` while rows remain, and for a run
-	 * that recorded nothing at all: that is the run's own emptiness, answered
-	 * below by its status.
+	 * Both controls narrow one list, so one empty state answers for both and names whichever
+	 * combination emptied it: they are cleared in different places, and a reader told "no failed
+	 * steps" over a list their search emptied clears the wrong one. `null` while rows remain, and
+	 * for a run that recorded nothing, which is the run's own emptiness, answered below by its
+	 * status.
 	 */
 	const emptyReason =
 		shownSteps.total === 0
@@ -381,16 +345,14 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 					/>
 				</div>
 
-				{/* The first four always, including the zeros. A summary that hides
-				    the outcomes nobody hit reads differently run to run, and the
-				    point of the row is that these are separate numbers. `stopped`
-				    joins them only when a Stop cut a step short.
-
-				    Each is also the filter for its own outcome (issue #730): a
-				    reader who has just read "11 failed" wants those eleven, and
-				    the number is where they read it. Pressing the active one
-				    clears the filter, so the control says what it does and undoes
-				    it in the same place. */}
+				{/*
+				 * The first four always, zeros included: a summary hiding the outcomes nobody hit
+				 * reads differently run to run, and the point is that these are separate numbers.
+				 * `stopped` joins only when a Stop cut a step short. Each is also its outcome's
+				 * filter (#730): a reader who has read "11 failed" wants those eleven, where they
+				 * read the number. Pressing the active one clears it, so the control undoes itself
+				 * in the same place.
+				 */}
 				<span className="flex items-center gap-1.5 sm:ml-auto">
 					{STEP_OUTCOMES.map((outcome) => {
 						const isActive = outcomeFilter === outcome;
@@ -455,13 +417,12 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 					</Callout>
 				)}
 
-				{/* What the rows below are, before a reader starts opening them:
-				    each one holds its request and response as they went over the
-				    wire. The load-mode sibling of this notice sits over the
-				    Samples tab, and a collection run's steps are the surface that
-				    had none - which let the Data tab's "rows are never saved
-				    anywhere" be read as covering the cells those rows bound
-				    (issue #731). */}
+				{/*
+				 * What the rows below are, before a reader opens them: each holds its request and
+				 * response as they went over the wire. The load-mode sibling sits over the Samples
+				 * tab; without this one, the Data tab's "rows are never saved anywhere" reads as
+				 * covering the cells those rows bound (#731).
+				 */}
 				<StoredExchangeWarning
 					steps={steps.length}
 					dataBound={dataBound}
@@ -507,26 +468,19 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 				{steps.length === 0 ? (
 					/*
-					 * Three different answers, not two - "still running", "still
-					 * loading" and "nothing at all" all read as the same blank
-					 * list otherwise. The stream is not enough on its own: a tab
-					 * reopened onto a run that is still executing - after a
-					 * relaunch, or from History - has no live steps and no
-					 * stored ones either, and telling that reader the run
-					 * recorded nothing would be wrong about a run that is still
-					 * going.
+					 * Three answers, not two: "still running", "still loading" and "nothing at all"
+					 * otherwise read as the same blank list. The stream alone is not enough: a tab
+					 * reopened onto a run still executing (after a relaunch, or from History) has
+					 * no live steps and no stored ones, and saying it recorded nothing would be
+					 * wrong about a run still going.
 					 *
-					 * `isLoading` is checked second, not folded into the first
-					 * branch: a live run's own report fetch is *also* loading
-					 * before its first refetch, and "waiting for the first
-					 * step" is the truer sentence for that case, since the run
-					 * has nothing stored yet regardless of network state. A
-					 * completed run reopened from History has no live signal at
-					 * all, so this branch is the only one that ever fires for
-					 * it - a spinning icon rather than the same static one every
-					 * other empty state uses, so a genuinely slow fetch reads as
-					 * in progress rather than as a run that finished with
-					 * nothing to show.
+					 * `isLoading` is checked second, not folded into the first branch: a live run's
+					 * own report fetch is *also* loading before its first refetch, and "waiting for
+					 * the first step" is the truer sentence there, as the run has nothing stored
+					 * yet either way. A completed run reopened from History has no live signal, so
+					 * this branch is the only one that fires for it, with a spinning icon rather
+					 * than the static one of every other empty state, so a slow fetch reads as in
+					 * progress, not as a run that finished with nothing.
 					 */
 					isLive ? (
 						<EmptyState
@@ -551,13 +505,11 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 					)
 				) : emptyReason ? (
 					/*
-					 * Narrowed to nothing by a control, which is not the same as
-					 * "no such steps" in either direction: thinning keeps every
-					 * non-passing row and drops passes, so a 6,000-step run can
-					 * report 5,010 passed and hold none of them - the chip's
-					 * number is the run's and this list is the store's - and a
-					 * search matches the names of the rows that were kept. Saying
-					 * which control is responsible is the difference between a
+					 * Narrowed to nothing by a control, which is not "no such steps" in either
+					 * direction: thinning keeps every non-passing row and drops passes, so a
+					 * 6,000-step run can report 5,010 passed and hold none of them (the chip's
+					 * number is the run's, this list the store's), and a search matches only the
+					 * kept rows' names. Naming the control responsible is the difference between a
 					 * disclosure and a contradiction.
 					 */
 					<EmptyState
@@ -574,13 +526,9 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 						<div className="divide-y">
 							{rendered.map((step) => (
 								/*
-								 * `skip-offscreen` per card, sized for a flat row
-								 * rather than for a console line: the browser skips
-								 * layout and paint for the ones scrolled past, which
-								 * is what keeps a filled store's list responsive
-								 * after it has grown. Smaller than before now that
-								 * the row is a flat divide-y strip rather than a
-								 * bordered, padded, gapped card.
+								 * `skip-offscreen` per card, sized for a flat row rather than a
+								 * console line: the browser skips layout and paint for cards
+								 * scrolled past, which keeps a filled store's list responsive.
 								 */
 								<div
 									key={stepKey(step)}
@@ -598,10 +546,9 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 						</div>
 						{hasMore && (
 							/*
-							 * The sentinel. Reaching it renders the next slice -
-							 * nothing is withheld, it arrives when you get there.
-							 * The count is stated rather than left to be inferred
-							 * from a scrollbar, exactly as the console's is.
+							 * The sentinel: reaching it renders the next slice, so nothing is
+							 * withheld. The count is stated rather than left to a scrollbar, as the
+							 * console's is.
 							 */
 							<p
 								ref={sentinelRef}

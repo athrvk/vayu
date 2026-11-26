@@ -6,7 +6,8 @@
  */
 
 /**
- * Utility functions for response body type detection and formatting
+ * Response body type detection and formatting, and the viewers' shared time, size and raw-message
+ * helpers.
  */
 
 import { formatBytes, formatFixed, formatLatencyParts } from "@/lib/format-number";
@@ -21,9 +22,7 @@ import {
 } from "@/modules/request-builder/utils/response-bytes";
 import type { BodyType } from "./types";
 
-/**
- * Detect content type from headers and body content
- */
+/** The body type from headers, then content. */
 export function detectBodyType(headers: Record<string, string>, body: string): BodyType {
 	const contentType = headers["content-type"] || headers["Content-Type"] || "";
 	const media = mediaTypeOf(contentType);
@@ -70,10 +69,8 @@ const BINARY_ESSENCES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * What the Content-Type alone says the body is, compared by whole token
- * (#2458). The order is the meaning: SVG is checked before `image/` so it
- * reads and formats as the XML it is, which is also what the engine sends it
- * as.
+ * What the Content-Type alone says the body is, compared by whole token (#2458). The order is the
+ * meaning: SVG before `image/`, so it reads and formats as the XML it is, as the engine sends it.
  */
 function declaredBodyType({ type, subtype, name, suffix }: MediaType): BodyType | undefined {
 	const essence = `${type}/${subtype}`;
@@ -90,9 +87,7 @@ function declaredBodyType({ type, subtype, name, suffix }: MediaType): BodyType 
 	return undefined;
 }
 
-/**
- * Map body type to Monaco editor language
- */
+/** The Monaco language for a body type. */
 export function getMonacoLanguage(bodyType: BodyType): string {
 	const languageMap: Record<BodyType, string> = {
 		json: "json",
@@ -110,73 +105,45 @@ export function getMonacoLanguage(bodyType: BodyType): string {
 }
 
 /**
- * Past this much body, the pane stops formatting and shows a raw prefix.
- *
- * Nothing about a response this size is free on the main thread, and rendering
- * one costs synchronous passes over the whole string plus a Monaco model: the
- * type sniff, the indent pass (a copy larger than the input) and Monaco
- * tokenising the result line by line for syntax highlighting. There is no
- * worker to move them to - `formatBody` is called during render - so all of it
- * lands between the user pressing Send and the pane painting.
- *
- * 2MB is where that stops being a pause and starts being a freeze, and it is
- * far above any body a person reads in an editor: 2MB of JSON is roughly 50,000
- * formatted lines. The engine's own design-mode read bound
- * (`maxDesignResponseBodyBytes`) is 32MB, sixteen times this, precisely because
- * *keeping* bytes is cheap where *formatting* them is not - the two numbers
- * answer different questions and are deliberately not the same.
- *
- * The Raw tab (`RawRequestResponse`) caps its copy of the body at the same
- * number: it does not format, but it hands Monaco the whole exchange as one
- * model plus `markLines` and `buildRawResponse` passes over it, which is the
- * same freeze. It shows the prefix and the same notice.
- *
- * Characters, not bytes, because that is what the editor and `String.slice`
- * count; for anything but a body of astral-plane text the two agree closely
- * enough for a display threshold.
+ * Past this much body, the pane stops formatting and shows a raw prefix. A body this size costs
+ * synchronous passes over the whole string plus a Monaco model: the type sniff, the indent pass (a
+ * copy larger than the input) and Monaco tokenising for highlighting. `formatBody` runs in render,
+ * with no worker to move it to, so all of it lands between Send and the pane painting. 2MB is where
+ * a pause becomes a freeze, far above a body anyone reads in an editor (about 50,000 formatted JSON
+ * lines). The engine's design-mode read bound (`maxDesignResponseBodyBytes`) is 32MB, as *keeping*
+ * bytes is cheap where *formatting* is not: different questions, deliberately different numbers.
+ * The Raw tab (`RawRequestResponse`) caps at the same number: unformatted, it still hands Monaco
+ * the whole exchange as one model plus `markLines` and `buildRawResponse` passes, the same freeze;
+ * it shows the prefix and the same notice. Characters, not bytes, as the editor and `String.slice`
+ * count them; outside astral-plane text the two agree well enough for a display threshold.
  */
 export const LARGE_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
- * Format body for display (pretty print JSON, XML).
- *
- * JSON is indented by `lib/json-format.ts`, which copies the received text
- * token by token rather than parsing it, so member order, repeated keys and
- * integers past 2^53 show as the server sent them (issue #2459). The input is
- * always the received text: a caller holding a parsed object has already lost
- * those, and there is nothing here to format it from.
- *
- * XML is pretty-printed too (`lib/xml-format.ts`). It was detected here and
- * highlighted by Monaco, but never indented, so Pretty and Raw were byte-for-byte
- * identical for every XML response - which reads as the toggle being broken.
- *
- * Only `bodyType === "xml"` reaches the indenter, never the `undefined` fallback
- * the JSON branch also serves: without a declared type, "starts with a tag" is
- * also true of HTML, whose whitespace rules are not XML's.
+ * The body formatted for display. JSON is indented by `lib/json-format.ts`, which copies the
+ * received text token by token rather than parsing it, so member order, repeated keys and integers
+ * past 2^53 stay as sent (#2459); the input is always the received text, a parsed object having
+ * lost those. XML is indented too (`lib/xml-format.ts`), or Pretty and Raw would be identical for
+ * every XML response, reading as a broken toggle. Only `bodyType === "xml"` reaches that indenter,
+ * never the `undefined` fallback the JSON branch serves: without a declared type, "starts with a
+ * tag" is true of HTML, whose whitespace rules are not XML's.
  */
 export function formatBody(body: string | undefined, bodyType?: BodyType): string {
 	if (!body) return "";
 	if (bodyType === "json" || bodyType === undefined) return formatJson(body);
-	// Returns its input unchanged when the document cannot be walked, so a
-	// malformed response still renders as what arrived.
+	// It returns its input unchanged when the document cannot be walked, so a malformed response
+	// still renders as received.
 	if (bodyType === "xml") return formatXml(body);
 	return body;
 }
 
 /**
- * Response time, at a precision anyone can read.
- *
- * Both response viewers printed `time.toFixed(4)` - `340.1235 ms`. Four decimal
- * places of a millisecond sit far below the resolution of what is measured, so
- * the last three digits are noise that changes every run, and they make the one
- * number people actually scan longer and harder to compare between runs.
- *
- * The digits are the load surfaces' (`formatLatencyParts`, #2793): two decimals
- * below 10 ms, whole milliseconds from there, so a 2.27 ms send reads `2.27 ms`
- * here and as a load p50.
- *
- * Lives here because it was fixed once in `ResponseHeader` and the identical
- * bug survived in `UnifiedResponseViewer` - the duplication was the defect.
+ * Response time at a readable precision: four decimals of a millisecond (`340.1235 ms`) sit far
+ * below the measurement's resolution, the last digits noise that makes the number people scan
+ * longer and harder to compare between runs. The digits are the load surfaces'
+ * (`formatLatencyParts`, #2793): two decimals below 10 ms, whole milliseconds above, so a 2.27 ms
+ * send reads `2.27 ms` here and as a load p50. Here, shared, because a fix to one viewer's copy
+ * missed the other.
  */
 export function formatResponseTime(ms: number): string {
 	const { value, unit } = formatDuration(ms);
@@ -184,20 +151,18 @@ export function formatResponseTime(ms: number): string {
 }
 
 /**
- * What `timing.engineMs` counts, worded once for the status bar's hover and the
- * Timing tab's tip (#2132). It must stay a statement of scope: the figure is
- * not a verdict on anyone else's speed, and `queueWaitMs` is a different,
- * smaller thing that is never presented as this.
+ * What `timing.engineMs` counts, worded once for the status bar's hover and the Timing tab's tip
+ * (#2132). It stays a statement of scope: no verdict on anyone else's speed, and `queueWaitMs`, a
+ * smaller, different thing, is never presented as it.
  */
 export const ENGINE_COST_TIP =
 	"Time Vayu's engine spent on this send: building the request, auth, cookies and " +
 	"assembling the answer. It leaves out the network transfer, your scripts and rendering.";
 
 /**
- * What `timing.scriptMs` counts, worded for the status bar's hover and the
- * Timing tab's tip (#3676). The other half of what `ENGINE_COST_TIP` says the
- * engine's figure leaves out, so the two must keep naming the same boundary:
- * scripts are here, never in "Vayu", and neither is added to the total.
+ * What `timing.scriptMs` counts, for the status bar's hover and the Timing tab's tip (#3676): the
+ * other half of what `ENGINE_COST_TIP` says the engine leaves out, so both name one boundary:
+ * scripts here, never in "Vayu", neither added to the total.
  */
 export const SCRIPT_TIME_TIP =
 	"Time your pre-request and test scripts took on this send, including any " +
@@ -211,11 +176,10 @@ const isReportedEpoch = (ms: number | undefined): ms is number =>
 	typeof ms === "number" && Number.isFinite(ms);
 
 /**
- * Milliseconds from @p from to @p to, both epoch ms, or undefined when either is
- * unknown (#3775): a load run's sampled event carries no `receivedAt`, and a
- * stream restored in a later session has no send time. Floored at 0, because a
- * stream's send time is stamped by the renderer when the engine's `202` lands,
- * so a local upstream's first event can carry a `receivedAt` a few ms earlier.
+ * Milliseconds from @p from to @p to, both epoch ms, or undefined when either is unknown (#3775): a
+ * load run's sampled event has no `receivedAt`, and a stream restored in a later session has no
+ * send time. Floored at 0: a stream's send time is stamped by the renderer when the engine's `202`
+ * lands, so a local upstream's first event can be a few ms earlier.
  */
 export function elapsedBetween(
 	from: number | undefined,
@@ -226,33 +190,22 @@ export function elapsedBetween(
 }
 
 /**
- * A duration split into its number and its unit, so a caller can style the unit
- * separately (these are rendered smaller and in `subtle-foreground` throughout).
- *
- * Use for independent values - a total, a queue wait - where each may sensibly
- * carry its own unit. The rule is `formatLatencyParts`, the one every load
- * surface uses; seconds all the way up, no minutes tier. For a set of values
- * that are read against each other, use `formatPhaseDuration`, which keeps more
- * precision in the tens of milliseconds.
+ * A duration as number and unit, so the unit can be styled apart (smaller, `subtle-foreground`).
+ * For independent values (a total, a queue wait), by `formatLatencyParts`, every load surface's
+ * rule: seconds all the way up, no minutes. Values read against each other use
+ * `formatPhaseDuration`, which keeps more precision in the tens of milliseconds.
  */
 export function formatDuration(ms: number): { value: string; unit: DurationUnit } {
 	return formatLatencyParts(ms);
 }
 
 /**
- * A single timing phase - DNS, connect, TLS, first byte, download - always in ms.
- *
- * Significant digits, because these five share a scale reading and their
- * magnitudes do not: a cached DNS lookup is 0.04ms while first-byte is
- * routinely 300ms. One fixed precision is wrong for one end or the other, and
- * the app had three different answers for the same five numbers - the dashboard
- * showed 2dp, the history breakdown 1dp, and the request-builder timing tab
- * already did this. This is that implementation, moved somewhere all three can
- * reach it.
- *
- * Distinct from `formatResponseTime`, which describes a whole response and
- * switches to seconds. A phase is always sub-second in practice and comparing
- * phases across a row matters more than the unit.
+ * A timing phase (DNS, connect, TLS, first byte, download), always in ms, by significant digits:
+ * the five share a scale and not magnitudes (a cached DNS lookup is 0.04ms, first byte routinely
+ * 300ms), so one fixed precision is wrong at one end. The one implementation for the dashboard, the
+ * history breakdown and the request builder's timing tab, which had three answers for the same
+ * numbers. Not `formatResponseTime`, which describes a whole response and switches to seconds; a
+ * phase is sub-second in practice, and comparing across a row matters more than the unit.
  */
 export function formatPhaseMs(ms: number): string {
 	if (ms >= 100) return formatFixed(ms, 0);
@@ -263,19 +216,11 @@ export function formatPhaseMs(ms: number): string {
 export type DurationUnit = "ms" | "s";
 
 /**
- * A timing phase, split into number and unit.
- *
- * Same unit rule as `formatDuration` - milliseconds until a full second, then
- * seconds - but it keeps the significant-digit ladder above, because a phase
- * needs precision `formatDuration` does not: a cached DNS lookup is 0.04ms and
- * a connect of 47.83ms keeps its decimal, where `formatDuration` prints `48`.
- *
- * An earlier version fixed one unit across the whole row, on the theory that
- * phases are compared against each other. That was wrong in practice: it turned
- * a 262ms connect into `0.26 s` and a 0.96ms download into `0.00 s`. A
- * millisecond value is perfectly readable on its own, and the percentage column
- * beside it already carries the comparison. Only the phase that genuinely runs
- * into seconds should change unit.
+ * A timing phase as number and unit: `formatDuration`'s unit rule (ms until a second, then seconds)
+ * with the significant-digit ladder above, as a phase needs precision `formatDuration` lacks
+ * (0.04ms DNS, a 47.83ms connect keeping its decimal where it prints `48`). Each value picks its
+ * own unit: one unit across the row turned a 262ms connect into `0.26 s` and a 0.96ms download into
+ * `0.00 s`, while a millisecond reads fine alone and the percentage column carries the comparison.
  */
 export function formatPhaseDuration(ms: number): { value: string; unit: DurationUnit } {
 	if (ms < 1000) return { value: formatPhaseMs(ms), unit: "ms" };
@@ -283,18 +228,18 @@ export function formatPhaseDuration(ms: number): { value: string; unit: Duration
 }
 
 /**
- * What the status bar's size counts (#2787). `size` is the decoded body, so a
- * gzipped 12 KB reply that inflates to 80 KB reads as 80 KB; saying so stops it
- * being compared with a DevTools or curl figure that counts something else.
+ * What the status bar's size counts (#2787): the decoded body, so a gzipped 12 KB reply inflating
+ * to 80 KB reads 80 KB; saying so stops comparison with a DevTools or curl figure counting
+ * something else.
  */
 export const RESPONSE_SIZE_TIP =
 	"Decoded body size. Headers are not counted, and a compressed response counts " +
 	"the bytes after decompression.";
 
 /**
- * The size element's hover: `RESPONSE_SIZE_TIP`, plus the compressed length when
- * the headers show the body was encoded. Content-Length is the wire figure only
- * beside a Content-Encoding other than `identity`; alone it is the body itself.
+ * The size's hover: `RESPONSE_SIZE_TIP`, plus the compressed length when the headers show an
+ * encoding; Content-Length is the wire figure only beside a Content-Encoding other than `identity`,
+ * alone it is the body.
  */
 export function responseSizeTip(headers: Record<string, string> | undefined): string {
 	const encoding = headerValueOf(headers, "content-encoding").trim().toLowerCase();
@@ -304,32 +249,19 @@ export function responseSizeTip(headers: Record<string, string> | undefined): st
 }
 
 /**
- * Rebuild the raw HTTP request from the parts a stored trace keeps.
+ * The raw HTTP request rebuilt from a stored trace's parts. A live send gets `rawRequest` from the
+ * engine's real wire message (`Client::send`, `engine/src/http/client.cpp`); a restored one has
+ * method, url, headers and body apart. Built in the engine's order, so the two read alike: request
+ * line with the path, `Host` from the URL, the sent headers, `Content-Length` for a body, blank
+ * line, body.
  *
- * A live send gets `rawRequest` from the engine, which assembles the real wire
- * message (`Client::send`, engine/src/http/client.cpp:277-331). A restored one has
- * no such string - the trace stores method, url, headers and body separately -
- * and the restore path used to collapse all four into `${method} ${url}`, so
- * the Raw tab of a reopened run showed a single line and the body that was sent
- * was not reachable anywhere in the app.
- *
- * This follows the engine's order so the two read the same: request line with
- * the path, `Host` from the URL, the sent headers, `Content-Length` for a body,
- * blank line, body.
- *
- * `httpVersion` is the negotiated protocol as a *display* string (`"HTTP/2"`,
- * `"HTTP/1.1"`, or `""` when nothing was negotiated - the engine's convention,
- * see `Response::http_version` in `engine/src/http/client.cpp`) - never the
- * request-side `auto`/`http1.1`/`http2` union; do not pass that here. It
- * defaults to `"HTTP/1.1"` so callers that predate this parameter, and stored
- * runs from before the field existed, keep printing what they always did.
- *
- * An explicit `""` collapses to the same default. The engine's own rawRequest
- * builder falls back to the *requested* protocol in that case (it has
- * `request.http_version` in hand); this generic formatter only ever sees a
- * display string, so replicating that fallback here would mean threading the
- * requested union into a function whose contract is display-string-only -
- * exactly the value-space merge this field's docs elsewhere warn against.
+ * `httpVersion` is the negotiated protocol as a *display* string (`"HTTP/2"`, `"HTTP/1.1"`, or `""`
+ * when nothing was negotiated, the engine's convention, `Response::http_version` in
+ * `engine/src/http/client.cpp`), never the request-side `auto`/`http1.1`/`http2` union; do not pass
+ * that here. It defaults to `"HTTP/1.1"`, so callers predating this parameter and runs stored
+ * before the field print as before, and an explicit `""` collapses to it: the engine's builder
+ * falls back to the *requested* protocol there, but this display-string-only formatter would need
+ * the request union threaded in, the value-space merge this field's docs warn against.
  */
 export function buildRawRequest(
 	method: string,
@@ -345,9 +277,8 @@ export function buildRawRequest(
 		target = `${parsed.pathname}${parsed.search}` || "/";
 		host = parsed.host;
 	} catch {
-		// A URL the platform will not parse - a host with no scheme, or one
-		// still holding an unresolved {{variable}}. Keep the string whole rather
-		// than inventing a split, and let the Host header fall away with it.
+		// A URL the platform will not parse (no scheme, an unresolved {{variable}}) stays whole
+		// rather than split by invention, and the Host header goes with it.
 	}
 
 	const versionLabel = httpVersion || "HTTP/1.1";
@@ -360,8 +291,8 @@ export function buildRawRequest(
 		raw += `${key}: ${value}\r\n`;
 	}
 
-	// Bytes, not characters - the engine counts `content.size()`, and any
-	// non-ASCII in the body makes the two differ.
+	// Bytes, not characters: the engine counts `content.size()`, and non-ASCII makes the two
+	// differ.
 	if (body) raw += `Content-Length: ${new TextEncoder().encode(body).length}\r\n`;
 
 	raw += "\r\n";
@@ -371,19 +302,10 @@ export function buildRawRequest(
 }
 
 /**
- * Build raw HTTP response string.
- *
- * `httpVersion` is the negotiated protocol as a display string - see
- * `buildRawRequest`'s doc comment above for the full contract, including why
- * `""` (the engine's "nothing negotiated" convention) collapses to the same
- * `"HTTP/1.1"` default as an omitted argument rather than trying to recover
- * the requested protocol.
- *
- * `headers` is the lines as received (issue #2460) - one line each, in wire
- * order, the name in the server's case - or, for a caller with only the folded
- * map, that map's entries. The lines are what the tab should print: it is the
- * exchange as the server sent it, and the map has lowercased every name and
- * joined every repeat into one.
+ * The raw HTTP response string. `httpVersion` is a display string, by `buildRawRequest`'s contract
+ * (`""` collapses to `"HTTP/1.1"` too). `headers` is the lines as received (#2460), one per line in
+ * wire order and the server's case, or for a caller with only the folded map, its entries: the
+ * lines are the exchange as sent, where the map lowercased every name and joined every repeat.
  */
 export function buildRawResponse(
 	status: number,

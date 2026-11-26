@@ -6,30 +6,26 @@
  */
 
 /**
- * @file script_kinds.cpp
- * @brief `script.pre` / `script.post` (issue #1513's registration, issue
- *        #1514's `compile` / `apply`), and `script.setup` / `script.teardown`
- *        (issue #1499), the same shape at the run's own boundary instead of a
- *        step's.
+ * `script.pre` / `script.post` (#1513's registration, #1514's `compile` /
+ * `apply`), and `script.setup` / `script.teardown` (#1499), the same shape at
+ * the run's boundary instead of a step's.
  *
- * `apply` never runs the script itself - it calls back into
- * `ElementContext::run_pre_script` / `run_post_script` (or, for the run-level
- * pair, `run_setup_script` / `run_teardown_script`), which the caller
- * (`execute_exchange`, or the run.start/run.end dispatch site) binds to the
- * exact `execute_script` call design mode has always made. That keeps
- * `ScriptEngine`, `ScriptContext` and the cookie-write staging entirely out of
- * `core/elements`, which knows nothing about scripting beyond
- * `vayu::ScriptResult`'s shape. The element's own outcome is about this one
- * script: `error` when it threw, `failed` when it ran and only a `pm.test`
- * assertion did not hold, `skipped` when the run's Stop cut it short (its
- * `pm.sendRequest`, #3371, or the script itself, #3460), `ok` otherwise
- * (#2663). The step's verdict is
- * separate - a script's assertions travel inside the step's `ScriptResult`,
- * folded beside every other level's (`fold_script_result`).
+ * `apply` never runs the script: it calls back into
+ * `ElementContext::run_pre_script` / `run_post_script` (or `run_setup_script` /
+ * `run_teardown_script`), which the caller (`execute_exchange`, or the
+ * run.start/run.end dispatch) binds to design mode's own `execute_script` call.
+ * That keeps `ScriptEngine`, `ScriptContext` and the cookie-write staging out
+ * of `core/elements`, which knows only `vayu::ScriptResult`'s shape. The
+ * element's outcome is about this one script: `error` when it threw, `failed`
+ * when only a `pm.test` assertion did not hold, `skipped` when the run's Stop
+ * cut it short (its `pm.sendRequest`, #3371, or the script itself, #3460), `ok`
+ * otherwise (#2663). The step's verdict is separate: a script's assertions
+ * travel in the step's `ScriptResult`, folded beside every other level's
+ * (`fold_script_result`).
  *
- * `script.setup` / `script.teardown` are `collection_only`: run once per run
- * rather than once per step, attaching one to a request would run it once per
- * request that happened to carry it, a question the model has no answer for.
+ * `script.setup` / `script.teardown` are `collection_only`: they run once per
+ * run, and on a request one would run once per request carrying it, which the
+ * model has no answer for.
  */
 
 #include "vayu/core/element_defaults.hpp"
@@ -203,13 +199,13 @@ void record_script_outcome (ElementContext& ctx, const vayu::ScriptResult& resul
     ctx.outcome_messages = script_messages (result);
 }
 
-/// `script.pre` / `script.post`'s shared `apply`: the element's own outcome
-/// is about this one script, the slot about the whole step. A thrown script is
-/// `error`; one that ran and failed only assertions is `failed`, with the
-/// first failure as its message, because `success` alone cannot tell the two
-/// apart (#2663). One the run's Stop cut short (its `pm.sendRequest`
-/// cancelled, #3371, or the script itself ended, #3460) is `skipped` and stays
-/// out of the slot, so no tally counts its tests or its throw.
+/// `script.pre` / `script.post`'s shared `apply`: the element's outcome is
+/// about this script, the slot about the whole step. A thrown script is
+/// `error`; one that failed only assertions is `failed`, with the first failure
+/// as its message, since `success` alone cannot tell the two apart (#2663). One
+/// the run's Stop cut short (its `pm.sendRequest` cancelled, #3371, or the
+/// script ended, #3460) is `skipped` and stays out of the slot, so no tally
+/// counts its tests or its throw.
 void run_step_script (ElementContext& ctx,
 const std::function<vayu::ScriptResult (const std::string&)>& runner,
 vayu::ScriptResult& slot,
@@ -266,13 +262,12 @@ class ScriptPostElement final : public Element {
     std::string script_;
 };
 
-/// `script.setup` / `script.teardown`'s shared `apply`. A script the run's
-/// Stop cut short is `skipped`: the run ended under it, which says nothing
-/// about the script (#3371, #3460). Any other result is
-/// read as a step script's is (`record_script_outcome`), so a setup whose only
-/// problem is a failing `pm.test` is `failed` with that test as its message,
-/// and its console lines and tests are kept for the report (#3455), its
-/// `pm.sendRequest` records (#3633) beside them.
+/// `script.setup` / `script.teardown`'s shared `apply`. A script the run's Stop
+/// cut short is `skipped`, which says nothing about the script (#3371, #3460).
+/// Any other result is read as a step script's (`record_script_outcome`): a
+/// setup whose only problem is a failing `pm.test` is `failed` with that test
+/// as its message, and its console lines, tests (#3455) and `pm.sendRequest`
+/// records (#3633) are kept for the report.
 void run_lifecycle_script (ElementContext& ctx,
 const std::function<vayu::ScriptResult (const std::string&)>& runner,
 const std::string& script,
@@ -354,15 +349,14 @@ make_script_kind (Phase phase, const char* kind, const char* label, const char* 
 }
 
 /**
- * `config.inline`, on the two step-level script kinds only (issue #1495,
- * `RunContext::script_element_runs_inline`): a load run reads it to decide
- * whether this script runs on the producer/completion hooks or is left to the
- * deferred replay. The base schema above closes `additionalProperties`, so a
- * kind that does not add it here refuses the marking outright - which is what
- * made the opt-in unreachable through every validated write path there is
- * (`apply_elements_field`, `validate_request_elements_run_override`) until
- * issue #1594 exercised one end to end. `script.setup` / `script.teardown` do
- * not get it: a run-boundary kind has no inline-or-deferred choice to make.
+ * `config.inline`, on the two step-level script kinds only (#1495,
+ * `RunContext::script_element_runs_inline`): a load run reads it to choose
+ * between the producer/completion hooks and the deferred replay. The base
+ * schema closes `additionalProperties`, so a kind that does not add it here
+ * refuses the marking on every validated write path (`apply_elements_field`,
+ * `validate_request_elements_run_override`, #1594). `script.setup` /
+ * `script.teardown` do not get it: a run-boundary kind has no
+ * inline-or-deferred choice.
  */
 void allow_inline_marking (ElementKind& kind) {
     kind.config_schema["properties"]["inline"] = {

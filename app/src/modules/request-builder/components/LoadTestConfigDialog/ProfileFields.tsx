@@ -19,9 +19,8 @@ interface ProfileFieldsProps {
 	/** True when the request (or, for a collection run, any step) streams: the two stream caps are shown. */
 	isStreamingRequest: boolean;
 	/**
-	 * The label of the Fixed request count mode's count. "Requests" for a single request; a
-	 * collection run counts passes through its sequence, where a request count
-	 * would understate the load by the sequence's length.
+	 * The Fixed request count mode's count label: "Requests" for one request; a collection run
+	 * counts passes, where a request count would understate the load by the sequence's length.
 	 */
 	iterationsLabel?: string;
 }

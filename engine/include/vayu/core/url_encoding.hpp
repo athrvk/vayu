@@ -7,10 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file core/url_encoding.hpp
- * @brief A whole URL written as Postman puts it on the wire.
- */
+/** @brief A whole URL written as Postman puts it on the wire. */
 
 #include <string>
 #include <string_view>

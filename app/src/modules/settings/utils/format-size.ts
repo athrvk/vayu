@@ -16,11 +16,10 @@ import { formatBytes } from "@/lib/format-number";
  * Whether an entry's value is a byte count, and so reads as `1.0 MB` rather
  * than as `1048576`.
  *
- * The entry declares it (`ConfigEntry.unit`, seeded engine-side). This used to
- * be a hardcoded list of three keys here, which is the app re-deriving a fact
- * the engine owns: an engine entry measured in bytes was formatted as a bare
- * number until someone remembered to edit this array, and two keys had already
- * been left in it after #519 retired them.
+ * The entry declares it (`ConfigEntry.unit`, seeded engine-side): a hardcoded
+ * key list here would be the app re-deriving a fact the engine owns, and an
+ * entry measured in bytes would format as a bare number until someone edited
+ * it (#519).
  */
 export function isByteUnit(unit?: string): boolean {
 	return unit === "bytes";

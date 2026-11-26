@@ -6,30 +6,16 @@
  */
 
 /**
- * DrawerSection - a group of rows inside a drawer view, and its header.
- *
- * `DrawerPanel` gave the four views one frame; the groups *inside* a view still
- * had none. Services drew muted sentence-case labels with a trailing plus;
- * Variables drew a chevron, an icon, a filled `Badge` count and a plus; and the
- * collections tree wrote its counts as inline `(2)` text one click away from
- * that badge. Two count idioms for the same fact, in one drawer.
- *
- * **One count idiom: the muted inline count, in parentheses.** The filled badge
- * loses. A count beside a group name is not a status and not a control - it is
- * the least important thing in the row, and a `Badge` gives it a fill, a
- * border, a 20px floor and the visual weight of a chip. The collections tree
- * already wrote it as muted text, which is also the idiom a row inside the tree
- * can use unchanged (`DrawerSectionCount` is exported for exactly that, so a row
- * and its section cannot drift apart again).
- *
- * **The header's ARIA stays at the call site.** Variables' section headers are
- * `role="treeitem"` rows inside a roving-tabindex tree, and the "+" beside one
- * is deliberately *outside* that row - the tree has no create key, so the button
- * is the drawer's own tab stop rather than a control the keyboard cannot reach.
- * A primitive that owned those attributes would have to know about the tree, so
- * `rowProps` and `activatorProps` are spread through instead: this component
- * owns the *shape* - the padding, the type, the chevron, where the count sits
- * and where the actions sit - and the caller keeps the semantics.
+ * A group of rows inside a drawer view, and its header: `DrawerPanel` gives the views one frame,
+ * this the groups inside one. **One count idiom: the muted inline count, in parentheses**, not a
+ * filled `Badge`: a count beside a group name is neither status nor control but the least important
+ * thing in the row, and a `Badge` gives it a fill, border, 20px floor and a chip's weight. The
+ * collection tree's rows use it too (`DrawerSectionCount` is exported for that), so a row and its
+ * section cannot drift. **The header's ARIA stays at the call site**: Variables' headers are
+ * `role="treeitem"` rows in a roving-tabindex tree, with the "+" deliberately *outside* the row
+ * (the tree has no create key, so the button is its own tab stop). A primitive owning those would
+ * have to know the tree, so `rowProps` and `activatorProps` spread through: this owns the *shape*
+ * (padding, type, chevron, where count and actions sit), the caller the semantics.
  */
 
 import type { LucideIcon } from "lucide-react";
@@ -50,14 +36,10 @@ type PassedProps<T> = React.HTMLAttributes<T> & {
 const HEADER_TEXT = "text-xs tracking-wider text-muted-foreground";
 
 /**
- * The one count idiom. Exported so a row inside a section (the collection tree's
- * folder rows) writes it the same way its section header does.
- *
- * What a folder row counts: a root shows every request in its whole subtree
- * (folders not counted, matching the import preview); a nested folder shows its
- * direct children, requests and child folders.
- *
- * `shrink-0`: the count is short and load-bearing, so the name yields first.
+ * The one count idiom, exported so a row in a section (the collection tree's folder rows) writes it
+ * as its header does. A root folder counts every request in its subtree (folders not counted, as
+ * the import preview does); a nested folder its direct children, requests and folders. `shrink-0`:
+ * the count is short and load-bearing, so the name yields first.
  */
 export function DrawerSectionCount({
 	value,
@@ -83,16 +65,15 @@ interface DrawerSectionProps {
 	/** A glyph for the scope the section names - Variables' cloud and layers. */
 	icon?: LucideIcon;
 	/**
-	 * How many rows are inside. A string for a count the app does not have yet:
-	 * Variables passes `"-"` while the query is loading or has failed, because a
-	 * literal `0` beside "Couldn't load collections" asserts something untrue.
+	 * How many rows are inside; a string for a count not yet known: Variables passes `"-"` while
+	 * loading or failed, as a `0` beside "Couldn't load collections" is untrue.
 	 */
 	count?: number | string;
 	/** Trailing controls - the group's own "New …" button. */
 	actions?: ReactNode;
 	/**
-	 * Collapse state. Both together make the header a button with a chevron;
-	 * omitted, the header is a plain heading.
+	 * Collapse state: with `onToggle`, the header is a button with a chevron; omitted, a plain
+	 * heading.
 	 */
 	expanded?: boolean;
 	onToggle?: () => void;
@@ -124,10 +105,9 @@ export function DrawerSection({
 			type="button"
 			{...activatorProps}
 			onClick={onToggle}
-			// px-3 py-1.5 on the activator, not on the row: the header's hover fill
-			// has to reach the row's edges, and a button inset inside a padded row
-			// leaves a dead strip on both sides (the composite-row hit-area trap
-			// drawer-row-hit-area.test.tsx was written against).
+			// px-3 py-1.5 on the activator, not the row: the hover fill must reach the row's edges,
+			// and a button inset in a padded row leaves dead strips (the composite-row hit-area
+			// trap drawer-row-hit-area.test.tsx guards).
 			className={cn(
 				"flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left hover:bg-accent",
 				HEADER_TEXT,
@@ -149,8 +129,10 @@ export function DrawerSection({
 
 	return (
 		<section className={cn("mb-4", className)}>
-			{/* `pr-3` matches the leading `px-3` on the heading, so the actions stop
-			    where the rows' own padding does. */}
+			{/*
+			 * `pr-3` matches the heading's `px-3`, so the actions stop where the rows' padding
+			 * does.
+			 */}
 			<div className="flex items-center gap-1 pr-3">
 				{rowProps ? (
 					<div {...rowProps} className={cn("flex min-w-0 flex-1", rowProps.className)}>

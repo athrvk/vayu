@@ -148,8 +148,8 @@ std::optional<std::size_t> host_end (std::string_view authority) {
 }
 
 /**
- * @brief Postman's reading of a URL libcurl refused, when a `{{...}}` token in
- *        its scheme or authority is why; unparsed otherwise.
+ * Postman's reading of a URL libcurl refused, when a `{{...}}` token in
+ * its scheme or authority is why; unparsed otherwise.
  *
  * `postman-url-encoder`'s `parse`, every separator looked for outside the
  * tokens: the fragment from the first `#`, the query from the first `?` before

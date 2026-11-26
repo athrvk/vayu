@@ -6,21 +6,17 @@
  */
 
 /**
- * Which OAuth 2.0 tokens does a collection run send? (issue #3199)
+ * Which OAuth 2.0 tokens does a collection run send? (issue #3199) A collection load run plans each
+ * step's token separately, but the engine keeps one credential per token cache key however many
+ * steps send it, so the answer is per *distinct* key, not per request. The collecting half of
+ * `OAuth2LoadTestGuard` for a run: walk the requests the run sends, resolve each one's effective
+ * auth (an `inherit` through its collection chain, a `noauth` ancestor stopping the walk),
+ * variable-resolve the OAuth 2.0 config it lands on, and keep the first config seen per key.
  *
- * A collection load run plans each step's token separately, but the engine keeps
- * one credential per token cache key, however many steps send it - so the run's
- * token question has one answer per *distinct* key, not per request. This is the
- * collecting half of `OAuth2LoadTestGuard` for a run: it walks the requests the
- * run sends, resolves each one's effective auth (an `inherit` through its
- * collection chain, a `noauth` ancestor stopping the walk), variable-resolves
- * the OAuth 2.0 config it lands on, and keeps the first config seen per key.
- *
- * Variables resolve through the scopes of the request's *own* collection chain,
- * globals and the active environment, from stored values only - the stored
- * values are what a load run acquires its token from (#2742). That is the
- * hook's resolution (`useVariableResolver`) without the hook, because a hook
- * cannot be called once per collection in a loop.
+ * Variables resolve through the request's *own* collection chain, globals and the active
+ * environment, from stored values only, which are what a load run acquires its token from (#2742).
+ * That is `useVariableResolver`'s resolution without the hook, as a hook cannot be called once per
+ * collection in a loop.
  */
 
 import { effectiveOAuth2Config } from "@/modules/request-builder/utils/auth-resolution";
@@ -36,11 +32,10 @@ import type { Collection, OAuth2Config, Request } from "@/types";
 import { walkAncestors } from "./tree-utils";
 
 /**
- * One distinct token the run sends: its cache key (for a config awaiting
- * discovery, the key its sign-in runs under, so the guard can say to sign in
- * first), a config that yields it and the collection of the request it was
- * first seen on, whose chain resolves a `jwt_bearer` key reference when the
- * guard refreshes it.
+ * One distinct token the run sends: its cache key (for a config awaiting discovery, the key its
+ * sign-in runs under, so the guard can say to sign in first), a config yielding it, and the
+ * collection of the request it was first seen on, whose chain resolves a `jwt_bearer` key reference
+ * when the guard refreshes it.
  */
 export interface RunOAuth2Config {
 	key: string;
@@ -61,11 +56,9 @@ export interface RunVariableScopes {
 }
 
 /**
- * The distinct OAuth 2.0 configs @p groups' requests send, in first-seen order.
- *
- * A config the engine cannot key (no token URL or client id once resolved) is
- * left out, unless discovery will fill those at sign-in: the guard has nothing
- * to look up for it, and it renders nothing.
+ * The distinct OAuth 2.0 configs @p groups' requests send, in first-seen order. A config the engine
+ * cannot key (no token URL or client id once resolved) is left out unless discovery fills those at
+ * sign-in: the guard has nothing to look up for it, and it renders nothing.
  */
 export function distinctRunOAuth2Configs(
 	groups: readonly RunRequestGroup[],

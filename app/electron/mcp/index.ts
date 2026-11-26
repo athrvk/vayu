@@ -6,11 +6,10 @@
  */
 
 /**
- * @file index.ts
  * @brief Public facade for the MCP feature. `VayuMcpService` owns the engine
  *        client, the mutable safety config, and the Streamable HTTP server, and
  *        is driven by the Electron main process (start/stop/status). See
- *        docs/engine/mcp.md.
+ *        docs/engine/mcp/index.md.
  */
 
 import type http from "node:http";

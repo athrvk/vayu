@@ -20,7 +20,7 @@
  * different verdicts on the same pair of runs - so this file is where the two
  * meet, the way `data-changed.conformance.test.ts` and
  * `variable-resolution.conformance.test.ts` do for their own mirrors. It
- * reaches across the boundary the way `tools.test.ts` already reaches for
+ * reaches across the boundary the way `tools/load.tools.test.ts` already reaches for
  * `@/constants`: a test may, production code may not.
  *
  * The cases are the contract, and they are shared with the engine:

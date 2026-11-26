@@ -6,23 +6,17 @@
  */
 
 /**
- * The sentence `DeleteConfirmDialog` builds from `name` (issue #1689). A separate module from the dialog component itself so the file that
- * only exports a component keeps doing only that - `react-refresh/only-export-
- * components` is what it is for.
+ * The sentences `DeleteConfirmDialog` builds (#1689), apart from the dialog so its file exports
+ * only a component (`react-refresh/only-export-components`).
  */
 
 import { pluralize } from "@/modules/dashboard/utils/format";
 
 /**
- * The sentence `DeleteConfirmDialog` builds from `name`. Exported
- * so a caller that needs the words outside the dialog itself - a toast
- * confirming what just happened, say - quotes the same noun the dialog did,
- * rather than inventing a second phrasing that can drift from it.
- *
- * Deliberately reworded away from the three phrasings this replaced, one per
- * call site that had written its own (see `collection-constants.test.ts` and
- * the acceptance criteria on issue #1689 for the exact strings). One sentence
- * shape, chosen once, is the fix.
+ * The sentence `DeleteConfirmDialog` builds from `name`, exported so a caller needing the words
+ * elsewhere (a toast confirming the delete) quotes the dialog's noun rather than a drifting second
+ * phrasing. One sentence shape, reworded away from the three call-site phrasings it replaced;
+ * `delete-confirm-dialog.test.tsx` holds the generated sentence clear of them.
  */
 export function deleteConfirmCopy(name: string): { title: string; description: string } {
 	const subject = `"${name}"`;
@@ -33,15 +27,11 @@ export function deleteConfirmCopy(name: string): { title: string; description: s
 }
 
 /**
- * The description an environment's delete dialog needs beyond the generic
- * template (docs/ux-writing.md's calibration example for this exact flow):
- * how many variables go with it, that requests using them fall back to
- * sending the literal `{{token}}` text rather than failing to send at all, and
- * that the Trash can give it back - the delete is soft since #2970, so the
- * generic "removed permanently" sentence would be false here. Both
- * environment-delete call sites (the header's own dialog and the sidebar row
- * menu's) build their description from this one function so their copy can
- * never drift apart.
+ * An environment delete's description beyond the template (docs/ux-writing.md's calibration example
+ * for this flow): how many variables go, that requests using them send the literal `{{token}}` text
+ * rather than failing, and that the Trash can restore it, as the delete is soft (#2970) and
+ * "removed permanently" would be false. Both call sites (the header's dialog, the sidebar row menu)
+ * build from this, so their copy cannot drift.
  */
 export function environmentDeleteDescription(environment: {
 	variables: Record<string, unknown>;
@@ -55,13 +45,10 @@ export function environmentDeleteDescription(environment: {
 }
 
 /**
- * The description a saved example's delete dialog needs beyond the generic
- * template: what a mock server does with the row, and what could bring it back.
- * That differs by origin because what the engine does with the row does
- * (#2971, and #722 before it). A saved (`user`) example goes to the Trash, so
- * the dialog points there. An imported one is not trashed: the engine keeps the
- * delete as a spec-sync tombstone, so a later sync does not write it back, and
- * re-importing the document is the one way it returns.
+ * A saved example delete's description beyond the template: what a mock server does with the row,
+ * and what brings it back, which differ by origin as the engine's handling does (#2971, #722). A
+ * saved (`user`) example goes to the Trash; an imported one becomes a spec-sync tombstone, so a
+ * sync does not write it back and re-importing the document is the one way it returns.
  */
 export function exampleDeleteDescription(origin: "import" | "user"): string {
 	const mockServer =
@@ -76,10 +63,9 @@ export function exampleDeleteDescription(origin: "import" | "user"): string {
 }
 
 /**
- * The description a client certificate's remove dialog needs beyond the generic
- * template: what its host does without it, that the files are the user's and
- * stay where they are, and that the Trash can give it back (the delete is soft
- * since #2973). `target` is the `host` or `host:port` the registry names it by.
+ * A client certificate removal's description beyond the template: what its host does without it,
+ * that the files stay where they are, and that the Trash can restore it (soft delete, #2973).
+ * `target` is the registry's `host` or `host:port`.
  */
 export function clientCertificateDeleteDescription(target: string): string {
 	return (
@@ -90,10 +76,9 @@ export function clientCertificateDeleteDescription(target: string): string {
 }
 
 /**
- * The Trash's purge description for a client certificate. The generic "removed
- * permanently" cannot say the two things this entry makes worth saying: the
- * stored key passphrase goes with the row (it is kept nowhere else), and the
- * files the entry only pointed at are untouched.
+ * The Trash's purge description for a client certificate, saying what "removed permanently" cannot:
+ * the stored key passphrase goes with the row (kept nowhere else), and the files it pointed at are
+ * untouched.
  */
 export function clientCertificatePurgeDescription(target: string): string {
 	return (
@@ -103,11 +88,9 @@ export function clientCertificatePurgeDescription(target: string): string {
 }
 
 /**
- * The Trash's purge description for a collection: the engine's purge totals
- * (#3449), which count every deleted row under it whichever delete stamped it,
- * so the sentence says what "Delete forever" removes rather than what a restore
- * would bring back. A collection that holds nothing reads as the generic
- * sentence.
+ * The Trash's purge description for a collection: the engine's purge totals (#3449), counting every
+ * deleted row under it whichever delete stamped it, so it says what "Delete forever" removes, not
+ * what a restore brings back. An empty collection reads as the generic sentence.
  */
 export function collectionPurgeDescription(
 	name: string,

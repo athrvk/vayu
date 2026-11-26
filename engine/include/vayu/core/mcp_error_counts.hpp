@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/mcp_error_counts.hpp
  * @brief A run's failed `mcp` replies counted by `McpErrorClass`, and a
  *        `protocol` failure's JSON-RPC `error.code` (#3828).
  *

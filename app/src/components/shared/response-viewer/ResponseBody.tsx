@@ -6,25 +6,15 @@
  */
 
 /**
- * ResponseBody Component
- *
- * Displays HTTP response body with multiple view modes:
- * - Pretty: Formatted/syntax highlighted view (default)
- * - Raw: Unformatted text view
- * - Preview: HTML rendering (when applicable)
- *
- * Similar to Postman's response body viewer. A body that is not text (an
- * image, a PDF, other bytes) has no modes: an image is drawn from its bytes,
- * and the rest say what they are and how big. Those bytes are `rawBytes`, the
- * decoded base64 the engine sent for a body that is not UTF-8 (issue #2458).
- *
- * Past `LARGE_BODY_BYTES` it drops to one mode: no `formatBody`, no syntax
- * highlighting, and a prefix of the raw body in the editor, with a notice
- * saying so. Everything this component does to a body it does synchronously
- * during render, so a multi-megabyte response used to freeze the window between
- * Send and the pane painting. See the constant in `utils.ts` for the passes and
- * why 2MB. The request builder's Raw tab applies the same cap to its own copy
- * of the body (`RawRequestResponse`) and shows the same notice.
+ * The response body with view modes, Pretty (formatted, highlighted; the default), Raw (as
+ * received) and Preview (HTML, when applicable), as Postman's viewer has. A body that is not text
+ * (an image, a PDF, other bytes) has no modes: an image is drawn from its bytes, the rest say what
+ * and how big, those bytes being `rawBytes`, the decoded base64 the engine sent for a non-UTF-8
+ * body (#2458). Past `LARGE_BODY_BYTES` it keeps one mode: no `formatBody`, no highlighting, a raw
+ * prefix in the editor with a notice, as everything here runs synchronously in render and a
+ * multi-megabyte response would freeze the window between Send and the pane painting (the constant
+ * in `utils.ts` has the passes and why 2MB). The request builder's Raw tab (`RawRequestResponse`)
+ * caps its copy alike, with the same notice.
  */
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -52,9 +42,8 @@ interface ExtendedResponseBodyProps extends ResponseBodyProps {
 	/** Show view mode toggle buttons */
 	showModeToggle?: boolean;
 	/**
-	 * Rendered at the end of the toolbar - copy and download, in the request
-	 * builder. A slot rather than a hardcoded `ResponseActions` because the
-	 * history viewer mounts this same component with nothing to put there.
+	 * The toolbar's end slot (copy and download in the request builder); a slot, as the history
+	 * viewer mounts this with nothing there.
 	 */
 	actions?: ReactNode;
 }
@@ -73,46 +62,37 @@ export default function ResponseBody({
 	const [viewMode, setViewMode] = useState<ViewMode>(defaultMode);
 
 	/*
-	 * Past `LARGE_BODY_BYTES` the pane stops formatting and shows a raw prefix.
-	 * Whichever of the two strings is bigger decides, because either can end up
-	 * in the editor - `body` in Pretty, `bodyRaw` in Raw - and the cost is the
-	 * one that gets rendered, not the one that was passed first.
+	 * Past `LARGE_BODY_BYTES` the pane stops formatting and shows a raw prefix. The bigger string
+	 * decides, as either can reach the editor (`body` in Pretty, `bodyRaw` in Raw), and the cost is
+	 * the rendered one.
 	 */
 	const bodyLength = Math.max(body.length, bodyRaw?.length ?? 0);
 	const isLargeBody = bodyLength > LARGE_BODY_BYTES;
 
 	/*
-	 * Detect body type from content and headers.
-	 *
-	 * Above the gate the *content* half is skipped, because it is itself a pass
-	 * over the whole string: with no content-type header - or a generic
-	 * `text/plain` one - `detectBodyType` trims the body, `JSON.parse`s it and
-	 * lower-cases it looking for markup, which for a 32MB body is the freeze
-	 * this threshold exists to prevent, paid before the gate below is even
-	 * reached. The header still decides where there is one; an unlabelled large
-	 * body reads as text, which is what the pane renders it as either way.
+	 * The body type from content and headers. Above the gate the *content* half is skipped, being a
+	 * whole-string pass itself: without a content-type (or with `text/plain`) `detectBodyType`
+	 * trims, `JSON.parse`s and lower-cases the body, for a 32MB body the freeze the gate prevents,
+	 * paid before the gate. The header still decides where present; an unlabelled large body reads
+	 * as text, as rendered anyway.
 	 */
 	const detectedType = useMemo(() => {
 		const declared = detectBodyType(headers, isLargeBody ? "" : bodyRaw || body);
-		// Bytes with no text view never reach the editor, whatever the header
-		// says: the funnel already decided there is no text (`isText`).
+		// Bytes without a text view never reach the editor, whatever the header: the funnel decided
+		// there is no text (`isText`).
 		if (rawBytes && !rawBytes.isText) return isNonTextType(declared) ? declared : "binary";
-		// A binary header over a body the engine sent as UTF-8 (no `rawBytes`, or
-		// `isText`) is text under a misleading label (#3427): the bytes are
-		// readable, so the editor shows them. Image and PDF keep their pane.
+		// A binary header over a body sent as UTF-8 (no `rawBytes`, or `isText`) is text
+		// mislabelled (#3427): readable, so the editor shows it. Image and PDF keep their pane.
 		return declared === "binary" ? "text" : declared;
 	}, [headers, bodyRaw, body, isLargeBody, rawBytes]);
 
 	const canPreview = detectedType === "html";
 
-	// Format body for display
-	// Raw mode: use bodyRaw (original raw bytes from server) if available, fallback to body
-	// Pretty mode: use formatted body
+	// Raw shows `bodyRaw`, the server's bytes, falling back to `body`; Pretty the formatted body.
 	const formattedBody = useMemo(() => {
-		// The gate, and the reason the toggle is hidden with it: there is one
-		// view left, so `formatBody`'s indent pass never runs and the
-		// editor is handed a bounded prefix rather than a model it will spend
-		// seconds tokenising.
+		// The gate, and why the toggle hides with it: one view remains, so `formatBody`'s indent
+		// pass never runs and the editor gets a bounded prefix instead of a model it tokenises for
+		// seconds.
 		if (isLargeBody) return (bodyRaw || body).slice(0, LARGE_BODY_BYTES);
 		if (viewMode === "raw") {
 			// Use bodyRaw for raw view to show actual server response
@@ -124,9 +104,8 @@ export default function ResponseBody({
 	// Get Monaco language
 	const language = useMemo(() => getMonacoLanguage(detectedType), [detectedType]);
 
-	// Raw rather than formatted, so the preview is the document the server sent.
-	// Never built above the gate: the toggle that selects Preview is hidden
-	// there, and the build is another whole-string copy.
+	// Raw, not formatted, so the preview is the server's document; never built above the gate,
+	// where the Preview toggle is hidden and the build is another whole-string copy.
 	const previewHtml = useMemo(
 		() =>
 			detectedType === "html" && !isLargeBody ? buildPreviewDocument(bodyRaw || body) : "",
@@ -156,17 +135,14 @@ export default function ResponseBody({
 				{showModeToggle && !isLargeBody && (
 					<ToggleGroup
 						value={viewMode}
-						// Radix clears the value when the active item is pressed again.
-						// A view mode has no "off" - ignore the empty string rather than
-						// letting the body render nothing.
+						// Radix clears the value when the active item is pressed again; a view mode
+						// has no "off", so the empty string is ignored rather than rendering
+						// nothing.
 						onValueChange={(next) => next && setViewMode(next as ViewMode)}
-						// Always `xs`, never `sm`: this toolbar's row
-						// is `h-band` (32px), but `sm`'s track (`h-control`
-						// 28px plus `p-1` padding, 34px total) is taller than that - it
-						// overflowed the band's own border once #1679 made `sm` a flat
-						// 28px instead of a `--spacing`-derived value that happened to
-						// fit. `xs`'s track (`h-control-sm` 24px plus `p-0.5`, 27px) is
-						// the one size that actually clears it.
+						// Always `xs`: the toolbar row is `h-band` (32px), and `sm`'s track
+						// (`h-control` 28px plus `p-1`, 34px) overflows its border, `sm` being a
+						// flat 28px (#1679); `xs`'s (`h-control-sm` 24px plus `p-0.5`, 27px) clears
+						// it.
 						size="xs"
 						aria-label="Body view mode"
 					>
@@ -190,8 +166,8 @@ export default function ResponseBody({
 			</BodyToolbar>
 
 			{/*
-			 * Download is promised only when there is a Download button - the
-			 * history viewer mounts this with no `actions` slot.
+			 * Download is promised only with a Download button: the history viewer has no `actions`
+			 * slot.
 			 */}
 			{isLargeBody && (
 				<LargeBodyNotice
@@ -210,10 +186,10 @@ export default function ResponseBody({
 			<div className="flex-1 min-h-0">
 				{!isLargeBody && viewMode === "preview" && detectedType === "html" ? (
 					// The markup is the server's, so the frame takes no sandbox token:
-					// `allow-same-origin` with `allow-scripts` hands it the renderer's
-					// origin and `window.parent.electronAPI`, and `allow-scripts` alone
-					// still runs whatever it ships. The policy and inert links come from
-					// `buildPreviewDocument`. `preview-sandbox.test.tsx` holds the string.
+					// `allow-same-origin` with `allow-scripts` hands it the renderer's origin and
+					// `window.parent.electronAPI`, and `allow-scripts` alone runs whatever it
+					// ships. The policy and inert links come from `buildPreviewDocument`;
+					// `preview-sandbox.test.tsx` holds the string.
 					<iframe
 						srcDoc={previewHtml}
 						className="w-full h-full bg-white"
@@ -223,9 +199,8 @@ export default function ResponseBody({
 				) : (
 					<CodeEditor
 						height={height}
-						// Plaintext above the gate too: tokenising a 2MB model for
-						// syntax colours is the third of the three passes the
-						// threshold exists to avoid.
+						// Plaintext above the gate: tokenising a 2MB model for syntax colours is
+						// the third pass the threshold avoids.
 						language={isLargeBody || viewMode === "raw" ? "plaintext" : language}
 						ariaLabel="Response body"
 						value={formattedBody}
@@ -238,35 +213,12 @@ export default function ResponseBody({
 }
 
 /**
- * The toolbar sits on a 32px band.
- *
- * It was `px-4 py-2` around `h-7` segments - 44px, against a 24px tab
- * strip directly above it. `ResponseActions` carries a comment saying
- * its icons are `h-6` precisely so they share that 24px row; this
- * toolbar never got the same treatment and ran 83% taller than the
- * band it hangs under. `h-8` with no vertical padding is the same
- * construction the tab row uses, one step up so the hierarchy still
- * reads.
- *
- * **No background of its own**, which is the second thing that was
- * wrong here and the harder one to see. It was `bg-muted/20`; the fix
- * for that was `surface-sunken`, and that over-corrected - a full
- * `--muted` fill turns this row into a heavy grey band between a
- * card-coloured tab strip and a card-coloured editor, reading as a
- * separate block wedged between them rather than part of the pane.
- *
- * The rule problem `surface-sunken` was solving does not need a fill to
- * solve. This row sits inside the pane, which declares `surface-card`,
- * so `border-b border-rule` already resolves against a card - exactly
- * how the tab strip above gets its edge, with no background either.
- * The band is defined by its rule and its height, not by a colour.
- *
- * `h-band` (issue #1679), not the bare `h-8` this comment already
- * claimed was 32px: under the 3px spacing rhythm `--spacing` moved to
- * for #1670, `h-8` resolves to 24px, level with the tab strip rather
- * than a step above it - a comment describing an intent the class had
- * stopped delivering. `--spacing-band` is the floor that does not ride
- * density, the same one the tab strip and drawer header use.
+ * The toolbar sits on a 32px band: `h-band` (#1679), the floor that does not ride density, as the
+ * tab strip and drawer header use, a step above the 24px tab strip (a bare `h-8` is 24px under
+ * #1670's 3px `--spacing`). **No background of its own**: a full `--muted` fill makes it a heavy
+ * grey band wedged between a card-coloured tab strip and editor. The pane declares `surface-card`,
+ * so `border-b border-rule` already resolves against a card, as the tab strip's edge does without a
+ * background: the band is its rule and height, not a colour.
  */
 function BodyToolbar({ label, children }: { label: string; children?: ReactNode }) {
 	return (
@@ -316,9 +268,9 @@ function DecodeNoticeCallout({
 }
 
 /**
- * An image, a PDF or other bytes: what it is, how big, and the image itself.
- * The bytes are `rawBytes` when the engine sent base64, else the UTF-8 text it
- * sent, which is then exactly those bytes.
+ * An image, a PDF or other bytes: what it is, how big, and the image itself. The bytes are
+ * `rawBytes` when the engine sent base64, else the UTF-8 text it sent, which is then exactly those
+ * bytes.
  */
 function NonTextBody({
 	type,

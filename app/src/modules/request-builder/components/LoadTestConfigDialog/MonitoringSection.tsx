@@ -20,9 +20,8 @@ interface MonitoringSectionProps {
 }
 
 /**
- * Last of the three disclosures because it is about the *target* rather than
- * about the load: a run is fully specified without it, and it adds a second
- * series to the charts rather than changing what is sent.
+ * Last of the three disclosures: it is about the *target*, not the load. A run is complete without
+ * it, and it adds a chart series rather than changing what is sent.
  */
 export function MonitoringSection({ monitor, onMonitorChange, maxSeries }: MonitoringSectionProps) {
 	const [open, setOpen] = useState(false);
@@ -65,18 +64,16 @@ export function MonitoringSection({ monitor, onMonitorChange, maxSeries }: Monit
 			<div className="space-y-1.5">
 				<span className="block text-xs font-medium leading-none">Response format</span>
 				{/*
-				    A segmented control rather than a two-row select: it is a binary
-				    choice, and `ToggleGroup` is the app's primitive for one (roving
-				    focus and the `data-[state=]` variants come with it).
+				 * A segmented control, not a two-row select: a binary choice, and `ToggleGroup` is
+				 * the app's primitive for one (roving focus and the `data-[state=]` variants).
 				 */}
 				<ToggleGroup
 					size="sm"
 					aria-label="Response format"
 					value={monitor.format}
 					onValueChange={(value) => {
-						// Radix emits "" when the active item is clicked again; a format
-						// is not optional, so that deselection is ignored rather than
-						// leaving the draft with no format at all.
+						// Radix emits "" when the active item is clicked again; a format is
+						// required, so that is ignored.
 						if (value === "prometheus" || value === "json") {
 							onMonitorChange((prev) => ({ ...prev, format: value }));
 						}

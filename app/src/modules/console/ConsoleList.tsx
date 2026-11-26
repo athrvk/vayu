@@ -6,20 +6,18 @@
  */
 
 /**
- * The session Console's list (#3634): the ring's rows, oldest first and newest
- * last, in the tab's own scroller.
+ * The session Console's list (#3634): the ring's rows, oldest first and newest last, in the tab's
+ * own scroller.
  *
- * **The filter runs before the window is taken.** `useGrowingWindow` renders
- * the newest slice and grows upward from a sentinel above it, holding the
- * reader's place as it does (`useHoldPlace`, #3675); the toolbar's
- * filter is applied to every row in the ring first, so a match above what is
- * drawn is still listed. The filter is the window's reset key, so narrowing
- * starts from the newest slice again, and a row appended to the ring does not.
+ * **The filter runs before the window is taken.** `useGrowingWindow` renders the newest slice and
+ * grows upward from a sentinel above it, holding the reader's place (`useHoldPlace`, #3675); the
+ * toolbar's filter applies to every ring row first, so a match above what is drawn is still listed.
+ * The filter is the window's reset key: narrowing starts from the newest slice again, and a row
+ * appended to the ring does not.
  *
- * **It follows the newest while scrolled to the end**, the way a console does:
- * a new row brings the list down only when the reader was already at the
- * bottom. Scrolling up stops the following and scrolling back to the end
- * resumes it (`useStickToEnd`, #3671).
+ * **It follows the newest while scrolled to the end**, as a console does: a new row brings the list
+ * down only when the reader was already at the bottom. Scrolling up stops following and scrolling
+ * back to the end resumes it (`useStickToEnd`, #3671).
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";

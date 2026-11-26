@@ -6,20 +6,17 @@
  */
 
 /**
- * The start options for a webhook inbox: which origins may read its answers
- * (#2367).
+ * The start options for a webhook inbox: which origins may read its answers (#2367).
  *
- * Starting an inbox is one click and stays one click - the common case is "give
- * me a URL" with nothing set, from the drawer's New inbox and from the tab's
- * Start buttons. This is the secondary affordance beside them, the shape
- * `MockServerControl` gave the mock's options: an icon button that opens a
- * form. It owns its own start mutation because the three places that offer it
- * react to a start differently (the tab shows the new inbox, the drawer flashes
- * its row), which they say through `onStarted`; the dialog's failure is shown in
- * the form, where the user is, not as a toast behind it.
+ * Starting stays one click (the common case is "give me a URL" with nothing set, from the drawer's
+ * New inbox and the tab's Start buttons); this is the secondary affordance beside them, in the
+ * shape `MockServerControl` gave the mock's options: an icon button opening a form. It owns its
+ * start mutation because the three places offering it react to a start differently (the tab shows
+ * the new inbox, the drawer flashes its row), which they say through `onStarted`; the dialog's
+ * failure shows in the form, where the user is, not as a toast behind it.
  *
- * Fixed for the inbox's life, like the mock's: the engine has no way to change
- * it on a running listener, so a different policy is a new inbox.
+ * Fixed for the inbox's life, like the mock's: the engine cannot change it on a running listener,
+ * so a different policy is a new inbox.
  */
 
 import { useState } from "react";

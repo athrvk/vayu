@@ -8,23 +8,21 @@
  */
 
 /**
- * @file http/curl_error_buffer.hpp
- * @brief The buffer libcurl writes a transfer's error text into (issue #945).
+ * @brief The buffer libcurl writes a transfer's error text into (#945).
  *
  * `CURLOPT_ERRORBUFFER` has three rules and no way to state them: the buffer
  * must hold at least `CURL_ERROR_SIZE` bytes, it must outlive the transfer, and
  * libcurl leaves it *untouched* when nothing goes wrong - so a handle reused
  * across transfers reports the previous failure unless something clears it in
- * between. All three drivers here (the single-request client, the event loop,
- * the SSE stream) spelled it as a bare `char[CURL_ERROR_SIZE]`, which decays to
- * a pointer at every use and carries none of that with it; the size then had to
- * be restated, and "empty means no message" was re-derived at each read as
- * `error_buffer[0]`.
+ * between. A bare `char[CURL_ERROR_SIZE]` decays to a pointer at every use and
+ * carries none of that, leaving each read to restate the size and re-derive
+ * "empty means no message". This type, which all three drivers use (the
+ * single-request client, the event loop, the SSE stream), keeps the length
+ * attached to the storage and says the contract once.
  *
- * This keeps the length attached to the storage and says the contract once. It
- * is deliberately not a `std::string`: libcurl needs somewhere fixed to write
- * into for the whole transfer, and a string that reallocates is exactly what
- * that option cannot be given.
+ * It is deliberately not a `std::string`: libcurl needs somewhere fixed to
+ * write into for the whole transfer, and a string that reallocates is exactly
+ * what that option cannot be given.
  */
 
 #include <curl/curl.h>

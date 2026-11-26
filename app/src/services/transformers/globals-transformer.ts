@@ -6,10 +6,7 @@
  */
 
 /**
- * Globals Transformer
- *
- * Transforms backend globals format to frontend format.
- * Handles date conversion (number to ISO string) for updatedAt field.
+ * Turns the engine's globals into the app's shape: `updatedAt` from a number to an ISO string.
  */
 
 import type { GlobalVariables } from "@/types";
@@ -21,16 +18,9 @@ export type BackendGlobals = Omit<GlobalVariables, "updatedAt"> & {
 	updatedAt: number | string;
 };
 
-/**
- * Globals Transformer
- *
- * Converts backend globals (with number timestamp) to frontend format (with ISO string timestamp).
- */
+/** Engine globals to the app's shape; see the file comment. */
 export class GlobalsTransformer {
-	/**
-	 * Transform backend globals response to frontend format
-	 * Converts updatedAt from number (Unix timestamp ms) to ISO string
-	 */
+	/** `updatedAt` from Unix milliseconds to an ISO string. */
 	static toFrontend(backendResponse: BackendGlobals): GlobalVariables {
 		return {
 			...backendResponse,

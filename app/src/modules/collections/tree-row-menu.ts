@@ -6,12 +6,10 @@
  */
 
 /**
- * A tree row's actions and the name of the menu listing them.
- *
- * Two menus show the list: the row's own `⋯` button, which the row builds, and
- * the tree's one right-click menu, which resolves the row under the pointer and
- * builds it here from the flat rows model (#2543). Both call the builders below,
- * so the right-click menu cannot offer a row something its `⋯` menu does not.
+ * A tree row's actions and the name of the menu listing them. Two menus show the list: the row's
+ * own `⋯` button, which the row builds, and the tree's one right-click menu, built here from the
+ * flat rows model for the row under the pointer (#2543). Both call the builders below, so the
+ * right-click menu cannot offer a row something its `⋯` menu does not.
  */
 
 import { Copy, CopyPlus, Edit2, Trash2 } from "lucide-react";
@@ -156,11 +154,10 @@ function itemRowMenu(
 }
 
 /**
- * The menu a right-click on `row` opens, or `null` when it opens none: the row
- * is not a treeitem, it is mid-rename or mid-delete (its field wants the
- * platform's own Cut/Copy/Paste), or it has nothing to offer. The rows apply
- * the same rule to the `own-menu` marker they carry, so the marker and the menu
- * come and go together.
+ * The menu a right-click on `row` opens, or `null` when it opens none: the row is not a treeitem,
+ * is mid-rename or mid-delete (its field wants the platform's own Cut/Copy/Paste), or has nothing
+ * to offer. The rows apply the same rule to the `own-menu` marker they carry, so the marker and the
+ * menu come and go together.
  */
 export function treeRowMenu(
 	row: TreeRow,

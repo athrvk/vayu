@@ -14,21 +14,17 @@ export interface RateFidelity {
 }
 
 /**
- * Rate fidelity for a run in progress (#2392): requests the generator has sent
- * against what the target owed it over the sending window, the same definition
- * the finished report states (`rateControl.achievement`). The window is the
- * elapsed time capped at the configured duration, because the engine stops
- * submitting at the deadline and then drains: past it, elapsed time keeps
- * growing while nothing more is owed.
+ * Rate fidelity for a run in progress (#2392): requests the generator sent against what the target
+ * owed it over the sending window, the finished report's definition (`rateControl.achievement`).
+ * The window is the elapsed time capped at the configured duration: the engine stops submitting at
+ * the deadline and then drains, and past it elapsed time grows while nothing more is owed.
  *
- * Owed-to-date is `targetRps x window`, not the tick's `requests_expected`:
- * that is the whole plan, so sent over it is progress through the run, not
- * fidelity to the rate. Once the window has reached the configured duration the
- * target owes the engine's whole count, `floor(targetRps x duration)`, because
- * the engine sends whole requests: 33.3 req/s for 3 s sends 99, not 99.9, and a
- * run that sent them all must read 100 (#2910). `undefined` before there is a
- * window to divide by, so the card draws its empty state instead of a 0 or a
- * NaN.
+ * Owed-to-date is `targetRps x window`, not the tick's `requests_expected`, which is the whole plan
+ * (sent over it is progress through the run, not fidelity to the rate). Once the window reaches the
+ * configured duration the target owes the engine's whole count, `floor(targetRps x duration)`,
+ * because the engine sends whole requests: 33.3 req/s for 3 s sends 99, not 99.9, and a run that
+ * sent them all must read 100 (#2910). `undefined` before there is a window to divide by, so the
+ * card draws its empty state instead of a 0 or a NaN.
  */
 export function liveRateFidelity(input: {
 	targetRps?: number;

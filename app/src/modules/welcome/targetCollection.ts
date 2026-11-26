@@ -6,18 +6,13 @@
  */
 
 /**
- * Decides where a new request from any "New request" entry point should land.
- *
- * Hybrid, weighted toward the last-worked-in collection:
- *  - a valid remembered collection (`lastCollectionId`, still present) wins -
- *    invisible, no friction;
+ * Where a new request from any "New request" entry point lands, weighted toward the last-worked-in
+ * collection:
+ *  - a valid remembered collection (`lastCollectionId`, still present) wins, with no friction;
  *  - no collections at all → create one;
  *  - exactly one collection → use it;
- *  - otherwise (no memory, several collections) → ask, rather than guess.
- *
- * The old behavior was `collections[0]` - the topmost by sidebar order, which is
- * arbitrary relative to what the user is doing. This never guesses silently
- * among several collections.
+ *  - otherwise (no memory, several collections) → ask: the topmost by sidebar order is arbitrary
+ *    relative to what the user is doing, so this never guesses among several.
  */
 
 import type { Collection } from "@/types";

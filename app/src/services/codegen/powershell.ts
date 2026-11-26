@@ -8,16 +8,13 @@
 /**
  * PowerShell, via `Invoke-RestMethod`.
  *
- * A separate target rather than "curl with different quotes", which is the
- * whole reason the issue asked for it that way: PowerShell's quoting rule
- * shares nothing with POSIX. A single-quoted PowerShell string is literal -
- * `$env:PATH` and backticks inside it stay text - and the only escape it has is
- * a doubled quote (`''`). Writing a POSIX `'\''` here produces a backslash in
- * the data and an unterminated string.
+ * A separate target, not "curl with different quotes": PowerShell's quoting rule shares nothing
+ * with POSIX. A single-quoted PowerShell string is literal (`$env:PATH` and backticks inside it
+ * stay text), and its only escape is a doubled quote (`''`). A POSIX `'\''` here produces a
+ * backslash in the data and an unterminated string.
  *
- * `Invoke-RestMethod` rather than `curl.exe`: on Windows `curl` is an alias for
- * this cmdlet in Windows PowerShell, so a snippet that says `curl` runs
- * something else than the reader expects.
+ * `Invoke-RestMethod` rather than `curl.exe`: in Windows PowerShell `curl` is an alias for this
+ * cmdlet, so a snippet that says `curl` runs something other than the reader expects.
  */
 
 import { fileBaseName } from "@/lib/file-path";
@@ -162,10 +159,9 @@ function contentBodyNotes(parts: PreparedPart[], repeatedKeys: string[]): string
 }
 
 /**
- * A multipart body as a `MultipartFormDataContent`, which `Invoke-RestMethod`
- * takes as `-Body` and which, unlike a `-Form` hashtable, can hold several
- * parts under one name. It adds the boundary and the matching Content-Type
- * itself, as `-Form` does.
+ * A multipart body as a `MultipartFormDataContent`, which `Invoke-RestMethod` takes as `-Body` and
+ * which, unlike a `-Form` hashtable, can hold several parts under one name. It adds the boundary
+ * and the matching Content-Type itself, as `-Form` does.
  */
 function multipartContentLines(parts: PreparedPart[]): string[] {
 	return [
@@ -188,9 +184,8 @@ export function generatePowerShell(
 			"-SkipCertificateCheck needs PowerShell 6 or later. Windows PowerShell 5.1 does not have it."
 		);
 	}
-	// Said rather than emitted: this target's stock idiom buffers the whole
-	// body, so a snippet that looked like the request would simply hang on an
-	// endless stream. A stated limit is better than a command that stalls.
+	// Said rather than emitted: this target's stock idiom buffers the whole body, so a snippet that
+	// looked like the request would hang on an endless stream.
 	if (prepared.stream) {
 		notes.push(
 			"The response is an event stream. Invoke-RestMethod buffers it and does not return until the stream ends - use a System.Net.Http.HttpClient with HttpCompletionOption.ResponseHeadersRead to consume events as they arrive."
@@ -225,10 +220,9 @@ export function generatePowerShell(
 	}
 
 	if (isFormData) {
-		// `-Form` arrived in PowerShell 6.1. Windows PowerShell 5.1 - the shell
-		// whose `curl` alias is why this target exists at all - has no such
-		// parameter and fails the call outright, so the snippet says so in the one
-		// place the reader is already looking. The content form (repeated part
+		// `-Form` arrived in PowerShell 6.1. Windows PowerShell 5.1, the shell whose `curl` alias
+		// is why this target exists, has no such parameter and fails the call outright, so the
+		// snippet says so where the reader is already looking. The content form (repeated part
 		// names) keeps the same floor rather than claim an older shell.
 		lines.push(
 			repeatedKeys.length > 0

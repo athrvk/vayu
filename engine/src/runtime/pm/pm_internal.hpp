@@ -8,19 +8,14 @@
  */
 
 /**
- * @file pm_internal.hpp
- * @brief What the translation units behind the `pm` object share (issue
- *        #2092): `script_engine.cpp` and every file under `pm/`, nothing
- *        else.
- *
- * Everything here is in the named namespace `vayu::runtime::pm_detail`, never
- * an anonymous one: an anonymous namespace in a header is a separate copy per
- * including unit, which for a class id is two ids for one class - the
- * silent-segfault class #1589 closed. A helper one surface needs stays in its
- * own file's anonymous namespace; one that two files need is declared here.
- *
- * Not linted, like everything under `engine/src/runtime/` (its `.clang-tidy`
- * says why).
+ * What the translation units behind the `pm` object share (#2092):
+ * `script_engine.cpp` and every file under `pm/`, nothing else. All of it is in
+ * the named namespace `vayu::runtime::pm_detail`, never an anonymous one: an
+ * anonymous namespace in a header is a copy per including unit, which for a
+ * class id is two ids for one class, the silent segfault #1589 closed. A helper
+ * one surface needs stays in its file's anonymous namespace; one two files need
+ * is declared here. Not linted, like all of `engine/src/runtime/` (its
+ * `.clang-tidy` says why).
  */
 
 #ifdef VAYU_HAS_QUICKJS
@@ -64,17 +59,14 @@ extern "C" {
 
 namespace vayu::runtime::pm_detail {
 
-// Per-runtime deadline state for the interrupt handler. One instance is owned by
-// each pooled JSRuntime (stored as its runtime opaque) and refreshed before every
-// execution. QuickJS runtimes are single-threaded, and each pooled context pair is
-// used by one thread at a time, so no synchronization is needed here.
-//
-// Declared here rather than beside the interrupt handler in script_engine.cpp
-// because `pm.sendRequest` reads the same deadline to bound a blocking call:
-// QuickJS only calls the interrupt handler *between bytecode operations*, so a
-// C function that blocks never yields to it and the deadline has to be consulted
-// by hand. One struct, so the budget the handler enforces and the budget the
-// clamp reads cannot drift.
+// Per-runtime deadline state for the interrupt handler: one per pooled
+// JSRuntime (its runtime opaque), refreshed before every execution. A QuickJS
+// runtime is single-threaded and each pooled context pair serves one thread at
+// a time, so no synchronization. Here, not beside the handler in
+// script_engine.cpp, because `pm.sendRequest` reads the same deadline to bound
+// a blocking call: QuickJS calls the handler only between bytecode operations,
+// so a blocking C function never yields to it. One struct, so the budget the
+// handler enforces and the one the clamp reads cannot drift.
 struct RuntimeState {
     bool enabled = false; // false => no wall-clock limit (timeout_ms == 0)
     std::chrono::steady_clock::time_point deadline{};
@@ -179,7 +171,7 @@ class TimerQueue {
 /// Frees the references @p timer holds.
 void free_script_timer (JSContext* ctx, ScriptTimer& timer);
 
-// Context data stored in JS runtime
+// Per-execution state, held as the JS context's opaque (`get_context_data`).
 struct ContextData {
     std::vector<TestResult> tests;
     std::vector<ConsoleEntry> console_output;
@@ -350,7 +342,6 @@ struct ContextData {
     std::map<std::string_view, JSValue> shelf_modules;
 };
 
-// Get context data from JS context
 inline ContextData* get_context_data (JSContext* ctx) {
     return static_cast<ContextData*> (JS_GetContextOpaque (ctx));
 }
@@ -368,13 +359,12 @@ inline std::optional<int64_t> remaining_script_budget_ms (JSContext* ctx) {
     .count ();
 }
 
-// Clears the handler's record before a call an assertion is about to make into
-// the script, so that `script_deadline_expired` afterwards answers about *that
-// call* rather than about the execution so far. The distinction is not
-// theoretical: `pm.test` consumes an abort natively and lets the script run on,
-// and QuickJS gives it a fresh 10,000-operation budget before the next poll -
-// so a flag left standing would read the ordinary throw in the next test as an
-// abort too, failing an assertion that holds.
+// Clears the handler's record before a call an assertion makes into the script,
+// so `script_deadline_expired` then answers about that call, not the execution
+// so far. `pm.test` consumes an abort natively and lets the script run on, and
+// QuickJS grants a fresh 10,000-operation budget before the next poll, so a
+// flag left standing would read the next test's ordinary throw as an abort too,
+// failing an assertion that holds.
 inline void arm_script_deadline_watch (JSContext* ctx) {
     if (auto* state =
         static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)))) {
@@ -382,13 +372,12 @@ inline void arm_script_deadline_watch (JSContext* ctx) {
     }
 }
 
-// Whether the wall-clock deadline stopped the call just made. Asked by the
-// assertions that call back into the script: the interrupt stops the call by
-// raising an exception into it, which at the call site is indistinguishable
-// from one the script threw, so reading a pending exception as "the function
-// threw" reports a pass about a function that never returned. The handler's own
-// flag is the only honest answer - comparing the clock here would also call a
-// script's ordinary throw a timeout when it happened to land past the deadline.
+// Whether the wall-clock deadline stopped the call just made, asked by the
+// assertions that call back into the script: the interrupt raises an exception
+// into the call, indistinguishable at the call site from one the script threw,
+// so "the function threw" would report a pass about a function that never
+// returned. The handler's flag is the only honest answer: comparing the clock
+// would call an ordinary throw landing past the deadline a timeout.
 inline bool script_deadline_expired (JSContext* ctx) {
     auto* state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
     return state != nullptr && state->enabled && state->interrupted;
@@ -445,7 +434,6 @@ class ScopedValue {
     JSValue value_;
 };
 
-// Convert JS string to C++ string
 inline std::string js_to_string (JSContext* ctx, JSValue val) {
     const char* str = JS_ToCString (ctx, val);
     if (!str)

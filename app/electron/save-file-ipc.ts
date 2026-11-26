@@ -6,24 +6,21 @@
  */
 
 /**
- * `file:save`: what the renderer exports (a run report, an OpenAPI or Postman
- * document, an environment, a response or capture body) written to the path
- * the user picks in the system save dialog, answering whether it was written
- * (#3246). An `<a download>` cannot answer that: the click returns before the
- * dialog Electron opens for it does, so a caller could only say "Exported"
- * on a save the user then cancelled.
+ * `file:save`: what the renderer exports (a run report, an OpenAPI or Postman document, an
+ * environment, a response or capture body) written to the path the user picks in the system save
+ * dialog, answering whether it was written (#3246). An `<a download>` cannot answer that: the click
+ * returns before the dialog Electron opens for it does, so a caller could only say "Exported" on a
+ * save the user then cancelled.
  *
- * The renderer chooses the bytes and suggests a name, and nothing else. The
- * name is cut to its last path segment and the dialog opens in the user's
- * Downloads folder, so a renderer cannot steer the dialog to a directory; the
- * path written is the one the user confirmed. No grant is recorded for it
- * (`file-grants.ts`): a file the app wrote is not one the user picked to send.
+ * The renderer chooses the bytes and suggests a name, and nothing else. The name is cut to its last
+ * path segment and the dialog opens in the user's Downloads folder, so a renderer cannot steer the
+ * dialog to a directory; the path written is the one the user confirmed. No grant is recorded for
+ * it (`file-grants.ts`): a file the app wrote is not one the user picked to send.
  *
- * Answers only the app window's main frame (`ipc-sender.ts`). A refusal, an
- * argument of the wrong shape and an oversized payload reject before the
- * dialog opens; a write that fails after the user chose a path resolves
- * `failed` with the system's message. Kept out of main.ts so it can be tested;
- * the Electron surfaces arrive as arguments, the `file-ipc.ts` shape.
+ * Answers only the app window's main frame (`ipc-sender.ts`). A refusal, an argument of the wrong
+ * shape and an oversized payload reject before the dialog opens; a write that fails after the user
+ * chose a path resolves `failed` with the system's message. Kept out of main.ts so it can be
+ * tested; the Electron surfaces arrive as arguments, the `file-ipc.ts` shape.
  */
 
 import { promises as fs } from "fs";
@@ -39,13 +36,12 @@ export const SAVE_FILE_CHANNEL = "file:save";
 export const SAVE_FILE_MAX_BYTES = 1024 * 1024 * 1024;
 
 /**
- * What `file:save` answers. `fileName` is the last segment of the path the user
- * confirmed, which the dialog lets them change from the suggestion, so a toast
- * names the file that exists. Never the full path: the renderer has no use for
- * the user's directory layout. A `failed` before the dialog resolves is a
- * rejection, not this reply, so `failed` always carries the name. Mirrored by
- * `saveFile`'s return type in `preload.ts` and `SaveFileReply` in
- * `src/types/electron.d.ts`, neither of which can import from here.
+ * What `file:save` answers. `fileName` is the last segment of the path the user confirmed, which
+ * the dialog lets them change from the suggestion, so a toast names the file that exists; never the
+ * full path, since the renderer has no use for the user's directory layout. A `failed` before the
+ * dialog resolves is a rejection, not this reply, so `failed` always carries the name. Mirrored by
+ * `saveFile`'s return type in `preload.ts` and `SaveFileReply` in `src/types/electron.d.ts`,
+ * neither of which can import from here.
  */
 export type SaveFileReply =
 	| { outcome: "saved"; fileName: string }
@@ -82,10 +78,9 @@ export interface SaveFileIpcDeps {
 const UNSAFE_NAME_CHARACTERS = /[<>:"|?*\u0000-\u001f\u007f]/g;
 
 /**
- * The name the dialog suggests: the last segment of @p name on either
- * platform's separator, with what Windows refuses in a name (a drive colon
- * among it) and control characters replaced. Throws for a non-string, or one
- * that leaves no name.
+ * The name the dialog suggests: the last segment of @p name on either platform's separator, with
+ * what Windows refuses in a name (a drive colon among it) and control characters replaced. Throws
+ * for a non-string, or one that leaves no name.
  */
 export function suggestedFileName(name: unknown): string {
 	if (typeof name !== "string") throw new Error("A saved file needs a name.");

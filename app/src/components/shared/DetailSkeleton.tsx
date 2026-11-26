@@ -6,23 +6,12 @@
  */
 
 /**
- * DetailSkeleton
- *
- * Loading placeholder for a detail pane - the variables editor, the collection
- * detail screen. `ListSkeleton` is the same idea for the drawer's list views;
- * this one holds the shape of a heading, a subtitle and a stack of rows.
- *
- * A skeleton rather than a spinner for the same reason as there: it holds the
- * shape of the content, so nothing jumps when the data lands, and there is no
- * message to translate. A spinner tells you the app is busy; a skeleton tells
- * you what is about to appear.
- *
- * **Loading and not-found have to be different renders.** Every query here
- * defaults to `[]`, so an entity restored from a previous session resolves to
- * `undefined` while its query is still in flight. Rendering the not-found state
- * then does not merely look wrong - it tells the user their collection is gone
- * when the truthful answer is "not loaded yet". Both call sites reached this
- * component by shipping that bug first.
+ * The loading placeholder for a detail pane (the variables editor, the collection detail), the
+ * shape of a heading, a subtitle and rows; `ListSkeleton` is the drawer lists' twin. A skeleton,
+ * not a spinner: it holds the content's shape, so nothing jumps when data lands, and has no message
+ * to translate. **Loading and not-found must be different renders**: every query defaults to `[]`,
+ * so a restored entity is `undefined` while its query is in flight, and the not-found state then
+ * tells the user their collection is gone when it is not loaded yet.
  */
 
 import { Skeleton } from "@/components/ui";
@@ -30,8 +19,8 @@ import { cn } from "@/lib/utils";
 
 interface DetailSkeletonProps {
 	/**
-	 * Names the pane for assistive tech - "Loading collection", not "Loading".
-	 * The bars carry no information, but which pane is loading does.
+	 * Names the pane for assistive tech ("Loading collection", not "Loading"): the bars say
+	 * nothing, which pane is loading does.
 	 */
 	label: string;
 	/** Rows below the heading. Keep near what the pane usually shows. */
@@ -41,16 +30,16 @@ interface DetailSkeletonProps {
 
 export function DetailSkeleton({ label, rows = 4, className }: DetailSkeletonProps) {
 	return (
-		// role=status on the wrapper, aria-hidden on the bars: a screen reader
-		// gets the label once instead of reading a fake heading and four fake rows.
+		// role=status on the wrapper, aria-hidden on the bars: a screen reader gets the label once,
+		// not a fake heading and four fake rows.
 		<div className={cn("enter-fade flex-1 p-6", className)} role="status" aria-label={label}>
 			<div className="space-y-3" aria-hidden="true">
-				{/* `w-[12rem]` / `w-2xs`, not `w-48` / `w-72`: these bars preview a
-				    heading and a subtitle, both text measures, and `w-48`/`w-72` ride
-				    `--spacing` - narrower at the Default density than the text they
-				    stand in for. `w-[12rem]` is a literal rem value because no named
-				    container-scale step sits below `3xs` (16rem); `w-2xs` (18rem)
-				    is the closest step to the subtitle bar's intended 288px. */}
+				{/*
+				 * `w-[12rem]` / `w-2xs`, not `w-48` / `w-72`: the bars preview a heading and
+				 * subtitle, text measures, and `w-48`/`w-72` ride `--spacing`, narrower at Default
+				 * than the text. `w-[12rem]` is literal as no named step sits below `3xs` (16rem);
+				 * `w-2xs` (18rem) is nearest the subtitle's intended 288px.
+				 */}
 				<Skeleton className="h-6 w-[12rem] rounded-md" />
 				<Skeleton className="h-4 w-2xs rounded-md" />
 				<div className="space-y-2 pt-4">

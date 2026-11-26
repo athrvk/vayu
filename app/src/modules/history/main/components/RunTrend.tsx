@@ -6,18 +6,14 @@
  */
 
 /**
- * RunTrend
+ * p95 latency, throughput and error rate across the runs of one request or collection (#2165),
+ * under the open run's Performance charts: the report answers "how did this one go", this "is it
+ * getting better or worse".
  *
- * p95 latency, throughput and error rate across the runs of one request or one
- * collection (#2165), under the open run's own Performance charts: a run's
- * report answers "how did this one go", this answers "is it getting better or
- * worse".
- *
- * Built from the runs list's `resultSummary` (`useRequestRunsQuery`, the query
- * the compare picker already holds), so it costs no report fetch per run. It
- * draws nothing for a run with no identity (an unsaved request's) and nothing
- * until two runs have a summary: one point is not a trend, and an empty frame
- * would read as a failure to load.
+ * Built from the runs list's `resultSummary` (`useRequestRunsQuery`, the query the compare picker
+ * already holds), so no report fetch per run. Draws nothing for a run with no identity (an unsaved
+ * request's) and until two runs have a summary: one point is not a trend, and an empty frame would
+ * read as a failure to load.
  */
 
 import type { ReactNode } from "react";

@@ -6,32 +6,25 @@
  */
 
 /**
- * One element's tally line - which element it is and what happened to it
- * across a load run - shared by the single-request Elements card and the scenario Steps tab
- * (issue #2144).
+ * One element's tally line (which element, and what happened to it across a load run), shared by
+ * the single-request Elements card and the scenario Steps tab (#2144).
  *
- * **A `deferred` element is not a skipped one.** A post-request script is not
- * run inline on the load path; the engine replays it against the sampled
- * responses afterwards and reports that in the Test validation card (retitled
- * Sampled replay beside an exact Assertions card, #2820). Its `passed`/`failed`
- * are therefore zero by construction, and "0 passed" would read as a script
- * that did nothing. `deferred` is absent from a report stored before #2144,
- * which keeps the older rendering.
+ * **A `deferred` element is not a skipped one.** A post-request script does not run inline on the
+ * load path; the engine replays it against sampled responses and reports it in the Test validation
+ * card (Sampled replay beside an exact Assertions card, #2820), so its `passed`/`failed` are zero
+ * by construction and "0 passed" would read as a script doing nothing. `deferred` is absent from a
+ * report stored before #2144, which keeps the older rendering.
  *
- * **`missing` and `error` are buckets of their own (#3051).** An extractor that
- * found nothing is `missing`, not `skipped`, and an element that could not run
- * its check is `error`, not `failed`; the engine's `failed` no longer includes
- * either. A `required` extractor's miss fails the step, so its bucket takes the
- * error colour and says so. A row stored before #3051 has neither count, and
- * its `skipped` and `failed` keep what they counted then. The row names its
- * element (`name`, with the kind beside it as secondary text) and the level it
- * was composed from (`origin`); a row without a `name` prints the kind alone.
+ * **`missing` and `error` are buckets of their own (#3051)**: an extractor finding nothing is
+ * `missing`, not `skipped`, and an element unable to run its check is `error`, not `failed`; the
+ * engine's `failed` includes neither. A `required` extractor's miss fails the step, so its bucket
+ * takes the error colour and says so. A row stored before #3051 has neither, and its `skipped` and
+ * `failed` keep what they counted then. The row names its element (`name`, the kind beside it) and
+ * the level it was composed from (`origin`); without a `name` it prints the kind.
  *
- * **An inline script row carries what the script said (#3127)**: the error it
- * threw, each failing test and its console lines, drawn under the tally line by
- * {@link ElementMessages}. The deferred line names the replay's sample size
- * when the caller knows it, because "deferred" alone does not say that the
- * replay judged a few hundred responses, not all of them.
+ * **An inline script row carries what the script said (#3127)**, drawn under the line by
+ * {@link ElementMessages}. The deferred line names the replay's sample size when known, as
+ * "deferred" alone hides that the replay judged a few hundred responses, not all.
  */
 
 import { formatNumber } from "@/lib/format-number";
@@ -51,8 +44,8 @@ export interface ElementTallyProps {
 	replayCard?: string;
 	/**
 	 * Responses the replay ran over (`testValidation.samplesTested`, or the step's
-	 * `tests.sampled`). Absent where the report does not say, and the deferred
-	 * line then names the replay without a size.
+	 * `tests.sampled`); absent where the report does not say, and the line names the replay without
+	 * a size.
 	 */
 	replaySamples?: number;
 	className?: string;
@@ -68,8 +61,7 @@ export function ElementTally({
 	const missing = element.missing ?? 0;
 	const error = element.error ?? 0;
 	const origin = elementOriginLabel(element.origin);
-	// A deferred row has no inline pass count to state; for every other row
-	// "N passed" is always stated, zero included.
+	// A deferred row has no inline pass count; every other row states "N passed", zero included.
 	const showPassed = deferred === 0 || element.passed > 0;
 
 	return (

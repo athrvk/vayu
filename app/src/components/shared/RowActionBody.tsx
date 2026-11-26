@@ -6,44 +6,33 @@
  */
 
 /**
- * What one row action draws, for whichever of the two menus is drawing it - the
- * `⋯` dropdown or the right-click menu (#1360). The rest of the rules about a
- * row's actions are in `row-actions.ts`.
+ * What one row action draws, in either menu (the `⋯` dropdown or the right-click menu, #1360); the
+ * other row-action rules are in `row-actions.ts`.
  */
 
 import type { RowAction } from "./row-actions";
 
 /**
- * An item's contents: its glyph, then its label, then a trailing column holding
- * either the reason the item is off or the value it carries (#1690).
- *
- * `data-icon-motion` arrives in a variable, so no source scan can see it - the
- * rendered-class half of `icon-motion.call-sites.test.tsx` is what holds it.
- *
- * `ml-auto` rather than a gap: the reason is a second column, and a menu sizes
- * itself to its widest row, so letting it sit where the label ends would leave
- * "Already first" reading as part of "Move up" on the one row and not on the
- * next. `text-muted-foreground` keeps it behind the label whichever it is - a
- * disabled item is already at the menu's own disabled opacity, and the column
- * has to stay secondary on an enabled one too.
+ * An item's contents: glyph, label, then a trailing column with the reason the item is off or the
+ * value it carries (#1690). `data-icon-motion` arrives in a variable no source scan sees; the
+ * rendered-class half of `icon-motion.call-sites.test.tsx` holds it. `ml-auto`, not a gap: a menu
+ * sizes to its widest row, so "Already first" sitting where its label ends would read as part of
+ * "Move up" on one row and not the next. `text-muted-foreground` keeps it behind the label on
+ * enabled items too, a disabled one being at the menu's disabled opacity already.
  */
 export function RowActionBody({ action }: { action: RowAction }) {
 	const Icon = action.icon;
-	// Why it is off wins over what it carries: a Copy that cannot run is not
-	// describing a value the user can have.
+	// Why it is off beats what it carries: a Copy that cannot run describes no value the user can
+	// have.
 	const trailing = (action.disabled ? action.disabledReason : undefined) ?? action.hint;
 	return (
 		<>
 			<Icon className="size-icon shrink-0" data-icon-motion={action.iconMotion} />
 			{action.label}
 			{trailing ? (
-				// `max-w-[12rem] truncate`: a hint is often a URL, and a menu sizes
-				// itself to its widest row - uncapped, one inbox row set the width
-				// of every item beside it. The cap is a text measure, so it is a
-				// literal rem value rather than `max-w-48`, which rides `--spacing`
-				// and would tighten the cap at the Default density; no named
-				// container-scale step sits this low (the scale starts at `3xs`,
-				// 16rem).
+				// `max-w-[12rem] truncate`: a hint is often a URL, and uncapped one inbox row set
+				// every item's width. A literal rem, as a text measure: `max-w-48` rides
+				// `--spacing` and tightens at Default, and no named step sits below `3xs` (16rem).
 				<span className="ml-auto max-w-[12rem] truncate pl-3 text-xs text-muted-foreground">
 					{trailing}
 				</span>

@@ -6,21 +6,16 @@
  */
 
 /**
- * StartAtLoginCard
+ * The switch for opening Vayu when the user signs in (#2098).
  *
- * The switch for opening Vayu when the user signs in to their computer
- * (issue #2098).
+ * **The value lives in the OS, not this app.** A login item can be removed from Task Manager,
+ * System Settings or a desktop environment's startup list without Vayu being asked, so a copy in
+ * `client-settings-store` would drift. The card reads it through the preload bridge on mount and
+ * after every write, and persists nothing.
  *
- * **The value lives in the OS, not in this app.** A login item can be removed
- * from Task Manager, System Settings or a desktop environment's startup list
- * without Vayu being asked, so a copy kept in `client-settings-store` would
- * drift from the truth. The card reads it through the preload bridge on mount
- * and again after every write, and nothing here is persisted.
- *
- * The card always renders, with its anchor: Settings search scrolls to it, and
- * it has to be findable outside Electron and in an unpackaged run, where there
- * is nothing to switch. Whether the switch can work is the main process's
- * answer (`supported`); this component never looks at the platform.
+ * The card always renders, with its anchor, so Settings search finds it outside Electron and in an
+ * unpackaged run too, where there is nothing to switch. Whether the switch can work is the main
+ * process's answer (`supported`); this component never looks at the platform.
  */
 
 import { useEffect, useState } from "react";

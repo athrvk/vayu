@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/postman_format.hpp
  * @brief The Postman Collection names Vayu maps onto its own, read by both the
  *        importer (`import_document.cpp`) and the exporter
  *        (`postman_export.cpp`).

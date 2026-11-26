@@ -11,7 +11,7 @@
 /**
  * A control revealed on hover must also be revealed on focus.
  *
- * `docs/design-system.md` has said so for a while - "the `focus-within` half is
+ * `docs/design-system/rows-and-drawers.md` has said so for a while - "the `focus-within` half is
  * not optional" - and the variables table's "mark as secret" toggle did not
  * follow it: `opacity-0 group-hover:opacity-100` with no focus counterpart, so
  * a keyboard user tabbed onto an invisible control.

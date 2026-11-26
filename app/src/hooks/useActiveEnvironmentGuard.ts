@@ -6,16 +6,13 @@
  */
 
 /**
- * Active-environment rehydrate validation.
+ * Clears a persisted `activeEnvironmentId` whose environment is gone. Persisted, the id outlives
+ * it: a delete in another window, a reset database, or an id stored before the delete-time cleanup
+ * existed all leave it dangling. The switcher hides that (a defensive `find()` renders "No
+ * Environment"), but every send still forwards the id to `/compose`, so the UI says none while the
+ * wire says a deleted one.
  *
- * `activeEnvironmentId` is persisted, so it outlives the environment it names:
- * a delete performed by another window, a reset database, or a stored id from
- * before the delete-time cleanup existed all leave a dangling id in
- * localStorage. The switcher hides that (a defensive `find()` renders "No
- * Environment"), but every send still forwards the id to `/compose`, so the UI
- * says none while the wire says a deleted one.
- *
- * This clears it once - and only once - the engine has actually answered.
+ * Clears it once, and only after the engine has answered.
  */
 
 import { useEffect } from "react";
@@ -29,10 +26,9 @@ export function useActiveEnvironmentGuard(): void {
 
 	useEffect(() => {
 		/*
-		 * `isSuccess` is the load-bearing condition, not `environments.length`:
-		 * an unreachable engine or a failed fetch leaves the list empty too, and
-		 * clearing on that would throw away a perfectly good selection every time
-		 * the app started before the engine did.
+		 * `isSuccess` is the load-bearing condition, not `environments.length`: an unreachable
+		 * engine or a failed fetch leaves the list empty too, and clearing on that would drop a
+		 * good selection whenever the app starts before the engine.
 		 */
 		if (!isSuccess || !activeEnvironmentId) return;
 		if (!environments.some((e) => e.id === activeEnvironmentId)) {

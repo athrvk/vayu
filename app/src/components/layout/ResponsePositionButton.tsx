@@ -22,31 +22,25 @@ import { contextProps } from "@/lib/context-menu";
 import { formatChord } from "@/lib/platform";
 
 /**
- * The Dock's response-position switch (issue #1711): one icon button that
- * moves the response pane from beside the request to below it, and back.
+ * The Dock's response-position switch (#1711): one icon button that moves the response pane from
+ * beside the request to below it, and back.
  *
- * The icon names the **destination**, not the current state - the rule
- * "### Pane Toggles" in `docs/design-system.md` already holds for the
- * `PanelLeft*` pair: `PanelBottom` while the response is beside ("Response
- * below"), `PanelRight` while it is below ("Response beside"). A glyph
- * showing the current arrangement would read as a status, and this strip has
- * enough of those; a glyph showing where a click takes you is an affordance.
+ * The icon names the **destination**, not the state, as "Pane Toggles" in
+ * `docs/design-system/layout.md` holds for the `PanelLeft*` pair: `PanelBottom` while the response
+ * is beside ("Response below"), `PanelRight` while below ("Response beside"). A state glyph reads
+ * as a status, and this strip has enough; a destination glyph is an affordance.
  *
- * While the setting is `auto` the button shows Auto's current pick and a click
- * writes an explicit Beside or Below - the user chose, so Auto is over until
- * they pick it again in Settings. `toggleResponsePosition` holds that rule so
- * the chord and the palette row cannot apply a different one.
+ * While the setting is `auto` the button shows Auto's current pick and a click writes an explicit
+ * Beside or Below: the user chose, so Auto is over until picked again in Settings.
+ * `toggleResponsePosition` holds that rule, so the chord and the palette row cannot apply another.
  *
- * `IconSwap` rather than a conditional render: the two glyphs are the same
- * nominal size and still not the same width of ink, and the swap crossfades
- * where a swap-by-render pops.
+ * `IconSwap`, not a conditional render: the glyphs are one nominal size but not one width of ink,
+ * and the swap crossfades where a re-render pops.
  *
- * Right-click picks instead of flipping: a radio menu over the three settings
- * (Beside, Below, Auto), the same set the Settings row offers. It is what puts
- * Auto within reach from the strip - a left click can only ever leave it - and
- * it marks which of the three is in force, which the destination glyph by
- * design does not say. `contextProps("own-menu")` keeps the main process's
- * edit menu off the gesture, as on every surface that draws its own.
+ * Right-click picks instead of flipping: a radio menu of Beside, Below and Auto, the Settings row's
+ * set. It puts Auto within reach (a left click can only leave it) and marks which is in force,
+ * which the destination glyph by design does not. `contextProps("own-menu")` keeps the main
+ * process's edit menu off the gesture, as on every surface that draws its own.
  */
 export function ResponsePositionButton() {
 	const setting = useLayoutStore((s) => s.responsePosition);

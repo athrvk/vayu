@@ -100,21 +100,75 @@ nav:
       - vs JMeter: compare/vayu-vs-jmeter.md
   - Engine:
       - Overview: engine/architecture.md
-      - HTTP API: engine/api-reference.md
-      - Test Scripting: engine/scripting.md
-      - Local Database: engine/db-schema.md
+      - HTTP API:
+          - Overview: engine/api-reference/index.md
+          - Resource Writes: engine/api-reference/resource-writes.md
+          - Request Body: engine/api-reference/request-body.md
+          - Health, Config and Workspace: engine/api-reference/health-config.md
+          - Collections and Reorder: engine/api-reference/collections.md
+          - Requests and Elements: engine/api-reference/requests.md
+          - Trash: engine/api-reference/trash.md
+          - Request Examples: engine/api-reference/examples.md
+          - Specs: engine/api-reference/specs.md
+          - Import: engine/api-reference/import.md
+          - Export: engine/api-reference/export.md
+          - Environments and Globals: engine/api-reference/environments.md
+          - Change Feed: engine/api-reference/changes.md
+          - Cookies and Certificates: engine/api-reference/cookies-and-certificates.md
+          - File Access: engine/api-reference/file-access.md
+          - Webhook Inbox: engine/api-reference/inbox.md
+          - Mock Server: engine/api-reference/mock-server.md
+          - Authentication: engine/api-reference/authentication.md
+          - POST /compose: engine/api-reference/compose.md
+          - POST /execute: engine/api-reference/execute.md
+          - POST /runs: engine/api-reference/load-runs.md
+          - Scenario Runs: engine/api-reference/scenario-runs.md
+          - Scenario Load Runs: engine/api-reference/scenario-load.md
+          - Metrics and Statistics: engine/api-reference/metrics.md
+          - Live Metrics and Events: engine/api-reference/live-metrics.md
+          - Runs: engine/api-reference/runs.md
+          - Collection Run Verdicts: engine/api-reference/collection-runs.md
+          - Scripting Completions: engine/api-reference/scripting.md
+      - Test Scripting:
+          - Overview: engine/scripting/index.md
+          - pm.test() and pm.expect(): engine/scripting/test-and-expect.md
+          - Response: engine/scripting/response.md
+          - Response Headers, Cookies and Assertions: engine/scripting/response-headers-and-assertions.md
+          - Request: engine/scripting/request.md
+          - Mutating the Request: engine/scripting/request-mutation.md
+          - Script Identity, Setup and Teardown: engine/scripting/info-and-setup.md
+          - Variables and Environments: engine/scripting/variables.md
+          - pm.sendRequest: engine/scripting/send-request.md
+          - Cookies: engine/scripting/cookies.md
+          - Flow Control, Metrics and Data Rows: engine/scripting/execution-metrics-data.md
+          - Console Output and Examples: engine/scripting/console-and-examples.md
+          - The Sandbox: engine/scripting/sandbox.md
+          - The require Shelf: engine/scripting/require-shelf.md
+          - Legacy Objects and the Visualizer: engine/scripting/legacy-and-visualizer.md
+          - Editor Support and Limitations: engine/scripting/limitations.md
+          - Where Each Kind of Script Runs: engine/scripting/execution-context.md
+          - Errors, Best Practices and API Reference: engine/scripting/errors-and-practices.md
       - Elements: engine/elements.md
       - Command Line: engine/cli.md
-      - MCP Server: engine/mcp.md
+      - MCP Server:
+          - Overview: engine/mcp/index.md
+          - Transports: engine/mcp/transports.md
+          - Tools: engine/mcp/tools.md
+          - Tool Conventions: engine/mcp/conventions.md
+          - Load Runs and Specs: engine/mcp/load-and-specs.md
+          - Runs and Reports: engine/mcp/runs-and-reports.md
+          - Writes to Saved Data: engine/mcp/saved-data.md
+          - Collection Runs and Local Services: engine/mcp/collection-runs-and-mocks.md
+          - Request Composition: engine/mcp/request-composition.md
+          - Resources and Prompts: engine/mcp/resources-and-prompts.md
+          - Safety Model: engine/mcp/safety.md
+          - Secret Values: engine/mcp/secrets.md
+          - Configuration: engine/mcp/configuration.md
       - Logging: engine/logging.md
       - Benchmarks: engine/benchmarks.md
   - Desktop App:
       - Overview: app/architecture.md
-      - UI Components: app/COMPONENTS.md
-      - Design System: design-system.md
       - UX Writing: ux-writing.md
-      - State Management: app/state-management.md
-      - Talking to the Engine: app/api-integration.md
       - Variables: app/variable-resolution.md
       - Data-Driven Runs: app/data-driven-runs.md
       - OpenAPI Collections: app/openapi.md
@@ -138,6 +192,101 @@ nav:
   - Design Notes:
       - Request Storage: request-storage-design.md
       - Lock Files: lock-file-handling.md
+  # Internals for someone changing the app or the engine, not for someone using it. The
+  # section index (navigation.indexes) keeps the page at /app/COMPONENTS/.
+  - Contributing:
+      - Talking to the Engine:
+          - Overview: app/api-integration/index.md
+          - HTTP Client and API Service: app/api-integration/http-client-and-service.md
+          - "Methods: Configuration and Local Services": app/api-integration/methods-local.md
+          - "Methods: Collections, Requests and Examples": app/api-integration/methods-saved.md
+          - "Methods: Specs": app/api-integration/methods-specs.md
+          - "Methods: Environments, Globals and Import": app/api-integration/methods-environments-import.md
+          - "Methods: Execution and Runs": app/api-integration/methods-execution.md
+          - "Methods: OAuth 2.0 and Scripting": app/api-integration/methods-oauth-scripting.md
+          - SSE Client: app/api-integration/sse-client.md
+          - API Endpoints: app/api-integration/endpoints.md
+          - Request Execution Flow: app/api-integration/execution-flow.md
+          - Streaming Request Execution: app/api-integration/streaming.md
+          - Errors and Connection Management: app/api-integration/errors-and-connection.md
+          - Testing and Troubleshooting: app/api-integration/testing-and-troubleshooting.md
+      - UI Components:
+          - app/COMPONENTS/index.md
+          - App Shell: app/COMPONENTS/app-shell.md
+          - Request Builder: app/COMPONENTS/request-builder.md
+          - GraphQL Library: app/COMPONENTS/graphql-library.md
+          - Drag Primitives and Agent References: app/COMPONENTS/drag-and-agent-references.md
+          - Collections: app/COMPONENTS/collections.md
+          - Load Test Dashboard: app/COMPONENTS/dashboard.md
+          - History: app/COMPONENTS/history.md
+          - Variables and Settings: app/COMPONENTS/variables-and-settings.md
+          - Webhook Inbox: app/COMPONENTS/inbox.md
+          - Services: app/COMPONENTS/services.md
+          - Mock Server: app/COMPONENTS/mock-server.md
+          - Logs and Console: app/COMPONENTS/logs-and-console.md
+          - Welcome: app/COMPONENTS/welcome.md
+          - Command Palette: app/COMPONENTS/palette.md
+          - Command Registry: app/COMPONENTS/command-registry.md
+          - "Shared: Breadcrumb, Toasts and Run Status": app/COMPONENTS/shared-run-status.md
+          - "Shared: Run Results": app/COMPONENTS/shared-run-results.md
+          - "Shared: Warnings and Banners": app/COMPONENTS/shared-warnings-and-banners.md
+          - "Shared: Fields and Snippets": app/COMPONENTS/shared-fields.md
+          - "Shared: ElementList": app/COMPONENTS/shared-element-list.md
+          - "Shared: Response Viewer and Auth": app/COMPONENTS/shared-response-viewer.md
+          - "Shared: Key/Value Editor": app/COMPONENTS/shared-key-value-editor.md
+          - "Shared: Variable Input": app/COMPONENTS/shared-variable-input.md
+          - UI Primitives: app/COMPONENTS/ui-primitives.md
+          - Patterns and State: app/COMPONENTS/patterns.md
+      - Design System:
+          - Overview: design-system/index.md
+          - Surface, Foreground and Border Tokens: design-system/surfaces.md
+          - Accent and Status Colors: design-system/accent-and-status.md
+          - Color Schemes: design-system/color-schemes.md
+          - Chart Series and Text Colors: design-system/chart-colors.md
+          - Scope, Decorative and Method Colors: design-system/categorical-colors.md
+          - Typography: design-system/typography.md
+          - Spacing and Chrome Floors: design-system/spacing-and-floors.md
+          - Geometry: design-system/geometry.md
+          - Animations and Motion: design-system/motion.md
+          - Focus and Interaction States: design-system/focus-states.md
+          - Accessibility: design-system/accessibility.md
+          - Row Actions and Drawer Panels: design-system/rows-and-drawers.md
+          - Overflowing Text and Flex Shrink: design-system/overflow-and-shrink.md
+          - Tree Navigation: design-system/tree-navigation.md
+          - Dialog Sizes: design-system/dialogs.md
+          - Layout Structure: design-system/layout.md
+          - Component Patterns: design-system/component-patterns.md
+          - Feedback and Dashboard Components: design-system/feedback-and-dashboard.md
+          - Utilities, Editor Widgets and Scrollbars: design-system/utilities-editor-scrollbar.md
+      - State Management:
+          - Overview: app/state-management/index.md
+          - Tabs, Layout and Session Stores: app/state-management/tabs-layout-session.md
+          - Data File, Spec File and Recovery Stores: app/state-management/data-and-spec-files.md
+          - Engine, Response and Console Stores: app/state-management/engine-and-response.md
+          - Save and Entity Draft Stores: app/state-management/save-and-drafts.md
+          - Preference Stores: app/state-management/preferences.md
+          - Dashboard and Live Run Stores: app/state-management/run-live-state.md
+          - Notice, Menu and Modal Stores: app/state-management/notices-and-menus.md
+          - Module-Local Stores: app/state-management/module-local-stores.md
+          - TanStack Query Hooks: app/state-management/query-hooks.md
+          - Query Keys and Cache Policy: app/state-management/query-keys.md
+          - Engine and Variable Hooks: app/state-management/engine-and-variable-hooks.md
+          - RequestBuilderContext: app/state-management/request-builder-context.md
+          - Save and Draft Hooks: app/state-management/draft-hooks.md
+          - Flows and Best Practices: app/state-management/flows-and-practices.md
+      - MCP Internals: engine/mcp/internals.md
+      - Local Database:
+          - Overview: engine/db-schema/index.md
+          - Startup and Recovery: engine/db-schema/startup-and-recovery.md
+          - Schema Versions: engine/db-schema/schema-versions.md
+          - Collections and Requests: engine/db-schema/collections-and-requests.md
+          - Spec Documents: engine/db-schema/specs.md
+          - Environments and Globals: engine/db-schema/environments-and-globals.md
+          - Certificates, Files and OAuth Tokens: engine/db-schema/credentials-and-files.md
+          - Runs: engine/db-schema/runs.md
+          - Run Samples, Results and Inbox: engine/db-schema/run-artifacts.md
+          - Config Entries: engine/db-schema/config.md
+          - Indexes and VariableValue: engine/db-schema/indexes.md
 
 markdown_extensions:
   - admonition

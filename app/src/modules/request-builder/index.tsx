@@ -6,18 +6,9 @@
  */
 
 /**
- * RequestBuilder - Main Container Component
- *
- * Location: Main content area only
- *
- * This is the main entry point for the RequestBuilder module.
- * It composes all sub-components and provides the context.
- *
- * Architecture:
- * - RequestBuilderProvider wraps everything for state management
- * - UrlBar handles method selection, URL input, and send button
- * - RequestTabs handles request configuration (params, headers, body, etc.)
- * - ResponseViewer displays the response
+ * The request builder's entry point, in the main content area: RequestBuilderProvider holds the
+ * state, UrlBar the method, URL and Send, RequestTabs the request's configuration, and
+ * ResponseViewer the response.
  */
 
 import { useCallback, useMemo, useState, useEffect } from "react";
@@ -109,12 +100,10 @@ import type {
 } from "@/types";
 
 /**
- * The PUT payload for exactly the fields the user changed (issue #1436) - an
- * untouched field is omitted, which the engine's partial-update merge (see
- * `apply_request_fields`) reads as "leave the stored value alone", not as "clear
- * it". `changedFields` groups the four body-shaping fields under one write,
- * since the wire's `body`/`bodyType` are one value split across them in the
- * editor's flattened state.
+ * The PUT payload for exactly the changed fields (#1436): an untouched field is omitted, which the
+ * engine's partial-update merge (`apply_request_fields`) reads as "leave it", not "clear it".
+ * `changedFields` groups the four body-shaping fields under one write, since the wire's
+ * `body`/`bodyType` is one value split across them in the editor's state.
  */
 function buildUpdatePayload(
 	requestId: string,
@@ -125,30 +114,24 @@ function buildUpdatePayload(
 
 	if (changedFields.has("name")) {
 		/*
-		 * A blank name is refused rather than saved - see the Info tab's
-		 * blank-name guard, which restores the stored name on blur. The
-		 * debounced autosave can still fire while the field is briefly empty,
-		 * so the guard has to be here too: omitting the key leaves the stored
-		 * name untouched, where sending `""` would blank it everywhere the
-		 * request is listed.
+		 * A blank name is refused, not saved (the Info tab's guard restores the stored name on
+		 * blur). The debounced autosave can fire while the field is briefly empty, so the guard is
+		 * here too: omitting the key keeps the stored name, where `""` would blank it everywhere
+		 * the request is listed.
 		 */
 		const name = request.name.trim();
 		if (name) payload.name = name;
 	}
 	if (changedFields.has("description")) payload.description = request.description;
 	if (changedFields.has("method")) payload.method = request.method as HttpMethod;
-	// Same null-vs-absent rule as `specOperation`: an untouched marker is
-	// omitted (keep), and leaving GraphQL - or picking a method by hand -
-	// touches it down to `undefined`, which has to reach the wire as an
-	// explicit `null` or the engine reads the absent key as "keep" instead.
+	// `specOperation`'s null-vs-absent rule: untouched is omitted (keep), and leaving GraphQL or a
+	// hand pick sets `undefined`, which must reach the wire as `null` or the engine reads "keep".
 	if (changedFields.has("methodSource")) payload.methodSource = request.methodSource ?? null;
 	if (changedFields.has("url")) payload.url = request.url;
 	if (changedFields.has("params")) payload.params = toKeyValueEntries(request.params);
-	// Only the user's rows: nothing in editor state is Vayu's own any more
-	// (issue #1229), so this needs no filter to stay clean.
-	// `disabledDefaultHeaders` is deliberately never sent - none of the
-	// opt-outs is persisted; they belong to a send, and the defaults they
-	// refuse are re-resolved from engine config on every one.
+	// Only the user's rows: editor state holds nothing of Vayu's (#1229), so no filter is needed.
+	// `disabledDefaultHeaders` is never sent: opt-outs belong to a send, and the defaults they
+	// refuse are re-resolved from engine config each time.
 	if (changedFields.has("headers")) payload.headers = toKeyValueEntries(request.headers);
 	if (
 		changedFields.has("bodyMode") ||
@@ -164,32 +147,28 @@ function buildUpdatePayload(
 	}
 	if (changedFields.has("auth")) payload.auth = request.auth;
 	/*
-	 * The whole list is sent when touched, empty array included. `undefined`
-	 * serialises the key out of the body, and an absent key on a `PUT` means
-	 * "leave the stored value alone" - so a list cleared to `[]` has to be
-	 * *sent*, not omitted, which is exactly what "touched" already
+	 * The whole list when touched, `[]` included: `undefined` drops the key, and an absent key on a
+	 * `PUT` keeps the stored value, so a list cleared to `[]` must be *sent*, which "touched"
 	 * distinguishes from "never edited".
 	 */
 	if (changedFields.has("elements")) payload.elements = request.elements;
 	if (changedFields.has("followRedirects")) payload.followRedirects = request.followRedirects;
 	if (changedFields.has("maxRedirects")) payload.maxRedirects = request.maxRedirects;
-	// A cleared field is an explicit `null`: an absent key keeps the stored
-	// timeout, so "back to the default" has to be sent to reach the engine
-	// (issue #2937, the `methodSource` rule above).
+	// A cleared field is an explicit `null`, since an absent key keeps the stored timeout (#2937,
+	// the `methodSource` rule).
 	if (changedFields.has("timeout")) payload.timeout = request.timeout ?? null;
 	if (changedFields.has("httpVersion")) payload.httpVersion = request.httpVersion;
 	if (changedFields.has("verifySSL")) payload.verifySSL = request.verifySSL;
 	if (changedFields.has("disableCookies")) payload.disableCookies = request.disableCookies;
-	// The *stored* automatic-header list (issue #1765), edited in the Settings
-	// tab - unlike the per-send `disabledDefaultHeaders` above, which never is.
-	// Sent whole, `[]` included, for the `elements` reason.
+	// The *stored* automatic-header list (#1765), edited in Settings, unlike the per-send
+	// `disabledDefaultHeaders`; sent whole, `[]` included, for the `elements` reason.
 	if (changedFields.has("disabledSystemHeaders"))
 		payload.disabledSystemHeaders = request.disabledSystemHeaders;
 	if (changedFields.has("disableUrlEncoding"))
 		payload.disableUrlEncoding = request.disableUrlEncoding;
 	if (changedFields.has("stream")) payload.stream = request.stream;
-	// A cleared field is an explicit `null`, the `timeout` rule: an absent key
-	// keeps the stored path (#3773).
+	// A cleared field is an explicit `null` (the `timeout` rule): an absent key keeps the path
+	// (#3773).
 	if (changedFields.has("streamTextPath"))
 		payload.streamTextPath = request.streamTextPath.trim() || null;
 	if (changedFields.has("streamFirstContentMarker"))
@@ -199,13 +178,10 @@ function buildUpdatePayload(
 }
 
 /**
- * The stored params as the draft's rows.
- *
- * A query only in the URL (stored with no `params`) gets its rows here, or the
- * table opens empty and its first edit rebuilds the URL without that query
- * (#3491). `baseline` is seeded from this same value, so the rows do not make
- * the draft unsaved. The query table's spare row sits ahead of the path rows,
- * where the table's own edits leave it, so adopting a refetch can hand it the
+ * The stored params as draft rows. A query only in the URL (stored with no `params`) gets rows
+ * here, or the table opens empty and its first edit drops that query from the URL (#3491).
+ * `baseline` is seeded from the same value, so the rows do not dirty the draft. The query's spare
+ * row sits ahead of the path rows, where the table's edits leave it, so a refetch can hand it the
  * draft's spare row id (`carryRowIds`, #3663).
  */
 function paramsDraftRows(stored: FormFieldEntry[], url: string): KeyValueItem[] {
@@ -214,10 +190,9 @@ function paramsDraftRows(stored: FormFieldEntry[], url: string): KeyValueItem[] 
 }
 
 /**
- * The pane a dirty tab falls back to when its request is deleted elsewhere
- * (issue #1436). `index.tsx` keeps `RequestBuilderProvider` mounted for this
- * case specifically so the draft is still reachable through context - a copy
- * of what the user had, rather than a 404 toast from a doomed autosave.
+ * The pane a dirty tab falls back to when its request is deleted elsewhere (#1436). This file keeps
+ * `RequestBuilderProvider` mounted for it, so the draft is reachable through context: a copy of the
+ * user's work, not a 404 toast from a doomed autosave.
  */
 function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 	const { request } = useRequestBuilderContext();
@@ -233,10 +208,8 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 				headers: toHeaderRows(request.headers),
 				body: toBodyPayload(request),
 				/*
-				 * The collection this request might have inherited auth from
-				 * cannot be looked up any more, so `inherit` resolves to nothing
-				 * here rather than guessing - the same answer an empty ancestor
-				 * chain gives a request that was never deleted.
+				 * The collection the auth might inherit from cannot be looked up now, so `inherit`
+				 * resolves to nothing rather than guessing, as for an empty ancestor chain.
 				 */
 				auth: resolveAuthForSend(request.auth, []),
 				stream: request.stream,
@@ -247,9 +220,9 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 				httpVersion: request.httpVersion,
 				disableUrlEncoding: request.disableUrlEncoding,
 			});
-			// A text button, so the acknowledgement is the toast rather than a
-			// check swap (design-system.md, Component Patterns) - and `useCopy`
-			// owns the failure path, which this used to duplicate by hand.
+			// A text button, so the acknowledgement is the toast, not a check swap
+			// (design-system/feedback-and-dashboard.md, Component Patterns); `useCopy` owns the
+			// failure path.
 			await copy(snippet.code, "cURL command");
 		} catch (error) {
 			console.error("Failed to build the request as curl:", error);
@@ -277,18 +250,14 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 	);
 }
 
-/**
- * RequestBuilder - Main entry point
- *
- * Gets request ID from store, fetches data, and provides context
- */
+/** Reads the request id from the tab store, fetches the request, and provides the context. */
 export default function RequestBuilder() {
 	const openTabs = useTabsStore((s) => s.openTabs);
 	const activeTabId = useTabsStore((s) => s.activeTabId);
 	const openTab = useTabsStore((s) => s.openTab);
 	const closeTab = useTabsStore((s) => s.closeTab);
-	// A request is picked from the Collections drawer, so that is where the
-	// "nothing selected" pane sends you.
+	// A request is picked from the Collections drawer, so the "nothing selected" pane sends you
+	// there.
 	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const startRun = useDashboardStore((s) => s.startRun);
@@ -298,19 +267,16 @@ export default function RequestBuilder() {
 	const updateRequestMutation = useUpdateRequestMutation();
 	const queryClient = useQueryClient();
 
-	// Get selectedRequestId from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const selectedRequestId = activeTab?.type === "request" ? activeTab.entityId : null;
 
-	// Load test dialog state
 	const [showLoadTestDialog, setShowLoadTestDialog] = useState(false);
 	const [isStartingLoadTest, setIsStartingLoadTest] = useState(false);
 	const [pendingLoadTestRequest, setPendingLoadTestRequest] = useState<RequestState | null>(null);
-	// The collection-run dialog the load dialog hands over to (#3050). Mounted
-	// only while a collection is set, like every other host of that dialog.
+	// The collection-run dialog the load dialog hands over to (#3050), mounted only with a
+	// collection set.
 	const [runCollectionTarget, setRunCollectionTarget] = useState<Collection | null>(null);
 
-	// Fetch request data
 	const {
 		data: fetchedRequest,
 		isLoading,
@@ -319,25 +285,20 @@ export default function RequestBuilder() {
 		refetch,
 	} = useRequestQuery(selectedRequestId);
 
-	// Remember the collection the user is working in so the welcome screen can
-	// land a new request here. Set from the loaded request, where collectionId
-	// is authoritative - not from a tab-focus cache peek, which can be stale.
+	// The collection being worked in, for the welcome screen to place a new request; from the
+	// loaded request, whose `collectionId` is authoritative, not a possibly stale tab-focus cache
+	// peek.
 	const setLastCollectionId = useSessionStore((s) => s.setLastCollectionId);
 	useEffect(() => {
 		if (fetchedRequest?.collectionId) setLastCollectionId(fetchedRequest.collectionId);
 	}, [fetchedRequest?.collectionId, setLastCollectionId]);
 
 	/*
-	 * Whether this tab ever saw its request load, across the tab's whole life
-	 * rather than just this render (issue #1436). A 404 that follows a real
-	 * load is a deletion with a draft worth offering; a 404 on the very first
-	 * fetch (a bad id, a tab restored after the row is long gone) has no draft
-	 * to preserve and gets the plain "no longer exists" pane instead.
-	 *
-	 * Adjusted during render, like `RequestBuilderProvider`'s own reset gates:
-	 * this is state derived from the query, and a ref read here would run
-	 * afoul of the same rule those gates exist to satisfy (a render can be
-	 * discarded or replayed, a ref cannot).
+	 * Whether this tab ever saw its request load, over the tab's life (#1436): a 404 after a load
+	 * is a deletion with a draft to offer; a 404 on the first fetch (a bad id, a long-gone row) has
+	 * none and gets the plain "no longer exists" pane. Adjusted during render, like the provider's
+	 * reset gates: state derived from the query, where a ref read would break the same rule (a
+	 * render can be discarded or replayed, a ref cannot).
 	 */
 	const [hadRequestFor, setHadRequestFor] = useState({ id: selectedRequestId, had: false });
 	if (hadRequestFor.id !== selectedRequestId) {
@@ -346,19 +307,18 @@ export default function RequestBuilder() {
 		setHadRequestFor((prev) => ({ ...prev, had: true }));
 	}
 
-	// Ancestor chain for the current request's collection (root-first)
+	// The current collection's ancestor chain, root first.
 	const collectionAncestors = useCollectionAncestors(fetchedRequest?.collectionId);
 
-	// Variable resolver for the current request's collection
-	// Preview-only since #226: execution resolves engine-side (POST /compose).
-	// `resolveObject` still backs the load dialog's OAuth token-expiry guard,
-	// which previews the effective config without sending anything.
+	// The variable resolver, preview-only (#226): execution resolves engine-side (POST /compose).
+	// `resolveObject` still backs the load dialog's OAuth expiry guard, which previews without
+	// sending.
 	const { resolveObject, resolveString } = useVariableResolver({
 		collectionId: fetchedRequest?.collectionId || undefined,
 	});
 
-	// The elements a load run of the pending request would resolve, inherited
-	// ones included: what the dialog warns about is what the run composes.
+	// The elements a load run of the pending request resolves, inherited ones included: the dialog
+	// warns about what the run composes.
 	const pendingLoadTestParts = useMemo(
 		() =>
 			pendingLoadTestRequest
@@ -375,10 +335,9 @@ export default function RequestBuilder() {
 		[pendingLoadTestParts]
 	);
 
-	// The pending load-test request's OAuth 2.0 config as written, if its auth
-	// resolves to oauth2. The shared walk lets an ancestor set to No Auth stop the
-	// search here too - otherwise the guard would fetch a token the request never
-	// sends.
+	// The pending load-test request's OAuth 2.0 config as written, if its auth resolves to oauth2.
+	// The shared walk lets an ancestor set to No Auth stop the search, or the guard would fetch a
+	// token never sent.
 	const pendingOAuth2Raw = useMemo(
 		() =>
 			pendingLoadTestRequest
@@ -387,8 +346,8 @@ export default function RequestBuilder() {
 		[pendingLoadTestRequest, collectionAncestors]
 	);
 
-	// Effective (variable-resolved) OAuth 2.0 config for the pending load-test
-	// request. Drives the token-expiry guard.
+	// The pending load-test request's variable-resolved OAuth 2.0 config, for the token-expiry
+	// guard.
 	const pendingOAuth2Config = useMemo(
 		() =>
 			pendingOAuth2Raw
@@ -400,25 +359,24 @@ export default function RequestBuilder() {
 		[pendingOAuth2Raw, resolveObject]
 	);
 
-	// Asked only while the dialog is open: a load run fetches its token once,
-	// before any script, and this is for the note that says so.
+	// Asked only while the dialog is open: a load run fetches its token once, before any script,
+	// and this feeds the note saying so.
 	const pendingOAuth2DeferredNames = useOAuth2DeferredNames(
 		fetchedRequest?.id ?? "",
 		pendingOAuth2Raw,
 		showLoadTestDialog
 	);
 
-	// The URL the load dialog names as the target and classifies for its
-	// off-network advisory (#2117). Resolved from the same scopes the preview
-	// uses, so a `{{baseUrl}}` with no value stays a token and reads as unknown.
+	// The URL the dialog names as target and classifies for its off-network advisory (#2117),
+	// resolved from the preview's scopes, so a valueless `{{baseUrl}}` stays a token and reads as
+	// unknown.
 	const pendingLoadTestUrl = useMemo(
 		() => (pendingLoadTestRequest ? resolveString(pendingLoadTestRequest.url) : undefined),
 		[pendingLoadTestRequest, resolveString]
 	);
 
-	// The pending request in the stored row's shapes, for the load dialog's
-	// data-column audit (issue #2050). The draft rather than the stored row,
-	// because the draft is what the run sends.
+	// The pending load-test request in stored-row shapes, for the load dialog's data-column audit
+	// (#2050); the draft, as that is what the run sends.
 	const pendingLoadTestAuditRequest = useMemo<ColumnAuditRequest | undefined>(
 		() =>
 			pendingLoadTestRequest
@@ -449,14 +407,12 @@ export default function RequestBuilder() {
 		[savedRequestId, savedRequestName]
 	);
 
-	// Convert fetched request to RequestState format
 	const initialRequest = useMemo((): Partial<RequestState> | undefined => {
 		if (!fetchedRequest) return undefined;
 
 		const body = fetchedRequest.body;
-		// The stored mode is the editor's mode, one for one. The ternary chain
-		// this replaced read a mode it did not name as "none", which is how a new
-		// mode would have been dropped in silence.
+		// The stored mode is the editor's, one for one; no mapping can turn an unnamed new mode
+		// into "none".
 		const bodyMode = body.mode;
 
 		const rawBody = "content" in body ? body.content : "";
@@ -473,22 +429,19 @@ export default function RequestBuilder() {
 			bodyMode,
 			body: rawBody,
 			/*
-			 * A request stores one body, so the record has no opinion about the
-			 * modes it does not hold. Naming those keys with empty values made the
-			 * save's own echo read as "formData is now []", which the merge adopts
-			 * over the draft's rows (#3665). Absent keys let `{ ...baseline,
-			 * ...initialRequest }` carry the draft's own. The test is the stored
-			 * mode, not whether it holds anything: a form-data body with no fields
-			 * is still the record's answer.
+			 * A request stores one body, so the record says nothing of other modes: naming their
+			 * keys empty made a save's echo read as "formData is now []", which the merge adopted
+			 * over the draft's rows (#3665). Absent keys let `{ ...baseline, ...initialRequest }`
+			 * keep the draft's own. The test is the stored mode, not content: an empty form-data
+			 * body is still the record's answer.
 			 */
 			...(body.mode === "form-data" && { formData: toKeyValueItems(body.fields) }),
 			...(body.mode === "x-www-form-urlencoded" && {
 				urlEncoded: toKeyValueItems(body.fields),
 			}),
 			...(body.mode === "binary" && { binaryFile: body.file ?? noFile() }),
-			// Named for the stored mcp body alone, for the reason above, and even
-			// when it holds no tool: an external write that removed one must reach
-			// the draft as "none" rather than leave the old tool in place.
+			// For the stored mcp body only, as above, even without a tool: an external write
+			// removing one must reach the draft as "none".
 			...(body.mode === "mcp" && { mcpTool: body.mcpTool }),
 			auth: fetchedRequest.auth,
 			elements: fetchedRequest.elements,
@@ -508,28 +461,18 @@ export default function RequestBuilder() {
 		};
 	}, [fetchedRequest]);
 
-	// Judges the draft's elements at Send (#3066) by the same schemas the Elements
-	// tab flags them with; `ElementsPanel` already fetches it, so this is a cache read.
+	// Judges the draft's elements at Send (#3066) by the Elements tab's schemas; `ElementsPanel`
+	// fetches it, so this is a cache read.
 	const { data: elementKinds } = useElementKindsQuery();
 
 	/**
-	 * The compose body a Send puts on the wire, the script parts that went into
-	 * it, and the draft elements it leaves out (`leftOut`, #3066).
-	 *
-	 * Shared by the buffered and the streaming send (issue #574): the two differ
-	 * only in which endpoint answer they take, and everything up to that point -
-	 * the headers, the body builder, the collection chain's scripts - has to be
-	 * identical, or a stream would measure a different request from the one Send
-	 * sends. Built apart from the engine-side composition so a handler holds
-	 * `leftOut` before that call can fail: a failed send still says what it left
-	 * out.
-	 *
-	 * `collectionAncestors` is the live chain, so a stream's refusal for
-	 * carrying scripts is decided by what the send *would* run, not by what this
-	 * request alone declares.
-	 *
-	 * `dataRow` is Send-with-row's chosen row (issue #601), and composition needs
-	 * it for its *names* alone - see the `dataColumns` field below.
+	 * The compose body a Send puts on the wire, the script parts in it, and the draft elements it
+	 * leaves out (`leftOut`, #3066). Shared by the buffered and streaming send (#574): everything
+	 * up to the endpoint answer must be identical, or a stream would measure another request. Built
+	 * apart from the engine-side composition, so a handler holds `leftOut` before that can fail: a
+	 * failed send still says what it left out. `collectionAncestors` is the live chain, so a
+	 * stream's refusal for carrying scripts follows what the send *would* run. `dataRow` (#601)
+	 * matters to composition only for its *names* (`dataColumns` below).
 	 */
 	const buildSendBody = useCallback(
 		(
@@ -540,8 +483,8 @@ export default function RequestBuilder() {
 		) =>
 			buildComposeBody({
 				request,
-				// The draft's unfinished elements stay out of the payload (#3066), as
-				// in the Code section; an unloaded catalogue judges what it can.
+				// Unfinished draft elements stay out of the payload (#3066), as in the Code
+				// section; an unloaded catalogue judges what it can.
 				elements: {
 					chain: collectionAncestors,
 					ownerId,
@@ -549,16 +492,14 @@ export default function RequestBuilder() {
 				},
 				collectionId: ownerCollectionId,
 				environmentId: activeEnvironmentId,
-				// The row's own keys, which is exactly the set the engine's bind
-				// reads back (issue #1007): a Postman-shaped `{{username}}` has to
-				// survive composition to reach that bind. Absent for an ordinary
-				// Send, which composes exactly as it did.
+				// The row's keys, exactly the set the engine's bind reads back (#1007): a
+				// Postman-style `{{username}}` must survive composition to reach that bind. Absent
+				// for an ordinary Send.
 				dataColumns: dataRow ? Object.keys(dataRow) : undefined,
 			}),
 		[collectionAncestors, activeEnvironmentId, elementKinds]
 	);
 
-	// Execute request callback
 	const handleExecute = useCallback(
 		async (
 			request: RequestState,
@@ -567,7 +508,7 @@ export default function RequestBuilder() {
 		): Promise<ResponseState | null> => {
 			if (!fetchedRequest) return null;
 
-			// Outside the try: a send that fails still left these out.
+			// Outside the try: a failed send still left these out.
 			let leftOut: LeftOutElement[] = [];
 			try {
 				const built = buildSendBody(
@@ -581,44 +522,36 @@ export default function RequestBuilder() {
 				const composed = await engineComposeRequest(built.body);
 
 				const result = await engineExecuteRequest(
-					// `stream: false` explicitly, never elided - the two answers
-					// this endpoint can give are different *shapes*, so which one
-					// is coming back is not a decision to hand to an engine-side
-					// default. See `ExecuteRequestRequest.stream`.
+					// `stream: false` explicitly: the endpoint's two answers are different
+					// *shapes*, so which comes back is no decision for an engine default
+					// (`ExecuteRequestRequest.stream`).
 					{
 						...composed,
 						requestId: fetchedRequest.id,
 						stream: false,
-						// The defaults this send refuses (issue #1229). Beside the
-						// composed payload rather than through composition: what
-						// the engine adds is decided at send time from config, so
-						// the opt-out belongs to the send, not to the composed
-						// request. Omitted entirely when nothing is switched off.
+						// The defaults this send refuses (#1229), beside the composed payload, not
+						// through it: what the engine adds is decided at send time from config, so
+						// the opt-out is the send's. Omitted when none.
 						...disabledDefaults(request),
-						// A Send-with-row's row, or nothing at all (issue #601).
-						// It rides *beside* the composed payload rather than
-						// through composition: `{{data.*}}` survives compose by
-						// design, so the tokens are still written when the
-						// engine binds them here.
+						// A Send-with-row's row, or nothing (#601), beside the composed payload:
+						// `{{data.*}}` survives compose by design, so the tokens are still written
+						// when the engine binds here.
 						...(dataRow ? { data: dataRow } : {}),
 					},
 					activeEnvironmentId || undefined,
 					signal
 				);
 
-				// Before the cancelled-send exit: Cancel only stops the renderer
-				// waiting, so the engine still runs and records the request (#3352).
-				// This send is a new design run, and the context bar's Recent
-				// sends list is not polled - without this it would keep showing
-				// the sends from before this one for as long as the tab is open.
-				// The history list has its own 5s poll and needs nothing here.
+				// Before the cancelled-send exit: Cancel only stops waiting, the engine still runs
+				// and records the request (#3352). The context bar's Recent sends is not polled, so
+				// it would otherwise keep showing older sends; the history list has its own 5s
+				// poll.
 				queryClient.invalidateQueries({
 					queryKey: queryKeys.runs.recentDesign(fetchedRequest.id),
 				});
 
-				// Refresh variables so script-set values (e.g. pm.environment.set)
-				// appear in the UI - an extractor's `scope` writes them too, see
-				// the helper's note.
+				// Refresh variables so script-set values (`pm.environment.set`) appear; an
+				// extractor's `scope` writes them too (see the helper).
 				if (elementsMayWriteVariables(elements)) {
 					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
@@ -627,17 +560,16 @@ export default function RequestBuilder() {
 
 				if (!result) return null;
 
-				// Surface an OAuth 2.0 authorization requirement (the engine could
-				// not fetch a token non-interactively) - the response still renders
-				// its error, but the toast points the user at the fix.
+				// The engine could not fetch an OAuth 2.0 token non-interactively: the response
+				// renders its error, and the toast points at the fix.
 				if (result.errorCode === "AUTH_REQUIRED") {
 					showToast(
 						"This request needs an OAuth 2.0 token. Open the Auth tab to get one.",
 						"error"
 					);
 				} else if (result.errorCode === "AUTH_FAILED") {
-					// The engine's message names JSON fields (accessTokenUrl); the user
-					// is looking at a form that labels them (Access Token URL).
+					// The engine's message names JSON fields (accessTokenUrl); the form labels them
+					// (Access Token URL).
 					showToast(
 						result.errorMessage
 							? humanizeOAuth2Error(result.errorMessage)
@@ -646,14 +578,13 @@ export default function RequestBuilder() {
 					);
 				}
 
-				// Shared with the History run view's send path - see execute-mapping.ts
+				// Shared with the History run view's send path (execute-mapping.ts).
 				const response = responseFromExecuteResult(result);
-				// A session send, so the Console lists it (#3634); a History
-				// replay maps its answer without this. The answer's method and URL
-				// are what was dialled, after any pre-request script retargeted the
-				// send; the composed ones stand in for an engine that predates them.
-				// `runId` is what the engine recorded the Send under (#3679), absent
-				// for a transient one: it is what the row's "Open run" opens.
+				// A session send, so the Console lists it (#3634); a History replay maps its answer
+				// without this. The answer's method and URL are what was dialled after any script
+				// retargeting; the composed ones stand in for an older engine. `runId` is the run
+				// the engine recorded (#3679), absent for a transient send: it is what "Open run"
+				// opens.
 				appendSendToConsole({
 					method: result.method ?? composed.method,
 					url: result.url ?? composed.url,
@@ -672,14 +603,14 @@ export default function RequestBuilder() {
 					body: errorMsg,
 					time: 0,
 					size: 0,
-					// Compose runs first, so an engine that is down throws here
-					// before any send - a plain Error from the fetch, not an
-					// `ApiError`. Same rule as `useEngine`'s `executeRequest`.
+					// Compose runs first, so a down engine throws here before any send, a plain
+					// fetch Error, not an `ApiError`; `useEngine`'s `executeRequest` follows the
+					// same rule.
 					errorCode: responseCodeOfFailure(error),
 					errorMessage: errorMsg,
 				};
-				// A Send that never got an answer is still a Send the Console
-				// lists (#3634), with the request as written: nothing composed.
+				// A Send that got no answer is still listed by the Console (#3634), as written:
+				// nothing composed.
 				appendSendToConsole({
 					method: request.method,
 					url: request.url,
@@ -701,20 +632,12 @@ export default function RequestBuilder() {
 	);
 
 	/**
-	 * Start a stream-flagged send (issue #574).
-	 *
-	 * The composition is the buffered path's, exactly; only the answer differs -
-	 * `202 {runId, eventsUrl}` and no exchange, because there is none yet. The
-	 * provider takes it from here: it registers the stream and the events hook
-	 * tails it.
-	 *
-	 * A refusal comes back as a response to render rather than as a thrown
-	 * error swallowed at the boundary. The engine's refusals here are ones a
-	 * user has to read and act on - a stream cannot carry scripts, and the
-	 * scripts a send carries include the collection chain's - so the message is
-	 * shown in the pane where the response would have been, and repeated as a
-	 * toast because the pane is easy to miss when the Events tab is the one on
-	 * screen.
+	 * Start a stream-flagged send (#574): the buffered path's composition exactly, with
+	 * `202 {runId, eventsUrl}` and no exchange; the provider registers the stream and the events
+	 * hook tails it. A refusal returns as a response to render, not a swallowed error: the engine's
+	 * refusals here need reading (a stream cannot carry scripts, including the chain's), so the
+	 * message fills the response pane and repeats as a toast, since the pane is easy to miss from
+	 * the Events tab.
 	 */
 	const handleExecuteStream = useCallback(
 		async (
@@ -723,7 +646,7 @@ export default function RequestBuilder() {
 		): Promise<StreamStartResult | null> => {
 			if (!fetchedRequest) return null;
 
-			// Outside the try: a send that fails still left these out.
+			// Outside the try: a failed send still left these out.
 			let leftOut: LeftOutElement[] = [];
 			try {
 				const built = buildSendBody(
@@ -739,21 +662,18 @@ export default function RequestBuilder() {
 					...composed,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
-					// Same opt-out the buffered send carries - a stream must not
-					// go out with a header set the buffered send would not.
+					// The buffered send's opt-out: a stream must not carry a header set the
+					// buffered send would not.
 					...disabledDefaults(request),
 					// The inline compose carries no text path, so the send states it.
 					...streamTextPathOf(request),
-					// A stream binds a row exactly as a buffered send does - the
-					// engine reads it before the transfer starts, so the URL and
-					// headers it opens with are the bound ones (issue #601).
+					// A stream binds a row as a buffered send does; the engine reads it before the
+					// transfer, so the URL and headers it opens with are bound (#601).
 					...(dataRow ? { data: dataRow } : {}),
 				});
 
-				// A stream is a design run like any other, so the context bar's
-				// Recent sends list has to hear about it now - it is not polled,
-				// and the run exists from this moment rather than when the stream
-				// ends.
+				// A stream is a design run, so Recent sends (not polled) is told now: the run
+				// exists from here, not from when the stream ends.
 				queryClient.invalidateQueries({
 					queryKey: queryKeys.runs.recentDesign(fetchedRequest.id),
 				});
@@ -773,9 +693,8 @@ export default function RequestBuilder() {
 					errorCode: responseCodeOfFailure(error),
 					errorMessage: errorMsg,
 				};
-				// A refused stream is a Send the Console lists as a buffered one that
-				// got no answer is (#3634): no stream opens, so `finalizeStreamRun`
-				// never appends it later.
+				// A refused stream is listed like a buffered Send with no answer (#3634): no stream
+				// opens, so `finalizeStreamRun` never appends it.
 				appendSendToConsole({
 					method: request.method,
 					url: request.url,
@@ -795,8 +714,8 @@ export default function RequestBuilder() {
 		]
 	);
 
-	// Save request callback: only the fields the user actually changed since
-	// the draft's last known-good value (issue #1436) - see `buildUpdatePayload`.
+	// Saves only the fields changed since the draft's last known-good value (#1436); see
+	// `buildUpdatePayload`.
 	const handleSave = useCallback(
 		async (request: RequestState, changedFields: ReadonlySet<MergeableRequestField>) => {
 			if (!fetchedRequest || changedFields.size === 0) return;
@@ -808,14 +727,10 @@ export default function RequestBuilder() {
 	);
 
 	/*
-	 * `canStartLoadRun` (#3351): while a run holds the stream, open it and say
-	 * which run it is instead of starting another. True when it refused.
-	 *
-	 * The gate is about *load* runs only. A streaming design request (issue
-	 * #574) is not checked here and deliberately does not block one: a design
-	 * stream holds one consumer on one run's events and reports into the
-	 * response pane, while a load run owns the dashboard, and neither can be
-	 * mistaken for the other or read the other's numbers.
+	 * `canStartLoadRun` (#3351): while a run holds the stream, open it and name it instead of
+	 * starting another; true when it refused. Load runs only: a streaming design request (#574)
+	 * does not block one, holding one consumer on one run and reporting into the response pane,
+	 * while a load run owns the dashboard; neither can read the other's numbers.
 	 */
 	const refuseWhileRunLive = useCallback((): boolean => {
 		const gate = canStartLoadRun();
@@ -825,7 +740,7 @@ export default function RequestBuilder() {
 		return true;
 	}, [openTab, showToast]);
 
-	// Start load test callback - shows the config dialog
+	// Start a load test: shows the config dialog.
 	const handleStartLoadTest = useCallback(
 		(request: RequestState) => {
 			if (refuseWhileRunLive()) return;
@@ -835,7 +750,6 @@ export default function RequestBuilder() {
 		[refuseWhileRunLive]
 	);
 
-	// Actually start the load test with config
 	const handleConfirmLoadTest = useCallback(
 		async (config: LoadTestConfig) => {
 			if (!pendingLoadTestRequest || !fetchedRequest) return;
@@ -848,82 +762,62 @@ export default function RequestBuilder() {
 
 			setIsStartingLoadTest(true);
 			try {
-				// The request half through the same builder Send uses, so a load
-				// test measures the request Send sends - one Settings tab governs
-				// both, and the dialog decides load shape, not request semantics.
-				//
-				// Its resolved elements go to `POST /runs` as `requestElements`
-				// (issue #1594): the single-request load path runs their
-				// `extract.*` / `assert.*` inline and `timer.think` / `script.*` per
-				// `elements.scripts` below. A distinct key from `elements` (the
-				// run-level timers/scripts override object), because a flat run
-				// payload has no `request` sub-object to nest them under.
+				// The request half through Send's builder, so a load test measures the request Send
+				// sends: one Settings tab governs both, and the dialog decides load shape only. Its
+				// resolved elements go to `POST /runs` as `requestElements` (#1594): the
+				// single-request load path runs `extract.*` / `assert.*` inline and `timer.think` /
+				// `script.*` per `elements.scripts`. A key apart from `elements` (the run-level
+				// override), since the flat payload has no `request` sub-object.
 				const { body, elements: requestElements } = buildComposeBody({
 					request: pendingLoadTestRequest,
 					elements: { chain: collectionAncestors, ownerId: fetchedRequest.id },
 					collectionId: fetchedRequest.collectionId,
 					environmentId: activeEnvironmentId,
-					// The picked file's columns, when the dialog picked one (issue
-					// #1007). This composition happens *before* `POST /runs`, so it
-					// is the only place that can leave a bare `{{username}}` for the
-					// per-iteration bind instead of resolving it from the
-					// environment. Absent whenever `config.data` is.
+					// The picked file's columns (#1007). This composition precedes `POST /runs`,
+					// the only place a bare `{{username}}` can be left for the per-iteration bind
+					// instead of resolved from the environment. Absent whenever `config.data` is.
 					dataColumns: config.dataColumns,
-					// This composed payload is repeated once per iteration, per
-					// virtual user, so the `{{$guid}}` family belongs to each
-					// repetition, not to the one-time composition (issue #995).
+					// The payload repeats per iteration and virtual user, so the `{{$guid}}` family
+					// belongs to each repetition, not the one composition (#995).
 					deferDynamicVariables: true,
 				});
 
-				// Compose engine-side, then start the run with the composed
-				// request half plus the load shape - never re-resolved.
+				// Compose engine-side, then start the run with the composed request half plus the
+				// load shape, never re-resolved.
 				const composed = await engineComposeRequest(body);
 
-				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
 				const apiRequest: StartLoadTestRequest = {
 					...(composed as unknown as StartLoadTestRequest),
-					// Load test config
 					mode: config.mode,
 					...wireTimings(config),
 					targetRps: config.rps,
 					iterations: config.iterations,
 					concurrency: config.concurrency,
-					// Ramp-Up only. Never sent before: the field was plumbed to the
-					// engine and read back into the dashboard, but nothing set it, so
-					// every ramp started from the engine default of 1.
+					// Ramp-Up only; unset, every ramp starts from the engine default of 1.
 					startConcurrency: config.start_concurrency,
-					// Capacity only. `startConcurrency` above is where the search
-					// begins and `concurrency` is its ceiling, so the mode adds
-					// only `sloMs` and the step duration (in `wireTimings`) rather
-					// than a second spelling of bounds the ramp already owns.
+					// Capacity only. `startConcurrency` is where the search begins and
+					// `concurrency` its ceiling, so the mode adds only `sloMs` and the step
+					// duration (in `wireTimings`), not a second spelling of bounds.
 					sloMs: config.slo_ms,
 					maxInFlight: config.max_in_flight,
-					// A load run of a streaming request streams (issue #576).
-					// Read off the request rather than the dialog, and sent as
-					// `false` rather than elided when it does not, for the same
-					// reason the execute payload spells it out: the engine's
-					// composed payload may carry a stale flag, and an omitted
-					// `false` would be read as "unset", not as "no".
+					// A load run of a streaming request streams (#576), read off the request, not
+					// the dialog, and sent as `false`, not elided: the composed payload may carry a
+					// stale flag, and an omitted `false` reads as "unset", not "no".
 					stream: pendingLoadTestRequest.stream ?? false,
-					// The stream caps (the duration one is in `wireTimings`, in the
-					// engine's milliseconds). Present only for a streaming run - the
-					// engine rejects a cap without `stream`, which is what stops an
-					// unbounded run from being mistaken for a capped one.
+					// The stream caps (duration is in `wireTimings`, in ms), only for a streaming
+					// run: the engine refuses a cap without `stream`, so an unbounded run is not
+					// mistaken for a capped one.
 					maxStreamEvents: config.stream_max_events,
 					requestId: fetchedRequest.id,
 					environmentId: activeEnvironmentId || undefined,
 					comment: config.comment,
-					// The resolved chain composed above (issue #1594), never the
-					// spread's own `elements` - the composed payload's `elements`
-					// is `requestElements`' own resolved list, while `elements` on
-					// `POST /runs` is the run-level timers/scripts override object
-					// the dialog's Scripts control writes; the two must not
-					// collide under one name. A disabled element is left out
-					// (#3050): the pipeline skips it, so it has nothing to add, and
-					// a scenario-only kind among them must not be what refuses the run.
-					// Nor is a collection's own setup / teardown script sent (#3070): a
-					// single-request run never takes one, and the engine refuses it as a
-					// request's.
+					// The resolved chain composed above (#1594), never the spread's `elements`:
+					// that is the composed list, while `elements` on `POST /runs` is the run-level
+					// override object the Scripts control writes, and the two must not collide.
+					// Disabled elements are left out (#3050): skipped anyway, and a scenario-only
+					// kind among them must not refuse the run. Nor goes a collection's setup /
+					// teardown script (#3070): a single-request run never takes one, and the engine
+					// refuses it on a request.
 					requestElements: withoutInheritedCollectionOnly(
 						withoutDisabled(requestElements)
 					),
@@ -933,42 +827,35 @@ export default function RequestBuilder() {
 					save_timing_breakdown: config.save_timing_breakdown,
 					retryAfterBackoff: config.retryAfterBackoff,
 					retryAfterMaxMs: config.retryAfterMaxMs,
-					// Undefined when the dialog declared no budgets: the engine
-					// rejects an empty `thresholds` object rather than starting a
-					// run whose verdict nothing can compute.
+					// Undefined without budgets: the engine refuses an empty `thresholds` rather
+					// than start an unjudged run.
 					thresholds: config.thresholds,
 					carriedBudgets: config.carriedBudgets,
-					// Undefined when the dialog named no metrics endpoint, for the
-					// same reason - and a run without it behaves exactly as it did
-					// before server monitoring existed.
+					// Undefined without a metrics endpoint, for the same reason.
 					monitor: config.monitor,
-					// The rows the dialog's file picker parsed (issue #993), which
-					// the engine binds one per submission. Undefined when no file
-					// was picked: a present-but-empty array is refused engine-side,
-					// so "no data set" has to be the absent key rather than `[]`.
+					// The rows the picker parsed (#993), bound one per submission; undefined with
+					// no file, since an empty array is refused, so "no data set" is the absent key.
 					data: config.data,
-					// Which file those rows came from (issue #2051): its name and
-					// content hash, never its path, and how it was read (issue
-					// #2540). Undefined exactly when `data` is.
+					// The rows' file (#2051): name and content hash, never the path, and how it was
+					// read (#2540). Undefined exactly when `data` is.
 					dataFileName: config.dataFileName,
 					dataFileHash: config.dataFileHash,
 					dataFileCastNumbers: config.dataFileCastNumbers,
-					// The engine defaults this run refuses (issue #1229). A load
-					// run has to send the header set Send sends, or it measures a
-					// different request from the one the user tried.
+					// The defaults this run refuses (#1229): a load run must send Send's header
+					// set, or it measures another request.
 					...disabledDefaults(pendingLoadTestRequest),
-					// The text path a streaming run's events are read through (#3773):
-					// from the request, like `stream` above, never the dialog.
+					// The text path a streaming run reads events through (#3773), from the request
+					// like `stream`.
 					...streamTextPathOf(pendingLoadTestRequest),
-					// The literal the run times its streams to (#3774): a load run
-					// only, a Send would carry a field nothing reads.
+					// The literal the run times streams to (#3774): load runs only, as a Send has
+					// no reader for it.
 					...streamFirstContentMarkerOf(pendingLoadTestRequest),
 				};
 
 				const result = await apiService.startLoadTest(apiRequest);
 
-				// Set the active run ID and switch to dashboard
-				// Pass config and request info so dashboard can show them during live streaming
+				// Set the active run and open the dashboard, with config and request info for the
+				// live view.
 				startRun(
 					result.runId,
 					{
@@ -994,7 +881,7 @@ export default function RequestBuilder() {
 					fetchedRequest.id
 				);
 
-				// Start global metrics monitoring (stays active even if user navigates away)
+				// Global metrics monitoring, active even if the user navigates away.
 				loadTestService.startMonitoring(result.runId);
 
 				openTab({ type: "dashboard", entityId: null });
@@ -1025,7 +912,6 @@ export default function RequestBuilder() {
 		]
 	);
 
-	// Close load test dialog
 	const handleCloseLoadTestDialog = useCallback(() => {
 		setShowLoadTestDialog(false);
 		setPendingLoadTestRequest(null);
@@ -1039,7 +925,6 @@ export default function RequestBuilder() {
 		setRunCollectionTarget(requestCollection);
 	}, [requestCollection, handleCloseLoadTestDialog]);
 
-	// Loading state
 	if (!selectedRequestId) {
 		return (
 			<EmptyState
@@ -1058,30 +943,21 @@ export default function RequestBuilder() {
 	}
 
 	/*
-	 * Reaching here means the lookup errored, and the two reasons need different
-	 * panes. `useRequestQuery` hits `GET /requests/:id`, so a genuine deletion
-	 * throws the `RequestNotFoundError` sentinel and is authoritative - telling
-	 * the user their request is gone is correct, and offering a retry is not,
-	 * since a 404 can only 404 again. Every other failure (a 5xx, an engine that
-	 * is not up yet) means the request is very probably still there and only the
-	 * lookup failed; saying "no longer exists" there is a lie that invites the
-	 * user to close a tab they will want back. Discriminated by type, never by
-	 * message - same rule as `DesignRunView`.
-	 *
-	 * Deleting a request already closes its tabs (`closeTabsForEntities`), so the
-	 * usual cause of the deleted branch is a delete from another window or a
-	 * database restored underneath the app. The delete is soft, so the pane
-	 * points at the Trash (#3449): a restore invalidates `requests.all`, which
-	 * holds this tab's detail query, so the lookup runs again and the tab loads.
+	 * The lookup errored, and the two causes need different panes. `GET /requests/:id` throws the
+	 * `RequestNotFoundError` sentinel for a genuine deletion, which is authoritative: say it is
+	 * gone, and offer no retry (a 404 only 404s again). Any other failure (a 5xx, an engine not up
+	 * yet) means the request is likely there and only the lookup failed; "no longer exists" would
+	 * be a lie inviting a close. Discriminated by type, never message, as in `DesignRunView`.
+	 * Deleting a request closes its tabs (`closeTabsForEntities`), so this branch usually means
+	 * another window or a restored database. The delete is soft, so the pane points at the Trash
+	 * (#3449): a restore invalidates `requests.all`, holding this tab's query, so it loads again.
 	 */
 	const requestWasDeleted =
 		isRequestNotFound(requestLookupError) || (!isError && !fetchedRequest);
 	/*
-	 * A deletion this tab was open for has a draft worth keeping (issue #1436):
-	 * `RequestBuilderProvider` stays mounted below instead of being replaced by
-	 * the plain not-found pane, so `request` survives in context for
-	 * `DeletedRequestBanner` to offer. A first-load 404, or any non-deletion
-	 * error, still gets the full-pane swap - there is no draft yet either way.
+	 * A deletion this tab was open for keeps its draft (#1436): the provider stays mounted instead
+	 * of the not-found pane, so `DeletedRequestBanner` can offer `request`. A first-load 404 or any
+	 * other error gets the full-pane swap: there is no draft either way.
 	 */
 	const deletedWithDraft = requestWasDeleted && hadRequestFor.had;
 	if ((isError || !fetchedRequest) && !deletedWithDraft) {
@@ -1128,10 +1004,11 @@ export default function RequestBuilder() {
 				) : (
 					<>
 						<RequestBuilderLayout />
-						{/* Render nothing. They publish this builder's live draft, so the
-						    palette's "Load test …" and "Send …" and the context bar's
-						    Code section act on the request as currently edited rather
-						    than as last saved. */}
+						{/*
+						 * Render nothing; they publish the live draft, so the palette's
+						 * `Load test …` and `Send …` and the context bar's Code section act on the
+						 * request as edited, not as last saved.
+						 */}
 						<LoadTestCommandSurface />
 						<SendRequestCommandSurface />
 						<EditorDraftSurface />
@@ -1139,7 +1016,6 @@ export default function RequestBuilder() {
 				)}
 			</RequestBuilderProvider>
 
-			{/* Load Test Configuration Dialog */}
 			{showLoadTestDialog && (
 				<LoadTestConfigDialog
 					onClose={handleCloseLoadTestDialog}
@@ -1172,7 +1048,6 @@ export default function RequestBuilder() {
 	);
 }
 
-// Re-export types for external use. The context hook is not re-exported here:
-// every consumer imports it from `./context` directly, and a value export
-// alongside the component would cost this file its fast refresh.
+// Types re-exported for external use. Not the context hook: consumers import it from `./context`,
+// and a value export beside the component would cost this file fast refresh.
 export type { RequestState, ResponseState } from "./types";

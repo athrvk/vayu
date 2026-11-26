@@ -8,9 +8,8 @@
  */
 
 /**
- * @file http/target_policy.hpp
  * @brief Which hosts one send or run may reach, as its caller states it per
- *        payload (`targetPolicy`, issue #2521).
+ *        payload (`targetPolicy`, #2521).
  *
  * The MCP server checks its allowlist against the composed URL before it sends,
  * but a pre-request script can rewrite `pm.request.url` or set the variable a

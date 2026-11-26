@@ -6,12 +6,9 @@
  */
 
 /**
- * useMode - the single source of truth for the dashboard's load-test mode.
- *
- * The engine/run-config `mode` string is freeform (and historically defaulted
- * to the constant_rps model). Every mode-adaptive component MUST derive its
- * behaviour from this discriminator rather than re-parsing the raw string, so
- * the mapping lives in exactly one place - this file.
+ * The single source of truth for the dashboard's load-test mode. The run-config `mode` string is
+ * freeform, so every mode-adaptive component MUST derive its behaviour from this discriminator
+ * rather than re-parse the raw string, and the mapping lives in this file only.
  */
 
 import { LOAD_TEST_MODES } from "@/constants/load-test-modes";
@@ -21,31 +18,21 @@ import type { LoadTestMode } from "@/types";
 export type LoadMode = LoadTestMode;
 
 /**
- * Derived from `LOAD_TEST_MODES`, not hand-listed.
- *
- * This was a third copy of the mode vocabulary - after the `LoadTestMode` union
- * and `LOAD_TEST_MODES` itself - and a hand-written `Set<LoadMode>` literal is
- * invisible to the type checker when a member is *missing*, only when one is
- * spurious. So `capacity` shipped in the union, in the picker and in both
- * mode-adaptive rows while this set still had four entries: `resolveMode`
- * normalised it to `constant_rps`, and every `case "capacity"` arm downstream
- * was dead code that rendered open-loop cards for a closed-loop search.
- *
- * Deriving it makes that unrepresentable. A mode a user can *start* is now by
- * construction a mode the dashboard can *render*, and `LOAD_TEST_MODES` is
- * already pinned to the union by `load-test-modes.test.ts`, so the whole chain
- * has one guard rather than three lists to keep in step.
+ * Derived from `LOAD_TEST_MODES`, not hand-listed: a hand-written `Set<LoadMode>` is invisible to
+ * the type checker when a member is *missing*, and a missing mode is normalised to `constant_rps`,
+ * which turns every `case` arm for it downstream into dead code rendering open-loop cards. Derived,
+ * a mode a user can *start* is by construction one the dashboard can *render*, and
+ * `load-test-modes.test.ts` pins `LOAD_TEST_MODES` to the union, so the whole chain has one guard
+ * rather than three lists to keep in step.
  */
 const KNOWN_MODES: ReadonlySet<LoadMode> = new Set<LoadMode>(
 	LOAD_TEST_MODES.map((mode) => mode.value)
 );
 
 /**
- * Normalise a raw run-config mode string into a {@link LoadMode}.
- *
- * Unknown/absent values fall back to `constant_rps` - the legacy model the
- * dashboard was originally built around, so behaviour is unchanged for runs
- * that predate explicit mode tagging.
+ * Normalise a raw run-config mode string into a {@link LoadMode}. Unknown or absent values fall
+ * back to `constant_rps`, the model runs without an explicit mode tag were made under, so they
+ * render as they always have.
  */
 export function resolveMode(rawMode?: string): LoadMode {
 	if (rawMode && KNOWN_MODES.has(rawMode as LoadMode)) {
@@ -55,9 +42,8 @@ export function resolveMode(rawMode?: string): LoadMode {
 }
 
 /**
- * Hook form of {@link resolveMode}. Pure and synchronous - there is no state
- * to subscribe to, but exposing it as a hook keeps call sites consistent and
- * leaves room to fold in store/config lookups later without a signature change.
+ * Hook form of {@link resolveMode}: pure and synchronous, a hook so call sites stay consistent and
+ * a store or config lookup can join it without a signature change.
  */
 export function useMode(rawMode?: string): LoadMode {
 	return resolveMode(rawMode);

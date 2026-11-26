@@ -6,7 +6,6 @@
  */
 
 /**
- * @file requests.tools.ts
  * @brief Saved-request writes: create, update and delete.
  */
 
@@ -462,13 +461,11 @@ async function writeRequestEdits(
 }
 
 /**
- * Whether the write needs the stored row: a script edit, because the engine
- * replaces the `elements` list whole (#1514); a header row written back
- * withheld, which keeps the stored value (#3550); and, while secrets are
- * withheld, a `url`, whose credentials the read emptied (#3549), or any
- * `headers`, so a stored row the session could not read is named when the
- * write drops it (#3550); and an `mcp` body, whose stored tool a write of the
- * body would otherwise clear (#3762).
+ * Whether the write needs the stored row: a script edit, because the engine replaces the `elements`
+ * list whole (#1514); a header row written back withheld, which keeps the stored value (#3550);
+ * while secrets are withheld, a `url`, whose credentials the read emptied (#3549), or any
+ * `headers`, so a stored row the session could not read is named when the write drops it (#3550);
+ * and an `mcp` body, whose stored tool a write of the body would otherwise clear (#3762).
  */
 function readsStoredRequest(
 	payload: Record<string, unknown>,

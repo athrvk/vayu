@@ -8,15 +8,14 @@
  */
 
 /**
- * @file utils/log_text.hpp
  * @brief A bounded copy of caller-authored text, for a `LogRecord` field
- *        (issue #2359) and a load report's script messages (#3127).
+ *        (#2359) and a load report's script messages (#3127).
  *
  * A record's `msg` is never redacted - only `fields` are, by key
- * (`utils/log_redact.hpp`) - so text a user's script chose (`throw new
- * Error (...)`) must not be concatenated into one. It goes in a field instead,
- * through this: a script can throw a megabyte, and a log line is not where
- * that belongs.
+ * (`utils/log_redact.hpp`) - so text a user's script chose
+ * (`throw new Error (...)`) must not be concatenated into one. It goes in a
+ * field instead, through this: a script can throw a megabyte, and a log line is
+ * not where that belongs.
  */
 
 #include <cstddef>

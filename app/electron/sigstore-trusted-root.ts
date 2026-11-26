@@ -6,16 +6,14 @@
  */
 
 /**
- * The Sigstore public-good trusted root, refreshed over TUF through an
- * injected `fetch` (#2738).
+ * The Sigstore public-good trusted root, refreshed over TUF through an injected `fetch` (#2738).
  *
- * `@sigstore/tuf`'s `getTrustedRoot` would do the same, but the client behind
- * it downloads with Node's global `fetch`, which ignores the system proxy; on a
- * network that only reaches the internet through one, every refresh failed and
- * every update was refused. This builds the same `tuf-js` `Updater` itself
- * (what `@sigstore/tuf` does in `client.js` and `target.js`) with a fetcher
- * backed by the caller's `fetch` - Electron's `net.fetch` in the app - and the
- * same cache layout, so a cache an earlier build wrote stays valid.
+ * `@sigstore/tuf`'s `getTrustedRoot` would do the same, but the client behind it downloads with
+ * Node's global `fetch`, which ignores the system proxy; on a network that only reaches the
+ * internet through one, every refresh fails and every update is refused. This builds the same
+ * `tuf-js` `Updater` itself (what `@sigstore/tuf` does in `client.js` and `target.js`) with a
+ * fetcher backed by the caller's `fetch` (Electron's `net.fetch` in the app) and the same cache
+ * layout, so a cache an earlier build wrote stays valid.
  *
  * Imported on first use, with the TUF packages it pulls in.
  */
@@ -41,10 +39,9 @@ type Seeds = Record<string, { "root.json": string; targets: Record<string, strin
 const require = createRequire(import.meta.url);
 
 /**
- * Downloads TUF metadata and targets through `fetch`, retrying a thrown error
- * or a 5xx like `tuf-js`'s own fetcher does. A non-2xx answer is a
- * `DownloadHTTPError` because `Updater.loadRoot` reads a 403 or 404 on
- * `<n+1>.root.json` as "the root we hold is the newest" and stops there; any
+ * Downloads TUF metadata and targets through `fetch`, retrying a thrown error or a 5xx like
+ * `tuf-js`'s own fetcher does. A non-2xx answer is a `DownloadHTTPError` because `Updater.loadRoot`
+ * reads a 403 or 404 on `<n+1>.root.json` as "the root we hold is the newest" and stops there; any
  * other error type would fail every refresh at the first probe.
  */
 class InjectedFetcher extends BaseFetcher {
@@ -108,10 +105,9 @@ export async function loadTrustedRoot(
 }
 
 /**
- * `root.json` is the trust anchor and is written only when absent: a cache
- * holds the newest root the client has verified, which the embedded seed
- * predates. It is written last, so a seed interrupted midway is redone rather
- * than mistaken for a complete one.
+ * `root.json` is the trust anchor and is written only when absent: a cache holds the newest root
+ * the client has verified, which the embedded seed predates. It is written last, so a seed
+ * interrupted midway is redone rather than mistaken for a complete one.
  */
 function seedCache(repoDir: string): void {
 	const targetsDir = path.join(repoDir, TARGETS_DIR);

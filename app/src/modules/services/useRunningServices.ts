@@ -6,34 +6,24 @@
  */
 
 /**
- * What local services are running - for the Dock's ambient indicator, and for
- * the close that would stop them (issue #1363).
+ * What local services are running, for the Dock's ambient indicator and the close that would stop
+ * them (#1363).
  *
- * One definition rather than each surface counting for itself: the drawer, the
- * indicator, the main process and the restart notice (`runningServicesIn`,
- * `lib/services-stopped-by-restart.ts`) have to agree about what "running"
- * means, and the three lists disagree on their own terms. An inbox keeps its record after
- * it is stopped (`running` is the flag that says so); a stopped issuer or mock
- * server is *gone* from the engine's list, so every one of those listed is a
- * running one.
+ * One definition for the drawer, the indicator, the main process and the restart notice
+ * (`runningServicesIn`, `lib/services-stopped-by-restart.ts`), because the three lists disagree on
+ * their own terms: an inbox keeps its record when stopped (`running` says so), while a stopped
+ * issuer or mock server is *gone* from the engine's list, so every one listed is running.
  *
- * The count is the list's length rather than a second sum: two answers to
- * "what is running" drift, and the Dock saying 2 while the close names 3 is the
- * kind of disagreement no test that reads one of them can see.
+ * The count is the list's length, not a second sum: two answers to "what is running" drift, and the
+ * Dock saying 2 while the close names 3 is invisible to a test that reads one of them. The reads
+ * share the drawer's query keys, so the Dock costs one shared poll, not a second set of requests.
  *
- * All three reads go through the same query keys the drawer uses, so mounting
- * this in the Dock costs one shared poll, not a second set of requests.
- *
- * **A dead engine is running nothing, whatever the cache still holds.** All
- * three lists are engine-*process* state, so when the engine goes down every service
- * it was holding went down with it - but TanStack keeps the last good data
- * through failed refetches, which is right for a list the user can still read
- * and wrong for a count that claims something is listening. The Dock said "2
- * services" in green beside its own "Disconnected" light. The gate lives here
- * rather than at the one call site because the count is what is untrue: any
- * later reader inherits the answer instead of re-deriving the caveat.
- * `useEngineServing` is that gate, and the drawer reads it too, so its rows
- * turn stopped on the same evidence the Dock's count drops to zero on.
+ * **A dead engine is running nothing, whatever the cache holds.** The lists are engine-process
+ * state, and TanStack keeps the last good data through failed refetches, right for a list the user
+ * can read and wrong for a count that claims something is listening (the Dock would say "2
+ * services" beside its own "Disconnected"). The gate lives here, not at a call site, because the
+ * count is what is untrue, so every reader inherits it; the drawer reads `useEngineServing` too, so
+ * its rows turn stopped on the same evidence the count drops to zero on.
  */
 
 import { useEffect, useMemo } from "react";
@@ -47,12 +37,9 @@ import type { RunningServiceSummary } from "@/types/electron";
 const NOTHING_RUNNING: RunningServiceSummary[] = [];
 
 /**
- * Whether the engine is up to hold any service at all.
- *
- * Both not-connected states read false: an engine that has not answered yet is
- * running no more than one that stopped answering. A crash the sidecar
- * reported counts before the health poll confirms it (#3493), through the same
- * `selectKnownEngineStatus` the Dock's light reads.
+ * Whether the engine is up to hold any service. Not yet answered and stopped answering both read
+ * false; a crash the sidecar reported counts before the health poll confirms it (#3493), through
+ * the same `selectKnownEngineStatus` the Dock's light reads.
  */
 export function useEngineServing(): boolean {
 	return useEngineStore((s) => selectKnownEngineStatus(s) === "connected");
@@ -80,12 +67,10 @@ export function useRunningServiceCount(): number {
 }
 
 /**
- * Tell the main process what is running, so the close it intercepts can name it
- * (issue #1363).
- *
- * Mounted once at the app root. Published on change rather than answered on
- * demand: the question would arrive on the gesture the user is already waiting
- * on, and main cannot read the queries this is derived from.
+ * Tells the main process what is running, so the close it intercepts can name it (#1363). Mounted
+ * once at the app root; published on change rather than answered on demand, because the question
+ * would arrive on the gesture the user is waiting on, and main cannot read the queries this derives
+ * from.
  */
 export function useRunningServicesPublisher(): void {
 	const services = useRunningServices();

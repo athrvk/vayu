@@ -10,12 +10,10 @@ import { pickByCount } from "@/modules/dashboard/utils/format";
 import type { InboxDeletion } from "./useInboxDeletion";
 
 /**
- * The confirmation both delete affordances raise (issue #553).
- *
- * It names the count because that is the whole of what is at stake: the
- * listener is replaceable in one click, the recorded requests are not. Renders
- * nothing until the deletion asks for it - an inbox holding nothing is deleted
- * outright, so this dialog only ever appears over something worth losing.
+ * The confirmation both delete affordances raise (#553). It names the count because that is what is
+ * at stake: the listener is replaceable in one click, the recorded requests are not. Renders
+ * nothing until a deletion asks for it: an empty inbox is deleted outright, so this only appears
+ * over something worth losing.
  */
 export function DeleteInboxDialog({ deletion }: { deletion: InboxDeletion }) {
 	const { inbox, captureCount } = deletion;

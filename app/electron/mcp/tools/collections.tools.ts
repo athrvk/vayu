@@ -6,7 +6,6 @@
  */
 
 /**
- * @file collections.tools.ts
  * @brief Collection writes: create, update and delete.
  */
 

@@ -6,14 +6,12 @@
  */
 
 /**
- * The last segment of a filesystem path, for either platform's separator.
- *
- * A multipart file part carries a path, and three places need its filename: the
- * editor row's label, and the two importers that turn a foreign path into a
- * part. Those paths come from whichever machine exported the collection, so
- * splitting on the host's separator alone would show a whole Windows path as
- * one long "filename" on Linux. Node's `path.basename` is not available in the
- * renderer, and it would answer for the host platform anyway.
+ * The last segment of a filesystem path, for either platform's separator. A multipart file part
+ * carries a path, and three places need its filename: the editor row's label and the two importers
+ * that turn a foreign path into a part. Those paths come from whichever machine exported the
+ * collection, so splitting on the host's separator alone would show a whole Windows path as one
+ * "filename" on Linux. Node's `path.basename` is not in the renderer, and would answer for the host
+ * platform anyway.
  */
 export function fileBaseName(filePath: string): string {
 	const trimmed = filePath.trim();
@@ -46,13 +44,11 @@ function comparable(p: string): string {
 }
 
 /**
- * Whether `filePath` lies inside `folder`, compared component by component -
- * `/data/fixtures-old/a.bin` is not under `/data/fixtures`.
- *
- * A **display** answer only. The engine decides what it sends, on canonical
- * paths with symlinks followed; this one compares the text, so the editor can
- * say "already under an allowed folder" without asking. A disagreement shows
- * up as the engine's refusal naming the path, never as a silent send.
+ * Whether `filePath` lies inside `folder`, compared component by component
+ * (`/data/fixtures-old/a.bin` is not under `/data/fixtures`). A **display** answer only: the engine
+ * decides what it sends, on canonical paths with symlinks followed, while this compares the text so
+ * the editor can say "already under an allowed folder" without asking. A disagreement shows up as
+ * the engine's refusal naming the path, never as a silent send.
  */
 export function isUnderFolder(filePath: string, folder: string): boolean {
 	const file = comparable(filePath);

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file mock-server.ts
  * @brief The payload `start_mock_server` sends, and the caveat on its answer.
  */
 
@@ -21,24 +20,20 @@ import { isRecord, requireStr } from "./kit.js";
 const MOCK_SERVER_START_KEYS = ["port", "latencyMs", "errorRatePct", "allowedOrigins"] as const;
 
 /**
- * The start body. `collectionId` always travels; a knob the caller did not name
- * stays absent, for the reason {@link mockIssuerStartPayload} records - the
- * engine reads a present field with a bad value as a 400 rather than falling
- * back to its default.
+ * The start body. `collectionId` always travels; a knob the caller did not name stays absent, for
+ * the reason {@link mockIssuerStartPayload} records (the engine reads a present field with a bad
+ * value as a 400 rather than falling back to its default).
  *
- * The engine's `latencyMs` ceiling is not restated in the schema (the same
- * division of labour the issuer tools document): it lives in
- * `core/constants.hpp`, an out-of-range value comes back as a 400 naming the
- * bound, and a copy here would refuse values the engine accepts the moment
- * either side moves. `port` and `errorRatePct` are bounded in the schema
- * because their bounds are the *shape* - a port is 0-65535 everywhere and a
- * percentage is 0-100 by definition, not by an engine constant.
+ * The engine's `latencyMs` ceiling is not restated in the schema (the division of labour the issuer
+ * tools document): it lives in `core/constants.hpp`, an out-of-range value comes back as a 400
+ * naming the bound, and a copy would refuse values the engine accepts once either side moves.
+ * `port` and `errorRatePct` are bounded in the schema because their bounds are the *shape*: a port
+ * is 0-65535 everywhere and a percentage is 0-100 by definition, not by an engine constant.
  *
- * `allowedOrigins` (#2367) is the first kind: its count and length ceilings are
- * engine constants, and what makes an entry an origin is the engine's
- * `canonical_origin`, so the schema says "array of strings" and the engine's
- * `400` names the entry (`allowedOrigins[1]`) and what is wrong with it. It
- * travels as given, `[]` included - the engine reads that as the default.
+ * `allowedOrigins` (#2367) is of the `latencyMs` kind: its count and length ceilings are engine
+ * constants, and what makes an entry an origin is the engine's `canonical_origin`, so the schema
+ * says "array of strings" and the engine's `400` names the entry (`allowedOrigins[1]`) and what is
+ * wrong with it. It travels as given, `[]` included (the engine reads that as the default).
  */
 export function mockServerStartPayload(args: Record<string, unknown>): Record<string, unknown> {
 	const payload: Record<string, unknown> = { collectionId: requireStr(args, "collectionId") };
@@ -49,16 +44,12 @@ export function mockServerStartPayload(args: Record<string, unknown>): Record<st
 }
 
 /**
- * What a started mock could not serve, or "" when every route has an example
- * and none is shadowed.
- *
- * A mock with routes but no examples answers `501` to each of them, which reads
- * as a broken mock rather than as an empty collection - so the count the engine
- * already reports (`routesWithoutExample`) is turned into a sentence instead of
- * being left for an agent to notice in the JSON. `routeCount: 0` is the sharper
- * case and gets its own line: there is nothing to point a client at.
- * `duplicateRoutes` (#3115) is the other silent one: a request that shares a
- * method and path with another never answers.
+ * What a started mock could not serve, or "" when every route has an example and none is shadowed.
+ * A mock with routes but no examples answers `501` to each, which reads as a broken mock rather
+ * than an empty collection, so the count the engine reports (`routesWithoutExample`) becomes a
+ * sentence instead of being left for an agent to notice in the JSON. `routeCount: 0` is the sharper
+ * case and gets its own line: there is nothing to point a client at. `duplicateRoutes` (#3115) is
+ * the other silent one: a request that shares a method and path with another never answers.
  */
 export function mockServerCaveat(started: unknown): string {
 	if (!isRecord(started)) return "";

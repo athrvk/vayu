@@ -6,35 +6,24 @@
  */
 
 /**
- * Splitting one `key<sep>value` line, for the bulk editors.
- *
- * Headers and params looked like they had two arbitrary formats - `Name: value`
- * against `key=value` - and the obvious tidy-up is to pick one. They cannot
- * share one, and a single line shows why:
+ * Splitting one `key<sep>value` line for the bulk editors. Headers (`Name: value`) and params
+ * (`key=value`) cannot share one separator, as one line shows:
  *
  *     filter:status=open
  *
- * That is a legal query parameter: a param *name* may contain a colon (JIRA,
- * Elasticsearch and OData all do it), so `:` cannot be the separator or the line
- * splits as `filter` / `status=open`. Meanwhile a header line frequently has no
- * `=` at all - `Authorization: Bearer abc` - so `=` cannot be the only
- * separator either.
- *
- * The rule they *do* share is one level up:
+ * is a legal query parameter (JIRA, Elasticsearch and OData put colons in names), so `:` cannot
+ * split params, and a header line often has no `=` (`Authorization: Bearer abc`), so `=` cannot be
+ * the only separator. The shared rule is one level up:
  *
  *   **the separator is the earliest character the key is not allowed to contain**
  *
- * which resolves differently only because the two key alphabets differ:
+ * which differs only because the key alphabets do:
  *
- *   - a header name may contain neither `:` nor `=`, so whichever comes first
- *     is the separator;
- *   - a param name may contain `:` but never `=`, so `=` wins wherever it
- *     appears, and `:` is consulted only when the line has no `=` - which is
- *     what makes a header block pasted into the Params tab parse instead of
- *     vanishing.
+ *   - a header name may contain neither `:` nor `=`, so whichever comes first splits;
+ *   - a param name may contain `:` but never `=`, so `=` wins wherever it is, and `:` is consulted
+ *     only without one, which lets a header block pasted into Params parse instead of vanishing.
  *
- * Tiers express exactly that: try each tier in order, take the earliest match
- * within a tier.
+ * Tiers express that: try each tier in order, earliest match within a tier.
  */
 
 /** One tier of candidate separators. The earliest occurrence in a tier wins. */
@@ -44,39 +33,31 @@ export type SeparatorTiers = readonly (readonly string[])[];
 export const HEADER_SEPARATORS: SeparatorTiers = [[":", "="]];
 
 /**
- * A param name may contain `:` but not `=`, so `=` outranks it. The second tier
- * is what lets a pasted `Name: value` line survive.
+ * A param name may contain `:` but not `=`, so `=` outranks it; the second tier lets a pasted
+ * `Name: value` line survive.
  */
 export const PARAM_SEPARATORS: SeparatorTiers = [["="], [":"]];
 
 export interface SplitOptions {
 	/**
-	 * Treat a line with no separator as a key with no value (`valueless`).
-	 *
-	 * True for params, where `?page` is a legal valueless parameter and
-	 * `buildUrlWithParams` emits one for a valueless row. False for headers, where a bare
-	 * word names no header - `justsometext` is not a header line, and inventing
-	 * an empty one from it would put a row in the table the user did not write.
+	 * Read a line without a separator as a valueless key. True for params, where `?page` is legal
+	 * and `buildUrlWithParams` emits one for a valueless row; false for headers, where
+	 * `justsometext` names no header, and inventing an empty one would add a row the user did not
+	 * write.
 	 */
 	allowBareKey?: boolean;
 }
 
 /**
- * A leading `//`, the row's disabled marker in bulk-edit text (issue #1480).
- *
- * Matched only at the start of the line (leading whitespace tolerated, the way
- * a hand-typed comment usually is), never mid-line - a header value routinely
- * contains `//` of its own (`Referer: https://example.com`), and that must
- * never be mistaken for the marker.
+ * A leading `//`, a row's disabled marker in bulk-edit text (#1480), matched only at line start
+ * (leading whitespace tolerated), never mid-line: a header value often holds `//`
+ * (`Referer: https://example.com`).
  */
 const DISABLED_MARKER = /^\s*\/\/ ?/;
 
 /**
- * Strip a leading disabled marker, if the line carries one.
- *
- * `formatXToText` writes the marker as `// ` (with its one space); this reads
- * it back with or without that space, since a hand-typed `//key: value` should
- * still disable the row.
+ * Strip a leading disabled marker: written as `// `, read with or without the space, so a
+ * hand-typed `//key: value` disables too.
  */
 export function stripDisabledMarker(line: string): { enabled: boolean; rest: string } {
 	const match = line.match(DISABLED_MARKER);
@@ -85,24 +66,13 @@ export function stripDisabledMarker(line: string): { enabled: boolean; rest: str
 }
 
 /**
- * Split one line into a key and a value, or return null if it names nothing.
- *
- * A line that opens with its separator - `: orphaned`, `=orphaned` - names no
- * key, and a row with an empty key is one the user can neither identify nor
- * fix. That is handled by the empty-key check rather than a separate guard on
- * the separator's position: an earlier draft had both, and a mutation run
- * showed the position check could be deleted with every test still green,
- * because `slice(0, 0)` is empty and the key check already rejects it.
- *
- * Once a tier matches, the result stands - it does not fall through to a later
- * tier. A line whose `=` is at position 0 is malformed, not a line that meant
- * to be split at its colon instead.
- *
- * The value is not trimmed. Only the key is - a header or param name carrying
- * leading/trailing space is never intentional - but a value's whitespace can
- * be load-bearing (a signature, a padded token), so only the one conventional
- * space right after the separator (`key: value`, not `key:value`) is dropped;
- * anything past that, leading or trailing, survives verbatim (issue #1480).
+ * One line as a key and value, or null if it names nothing. A line opening with its separator
+ * (`: orphaned`, `=orphaned`) names no key, and an empty-key row can be neither identified nor
+ * fixed; the empty-key check covers it, as `slice(0, 0)` is empty. Once a tier matches it stands: a
+ * line whose `=` is at position 0 is malformed, not meant to split at its colon. Only the key is
+ * trimmed (a padded name is never intended); a value's whitespace can matter (a signature, a padded
+ * token), so only the one conventional space after the separator goes (`key: value`) and the rest
+ * is kept verbatim (#1480).
  */
 export function splitKeyValueLine(
 	line: string,
@@ -145,10 +115,9 @@ export interface UnreadLine {
 }
 
 /**
- * Every non-blank line of `text`, disabled marker stripped and then split. The
- * parsers and the unread-line report both read through this, so what is
- * reported can never differ from what is dropped. A blank line is nothing the
- * user meant as a row, so it is not scanned at all.
+ * Every non-blank line, disabled marker stripped, then split. The parsers and the unread-line
+ * report both read through this, so what is reported is what is dropped. A blank line is no
+ * intended row and is not scanned.
  */
 export function scanKeyValueLines(
 	text: string,

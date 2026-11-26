@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Vayu run report export",
-  "description": "The document POST /export/run-report writes for a finished load run (issue #2127), schema version 1. Built by allowlist: every member below is copied on purpose, and no other member is ever written. A breaking change bumps schemaVersion and is noted in docs/engine/api-reference.md.",
+  "description": "The document POST /export/run-report writes for a finished load run (issue #2127), schema version 1. Built by allowlist: every member below is copied on purpose, and no other member is ever written. A breaking change bumps schemaVersion and is noted in docs/engine/api-reference/export.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [

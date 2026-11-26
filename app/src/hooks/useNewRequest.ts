@@ -6,17 +6,14 @@
  */
 
 /**
- * "New request" - the whole flow, once.
+ * "New request", the whole flow, once. Several surfaces start it (`Shell`, the Welcome screen, the
+ * collection tree, the Import dialog, a History run's Save button), and a second copy of "decide
+ * where it lands, create a collection if there is none, ask when it is ambiguous" is how two entry
+ * points end up disagreeing about where a request goes.
  *
- * It lived inside `WelcomeScreen`, which was fine while the Launcher tile was
- * the only way to ask for one. The command palette is the second, and a second
- * copy of "decide where it lands, create a collection if there is none, ask when
- * it is ambiguous" is how two entry points end up disagreeing about where a
- * request goes.
- *
- * A hook rather than a store because the flow can *ask*: the picker is a dialog,
- * and a dialog needs a component to render it. Each caller renders its own from
- * `pickerProps`, so two surfaces never fight over one dialog's open state.
+ * A hook rather than a store because the flow can *ask*: the picker is a dialog, and a dialog needs
+ * a component to render it. Each caller renders its own from `pickerProps`, so two surfaces never
+ * fight over one dialog's open state.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -48,11 +45,10 @@ function createFailedMessage(error: unknown): string {
 }
 
 /**
- * A request to create with fields already filled in, rather than the blank
- * `DEFAULT_REQUEST_NAME` / GET / empty-URL shape - the Launcher's demo tile
- * (issue #1694) hands over a real method and URL, and "Save to request" on an
- * agent's run (issue #1817) hands over the whole request, description included.
- * Everything but where it lands, which this flow decides.
+ * A request to create with fields already filled in, rather than the blank `DEFAULT_REQUEST_NAME` /
+ * GET / empty-URL shape: the Launcher's demo tile (#1694) hands over a real method and URL, and
+ * "Save to request" on an agent's run (#1817) the whole request, description included. Everything
+ * but where it lands, which this flow decides.
  */
 export type RequestPreset = Omit<CreateRequestRequest, "id" | "collectionId" | "name"> & {
 	name?: string;
@@ -141,11 +137,9 @@ export function useNewRequest(): UseNewRequestReturn {
 	const createCollectionMutation = useCreateCollectionMutation();
 	const [pickerOpen, setPickerOpen] = useState(false);
 	/*
-	 * A ref, not state: the picker can sit open for as long as the user takes to
-	 * choose, and the preset that opened it must still be there when `onSelect`
-	 * finally runs - a second `newRequest()` call (blank, from elsewhere) between
-	 * open and pick would otherwise have nothing to overwrite it with anyway,
-	 * since only one flow is ever in flight at a time.
+	 * A ref, not state: the picker can sit open as long as the user takes to choose, and the preset
+	 * that opened it must still be there when `onSelect` runs. Only one flow is ever in flight, so
+	 * nothing overwrites it in between.
 	 */
 	const presetRef = useRef<RequestPreset | null>(null);
 
@@ -165,7 +159,7 @@ export function useNewRequest(): UseNewRequestReturn {
 				else openRequestFocusingUrl(newRequest.id);
 				onItemOpened();
 			} catch (error) {
-				// Without this the click looks dead - the old code only logged.
+				// Without the toast the click looks dead.
 				console.error("Failed to create new request:", error);
 				showToast(createFailedMessage(error), "error");
 			}

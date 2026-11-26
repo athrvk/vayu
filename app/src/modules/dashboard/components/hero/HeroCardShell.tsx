@@ -6,13 +6,10 @@
  */
 
 /**
- * Shared hero-card primitives (B6 simplify). Every hero card is the same card
- * chrome + eyebrow header with an InfoChip; most also have a single 34px value
- * row, and two carry a fidelity gauge. These extract that
- * common shape so the per-mode cards stay tiny and consistent. Cards with
- * bespoke bodies (ErrorRate's status stack, ThroughputTwin's 2-col grid,
- * Saturation's text headline) still use HeroCardShell and supply their own
- * children.
+ * Shared hero-card primitives: every hero card is the same chrome and eyebrow header with an
+ * InfoChip, most with a single 34px value row and two with a fidelity gauge, so the per-mode cards
+ * stay tiny and consistent. Cards with bespoke bodies (ErrorRate's status stack, ThroughputTwin's
+ * 2-col grid, Saturation's text headline) still use HeroCardShell and supply their own children.
  */
 
 import { type ReactNode } from "react";
@@ -80,10 +77,8 @@ export function MiniBar({ pct, color }: { pct: number; color: string }) {
 	return (
 		<div className="relative mt-2 h-1 rounded-sm bg-accent overflow-hidden" aria-hidden="true">
 			<div
-				// `transition-[width,background-color]`: both the fill's width and
-				// its tier colour change live while a load test runs, and neither
-				// had a transition - the bar jumped to its new length and its new
-				// colour popped on the same tick.
+				// `transition-[width,background-color]`: both the fill's width and its tier colour
+				// change live while a load test runs, so neither jumps on a tick.
 				className="absolute inset-y-0 left-0 transition-[width,background-color] duration-150"
 				style={{ width: `${pct}%`, background: color }}
 			/>

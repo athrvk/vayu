@@ -8,8 +8,7 @@
  */
 
 /**
- * @file lodash_glue.hpp
- * @brief The factory around the vendored `lodash` (engine/vendor/lodash, #2651).
+ * The factory around the vendored `lodash` (engine/vendor/lodash, #2651).
  *
  * `LODASH_GLUE_OPEN + LODASH_JS + LODASH_GLUE_CLOSE` is the source the shelf
  * evaluates. The library is npm's `lodash.min.js`, unchanged. The glue gives it

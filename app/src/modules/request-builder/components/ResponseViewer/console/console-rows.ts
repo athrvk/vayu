@@ -6,17 +6,13 @@
  */
 
 /**
- * The Console's rows: the parsed lines with each script request placed among
- * them (#3633).
- *
- * Scripts are synchronous and `pm.sendRequest` blocks, so execution order is
- * time order and the lines need no timestamp. A summary line that indexes its
- * record (`scriptRequest`) becomes the request row in the line's own place. A
- * record no line points at - the console was off, or its cap dropped the line -
- * goes after the last row its script wrote. "Its script" is the source and the
- * level: a collection script runs before a folder's, which runs before the
- * request's, so a record lands after the last row of its own level or an
- * earlier one.
+ * The Console's rows: the parsed lines with each script request among them (#3633). Scripts are
+ * synchronous and `pm.sendRequest` blocks, so execution order is time order and lines need no
+ * timestamp. A summary line that indexes its record (`scriptRequest`) becomes the request row in
+ * its place. A record no line points at (console off, or its cap dropped the line) goes after the
+ * last row its script wrote, by source and level: a collection script runs before a nested
+ * collection's, before the request's, so it lands after the last row of its own or an earlier
+ * level.
  */
 
 import type { ConsoleLogEntry, ElementScope, ScriptRequestRecord } from "@/types";
@@ -46,8 +42,8 @@ const sourceOf = (record: ScriptRequestRecord): LogSource =>
 	record.source === "pre" ? "pre" : "test";
 
 /**
- * Where an unlinked record goes: after the last row of its source whose level
- * ran no later than its own, else before the first row of its source.
+ * An unlinked record's place: after its source's last row at a level no later than its own, else
+ * before its source's first row.
  */
 function insertionIndex(rows: readonly ConsoleRow[], row: ScriptRequestConsoleRow): number {
 	const rank = rankOf(row.scope);
@@ -68,8 +64,8 @@ export function consoleRows(
 	const linked = new Set<number>();
 	const rows: ConsoleRow[] = parsed.map((line) => {
 		const index = line.scriptRequest;
-		// A second line naming the same record, or an index past the list, is
-		// drawn as the plain line it is rather than dropped.
+		// A second line naming the same record, or an index past the list, is drawn as the plain
+		// line it is.
 		if (index === undefined || linked.has(index) || !records[index]) return line;
 		linked.add(index);
 		return { source: line.source, scope: line.scope, record: records[index], line };
@@ -88,8 +84,8 @@ export function consoleRows(
 }
 
 /**
- * How many rows the Console draws: every line, plus each record no line
- * stands in for. A linked record is counted once, by its line.
+ * Rows the Console draws: every line plus each unlinked record; a linked record counts once, as its
+ * line.
  */
 export function consoleRowCount(
 	logs: ReadonlyArray<ConsoleLogEntry | string>,
@@ -99,9 +95,8 @@ export function consoleRowCount(
 }
 
 /**
- * Whether a row matches the Console's filter. A request row is found by its
- * method, URL, status and error code, and by its summary line's own text, so
- * nothing the line matched before it became a row stops matching.
+ * Whether a row matches the filter. A request row matches by method, URL, status, error code and
+ * its summary line's text, so nothing its line matched stops matching.
  */
 export function rowMatches(row: ConsoleRow, needle: string): boolean {
 	if (!isScriptRequestRow(row)) return row.message.toLowerCase().includes(needle);

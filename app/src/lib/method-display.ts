@@ -6,9 +6,8 @@
  */
 
 /**
- * Returns the CSS variable reference for an HTTP method's color token.
- * Use as: `hsl(${getMethodColor(method)})` for a solid color,
- *      or `hsl(${getMethodColor(method)} / 0.1)` for a tinted background.
+ * The CSS variable reference for an HTTP method's color token: `hsl(${getMethodColor(method)})` for
+ * a solid color, `hsl(${getMethodColor(method)} / 0.1)` for a tinted background.
  */
 export function getMethodColor(method: string): string {
 	const m = method.toLowerCase();
@@ -17,13 +16,11 @@ export function getMethodColor(method: string): string {
 }
 
 /**
- * Standard HTTP methods whose full name is longer than the five-character
- * fixed column `MethodBadge` uses, and the label the badge renders in their
- * place. The abbreviations are the ones every other client picks - `DEL` for
- * `DELETE`, `OPT` for `OPTIONS`, `CONN` for `CONNECT` - and the badge exposes
- * the full method as `title` when it substitutes one, so the meaning is one
- * hover away. Kept beside `getMethodColor` for the same reason: one value,
- * one meaning everywhere.
+ * Standard HTTP methods whose full name is longer than `MethodBadge`'s five-character fixed column,
+ * and the label the badge renders in their place. The abbreviations are the ones other clients pick
+ * (`DEL` for `DELETE`, `OPT` for `OPTIONS`, `CONN` for `CONNECT`), and the badge exposes the full
+ * method as `title` when it substitutes one, so the meaning is one hover away. Kept beside
+ * `getMethodColor` for the same reason: one value, one meaning everywhere.
  */
 export const METHOD_ABBREVIATIONS: Readonly<Record<string, string>> = {
 	DELETE: "DEL",
@@ -32,11 +29,10 @@ export const METHOD_ABBREVIATIONS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Returns the label to display for a method and whether it was substituted
- * for the full name. `abbreviated: true` means the caller should reveal the
- * full method on hover (as `MethodBadge` does through its `title`) - a `DEL`
- * on screen without that would leave a user guessing between `DELETE` and
- * `DEL` the same way an unlabelled icon does.
+ * The label to display for a method, and whether it was substituted for the full name.
+ * `abbreviated: true` means the caller should reveal the full method on hover (as `MethodBadge`
+ * does through its `title`): a `DEL` on screen without that leaves a user guessing between `DELETE`
+ * and `DEL`, as an unlabelled icon does.
  */
 export function getMethodDisplayLabel(method: string): {
 	label: string;

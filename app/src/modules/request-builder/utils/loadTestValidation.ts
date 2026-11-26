@@ -5,21 +5,15 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Pure validation helpers for the load-test config dialog. Kept
- * component-free so they can be unit-tested in isolation.
- */
+/** Pure validation helpers for the load-test dialogs, component-free to unit-test in isolation. */
 
 import type { LimitRange } from "@/constants/load-test";
 
 /**
- * The one range rule both load dialogs refuse a field by: a finite number inside
- * `range`, and an integer when `whole`. A number input's own `min`/`max` are
- * advisory (a typed value still reaches state), so without this check an
- * over-ceiling value starts a run the user's Settings forbid.
- *
- * `engineBound` is for a range Settings cannot move, so the message does not
- * point there.
+ * The one range rule both load dialogs refuse a field by: finite, inside `range`, an integer when
+ * `whole`. A number input's `min`/`max` are advisory (a typed value still reaches state), so
+ * without this an over-ceiling value starts a run Settings forbid. `engineBound` marks a range
+ * Settings cannot move, so the message does not point there.
  */
 export function rangeError(
 	label: string,
@@ -35,10 +29,9 @@ export function rangeError(
 }
 
 /**
- * For ramp_up runs, `duration` is the TOTAL test time and must include the
- * ramp. A total shorter than the ramp would end the test mid-ramp, so it is
- * rejected. Returns a user-facing error message when invalid, or null when the
- * config is fine (including for all non-ramp_up modes).
+ * For ramp_up, `duration` is the TOTAL time including the ramp, so a total shorter than the ramp
+ * (ending mid-ramp) is refused. A user-facing message when invalid, else null (every other mode
+ * too).
  */
 export function validateRampDuration(
 	mode: string | undefined,
@@ -53,21 +46,13 @@ export function validateRampDuration(
 }
 
 /**
- * Both profiles that show the Start field - Ramp-Up and Capacity Discovery -
- * climb from `startConcurrency`, and neither can climb from nothing: the
- * engine floors the field at 1 (`startConcurrency` in `validate_run_config`,
- * `engine/src/http/routes/execution.cpp`) and answers a lower value with a 400.
- * Without this rule that 400 is the only feedback, arriving after Start is
- * pressed - and the field reaches 0 easily, because clearing a number input
- * reads back as `Number("") === 0`.
- *
- * A ramp from 0 is also the case measured in issue #694: the concurrency
- * integral truncates on the first ticks, showing ~0.8% structural lag on a
- * healthy run. Refusing the value rather than silently raising it to 1 means
- * the run that starts is the run the user described.
- *
- * Returns a user-facing message when invalid, or null (including for every
- * mode that does not send a start).
+ * Ramp-Up and Capacity Discovery climb from `startConcurrency`, never from nothing: the engine
+ * floors it at 1 (`validate_run_config`, `engine/src/http/routes/execution.cpp`) and 400s a lower
+ * value, which without this rule is the only feedback, arriving after Start, and the field reaches
+ * 0 easily (a cleared input reads `Number("") === 0`). A ramp from 0 is also #694's case: the
+ * concurrency integral truncates early, showing ~0.8% lag on a healthy run. Refused, not silently
+ * raised to 1, so the run is the one described. A message when invalid, else null (every mode
+ * sending no start too).
  */
 export function validateStartConcurrencyFloor(
 	mode: string | undefined,
@@ -84,13 +69,9 @@ export function validateStartConcurrencyFloor(
 }
 
 /**
- * Ramp-Up climbs from `startConcurrency` to `concurrency`. A start above the
- * target is a ramp *down*, which contradicts the profile the user picked and is
- * almost always a transposed pair rather than an intent - the engine would
- * happily run it, shedding virtual users over the ramp.
- *
- * Returns a user-facing message when invalid, or null (including for every
- * non-ramp mode).
+ * Ramp-Up climbs from `startConcurrency` to `concurrency`; a start above the target is a ramp
+ * *down*, contradicting the profile and almost always a transposed pair (the engine would shed
+ * users over the ramp). A message when invalid, else null (every non-ramp mode too).
  */
 export function validateStartConcurrency(
 	mode: string | undefined,
@@ -105,14 +86,10 @@ export function validateStartConcurrency(
 }
 
 /**
- * Capacity Discovery climbs from `startConcurrency` toward `concurrency`. A
- * start at or above the ceiling is a search with nothing to search: the engine
- * measures the one level and stops `cap_reached`, which is a legitimate run but
- * never the one the user meant when they picked the profile whose whole job is
- * to find a limit.
- *
- * Returns a user-facing message when invalid, or null (including for every
- * non-capacity mode).
+ * Capacity Discovery climbs from `startConcurrency` toward `concurrency`; a start at or above the
+ * ceiling has nothing to search: the engine measures one level and stops `cap_reached`, a
+ * legitimate run but never the intent of the profile whose job is finding a limit. A message when
+ * invalid, else null (every non-capacity mode too).
  */
 export function validateCapacityRange(
 	mode: string | undefined,

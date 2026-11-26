@@ -6,19 +6,13 @@
  */
 
 /**
- * @file http/routes/cookies.cpp
- * @brief See and clear the design-mode cookie jar (issue #301).
- *
- * A session the user cannot inspect or reset is a support problem: "why is
- * this request authenticated when I never sent a token" has no answer without
- * a way to look, and "clear cookies" is the first thing anyone reaches for
- * when a stale session breaks a call. These two endpoints are that, and they
- * are the whole user-visible surface of the jar's lifetime.
- *
- * A trashed environment keeps its jar, so a restore gets the session back, but
- * the read hides it: a panel row naming an environment the app can no longer
- * resolve is a ghost (#3349). Purging the environment drops the jar
- * (`trash_purge_response`).
+ * Seeing and clearing the design-mode cookie jar (#301): "why is this request
+ * authenticated when I never sent a token" has no answer without a look, and
+ * "clear cookies" is the first thing anyone tries on a stale session. These two
+ * endpoints are the whole user-visible surface of the jar's lifetime. A trashed
+ * environment keeps its jar, so a restore gets the session back, but the read
+ * hides it: a row naming an environment the app cannot resolve is a ghost
+ * (#3349). Purging the environment drops the jar (`trash_purge_response`).
  */
 
 #include "vayu/http/list_page.hpp"
@@ -91,13 +85,10 @@ nlohmann::json scoped_cookie_json (const ScopedCookie& scoped) {
 } // namespace
 
 /**
- * Testable core of GET /cookies.
- *
- * Values are included. The response viewer already shows `Set-Cookie` in
- * full, so withholding them here would hide nothing the app cannot already
- * see, while making the panel useless for the case it exists to answer -
- * "which session is this request actually using". They stay out of the logs,
- * where redaction does apply (`debug_redact.hpp`).
+ * Testable core of GET /cookies. Values are included: the response viewer shows
+ * `Set-Cookie` in full, so withholding them hides nothing and makes the panel
+ * useless for "which session is this request using". They stay out of the logs,
+ * where redaction applies (`debug_redact.hpp`).
  *
  * @param live_environment_ids `live_environment_ids (db)`: a scope whose
  *        environment is not among them is left out.

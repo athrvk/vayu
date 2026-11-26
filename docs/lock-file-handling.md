@@ -73,10 +73,10 @@ An all-users install leaves NSIS in the machine context, where `$APPDATA` is not
 the roaming profile Electron writes userData to - so a correctly named path
 would still miss the real directory in that install mode.
 
-Until #1393 the script named `productName` for both, so "Delete everything"
-ran `RMDir /r` over `$APPDATA\Vayu` and removed nothing the app owns - the same
-wrong-directory defect the Linux hooks had, and worse, because here it was a
-promise about the user's data rather than a no-op.
+Naming `productName` for both paths would make "Delete everything"
+run `RMDir /r` over `$APPDATA\Vayu` and remove nothing the app owns - the same
+wrong-directory defect the Linux hooks had, and worse, because here it is a
+promise about the user's data rather than a no-op (#1393).
 
 ### macOS (DMG)
 
@@ -102,22 +102,21 @@ promise about the user's data rather than a no-op.
   which is why running as root does not break it
 - Lock file cleanup handled automatically in app startup
 
-A postinst and a postrm hook used to clean the lock file here. They were
-removed (#1356): both looked for `$HOME/.config/vayu/vayu.lock`, a directory the
+The package has no postinst or postrm hook for the lock file (#1356): such a hook would look for `$HOME/.config/vayu/vayu.lock`, a directory the
 app has never written, and dpkg runs maintainer scripts as root, so even the
-right directory name would have resolved under `/root` rather than the
-installing user's home. The recovery they attempted - read the PID, verify it
+right directory name would resolve under `/root` rather than the
+installing user's home. The recovery such a hook attempts - read the PID, verify it
 belongs to `vayu-engine`, remove the file if not - is what startup already does,
 against a path it resolves rather than spells, and at every launch rather than
 only at install time.
 
-They also cost more than they looked. `afterInstall` and `afterRemove` are
+Such hooks would also cost more than they look. `afterInstall` and `afterRemove` are
 passed to fpm as `--after-install` and `--after-remove`, which **replace**
 electron-builder's generated maintainer scripts rather than running alongside
-them, so every `.deb` built while those hooks existed shipped the lock cleanup
+them, so a `.deb` built with those hooks would ship the lock cleanup
 in place of the `/usr/bin/vayu-client` alternative, the `chrome-sandbox` mode
 fix, the mime and desktop database updates and the AppArmor profile Ubuntu 24
-requires. Removing them restores all of it. Anything a future hook needs to do
+requires. Anything a hook needs to do
 belongs in a script that keeps that generated content, not one that supersedes
 it.
 
@@ -226,7 +225,7 @@ being written. If something else still holds the
 database when an engine starts (a `sqlite3` shell left in a transaction, a sync
 agent), the engine waits for it (10 s on each connection it opens), then exits 1 naming the database
 and leaves every file as it was, rather than treating the held file as corrupt
-([db-schema.md](engine/db-schema.md#startup-validation-backup-and-recovery)).
+([db-schema/startup-and-recovery.md](engine/db-schema/startup-and-recovery.md#startup-validation-backup-and-recovery)).
 Because the lock is held before the database opens, the startup reconcile that
 marks `running` and `pending` runs as failed only ever meets runs a dead engine
 left behind; the lock is the whole ownership check, and run rows carry no owner.

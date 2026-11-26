@@ -6,12 +6,11 @@
  */
 
 /**
- * The main process's copy of `src/lib/execute-budget.ts` (issue #2836): the
- * abort budget for a `POST /execute`. `electron/` cannot import renderer
- * modules, so the function and its three constants are duplicated;
- * `execute-budget.parity.test.ts` holds the two to the same answer for the same
- * payload, which is what keeps the copy honest. Read that module's docblock for
- * the reasoning.
+ * The main process's copy of `src/lib/execute-budget.ts` (#2836): the abort budget for a
+ * `POST /execute`. `electron/` cannot import renderer modules, so the function and its three
+ * constants are duplicated; `execute-budget.parity.test.ts` holds the two to the same answer for
+ * the same payload, which is what keeps the copy honest. Read that module's docblock for the
+ * reasoning.
  */
 
 /**
@@ -23,9 +22,8 @@ const PROXIED_TIMEOUT_GRACE_MS = 10_000;
 
 /**
  * Ceiling of the engine's `defaultTimeout` setting (`seed_default_config` in
- * engine/src/db/database.cpp caps it at 300000). Used when the setting cannot
- * be read, so an unreadable config never shortens the budget below what the
- * engine may legitimately take.
+ * engine/src/db/database.cpp caps it at 300000). Used when the setting cannot be read, so an
+ * unreadable config never shortens the budget below what the engine may legitimately take.
  */
 const ENGINE_MAX_DEFAULT_TIMEOUT_MS = 300_000;
 
@@ -60,11 +58,10 @@ function runnableScriptCount(payload: Record<string, unknown> | undefined): numb
 }
 
 /**
- * Worst-case duration of a `POST /execute` for this payload, plus the grace: the
- * request timeout (the payload's own `timeout`, else `defaultTimeout`, else the
- * ceiling), once for the transfer and again for an OAuth 2.0 token fetch, plus
- * `scriptTimeout` per enabled script element. Exactly timeout + grace for a
- * payload with neither.
+ * Worst-case duration of a `POST /execute` for this payload, plus the grace: the request timeout
+ * (the payload's own `timeout`, else `defaultTimeout`, else the ceiling), once for the transfer and
+ * again for an OAuth 2.0 token fetch, plus `scriptTimeout` per enabled script element. Exactly
+ * timeout + grace for a payload with neither.
  */
 export function executeBudgetMs(payload: unknown, settings: BudgetSettings): number {
 	const body = asRecord(payload);

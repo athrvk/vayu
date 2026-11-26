@@ -6,12 +6,10 @@
  */
 
 /**
- * A Console row's exchange (#3634): request and response headers and bodies in
- * the shared `UnifiedResponseViewer`, as History's step card draws a stored
- * one. Every value is the row's, masked before it reached the ring.
- *
- * A body the ring cut at `CONSOLE_BODY_MAX_CHARS` says so above the viewer; a
- * row with a run points at History, whose stored trace keeps more.
+ * A Console row's exchange (#3634): request and response headers and bodies in the shared
+ * `UnifiedResponseViewer`, as History's step card draws a stored one; every value is the row's,
+ * masked before it reached the ring. A body the ring cut at `CONSOLE_BODY_MAX_CHARS` says so above
+ * the viewer, and a row with a run points at History, whose stored trace keeps more.
  */
 
 import { useMemo } from "react";

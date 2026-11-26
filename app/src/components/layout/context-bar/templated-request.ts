@@ -6,10 +6,9 @@
  */
 
 /**
- * The stored request as a snippet input - the Code section's Templated mode.
- *
- * Its counterpart is `POST /compose`, which the engine owns; this is the only
- * half the renderer builds itself, and it builds it by *not* resolving.
+ * The stored request as a snippet input, for the Code section's Templated mode. Its counterpart is
+ * `POST /compose`, which the engine owns; this is the only half the renderer builds itself, and it
+ * builds it by *not* resolving.
  */
 
 import { resolveAuthForSend } from "@/modules/request-builder/utils/auth-resolution";
@@ -18,12 +17,9 @@ import type { SnippetRequest } from "@/services/codegen";
 import type { Request } from "@/types";
 
 /**
- * Nothing is substituted - `{{host}}` stays `{{host}}`, which is the point of
- * the mode.
- *
- * `inherit` is still walked, because inheritance is structure rather than
- * interpolation: a templated snippet that dropped the inherited credential
- * would not be the request as written, it would be a different request.
+ * Nothing is substituted (`{{host}}` stays `{{host}}`), which is the point of the mode. `inherit`
+ * is still walked, as inheritance is structure, not interpolation: a templated snippet without the
+ * inherited credential would be a different request, not the request as written.
  */
 export function templatedRequest(
 	request: Request,
@@ -38,9 +34,8 @@ export function templatedRequest(
 		headers: toHeaderRows(request.headers ?? []),
 		body: request.body,
 		auth: resolveAuthForSend(request.auth, ancestors),
-		// An execution setting, so it comes off the row in both modes - see
-		// `CodeSection` for why the resolved mode cannot read it from the
-		// composed payload.
+		// An execution setting, so it comes off the row in both modes (see `CodeSection` for why
+		// the resolved mode cannot read it from the composed payload).
 		stream: request.stream,
 		verifySSL: request.verifySSL,
 		followRedirects: request.followRedirects,

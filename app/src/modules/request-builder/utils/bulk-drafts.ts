@@ -6,17 +6,12 @@
  */
 
 /**
- * The Params and Headers tabs' Bulk edit drafts, and the one rule for turning
- * a draft's text into the request it describes (#3666).
- *
- * A draft is held by `RequestBuilderProvider`, filed under the builder's
- * `memoryKey`, not by `BulkEditor`: one provider serves every request tab and
- * Params / Headers unmount on every sub-tab switch, so a component-held draft
- * was either lost on a glance at another tab or committed into the next
- * request. Send and Save commit an open draft before they read the request,
- * which is why the commit is a pure patch here rather than the panel's own
- * `updateField` calls: the provider applies it to the snapshot it is about to
- * send, in the same tick, as well as to its state.
+ * The Params and Headers Bulk edit drafts, and the one rule turning a draft's text into the request
+ * it describes (#3666). `RequestBuilderProvider` holds a draft under `memoryKey`, not `BulkEditor`:
+ * one provider serves every request tab and the panels unmount on every sub-tab switch, so a
+ * component-held draft was lost or committed into the next request. Send and Save commit an open
+ * draft first, so the commit is a pure patch, applied in the same tick to the snapshot being sent
+ * and to state.
  */
 
 import type { KeyValueItem } from "@/types";
@@ -49,15 +44,11 @@ type QuerySource = Pick<RequestState, "params" | "url" | "disableUrlEncoding">;
 type BulkSource = QuerySource & Pick<RequestState, "headers">;
 
 /**
- * The query table's rows written back beside the path rows it never shows, and
- * the URL's query rebuilt from them - the Params table's own edit and a params
- * draft's commit alike. `buildUrlWithParams` skips path rows itself, so the
- * `:name` segments stay as they are.
- *
- * A request sent unencoded (#1765) keeps its rows as typed in the URL too, or
- * the table would encode what the engine then sends raw. The rows before this
- * change tell an edited row from one carried over (#1771): only the latter may
- * keep a pair it matches decoded.
+ * The query rows written back beside the hidden path rows, with the URL's query rebuilt from them,
+ * for the Params table's edit and a params draft's commit alike; `buildUrlWithParams` skips path
+ * rows, so `:name` segments stay. A request sent unencoded (#1765) keeps its rows as typed in the
+ * URL, or the table would encode what the engine sends raw. The previous rows tell an edited row
+ * from a carried one (#1771): only the carried may keep a pair it matches decoded.
  */
 export function queryTablePatch(
 	request: QuerySource,
@@ -74,9 +65,9 @@ export function queryTablePatch(
 }
 
 /**
- * What committing `text` into `table` writes, or null when the text describes
- * the rows the table already holds: opening Bulk edit and leaving with nothing
- * typed must not re-enable a disabled row or dirty the request (#1480).
+ * What committing `text` into `table` writes, or null when it describes the rows already held:
+ * opening Bulk edit and leaving untyped must not re-enable a disabled row or dirty the request
+ * (#1480).
  */
 export function bulkTextPatch(
 	request: BulkSource,
@@ -92,8 +83,8 @@ export function bulkTextPatch(
 }
 
 /**
- * Every open draft's patch, merged. The tables write disjoint fields (params
- * and url, or headers), so each is computed against `request` as it stands.
+ * Every open draft's patch, merged; the tables write disjoint fields (params and url, or headers),
+ * so each is computed against `request`.
  */
 export function bulkDraftsPatch(
 	request: BulkSource,
@@ -119,9 +110,9 @@ const clip = (text: string): string =>
 	text.length > UNREAD_TEXT_MAX ? `${text.slice(0, UNREAD_TEXT_MAX)}…` : text;
 
 /**
- * The sentence for a table's unread lines, or null when there are none:
- * `Headers: 2 lines not read: line 3 "nocolon", line 5 "=novalue"`. Plain
- * quotes, not code style, because a toast renders text and nothing else.
+ * A table's unread-lines sentence, or null:
+ * `Headers: 2 lines not read: line 3 "nocolon", line 5 "=novalue"`. Plain quotes, not code style: a
+ * toast renders text only.
  */
 export function unreadLinesNotice(table: BulkTable, unread: readonly UnreadLine[]): string | null {
 	if (unread.length === 0) return null;
@@ -135,10 +126,9 @@ export function unreadLinesNotice(table: BulkTable, unread: readonly UnreadLine[
 }
 
 /**
- * One notice per open draft whose text holds a line the parser drops (#3694).
- * Independent of `bulkTextPatch`: a commit that changes no row (the unreadable
- * line was the only edit) is still a commit that did not read a line, so the
- * no-op guard does not silence it. A clean round trip has no unread line.
+ * One notice per open draft whose text holds a line the parser drops (#3694). Apart from
+ * `bulkTextPatch`: a commit changing no row (the unreadable line was the only edit) still did not
+ * read a line, so the no-op guard must not silence it. A clean round trip has none.
  */
 export function unreadLineNotices(drafts: BulkDrafts): string[] {
 	const notices: string[] = [];

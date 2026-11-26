@@ -8,22 +8,20 @@
 /**
  * What the session Console's ring (`stores/console-store.ts`) is handed (#3634).
  *
- * {@link sendConsoleRows} is the one builder both Send completions call, the
- * buffered one in `request-builder/index.tsx` and the streamed one in
- * `stream-finalization.ts`: two builders would be a field one path writes and
- * the other does not. A Send contributes its rows in execution order, the
- * pre-request script's lines and requests, the Send itself, then the
- * post-response script's, placed by the response pane's own `consoleRows`. A
- * script that threw adds its error as an `error` line after its phase's rows
- * (#3673), where the response pane draws it as a callout above the lines.
+ * {@link sendConsoleRows} is the one builder both Send completions call (the buffered one in
+ * `request-builder/index.tsx`, the streamed one in `stream-finalization.ts`): two builders would be
+ * a field one path writes and the other does not. A Send contributes its rows in execution order:
+ * the pre-request script's lines and requests, the Send itself, then the post-response script's,
+ * placed by the response pane's own `consoleRows`. A script that threw adds its error as an `error`
+ * line after its phase's rows (#3673), where the response pane draws it as a callout above the
+ * lines.
  *
- * The Send row is built from the live response, so it is masked here before
- * it enters the ring: header values by the engine's logger name set (less the
- * challenge headers) plus the `authHeaders` the response carries, the URL by
- * `maskUrlCredentials` plus `authQueryParam`, in the `user:<redacted>@host`
- * form the engine writes on a script request's row (#3672). Script requests
- * arrive masked by the engine (#3633) and are kept as written.
- * Bodies are not judged, as in an export.
+ * The Send row is built from the live response, so it is masked here before it enters the ring:
+ * header values by the engine's logger name set (less the challenge headers) plus the `authHeaders`
+ * the response carries, the URL by `maskUrlCredentials` plus `authQueryParam`, in the
+ * `user:<redacted>@host` form the engine writes on a script request's row (#3672). Script requests
+ * arrive masked by the engine (#3633) and are kept as written. Bodies are not judged, as in an
+ * export.
  */
 
 import type { ScriptRequestRecord, ScriptSource } from "@/types";

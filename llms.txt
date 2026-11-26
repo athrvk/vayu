@@ -28,6 +28,7 @@ Documentation site: https://athrvk.github.io/vayu/
 - [Engine API Reference](https://athrvk.github.io/vayu/engine/api-reference/)
 - [Engine Scripting](https://athrvk.github.io/vayu/engine/scripting/)
 - [MCP Server](https://athrvk.github.io/vayu/engine/mcp/)
+- [MCP Tools](https://athrvk.github.io/vayu/engine/mcp/tools/)
 - [Variable Resolution](https://athrvk.github.io/vayu/app/variable-resolution/)
 - [DB Schema](https://athrvk.github.io/vayu/engine/db-schema/)
 - [Building](https://athrvk.github.io/vayu/building/)

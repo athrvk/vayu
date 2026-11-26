@@ -6,15 +6,12 @@
  */
 
 /**
- * Row 3 of the live view: the run-so-far latency distribution (History's HDR
- * chart) and the request timing (History's waterfall and per-phase percentile
- * table), drawn from the latest gate frame (issue #2782).
- *
- * Both are read from `history`, not from the newest tick: only the gate frame
- * carries the distributions, and the newest tick usually is not one
- * (`utils/liveDistributions.ts`). Before the first completion each card says so
- * in one line, sized to the card it will become so nothing jumps when data
- * arrives.
+ * Row 3 of the live view: the run-so-far latency distribution (History's HDR chart) and the request
+ * timing (History's waterfall and per-phase percentile table), from the latest gate frame (issue
+ * #2782). Read from `history`, not the newest tick: only the gate frame carries the distributions,
+ * and the newest tick usually is not one (`utils/liveDistributions.ts`). Before the first
+ * completion each card says so in one line, sized to the card it will become, so nothing jumps when
+ * data arrives.
  */
 
 import { useMemo } from "react";

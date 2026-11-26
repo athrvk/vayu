@@ -8,24 +8,18 @@
 import { cva } from "class-variance-authority";
 
 /**
- * Lives beside `button.tsx` rather than in it: a module that exports both a
- * component and a value cannot be hot-reloaded (`react-refresh/only-export-components`).
+ * Beside `button.tsx`, not in it: a module exporting a component and a value cannot hot-reload
+ * (`react-refresh/only-export-components`).
  */
 export const buttonVariants = cva(
-	// No `transition-colors` here: it is a `@layer utilities` class, which
-	// beats the `@layer base` baseline transition in index.css that already
-	// covers this element (`button, [role="button"], a[href], summary`,
-	// including `scale` for press feedback) - a utility here would win the
-	// cascade and replace that whole list.
+	// No `transition-colors`: a `@layer utilities` class beats the `@layer base` transition in
+	// index.css that already covers this element (`button, [role="button"], a[href], summary`,
+	// `scale` included), replacing that whole list.
 	//
-	// `[&_svg:not([class*='size-'])]:size-icon`, not the bare `[&_svg]:size-icon`
-	// it used to be (issue #1679): a descendant rule scoped to a class plus a
-	// type selector is `(0,1,1)`, which outranks a plain `size-icon-sm` on the
-	// icon itself (`(0,1,0)`) - every caller that wanted the smaller glyph
-	// (the update/recovery banner closes, `RunItem`'s row actions) silently
-	// got the default 16px instead. `:not([class*='size-'])` makes the default
-	// rule not match at all once a caller states its own size, so there is no
-	// specificity contest to lose.
+	// `[&_svg:not([class*='size-'])]:size-icon`, not `[&_svg]:size-icon` (#1679): a class plus type
+	// descendant rule is `(0,1,1)` and outranks a `size-icon-sm` on the icon (`(0,1,0)`), so
+	// callers wanting the smaller glyph got 16px. The `:not` makes the default not match once a
+	// caller sizes the icon, so there is no contest.
 	"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-icon [&_svg]:shrink-0",
 	{
 		variants: {
@@ -40,59 +34,36 @@ export const buttonVariants = cva(
 				ghost: "hover:bg-accent hover:text-accent-foreground",
 				link: "text-primary underline-offset-4 hover:underline",
 				/*
-				 * Row actions - the controls that appear on a row you are already
-				 * hovering (⋯, delete, copy). `ghost` is wrong for these: it hovers
-				 * to bg-accent, which is exactly what the row underneath already
-				 * paints, so the button appears to have no hover state at all.
-				 * These step up to accent-active instead.
+				 * Row actions: controls on a row already hovered (⋯, delete, copy). Not `ghost`,
+				 * which hovers to bg-accent, what the row already paints, so it shows no hover;
+				 * these step to accent-active.
 				 */
 				rowAction: "text-muted-foreground hover:bg-accent-active hover:text-foreground",
 				/*
-				 * Same shape as rowAction - only the glyph turns red, and only on
-				 * hover. No red background: the row already carries one fill, a
-				 * second competing tint is noise, and the delete confirmation is
-				 * what actually protects the user.
-				 *
-				 * `destructive-text`, not `destructive`. Measured against
-				 * `--accent-active`, the fill token gives 3.66 light / 1.27 dark -
-				 * the dark figure missing even the 3.0 floor for a glyph.
-				 * `destructive-text` gives 4.12 / 3.96.
-				 *
-				 * Those clear 3.0 but not the 4.5 that *text* would need, and this
-				 * variant is icon-only by design (all three call sites render a
-				 * Trash2 at size="icon"). Put a text label in it and it stops
-				 * passing - use a different variant.
+				 * Like rowAction, but the glyph turns red on hover. No red background: the row has
+				 * one fill, a second tint is noise, and the delete confirmation is the protection.
+				 * `destructive-text`, not `destructive`: against `--accent-active` the fill token
+				 * gives 3.66 light / 1.27 dark (under the 3.0 glyph floor), `destructive-text` 4.12
+				 * / 3.96. Those miss the 4.5 text needs, so this is icon-only (every call site is a
+				 * Trash2 at size="icon"); a labelled button needs another variant.
 				 */
 				rowActionDestructive:
 					"text-muted-foreground hover:bg-accent-active hover:text-destructive-text",
 				/*
-				 * A full-width, left-aligned clickable row - the shape a summary row
-				 * or a "recent items" entry needs, and `default`'s fixed-height,
-				 * content-fit, centered shape cannot give. Deliberately not named
-				 * `row` - the "Row Actions" section above already owns that word for
-				 * the small hover-revealed `⋯`/delete controls on a row, a different
-				 * thing at a different scale.
-				 *
-				 * Only the axis-level shape lives here: `justify-center` flips to
-				 * `justify-start`, `text-left` beats the base's implicit centering.
-				 * Padding, gap, text size and icon size stay with the caller's own
-				 * `className` - the call sites this converts span three different
-				 * padding/text scales (a context-bar row is not a welcome-screen
-				 * row), and a single opinion here would renormalize all of them.
-				 * `h-auto` and `active:scale-100` live in `compoundVariants` below,
-				 * not here: cva concatenates `size`'s classes after `variant`'s, so a
-				 * height set in this string loses to `size`'s default `h-control` once both
-				 * pass through the same `cn()` merge, and the base string's own
-				 * `active:scale` (below `compoundVariants` in the final class list)
-				 * would win over a `scale-100` set here for the same reason.
+				 * A full-width, left-aligned clickable row (a summary row, a "recent items" entry),
+				 * which `default`'s fixed-height, centred shape cannot give. Not named `row`: "Row
+				 * Actions" above owns that word for the small hover controls. Only the axis-level
+				 * shape lives here (`justify-start`, `text-left`); padding, gap, text and icon size
+				 * stay with the caller, as the call sites span three scales. `h-auto` and
+				 * `active:scale-100` are in `compoundVariants`: cva puts `size`'s classes after
+				 * `variant`'s, so a height here loses to `size`'s `h-control` in `cn()`, and the
+				 * base's `active:scale` would beat a `scale-100` here.
 				 */
 				listRow: "w-full justify-start text-left",
 			},
-			// `default`/`sm`/`icon` read the app's control/target floors (issue
-			// #1679) rather than the bare `--spacing` rhythm: `h-9` and `h-8` were
-			// 27px/24px under the 3px unit (documented as 28/24 by every caller
-			// that mattered), and `icon` at `h-9 w-9` was a 27px interactive
-			// target, under the WCAG 2.2 SC 2.5.8 24x24px floor.
+			// `default`/`sm`/`icon` read the control/target floors (#1679), not the `--spacing`
+			// rhythm: `h-9` and `h-8` were 27px/24px under the 3px unit, and `icon` at `h-9 w-9` a
+			// 27px target, under WCAG 2.2 SC 2.5.8's 24x24px floor.
 			size: {
 				default: "h-control px-4 py-2",
 				sm: "h-control-sm px-3 text-xs",
@@ -102,15 +73,11 @@ export const buttonVariants = cva(
 		compoundVariants: [
 			{
 				variant: "listRow",
-				// `active:scale-100`: the baseline press-feedback shrink
-				// (`index.css`'s `[data-slot="button"]:active`) is 2% of the
-				// element's own box, which reads fine on a compact, content-fit
-				// CTA and reads as a glitch on a full-width row - the same
-				// distinction that comment already draws for `a[href]`/
-				// `[role="button"]`, just not extended to a `Button` rendering as
-				// one. Measured: a 1290px row (`SampledExchange`, snug inside its
-				// own 1px border) shrinks by 13px on each side, visibly detaching
-				// from the border it needs to stay flush against.
+				// `active:scale-100`: the press shrink (`index.css`'s
+				// `[data-slot="button"]:active`) is 2% of the element's box, fine on a compact CTA
+				// and a glitch on a full-width row (the distinction index.css's comment draws for
+				// `a[href]` / `[role="button"]`). A 1290px row (`SampledExchange`, inside its own
+				// 1px border) shrinks 13px a side, detaching from the border.
 				class: "h-auto active:scale-100",
 			},
 		],

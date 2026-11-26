@@ -6,25 +6,17 @@
  */
 
 /**
- * Which section tabs fit the space a strip has, and which go to the overflow
- * menu (#2200).
+ * Which section tabs fit a strip's space and which go to the overflow menu (#2200): `TabStrip`'s
+ * measured fit for document tabs, applied to Radix `TabsTrigger`s. Widths come from a canvas, not
+ * the rendered triggers (hiding one would change what is measured next), and the active tab never
+ * overflows.
  *
- * The response and request strips used to be `overflow-x-auto` with a hidden
- * scrollbar, so at the default split the last tabs were simply cut off with no
- * cue that they existed. This is the measured-fit `TabStrip` uses for document
- * tabs, applied to Radix `TabsTrigger`s: widths come from a canvas rather than
- * from the rendered triggers (hiding one would change what is measured next),
- * and the active tab is never the one overflowed.
- *
- * **`containerRef` goes on a wrapper around the `TabsList`, never on the list.**
- * The list is `min-w-0` and shrinks to its visible triggers, so measuring it
- * reads back the width the previous fit left - the feedback loop that collapsed
- * `TabStrip` to one tab (`TabStrip.overflow.test.tsx`). The wrapper has to fill
- * its parent whatever its content is (`flex-1` in a row, `w-full` in a column).
- *
- * It is a callback ref, not an object ref: a pane that returns early (an empty
- * response) has no wrapper on its first commit, and the observer must attach
- * when the wrapper does.
+ * **`containerRef` goes on a wrapper around the `TabsList`, never on the list.** The list is
+ * `min-w-0` and shrinks to its visible triggers, so measuring it reads back the previous fit's
+ * width, a feedback loop that collapses the strip to one tab (`TabStrip.overflow.test.tsx`). The
+ * wrapper must fill its parent whatever its content (`flex-1` in a row, `w-full` in a column). A
+ * callback ref, not an object ref: a pane returning early (an empty response) has no wrapper on its
+ * first commit, and the observer must attach when the wrapper does.
  */
 
 import { useLayoutEffect, useMemo, useState } from "react";
@@ -51,9 +43,9 @@ export interface FittedTabs<Id extends string> {
 }
 
 /**
- * The font a trigger draws its name in, read from a rendered one so the user's
- * font choice and scale are included. The weight is pinned to 600: `TabLabel`
- * reserves the bold width in every state, so that is the width a trigger takes.
+ * The font a trigger draws its name in, read from a rendered one so the user's font choice and
+ * scale count. The weight is pinned to 600: `TabLabel` reserves the bold width in every state, so
+ * that is the width a trigger takes.
  */
 function triggerFont(container: HTMLElement): string {
 	const trigger = container.querySelector('[data-slot="tabs-trigger"]') ?? container;
@@ -91,8 +83,8 @@ export function useFittedTabs<Id extends string>({
 	const widths = ids.map((id, i) =>
 		naturalTriggerWidth(labels[i], measure, markAllowance?.(id) ?? 0)
 	);
-	// Nothing to reserve for a New-tab button, and the "+N" control is paid for
-	// by fitTabs itself, so a row that fits shows no menu.
+	// No New-tab button to reserve for, and `fitTabs` pays for the "+N" control itself, so a row
+	// that fits shows no menu.
 	const { visible, overflowed } = fitTabs(widths, available, ids.indexOf(activeId), {
 		reserved,
 	});

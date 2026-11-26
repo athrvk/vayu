@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * RequestTabs Component
- *
- * Tab navigation and content panels for request configuration
- */
+/** Tab navigation and content panels for request configuration. */
 
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
@@ -32,28 +28,19 @@ import { isRequestSettingsNonDefault } from "../../utils/request-state";
 import { displayPathRows, pathRowsOf, queryRowsOf } from "../../utils/path-variables";
 
 /**
- * The tabs whose panel carries a Monaco editor rather than a form: Body's code
- * pane, and Elements' `script.pre` / `script.post` rows (one editor each,
- * issue #1643 gave every row its own height).
- *
- * Force-mounted below (issue #1718) so switching to Headers and back does not
- * tear the editor down and rebuild it - cursor, scroll position and undo
- * history used to reset on every glance elsewhere, because Radix unmounts an
- * inactive `TabsContent` and the text is all that survives, read back from the
- * request store. Params, Headers, Auth and the rest keep their cheap
- * mount-on-demand behaviour; only these two carry state a remount destroys.
+ * Tabs whose panel holds Monaco, not a form: Body's code pane and Elements' `script.pre` /
+ * `script.post` rows (one editor each, #1643). Force-mounted below (#1718) so a glance at Headers
+ * does not rebuild the editor: Radix unmounts an inactive `TabsContent`, and only the text, read
+ * back from the store, would survive, losing cursor, scroll and undo. Other tabs keep cheap
+ * mount-on-demand; only these carry state a remount destroys.
  */
 const EDITOR_TABS = new Set<RequestTab>(["body", "elements"]);
 
-/**
- * `variant="inset"`'s `px-1` on both sides of the list, which the fit's wrapper
- * contains but the triggers cannot use.
- */
+/** `variant="inset"`'s `px-1` per side: inside the fit's wrapper, unusable by the triggers. */
 const LIST_PADDING = 8;
 
 /**
- * What a tab's mark may grow to once it arrives. A tab with no `badge` key can
- * never carry one (Examples), and a `presence` tab draws a dot, not digits.
+ * What a tab's mark may grow to: none without a `badge` key (Examples), a dot for a `presence` tab.
  */
 function markAllowanceOf(tab: TabInfo): number {
 	if (!("badge" in tab)) return MARK_ALLOWANCE.none;
@@ -61,8 +48,7 @@ function markAllowanceOf(tab: TabInfo): number {
 }
 
 /**
- * A tab's trailing mark, shared by its trigger and its "+N" menu item. A tab
- * with no `badge` key can never carry one (Examples).
+ * A tab's trailing mark, shared by its trigger and its "+N" menu item; none without a `badge` key.
  */
 function countMarkOf(tab: TabInfo) {
 	if (!("badge" in tab)) return null;
@@ -73,36 +59,25 @@ export default function RequestTabs() {
 	const { request, memoryKey, activeTab, setActiveTab } = useRequestBuilderContext();
 
 	/*
-	 * Force-mounted from first visit onward, not from mount: a request opened
-	 * on Params should not pay for a Body editor - or, worse, one Monaco
-	 * instance per `script.pre`/`script.post` element - that nobody asked for.
-	 * Once the user has looked at Body or Elements, the panel (and everything
-	 * it mounted) stays alive for the rest of this builder instance; component
-	 * state rather than a ref because it has to trigger the re-render that
-	 * turns `forceMount` on.
-	 *
-	 * Seeded from the incoming `activeTab` so a request restored straight into
-	 * Body force-mounts on this very render, not a frame late - and updated by
-	 * comparing against the last-seen tab during render (the same
-	 * derived-during-render shape `CollectionDetail`'s per-collection tab sync
-	 * uses) rather than in an effect, since the active tab already renders
-	 * regardless of `forceMount` and a `visited` that lagged a render would
-	 * only matter for the one thing this exists to prevent: dropping it the
-	 * instant the user glanced at a sibling tab.
+	 * Force-mounted from first visit, not from mount: a request opened on Params should not pay for
+	 * a Body editor, or a Monaco per `script.*` element, nobody asked for. Once Body or Elements is
+	 * seen, its panel stays alive for this builder instance. State, not a ref, since it must
+	 * trigger the render that turns `forceMount` on. Seeded from `activeTab`, so a request restored
+	 * into Body force-mounts on this render, and updated during render (as `CollectionDetail`'s tab
+	 * sync is), not in an effect: a `visited` lagging a render would drop the panel the instant the
+	 * user glanced at a sibling.
 	 */
 	const [visited, setVisited] = useState<ReadonlySet<RequestTab>>(() => new Set([activeTab]));
 	if (!visited.has(activeTab)) {
 		setVisited((prev) => new Set(prev).add(activeTab));
 	}
 
-	// Calculate badges for tabs
 	const tabs: TabInfo[] = [
 		{
 			/*
-			 * First, deliberately. A description is the first thing you want to
-			 * read about a request and the last thing you find at the end of a
-			 * tab row. Its badge is a presence dot, not a count: Params and
-			 * Headers carry real numbers, and a `1` here read as one of something.
+			 * First, deliberately: a description is the first thing to read about a request. Its
+			 * badge is a presence dot, not a count: Params and Headers carry real numbers, and a
+			 * `1` here read as a count.
 			 */
 			id: "info",
 			label: "Info",
@@ -112,9 +87,9 @@ export default function RequestTabs() {
 		{
 			id: "params",
 			label: "Params",
-			// Both tables' enabled rows: the query's and the path variables'
-			// (#1764), as the tab shows them - so a `:name` no stored row answers
-			// yet counts too; it is the row most likely to need the user.
+			// Enabled rows of both tables, query and path variables (#1764), as the tab shows them,
+			// so a `:name` no stored row answers yet counts: it is the row most likely to need the
+			// user.
 			badge:
 				[
 					...queryRowsOf(request.params),
@@ -141,19 +116,17 @@ export default function RequestTabs() {
 		{
 			id: "elements",
 			label: "Elements",
-			// A blank script.pre/post is inert (#1609) - it does nothing, so it
-			// doesn't count toward "something is here" any more than a disabled row.
+			// A blank script.pre/post is inert (#1609), so it counts no more than a disabled row.
 			badge:
 				request.elements.filter((e) => e.enabled && !isBlankScriptElement(e)).length ||
 				undefined,
 		},
 		{
 			/*
-			 * After the elements and before Settings: examples describe what the
-			 * request answers with, which belongs beside the request's own
-			 * definition rather than among its execution options. No badge - the
-			 * count lives behind a query, and a tab row that waits on the network
-			 * to finish drawing is worse than one that says nothing until opened.
+			 * After the elements, before Settings: examples describe what the request answers with,
+			 * which belongs by its definition, not among execution options. No badge: the count is
+			 * behind a query, and a tab row waiting on the network is worse than one silent until
+			 * opened.
 			 */
 			id: "examples",
 			label: "Examples",
@@ -161,8 +134,7 @@ export default function RequestTabs() {
 		{
 			id: "settings",
 			label: "Settings",
-			// Marked only when the request departs from the engine defaults, so
-			// the tab stays quiet for the requests that never touch it.
+			// Marked only when the request departs from the engine defaults.
 			badge: isRequestSettingsNonDefault(request) ? 1 : undefined,
 			presence: true,
 		},
@@ -184,11 +156,9 @@ export default function RequestTabs() {
 			className="flex-1 flex flex-col overflow-hidden"
 		>
 			{/*
-			 * Tab Headers. The fit measures the wrapper, not the list, which shrinks
-			 * to what it draws (`useFittedTabs`); `w-full` rather than `flex-1`
-			 * because the wrapper sits in a column, where `flex-1` would grow it
-			 * vertically and leave its width to its content. Tabs that do not fit are
-			 * in the "+N" menu rather than scrolled out of sight.
+			 * The fit measures the wrapper, not the list, which shrinks to what it draws
+			 * (`useFittedTabs`); `w-full`, not `flex-1`, since in a column `flex-1` grows height
+			 * and leaves width to content. Tabs that do not fit go in the "+N" menu.
 			 */}
 			<div ref={containerRef} className="flex w-full shrink-0 items-stretch">
 				<TabsList variant="inset" className="overflow-hidden flex-nowrap">
@@ -198,15 +168,12 @@ export default function RequestTabs() {
 							<TabsTrigger key={tab.id} value={tab.id}>
 								<TabLabel>{tab.label}</TabLabel>
 								{/*
-								 * Unconditional for every tab that *can* carry a count,
-								 * `undefined` and all - `TabCount` animates its own track
-								 * open rather than reserving one. Gating the element here is
-								 * exactly what made typing the first character into an empty
-								 * Params table shove the seven tabs after Params, and the
-								 * `Table` toggle sharing their row, sideways. Examples can
-								 * never carry a count, so it declares no `badge` key at all
-								 * and pays no width at all, ever - which is why this asks
-								 * whether the key is *there*, not whether its value is set.
+								 * Unconditional for every tab that *can* carry a count, `undefined`
+								 * included: `TabCount` animates its own track open. Gating the
+								 * element here made typing the first character into an empty Params
+								 * table shove every tab after it sideways. Examples declares no
+								 * `badge` key and pays no width, so this asks whether the key is
+								 * *there*, not whether its value is set.
 								 */}
 								{countMarkOf(tab)}
 							</TabsTrigger>
@@ -221,30 +188,19 @@ export default function RequestTabs() {
 			</div>
 
 			{/*
-			 * TabsContent per tab, not a plain <div>. Radix derives an
-			 * aria-controls id per trigger from its value, so rendering the
-			 * content outside the Tabs tree left all six triggers pointing at
-			 * panel ids that never existed - a tablist with no reachable panels.
+			 * TabsContent per tab, not a plain <div>: Radix derives each trigger's aria-controls id
+			 * from its value, so content outside the Tabs tree left every trigger pointing at a
+			 * panel id that did not exist. Each panel renders against `tab.id`, not a component
+			 * keyed on `activeTab`, which would blank a force-mounted panel once focus moved,
+			 * undoing `forceMount`. `EDITOR_TABS.has(tab.id) && visited.has(tab.id)` force-mounts
+			 * Body and Elements from first visit; other tabs mount only while active.
+			 * `components/ui/tabs.tsx` hides an inactive force-mounted panel from the accessibility
+			 * tree and tab order (`data-[state=inactive]:hidden`), as `CollectionDetail` relies on.
 			 *
-			 * Each panel renders inline against `tab.id` rather than through a
-			 * separate component keyed on `activeTab`: a switch on the *active*
-			 * tab would render nothing for a force-mounted panel the moment focus
-			 * moved elsewhere, undoing the one thing `forceMount` exists to do.
-			 * `EDITOR_TABS.has(tab.id) && visited.has(tab.id)` force-mounts Body
-			 * and Elements from their first visit onward; every other tab keeps
-			 * Radix's default of mounting only while active, so `TabsContent`
-			 * still renders exactly one panel until a second one has actually
-			 * been visited. `components/ui/tabs.tsx` hides an inactive
-			 * force-mounted panel from the accessibility tree and the tab order
-			 * (`data-[state=inactive]:hidden`), the same way `CollectionDetail`
-			 * relies on it for its own force-mounted drafts.
-			 *
-			 * The mount-on-demand panels are keyed on the builder's `memoryKey`
-			 * (#3666): one provider serves every request tab, so a panel whose
-			 * state is its own (a bulk-edit draft, a revealed secret, a signing
-			 * key being typed) would otherwise follow the user into the next
-			 * request. Body and Elements cannot be keyed - a remount rebuilds
-			 * Monaco - so Body resets what it holds itself.
+			 * Mount-on-demand panels are keyed on the builder's `memoryKey` (#3666): one provider
+			 * serves every request tab, so a panel's own state (a bulk-edit draft, a revealed
+			 * secret, a key being typed) would follow the user into the next request. Body and
+			 * Elements cannot be keyed (a remount rebuilds Monaco), so Body resets its own state.
 			 */}
 			{tabs.map((tab) => (
 				<TabsContent
@@ -253,10 +209,8 @@ export default function RequestTabs() {
 					forceMount={EDITOR_TABS.has(tab.id) && visited.has(tab.id) ? true : undefined}
 					className={cn(
 						"mt-0 flex-1 overflow-y-auto p-4",
-						// Only Body's panel is one editor filling the whole pane - the
-						// flex column that lets it do so is not tied to force-mount
-						// membership. Elements is a list of rows with an editor apiece,
-						// laid out by its own scrollable block.
+						// Only Body is one editor filling the pane, so only it gets the flex
+						// column; Elements lays out its rows in its own scrollable block.
 						tab.id === "body" && "flex flex-col"
 					)}
 				>

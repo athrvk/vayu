@@ -6,19 +6,14 @@
  */
 
 /**
- * DemoApiTile - "try sending a request" (issue #1694).
+ * "Try sending a request" (#1694). Its own row, not a seventh tile at a different height: the
+ * Launcher's Start grid is six equal-weight actions with no room for a sentence. Shown only while
+ * `runs.length === 0` (`Launcher.tsx`): once anything has been sent the row's question is answered,
+ * and it goes without a dismiss to click.
  *
- * The Launcher's Start grid is six equal-weight actions with no room for a
- * sentence, so this is its own row rather than a seventh tile squeezed into
- * that grid at a different height. Shown only while `runs.length === 0`
- * (`Launcher.tsx`) - once anything has been sent, the app has already
- * answered the question this row exists to answer, and it disappears without
- * a dismiss to click.
- *
- * Opens a real, pre-filled request (`DEMO_REQUEST_PRESET`) rather than
- * explaining Vayu in prose - the module's own README rules out marketing copy
- * here, and "click, then press the chord you'll use every day" teaches the
- * one interaction that matters more than any paragraph could.
+ * Opens a real, pre-filled request (`DEMO_REQUEST_PRESET`) rather than explaining Vayu in prose:
+ * the module's README rules out marketing copy here, and "click, then press the chord you'll use
+ * every day" teaches the one interaction that matters most.
  */
 
 import { Zap } from "lucide-react";

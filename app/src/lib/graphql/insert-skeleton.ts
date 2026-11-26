@@ -8,44 +8,34 @@
 /**
  * Turning a row of the schema explorer into an edit of the query document.
  *
- * **The contract is that the document still parses afterwards *and* can be
- * run.** A document that parses is not necessarily one the endpoint will
- * accept: a lone `fragment PostFields on Post { … }` is valid GraphQL and holds
- * no operation, so pressing Send on it gets nothing back. A click has to leave
- * behind something the user can run, which is why a type row inserts the query
- * that reaches it and falls back to a fragment only when the document already
- * carries an operation for that fragment to live beside.
+ * **The contract: the document still parses afterwards *and* can be run.** A lone
+ * `fragment PostFields on Post { … }` is valid GraphQL and holds no operation, so Send on it gets
+ * nothing back. So a type row inserts the query that reaches it, and falls back to a fragment only
+ * when the document already has an operation for the fragment to live beside.
  *
- * Everything awkward in here follows from the parses half of it:
+ * What follows from the parses half:
  *
- * - A field is inserted into the selection set the cursor is in *only* when
- *   that set's type is the one that owns the field. No inline-fragment
- *   guessing on an interface or union, because "probably compatible" is how an
- *   invalid document gets written on the user's behalf. A cursor *inside* an
- *   inline fragment is a different matter: the fragment states its type, so the
- *   set is read at that type rather than at the interface or union above it -
- *   reading what the document says is not guessing.
- * - A field whose arguments become `$variables` forces those variables to be
- *   *declared*, so inserting into an existing operation edits that operation's
- *   variable definitions too. A `$id` nobody declared is a document the server
- *   rejects, and it would have been produced by a click rather than typed.
- * - An object-typed field is given its scalar fields rather than the empty
- *   `{ }` the issue sketched. An empty selection set is a syntax error, so the
- *   sketch and the contract disagreed; the contract wins, and the cursor still
- *   lands inside the braces where the sketch wanted it.
+ * - A field goes into the selection set the cursor is in *only* when that set's type owns the
+ *   field. No inline-fragment guessing on an interface or union: "probably compatible" is how an
+ *   invalid document gets written on the user's behalf. A cursor *inside* an inline fragment is
+ *   different: the fragment states its type, so the set is read at that type, not at the interface
+ *   or union above it.
+ * - A field whose arguments become `$variables` forces those variables to be *declared*, so
+ *   inserting into an existing operation edits its variable definitions too. An undeclared `$id` is
+ *   a document the server rejects, produced by a click rather than typed.
+ * - An object-typed field gets its scalar fields rather than an empty `{ }`, which is a syntax
+ *   error; the cursor still lands inside the braces.
  *
- * **A path, not a search.** Inserting `Post.title` needs to know how a `Post`
- * is reached, and the schema graph has many answers (or none). The explorer
- * already knows the one the user opened - it is the rows they expanded - so a
- * field row carries its `rootPath` and this module never searches the graph. A
- * row with no path (browsed under Types) can still be inserted where the cursor
- * already sits in a compatible set; anywhere else it is refused out loud, which
- * is the honest end of "never silently produces an invalid document".
+ * **A path, not a search.** Inserting `Post.title` needs to know how a `Post` is reached, and the
+ * schema graph has many answers (or none). The explorer knows the one the user opened (the rows
+ * they expanded), so a field row carries its `rootPath` and this module never searches the graph. A
+ * row with no path (browsed under Types, or a search result) borrows the best one-step route to its
+ * owner type (`rootedPath`); with none to borrow, it can still be inserted where the cursor already
+ * sits in a compatible set, and is refused out loud anywhere else.
  *
- * The document is parsed through `maskGraphqlTemplates`, so a query holding
- * `{{variables}}` is analysed rather than treated as broken. The mask is
- * length-preserving, which is what makes the AST's offsets usable against the
- * real text.
+ * The document is parsed through `maskGraphqlTemplates`, so a query holding `{{variables}}` is
+ * analysed rather than treated as broken; the mask is length-preserving, so the AST's offsets fit
+ * the real text.
  */
 
 import {
@@ -77,9 +67,8 @@ import { rootPathsToType, type FieldStep, type SchemaTreeNode } from "./schema-t
 const INDENT = "  ";
 
 /**
- * Where the caret goes, carried inside the generated text until the offsets are
- * final. A NUL cannot be typed into the editor, so it can never collide with
- * the user's own document.
+ * Where the caret goes, carried inside the generated text until the offsets are final. A NUL cannot
+ * be typed into the editor, so it never collides with the user's document.
  */
 const CARET = "\u0000";
 
@@ -88,9 +77,9 @@ export interface InsertRequest {
 	parentTypeName: string;
 	fieldName: string;
 	/**
-	 * The route from a root operation type to this field, or null when the row
-	 * was not reached from one. A path is what allows a new operation to be
-	 * appended; without one, only the cursor's current selection set will do.
+	 * The route from a root operation type to this field, or null when the row was not reached from
+	 * one. A path lets a new operation be appended; without one, and none `rootedPath` can borrow,
+	 * only the cursor's current selection set will do.
 	 */
 	rootPath: FieldStep[] | null;
 }
@@ -135,14 +124,12 @@ export interface InsertRefusal {
 }
 
 /**
- * The leaf is already in the selection set the insertion would have written it
- * into, so there is nothing to write.
- *
- * A *value* rather than a silent return, for the same reason a refusal is one:
- * the caller has to say what happened. Duplicate fields are valid GraphQL - they
- * merge - so this is not the "never produce an invalid document" contract, it is
- * the second click on a row adding a line the user cannot tell from the first.
- * The offsets are the existing field's name, so the caller can show it instead.
+ * The leaf is already in the selection set the insertion would have written it into, so there is
+ * nothing to write. A *value* rather than a silent return, for the reason a refusal is one: the
+ * caller has to say what happened. Duplicate fields are valid GraphQL (they merge), so this is not
+ * the "never produce an invalid document" contract but the second click on a row adding a line the
+ * user cannot tell from the first. The offsets are the existing field's name, so the caller can
+ * show it instead.
  */
 export interface InsertAlreadyPresent {
 	alreadyPresent: true;
@@ -176,17 +163,13 @@ interface EnclosingSet {
 }
 
 /**
- * The selection sets containing `cursor`, outermost first.
+ * The selection sets containing `cursor`, outermost first. Empty when the document does not parse,
+ * the cursor is outside every operation, or a field along the way is not in the schema: to the
+ * caller all three mean there is no context to insert into.
  *
- * Empty when the document does not parse, when the cursor is outside every
- * operation, or when a field along the way is not in the schema - all of which
- * mean the same thing to the caller: there is no context to insert into.
- *
- * An inline fragment is one of the sets, at the type it narrows to. Skipping it
- * reported the interface or union the field above declares, so a cursor inside
- * `... on Post { }` looked like a cursor in a `Node` set that owns nothing the
- * user clicked - and the insertion fell all the way out to a second copy of the
- * route (#1346).
+ * An inline fragment is one of the sets, at the type it narrows to. Skipped, a cursor inside
+ * `... on Post { }` would read as a cursor in a `Node` set that owns nothing the user clicked, and
+ * the insertion would fall all the way out to a second copy of the route (#1346).
  */
 function enclosingSets(
 	schema: GraphQLSchema,
@@ -223,19 +206,16 @@ function enclosingSets(
 }
 
 /**
- * One step inwards from `set` towards the cursor, or null when the cursor is in
- * `set` itself - or behind something this cannot read the type of.
+ * One step inwards from `set` towards the cursor, or null when the cursor is in `set` itself, or
+ * behind something whose type this cannot read.
  *
- * The two selections that hold a nested set are a field and an inline fragment,
- * and they answer the same question differently: a field's set is read at the
- * field's type, a fragment's at the type it names. A fragment with no type
- * condition (`... @include(if: $x) { }`) is legal and narrows nothing, so the
- * type carries over unchanged.
+ * A field and an inline fragment hold the nested sets and answer differently: a field's set is read
+ * at the field's type, a fragment's at the type it names. A fragment with no type condition
+ * (`... @include(if: $x) { }`) is legal and narrows nothing, so the type carries over.
  *
- * Stopping (rather than descending blind) where the schema does not have the
- * field or the type condition is the same rule the chain has always followed:
- * the sets above are still honest context, and the sets below are read against
- * a type nothing can be checked against.
+ * Where the schema lacks the field or the type condition this stops rather than descending blind:
+ * the sets above are still honest context, and the sets below would be read against a type nothing
+ * can be checked against.
  */
 function descend(
 	schema: GraphQLSchema,
@@ -283,11 +263,9 @@ function contains(node: { loc?: { start: number; end: number } }, offset: number
 /* -------------------------------------------------------------------------- */
 
 /**
- * Hands out variable names that collide with nothing already declared.
- *
- * A second `$id` in one operation is a validation error, and two fields wanting
- * an `id` is the ordinary case (`user(id:)` then `post(id:)`), so the second
- * becomes `$id2`.
+ * Hands out variable names that collide with nothing already declared. A second `$id` in one
+ * operation is a validation error, and two fields wanting an `id` is the ordinary case (`user(id:)`
+ * then `post(id:)`), so the second becomes `$id2`.
  */
 class VariableNamer {
 	private readonly taken: Set<string>;
@@ -309,12 +287,10 @@ class VariableNamer {
 }
 
 /**
- * A starting value for a variable of this type.
- *
- * Deliberately a value of the right shape rather than `null`: the pane's JSON
- * schema (`variables-schema.ts`) validates what is there, and a null under a
- * non-null variable is an error the user did not make yet. An enum takes its
- * first value because any of them parses and none is more correct.
+ * A starting value for a variable of this type: one of the right shape, not `null`, because the
+ * pane's JSON schema (`variables-schema.ts`) validates what is there, and a null under a non-null
+ * variable is an error the user has not made yet. An enum takes its first value: any of them parses
+ * and none is more correct.
  */
 export function placeholderFor(type: GraphQLNamedType, isList: boolean): unknown {
 	if (isList) return [];
@@ -332,15 +308,11 @@ export function placeholderFor(type: GraphQLNamedType, isList: boolean): unknown
 /* -------------------------------------------------------------------------- */
 
 /**
- * Render `steps` as a nested selection, innermost step carrying the caret.
- *
- * Indentation is **relative**: the result starts at column zero and whoever
- * places it shifts every line by the same prefix. Rendering absolute
- * indentation here instead meant the placer's own prefix was applied on top of
- * it, and every nested level came out doubled.
- *
- * Returns null when a step names something the schema does not have, which
- * happens when the pane's tree is a refresh behind the schema it is reading.
+ * Render `steps` as a nested selection, innermost step carrying the caret. Indentation is
+ * **relative**: the result starts at column zero and the placer shifts every line by one prefix;
+ * absolute indentation here would get the placer's prefix on top and double every nested level.
+ * Null when a step names something the schema does not have, which happens when the pane's tree is
+ * a refresh behind its schema.
  */
 function renderSteps(
 	schema: GraphQLSchema,
@@ -361,9 +333,8 @@ function renderSteps(
 		if (body === null) return null;
 	} else {
 		/*
-		 * The narrowing decides what to select, not just how to wrap it: the
-		 * step wants `Post`'s scalars, and the field's own type is the `Node`
-		 * they are not on.
+		 * The narrowing decides what to select, not just how to wrap it: the step wants `Post`'s
+		 * scalars, and the field's own type is the `Node` they are not on.
 		 */
 		const target = step.narrowTo ? schema.getType(step.narrowTo) : getNamedType(field.type);
 		if (!target) return null;
@@ -387,10 +358,8 @@ function indentBlock(block: string): string {
 }
 
 /**
- * Required arguments as `$variables`, optional ones omitted.
- *
- * "Required" means non-null with no default: an argument the schema defaults is
- * one the server fills in, and writing it out as a variable the user must now
+ * Required arguments as `$variables`, optional ones omitted. "Required" means non-null with no
+ * default: the server fills a defaulted argument in, and writing it out as a variable the user must
  * supply turns a convenience into a chore.
  */
 function renderArguments(field: GraphQLField<unknown, unknown>, namer: VariableNamer): string {
@@ -406,12 +375,10 @@ function renderArguments(field: GraphQLField<unknown, unknown>, namer: VariableN
 }
 
 /**
- * What to select inside an object-typed field: its scalar leaves.
- *
- * `null` for a field that needs no selection set at all (a scalar or enum).
- * `__typename` when there is nothing scalar to take - a union has no fields of
- * its own, and an object of nothing but object fields would otherwise get an
- * empty set, which does not parse.
+ * What to select inside an object-typed field: its scalar leaves. `null` for a field that needs no
+ * selection set (a scalar or enum). `__typename` when there is nothing scalar to take: a union has
+ * no fields of its own, and an object of only object fields would otherwise get an empty set, which
+ * does not parse.
  */
 function leafSelection(type: GraphQLNamedType): string | null {
 	if (isScalarType(type) || isEnumType(type)) return null;
@@ -424,10 +391,9 @@ function leafSelection(type: GraphQLNamedType): string | null {
 				);
 			})
 			/*
-			 * A deprecated field is one the schema is asking clients to stop
-			 * using. Selecting it by default writes the migration the server
-			 * author is trying to end into every new operation - it is browsable
-			 * in the tree, struck through, which is where it belongs.
+			 * A deprecated field is one the schema asks clients to stop using; selecting it by
+			 * default writes the migration the server author is trying to end into every new
+			 * operation. It stays browsable in the tree, struck through.
 			 */
 			.filter((f) => !f.deprecationReason)
 			.map((f) => f.name);
@@ -448,11 +414,9 @@ interface Edit {
 }
 
 /**
- * Apply edits to `text` and report where the caret marker ended up.
- *
- * Applied last-first so that an earlier edit's offsets are still the offsets it
- * was computed against - the reason a variable definition and a selection can
- * be planned independently and committed together.
+ * Apply edits to `text` and report where the caret marker ended up. Applied last-first so an
+ * earlier edit's offsets are still the ones it was computed against, which is why a variable
+ * definition and a selection can be planned independently and committed together.
  */
 function applyEdits(text: string, edits: Edit[]): { text: string; cursor: number } {
 	let out = text;
@@ -464,11 +428,9 @@ function applyEdits(text: string, edits: Edit[]): { text: string; cursor: number
 }
 
 /**
- * The document with a blank line at the end, ready to be appended to.
- *
- * Additive only: it never trims what is already there. Trimming looks tidier
- * and deletes characters the user just typed - a mid-edit `user(id: ` ends in a
- * space, and the caret is sitting on it.
+ * The document with a blank line at the end, ready to be appended to. Additive only, never
+ * trimming: trimming deletes characters the user just typed (a mid-edit `user(id: ` ends in a
+ * space, and the caret is on it).
  */
 function withBlankLine(text: string): string {
 	if (!text.trim()) return "";
@@ -483,11 +445,9 @@ function indentAt(text: string, offset: number): string {
 }
 
 /**
- * An edit putting `body` as the last selection of `set`.
- *
- * The whitespace between the last selection and the closing brace is rewritten
- * rather than added to, so a one-line `{ id }` becomes a block instead of
- * growing a selection wedged against the brace.
+ * An edit putting `body` as the last selection of `set`. The whitespace between the last selection
+ * and the closing brace is rewritten, not added to, so a one-line `{ id }` becomes a block instead
+ * of growing a selection wedged against the brace.
  */
 function insertIntoSet(text: string, set: SelectionSetNode, body: string): Edit {
 	const brace = set.loc!.end - 1;
@@ -504,12 +464,9 @@ function insertIntoSet(text: string, set: SelectionSetNode, body: string): Edit 
 }
 
 /**
- * An edit adding variable definitions to an operation that may have none, and
- * may not even have a keyword to hang them off.
- *
- * The shorthand form (`{ user { id } }`) is the awkward case: it cannot carry
- * variables at all, so it is promoted to `query (...)` in the same edit. Left
- * alone it would have produced a document using variables it had no way to
+ * An edit adding variable definitions to an operation that may have none, and may have no keyword
+ * to hang them off. The shorthand form (`{ user { id } }`) cannot carry variables at all, so it is
+ * promoted to `query (...)` in the same edit; left alone it would use variables it has no way to
  * declare.
  */
 function declareVariables(
@@ -544,15 +501,11 @@ function declareVariables(
 }
 
 /**
- * The selection `set` already holds for a bare leaf field, or null.
- *
- * Narrow on purpose, and the narrowing is the design. A field with required
- * arguments can honestly appear twice with different values; an object-typed
- * field re-inserted brings a selection set of its own, which is a different
- * line. Only a scalar or enum taking no required argument produces a duplicate
- * the user cannot tell apart from what is already there. An *aliased* selection
- * is a different key in the response, so it does not count as the field being
- * present either.
+ * The selection `set` already holds for a bare leaf field, or null. Narrow on purpose: a field with
+ * required arguments can honestly appear twice with different values, and an object-typed field
+ * re-inserted brings its own selection set, a different line. Only a scalar or enum taking no
+ * required argument makes a duplicate the user cannot tell apart from what is there. An *aliased*
+ * selection is a different response key, so it does not count as the field being present.
  */
 function presentLeaf(
 	schema: GraphQLSchema,
@@ -584,12 +537,9 @@ function declaredNames(operation: OperationDefinitionNode): string[] {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Insert a field at (or around) the cursor.
- *
- * Placement, in the order it is tried: the innermost enclosing selection set
- * whose type owns a step of the path, then any enclosing set further out, then
- * a new operation - and for a row with no root path, a refusal instead of the
- * last of those.
+ * Insert a field at (or around) the cursor. Placement, in the order tried: the innermost enclosing
+ * selection set whose type owns a step of the path, then any enclosing set further out, then a new
+ * operation; a row with no root path is refused instead of the last.
  */
 export function insertField(
 	schema: GraphQLSchema,
@@ -619,9 +569,8 @@ export function insertField(
 		if (stepIndex === -1) continue;
 
 		/*
-		 * The suffix is a single leaf and that leaf is already selected here:
-		 * inserting it again would add a line the user cannot tell from the one
-		 * they already have. Report where it is instead of writing it twice.
+		 * The suffix is a single leaf already selected here: inserting it again would add a line
+		 * the user cannot tell from theirs, so report where it is instead.
 		 */
 		const suffix = fullPath.slice(stepIndex);
 		if (suffix.length === 1) {
@@ -664,18 +613,14 @@ export function insertField(
 }
 
 /**
- * Write one of a field's arguments onto that field, as a variable.
+ * Write one of a field's arguments onto that field, as a variable. An argument is written *onto* a
+ * field, so the field must be in the document first; when it is not, it is inserted by the ordinary
+ * rules and the argument goes onto what that wrote, which is what a user clicking `first` under
+ * `posts` asks for.
  *
- * An argument is not a selection: it is written *onto* a field, so this needs
- * the field to be in the document first. When it is not, the field is inserted
- * by the ordinary rules and the argument goes onto what that wrote - which is
- * what a user clicking `first` under `posts` is asking for, having no interest
- * in doing the two steps themselves.
- *
- * The value is a `$variable` rather than a literal for the reason a required
- * argument already is one: the pane merges a placeholder of the right shape into
- * the Variables editor, where it can be typed over, and a literal written into
- * the query would have to be found and edited in place instead.
+ * The value is a `$variable` rather than a literal, as a required argument already is: the pane
+ * merges a placeholder of the right shape into the Variables editor, where it can be typed over,
+ * and a literal in the query would have to be found and edited in place.
  */
 export function insertArgument(
 	schema: GraphQLSchema,
@@ -699,11 +644,10 @@ export function insertArgument(
 
 	const written = selectedField(schema, inserted.text, inserted.cursor, request);
 	/*
-	 * The field is in the document now, so what is left is the argument - unless
-	 * writing the field already wrote it, which is the ordinary case for a
-	 * required one (`search(term: $term)`). Either way the field insertion is the
-	 * answer to report: it is the edit that happened, and the argument the user
-	 * clicked is on it.
+	 * The field is in the document now, so what is left is the argument, unless writing the field
+	 * already wrote it (the ordinary case for a required one, `search(term: $term)`). Either way
+	 * the field insertion is the answer to report: it is the edit that happened, and the clicked
+	 * argument is on it.
 	 */
 	if (!written) return inserted;
 	const withArgument = writeArgument(inserted.text, written, argument);
@@ -728,19 +672,16 @@ function declaredArgument(
 }
 
 /**
- * The selection of `request`'s field the argument would land on, or null.
+ * The selection of `request`'s field the argument would land on, or null. The innermost enclosing
+ * set whose type owns the field wins, the rule `insertField` places by, so the argument lands on
+ * the selection the user is looking at, not a same-named field in another operation. An *alias*
+ * counts here, unlike in `presentLeaf`: `latest: posts` is still the `posts` the argument row
+ * belongs to, and the question is which selection to write onto, not whether one duplicates
+ * another.
  *
- * The innermost enclosing set whose type owns the field wins, which is the rule
- * `insertField` places by - so the argument lands on the selection the user is
- * looking at rather than on a same-named field in another operation. An *alias*
- * counts here, unlike in `presentLeaf`: `latest: posts` is still the `posts` the
- * argument row belongs to, and the question is which selection to write onto
- * rather than whether one is a duplicate of another.
- *
- * Which is why the *cursor* breaks the tie between two of them. `latest: posts`
- * and `older: posts` are both that field in one set, and the first in document
- * order is not the one the user has their cursor inside - editing that one is a
- * line changing on screen somewhere the user was not looking.
+ * So the *cursor* breaks a tie: `latest: posts` and `older: posts` are both that field in one set,
+ * and the first in document order may not be the one the cursor is inside; editing that one changes
+ * a line where the user was not looking.
  */
 function selectedField(
 	schema: GraphQLSchema,
@@ -801,11 +742,9 @@ function writeArgument(
 }
 
 /**
- * An edit adding `argument` to a field's list, opening one when it has none.
- *
- * The caret rides inside `argument`, so it lands on what was just written rather
- * than at the end of the document - which is where `applyEdits` puts it for an
- * edit carrying no marker.
+ * An edit adding `argument` to a field's list, opening one when it has none. The caret rides inside
+ * `argument`, so it lands on what was just written rather than at the end of the document, where
+ * `applyEdits` puts it for an edit with no marker.
  */
 function argumentEdit(field: FieldNode, argument: string): Edit {
 	const args = field.arguments ?? [];
@@ -814,11 +753,10 @@ function argumentEdit(field: FieldNode, argument: string): Edit {
 		return { start: at, end: at, text: `(${argument})` };
 	}
 	/*
-	 * Straight after the last argument, rather than in front of the closing
-	 * paren found by searching for one: a `)` inside a comment in the argument
-	 * list (`search(term: $term # (see)`) is found first, and the argument would
-	 * be written into the comment - added to nothing, silently. This is also the
-	 * tidier edit on a list spread over several lines.
+	 * Straight after the last argument, not before a closing paren found by searching: a `)` inside
+	 * a comment in the argument list (`search(term: $term # (see)`) would be found first, and the
+	 * argument written into the comment, silently. Also the tidier edit on a list spread over
+	 * several lines.
 	 */
 	const at = args[args.length - 1].loc!.end;
 	return { start: at, end: at, text: `, ${argument}` };
@@ -869,41 +807,21 @@ function appendOperation(
 }
 
 /**
- * A fragment definition on `typeName`, **and the spread that uses it**.
- *
- * The two are one edit because a fragment nothing spreads is not merely
- * useless, it is invalid: `Fragment "X" is never used` is a validation rule
- * every spec-conformant server enforces, and it rejects the *whole* request -
- * including the operation the user already had and did not touch. Appending a
- * definition on its own therefore breaks a working document, which is the
- * opposite of what a click should do.
- *
- * So the spread decides where a fragment can go at all: the cursor has to be in
- * a selection set the fragment applies to. Anywhere else is refused, which is
- * the same honest end as every other placement this module cannot make.
- */
-/**
  * The selection set a fragment on `type` can be spread into, innermost first.
  *
- * **Compatibility, not equality.** A fragment on a concrete type belongs
- * inside a selection of the interface it implements or the union it joins -
- * `fragment PostFields on Post` spread into a `Query.node: Node` selection is
- * the case named fragments exist for, and an equality test refuses it while
- * the user is looking straight at the set it goes in.
+ * **Compatibility, not equality.** A fragment on a concrete type belongs inside a selection of the
+ * interface it implements or the union it joins: `fragment PostFields on Post` spread into a
+ * `Query.node: Node` selection is the case named fragments exist for, and an equality test would
+ * refuse it while the user is looking straight at the set it goes in. The predicate is
+ * `doTypesOverlap`, the one `PossibleFragmentSpreadsRule` validates with, so this cannot write a
+ * spread the server then rejects, as a hand-rolled subtype walk eventually would.
  *
- * The predicate is `doTypesOverlap`, the one `PossibleFragmentSpreadsRule`
- * validates with, so this cannot write a spread the server then rejects - the
- * failure a hand-rolled subtype walk would eventually produce.
- *
- * **Depth decides, not the kind of match.** The innermost set that can hold the
- * spread wins, whether its type is the fragment's exactly or merely overlaps it.
- * Preferring an exact match instead was the same rule while the two candidates
- * could not both be on the chain; since #1346 the chain descends through inline
- * fragments, so a cursor inside `... on Post` sits in an overlapping set with the
- * exactly-matching `Node` set outside it, and exactness would have written the
- * spread a set out from where the user is looking (#1350). Where both point the
- * same way - a `User` set beside a `node` selection - the exact set is also the
- * deeper one, so nothing about that case changes.
+ * **Depth decides, not the kind of match.** The innermost set that can hold the spread wins,
+ * whether its type matches the fragment's exactly or only overlaps it. The chain descends through
+ * inline fragments (#1346), so a cursor inside `... on Post` sits in an overlapping set with the
+ * exactly-matching `Node` set outside it; preferring exactness would write the spread a set out
+ * from where the user is looking (#1350). Where both point the same way (a `User` set beside a
+ * `node` selection) the exact set is also the deeper one.
  */
 function spreadHost(
 	schema: GraphQLSchema,
@@ -919,6 +837,13 @@ function spreadHost(
 	return null;
 }
 
+/**
+ * A fragment definition on `typeName`, **and the spread that uses it**. One edit, because a
+ * fragment nothing spreads is invalid: `Fragment "X" is never used` is a validation rule every
+ * spec-conformant server enforces, and it rejects the *whole* request, including the operation the
+ * user already had. So the spread decides where a fragment can go at all: the cursor has to be in a
+ * selection set the fragment applies to, and anywhere else is refused.
+ */
 export function insertFragment(
 	schema: GraphQLSchema,
 	text: string,
@@ -958,9 +883,8 @@ export function insertFragment(
 	const body = leafSelection(type) ?? "__typename";
 	const definition = `fragment ${name} on ${typeName} {\n${indentBlock(`${body}${CARET}`)}\n}`;
 	/*
-	 * The definition goes after everything, the spread where the cursor is, and
-	 * `applyEdits` commits them last-first so the spread's offsets are still the
-	 * ones it was computed against.
+	 * The definition goes after everything and the spread where the cursor is; `applyEdits` commits
+	 * them last-first, so the spread's offsets stay the ones it was computed against.
 	 */
 	const gap = text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n";
 	const applied = applyEdits(text, [
@@ -982,15 +906,11 @@ export interface VariablesMerge {
 }
 
 /**
- * Fold new variables into the Variables pane, or refuse to touch it.
- *
- * **Never replace, and never touch text that is not strict JSON.** A pane
- * holding `{"id": {{userId}}}` is a working template that `JSON.parse` rejects;
- * rewriting it would delete the user's draft to make room for a placeholder.
- * Existing keys keep their values for the same reason - a value that is already
- * there is one the user chose, and an insertion is not a reason to reconsider
- * it. What is left over is reported as `pending`, which is what the badge says
- * out loud instead.
+ * Fold new variables into the Variables pane, or refuse to touch it. **Never replace, and never
+ * touch text that is not strict JSON.** A pane holding `{"id": {{userId}}}` is a working template
+ * `JSON.parse` rejects; rewriting it would delete the user's draft for a placeholder. Existing keys
+ * keep their values: a value already there is one the user chose. What is left over is reported as
+ * `pending`, which the badge says out loud.
  */
 export function mergeVariables(text: string, incoming: Record<string, unknown>): VariablesMerge {
 	const names = Object.keys(incoming);
@@ -1022,13 +942,10 @@ export function mergeVariables(text: string, incoming: Record<string, unknown>):
 /* -------------------------------------------------------------------------- */
 
 /**
- * What activating an explorer row should do to the document.
- *
- * A separate function because it is the whole decision - which of the two
- * insertions applies, and which rows have no insertion at all - and because a
- * refusal has to be a *value* the caller announces rather than a silent return.
- * It lives here rather than in the pane so the decision is testable without a
- * Monaco editor in the room, and so the pane holds no insertion rules of its own.
+ * What activating an explorer row does to the document: the whole decision (which insertion
+ * applies, which rows have none), returning a refusal as a *value* the caller announces rather than
+ * a silent return. Here rather than in the pane, so the decision is testable without a Monaco
+ * editor and the pane holds no insertion rules of its own.
  */
 export function insertionForNode(
 	schema: GraphQLSchema,
@@ -1084,23 +1001,17 @@ export function insertionForNode(
 }
 
 /**
- * The route to a field, borrowing one to its owner when the row has none.
+ * The route to a field, borrowing one to its owner when the row has none. A field found by search
+ * under a non-root type carries no path (`Post.title` says nothing about how a `Post` is reached),
+ * which would make the commonest search result un-insertable outside a `Post` set. The schema does
+ * say how: `rootPathsToType` reads the root fields that answer with one, and the best of those plus
+ * this field is the path the user would have built by expanding the tree.
  *
- * A field found by search under a non-root type carries no path - `Post.title`
- * says nothing about how a `Post` is reached - and until now that made the
- * commonest search result un-insertable: clicking it produced a refusal
- * whenever the cursor was not already inside a `Post`. It is only un-insertable
- * if nothing is allowed to say how a `Post` is reached, and the schema does say:
- * `rootPathsToType` reads the root fields that answer with one. Borrowing the
- * best of those and appending this field is the same path the user would have
- * built by expanding the tree, arrived at without the expanding.
+ * Takes the request rather than the row, because an argument row names its field in `argumentOwner`
+ * and its own `name` is the argument's; a field read out of the row would be a step for a field
+ * that does not exist.
  *
- * Takes the request rather than the row, because an argument row names its
- * field in `argumentOwner` and its own `name` is the argument's: reading a field
- * out of the row would build a step for a field that does not exist.
- *
- * Still null when nothing returns the owner type, which is the honest answer and
- * the case `insertField` refuses out loud.
+ * Null when nothing returns the owner type, the case `insertField` refuses out loud.
  */
 function rootedPath(schema: GraphQLSchema, request: InsertRequest): FieldStep[] | null {
 	if (request.rootPath) return request.rootPath;
@@ -1111,17 +1022,11 @@ function rootedPath(schema: GraphQLSchema, request: InsertRequest): FieldStep[] 
 }
 
 /**
- * What activating a *type* row writes.
- *
- * A type row used to write a fragment unconditionally, which on an empty
- * document left `fragment PostFields on Post { … }` and nothing else: a
- * document that parses, holds no operation, and cannot be sent. A user clicking
- * a type in a schema browser is asking "give me one of these", and the answer
- * to that is the query that returns one.
- *
- * So: the best route from a root field, when the schema has one. Otherwise a
- * fragment, which `insertFragment` writes only where its spread can go and
- * refuses everywhere else. Never a fragment alone.
+ * What activating a *type* row writes: the best route from a root field, when the schema has one,
+ * since a user clicking a type is asking "give me one of these" and the query that returns one is
+ * the answer. Otherwise a fragment, which `insertFragment` writes only where its spread can go and
+ * refuses elsewhere. Never a fragment alone: on an empty document it would parse, hold no
+ * operation, and could not be sent.
  */
 function insertTypeSelection(
 	schema: GraphQLSchema,

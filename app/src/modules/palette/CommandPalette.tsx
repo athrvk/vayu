@@ -6,31 +6,22 @@
  */
 
 /**
- * The ⌘K command palette.
- *
- * Reaching anything by name. Before this, a request meant the collections
- * drawer plus tree expansion, a run meant the history drawer plus scrolling,
- * and a settings section meant ⌘, plus its sidebar - so Vayu was navigated with
- * a mouse or not at all.
+ * The ⌘K command palette: a request, a run, a setting or a command, reached by name.
  *
  * Three things it deliberately is not:
  *
- * - **Not its own search implementation.** Results come from source hooks
- *   (`sources/`), each returning the same `PaletteItem` shape and performing
- *   its action through the very call the sidebar makes. Settings entries,
- *   variables and runs joined as three more sources and changed nothing here.
- * - **Not its own list of actions.** The Commands and Settings groups are
- *   `lib/commands`, the registry the native menu points at too. What this file
- *   does own is the *host* for the dialogs those commands open - see
- *   `useCommandSurfaces` for why the picker and the run dialog are mounted here
- *   rather than left to surfaces that are not always on screen.
- * - **Not a second copy of the tab strip's naming.** Tab rows are labelled by
- *   `tab-descriptors`, the hook the strip itself uses.
+ * - **Its own search.** Results come from source hooks (`sources/`), each returning `PaletteItem`
+ *   and acting through the call the sidebar makes.
+ * - **Its own list of actions.** The Commands and Settings groups are `lib/commands`, the registry
+ *   the native menu reads too. This file hosts the dialogs those commands open;
+ *   `useCommandSurfaces` says why they are mounted here rather than on surfaces that are not always
+ *   on screen.
+ * - **A second copy of the tab strip's naming.** Tab rows are labelled by `tab-descriptors`, the
+ *   strip's own hook.
  *
- * Focus goes back where it came from on close, and that is this file's job, not
- * Radix's: `FocusScope` restores to the dialog's *trigger*, and a palette
- * summoned by a chord has none - measured, focus lands on `<body>`, so the caret
- * is gone from the editor the user was typing in. See `focusBefore` below.
+ * Giving focus back on close is this file's job, not Radix's: `FocusScope` restores to the dialog's
+ * trigger, and a palette summoned by a chord has none, so focus lands on `<body>` (measured) and
+ * the editor loses its caret. See `focusBefore`.
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -47,9 +38,8 @@ import { useCommandSurfaces } from "./useCommandSurfaces";
 import type { PaletteItem } from "./types";
 
 /**
- * The keys cmdk answers by moving the highlight - not Enter, Escape or typing.
- * Mirrors its own switch (arrows, Home, End, and the vim bindings Ctrl+N/J/P/K),
- * minus a keystroke an IME owns, which cmdk ignores too.
+ * The keys cmdk moves the highlight on: its own switch's arrows, Home, End and the vim
+ * Ctrl+N/J/P/K, minus a keystroke an IME owns, which cmdk also ignores.
  */
 function movesHighlight(e: ReactKeyboardEvent): boolean {
 	if (e.nativeEvent.isComposing || e.defaultPrevented) return false;
@@ -66,16 +56,12 @@ export function CommandPalette() {
 	const [query, setQuery] = useState("");
 	/** The query matched nothing, so the rows on screen are suggestions (#3321). */
 	const [nothingMatched, setNothingMatched] = useState(false);
-	/**
-	 * The user has moved the highlight since the query last changed. Until then a
-	 * suggestion is not chosen, and Enter must not run it.
-	 */
+	/** The highlight moved since the query changed; until then Enter runs no suggestion. */
 	const [navigated, setNavigated] = useState(false);
 	/**
-	 * What cmdk last said it highlighted, and how many times it has said so. The
-	 * value is what a navigating user gets back; the count is what makes the
-	 * withheld highlight re-apply when cmdk re-highlights the same row for the
-	 * next query, which a bare value could not signal.
+	 * What cmdk last reported highlighting, and how many times. The value is what a navigating user
+	 * gets back; the count re-applies the withheld highlight when cmdk re-highlights the same row
+	 * for the next query, which a bare value could not signal.
 	 */
 	const [highlight, setHighlight] = useState({ value: "", reports: 0 });
 	const { surfaces, pickerProps, runTarget, dismissRunDialog } = useCommandSurfaces();
@@ -84,17 +70,13 @@ export function CommandPalette() {
 	const focusBefore = useRef<HTMLElement | null>(null);
 
 	/*
-	 * Read from a store subscription rather than from an effect on `paletteOpen`.
+	 * A store subscription, not an effect on `paletteOpen`: child effects run before the parent's,
+	 * so by the time an effect here fired the dialog has moved focus to its search field. A
+	 * subscription runs inside `set()`, before React re-renders, the last moment the previous focus
+	 * still exists.
 	 *
-	 * An effect would be too late: child effects run before the parent's, so by
-	 * the time this component's effect fires, the dialog below it has already
-	 * moved focus to its own search field and `document.activeElement` is that
-	 * field. A subscription runs inside `set()`, before React re-renders - the
-	 * last moment the previous focus still exists.
-	 *
-	 * It also catches every opener, not just the chord: the welcome Launcher's
-	 * Search tile and the title bar's search bar both flip this flag through the
-	 * store.
+	 * It also catches every opener, not just the chord: the welcome Launcher's Search tile and the
+	 * title bar's search bar flip this flag through the store.
 	 */
 	useEffect(
 		() =>
@@ -102,10 +84,9 @@ export function CommandPalette() {
 				if (!state.paletteOpen || previous.paletteOpen) return;
 				const active = document.activeElement;
 				focusBefore.current = active instanceof HTMLElement ? active : null;
-				// Every open starts empty, like Spotlight - a palette reopened with
-				// the last query still in it shows yesterday's search. Here rather
-				// than in `onOpenChange` so it holds for every opener, including the
-				// ones that flip the store flag directly.
+				// Every open starts empty, like Spotlight: a reopened palette never shows the last
+				// search. Here rather than in `onOpenChange` so it holds for the openers that flip
+				// the store flag directly.
 				setQuery("");
 				setNavigated(false);
 				setHighlight({ value: "", reports: 0 });
@@ -114,44 +95,35 @@ export function CommandPalette() {
 	);
 
 	/*
-	 * Restoring focus has to wait for the commit that unmounts the dialog: doing
-	 * it in the subscription above would run before React re-renders, and Radix's
-	 * own unmount handling would then move focus off again.
+	 * Waits for the commit that unmounts the dialog: done in the subscription above, before React
+	 * re-renders, Radix's unmount handling would move focus off again.
 	 */
 	useEffect(() => {
 		if (paletteOpen) return;
 		const previous = focusBefore.current;
 		focusBefore.current = null;
-		// `isConnected` because whatever had focus may have been unmounted by the
-		// very thing the palette just did - picking a request replaces the main
-		// pane, and focusing a detached node throws focus to `<body>` instead.
+		// `isConnected`: the palette's own action may have unmounted the previous focus (picking a
+		// request replaces the main pane), and focusing a detached node sends focus to `<body>`.
 		if (previous?.isConnected) previous.focus();
 	}, [paletteOpen]);
 
 	/*
-	 * Capture phase, unlike the rest of the app's shortcuts, which listen on the
-	 * bubble in `Shell`.
+	 * Capture phase, unlike the app's other shortcuts on the bubble in `Shell`: Monaco treats
+	 * Ctrl/⌘+K as a chord start (⌘K ⌘C) and calls `stopPropagation`, so a bubble listener on
+	 * `window` never sees it while the caret is in a body or script editor, which is when reaching
+	 * another request by name is worth most. Capture runs before the editor.
 	 *
-	 * Monaco treats Ctrl/⌘+K as the start of a chord (⌘K ⌘C and friends) and
-	 * calls `stopPropagation` on it, so a bubble-phase listener on `window`
-	 * never sees the key while the caret is in a body or script editor - which
-	 * is most of the time in this app, and exactly when reaching another
-	 * request by name is worth the most. Capture runs before the editor gets
-	 * the event.
-	 *
-	 * The scope of the divergence is one chord: everything else stays on the
-	 * bubble, where a focused control still gets first refusal.
+	 * Only this chord diverges; everything else stays on the bubble, where a focused control gets
+	 * first refusal.
 	 */
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (!matchesChord(e, PALETTE_CHORD)) return;
 			/*
-			 * Not over another dialog (#3320): the palette would stack on it, and
-			 * running a command from there acts on the page the dialog belongs to.
-			 * Guarded on the palette being closed because the palette is itself a
-			 * dialog - while it is open `isModalOpen()` is true, and the chord must
-			 * still toggle it shut. Before the claim below, so the key stays the
-			 * dialog's own.
+			 * Not over another dialog (#3320): the palette would stack on it, and a command would
+			 * act on that dialog's page. Guarded on the palette being closed: while it is open
+			 * `isModalOpen()` is true, and the chord must still toggle it shut. Before the claim
+			 * below, so the key stays the dialog's.
 			 */
 			if (!useLayoutStore.getState().paletteOpen && isModalOpen()) {
 				/*
@@ -165,16 +137,10 @@ export function CommandPalette() {
 			}
 			e.preventDefault();
 			/*
-			 * And stopped here, not merely prevented. `preventDefault` cancels the
-			 * browser's own action and nothing else: the event still finished its
-			 * journey to Monaco, which treats ⌘K as a chord *leader* and entered
-			 * chord mode behind the open palette - so the next key typed in the
-			 * editor answered "not a command" in its status bar. Capturing a key and
-			 * leaving it in flight is half a claim.
-			 *
-			 * Scoped to this one chord like the capture phase itself: the `return`
-			 * above is the only other way out of this handler, so no other key is
-			 * stopped.
+			 * Stopped, not merely prevented: `preventDefault` cancels only the browser's action,
+			 * and the event would still reach Monaco, which treats ⌘K as a chord leader and enters
+			 * chord mode behind the open palette (the next editor key reports "not a command").
+			 * Only this chord is stopped: the `return` above is the handler's one other exit.
 			 */
 			e.stopPropagation();
 			// Toggling rather than only opening: the chord that summoned it is
@@ -191,13 +157,11 @@ export function CommandPalette() {
 	};
 
 	/*
-	 * Close, then perform - and the close is flushed. A command that moves focus
-	 * (closing a tab hands it to the replacement, #3401) has to do it once the
-	 * palette is gone: while the dialog is open its focus trap pulls focus back
-	 * into the search field, and the restore effect above, which runs on the
-	 * close, would then take focus to whatever held it before the palette opened.
-	 * Flushed so that effect has run by the time `perform` does, leaving the
-	 * command the last word on where focus is.
+	 * Close (flushed), then perform. A command that moves focus (closing a tab hands it to the
+	 * replacement, #3401) must do so once the palette is gone: while open its focus trap pulls
+	 * focus back to the search field, and the restore effect above, which runs on close, would move
+	 * it to the pre-palette element. Flushed so that effect has run before `perform`, which then
+	 * has the last word on focus.
 	 */
 	const pick = (item: PaletteItem) => {
 		flushSync(() => setPaletteOpen(false));
@@ -212,11 +176,11 @@ export function CommandPalette() {
 				title="Command palette"
 				description="Search open tabs, requests, collections, views, commands, settings, variables and past runs."
 				className="max-w-xl"
-				/* Matching belongs to `ranking.ts`, which needs to decide the top
-				   result, the relevance floor and the announced count from one
-				   pass. cmdk scoring the rendered rows again would be a second
-				   authority over the same question - and the one that used to win,
-				   since a section it could not re-order outranked any score. */
+				/*
+				 * `ranking.ts` decides the top result, the floor and the announced count in one
+				 * pass; cmdk scoring the rows too would be a second authority over the same
+				 * question.
+				 */
 				shouldFilter={false}
 				/* Nothing matched, so cmdk would highlight the first suggestion and
 				   Enter would run it (#3321). The highlight is withheld until an

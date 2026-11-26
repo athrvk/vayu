@@ -6,26 +6,22 @@
  */
 
 /**
- * Reading a bound OpenAPI document again from wherever it came from (issue
- * #654).
+ * Reading a bound OpenAPI document again from wherever it came from (#654).
  *
- * Binding stored two different kinds of origin, and they are not
- * interchangeable: a URL is portable and travels with the document
- * (`spec_documents.source_url`), while a picked file's path is true of one
- * machine (`Collection.specFile`, #2765 - kept by a backup, never by an export
- * or an import). A collection bound from a paste has neither, and a path
- * restored from another machine may name no file here - each a state to *say*,
- * not to paper over: there is nothing to compare against, and pretending
- * otherwise would report a spec as unchanged because it was never looked at.
+ * A binding records one of two kinds of origin, and they are not interchangeable: a URL is portable
+ * and travels with the document (`spec_documents.source_url`), while a picked file's path is true
+ * of one machine (`Collection.specFile`, #2765: kept by a backup, never by an export or an import).
+ * A collection bound from a paste has neither, and a path restored from another machine may name no
+ * file here; each is a state to *say*, not to paper over: there is nothing to compare against, and
+ * pretending otherwise would report a spec as unchanged because it was never looked at.
  *
- * What comes back goes through the bundler on the way, exactly as import does.
- * The stored document is the bundled one (issue #649), so a comparison against
- * an unbundled re-fetch would report every external `$ref` as a change, on
- * every check, forever.
+ * What comes back goes through the bundler on the way, exactly as import does. The stored document
+ * is the bundled one (#649), so a comparison against an unbundled re-fetch would report every
+ * external `$ref` as a change, on every check, forever.
  *
- * The I/O is injected rather than imported: this module decides *what* to read
- * and in what order, and the renderer decides how - which is what lets the
- * order and the honesty be tested without a network, a disk or Electron.
+ * The I/O is injected rather than imported: this module decides *what* to read and in what order,
+ * and the renderer decides how, which lets the order and the honesty be tested without a network, a
+ * disk or Electron.
  */
 
 import {
@@ -69,11 +65,9 @@ export interface RefetchedSpec extends RefReport {
 }
 
 /**
- * A binding with nothing to re-read: pasted, or picked on another machine.
- *
- * Its own error because the answer is a different one - not "the fetch failed",
- * which invites a retry that cannot work, but "pick the file again", which is
- * the only thing that helps.
+ * A binding with nothing to re-read: pasted, or picked on another machine. Its own error because
+ * the answer differs: not "the fetch failed", which invites a retry that cannot work, but "pick the
+ * file again", the only thing that helps.
  */
 export class NoSpecSourceError extends Error {
 	constructor(message: string) {
@@ -148,12 +142,11 @@ async function read(
 		return { text: await io.fetchUrl(source.sourceUrl), sourceUrl: source.sourceUrl };
 	}
 	if (source.file?.path && io.readSpecFile) {
-		// The document is read through the same gate its siblings are, by naming
-		// itself as the file beside itself: the main process resolves a name
-		// against the picked path's directory, and the picked file's own name
-		// resolves back to the picked file. One gated channel rather than a
-		// second one that would have to repeat the extension allowlist and the
-		// byte cap - and repeat them identically forever.
+		// The document is read through the same gate its siblings are, by naming itself as the file
+		// beside itself: the main process resolves a name against the picked path's directory, and
+		// the picked file's own name resolves back to the picked file. One gated channel, not a
+		// second one that would have to repeat the extension allowlist and the byte cap identically
+		// forever.
 		const { bytes } = await io.readSpecFile(source.file.path, source.file.fileName);
 		return { text: new TextDecoder("utf-8").decode(bytes), specPath: source.file.path };
 	}

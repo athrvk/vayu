@@ -6,24 +6,21 @@
  */
 
 /**
- * What the app's icon carries, and what its menu offers (issue #1364).
+ * What the app's icon carries, and what its menu offers (#1364): that a capture arrived, that a run
+ * failed, and more than the entries the OS puts in its menu. Each is a glance the user does not
+ * have to switch windows for, the same case the wake lock (#1357), the notifications (#1358) and
+ * the taskbar progress bar (#1362) are for.
  *
- * The Dock and taskbar icon was inert: it never said a capture had arrived, it
- * never said a run had failed, and right-clicking it offered only what the OS
- * puts there. Each of those is a glance the user does not have to switch
- * windows for, which is the same case the wake lock (#1357), the notifications
- * (#1358) and the taskbar progress bar (#1362) were made for.
+ * **The split is `run-progress.ts`'s.** The renderer says *what happened* (a capture landed, a run
+ * failed, these are the collections it has been in) and this side says *whether and how*, because
+ * both answers are main's:
  *
- * **The split is `run-progress.ts`'s.** The renderer says *what happened* - a
- * capture landed, a run failed, these are the collections it has been in - and
- * this side says *whether and how*, because both answers are main's:
- *
- * - **Whether**, because the mark is only worth painting when the user is not
- *   looking. The window's focus is main's to answer - minimized, behind another
- *   app, on another desktop, none of which `document.hasFocus()` tells apart -
- *   which is the same reason `notify.ts` asks it here rather than in React.
- * - **How**, because the three platforms have three different surfaces, and
- *   since Electron 44 removed Unity support one of them has none at all.
+ * - **Whether**, because the mark is only worth painting when the user is not looking. The window's
+ *   focus is main's to answer (minimized, behind another app, on another desktop, none of which
+ *   `document.hasFocus()` tells apart), the same reason `notify.ts` asks it here rather than in
+ *   React.
+ * - **How**, because the three platforms have three different surfaces, and since Electron 44
+ *   removed Unity support one of them has none at all.
  *
  * | | macOS | Windows | Linux |
  * |---|---|---|---|
@@ -32,28 +29,24 @@
  * | the icon's menu | `dock.setMenu` | `app.setUserTasks` | - |
  * | a run that ended | `dock.bounce("informational")` | `flashFrame` | `flashFrame` |
  *
- * **The last row is the one Linux still has**, which is why it is answered
- * before the gate the other three share rather than inside it. It is also the
- * only row that is conditional: it fires just when the user has the system
- * notifications off, because it is the quieter substitute for the toast they
- * declined, not a second cue beside it. That condition is the renderer's - the
- * opt-in lives in a store main cannot see - so it never sends when the setting
- * is on.
+ * **The last row is the one Linux still has**, which is why it is answered before the gate the
+ * other three share rather than inside it. It is also the only conditional row: it fires just when
+ * the user has system notifications off, as the quieter substitute for the toast they declined, not
+ * a second cue beside it. That condition is the renderer's (the opt-in lives in a store main cannot
+ * see), so it never sends when the setting is on.
  *
- * macOS takes a single informational bounce rather than `flashFrame`, which it
- * does have: there a flash bounces the Dock continuously until something turns
- * it off, which is the wrong weight for a run that merely ended, and the
- * critical bounce is already what a *failed* run gets. The informational bounce
- * stops on its own, so it is the one cue here that needs no clearing.
+ * macOS takes a single informational bounce rather than `flashFrame`, which it does have: there a
+ * flash bounces the Dock continuously until something turns it off, the wrong weight for a run that
+ * merely ended, and the critical bounce is already what a *failed* run gets. The informational
+ * bounce stops on its own, so it is the one cue here that needs no clearing.
  *
- * **Windows has one overlay and two things to say through it.** A failed run
- * wins while it stands, because it is the newer and the more urgent of the two,
- * and the count comes back underneath it when focus clears the failure. macOS
- * has no such contention: the badge is a number and the bounce is an event.
+ * **Windows has one overlay and two things to say through it.** A failed run wins while it stands,
+ * as the newer and more urgent of the two, and the count comes back underneath when focus clears
+ * the failure. macOS has no such contention: the badge is a number and the bounce is an event.
  *
- * Kept out of `main.ts` so it can be tested - `main.ts` creates windows and
- * starts the engine at import time, which no unit test can do - and every
- * Electron surface it needs arrives as an argument for the same reason.
+ * Kept out of `main.ts` so it can be tested (`main.ts` creates windows and starts the engine at
+ * import time, which no unit test can do), and every Electron surface it needs arrives as an
+ * argument for the same reason.
  */
 
 import {
@@ -69,31 +62,25 @@ import { createRendererWatch, type IpcEventLike } from "./renderer-watch.js";
 export const OS_ICON_CHANNEL = "icon:signal";
 
 /**
- * How many collections the icon's menu offers.
- *
- * Three is what fits above the OS's own entries without the menu becoming a
- * second collection tree - the tree is in the window, and this is the shortcut
- * for the one the user was just in.
+ * How many collections the icon's menu offers: three fit above the OS's own entries without the
+ * menu becoming a second collection tree. The tree is in the window; this is the shortcut to the
+ * one the user was just in.
  */
 export const OS_ICON_MAX_RECENTS = 3;
 
 /**
- * The argument a Jump List task launches Vayu with.
- *
- * Windows tasks are shortcuts to the executable, so the collection has to
- * survive as text on a command line and be read back by whichever process ends
- * up handling it - a cold start reads its own `process.argv`, a warm one gets
- * the launch as `second-instance`. `open-intent.ts` is the one reader.
+ * The argument a Jump List task launches Vayu with. Windows tasks are shortcuts to the executable,
+ * so the collection has to survive as text on a command line and be read back by whichever process
+ * ends up handling it (a cold start reads its own `process.argv`, a warm one gets the launch as
+ * `second-instance`); `open-intent.ts` is the one reader.
  */
 export const OPEN_COLLECTION_ARG = "--vayu-open-collection=";
 
 /**
- * The argument the menu's other entry launches Vayu with.
- *
- * New Request needs one for the same reason a collection does: a task with no
- * arguments is an ordinary launch, which opens the app rather than opening
- * anything in it, and a warm one would reach `second-instance` with nothing to
- * distinguish it from double-clicking the icon.
+ * The argument the menu's other entry launches Vayu with. New Request needs one for the reason a
+ * collection does: a task with no arguments is an ordinary launch, which opens the app rather than
+ * anything in it, and a warm one would reach `second-instance` with nothing to tell it from
+ * double-clicking the icon.
  */
 export const NEW_REQUEST_ARG = "--vayu-new-request";
 
@@ -162,9 +149,8 @@ export interface OsIconDeps {
 	/** Whether the user is looking at the window right now. */
 	isFocused: () => boolean;
 	/**
-	 * The window as it is right now, or null. Read per call rather than
-	 * captured: on macOS the app outlives its window, and a captured one would
-	 * be painted after it was destroyed.
+	 * The current window, or null; read per call, not captured: on macOS the app outlives its
+	 * window, and a captured one would be painted after it was destroyed.
 	 */
 	window: () => OverlayWindowLike | null;
 	/** `app.dock`, which is undefined off macOS. */
@@ -265,13 +251,8 @@ export function createOsIcon(deps: OsIconDeps): OsIconPainter {
 		// when the notifications it substitutes for are on.
 		if (deps.isFocused()) return;
 		if (isMac) {
-			// One bounce rather than a flash, and the informational one. macOS
-			// has `flashFrame`, but there it bounces the Dock continuously until
-			// something turns it off, which is the wrong weight for a run that
-			// merely ended - and `bounce("critical")` is already what a *failed*
-			// run gets, so reusing it would make the two indistinguishable. The
-			// informational bounce is the platform's own "this is done": it
-			// stops on its own, which is why nothing below has to clear it.
+			// One informational bounce: not a flash and not the critical bounce a *failed* run gets
+			// (the header says why). It stops on its own, so nothing below has to clear it.
 			deps.dock()?.bounce("informational");
 			return;
 		}
@@ -359,10 +340,9 @@ export function createOsIcon(deps: OsIconDeps): OsIconPainter {
 			// the gate at all.
 			stopFlashing();
 			if (!paints) return;
-			// The count is not cleared here: those captures are still unread, and
-			// opening the Inbox is what says otherwise. The failure is, because
-			// coming back to the window is the whole of what the mark was asking
-			// for.
+			// The count stays: those captures are still unread, and opening the Inbox is what says
+			// otherwise. The failure clears, because coming back to the window is the whole of what
+			// the mark asked for.
 			if (!failed) return;
 			failed = false;
 			repaint();
@@ -397,11 +377,9 @@ function parseCollections(raw: unknown): OsIconCollection[] | null {
 }
 
 /**
- * Read one signal off the channel, or `null` for anything that is not one.
- *
- * Dropped rather than thrown, the way `run-progress.ts` drops a malformed
- * update: these reach an OS surface that outlives the window, and a mark nothing
- * will come back to clear is worse than a mark that never appeared.
+ * Read one signal off the channel, or `null` for anything that is not one. Dropped rather than
+ * thrown, as `run-progress.ts` drops a malformed update: these reach an OS surface that outlives
+ * the window, and a mark nothing will come back to clear is worse than a mark that never appeared.
  */
 export function parseOsIconSignal(raw: unknown): OsIconSignal | null {
 	if (typeof raw !== "object" || raw === null) return null;
@@ -414,12 +392,9 @@ export function parseOsIconSignal(raw: unknown): OsIconSignal | null {
 }
 
 /**
- * Wire the channel, and take the marks down with the renderer that asked for
- * them.
- *
- * The teardown is not a nicety: a renderer that crashes or reloads never gets to
- * say the Inbox was opened, and without this the Dock keeps a count for captures
- * whose list is gone until the app quits.
+ * Wire the channel, and take the marks down with the renderer that asked for them. The teardown is
+ * not a nicety: a renderer that crashes or reloads never gets to say the Inbox was opened, and
+ * without this the Dock keeps a count for captures whose list is gone until the app quits.
  */
 export function registerOsIconIpc(
 	ipc: IpcLike,

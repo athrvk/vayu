@@ -6,33 +6,29 @@
  */
 
 /**
- * DesignRunView
- *
- * A past design run, opened as an editable copy of the request that was sent.
- * Read it, change it, send it again. Nothing typed here reaches the saved
- * request unless the Save button below is used, and that asks first.
+ * A past design run, opened as an editable copy of the request that was sent: read it, change it,
+ * send it again. Nothing typed here reaches the saved request unless the Save button below is used,
+ * and that asks first.
  *
  * ## Two things detach the copy, and neither is decoration
  *
- * **`id: null`** (set by `seedFromRun`) and **no `onSave`** below. Either alone
- * is sufficient today, which is deliberate belt-and-braces, so do not read one
- * as redundant and delete it:
+ * **`id: null`** (set by `seedFromRun`) and **no `onSave`** below. Either alone is sufficient,
+ * deliberately belt-and-braces, so do not delete one as redundant:
  *
- * - `useSaveManager` early-returns on `!entityId` in both its autosave effect
- *   and `performSave`, so a null id stops the write even if an `onSave` exists.
- * - `RequestBuilderProvider` passes `enabled: !!onSave`, so no `onSave` stops it
- *   even if an id appears.
+ * - `useSaveManager` early-returns on `!entityId` in both its autosave effect and `performSave`, so
+ *   a null id stops the write even if an `onSave` exists.
+ * - `RequestBuilderProvider` passes `enabled: !!onSave`, so no `onSave` stops it even if an id
+ *   appears.
  *
- * A null id also keeps the response store - which is keyed by request id - from
- * being written to, and stops `useLastDesignRunQuery` from running.
+ * A null id also keeps the response store (keyed by request id) unwritten and stops
+ * `useLastDesignRunQuery` from running.
  *
- * The absent prop looks like an oversight in the JSX below. It is not. The bug
- * this view exists to remove was opening the *saved request* in the builder:
- * that has both an id and an `onSave`, so changing a header to compare against
- * an old run rewrote the saved request seconds later.
+ * The absent prop looks like an oversight in the JSX below; it is not. Opening the *saved request*
+ * in the builder has both an id and an `onSave`, so changing a header to compare against an old run
+ * rewrites the saved request seconds later, which is what this view exists to prevent.
  *
- * Guarded by "does not save when the URL is edited" in `DesignRunView.test.tsx`,
- * which fails when both gates are removed together.
+ * Guarded by "does not save when the URL is edited" in `DesignRunView.test.tsx`, which fails when
+ * both gates are removed together.
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -80,11 +76,10 @@ interface DesignRunViewProps {
 }
 
 /**
- * The one glued script of a run recorded before script parts existed, replayed
- * as a single request-origin element per hook: `seedFromRun` cannot split it,
- * so the string is the only record of what ran. A blank one is left out
- * (#3066): the engine refuses a script element with no text, which would 400
- * the resend.
+ * A run recorded before script parts existed has one glued script, replayed as a single
+ * request-origin element per hook: `seedFromRun` cannot split it, so the string is the only record
+ * of what ran. A blank one is left out (#3066): the engine refuses a script element with no text,
+ * which would 400 the resend.
  */
 function legacyElements(seed: DesignRunSeed): ResolvedElement[] {
 	const pre = scriptPartToElement(
@@ -108,10 +103,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	const queryClient = useQueryClient();
 	const [showSaveDialog, setShowSaveDialog] = useState(false);
 
-	// A design run has no comparison to make, but pinning it is still how a
-	// user keeps a known-good (or known-bad) reply past retention and finds
-	// it again later - see issue #1509. Reuses the same mutation RunItem's
-	// row pin calls; nothing about it is load-run-specific.
+	// A design run has no comparison to make, but a pin still keeps a known-good (or known-bad)
+	// reply past retention and findable (#1509). The same mutation as RunItem's row pin; nothing
+	// about it is load-run-specific.
 	const setBaselineMutation = useSetRunBaselineMutation();
 	const handleTogglePin = async () => {
 		try {
@@ -130,34 +124,28 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 		: "Pin this run to keep it past retention and find it again later";
 
 	/*
-	 * The live request, when it still exists. It is the only source of
-	 * credentials - `sanitize_config_snapshot` strips auth down to its mode and
-	 * replaces a credential header's value with `<redacted>` before storing a
-	 * run - so the seed needs it to decide where headers and auth come from.
+	 * The live request, when it still exists. It is the only source of credentials
+	 * (`sanitize_config_snapshot` strips auth to its mode and replaces a credential header's value
+	 * with `<redacted>` before storing a run), so the seed needs it to decide where headers and
+	 * auth come from.
 	 *
-	 * Three outcomes, and all three have to be kept apart, because `seedFromRun`
-	 * treats a falsy `liveRequest` as "the request was deleted" - it seeds the
-	 * recorded wire headers, `Authorization` included, and `auth: { mode: "none" }`:
+	 * Three outcomes, kept apart because `seedFromRun` treats a falsy `liveRequest` as "the request
+	 * was deleted" and seeds the recorded wire headers, `Authorization` included, with
+	 * `auth: { mode: "none" }`:
 	 *
-	 * - **still loading.** `data` is falsy but the answer is not in yet. Seeding
-	 *   now bakes in the deleted-request seed, and the provider never corrects
-	 *   it: its reset effect keys on `initialRequest?.id`, which is null before
-	 *   and after. So the pane is held until the query settles. `isLoading` is
-	 *   `isPending && isFetching`, so a run with no `requestId` disables the
-	 *   query and settles at once rather than hanging on the spinner.
-	 *
-	 * - **settled, request gone.** A genuine deletion, thrown as
-	 *   `RequestNotFoundError`. This is the orphan case that legitimately
-	 *   replays the recorded headers, so it is the *only* error allowed to reach
+	 * - **Still loading.** `data` is falsy but the answer is not in. Seeding now bakes in the
+	 *   deleted-request seed and the provider never corrects it (its reset effect keys on
+	 *   `initialRequest?.id`, null before and after), so the pane is held until the query settles.
+	 *   `isLoading` is `isPending && isFetching`, so a run with no `requestId` disables the query
+	 *   and settles at once rather than hanging on the spinner.
+	 * - **Settled, request gone.** A genuine deletion, thrown as `RequestNotFoundError`: the orphan
+	 *   case that legitimately replays the recorded headers, so the *only* error allowed into
 	 *   `seedFromRun`'s request-gone branch.
-	 *
-	 * - **settled, lookup failed.** A transport failure throws something else.
-	 *   Crucially `.catch(() => [])` on each per-collection list fetch
-	 *   (`collections.ts`) means one swallowed transient failure surfaces as a
-	 *   `RequestNotFoundError` too would be wrong - so we test for the sentinel
-	 *   type, not just "there was an error". A non-sentinel error means the
-	 *   request could not be fetched, and seeding a copy from it would be
-	 *   guessing: show a retry instead.
+	 * - **Settled, lookup failed.** A transport failure throws something else. Each per-collection
+	 *   list fetch has `.catch(() => [])` (`collections.ts`), so treating any error as "not found"
+	 *   would turn one swallowed transient failure into a deletion; the test is for the sentinel
+	 *   type. A non-sentinel error means the request could not be fetched, and seeding from it
+	 *   would be guessing: show a retry.
 	 */
 	const {
 		data: liveRequest,
@@ -175,9 +163,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	const liveCollectionId = liveRequest?.collectionId;
 
 	/*
-	 * Memoized because the provider reads it in an effect, not only in a
-	 * `useState` initialiser - a fresh object each render would re-run that
-	 * effect and reset the pane.
+	 * Memoized: the provider reads it in an effect, not only in a `useState` initialiser, so a
+	 * fresh object each render would re-run that effect and reset the pane.
 	 */
 	const initialResponse = useMemo<ResponseState | null>(
 		() => responseFromRunResult(run.result, run.id),
@@ -185,9 +172,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	);
 
 	/*
-	 * Replay: the inherited elements exactly as recorded (what the collection
-	 * ran then, not what it reads now), then the copy's own, which are live and
-	 * editable.
+	 * Replay: the inherited elements exactly as recorded (what the collection ran then, not what it
+	 * reads now), then the copy's own, live and editable.
 	 */
 	const handleExecute = useCallback(
 		async (
@@ -197,17 +183,15 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 		): Promise<ResponseState | null> => {
 			try {
 				/*
-				 * The same builder as the builder's own Send (issue #2638), raw:
-				 * the engine resolves {{variables}} and inherit auth at compose
-				 * time (#226), against *today's* variables and chain - which is
-				 * what a replay has always meant here (D14). The detached copy is
-				 * exactly why replay uses the inline compose shape: there is no
-				 * saved row behind an edited copy for a by-id compose to load.
+				 * `buildComposeBody`, as the builder's own Send uses it (#2638), raw: the engine
+				 * resolves {{variables}} and inherit auth at compose time (#226), against *today's*
+				 * variables and chain, which is what a replay means here (D14). The detached copy
+				 * is why replay uses the inline compose shape: there is no saved row behind an
+				 * edited copy for a by-id compose to load.
 				 *
-				 * When the request is gone there is nothing to resolve: the seed
-				 * put the recorded `Authorization` into the headers and
-				 * `auth: { mode: "none" }` on the copy, so the replay goes out
-				 * exactly as it ran - the engine drops a none-auth at compose.
+				 * When the request is gone there is nothing to resolve: the seed put the recorded
+				 * `Authorization` into the headers and `auth: { mode: "none" }` on the copy, so the
+				 * replay goes out exactly as it ran (the engine drops a none-auth at compose).
 				 */
 				const elements: ResolvedElement[] = [
 					...seed.inheritedElements,
@@ -231,8 +215,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				const result = await engineExecuteRequest(
 					{
 						...composed,
-						// Files the new run under the same request, so a resend
-						// lands beside the run it came from.
+						// Files the resend under the same request, beside the run it came from.
 						...(run.requestId ? { requestId: run.requestId } : {}),
 						// The engine defaults this replay refuses (issue #1229),
 						// switched off in the copy's own Headers tab.
@@ -247,9 +230,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				// A resend is a new run, so History has to hear about it.
 				queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
 				queryClient.invalidateQueries({ queryKey: queryKeys.runs.count() });
-				// And so does the request's Recent sends list, which is not
-				// polled - a replay from here is one of its rows. Only when the
-				// run links a request: a detached replay belongs to none.
+				// The request's Recent sends list too, which is not polled and lists this replay;
+				// only when the run links a request, as a detached replay belongs to none.
 				if (run.requestId) {
 					queryClient.invalidateQueries({
 						queryKey: queryKeys.runs.recentDesign(run.requestId),
@@ -309,22 +291,20 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	);
 
 	/*
-	 * Hold the whole pane until the lookup settles, rather than mounting the
-	 * builder on a seed that says "deleted" and hoping to correct it. There is
-	 * no correction available: the provider seeds once per `initialRequest.id`,
-	 * and that id is null for every detached copy. The same skeleton as the
-	 * request builder's own loading state, because this *is* the request builder.
+	 * Hold the whole pane until the lookup settles rather than mount the builder on a seed that
+	 * says "deleted": nothing could correct it, as the provider seeds once per `initialRequest.id`,
+	 * null for every detached copy. The request builder's own loading skeleton, because this *is*
+	 * the request builder.
 	 */
 	if (isResolvingRequest) {
 		return <DetailSkeleton label="Loading run" />;
 	}
 
 	/*
-	 * The lookup settled in a transport failure, not a deletion. Seeding the
-	 * copy from a run whose request could not be fetched would silently replay
-	 * the recorded token as though the request were an orphan - so offer a retry
-	 * instead of guessing. A genuine deletion is not caught here: it flows on and
-	 * seeds the orphan copy, which is correct for one.
+	 * The lookup settled in a transport failure, not a deletion. Seeding from a run whose request
+	 * could not be fetched would silently replay the recorded token as if the request were an
+	 * orphan, so offer a retry. A genuine deletion is not caught here: it flows on and seeds the
+	 * orphan copy, which is correct for one.
 	 */
 	if (requestLookupFailed) {
 		const detail = requestLookupError instanceof Error ? requestLookupError.message : null;
@@ -344,11 +324,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					You are editing a copy - nothing here is saved.
 				</span>
 				{/*
-				 * The mode this run actually sent, read-only. The Auth tab shows the
-				 * request's *current* mode, so seeing both side by side is the only
-				 * way to notice the request's auth changed since this ran. Only the
-				 * mode survives storage, so there is nothing more to show. Absent
-				 * when the run sent no auth.
+				 * The mode this run sent, read-only. The Auth tab shows the request's *current*
+				 * mode, so the two side by side are the only way to notice the auth changed since
+				 * this ran. Only the mode survives storage. Absent when the run sent no auth.
 				 */}
 				{seed.recordedAuthMode && (
 					<Badge variant="outline" className="text-xs shrink-0 font-normal">
@@ -361,10 +339,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				{seed.requestBodyFile && <SentBodyFileNote file={seed.requestBodyFile} />}
 				<div className="ml-auto flex items-center gap-2">
 					{/*
-					 * An agent's run with no saved request has nothing to write back to,
-					 * so Save here makes the request, and leads the header - the only
-					 * thing this run still needs. A linked run keeps its overwrite
-					 * button below, unpromoted.
+					 * An agent's run with no saved request has nothing to write back to, so Save
+					 * here makes the request and leads the header, the one thing this run still
+					 * needs. A linked run keeps its overwrite button below, unpromoted.
 					 */}
 					{isUnsavedAgentRun(run) && <SaveAgentRunButton run={run} seed={seed} />}
 					<Tooltip>
@@ -387,10 +364,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						<TooltipContent>{pinTooltip}</TooltipContent>
 					</Tooltip>
 					{/*
-					 * The Save button exists only while the request does. When it has
-					 * been deleted there is nothing to write back to, so it is absent
-					 * rather than disabled - a disabled button invites a hunt for the
-					 * condition that would enable it, and none can be met here.
+					 * Only while the request exists. Deleted, there is nothing to write back to, so
+					 * the button is absent, not disabled: a disabled button invites a hunt for the
+					 * condition that enables it, and none can be met here.
 					 */}
 					{liveRequest && (
 						<Button variant="outline" size="sm" onClick={() => setShowSaveDialog(true)}>

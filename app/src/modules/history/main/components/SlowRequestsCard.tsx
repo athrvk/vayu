@@ -6,16 +6,13 @@
  */
 
 /**
- * How many requests crossed the run's slow-request threshold.
+ * How many requests crossed the run's slow-request threshold. Absent when none did, and for a run
+ * with no slow threshold (the engine leaves `slowRequests` out): a card of zeros would read as a
+ * finding, not the absence of one. The per-row verdict is the Samples tab's "Slow" chip and
+ * callout.
  *
- * Absent when none did, and for a run with no slow threshold, where the engine
- * leaves `slowRequests` out: a card of zeros would read as a finding rather
- * than as the absence of one. The per-row verdict is the Samples tab's "Slow"
- * chip and callout.
- *
- * `count` is every slow completion; `tracesStored` is the capped sample of them
- * the run kept (#2399), so the footer says how many can be opened rather than
- * implying all of them can.
+ * `count` is every slow completion; `tracesStored` is the capped sample the run kept (#2399), so
+ * the footer says how many can be opened rather than implying all can.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";

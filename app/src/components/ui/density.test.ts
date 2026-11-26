@@ -65,7 +65,7 @@ describe("interface density", () => {
 	// Issue #1679: named floor steps, outside the --spacing multiplier -
 	// ten of them since #1688 added the two wider chrome bands and #1830
 	// `control-xs` -
-	// see the "Chrome, Target and Icon Floors" table in docs/design-system.md
+	// see the "Chrome, Target and Icon Floors" table in docs/design-system/spacing-and-floors.md
 	// and design-system-doc.test.ts, which checks that doc's numbers against
 	// these same declarations.
 	describe("chrome/target/icon floors", () => {

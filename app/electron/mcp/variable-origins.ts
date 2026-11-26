@@ -6,39 +6,31 @@
  */
 
 /**
- * @file variable-origins.ts
- * @brief The variable resolution model as the MCP surface states it, and which
- *        definition of a name wins (the `resolve_variables` tool's core). The
- *        app answers the second question in the variable popover's origin list;
- *        before this module an agent could not ask it at all, and had to
- *        reconstruct the resolution order from a rule no tool stated
- *        (issue #1207).
+ * @brief The variable resolution model as the MCP surface states it, and which definition of a name
+ *        wins (the `resolve_variables` tool's core; the app answers the second question in the
+ *        variable popover's origin list, issue #1207).
  *
- * The prose and the computation live together on purpose: a tool description
- * that paraphrases the order and a resolver that implements it are exactly the
- * two copies that drift. Here the sentence every variable tool carries and the
- * loop that picks the winner are one edit apart.
+ * The prose and the computation live together on purpose: a tool description that paraphrases the
+ * order and a resolver that implements it are two copies that drift, so the sentence every variable
+ * tool carries and the loop that picks the winner are one edit apart.
  *
- * The order is the one `docs/app/variable-resolution.md` defines and the engine
- * executes: globals < collection chain (root -> leaf) < active environment.
- * Disabled definitions are collected rather than skipped - "why is this not the
- * value I set?" is answered by a switched-off row far more often than by
- * shadowing, and a list built by skipping them cannot say so.
+ * The order is the one `docs/app/variable-resolution.md` defines and the engine executes: globals <
+ * collection chain (root -> leaf) < active environment. Disabled definitions are collected rather
+ * than skipped: a switched-off row answers "why is this not the value I set?" far more often than
+ * shadowing does, and a list built by skipping them cannot say so.
  *
  * **Mirrored by `app/src/lib/variable-resolution.ts` (the winner) and
- * `app/src/hooks/useVariableResolver.ts` (the origin accumulation).** Neither
- * process can import the other's source: this project emits with
- * `rootDir: "electron"` and so cannot compile a file from `src/` (TS6059), and
- * the renderer cannot import one from here either, because this is a referenced
- * composite project (TS6305 - and excluding a file from it to dodge that is
- * TS6307). So the copy is deliberate, the way `compare.ts` mirrors
- * `src/lib/run-compare.ts`, and `variable-origins.conformance.test.ts` runs this
- * winner against the renderer's over the engine's own conformance fixture and
- * fails on any divergence. Change this file and change those two.
+ * `app/src/hooks/useVariableResolver.ts` (the origin accumulation).** Neither process can import
+ * the other's source: this project emits with `rootDir: "electron"` and cannot compile a file from
+ * `src/` (TS6059), and the renderer cannot import one from here because this is a referenced
+ * composite project (TS6305; excluding a file from it is TS6307). So the copy is deliberate, as
+ * `compare.ts` mirrors `src/lib/run-compare.ts`, and `variable-origins.conformance.test.ts` runs
+ * this winner against the renderer's over the engine's conformance fixture and fails on any
+ * divergence. Change this file and change those two.
  *
- * What this deliberately does NOT do is substitute `{{tokens}}`: that is
- * composition, the engine owns it (`POST /compose`), and MCP keeps no copy of
- * it. This module reports where a value came from; it never renders a request.
+ * It does NOT substitute `{{tokens}}`: that is composition, which the engine owns
+ * (`POST /compose`), and MCP keeps no copy. This module reports where a value came from and never
+ * renders a request.
  */
 
 /** The three scopes a stored definition can live in, lowest precedence first. */
@@ -63,9 +55,8 @@ export interface VariableSource {
 }
 
 /**
- * The scopes to resolve across. `chain` is **root-first**, so a later (leaf)
- * entry outranks an earlier (root) one - the same order the renderer's
- * `walkAncestors` produces and the engine walks.
+ * The scopes to resolve across. `chain` is **root-first**: a later (leaf) entry outranks an earlier
+ * (root) one, the order the renderer's `walkAncestors` produces and the engine walks.
  */
 export interface OriginScopes {
 	globals?: StoredVariableBag;
@@ -74,10 +65,8 @@ export interface OriginScopes {
 }
 
 /**
- * One definition of one name, and whether it is the one a send would use.
- *
- * `winner` is marked rather than inferred by position: once disabled
- * definitions are in the list, "last" and "wins" are different things.
+ * One definition of one name, and whether a send would use it. `winner` is marked, not inferred by
+ * position: with disabled definitions in the list, "last" and "wins" differ.
  */
 export interface VariableOrigin {
 	scope: VariableScope;
@@ -91,9 +80,8 @@ export interface VariableOrigin {
 }
 
 /**
- * D17: only an explicit `false` disables a definition. Absent (a blob written
- * by the raw engine API) and malformed values count as enabled, matching the
- * importers' normalization and the engine's `parse_variables`.
+ * D17: only an explicit `false` disables a definition. Absent (a blob from the raw engine API) and
+ * malformed values count as enabled, as in the importers and the engine's `parse_variables`.
  */
 function isEnabledDefinition(def: StoredVariableLike | undefined): boolean {
 	return !!def && typeof def === "object" && def.enabled !== false;
@@ -116,12 +104,9 @@ function coerceVariableType(type: unknown): string | undefined {
 }
 
 /**
- * Every definition of every name, in precedence order (lowest first), with the
- * winner marked.
- *
- * Each collection in the chain is its own origin: two collections in one chain
- * both have scope `"collection"`, and collapsing them by scope would hide the
- * override that actually happened.
+ * Every definition of every name, lowest precedence first, with the winner marked. Each collection
+ * in the chain is its own origin: two share scope `"collection"`, and collapsing by scope would
+ * hide the override.
  */
 export function buildVariableOrigins(scopes: OriginScopes): Record<string, VariableOrigin[]> {
 	const result: Record<string, VariableOrigin[]> = {};
@@ -173,28 +158,21 @@ export interface CollectionLike {
 }
 
 /**
- * A collection's parent, with the three spellings of "root" normalized to one.
- *
- * `null`, absent and the empty string all mean top-level, and comparing raw
- * values would file a root collection under a parent named "". Exported because
- * `tools/cascade.ts` walks the same rows for its cascade accounting: the rule
- * has to have one definition, and this module is the one of the two that can be
- * imported by the other (the tool registry already imports from here; the
- * reverse would be a cycle).
+ * A collection's parent with the three spellings of root (`null`, absent, `""`) normalized to
+ * `null`; raw comparison would file a root collection under a parent named "". Exported because
+ * `tools/cascade.ts` walks the same rows for its cascade accounting and the rule needs one
+ * definition: this module is the one of the two that can be imported by the other (the registry
+ * already imports from here; the reverse is a cycle).
  */
 export function collectionParentId(row: CollectionLike): string | null {
 	return typeof row.parentId === "string" && row.parentId !== "" ? row.parentId : null;
 }
 
 /**
- * The collection chain from the root down to `leafId`, root-first.
- *
- * Root is spelled three ways in stored rows (`null`, absent, `""`), and a
- * corrupted `parentId` can point at itself or close a loop - so the walk is
- * guarded, the way the renderer's `walkAncestors` and the tool layer's
- * descendant walk both are. An unknown id yields an empty chain rather than
- * throwing: whether that is an error is the caller's to decide, because
- * `resolve_variables` refuses it and other callers may not.
+ * The collection chain from the root down to `leafId`, root-first. The walk is guarded against a
+ * corrupted `parentId` that points at itself or closes a loop, as the renderer's `walkAncestors`
+ * and the tool layer's descendant walk are. An unknown id yields an empty chain rather than
+ * throwing: `resolve_variables` refuses it, other callers may not.
  */
 export function collectionChain(rows: readonly CollectionLike[], leafId: string): VariableSource[] {
 	const byId = new Map<string, CollectionLike>();
@@ -255,25 +233,19 @@ export interface ResolvedVariableReport {
 }
 
 /**
- * A secret's value is withheld rather than silently dropped, the way
- * `projectOAuth2Token` withholds an access token: `valueWithheld` is stated, so
- * an absent `value` is never mistaken for an empty one. Every MCP read that
- * carries a variable spells it this way (`withhold.ts`, #1805).
+ * A secret's value is withheld, not dropped, as `projectOAuth2Token` withholds an access token:
+ * `valueWithheld` is stated so an absent `value` is never mistaken for an empty one. Every MCP read
+ * that carries a variable spells it this way (`withhold.ts`, #1805).
  */
 export function withValue<T>(value: T, withhold: boolean): { value: T } | { valueWithheld: true } {
 	return withhold ? { valueWithheld: true } : { value };
 }
 
 /**
- * Turn one name's origin list into the winner-plus-shadowed answer, ordered the
- * way the app's popover orders it: highest precedence first.
- *
- * A name whose every definition is disabled reports `resolved: false` with no
- * value - absent, not present-and-empty, because a present-and-empty answer
- * would read as "it resolves to the empty string", which is a different fact.
- *
- * A secret's value is withheld unless @p reveal, the user's
- * `revealSecretsToAgents` setting, says otherwise.
+ * One name's origin list as the winner-plus-shadowed answer, highest precedence first as the app's
+ * popover orders it. A name whose every definition is disabled reports `resolved: false` with no
+ * value: absent, because a present-and-empty one would read as "resolves to the empty string". A
+ * secret's value is withheld unless @p reveal (the user's `revealSecretsToAgents`) says otherwise.
  */
 export function reportForName(
 	name: string,
@@ -311,12 +283,9 @@ export function reportForName(
 }
 
 /**
- * Every name defined anywhere in `scopes`, reported winner-first and sorted by
- * name so two calls over the same data read the same way.
- *
- * `names`, when given, selects: a name nothing defines still gets a row, with
- * `resolved: false` and an empty `shadowedBy`, because "nothing defines it" is
- * the answer to the question asked and an omitted row is not.
+ * Every name defined anywhere in `scopes`, winner-first and sorted by name so equal data reads
+ * equal. `names`, when given, selects: a name nothing defines still gets a row (`resolved: false`,
+ * empty `shadowedBy`), because "nothing defines it" is the answer and an omitted row is not.
  */
 export function resolveVariableReports(
 	scopes: OriginScopes,
@@ -331,55 +300,43 @@ export function resolveVariableReports(
 // --- The model, as the MCP surface states it ---------------------------------
 
 /**
- * The resource that carries the full model. Every variable-writing tool points
- * at this rather than paraphrasing the rules a second time, which is what
- * `tools.test.ts`'s table-driven scan checks.
+ * The resource carrying the full model. Every variable-writing tool points here instead of
+ * paraphrasing the rules, which `tools/variables.tools.test.ts`'s table-driven scan checks.
  */
 export const VARIABLE_RESOLUTION_URI = "vayu://variables/resolution";
 
 /**
- * The one sentence. It appears verbatim in every tool that writes or lists
- * variables; a new such tool that omits it fails the scan.
- *
- * Kept under 150 characters: it is the one sentence repeated across many
- * descriptions on purpose, and longer repeats are what #2441 took out of
- * `tools/list`.
- *
- * Spelled with `<` rather than `>` because that is the direction
- * `docs/app/variable-resolution.md` states the ladder in, and the two spellings
- * in one surface were half of what made the order hard to learn.
+ * The one sentence, verbatim in every tool that writes or lists variables; a new such tool that
+ * omits it fails the scan. Under 150 characters because it repeats across many descriptions on
+ * purpose, and longer repeats are what #2441 took out of `tools/list`. Spelled with `<` because
+ * `docs/app/variable-resolution.md` states the ladder that way; two spellings on one surface made
+ * the order hard to learn.
  */
 export const VARIABLE_PRECEDENCE_SENTENCE =
 	"Resolution order (lowest to highest): globals < collection chain (root to leaf) < active environment < a bound data row's bare column names.";
 
 /**
- * Which environment a tool resolves against when the call names none (#2480).
- * One sentence for every tool that takes `environmentId`, so the preview and
- * the sends cannot come to describe different defaults; `resolveEnvironmentId`
- * (`tools/compose.ts`) is the rule it describes.
+ * Which environment a tool resolves against when the call names none (#2480): one sentence for
+ * every tool that takes `environmentId`, so preview and sends cannot describe different defaults.
+ * `resolveEnvironmentId` (`tools/compose.ts`) is the rule it describes.
  */
 export const ENVIRONMENT_DEFAULT_SENTENCE =
 	'An omitted environmentId means the active environment, the one the app\'s Send uses; "none" means no environment, and an unknown id is refused.';
 
 /**
- * The precedence sentence, this tier's own position in it, and the pointer to
- * the full model - the three things every variable tool's description owes an
- * agent that is about to change a value.
+ * The precedence sentence, this tier's position in it and the pointer to the full model: what every
+ * variable tool's description owes an agent about to change a value.
  */
 export function precedenceNote(tierPosition: string): string {
 	return `${VARIABLE_PRECEDENCE_SENTENCE} ${tierPosition} Full model, including the reserved namespaces and what a script sees: ${VARIABLE_RESOLUTION_URI}.`;
 }
 
 /**
- * The rule set from `docs/app/variable-resolution.md`, in the form an agent
- * reads. Structured rather than one prose blob so a client can render or search
- * it, and so the tiers cannot be listed in one order here and another there.
- *
- * This is a statement of a contract the engine executes, not a second
- * implementation of it: nothing here resolves anything. The contract itself is
- * pinned by `engine/tests/fixtures/variable-resolution-conformance.json`, which
- * the engine's suite, the renderer's and this module's conformance guard all
- * replay.
+ * The rule set from `docs/app/variable-resolution.md` as an agent reads it, structured so a client
+ * can render or search it and the tiers cannot be listed in two orders. It states a contract the
+ * engine executes and resolves nothing;
+ * `engine/tests/fixtures/variable-resolution-conformance.json` pins it, and the engine's suite, the
+ * renderer's and this module's conformance guard all replay it.
  */
 export const VARIABLE_RESOLUTION_MODEL = {
 	summary: VARIABLE_PRECEDENCE_SENTENCE,

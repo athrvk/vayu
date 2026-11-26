@@ -119,14 +119,13 @@ export interface InteractiveAuthResult {
 }
 
 /**
- * Run the interactive flow for a *resolved* OAuth2Config (variables already
- * substituted). Resolves with the cache key on success; throws on failure or
- * when the desktop bridge is unavailable.
+ * Run the interactive flow for a *resolved* OAuth2Config (variables already substituted). Resolves
+ * with the cache key on success; throws on failure or when the desktop bridge is unavailable.
  *
- * Aborting @p signal rejects with `InteractiveAuthCancelledError` and stops
- * every later engine call. It cannot close what it already opened: the
- * renderer has no way to close the embedded window or the system browser tab,
- * so the user closes those and the window's own answer is ignored.
+ * Aborting @p signal rejects with `InteractiveAuthCancelledError` and stops every later engine
+ * call. It cannot close what it already opened: the renderer has no way to close the embedded
+ * window or the system browser tab, so the user closes those and the window's own answer is
+ * ignored.
  */
 export async function runInteractiveAuthorization(
 	config: OAuth2Config,

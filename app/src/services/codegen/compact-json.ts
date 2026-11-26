@@ -119,10 +119,9 @@ function numberText(token: string): string {
 /** What the reader accepts beyond strict JSON. */
 export interface ReadOptions {
 	/**
-	 * Read a `{{name}}` token in value position as an opaque value written as
-	 * typed. The engine resolves tokens before it reads the body, so text that
-	 * still holds `[{{a}},{{b}}]` is the document it will read once they are
-	 * numbers. Keys and string contents are unaffected: a token is a value only
+	 * Read a `{{name}}` token in value position as an opaque value written as typed. The engine
+	 * resolves tokens before it reads the body, so text holding `[{{a}},{{b}}]` is the document it
+	 * reads once they are numbers. Keys and string contents are unaffected: a token is a value only
 	 * where a value can start.
 	 */
 	templateTokens?: boolean;

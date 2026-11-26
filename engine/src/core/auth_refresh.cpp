@@ -29,10 +29,9 @@ int64_t now_ms () {
     .count ();
 }
 
-/// Monotonic companion to `now_ms()`, for the one thing here that is a length
-/// rather than a point in time: how far into the run a refresh landed. Wall
-/// time can step mid-run and would report an offset that never happened.
-/// Pairs with `RunContext::load_start_steady_ms`.
+/// Monotonic companion to `now_ms()` for the one length here, how far into the
+/// run a refresh landed: wall time can step mid-run and report an offset that
+/// never happened. Pairs with `RunContext::load_start_steady_ms`.
 int64_t steady_now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::steady_clock::now ().time_since_epoch ())
@@ -204,11 +203,10 @@ uint64_t& seen_generation) {
 
 AuthRefreshTuning read_auth_refresh_tuning (vayu::db::Database& db) {
     const AuthRefreshTuning defaults;
-    // A non-positive value is not a setting - POST /config rejects one against
-    // each key's seeded minimum - so it can only reach here from a hand-edited
-    // row, and a zero floor would turn the schedule into a tight loop against
-    // the token endpoint. Fall back rather than trust it, as live_ring_size
-    // does for the same reason.
+    // A non-positive value is no setting (POST /config rejects one against each
+    // key's seeded minimum), so it can only come from a hand-edited row, and a
+    // zero floor would loop tightly against the token endpoint. Fall back, as
+    // live_ring_size does for the same reason.
     auto read = [&db] (const char* key, int64_t fallback) {
         const auto value =
         static_cast<int64_t> (db.get_config_int (key, static_cast<int> (fallback)));

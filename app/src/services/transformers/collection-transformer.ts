@@ -6,10 +6,8 @@
  */
 
 /**
- * Collection Transformer
- *
- * Transforms backend collection format to frontend domain Collection type.
- * Handles timestamp conversion and provides safe defaults for new fields.
+ * Turns the engine's collection row into the domain `Collection`: timestamps converted, safe
+ * defaults for newer fields.
  */
 
 import type {
@@ -26,14 +24,11 @@ import { DATA_FILE_HASH_PATTERN } from "@/services/data-files/hash";
 import { toElements } from "./elements-transformer";
 
 /**
- * The declared data contract, or `{}` when the row predates the column or holds
- * something that is not a schema.
- *
- * Normalized field by field rather than cast: this row can come from an engine
- * older than the `data_schema` column, and every consumer downstream (the tab's
- * diff, the runner's warnings) treats `columns` as a string array without
- * re-checking. A blob that got in another way must not become the first
- * `undefined` the diff iterates.
+ * The declared data contract, or `{}` when the row predates the column or holds something that is
+ * not a schema. Normalized field by field rather than cast: this row can come from an engine older
+ * than the `data_schema` column, and every consumer downstream (the tab's diff, the runner's
+ * warnings) treats `columns` as a string array without re-checking, so a blob that got in another
+ * way must not become the first `undefined` the diff iterates.
  */
 function toDataSchema(raw: unknown): CollectionDataSchema {
 	const record = asRecord(raw);
@@ -68,14 +63,12 @@ function toOpenApiBinding(raw: unknown): CollectionOpenApiBinding {
 }
 
 /**
- * A stored spec-file location, or `undefined` for none (#2765).
- *
- * Rebuilt rather than trusted: whatever this answers reaches the read IPC *as a
- * path*, so a value that is not a `{path, fileName}` pair of non-empty strings
- * is no location at all. Dropping it is right where repairing it is not -
- * there is nothing to repair a path *to*, and the picker is one click away.
- * The engine's `{}` for "no file" lands here too. Exported for the one-time
- * import of the locations the app used to keep in `localStorage`.
+ * A stored spec-file location, or `undefined` for none (#2765). Rebuilt rather than trusted:
+ * whatever this answers reaches the read IPC *as a path*, so a value that is not a
+ * `{path, fileName}` pair of non-empty strings is no location at all. Dropping it is right where
+ * repairing it is not: there is nothing to repair a path *to*, and the picker is one click away.
+ * The engine's `{}` for "no file" lands here too. Exported for the one-time import of the locations
+ * held in `localStorage`.
  */
 export function toSpecFileLocation(raw: unknown): SpecFileLocation | undefined {
 	const record = asRecord(raw);

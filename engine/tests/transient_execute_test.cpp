@@ -32,7 +32,7 @@
  * `read_persist_variables_flag` (#1904) is the sibling opt-out for what the
  * scripts and extractors set, read by the same rule, so its table sits here;
  * the route honouring it on both transports is driven end to end in
- * sse_stream_test.cpp's `StreamExecuteTest`. `read_include_parsed_body_flag`
+ * `StreamExecuteTest` (sse_stream_fixture.hpp). `read_include_parsed_body_flag`
  * (#2544) is a third, for the answer's parsed `body`; the route honouring it
  * is driven in execute_binary_body_test.cpp.
  *

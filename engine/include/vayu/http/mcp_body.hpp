@@ -18,7 +18,6 @@
 #include "vayu/types.hpp"
 
 /**
- * @file mcp_body.hpp
  * @brief An MCP request over Streamable HTTP, modern era (#3762): the body's
  *        `_meta` and the headers the transport mirrors out of the body.
  *
@@ -125,18 +124,17 @@ mcp_derived_headers (std::string_view wire_body, const std::optional<McpTool>& t
 [[nodiscard]] std::string mcp_header_value (std::string_view value);
 
 /**
- * @brief The label a scenario load run's step breakdown gives an `mcp` step
- *        (#3829): `<method> <name>`, e.g. `tools/call search`, the name being
+ * @brief An `mcp` step's label in a scenario load run's breakdown (#3829):
+ *        `<method> <name>`, e.g. `tools/call search`, the name being
  *        `params.name` of a `tools/call` or `prompts/get`.
  *
- * @p content is the request's *stored* body text, never the composed one: a
- * name or method still spelled `{{token}}` is left out, so no substituted
- * value (a secret's included) can reach the label. The method alone for every
- * other method (`resources/read` too: its `params.uri` names no tool and can
- * carry a credential), and for a name that is absent, not a non-empty string,
- * or holds a `{{` token. Empty when @p content is not one JSON object (a token
- * outside a string, a call past `constants::request_body::MAX_JSON_DEPTH`) or
- * has no string `method` free of `{{`.
+ * @p content is the *stored* body text, never the composed one, so no
+ * substituted value (a secret's included) can reach the label. The method
+ * alone for every other method (`resources/read`'s `uri` names no tool and can
+ * carry a credential) and for a name that is absent, empty, not a string or
+ * holds `{{`. Empty when @p content is not one JSON object within
+ * `constants::request_body::MAX_JSON_DEPTH`, or has no non-empty string
+ * `method` free of `{{`.
  */
 [[nodiscard]] std::string mcp_step_label (std::string_view content);
 

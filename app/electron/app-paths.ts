@@ -6,15 +6,11 @@
  */
 
 /**
- * @file app-paths.ts
  * @brief The directories Settings - General shows the user.
  *
- * Extracted from the `app:getPaths` handler, which had grown its own copy of
- * the sidecar's data-dir rule and of the engine's `logs`/`db` layout. Two
- * copies of a derivation drift silently here: the panel keeps rendering, it
- * just names directories nothing writes to. The derivation now has one owner
- * per layer - `engineDataDirectory()` for the data dir, `constants.ts` for the
- * subdirectory names - and this module only joins them.
+ * Two copies of a derivation drift silently here: the panel keeps rendering, naming directories
+ * nothing writes to. The derivation has one owner per layer, `engineDataDirectory()` for the data
+ * dir and `constants.ts` for the subdirectory names, and this module only joins them.
  */
 
 import { app } from "electron";

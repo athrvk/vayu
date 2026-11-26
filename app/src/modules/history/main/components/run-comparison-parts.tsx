@@ -6,12 +6,10 @@
  */
 
 /**
- * The pieces of a run comparison that the vs-baseline strip and the full
- * compare view draw alike.
- *
- * One file so a fix to how a delta is coloured, how a value gets its unit or
- * how a comparability warning reads lands on both surfaces: a second copy of
- * the warnings list was exactly what #2162 would have had to fix twice.
+ * The pieces of a run comparison the vs-baseline strip and the full compare view draw alike, in one
+ * file so a fix to how a delta is coloured, how a value gets its unit or how a comparability
+ * warning reads lands on both (a second copy of the warnings list would have needed #2162's fix
+ * twice).
  */
 
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
@@ -70,9 +68,8 @@ export function DeltaCell({ metric }: { metric: MetricDelta }) {
 }
 
 /**
- * One warning row per way the two runs are not the same experiment: the
- * baseline's (or the compared run's) value, then the open run's. Draws nothing
- * for a like-for-like pair.
+ * One warning row per way the two runs are not the same experiment: the baseline's (or compared
+ * run's) value, then the open run's. Nothing for a like-for-like pair.
  */
 export function ComparabilityWarnings({ warnings }: { warnings: ComparabilityWarning[] }) {
 	if (warnings.length === 0) return null;

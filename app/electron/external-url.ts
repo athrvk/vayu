@@ -8,24 +8,21 @@
 /**
  * What the main process will hand to the OS's browser.
  *
- * Two places decide it and they must decide it the same way: the OAuth flow's
- * `shell:openExternalUrl` handler, where the URL comes from a renderer that a
- * compromised page could be driving, and the context menu's "Open in Browser",
- * where it comes from whatever `href` a document put on screen. Both are
- * arbitrary text arriving from outside, and `shell.openExternal` launches
- * whatever protocol handler the OS has registered for the scheme.
+ * Two places decide it and must decide it the same way: the OAuth flow's `shell:openExternalUrl`
+ * handler, where the URL comes from a renderer that a compromised page could be driving, and the
+ * context menu's "Open in Browser", where it is whatever `href` a document put on screen. Both are
+ * arbitrary text from outside, and `shell.openExternal` launches whatever protocol handler the OS
+ * has registered for the scheme.
  *
- * So the rule is stated once, here: the two schemes a browser answers for, and
- * nothing else. The two callers differ only in what they do with a refusal -
- * the IPC handler throws a message the caller sees, the menu simply does not
- * offer the item - which is why `isBrowsableUrl` answers the question rather
- * than performing the open.
+ * So the rule is stated once, here: the two schemes a browser answers for, and nothing else. The
+ * two callers differ only in what they do with a refusal (the IPC handler throws a message the
+ * caller sees, the menu does not offer the item), which is why `isBrowsableUrl` answers the
+ * question rather than performing the open.
  *
- * The IPC handler is also the one door a compromised renderer can call in a
- * loop, so `createExternalUrlOpener` adds two limits on top of the scheme rule
- * (#2378): the window must be the one in front, and one open per second. A real
- * click needs the first and cannot beat the second; a script spraying browser
- * tabs at an unattended machine is stopped by both.
+ * The IPC handler is also the one door a compromised renderer can call in a loop, so
+ * `createExternalUrlOpener` adds two limits on top of the scheme rule (#2378): the window must be
+ * the one in front, and one open per second. A real click needs the first and cannot beat the
+ * second; a script spraying browser tabs at an unattended machine is stopped by both.
  */
 
 /** A URL's protocol, or `null` for text that is not a URL at all. */
@@ -56,9 +53,8 @@ export interface ExternalUrlOpenerDeps {
 }
 
 /**
- * The `shell:openExternalUrl` handler body. Every refusal throws, so the
- * renderer's invoke rejects at the call that made it, and none reaches
- * `openExternal`.
+ * The `shell:openExternalUrl` handler body. Every refusal throws, so the renderer's invoke rejects
+ * at the call that made it, and none reaches `openExternal`.
  */
 export function createExternalUrlOpener(
 	deps: ExternalUrlOpenerDeps

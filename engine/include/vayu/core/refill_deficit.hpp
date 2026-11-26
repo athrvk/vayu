@@ -25,7 +25,6 @@ namespace vayu::core {
 [[nodiscard]] inline size_t
 compute_refill_deficit (size_t target, size_t in_flight, size_t budget_remaining) {
     size_t need = target > in_flight ? target - in_flight : 0;
-    // Parenthesized against windows.h min/max macros (`core/constants.hpp`).
     return (std::min)(need, budget_remaining);
 }
 

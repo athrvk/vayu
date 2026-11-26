@@ -6,33 +6,28 @@
  */
 
 /**
- * @file http/routes/client_certificates.cpp
- * @brief The client-certificate registry (issue #707).
+ * The client-certificate registry (#707). A certificate belongs to a host, not
+ * a request: the transfer needing mTLS is as often a token fetch, a redirect or
+ * a script's `pm.sendRequest` as the request on screen, and none of those can
+ * carry an attachment. `resolve_transport_policy` reads the whole table and
+ * `match_client_certificate` picks an entry per transfer.
  *
- * A certificate belongs to a *host*, not to a request, so this is a registry
- * and not a request field: the transfer that needs mTLS is as often a token
- * fetch, a redirect or a script's `pm.sendRequest` as it is the request the
- * user is looking at, and none of those are places anything can be attached.
- * `resolve_transport_policy` reads the whole table into the policy, and
- * `match_client_certificate` picks the entry per transfer.
- *
- * Two rules are enforced here rather than deeper down, because only a route can
- * answer with a status code:
+ * Two rules live here, not deeper, because only a route answers with a status:
  *
  *  1. **A registered entry is usable.** Host shape, port range, the file paths
- *     the declared format calls for, and that format against the file's own
- *     bytes are all checked at write time (`client_cert_rejection`). A path
- *     that is not there - or a PKCS#12 file registered as a PEM pair - fails at
- *     handshake time as an SSL error naming the endpoint, which reads as "the
- *     API is broken" - the misdiagnosis this epic exists to end.
- *  2. **One entry per host+port.** Two rows claiming the same target would make
- *     the certificate presented depend on row order, so the second one is a 409
- *     naming the first rather than a silent shadowing.
+ *     the format needs and the format against the file's bytes are checked at
+ *     write time (`client_cert_rejection`). A missing path, or a PKCS#12 file
+ *     registered as a PEM pair, would fail at handshake as an SSL error naming
+ *     the endpoint, read as "the API is broken", the misdiagnosis this epic
+ *     exists to end.
+ *  2. **One entry per host+port.** Two rows on one target would make the
+ *     presented certificate depend on row order, so the second is a 409 naming
+ *     the first.
  *
- * A row can stop being usable after it was written (its file moved, or the row
- * was edited around the routes), and the resolver then drops it. The list says
- * so per row (`usable`, `problem`) rather than leave the card showing an entry
- * the engine no longer presents.
+ * A row can become unusable after it was written (its file moved, or an edit
+ * around the routes), and the resolver drops it; the list says so per row
+ * (`usable`, `problem`) rather than show an entry the engine no longer
+ * presents.
  */
 
 #include "vayu/http/routes.hpp"
@@ -51,15 +46,11 @@ namespace vayu::http::routes {
 namespace {
 
 /**
- * The one null-vs-absent rule for `port`, which is nullable rather than
- * defaulted: absent on create and explicit `null` both mean "every port", and
- * absent on update keeps what is stored.
- *
- * A non-integer is a 400 rather than the silent ignore `apply_int_field` gives
- * a scalar with a default. There is no value to fall back to here - a dropped
- * `port` would widen the entry from one port to all of them, which is the
- * opposite of what the client asked for and is invisible until the wrong
- * certificate is presented somewhere else.
+ * The null-vs-absent rule for `port`, nullable rather than defaulted: absent on
+ * create and `null` mean every port, absent on update keeps. A non-integer is a
+ * 400, not `apply_int_field`'s silent ignore: there is no fallback, and a
+ * dropped `port` would widen the entry to every port, invisibly until the wrong
+ * certificate is presented elsewhere.
  */
 RouteResult apply_port_field (const nlohmann::json& json, std::optional<int>& out, bool is_create) {
     if (!json.contains ("port")) {
@@ -99,9 +90,9 @@ const std::string& self_id) {
     holder->id + "); update or delete that entry instead");
 }
 
-/// The wire spellings a `certFormat` may take, for the tail of a rejection.
-/// Built from `all_client_cert_formats()` so the set accepted and the set
-/// advertised cannot drift - the `http_version_valid_list` rule.
+/// The wire spellings `certFormat` may take, for a rejection's tail, built from
+/// `all_client_cert_formats ()` so accepted and advertised cannot drift (the
+/// `http_version_valid_list` rule).
 std::string cert_format_valid_list () {
     std::string list;
     for (const auto format : vayu::http::all_client_cert_formats ()) {
@@ -114,20 +105,15 @@ std::string cert_format_valid_list () {
 }
 
 /**
- * The `certFormat` of a create or update body onto @p out (issue #833).
- *
- * Absent on create is the one place this engine *guesses*, and it guesses from
- * the file rather than from a constant: a user who named a `.p12` gets a
- * PKCS#12 row without having to know the field exists, and a file that says
- * nothing this engine can read falls back to `pem`, which is what every row
- * written before the field existed is. An explicit value is never overridden -
- * `client_cert_rejection` then checks it against the file and refuses a
- * contradiction, so correcting a bad sniff is possible and being wrong is loud.
- *
- * An unrecognised spelling is a 400 rather than the silent ignore
- * `apply_string_field` would give it: an entry quietly registered as PEM
- * because "PKCS12" was not the word we wanted is a handshake failure against
- * the endpoint later.
+ * A create or update body's `certFormat` onto @p out (#833). Absent on create
+ * is the one place this engine guesses, from the file, not a constant: a `.p12`
+ * gets a PKCS#12 row without the user knowing the field, and a file it cannot
+ * read falls back to `pem`, what every row predating the field is. An explicit
+ * value is never overridden: `client_cert_rejection` checks it against the file
+ * and refuses a contradiction, so a bad sniff can be corrected and being wrong
+ * is loud. An unrecognised spelling is a 400, not `apply_string_field`'s silent
+ * ignore: a row quietly registered as PEM over "PKCS12" is a handshake failure
+ * later.
  */
 RouteResult apply_cert_format_field (const nlohmann::json& json,
 std::string& out,
@@ -163,11 +149,9 @@ bool is_create) {
 }
 
 /**
- * The fields of a create or update body onto @p c, under the standard
- * null-vs-absent rule, ending in the shared usability check.
- *
- * The check runs on the *merged* row rather than on the body, which is what
- * makes a PUT that moves only `keyPath` still prove the pair works together.
+ * A create or update body's fields onto @p c under the null-vs-absent rule,
+ * ending in the shared usability check, which runs on the merged row so a PUT
+ * moving only `keyPath` still proves the pair works.
  */
 RouteResult apply_client_certificate_fields (vayu::db::ClientCertificate& c,
 const nlohmann::json& json,
@@ -191,12 +175,10 @@ bool is_create) {
         return outcome;
     }
     // `keyPath` is required for a PEM pair and must be absent for a PKCS#12
-    // bundle, so it cannot go through `apply_required_string_field`: what a
-    // complete row looks like depends on the format beside it. `null` clears
-    // it, which is how an entry moves from PEM to PKCS#12 in one PUT; the
-    // "which format needs which file" rule itself stays in
-    // `client_cert_rejection`, the one copy both this route and the resolver
-    // read.
+    // bundle, so not `apply_required_string_field`: a complete row depends on
+    // the format. `null` clears it, moving an entry from PEM to PKCS#12 in one
+    // PUT; the which-format-needs-which-file rule stays in
+    // `client_cert_rejection`, the one copy this route and the resolver read.
     if (json.contains ("keyPath")) {
         if (json["keyPath"].is_null ()) {
             c.key_path.clear ();
@@ -217,11 +199,10 @@ bool is_create) {
         return outcome;
     }
 
-    // The merged row's format. Unparseable only when the *stored* value is one
-    // no route would have written - a hand-edited row - and that is a 400
-    // rather than a fallback to `pem`: an update that answered 200 while
-    // leaving the row unusable is the silent acceptance this file exists to
-    // avoid, and the caller can fix it by naming `certFormat` here.
+    // The merged row's format, unparseable only for a hand-edited stored value,
+    // and then a 400, not a `pem` fallback: a 200 leaving the row unusable is
+    // the silent acceptance this file avoids, and naming `certFormat` here
+    // fixes it.
     const auto format = vayu::http::client_cert_format_from_string (c.cert_format);
     if (!format) {
         return route_error (400,
@@ -239,15 +220,12 @@ bool is_create) {
 } // namespace
 
 /**
- * Testable core of GET /client-certificates, returning {http_status, json_body}:
- * every live row as `serialize` writes it, plus `usable` and, when it is not,
- * `problem`, judged by `check_client_cert_row`, the check
- * `resolve_transport_policy` drops a row by. Those two are the list's alone - a
- * create or update answers 400 for an unusable row, so its response never needs
- * them.
- *
- * Reads the files each row names, so it runs outside the database lock: the
- * rows are fetched first (that call takes its own lock) and checked after.
+ * Testable core of GET /client-certificates, {http_status, json_body}: every
+ * live row as `serialize` writes it, plus `usable` and, when not, `problem`,
+ * judged by `check_client_cert_row`, the check `resolve_transport_policy` drops
+ * a row by. Only the list has them: a create or update answers 400 for an
+ * unusable row. It reads the files each row names, so it runs outside the
+ * database lock: rows first (that call locks), checks after.
  */
 std::pair<int, nlohmann::json> list_client_certificates_response (vayu::db::Database& db) {
     nlohmann::json response = nlohmann::json::array ();
@@ -295,23 +273,18 @@ const std::function<void ()>& before_write) {
 }
 
 /**
- * Testable core of POST /client-certificates - **create only**, returning
- * {http_status, json_body}. The engine owns the id (#97), so a body carrying
- * one is a 400.
+ * Testable core of POST /client-certificates, **create only**, {http_status,
+ * json_body}; the engine owns the id (#97), so a body carrying one is a 400.
  *
  * **The check and the write are one lock scope** (#1455, the create-side
- * sibling of #1440): two creates for the same host and port racing each other
- * must not both pass `reject_duplicate_target` before either writes, or two
- * rows end up claiming one target and the certificate presented depends on
- * row order - exactly what the 409 exists to prevent.
- * `update_client_certificate_response`'s doc comment states the identical
- * reasoning for the update side of this invariant; this is the second (not
- * the only) lock scope in the engine that reads the filesystem, for the same
- * reason - `apply_client_certificate_fields`'s usability check reads the
- * first page of the file this create is about to register.
+ * sibling of #1440): two creates for one host and port must not both pass
+ * `reject_duplicate_target` before either writes, or two rows claim one target
+ * and row order picks the certificate. This is one of the two lock scopes in
+ * the engine reading the filesystem (`update_client_certificate_response` says
+ * why): the usability check reads the first page of the file being registered.
  *
- * @param before_write Test seam, invoked inside the lock scope with the new
- *        row staged and immediately before it is written; see
+ * @param before_write Test seam, invoked inside the lock scope with the new row
+ *        staged and immediately before it is written; see
  *        `update_request_response` for why it is an overload.
  */
 std::pair<int, nlohmann::json> create_client_certificate_response (vayu::db::Database& db,
@@ -328,10 +301,8 @@ create_client_certificate_response (vayu::db::Database& db, const nlohmann::json
     return create_client_certificate_response (db, json, nullptr);
 }
 
-/**
- * The read-merge-write of PUT /client-certificates/:id, run under the caller's
- * lock.
- */
+/// The read-merge-write of PUT /client-certificates/:id, run under the caller's
+/// lock.
 static std::pair<int, nlohmann::json> update_client_certificate_locked (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json,
@@ -362,27 +333,21 @@ const std::function<void ()>& before_write) {
 }
 
 /**
- * Testable core of PUT /client-certificates/:id - **update only**
- * (merge-patch), returning {http_status, json_body}. A missing id is a 404
- * rather than a silent create, like every other resource.
+ * Testable core of PUT /client-certificates/:id, **update only** (merge-patch),
+ * {http_status, json_body}; a missing id is a 404.
  *
- * **The read, the merge and the write are one lock scope** (#1440), for the
- * reason `update_request_response` states. This resource has a second stake in
- * it: `reject_duplicate_target` proves no other row claims this host and port,
- * and that proof is only worth as much as the window between it and the write -
- * two PUTs converging on one target from either side of it would both pass and
- * leave the presented certificate decided by row order, the state the 409
- * exists to prevent.
+ * **The read, the merge and the write are one lock scope** (#1440), for
+ * `update_request_response`'s reason and a second: `reject_duplicate_target` is
+ * worth only the window between it and the write, and two PUTs converging on
+ * one target would both pass and let row order pick the certificate.
  *
- * It is also one of the two lock scopes in the engine that touch the
- * filesystem (the other being this file's own create, #1455):
- * `client_cert_rejection` stats the paths and reads the first page of the
- * certificate to catch a `.p12` registered as a PEM pair. That check reads the
- * *merged* row, which is why it cannot be hoisted out - and moving it out
- * anyway would only trade this bounded read for a window between the check and
- * the write it exists to guard. Bounded, local, and one page per path; see
- * `docs/engine/architecture.md`, which names both as the exception to the rule
- * that a file read stays outside.
+ * One of the two lock scopes in the engine touching the filesystem (the other
+ * is this file's create, #1455): `client_cert_rejection` stats the paths and
+ * reads the certificate's first page to catch a `.p12` registered as PEM. It
+ * reads the merged row, so it cannot be hoisted, and moving it out would trade
+ * a bounded read for a window between check and write. Bounded, local, one page
+ * per path; `docs/engine/architecture.md` names both as the exception to the
+ * file-read-outside rule.
  *
  * @param before_write Test seam, invoked inside the lock scope with the merged
  *        row staged and immediately before it is written; see

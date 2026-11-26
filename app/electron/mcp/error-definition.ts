@@ -6,12 +6,11 @@
  */
 
 /**
- * What an "error" is in a load-test run's numbers (issue #2124), for the
- * descriptions of every tool, resource and prompt that hands back an error
- * count or rate. One sentence in one place, because the engine has one
- * definition and an agent reading a rate with a different one in mind draws
- * the wrong conclusion (a run answering 15% 500s is not "0% errors").
- * `docs/engine/api-reference.md` ("What counts as an error") is the engine side.
+ * What an "error" is in a load-test run's numbers (#2124), for the descriptions of every tool,
+ * resource and prompt that hands back an error count or rate. One sentence in one place, because
+ * the engine has one definition and an agent reading a rate with a different one in mind draws the
+ * wrong conclusion (a run answering 15% 500s is not "0% errors").
+ * `docs/engine/api-reference/metrics.md` ("What counts as an error") is the engine side.
  */
 export const RUN_ERROR_DEFINITION_SENTENCE =
 	"An error is a response with a status outside 2xx and 3xx (an HTTP error) or no response at all " +

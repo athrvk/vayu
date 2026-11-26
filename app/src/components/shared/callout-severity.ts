@@ -6,12 +6,9 @@
  */
 
 /**
- * Notice severity, kept out of `Callout.tsx` so that file exports only a
- * component - mixing the two breaks fast refresh, which the linter flags.
- *
- * The array order is the sort order: a notice that stops the run has to render
- * above one that merely warns. With several notices stacked, position is the
- * only thing distinguishing them.
+ * Notice severity, kept out of `Callout.tsx` so it exports only a component (mixing breaks fast
+ * refresh, which the linter flags). The array order is the sort order: a notice stopping the run
+ * renders above one that warns, as position alone tells stacked notices apart.
  */
 export const SEVERITY_ORDER = ["blocking", "warning", "info"] as const;
 

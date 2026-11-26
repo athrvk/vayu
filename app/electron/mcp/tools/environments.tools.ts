@@ -6,7 +6,6 @@
  */
 
 /**
- * @file environments.tools.ts
  * @brief Environment writes: create, update, activate and delete.
  */
 

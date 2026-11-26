@@ -5,12 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * TestResults Component
- *
- * Displays test execution results with pass/fail status, grouped by the script
- * that made them.
- */
+/** Test results with pass/fail status, grouped by the script that made them. */
 
 import { CheckCircle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -23,21 +18,19 @@ import ScopeTag from "./ScopeTag";
 export interface TestResultsProps {
 	results: readonly TestResult[];
 	/**
-	 * Whether this component owns its padding and scroll box. False when the
-	 * Tests tab is stacking it under a schema verdict (issue #628), which owns
-	 * both for the pair - two scroll boxes in one pane scroll independently, and
-	 * two paddings indent the list twice.
+	 * Whether this owns its padding and scroll box. False when the Tests tab stacks it under a
+	 * schema verdict (#628), which owns both: two scroll boxes scroll independently, two paddings
+	 * indent twice.
 	 */
 	inset?: boolean;
 }
 
-/** In execution order, which is the order the engine lists them in. */
+/** In execution order, as the engine lists them. */
 const SOURCES: readonly ScriptSource[] = ["pre", "test"];
 
 /**
- * An entry with no `source` came from an engine - or a stored trace - older
- * than issue #810, which listed the post-request script's assertions and
- * nothing else. Reading it as `"test"` is what that list meant, not a guess.
+ * No `source` means an engine or trace older than #810, which listed only the post-request script's
+ * assertions, so `"test"` is what it meant.
  */
 function sourceOf(test: TestResult): ScriptSource {
 	return test.source === "pre" ? "pre" : "test";
@@ -48,21 +41,12 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 	const failedCount = results.length - passedCount;
 
 	/*
-	 * Grouped by script, with a heading over each group that has anything in it
-	 * (issue #810).
-	 *
-	 * The heading is on every group rather than only when both are present: a
-	 * list of assertions made *before* the request went out is a different claim
-	 * from one made about the response, and a run whose only assertions are
-	 * pre-request ones would otherwise read as the latter with nothing to say
-	 * so. The labels come from `SCRIPT_SECTIONS`, the same table the Console
-	 * tab's sections use, so the two panes cannot name the scripts differently.
-	 *
-	 * Neutral text rather than that table's identity tones: in this list colour
-	 * already means a verdict, and a green section heading over a failed
-	 * assertion would be saying the opposite of the card under it. The level an
-	 * inherited assertion came from (issue #2522) is a `ScopeTag` for the same
-	 * reason.
+	 * Grouped by script, a heading over each non-empty group (#810), always: assertions made
+	 * *before* the request are a different claim from ones about the response, and a
+	 * pre-request-only list would otherwise read as the latter. Labels come from `SCRIPT_SECTIONS`,
+	 * as the Console's sections do, so the panes cannot name scripts differently. Neutral, not that
+	 * table's tones: here colour is a verdict, and a green heading over a failed card would
+	 * contradict it. An inherited assertion's level (#2522) is a `ScopeTag` for the same reason.
 	 */
 	const groups = SOURCES.map((source) => ({
 		source,
@@ -73,13 +57,9 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 	return (
 		<div className={inset ? "p-4 overflow-auto h-full" : undefined}>
 			{/*
-			 * The summary reads as text, not a chip.
-			 *
-			 * It was a `text-sm` Badge, which made it the loudest thing in a panel
-			 * whose *content* is the results - and the tab trigger directly above
-			 * already carries a pass/fail chip, so a second one restated it more
-			 * loudly than the thing it summarised. Failures keep a colour, because
-			 * "2 failed" is the one part worth finding without reading.
+			 * The summary is text, not a chip: the content is the results, and the tab trigger
+			 * above already carries a pass/fail chip. Failures keep a colour: "2 failed" is the
+			 * part worth finding unread.
 			 */}
 			<p className="mb-3 text-xs text-muted-foreground">
 				<span className="text-foreground font-medium tabular-nums">{passedCount}</span>{" "}
@@ -95,12 +75,7 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 				)}
 			</p>
 
-			{/*
-			 * `text-xs` and 14px icons, matching the pane. This ran at `text-sm`
-			 * with `w-5 h-5` icons - a ~52px row in the one tab whose job is
-			 * listing every assertion a script made, while the tables beside it
-			 * had just been taken to 12px.
-			 */}
+			{/* `text-xs` and 14px icons, matching the pane and its 12px tables. */}
 			<div className="space-y-3">
 				{groups.map((group) => (
 					<section key={group.source} className="space-y-1.5">
@@ -112,9 +87,7 @@ export default function TestResults({ results, inset = true }: TestResultsProps)
 							<div
 								key={i}
 								className={cn(
-									// `rounded-md`: these were the only square-cornered
-									// cards in the response pane, and they ignored the
-									// Roundedness setting entirely.
+									// `rounded-md`, so the cards follow the Roundedness setting.
 									"p-2.5 rounded-md border",
 									test.passed
 										? "bg-status-success/10 border-status-success/20"

@@ -6,10 +6,8 @@
  */
 
 /**
- * Local persistence keys (localStorage + zustand persist names).
- *
- * Renaming a key orphans previously persisted data - treat these as part of
- * the app's storage schema.
+ * Local persistence keys (localStorage and zustand persist names). Part of the app's storage
+ * schema: renaming a key orphans the data persisted under it.
  */
 
 export const STORAGE_KEYS = {
@@ -42,31 +40,28 @@ export const STORAGE_KEYS = {
 	/** Zustand persist name for shell layout (drawer, context bar, split ratio). */
 	LAYOUT_STORE: "vayu.layout",
 	/**
-	 * Zustand persist name for the startup-recovery notice the user has already
-	 * seen (issue #922). One timestamp - the engine keeps the record itself.
+	 * Persist name for the startup-recovery notice already seen (#922): one timestamp, as the
+	 * engine keeps the record itself.
 	 */
 	RECOVERY_NOTICE_STORE: "vayu.recovery-notice",
 	/**
-	 * Zustand persist name for the intervals the host spent asleep under a run
-	 * (issue #1357). Keyed by run id; the engine's report cannot carry them,
-	 * because the engine was suspended too.
+	 * Persist name for the intervals the host slept under a run (#1357), keyed by run id. The
+	 * engine's report cannot carry them: the engine was suspended too.
 	 */
 	HOST_SLEEP_STORE: "vayu.host-sleeps",
 	/**
-	 * Zustand persist name for which inboxes may notify on a capture (issue
-	 * #1388). Keyed by inbox id; the engine's inbox record is in-memory state
-	 * with no field for a client-side preference, and an id it no longer lists
-	 * is pruned on the next list read.
+	 * Persist name for which inboxes may notify on a capture (#1388), keyed by inbox id. The
+	 * engine's inbox record is in-memory with no field for a client-side preference; an id it no
+	 * longer lists is pruned on the next list read.
 	 */
 	INBOX_NOTIFY_STORE: "vayu.inbox-notify",
 } as const;
 
 /**
- * Keys an older Vayu wrote and this one only reads, once: each collection's
- * spec-file and data-file binding, from before the binding rode the engine row
- * (#2765). `useLegacyFileBindingImport` moves what they hold onto the rows and
- * removes each key once it has; nothing writes them any more. Retired with the
- * import (#2809), beside the `file:` origin hand-off (#2763).
+ * Keys an older Vayu wrote and this one only reads, once: each collection's spec-file and data-file
+ * binding from before the binding rode the engine row (#2765). `useLegacyFileBindingImport` moves
+ * what they hold onto the rows and removes each key; nothing writes them. Retired with the import
+ * (#2809), beside the `file:` origin hand-off (#2763).
  */
 export const LEGACY_FILE_BINDING_KEYS = {
 	SPEC_FILES: "vayu.spec-files",

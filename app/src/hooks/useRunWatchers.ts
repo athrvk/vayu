@@ -6,27 +6,22 @@
  */
 
 /**
- * Watch a run an MCP agent started, as if the app had started it (issue #1419).
+ * Watch a run an MCP agent started, as if the app had started it (#1419). Everything a run does in
+ * the background (the OS progress indicator, #1362; the keep-awake hold, #1357; the finished/failed
+ * notification, #1358) lives inside `LoadTestService` and `ScenarioRunService`, and both begin at
+ * `startMonitoring`, which otherwise only a renderer surface calls (the dashboard, the Run
+ * Collection dialog). A run handed to an agent would then paint no taskbar bar, hold no wake lock
+ * and say nothing when it ended, until its dashboard tab was opened, and the user who hands a long
+ * run to an agent is exactly the user not looking at the window.
  *
- * Everything a run does in the background - the OS progress indicator (#1362),
- * the keep-awake hold (#1357) and the finished/failed notification (#1358) -
- * lives inside `LoadTestService` and `ScenarioRunService`, and both begin at
- * `startMonitoring`. Until this hook existed only a renderer surface called it:
- * the dashboard and the Run Collection dialog. A run handed to an agent
- * therefore painted no taskbar bar, held no wake lock and said nothing when it
- * ended, until its dashboard tab was opened - and the user who hands a long run
- * to an agent is exactly the user who is not looking at the window.
+ * Not a second copy of the run lifecycle in the main process: main says only *that* a run started
+ * and which service owns it (`startedRun` on the `mcp:data-changed` event), and the renderer enters
+ * the one path that already means "watch this run". As for any other run, that path is open only
+ * while `canStartLoadRun` says so (#3351, #3381).
  *
- * The fix is deliberately not a second copy of the run lifecycle in the main
- * process: main says only *that* a run started and which service owns it
- * (`startedRun` on the `mcp:data-changed` event), and the renderer enters the
- * one path that already means "watch this run". As for any other run, that
- * path is open only while `canStartLoadRun` says so (#3351, #3381).
- *
- * Mounted once in `App.tsx`, beside `useMcpDataInvalidation`, for the same
- * reason: the event names a run, not a screen, and a listener that came and went
- * with a view would miss the runs this exists for. Absent outside Electron,
- * where there is no MCP server to hear from.
+ * Mounted once in `App.tsx`, beside `useMcpDataInvalidation`, for its reason: the event names a
+ * run, not a screen, and a listener that came and went with a view would miss the runs this exists
+ * for. Absent outside Electron, where there is no MCP server to hear from.
  */
 
 import { useEffect } from "react";
@@ -41,14 +36,11 @@ import { loadConfigFromSnapshot, requestInfoFromSnapshot } from "@/lib/run-confi
 import type { StartedRun } from "@/types/domain";
 
 /**
- * Give the dashboard the config an agent's run was started with, read from the
- * run's stored snapshot (issue #1935).
- *
- * Best effort: the run is already being watched, and a row that cannot be read
- * leaves the dashboard as it was. It must not reach `streamLost`, which raises the
- * lost-stream callout for a stream that is fine. A response that arrives after
- * another run took the dashboard is dropped by the store rather than written
- * over it.
+ * Give the dashboard the config an agent's run was started with, read from the run's stored
+ * snapshot (#1935). Best effort: the run is already being watched, and a row that cannot be read
+ * leaves the dashboard as it was; it must not reach `streamLost`, which raises the lost-stream
+ * callout for a stream that is fine. A response that arrives after another run took the dashboard
+ * is dropped by the store rather than written over it.
  */
 async function configureFromRunRow(runId: string): Promise<void> {
 	try {

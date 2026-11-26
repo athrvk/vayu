@@ -6,19 +6,15 @@
  */
 
 /**
- * Where the history list's one tab stop is, and which row should hold it.
- *
- * The same roving-tabindex shape `tree-focus.ts` gives the collection tree -
- * one Tab stop for the whole list instead of one per row - stripped to the
- * flat case: no hierarchy, no expand/collapse, so none of that file's
- * depth/parent logic. `useHistoryListFocus.ts` is the keydown half.
+ * The history list's one tab stop, and which row holds it: `tree-focus.ts`'s roving-tabindex shape
+ * (one Tab stop for the list, not one per row) for the flat case, without its depth/parent logic.
+ * `useHistoryListFocus.ts` is the keydown half.
  */
 
 /**
- * A row's activator - the stretched button `RunItem` renders last, which
- * opens the run. Its own attribute rather than the tree's `data-tree-activate`:
- * this list is not a tree, and sharing the attribute would make a future
- * tree-only fix silently reach here too.
+ * A row's activator, the stretched button `RunItem` renders last, which opens the run. Not the
+ * tree's `data-tree-activate`: this list is not a tree, and sharing it would let a future tree-only
+ * fix silently reach here.
  */
 export const HISTORY_ROW_ACTIVATE = "[data-history-activate]";
 
@@ -29,12 +25,10 @@ export function historyRows(container: HTMLElement | null | undefined): HTMLElem
 }
 
 /**
- * Focus `row` and move the list's single tab stop onto it.
- *
- * Every other row is reset first - promoting the destination alone leaks a
- * stop per call, the same reasoning `focusTreeRow` documents: a DOM mutation
- * on top of a vdom prop that did not change, so React re-renders to nothing
- * and each stray `0` survives.
+ * Focus `row` and move the list's single tab stop onto it. Every other row is reset first:
+ * promoting the destination alone leaks a stop per call, as `focusTreeRow` documents (a DOM
+ * mutation over an unchanged vdom prop, so React re-renders to nothing and each stray `0`
+ * survives).
  */
 export function focusHistoryRow(
 	container: HTMLElement | null | undefined,

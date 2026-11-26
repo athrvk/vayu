@@ -8,20 +8,17 @@
  */
 
 /**
- * @file threshold_eval.hpp
  * @brief Pure core for a run's pass/fail budgets: what a `thresholds` object
  *        may say, and what verdict the run's own numbers give it.
  *
- * A load run measures everything and, before this, judged nothing - the report
- * carried percentiles and an error rate, and "did that meet the budget" was a
- * question only a human reading numbers could answer. The two halves live
- * together here on purpose: `validate_thresholds` (the route's gate) and
- * `evaluate_thresholds` (the run's verdict) read the *same* metric table, so a
- * key the route accepts cannot be one the evaluator silently ignores.
+ * The two halves live together on purpose: `validate_thresholds` (the route's
+ * gate) and `evaluate_thresholds` (the run's verdict) read the *same* metric
+ * table, so a key the route accepts cannot be one the evaluator silently
+ * ignores.
  *
  * Both are total functions over arbitrary JSON: the route's copy is handed a
- * client body, and the evaluator's is handed a stored config snapshot which may
- * have been written by an older engine or hand-edited.
+ * client body, and the evaluator's a stored config snapshot, which an older
+ * engine may have written or a person hand-edited.
  */
 
 #include <cstddef>
@@ -122,25 +119,24 @@ evaluate_thresholds (const nlohmann::json& config, const RunSummaryInputs& input
 /**
  * @brief Does this run's config ask a failed budget to fail the run?
  *
- * Reads `thresholds.failRun`, defaulting to `false` - the pre-existing
- * history semantics, where a budget miss is reported but never changes the
- * terminal status, are what every run gets without asking for this. Absent,
- * `null` or anything but `true` reads as `false`; `validate_thresholds`
- * already refuses anything else the key could hold.
+ * Reads `thresholds.failRun`, defaulting to `false`: a run that does not ask
+ * gets a budget miss reported but never a changed terminal status. Absent,
+ * `null` or anything but `true` reads as `false`; `validate_thresholds` already
+ * refuses anything else the key could hold.
  */
 [[nodiscard]] bool thresholds_fail_run (const nlohmann::json& config);
 
 /**
- * @brief Serialize a verdict into the `thresholds` block a run's stored
- *        summary carries.
+ * @brief Serialize a verdict into the `thresholds` block a run's stored summary
+ *        carries.
  *
- * The one writer for both run modes' summaries (issue #1564): a load run's
- * `RunSummaryInputs::thresholds` and a collection run's own
- * `ScenarioSummaryInputs::thresholds` are both a `std::optional<ThresholdOutcome>`
- * filled by the same `evaluate_thresholds`, so they read from one place
- * rather than two hand-written copies of the same three keys that could
- * drift - the report route's `apply_stored_summary` reads this shape off
- * `summary["thresholds"]` however it got there.
+ * The one writer for both run modes' summaries (#1564): a load run's
+ * `RunSummaryInputs::thresholds` and a collection run's
+ * `ScenarioSummaryInputs::thresholds` are both a
+ * `std::optional<ThresholdOutcome>` filled by the same `evaluate_thresholds`,
+ * so one writer keeps the three keys from drifting. The report route's
+ * `apply_stored_summary` reads this shape off `summary["thresholds"]` whichever
+ * mode wrote it.
  *
  * A check carrying `assertions` adds `assertionsExact` and `assertionsSampled`
  * (each `{passed, failed}`, both always written), and `sampleRate` only when

@@ -8,31 +8,23 @@
 /**
  * The `binary` body: one file, sent as the whole request body.
  *
- * **A path, never bytes.** The engine opens the file at send time - small
- * files read once, large ones streamed - so the editor holds a path and what
- * the user said about it. The file is chosen three ways: dropped on the
- * panel, picked with Choose file (both through `file-pick.ts`, the piece a
- * form-data file part uses too), or typed into the path field, which is how a
- * `{{fixturesDir}}/a.bin` path is written.
+ * **A path, never bytes.** The engine opens the file at send time (small files read once, large
+ * ones streamed), so the editor holds a path and what the user said about it. The file is dropped,
+ * picked with Choose file (both via `file-pick.ts`, which form-data file parts use too), or typed,
+ * which is how `{{fixturesDir}}/a.bin` is written.
  *
- * **Only a pick chooses a file** (#2356). Vayu sends a file picked on this
- * machine, or any file under a folder you allowed. Picking and dropping go
- * through the preload, which hands the main process the path to grant, so
- * either one clears the banner below. A typed path is not a pick: until the
- * engine answers for it on the next read (`unresolved`, `lib/file-trust.ts`)
- * it reads as not chosen, the same as an imported or pasted one. A path with a
- * `{{variable}}` in it is sent only from an allowed folder, because the
- * variable could point anywhere. The banner offers the two ways out - Relink
- * (pick the file here) and Allow folder - and goes quiet when the path already
- * sits under an allowed folder. That check is the text comparison in
- * `lib/file-path.ts`, a display answer; the engine's own check is on
- * canonical paths and is the one that decides.
+ * **Only a pick chooses a file** (#2356). Vayu sends a file picked on this machine or one under an
+ * allowed folder. Picking and dropping go through the preload, which hands main the path to grant,
+ * so either clears the banner below. A typed path is not a pick: until the engine answers for it on
+ * the next read (`unresolved`, `lib/file-trust.ts`) it reads as not chosen, like an imported or
+ * pasted one. A path with a `{{variable}}` is sent only from an allowed folder, since the variable
+ * could point anywhere. The banner offers Relink (pick it here) and Allow folder, and goes quiet
+ * under an allowed folder; that is `lib/file-path.ts`'s text comparison, a display answer, and the
+ * engine's canonical-path check is the one that decides.
  *
- * **The size line asks the main process** (`statFile`), which answers size
- * and modification time for an absolute path and never reads the file. It
- * answers only for a picked file or one under an allowed folder (#2357), and
- * null for everything else, so "Not found on this machine" also covers a typed
- * path outside every allowed folder that was never picked.
+ * **The size line asks main** (`statFile`), which returns size and mtime without reading the file,
+ * only for a picked file or one under an allowed folder (#2357), null otherwise; so "Not found on
+ * this machine" also covers a typed path outside every allowed folder.
  */
 
 import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
@@ -98,10 +90,8 @@ export default function BinaryBodyPanel() {
 	const setFile = useCallback((next: FileRef) => updateField("binaryFile", next), [updateField]);
 
 	/*
-	 * The Content-Type the user set is kept - a different file is not a reason
-	 * to forget it - and the browser's own guess at a type is not written: the
-	 * engine's extension table decides when the user did not, and it is the
-	 * one that reaches the wire.
+	 * The user's Content-Type survives a new file, and the browser's type guess is not written: the
+	 * engine's extension table decides when the user did not, and it is what reaches the wire.
 	 */
 	const onPick = useCallback(
 		(picked: PickedFile) => {
@@ -124,8 +114,7 @@ export default function BinaryBodyPanel() {
 		if (dropped) onPick(pickedFileOf(dropped));
 	};
 
-	// The declared name and the engine's answer belonged to the previous path,
-	// so they go with it.
+	// The declared name and the engine's answer belonged to the previous path, so they go with it.
 	const onTypePath = (src: string) => {
 		const next: FileRef = { src };
 		if (file.contentType) next.contentType = file.contentType;
@@ -157,9 +146,8 @@ export default function BinaryBodyPanel() {
 			<input {...inputProps} />
 
 			{/*
-			 * The drop target. Dragging is a pointer-only gesture, so the
-			 * keyboard path is the Choose file button inside it - which is why
-			 * this box carries no role or key handler of its own.
+			 * The drop target. Dragging is pointer-only, so the keyboard path is the Choose file
+			 * button inside, and this box has no role or key handler of its own.
 			 */}
 			<div
 				data-testid="binary-drop-zone"

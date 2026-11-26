@@ -6,29 +6,24 @@
  */
 
 /**
- * @file control_loop.cpp
- * @brief `control.loop` (issue #1515): walks a folder's members `count`
- *        times per iteration.
+ * `control.loop` (#1515): walks a folder's members `count` times per iteration.
  *
- * Runs in `step.between`, after this step's own outcome is decided and
- * before flow control reads it - the same seam `timer.think` uses, so a
- * loop-back never counts against the step it follows. `control.loop`
- * inherits into every member of the folder it sits on and compiles once per
- * member, so only the folder's *last* member (`ElementContext::step_position
- * == element_spans->at(element_id).last`, issue #1515's `needs_span`) ever
- * decides anything; every other member's own occurrence is a no-op. The
- * decision itself is an ordinary `Next` (`vayu::ScriptControl::Kind::Next`,
- * `first_step_name` from the same span), read back by
- * `scenario_runner.cpp::run_iteration` and resolved by the very
- * `resolve_next_step` a script's own `pm.execution.setNextRequest` already
- * goes through - a loop-back is not a second flow-control mechanism.
+ * Runs in `step.between`, after the step's outcome is decided and before flow
+ * control reads it (the seam `timer.think` uses), so a loop-back never counts
+ * against the step it follows. It inherits into every member of its folder and
+ * compiles once per member, so only the folder's *last* member
+ * (`ElementContext::step_position == element_spans->at(element_id).last`,
+ * #1515's `needs_span`) decides; every other occurrence is a no-op. The
+ * decision is an ordinary `Next` (`first_step_name` from the same span), read
+ * by `scenario_runner.cpp::run_iteration` and resolved by the
+ * `resolve_next_step` that `pm.execution.setNextRequest` goes through: no
+ * second flow-control mechanism.
  *
- * Runs under a scenario load run too (issue #1569): `scenario_load.cpp`'s
- * own `read_flow_control` (called from `finish_step`) reads this same `Next` decision off
- * `run_step_between`'s `ElementContext::pre_script_result` and resolves it
- * against the run's own `ScenarioLoadState::step_index` - the load path's
- * counterpart to `run_iteration`'s walk, guarded against a cycle that never
- * closes by the same `maxStepsPerIteration` the sequential run uses.
+ * A scenario load run (#1569) reads the same `Next` off
+ * `ElementContext::pre_script_result` in `scenario_load.cpp`'s
+ * `read_flow_control` (from `finish_step`) and resolves it against
+ * `ScenarioLoadState::step_index`, guarded against a cycle that never closes by
+ * the sequential run's `maxStepsPerIteration`.
  */
 
 #include "vayu/core/elements.hpp"

@@ -18,10 +18,9 @@
 namespace vayu::db::config_seeds {
 
 namespace {
-// Serialize all_http_versions() to the `{value,label}` JSON array the
-// "defaultHttpVersion" config entry stores in its `options` column. Derived
-// from the domain enumeration rather than a literal list, so a change to
-// HttpVersion cannot silently drift out of sync with the seeded options.
+// all_http_versions() as the `{value,label}` array the "defaultHttpVersion"
+// entry stores in `options`; derived from the enumeration, not a literal list,
+// so a change to HttpVersion cannot drift from the seeded options.
 std::string http_version_options_json () {
     nlohmann::json options = nlohmann::json::array ();
     for (const auto version : vayu::all_http_versions ()) {
@@ -31,10 +30,10 @@ std::string http_version_options_json () {
     return options.dump ();
 }
 
-// The `{value,label}` array for "proxyMode". Derived from the enumeration the
-// resolver parses, so a mode added to `ProxyMode` cannot be missing from the
-// options the config route validates against - which would make it a value
-// the engine understands and `POST /config` refuses.
+// The `{value,label}` array for "proxyMode", derived from the enumeration the
+// resolver parses, so a new `ProxyMode` cannot be missing from the options the
+// config route validates against, a value the engine understands and
+// `POST /config` refuses.
 std::string proxy_mode_options_json () {
     nlohmann::json options = nlohmann::json::array ();
     for (const auto mode : vayu::http::all_proxy_modes ()) {
@@ -49,9 +48,8 @@ std::string proxy_mode_options_json () {
 // NETWORK & CONNECTIVITY (network_performance)
 // The wire itself: what a new request starts with, how many transfers a
 // worker keeps open, and how long a name resolution is reused. The OAuth
-// renewal knobs that used to sit here were five of its eight entries and
-// moved to Services (#703) - a user tuning token renewal does not arrive at
-// "network tuning".
+// renewal knobs are in Services (#703): a user tuning token renewal does not
+// arrive at "network tuning".
 // =============================================================================
 void seed_network (ConfigSeeder& seed, int64_t now) {
     seed (unit ("ms") (keywords ({ "deadline", "give up", "hang" }) (ConfigEntry{ "defaultTimeout",
@@ -107,11 +105,10 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "3600", // 1 hour
     std::nullopt, now })));
 
-    // Proxy (issue #705). Three entries, read together by
-    // `resolve_transport_policy` at the point of use, so a change applies to
-    // the next transfer rather than the next restart. The keywords are the
-    // words someone arrives with when nothing works and they suspect the
-    // network - none of which the labels say.
+    // Proxy (#705): three entries `resolve_transport_policy` reads together at
+    // the point of use, so a change applies to the next transfer, not the next
+    // restart. The keywords are the words someone arrives with when nothing
+    // works and they suspect the network, none of which the labels say.
     seed (keywords ({ "corporate", "firewall", "mitm", "zscaler", "vpn" }) (ConfigEntry{ "proxyMode",
     vayu::http::to_string (vayu::http::TransportPolicy{}.proxy_mode), "enum", "Proxy",
     "How outbound requests reach the network. From environment uses the "
@@ -137,17 +134,16 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "certificate switch.",
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
-    // The resolved system proxy (issue #708). Written by the app's main
-    // process, which is the only part of Vayu that can ask the operating system
-    // - Chromium resolves it, libcurl sees none of it - and read by the engine
-    // only under `proxyMode: system`.
+    // The resolved system proxy (#708), written by the app's main process, the
+    // one part of Vayu that can ask the operating system (Chromium resolves it,
+    // libcurl sees none of it), and read by the engine only under
+    // `proxyMode: system`.
     //
-    // A visible row rather than a hidden side channel: a proxy the user cannot
-    // see is the failure this epic exists to end, and "system" that silently
-    // resolved to nothing has to be readable as such. It is stored where the
-    // user can edit it, and an edit lasts until the next resolution overwrites
-    // it - said in the description rather than enforced, because a read-only
-    // entry type would be a new concept in the config table for one row.
+    // A visible row, not a hidden side channel: a proxy the user cannot see is
+    // the failure this epic ends, and a "system" that resolved to nothing must
+    // read as such. It is editable, and an edit lasts until the next resolution
+    // overwrites it, said in the description rather than enforced, because a
+    // read-only entry type would be a new config concept for one row.
     seed (keywords ({ "wpad", "autoconfig", "automatic" }) (
     ConfigEntry{ "proxySystemUrl", "", "string", "System proxy (resolved)",
     "The proxy this computer is configured with, as the app resolved it when "
@@ -176,12 +172,11 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "follows whichever of those two that mode resolved to.",
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
-    // What the engine adds to a request nobody wrote it into (issue #1229).
-    // Five entries, read together by `resolve_default_header_policy` at the top
-    // of a request or a run, so a change applies to the next send rather than
-    // the next restart - the shape the proxy entries above use, and for the
-    // same reason. What each of them adds is shown in the Headers tab as a row
-    // the request can switch off; none of it is stored in the request.
+    // What the engine adds to a request nobody wrote it into (#1229): five
+    // entries `resolve_default_header_policy` reads together at the top of a
+    // request or run, so a change applies to the next send, as with the proxy
+    // entries. Each addition shows in the Headers tab as a row the request can
+    // switch off; none is stored in the request.
     seed (keywords ({ "gzip", "brotli", "deflate", "zstd" }) (ConfigEntry{
     "negotiateCompression", "true", "boolean", "Negotiate compressed responses",
     "Asks servers for a compressed response - the Accept-Encoding header a "
@@ -234,14 +229,14 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "network_performance", std::string (vayu::http::DEFAULT_CORRELATION_HEADER),
     std::nullopt, std::nullopt, std::nullopt, now })));
 
-    // Custom trust anchors (issue #706). `text` rather than `string` because
-    // what goes in it is a pasted PEM block: the single-line input every other
-    // string entry renders cannot show one, let alone several.
+    // Custom trust anchors (#706). `text`, not `string`, because a pasted PEM
+    // block cannot show in the single-line input a string renders, let alone
+    // several.
     //
-    // Content, not a path - a path breaks the moment the file moves and cannot
-    // be shown back in Settings. The engine materializes the bundle beside the
-    // database, extending the platform's own anchors rather than replacing
-    // them; see `resolve_transport_policy`.
+    // Content, not a path: a path breaks when the file moves and cannot be
+    // shown in Settings. The engine materializes the bundle beside the
+    // database, extending the platform's anchors rather than replacing them
+    // (`resolve_transport_policy`).
     seed (keywords ({ "firewall", "mitm", "zscaler", "ssl" }) (
     ConfigEntry{ "customCaCertificates", "", "text", "Custom CA certificates",
     "Certificate authorities to trust in addition to the ones this platform "

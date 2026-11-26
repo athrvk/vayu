@@ -6,12 +6,10 @@
  */
 
 /**
- * How much is in this collection, one level down.
- *
- * Direct children only, deliberately: the tree beside the bar draws the same
- * two numbers as the rows under a folder, and a subtree total would disagree
- * with what the user can see there. The pane's own header counts requests but
- * says nothing about nested folders, which is the half this adds.
+ * How much is in this collection, one level down. Direct children only, deliberately: the tree
+ * beside the bar draws the same two numbers on a folder's rows, and a subtree total would disagree
+ * with what the user sees there. The pane's header counts requests but not nested folders, the half
+ * this adds.
  */
 
 import { useCollectionsQuery, useRequestsQuery } from "@/queries";

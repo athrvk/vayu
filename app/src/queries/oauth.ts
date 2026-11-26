@@ -11,9 +11,8 @@ import type { OAuth2StepUpRequest, OAuth2TokenRequest } from "@/types";
 import { queryKeys } from "./keys";
 
 /**
- * Poll the engine's token cache status for a given cache key. Disabled when no
- * key is available (config incomplete). Refetches periodically so the status
- * row reflects expiry without a manual refresh.
+ * Poll the engine's token cache status for a cache key. Disabled without a key (config incomplete).
+ * Refetches periodically so the status row reflects expiry without a manual refresh.
  */
 export function useOAuth2TokenStatusQuery(cacheKey: string | null) {
 	return useQuery({

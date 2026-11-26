@@ -8,32 +8,24 @@
 /**
  * The dialogs and flows the palette's commands open.
  *
- * Four commands need something React owns rather than something a store holds:
- * a collection picker, the run dialog, the theme hook, and `useCopy` (the one
- * clipboard writer, `clipboard-single-writer.test.ts`). Their existing hosts
- * are not always on screen - the welcome screen's picker exists only on the
- * welcome tab, and the collections tree's run dialog is unmounted the moment the
- * drawer closes - so the palette hosts its own. Each is the same component the
- * original surface renders, driven by the same call, so a run started from here
+ * Four commands need something React owns rather than a store: a collection picker, the run dialog,
+ * the theme hook and `useCopy` (the one clipboard writer, `clipboard-single-writer.test.ts`). Their
+ * hosts are not always on screen (the welcome screen's picker exists only on the welcome tab, and
+ * the collections tree's run dialog unmounts when the drawer closes), so the palette hosts its own:
+ * the same component the original surface renders, driven by the same call, so a run started here
  * is the run the tree starts.
  *
- * The theme comes from `useElectronTheme`, a thin face over `useThemeStore`:
- * the mode, the scheme and `isDark` are one value shared with the app shell and
- * the Appearance panel, so a toggle from here reaches the panel's radio group
- * directly and the toggle's direction is never read from a stale copy (#1855).
+ * The theme comes from `useElectronTheme`, a thin face over `useThemeStore`: mode, scheme and
+ * `isDark` are one value shared with the app shell and the Appearance panel, so a toggle here
+ * reaches the panel's radio group and its direction is never read from a stale copy (#1855).
  *
- * Three more surfaces are **not** hosted here, and cannot be. Starting a load
- * test and sending both need the request builder's live editor draft, which exists
- * only inside a provider the palette is a sibling of. The mounted builder
- * contributes them through `lib/commands/live-surfaces.ts` and this hook merges
- * what is registered, so those commands are offered while a builder is on screen
- * and absent the rest of the time. Send is withdrawn for a second reason as
- * well - the builder stops offering it while it could not send at all - so its
- * row tracks the Send button rather than merely the builder's presence.
- *
- * A finished load run's export menu contributes the third the same way: what an
- * export sends depends on that menu's comparison toggle, which lives in the
- * mounted run view.
+ * Three surfaces are **not** hosted here, and cannot be. Starting a load test and sending need the
+ * request builder's live editor draft, which exists only inside a provider the palette is a sibling
+ * of, so the mounted builder registers them through `lib/commands/live-surfaces.ts` and this hook
+ * merges what is registered: offered while a builder is on screen, absent otherwise. The builder
+ * also withdraws Send while it could not send at all, so that row tracks the Send button, not just
+ * the builder's presence. A finished load run's export menu registers the third the same way: what
+ * an export sends depends on that menu's comparison toggle, in the mounted run view.
  */
 
 import { useCallback, useMemo, useState } from "react";

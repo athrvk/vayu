@@ -8,21 +8,21 @@
  */
 
 /**
- * @file utils/ordered_json.hpp
  * @brief The engine's one parse of untrusted JSON text into an `ordered_json`
- *        in time linear in its length (issues #2459, #2497).
+ *        in time linear in its length (#2459, #2497).
  *
- * `nlohmann::ordered_json::parse` places each member with `ordered_map::emplace`,
- * which scans every member already read to find a repeated key, so an object of
- * n members costs O(n^2). A hundred thousand short keys is about a megabyte of
- * text and tens of seconds of one core. Every parse of text a server, an
- * imported file or a client body chose therefore goes through `parse_ordered_json`,
- * a stored row included: its members are a client's. Only text the engine wrote
- * itself, at a size no client chose, may keep using `ordered_json::parse`.
+ * `nlohmann::ordered_json::parse` places each member with
+ * `ordered_map::emplace`, which scans every member already read to find a
+ * repeated key, so an object of n members costs O(n^2). A hundred thousand
+ * short keys is about a megabyte of text and tens of seconds of one core. Every
+ * parse of text a server, an imported file or a client body chose therefore
+ * goes through `parse_ordered_json`, a stored row included: its members are a
+ * client's. Only text the engine wrote itself, at a size no client chose, may
+ * keep using `ordered_json::parse`.
  */
 
 #include <cstddef>
-#include <limits>
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -31,8 +31,10 @@
 namespace vayu::utils {
 
 /// `max_depth` for a caller that bounds nothing here: the parse itself recurses
-/// nowhere, so depth only matters to what walks the tree afterwards.
-inline constexpr size_t ORDERED_JSON_UNBOUNDED = std::numeric_limits<size_t>::max ();
+/// nowhere, so depth only matters to what walks the tree afterwards. `SIZE_MAX`,
+/// not `numeric_limits::max ()`: see `core/constants.hpp` on `windows.h`'s `max`
+/// macro.
+inline constexpr size_t ORDERED_JSON_UNBOUNDED = SIZE_MAX;
 
 /**
  * @p text as an `ordered_json`, in time linear in its length, or `nullopt`
@@ -48,9 +50,9 @@ parse_ordered_json (std::string_view text, size_t max_depth);
 
 /**
  * Appends @p key -> @p value to @p object without the scan `operator[]` and
- * `emplace` make of every member before it (issue #2552). The parse is linear
- * but copying n members one by one into a new object is still O(n^2); a loop
- * that copies from an object whose keys are already distinct uses this.
+ * `emplace` make of every member before it (#2552). The parse is linear but
+ * copying n members one by one into a new object is still O(n^2); a loop that
+ * copies from an object whose keys are already distinct uses this.
  *
  * @p object must be a JSON object and must not hold @p key yet: nothing here
  * checks, and a repeated key would be written twice.

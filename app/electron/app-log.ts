@@ -6,25 +6,19 @@
  */
 
 /**
- * @file app-log.ts
- * @brief The two Electron-coupled loggers every main-process module shares
- *        (#1558): `appLogger()` for the app's own lifecycle (`main`,
- *        `sidecar`, `window`, `updater`, `power`, `notify`, `ipc`
- *        categories) and `mcpLogger()` for the Electron-hosted MCP
- *        transport. Both write `app_<stamp>.log` through the same
- *        `LogChannel` (see `log.ts`), so they share one buffer and one
- *        `logLevel` floor.
+ * @brief The three Electron-coupled loggers every main-process module shares (#1558): `appLogger()`
+ *        for the app's own lifecycle (`main`, `sidecar`, `window`, `updater`, `power`, `notify`,
+ *        `ipc`), `mcpLogger()` for the Electron-hosted MCP transport and `rendererLogger()` for
+ *        what `log-ipc.ts` forwards from the renderer. All write `app_<stamp>.log` through one
+ *        `LogChannel` (see `log.ts`), so they share one buffer and one `logLevel` floor.
  *
- * Kept out of `log.ts` itself so that module stays Electron-free -
- * `mcp/cli.ts`, a standalone process with no `app` module, calls
- * `createLogger` directly with its own options.
+ * Kept out of `log.ts` so that module stays Electron-free: `mcp/cli.ts`, a standalone process with
+ * no `app` module, calls `createLogger` directly with its own options.
  *
- * Deliberately reads `engineDataDirectory()` rather than `resolveAppPaths()`:
- * the latter lives in `app-paths.ts`, which itself imports `sidecar.ts`, and
- * `sidecar.ts` is one of this module's own callers - importing
- * `app-paths.ts` here would add a second edge to that cycle for no reason,
- * where `engineDataDirectory` alone already breaks it (a hoisted function
- * declaration, resolved lazily, never called at module-evaluation time).
+ * Reads `engineDataDirectory()`, not `resolveAppPaths()`: `app-paths.ts` imports `sidecar.ts`, one
+ * of this module's callers, so importing it here would add a second edge to that cycle, where
+ * `engineDataDirectory` (a hoisted function declaration, resolved lazily, never called at module
+ * evaluation) already breaks it.
  */
 
 import path from "path";

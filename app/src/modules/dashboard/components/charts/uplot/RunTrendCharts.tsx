@@ -6,19 +6,15 @@
  */
 
 /**
- * One metric across the runs of a request (#2165), on the shared uPlot
- * primitive: p95 latency, throughput and error rate, one point per run.
+ * One metric across the runs of a request (#2165) on the shared uPlot primitive: p95 latency,
+ * throughput and error rate, one point per run. The x axis is the run's position in the series (1 =
+ * oldest shown), not time: runs are minutes or days apart, and a time axis would bunch a burst of
+ * runs into a smear and strand the rest; the tooltip header gives the start time. Hence no
+ * `syncKey`: the group's cursor sync is by x value, and these three charts already share an x.
  *
- * The x axis is the run's position in the series (1 = oldest shown), not time:
- * runs are minutes or days apart, and a time axis would bunch a burst of runs
- * into one smear and strand the rest. The tooltip header is the run's start
- * time, so the position still says when. Hence no `syncKey`: the group's
- * cursor sync is by x value, and the three charts here already share an x.
- *
- * A run that did not record the metric is a gap, not a zero. Each series is
- * drawn twice - a line, and the same values as points - because a run is a
- * discrete sample: every run gets a marker, not only the lone ones between two
- * gaps that the line now marks for itself.
+ * A run that did not record the metric is a gap, not a zero. Each series is drawn twice, a line and
+ * the same values as points, because a run is a discrete sample: every run gets a marker, not only
+ * the lone ones between two gaps that the line marks for itself.
  */
 
 import { useMemo } from "react";

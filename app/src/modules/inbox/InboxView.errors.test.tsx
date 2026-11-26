@@ -239,7 +239,7 @@ describe("the inbox tab's copy control", () => {
 	});
 
 	// An icon button says it with its glyph; a toast beside the swap would say it
-	// twice (docs/design-system.md, "Copy feedback").
+	// twice (docs/design-system/feedback-and-dashboard.md, "Copy feedback").
 	it("swaps the glyph to a check when the copy worked, and raises no toast", async () => {
 		renderTab();
 

@@ -128,13 +128,12 @@ MonitorConfig& out) {
 std::optional<std::string> read_monitor_block (const nlohmann::json& monitor,
 const MonitorLimits& limits,
 MonitorConfig& out) {
-    // The configured cadence stands until the block names its own, so a user
-    // who set `monitorIntervalMs` to 5000 gets 5000 for every run that does not
-    // override it - including one started by a client that omits the field.
+    // The configured cadence stands unless the block names its own:
+    // `monitorIntervalMs` 5000 gives 5000 to every run that does not override
+    // it, including one from a client that omits the field.
     out.interval_ms = limits.default_interval_ms;
-    // The block has no timeout field of its own to override this: the scrape
-    // budget is an engine setting because it is about the endpoint being
-    // scraped, which is the same one run after run.
+    // No block field overrides this: the scrape budget is about the endpoint,
+    // the same one run after run, so it is an engine setting.
     out.scrape_timeout_ms = limits.scrape_timeout_ms;
     if (!monitor.is_object ()) {
         return "'monitor' must be an object with a 'url' and a 'series' list";
@@ -188,10 +187,9 @@ MonitorLimits read_monitor_limits (vayu::db::Database& db) {
     limits.max_series =
     max_series > 0 ? static_cast<size_t> (max_series) : defaults.max_series;
 
-    // A negative budget is not a shorter one, and a value past the longest
-    // cadence the engine will scrape at could never be reached anyway - both
-    // fall back to the derive sentinel rather than to a timeout the user did
-    // not choose.
+    // A negative budget is not a shorter one, and one past the longest cadence
+    // the engine scrapes at could never be reached; both fall back to the
+    // derive sentinel, not a timeout the user did not choose.
     const int scrape_timeout =
     db.get_config_int ("monitorScrapeTimeoutMs", defaults.scrape_timeout_ms);
     limits.scrape_timeout_ms =
@@ -274,11 +272,9 @@ std::optional<size_t> skip_exposition_labels (std::string_view line, size_t curs
 }
 
 /**
- * The value token of one sample line, or nothing when the line is a comment, a
- * metric nobody asked for, or not a sample this can read.
- *
- * A trailing exposition timestamp (the token after the value) is deliberately
- * ignored: the sample's time is when this engine scraped it, which is the axis
+ * The value token of one sample line, or nothing for a comment, an unrequested
+ * metric, or a line this cannot read. A trailing exposition timestamp is
+ * ignored on purpose: a sample's time is when this engine scraped it, the axis
  * the overlay joins on.
  */
 std::optional<std::pair<std::string, double>>

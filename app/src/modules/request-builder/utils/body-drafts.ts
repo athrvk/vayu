@@ -6,58 +6,29 @@
  */
 
 /**
- * Switching body mode used to reinterpret the same string, and it was
- * destructive.
+ * What each body mode held, so a mode switch is not destructive. A request stores **one** body (a
+ * discriminated union, `{"mode":"json","content":"..."}`), so JSON, text and GraphQL share
+ * `request.body`: switching JSON to GraphQL handed the payload to `parseGraphQLBody`, which treats
+ * a body without `query` as a raw query, and one keystroke later it was
+ * `{"query":"{\"merchant\":\"mrc_8813\"}"}`, the original gone.
  *
- * A request stores **one** body - the stored shape is a discriminated union,
- * `{"mode":"json","content":"..."}` - so JSON, text and GraphQL all shared
- * `request.body`. Switching from JSON to GraphQL therefore handed your payload
- * to `parseGraphQLBody`, which finds no `query` key and falls back to treating
- * the whole thing as a raw query string. One keystroke later the body was
- * `{"query":"{\"merchant\":\"mrc_8813\"}"}` and switching back showed *that* in
- * the JSON editor. The original payload was gone.
- *
- * **Two buckets, not eight.** `json`, `text`, `jsonrpc`, `mcp` and `xml` are the same
- * thing - a raw string body, differing only in syntax highlighting - so carrying
- * text between them is what you want. `graphql` is a structured envelope, and
- * carrying anything into or out of it is what caused the damage. `form-data`
- * and `x-www-form-urlencoded` do not use `body` at all, and `binary` does not
- * either; they have their own `formData`, `urlEncoded` and `binaryFile`. Those
- * need no bucket because the stored record never overwrites them from another
- * mode: `initialRequest` names each only while the stored body is that mode, so
- * a save made in JSON mode does not echo them back empty (#3665).
- *
- * `jsonrpc`, `mcp` and `xml` share the raw bucket rather than taking one of
- * their own because nothing on this side reads their text as a structure: the
- * JSON-RPC and MCP envelopes are completed engine-side at wire time and an XML
- * body is sent byte for byte, so each pane holds one plain document that a
- * `text` pane can show unchanged. An MCP body's `mcpTool` is not a draft: it is
- * its own request state (`RequestState.mcpTool`), kept across a mode switch. GraphQL got its own bucket for the opposite reason - its editor
- * state is structured, and the panes parse what they are given.
- *
- * Sharing the bucket does mean XML and JSON overwrite each other's text, which
- * is the intended trade: they are the same field, and a user switching between
- * them is reformatting one payload rather than keeping two.
- *
- * These drafts are deliberately *not* persisted: a request has one body, and
- * storing payloads it will never send would put them in exports and in the
- * engine's schema for no one to read.
- *
- * **They live in `RequestBuilderProvider`, not in `BodyPanel`.** The panel is
- * the obvious home and the wrong one: Radix unmounts an inactive `TabsContent`,
- * so stepping over to Headers and back tears `BodyPanel` down and takes a
- * panel-local ref with it. You would stash your JSON behind GraphQL, glance at
- * Headers, come back, and find the JSON gone. The provider survives that, which
- * is the whole reason it holds them.
- *
- * **They belong to one request, and the type says so.** What the provider does
- * *not* do is remount per request - it resets its state in an effect keyed on
- * `initialRequest?.id` - so a ref living there outlives the request that filled
- * it just as readily. Stash request A's JSON, switch to request B, pick JSON
- * there, and A's payload lands in B: the reported bug again, one step worse.
- * Carrying `requestId` inside the drafts rather than beside them means there is
- * no order of calls in which a caller can stash without saying whose body it
- * is, and no second reset to keep in step with the first.
+ * - **Two buckets.** `json`, `text`, `jsonrpc`, `mcp` and `xml` are one raw string differing in
+ *   highlighting: nothing here reads their text as a structure (JSON-RPC and MCP envelopes are
+ *   completed engine-side, XML goes byte for byte), so text carries between them, and XML and JSON
+ *   overwrite each other's text, the intended trade for one payload being reformatted. `graphql` is
+ *   a structured envelope its panes parse, so it has its own. `form-data`, urlencoded and `binary`
+ *   need none: they keep `formData`, `urlEncoded`, `binaryFile`, which the stored record never
+ *   overwrites from another mode (`initialRequest` names each only in its own mode, #3665). An MCP
+ *   body's `mcpTool` is request state (`RequestState.mcpTool`), not a draft.
+ * - **Not persisted**: a request has one body, and payloads it never sends would land in exports
+ *   and the engine's schema unread.
+ * - **They live in `RequestBuilderProvider`, not `BodyPanel`**: Radix unmounts an inactive
+ *   `TabsContent`, so a panel ref would lose the stashed JSON on a glance at Headers.
+ * - **They belong to one request, and the type says so.** The provider does not remount per request
+ *   (it resets its state during render on a new `initialRequest?.id`), so a ref there outlives its
+ *   request: stash request A's JSON, pick JSON in B, and A's payload lands in B. Carrying
+ *   `requestId` inside the drafts means no call can stash without naming whose body it is, and no
+ *   second reset must keep step with the first.
  */
 
 import type { BodyMode } from "../types";
@@ -76,8 +47,8 @@ export function draftKey(mode: BodyMode): DraftKey | null {
 		return "raw";
 	}
 	if (mode === "graphql") return "graphql";
-	// `none` sends nothing; the form modes and `binary` keep their own state
-	// (`formData`, `urlEncoded`, `binaryFile`), not a body string.
+	// `none` sends nothing; form modes and `binary` keep their own state (`formData`, `urlEncoded`,
+	// `binaryFile`), not a body string.
 	return null;
 }
 
@@ -99,14 +70,9 @@ export interface BodySwitch {
 }
 
 /**
- * Stash the outgoing mode's body and restore the incoming one's.
- *
- * Returns the same body when both modes share a bucket, so JSON to text does
- * not clear the editor - the string is the same string, and only the
- * highlighting changes.
- *
- * `requestId` is the request being edited *now*. Drafts belonging to any other
- * request are dropped rather than restored.
+ * Stash the outgoing mode's body and restore the incoming one's. Two modes sharing a bucket keep
+ * the body, so JSON to text does not clear the editor. `requestId` is the request edited *now*;
+ * another request's drafts are dropped, not restored.
  */
 export function switchBody(
 	from: BodyMode,
@@ -118,7 +84,7 @@ export function switchBody(
 	const fromKey = draftKey(from);
 	const toKey = draftKey(to);
 
-	// Someone else's drafts are not drafts, they are another request's payload.
+	// Another request's drafts are its payload, not drafts here.
 	const own: BodyDrafts = drafts.requestId === requestId ? drafts : emptyDrafts(requestId);
 
 	// Stash whatever the outgoing mode was holding, so returning to it restores.
@@ -129,31 +95,19 @@ export function switchBody(
 	if (!toKey) return { body: currentBody, drafts: next };
 
 	/*
-	 * Same bucket carries over without a branch for it: the stash above just
-	 * wrote `currentBody` under that key, so reading it back returns the same
-	 * string. An explicit `if (fromKey === toKey)` was here first and a mutation
-	 * run deleted it with every test still green - redundant code with a
-	 * confident comment, which is the shape worth noticing.
+	 * A same-bucket switch needs no branch: the stash just wrote `currentBody` under that key, so
+	 * the read returns it.
 	 */
 	return { body: next[toKey] ?? "", drafts: next };
 }
 
 /**
- * The Variables pane's raw text, for the same reason and with the same lifetime.
- *
- * The pane is a JSON editor over one *key* of the GraphQL envelope, so the body
- * cannot always hold what it shows: text that is neither JSON nor a resolvable
- * template is dropped by `serializeGraphQLBody` (deliberately - the query pane
- * must keep saving while the variables pane has an unclosed brace). That makes
- * the pane's own text the only copy, and `GraphQLBody`'s `useState` the wrong
- * place to keep it: Radix unmounts the inactive tab, so a glance at Headers
- * discarded a half-typed variables object exactly as it once discarded a stashed
- * JSON body.
- *
- * Carried beside the mode drafts rather than inside them because it is not a
- * *mode's* body - GraphQL's body is in the `graphql` bucket already. It is one
- * pane's in-progress text, and it names its own request for the reason
- * `BodyDrafts` does.
+ * The Variables pane's raw text, same reason and lifetime. The pane edits one *key* of the GraphQL
+ * envelope, so the body cannot always hold it: `serializeGraphQLBody` drops text that is neither
+ * JSON nor a resolvable template (deliberately, so the query keeps saving under an unclosed brace).
+ * That makes the pane's text the only copy, and `GraphQLBody`'s `useState` the wrong home, as Radix
+ * unmounts the inactive tab. Beside the mode drafts, not in them: it is one pane's text, not a
+ * mode's body (that is the `graphql` bucket), and it names its request as `BodyDrafts` does.
  */
 export interface VariablesDraft {
 	/** Whose pane this is. Drafts do not survive a change of request. */

@@ -6,29 +6,23 @@
  */
 
 /**
- * @file http/routes/workspace.cpp
- * @brief `POST /workspace/backup` - a snapshot of the workspace the user owns
- *        (issue #987).
+ * `POST /workspace/backup`: a snapshot of the workspace the user owns (#987).
+ * Everything a user typed lives in one SQLite file (collections, environments,
+ * stored credentials, run history). The engine's `.bak` is no such copy: it is
+ * overwritten once the engine listens and at a clean shutdown, so a corrupt
+ * file has something to restore from, not so a person can go back to last week.
+ * Copying the file by hand while the engine runs is unsafe under WAL: the
+ * `-wal` holds committed transactions the main file lacks, so the copy misses
+ * the most recent writes.
  *
- * Everything a Vayu user has typed lives in one SQLite file: collections,
- * environments, stored credentials and run history. Until this route there was
- * no way to take a copy of it that the user controlled. The `.bak` the engine
- * keeps is not one - it is overwritten once the engine listens and again at a
- * clean shutdown, and exists so a corrupt file has something to restore *from*,
- * not so a person can go back to last week. And copying the file by hand while the engine runs is
- * not safe under WAL: the `-wal` holds committed transactions the main file
- * does not, so the copy is a database missing its most recent writes.
+ * A verb path, not a stored resource, as `/inbox/start` and `/mock/start`: a
+ * backup is something the engine does, and its file is no row anything here
+ * reads back.
  *
- * The route is a verb path rather than a stored resource, on the same reasoning
- * as `/inbox/start` and `/mock/start`: a backup is something the engine *does*,
- * and the file it produces is not a row anything here can later read back.
- *
- * There is deliberately **no restore endpoint**. Restoring means putting a file
- * where the engine's open database is, and a live engine overwriting the file
- * it holds open is precisely the footgun this feature exists to spare the user.
- * The procedure is documented instead - stop the engine, copy a snapshot over
- * `db/vayu.db`, delete the `-wal` and `-shm`, start - in
- * `docs/engine/architecture.md`.
+ * There is deliberately **no restore endpoint**: a live engine overwriting the
+ * file it holds open is the footgun this feature spares the user. The procedure
+ * (stop the engine, copy a snapshot over `db/vayu.db`, delete the `-wal` and
+ * `-shm`, start) is in `docs/engine/architecture.md`.
  */
 
 #include "vayu/http/routes.hpp"
@@ -43,15 +37,14 @@ namespace vayu::http::routes {
 /**
  * Testable core of POST /workspace/backup.
  *
- * @param now the caller's clock in Unix ms - the instant the snapshot is named
- *        for. A parameter rather than a call to the clock inside, so a test can
- *        say which snapshot it is asking for.
+ * @param now the caller's clock in Unix ms, the instant the snapshot is named
+ *        for; a parameter so a test can say which snapshot it asks for.
  *
- * A backup already running is a **409**: nothing is wrong, and the caller's own
- * earlier request is still producing the file they asked for. Anything else
- * that goes wrong is a **500** naming what SQLite or the filesystem refused,
- * never a 200 with an empty path - a backup that reports success and wrote
- * nothing is the one outcome this feature must not have.
+ * A backup already running is a **409**: nothing is wrong, and the caller's
+ * earlier request is still producing the file. Anything else is a **500**
+ * naming what SQLite or the filesystem refused, never a 200 with an empty path:
+ * a backup reporting success having written nothing is the one outcome this
+ * feature must not have.
  */
 std::pair<int, nlohmann::json> workspace_backup_response (vayu::db::Database& db, int64_t now) {
     const auto outcome = db.backup_workspace (now);

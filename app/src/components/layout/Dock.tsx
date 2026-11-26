@@ -40,11 +40,8 @@ import { regionProps } from "./region-focus";
 import { pluralize } from "@/modules/dashboard/utils/format";
 
 /**
- * What each engine state is called in the strip.
- *
- * "Disconnected" stays the word for `unreachable` - it is what the state has
- * always been called here and in the docs, and the new state is the one that
- * needed a name of its own.
+ * What each engine state is called in the strip. `unreachable` keeps "Disconnected", the word the
+ * docs use for it; `starting` has a name of its own.
  */
 const ENGINE_STATUS_LABEL: Record<EngineConnectionStatus, string> = {
 	starting: "Starting…",
@@ -71,13 +68,10 @@ function EngineCrashDetail({ crash }: { crash: EngineCrash }) {
 }
 
 /**
- * What the connection light's tooltip says, or null when it has nothing to say.
- *
- * Connected, it names the engine's address: the engine may be on a fallback
- * port (#2118), and `vayu-cli --daemon` or `VAYU_ENGINE_URL` have to be given
- * that address. Unreachable, it is the reason: the main process's own sentence
- * when it has one (it is written for the user), then how the engine's process
- * left (#3336), else what the transport said. Starting is quiet.
+ * The connection light's tooltip, or null when it has nothing to say. Connected: the engine's
+ * address, which may be a fallback port (#2118) that `vayu-cli --daemon` or `VAYU_ENGINE_URL` must
+ * be given. Unreachable: the main process's own sentence when it has one (written for the user),
+ * then how the engine's process left (#3336), else what the transport said. Starting: quiet.
  */
 function engineStatusDetail(
 	status: EngineConnectionStatus,
@@ -95,35 +89,24 @@ function engineStatusDetail(
 }
 
 /**
- * The connection light - and, when it is out, why.
- *
- * `engineError` is written on every failed health poll (`queries/health.ts`)
- * and was read by nothing: the strip said "Disconnected" whether the engine had
- * refused the connection, timed out, or died mid-request, and the only place
- * the difference existed was devtools. It rides a tooltip rather than the strip
- * because the text is whatever the transport produced and can run long, and the
- * strip is a 2rem ambient row - the same reason `save-store`'s failure reason
- * became a toast rather than a line here.
- *
- * The trigger is focusable, so the reason is reachable by keyboard and not only
- * by hover, and the icon exists to say there is something to hover at all. A
- * connected engine's address rides the same trigger without the icon: it is
+ * The connection light and, when it is out, why. The reason is `engineError`, written on every
+ * failed health poll (`queries/health.ts`), so a refused connection, a timeout and a death
+ * mid-request read apart. It rides a tooltip, not the strip: the transport's text can run long and
+ * the strip is a 2rem ambient row (the reason `save-store`'s failure reason is a toast). The
+ * trigger is focusable, so the reason is reachable by keyboard, and the icon says there is
+ * something to hover. A connected engine's address rides the same trigger without the icon: it is
  * reference, not a problem to go and read.
  *
- * Only `unreachable` gets the reason. The window paints while the engine is
- * still starting (#1144), so the first seconds of every launch are spent not
- * connected - and rendering a red flag and a transport error there described a
- * failure that had not happened (#1164). "Starting…" is a state of its own,
- * quiet by design, and the store turns it into `unreachable` on its own budget
- * so an engine that never comes up still ends up saying why.
+ * Only `unreachable` gets the reason. The window paints while the engine is still starting (#1144),
+ * and a red flag and a transport error there report a failure that has not happened (#1164).
+ * "Starting…" is quiet; the store turns it into `unreachable` on its own budget, so an engine that
+ * never comes up still ends up saying why.
  *
- * A start failure the main process reports (every engine port held, #2118)
- * also offers Retry, because the sentence tells the user to press it and the
- * Dock is where they are reading it. An engine that left on its own (#3336)
- * offers Restart for the same reason, and names how it left. The light reads
- * `selectKnownEngineStatus`, so a crash the sidecar reported turns it at once,
- * ahead of the health refetch the push asks for (#3493): "Engine connected"
- * never stands beside the Restart a dead engine needs.
+ * A start failure the main process reports (every engine port held, #2118) offers Retry, and an
+ * engine that left on its own (#3336) offers Restart and names how it left: the sentence tells the
+ * user to press it, and the Dock is where they read it. The light reads `selectKnownEngineStatus`,
+ * so a crash the sidecar reported turns it at once, ahead of the health refetch the push asks for
+ * (#3493): "Engine connected" never stands beside the Restart a dead engine needs.
  */
 function EngineStatus() {
 	const engineStatus = useEngineStore(selectKnownEngineStatus);
@@ -133,23 +116,17 @@ function EngineStatus() {
 	const restartOffered = useEngineStore(selectEngineRestartOffered);
 
 	/*
-	 * `status-success-text`: not the general `success-text`, and not the bare
-	 * `status-success`. A connection light is precisely what design-system.md
-	 * means by "Run, connection, and test status", so it belongs to the
-	 * `--status-*` family - the family a reader greps to find every status
-	 * surface. The comment this replaces rejected the *bare* token, which is the
-	 * right rejection and the wrong conclusion: as 12px text `status-success`
-	 * measures 2.21:1 on --panel (design-system.md's own figure, reproduced), and
-	 * the family's answer to that is its `-text` pair, not a different family.
+	 * `status-success-text`: a connection light is what design-system/accent-and-status.md means by
+	 * "Run, connection, and test status", so it belongs to the `--status-*` family, the one a
+	 * reader greps to find every status surface. As 12px text the bare `status-success` measures
+	 * 2.21:1 on --panel (that doc's figure, reproduced), and the family's answer is its `-text`
+	 * pair, not another family. On --panel, the Dock's surface: 5.43:1 light (142 72% 27%) and
+	 * 9.61:1 dark (142 60% 55%), so the dot, coloured through bg-current, clears the 3:1 non-text
+	 * bar too. The pair is byte-identical to --success-text in both modes; the family, not the
+	 * colour, is why it is used.
 	 *
-	 * Measured on --panel, the Dock's own surface, in both themes: 5.43:1 light
-	 * (142 72% 27%) and 9.61:1 dark (142 60% 55%), so the dot - which inherits
-	 * the colour through bg-current - clears the 3:1 non-text bar too. The pair
-	 * is byte-identical to --success-text in both modes, so the swap moved no
-	 * pixel; it moved the token into the family that names this indicator.
-	 *
-	 * `starting` and `unreachable` stay on --muted-foreground, which is what the
-	 * doc prescribes for a pending state (there is no --status-pending).
+	 * `starting` and `unreachable` stay on --muted-foreground, the doc's colour for a pending state
+	 * (there is no --status-pending).
 	 */
 	const className = cn(
 		"flex items-center gap-1 text-xs",
@@ -180,12 +157,12 @@ function EngineStatus() {
 					)}
 				</span>
 			</TooltipTrigger>
-			{/* Wraps rather than truncates: an engine message names a port, a path
-			    or a TLS failure, and the tail is the part that identifies it.
-			    `max-w-3xs` (16rem, Tailwind's container scale), not `max-w-64`: this
-			    bounds the wrap width of the error text, not chrome rhythm, and
-			    `max-w-64` rode `--spacing`, narrowing the column at the Default
-			    density. */}
+			{/*
+			 * Wraps rather than truncates: an engine message names a port, a path or a TLS failure,
+			 * and the tail is the part that identifies it. `max-w-3xs` (16rem, Tailwind's container
+			 * scale), not `max-w-64`, which rides `--spacing` and narrows the column at the Default
+			 * density: this bounds a wrap width, not chrome rhythm.
+			 */}
 			<TooltipContent side="top">
 				<p className="max-w-3xs whitespace-normal break-words">{detail}</p>
 			</TooltipContent>
@@ -209,11 +186,9 @@ function EngineStatus() {
 }
 
 /**
- * The engine restart as a warning-toned button, shared by Retry after a start
- * failure and by the pending-setting restart so the two cannot drift.
- *
- * Spreads the rest onto the `<button>` because `PendingRestartButton` wraps it
- * in a `TooltipTrigger asChild`, which hands it a ref and event handlers.
+ * The engine restart as a warning-toned button, shared by Retry after a start failure and the
+ * pending-setting restart so the two cannot drift. Spreads the rest onto the `<button>`:
+ * `PendingRestartButton` wraps it in a `TooltipTrigger asChild`, which hands it a ref and handlers.
  */
 function EngineRestartButton({
 	idleLabel,
@@ -249,15 +224,9 @@ function EngineRestartButton({
 }
 
 /**
- * The app's own build version, with the running engine's worker-thread count
- * on hover (issue #1508) - the one place that number was computed and never
- * read anywhere in the app.
- *
- * `workers` is `null` until the first health poll answers, which is also true
- * of a disconnected engine that has never connected this session; either way
- * there is nothing to report yet, so the version renders as a plain span with
- * no hover affordance, matching `EngineStatus`'s "nothing to hover for, so
- * nothing pretends there is" rule above.
+ * The app's build version, with the running engine's worker-thread count on hover (#1508).
+ * `workers` is `null` until the first health poll answers, as for an engine that has never
+ * connected: with nothing to report, the version is a plain span with no hover affordance.
  */
 function EngineVersion() {
 	const workers = useEngineStore((s) => s.workers);
@@ -286,51 +255,36 @@ function EngineVersion() {
 }
 
 /**
- * A saved setting the running engine has not picked up yet.
+ * A saved setting the running engine has not picked up yet. A restart-required setting cannot
+ * confirm itself (the engine serves the old value until relaunched), and once the user has left
+ * Settings nothing else says so; the Dock carries it beside the connection light, which already
+ * answers "what is the engine doing".
  *
- * Every other setting in the app confirms itself: the value is written, the
- * thing it governs changes. The restart-required ones cannot - the engine keeps
- * serving the old value until it is relaunched - and until now nothing said so
- * outside the Settings screen, which is exactly where the user is *not* once
- * they have moved on. So the Dock carries it, beside the connection light that
- * already answers "what is the engine doing".
- *
- * What it tracks, stated plainly: settings saved from this app since it
- * connected that the engine marks `requiresRestart` (`engine-store`, written by
- * `SettingsMain`). Not a comparison against the engine's running values - it
- * does not report those, so any such claim would be inferred rather than known.
- * The honest consequence is that this cannot survive a reload of the renderer,
- * and it says "saved" rather than "in effect".
+ * It tracks settings saved from this app since it connected that the engine marks `requiresRestart`
+ * (`engine-store`, written by `SettingsMain`), not the engine's running values, which the engine
+ * does not report. So it does not survive a renderer reload, and it says "saved", not "in effect".
  */
 function PendingRestart() {
 	const pendingRestart = useEngineStore((s) => s.pendingRestart);
-	// The subtree stops here on the ordinary path, so the machinery behind the
-	// action - the restart itself, and the cache invalidation that follows it -
-	// is only mounted while there is a restart to offer.
+	// The restart and the cache invalidation after it are mounted only while there is a restart to
+	// offer: the ordinary path stops here.
 	return pendingRestart ? <PendingRestartButton /> : null;
 }
 
 /**
- * A local service is listening somewhere - the one thing that was invisible
- * outside the surface that started it (issue #502).
+ * A local service is listening somewhere (#502). A webhook inbox records a request whether or not
+ * its tab is open, and an OAuth issuer has no app surface at all. It sits beside the connection
+ * light, in the strip's ambient-status region, as the same kind of fact: what the engine is doing
+ * on the user's behalf.
  *
- * A webhook inbox recorded a request whether or not its tab was open, and an
- * OAuth issuer had no app surface at all, so "is something still running?" was
- * a question the app could not answer anywhere. It sits beside the connection
- * light because that is this strip's ambient-status region, and because these
- * are the same kind of fact: what the engine is doing on the user's behalf.
- *
- * **Nothing renders when nothing runs** - and an engine that is not connected,
- * starting or unreachable alike, is running nothing, which
- * `useRunningServiceCount` is what decides (it holds the gate,
- * so no reader has to remember the caveat). The Dock's middle is ambient, and a
- * standing "0 services" would spend a permanent line on the ordinary case.
- * Guarded by `Dock.services.test.tsx` - rendering it unconditionally fails.
+ * **Nothing renders when nothing runs**, and an engine that is not connected (starting or
+ * unreachable) runs nothing; `useRunningServiceCount` holds that gate, so no reader has to remember
+ * it. A standing "0 services" would spend a permanent line on the ordinary case.
+ * `Dock.services.test.tsx` fails if it renders unconditionally.
  */
 function RunningServices() {
-	// Reveal, never toggle: an ambient chip that says something is listening is
-	// pointing *at* the drawer, so clicking it with the drawer already on
-	// Services used to close the one surface that can act on them.
+	// Reveal, never toggle: the chip points *at* the drawer, and a toggle would close it when it is
+	// already on Services, the one surface that can act on them.
 	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const count = useRunningServiceCount();
 
@@ -340,11 +294,9 @@ function RunningServices() {
 		<Tooltip>
 			<TooltipTrigger asChild>
 				{/*
-				 * A button, not a chip: knowing a listener is up is only half the
-				 * need - the other half is getting to it, and the drawer is where
-				 * it can be stopped or copied. A listener being up is a service's
-				 * run state, so it takes `status-success-text`, the same pair the
-				 * connection light above uses for the same 12px dot.
+				 * A button, not a chip: the drawer is where a listener can be stopped or copied. A
+				 * listener being up is a service's run state, so it takes `status-success-text`,
+				 * the connection light's pair for the same 12px dot.
 				 */}
 				<button
 					onClick={() => revealDrawerView("services")}
@@ -362,23 +314,9 @@ function RunningServices() {
 }
 
 /**
- * The Dock's answer to "is my edit still unsaved", once the failure toast
- * that first reported it has expired.
- *
- * `--destructive-text` for the word, not the general `-text` a status dot
- * would use: this is not an engine connection state, it is the same failed
- * class of thing a destructive action warns about. The rest of the line stays
- * `--muted-foreground` like its three siblings, so only the word that means
- * trouble is coloured.
- */
-/**
- * Every line the save slot below can show, and whether that line carries the
- * `Info` glyph - `SaveError`'s, the only one of the four that does.
- *
- * One table rather than four hand-written spans, because it is read twice: once
- * to draw the live line, and once to draw the hidden twins that hold the slot's
- * width. A fifth state added to the store and not to this table would reserve
- * the wrong width, which is the one way this can go quietly wrong.
+ * Every line the save slot below can show, and whether it carries the `Info` glyph (only
+ * `SaveError`'s does). One table, read by the live line and by `SaveError`'s word, so the two
+ * cannot name a state differently.
  */
 const SAVE_LINES = {
 	pending: { text: "Unsaved changes", hint: false },
@@ -387,6 +325,12 @@ const SAVE_LINES = {
 	error: { text: "Not saved", hint: true },
 } as const;
 
+/**
+ * The Dock's answer to "is my edit still unsaved" once the failure toast has expired.
+ * `--destructive-text` for the word, not a `--status-*` pair: a failed save is not a connection
+ * state but the class of thing a destructive action warns about. The rest of the line stays
+ * `--muted-foreground` like the other three, so only the word meaning trouble is coloured.
+ */
 function SaveError() {
 	const message = useSaveStore((s) => s.lastErrorMessage);
 
@@ -408,8 +352,7 @@ function SaveError() {
 					<Info className="size-icon-sm" aria-hidden="true" />
 				</span>
 			</TooltipTrigger>
-			{/* `max-w-3xs` (16rem, Tailwind's container scale), not `max-w-64`: see
-			    `EngineStatus`'s tooltip above - the same wrap-width bug. */}
+			{/* `max-w-3xs`, not `max-w-64`: the wrap-width rule at `EngineStatus`'s tooltip. */}
 			<TooltipContent side="top">
 				<p className="max-w-3xs whitespace-normal break-words">{message}</p>
 			</TooltipContent>
@@ -418,33 +361,20 @@ function SaveError() {
 }
 
 /**
- * Holds "saving" on screen for `TIMING.SAVING_MIN_VISIBLE_MS` before letting
- * "saved" replace it, and holds whatever is showing for
- * `TIMING.SAVE_LINE_FADE_MS` past a return to `idle` so a CSS fade has
- * something to animate against - both a display concern, not the store's.
+ * Holds "saving" on screen for `TIMING.SAVING_MIN_VISIBLE_MS` before "saved" replaces it, and holds
+ * whatever is showing for `TIMING.SAVE_LINE_FADE_MS` past a return to `idle`, so a CSS fade has
+ * something to animate against. A display concern: `save-store`'s derived `status` flips the
+ * instant a save is reported or expires, and its other readers (the tests of every surface that
+ * reports to it among them) need that at once.
  *
- * `save-store`'s derived `status` flips the instant a save is reported or its
- * indicator expires, and every other reader of it (the tests of every surface
- * that reports to the store among them) needs that truth immediately. Two things about the Dock's own line used to be
- * true as a result, both wrong for a human watching it:
+ * - A save against the local engine often lands in well under 100ms, too short to register as a
+ *   state, so "Unsaved changes" would jump to "Saved" with "Saving…" gone in the same frame.
+ * - `idle` has no line (`SAVE_LINES` has no entry for it), so without the hold the live text goes
+ *   at once and the track's `transition-[grid-template-columns]` has nothing to shrink around: a
+ *   hard cut, not a fade.
  *
- * - A save against the local engine often lands in well under 100ms, under
- *   what a state needs to be on screen to register as one at all, so
- *   "Unsaved changes" jumped straight to "Saved" with "Saving…" gone in the
- *   same frame most people would notice it.
- * - `idle` has no line at all (`SAVE_LINES` has no entry for it), so the
- *   moment `status` became `idle` the live text was gone and the track's own
- *   `transition-[grid-template-columns]` had nothing left to shrink around -
- *   a hard cut, not the fade the track's own CSS transition implies is there.
- *
- * The fix for both is the same shape: `displayed` mirrors `status`
- * immediately for every transition except the two that need to be held back
- * - `"saving"` -> `"saved"`, and anything -> `"idle"` - each governed by its
- * own `TIMING` constant. Neither needs a generation counter the way a
- * store-level version of this would: a plain `useEffect` cleanup already
- * cancels a stale scheduled update whenever `status` (or `displayed`)
- * changes again before it fires, so React's ordinary effect lifecycle is the
- * whole mechanism.
+ * Every other transition mirrors `status` at once. No generation counter: an effect cleanup cancels
+ * a stale scheduled update whenever `status` or `displayed` changes before it fires.
  */
 function useSaveStatusDisplay(status: SaveStatus): SaveStatus {
 	const [displayed, setDisplayed] = useState(status);
@@ -472,10 +402,9 @@ function useSaveStatusDisplay(status: SaveStatus): SaveStatus {
 			return () => clearTimeout(timer);
 		}
 
-		// Every other transition (idle -> pending, pending -> saving, anything ->
-		// error) has nothing to hold for and mirrors `status` immediately - syncing
-		// local display state to an external store's value is exactly what this
-		// effect is for; the two blocks above are what make this the *un*-held path.
+		// Every other transition (idle -> pending, pending -> saving, anything -> error) has
+		// nothing to hold for and mirrors `status` at once: syncing local display state to an
+		// external store's value is what this effect is for.
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
 		setDisplayed(status);
 	}, [status, displayed]);
@@ -484,44 +413,28 @@ function useSaveStatusDisplay(status: SaveStatus): SaveStatus {
 }
 
 /**
- * The save line, animated into a track that costs nothing while idle.
+ * The save line, in a track that costs nothing while idle.
  *
- * **Why this animates rather than reserving.** The four lines used to be four
- * `{status === "x" && ...}` children of the ambient group, which is centred in
- * the strip by two equal `flex-1` gutters - so the group's own width decides
- * where it starts, and every item in it moves when that width changes. One
- * edit walks the store through `pending` -> `saving` -> `saved` -> `idle`,
- * four different widths in a couple of seconds, and each step slid the
- * connection light one way and the version string the other, by half the
- * difference. It is the ambient row of the whole app, on screen behind every
- * surface in it, and it twitched on every keystroke sequence the user typed
- * anywhere. An earlier fix reserved the widest line's width permanently (the
- * `MARK_SLOT` mechanism in `ui/tabs.tsx`), which stopped the twitch but left a
- * standing gap between the connection light and the version on every screen,
- * for the far more common case of nothing needing saving at all.
+ * **It animates rather than reserving a width.** The ambient group is centred in the strip by two
+ * equal `flex-1` gutters, so its width decides where every item in it sits. One edit walks the
+ * store through `pending` -> `saving` -> `saved` -> `idle`, four widths in a couple of seconds, and
+ * gated lines slide the connection light one way and the version the other by half of each
+ * difference, on the row behind every surface. Reserving the widest line's width (the `MARK_SLOT`
+ * mechanism in `ui/tabs.tsx`) stops that but leaves a standing gap between the light and the
+ * version for the far more common case of nothing to save.
  *
- * **The mechanism is `MARK_TRACK`'s** (`ui/tabs.tsx`): a
- * `grid-template-columns: 0fr -> 1fr` track that is genuinely zero width at
- * `idle`, and animates open to the live line's own intrinsic width otherwise -
- * `-ms-4` cancels the row's leading `gap-4` (the one *before* this slot) while
- * the track is `0fr`, the same single-sided cancellation `MARK_TRACK` uses for
- * a trigger's `gap-1.5`. Deliberately one side, not `-mx-4`: `gap-4` still
- * applies once, between this slot and `EngineVersion` after it, so the row
- * reads as one normal gap between the connection light and the version -
- * cancelling both sides removes that surviving gap too and jams the two
- * together with none at all.
- * `pending` -> `saving` -> `saved` -> `idle` is now a smooth grow-then-shrink
- * instead of a jump, and `idle` at rest looks exactly like the row did before
- * any of this existed - one `gap-4` between neighbours, never two, never zero.
+ * **The mechanism is `MARK_TRACK`'s** (`ui/tabs.tsx`): a `grid-template-columns: 0fr -> 1fr` track,
+ * zero width at `idle`, opening to the live line's own intrinsic width. `-ms-4` cancels the row's
+ * `gap-4` before this slot while the track is `0fr`, as `MARK_TRACK` does for a trigger's
+ * `gap-1.5`. One side only, not `-mx-4`: the `gap-4` after it, before `EngineVersion`, has to
+ * survive, so at `idle` the row holds one gap between neighbours, never two, never zero.
  */
 function SaveStatusLine() {
 	const rawStatus = useSaveStore((s) => s.status);
 	const status = useSaveStatusDisplay(rawStatus);
 	const line = status === "idle" ? null : SAVE_LINES[status];
-	// True for exactly the `TIMING.SAVE_LINE_FADE_MS` window the hook holds
-	// `status` open past the store's own return to `idle` - the store has
-	// already moved on, `displayed` has not caught up yet, and this is what
-	// tells the live cell to start fading rather than sit at full opacity.
+	// True for the `TIMING.SAVE_LINE_FADE_MS` window the hook holds `status` past the store's own
+	// return to `idle`: it tells the live cell to fade rather than sit at full opacity.
 	const fading = rawStatus === "idle" && status !== "idle";
 
 	return (
@@ -539,27 +452,21 @@ function SaveStatusLine() {
 				)}
 			>
 				{/*
-				 * The toast still carries the reason, first - it is the one channel
-				 * every failure in the app reports through, and it has room for a
-				 * message like "database is locked" that a 60-char span cannot. But
-				 * it clears itself after ten seconds, and a failed save leaves the
-				 * draft unsaved for as long as the engine stays down. This line is
-				 * the part that outlives the toast: the same tooltip-on-hover shape
-				 * `EngineStatus` uses for its own error, so the strip has one
-				 * pattern for "there is a reason, hover for it" rather than two.
+				 * The toast still carries the reason first: it is the channel every failure reports
+				 * through, with room for a message like "database is locked" that a 60-char span
+				 * lacks. But it clears after ten seconds, and a failed save leaves the draft
+				 * unsaved while the engine stays down, so this line outlives it, with
+				 * `EngineStatus`'s tooltip-on-hover shape: one pattern in the strip for "there is a
+				 * reason, hover for it", not two.
 				 */}
 				{status === "error" ? (
 					<SaveError />
 				) : line ? (
-					// No `key`, deliberately: a `key={line.text}` here remounted this
-					// span on every status change, and `.enter-fade` replayed on each
-					// one - `pending` -> `saving` -> `saved` fired three fade-ins in a
-					// few seconds, on top of the old text vanishing in the same frame
-					// the new text started its fade (`.enter-fade` has no exit half),
-					// which read as a flash rather than motion. The track opening from
-					// `idle` already says "something just appeared"; a text change
-					// within an already-open track is a plain swap, calmer than a
-					// fade-flash repeated on every step of one save.
+					// No `key`, deliberately: `key={line.text}` remounts the span on every status
+					// change and replays `.enter-fade`, which has no exit half, so the old text
+					// vanishes as the new fades in, three times in one save, a flash rather than
+					// motion. The track opening from `idle` already says something appeared; a text
+					// change inside an open track is a plain swap.
 					<span className="whitespace-nowrap">{line.text}</span>
 				) : null}
 			</span>
@@ -572,16 +479,12 @@ function PendingRestartButton() {
 		<Tooltip>
 			<TooltipTrigger asChild>
 				{/*
-				 * A button, not a chip with a tooltip: the restart is the point,
-				 * and a status that can only be read is one more thing to carry
-				 * back to Settings. Warning tokens rather than a raw amber - the
-				 * `-text` variant is the pair that passes contrast at 12px, the
-				 * same rule the connection light follows above.
-				 *
-				 * Deliberately `--warning` and not the `--status-*` family the two
-				 * indicators beside it now use: this announces a pending action on
-				 * a setting, not the state of a run, a connection or a service, and
-				 * amber in that family means "4xx client error".
+				 * A button, not a chip with a tooltip: the restart is the point, and a status that
+				 * can only be read is one more thing to carry back to Settings. Warning tokens, not
+				 * a raw amber: the `-text` variant is the pair that passes contrast at 12px, the
+				 * connection light's rule. Not the `--status-*` family its neighbours use: this is
+				 * a pending action on a setting, not the state of a run, a connection or a service,
+				 * and amber in that family means "4xx client error".
 				 */}
 				<EngineRestartButton
 					idleLabel="Restart pending"
@@ -589,8 +492,7 @@ function PendingRestartButton() {
 					className="enter-fade"
 				/>
 			</TooltipTrigger>
-			{/* `max-w-3xs` (16rem, Tailwind's container scale), not `max-w-64`: see
-			    `EngineStatus`'s tooltip above - the same wrap-width bug. */}
+			{/* `max-w-3xs`, not `max-w-64`: the wrap-width rule at `EngineStatus`'s tooltip. */}
 			<TooltipContent side="top">
 				<p className="max-w-3xs whitespace-normal break-words">
 					A saved setting needs an engine restart to take effect. Click to restart now.
@@ -611,31 +513,19 @@ export function Dock() {
 	return (
 		<>
 			{/*
-			 * Height comes from --dock-height, not a bare `h-8`, because the toast
-			 * viewport is `fixed` and has to offset itself above this strip - see
-			 * `ui/toast.tsx`. Same value (2rem); the token is what keeps the two
-			 * from drifting apart.
+			 * Height from --dock-height, not a bare `h-8`: the `fixed` toast viewport offsets
+			 * itself above this strip by the same token (`ui/toast.tsx`), which keeps the two from
+			 * drifting. Same value, 2rem.
 			 *
-			 * Status in the centre, controls on the right. #1615 moved the
-			 * sidebar-view switchers to `ActivityRail` and the context-bar
-			 * toggle to `ContextRail`, both on a window edge the OS never
-			 * covers, and left this strip status-only; #1711 amends that to
-			 * admit a right-aligned cluster of controls that act on the *active
-			 * tab's* view, rendered only while that tab is a request tab; #3635
-			 * amends it again for the one control that is not per-tab, the
-			 * bottom panel's button, which leads the cluster on every tab and
-			 * with none. The rule that survives all three is the one that
-			 * matters: every item here has a non-footer path (pending restart
-			 * is the banner in Settings, save status opens the tab it names,
-			 * the response position has its chord, its palette row and its
-			 * Settings row, the bottom panel its chord and its palette row), so
-			 * the system Dock covering this strip on macOS costs a glance, never
-			 * a click.
+			 * Status in the centre, controls on the right (#1615, #1711, #3635). Every item here
+			 * has a non-footer path (pending restart is the banner in Settings, save status opens
+			 * the tab it names, the response position has its chord, its palette row and its
+			 * Settings row, the bottom panel its chord and its palette row), so the system Dock
+			 * covering this strip on macOS costs a glance, never a click.
 			 *
-			 * The centre group stays centred in the whole strip, not in what the
-			 * right cluster leaves: the two gutters are equal `flex-1` boxes and
-			 * the right one holds the cluster at its end, so the connection light
-			 * does not shift when a request tab comes and goes.
+			 * The centre group is centred in the whole strip, not in what the right cluster leaves:
+			 * the two gutters are equal `flex-1` boxes and the right one holds the cluster at its
+			 * end, so the connection light does not shift when a request tab comes and goes.
 			 */}
 			<div
 				className="flex items-center h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0"
@@ -655,26 +545,19 @@ export function Dock() {
 					<PendingRestart />
 
 					{/*
-					 * "Unsaved changes" is the only place in the app that says so.
-					 * The tab strip deliberately has no unsaved-dot because
-					 * auto-save is the safety net - but auto-save is a setting the
-					 * user can turn off, and with it off nothing was ever written
-					 * back and nothing said as much. `pending` was set on every
-					 * edit and rendered nowhere.
-					 *
-					 * Unconditional, and holding its own width: see
-					 * `SaveStatusLine`. Four gated spans is what slid the
+					 * "Unsaved changes" is the only place in the app that says so. The tab strip
+					 * has no unsaved dot because auto-save is the safety net, but auto-save can be
+					 * turned off, and then nothing else says an edit is unwritten. Unconditional,
+					 * with `SaveStatusLine` animating its own track: gated spans slid the
 					 * connection light and the version string on every edit.
 					 */}
 					<SaveStatusLine />
 
 					{/*
-					 * Full muted-foreground, not /50. At half opacity the version
-					 * measured 2.71:1 dark and 1.94:1 light - the only element in the
-					 * app failing contrast. `subtle-foreground` would not fix it
-					 * either (3.63 / 3.04); it is the faintest *readable* tier, still
-					 * under AA for 12px text. A version string is information, not
-					 * decoration, so it gets a passing colour.
+					 * Full muted-foreground, not /50: at half opacity the version measured 2.71:1
+					 * dark and 1.94:1 light, and `subtle-foreground` (3.63 / 3.04), the faintest
+					 * *readable* tier, is still under AA for 12px text. A version string is
+					 * information, not decoration, so it gets a passing colour.
 					 */}
 					<EngineVersion />
 				</div>

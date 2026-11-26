@@ -6,16 +6,15 @@
  */
 
 /**
- * @file http/routes/file_grants.cpp
- * @brief The files a person picked, which a request body may send from
- * wherever they lie (`file_grants`, `FileAccessPolicy`, #2356).
+ * The files a person picked, which a request body may send from wherever they
+ * lie (`file_grants`, `FileAccessPolicy`, #2356).
  *
  * A row names one existing regular file by absolute path, stored canonical as
  * `grantable_file_path` answers it (every symlink resolved, so a link
- * re-pointed after the pick no longer matches), and one file is one row: a
- * second spelling of a granted file is a 409, as a second spelling of an
- * allowed folder is. Writes need the grant secret (`admit_file_trust_write`);
- * the list does not, because a GET changes nothing.
+ * re-pointed after the pick no longer matches). One file is one row: a second
+ * spelling of a granted file is a 409, as a second spelling of an allowed
+ * folder is. Writes need the grant secret (`admit_file_trust_write`); the list
+ * does not, because a GET changes nothing.
  */
 
 #include "vayu/http/file_access_policy.hpp"

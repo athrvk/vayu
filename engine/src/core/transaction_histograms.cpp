@@ -17,11 +17,10 @@ namespace vayu::core {
 
 namespace {
 
-/// Every `control.transaction` name the plan declares, in first-seen plan
-/// order - deterministic, so the report's row order does not depend on
-/// `unordered_map` iteration. Read through the registry's own `category`,
-/// never a `kind ==` comparison outside `core/elements` (#1512's
-/// extensibility contract, rule 1).
+/// Every `control.transaction` name in the plan, in first-seen order, so the
+/// report's rows do not follow `unordered_map` iteration. Read through the
+/// registry's `category`, never a `kind ==` comparison outside `core/elements`
+/// (#1512's extensibility contract, rule 1).
 std::vector<std::string> collect_transaction_names (const ScenarioPlan& plan) {
     std::vector<std::string> names;
     const auto& registry = Registry::instance ();

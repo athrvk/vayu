@@ -14,7 +14,6 @@
 #include "vayu/types.hpp"
 
 /**
- * @file form_body.hpp
  * @brief The two form body modes, from the stored shape to the wire.
  *
  * `x-www-form-urlencoded` and `form-data` are the only modes whose content is
@@ -62,14 +61,13 @@ namespace vayu::http {
  * The multipart counterpart to `encode_urlencoded`, and a *rendering* rather
  * than an encoding: multipart bytes belong to libcurl (see `wire_body_bytes`),
  * so this exists only for the surfaces that must show a form-data body as a
- * string - today `pm.request.body`.
+ * string (`pm.request.body`).
  *
  * A text part reads exactly as `encode_urlencoded` writes it. A **file part**
  * reads `key=@filename`, borrowing curl's own `-F` spelling: it carries its
- * content in `src` rather than `value`, so encoding it as a pair rendered
- * `avatar=` - indistinguishable from a text part whose value is empty, which is
- * the one case where the rendering lost information a reader could not recover
- * (issue #411).
+ * content in `src` rather than `value`, so as a pair it would render `avatar=`,
+ * indistinguishable from a text part whose value is empty: information a reader
+ * could not recover (#411).
  *
  * The filename is the one the *server* is told (`file_name`, else the basename
  * of `src`), not the path: a path discloses this machine's layout to anything a
@@ -110,16 +108,16 @@ namespace vayu::http {
  * The one answer to "what actually goes on the wire", because it is not
  * `body.content` for several modes: the form modes carry their content as
  * fields, and a `graphql`, `jsonrpc` or `mcp` body is enveloped on the way out
- * (`mcp_body.hpp` adds `_meta` to the last). Both
- * HTTP drivers read it, and so does the raw-request view - a view that
- * rebuilt the body itself would show something the transfer did not send.
+ * (`mcp_body.hpp` adds `_meta` to the last). Both HTTP drivers read it, and so
+ * does the raw-request view - a view that rebuilt the body itself would show
+ * something the transfer did not send.
  *
- * Empty for a body with nothing to send (`has_wire_body` is false), empty
- * for **multipart**, whose bytes belong to libcurl: it encodes the parts and
+ * Empty for a body with nothing to send (`has_wire_body` is false), empty for
+ * **multipart**, whose bytes belong to libcurl: it encodes the parts and
  * generates the boundary, so no faithful string exists outside the transfer -
  * and empty for **binary**, whose bytes are the file's (`FileRef`): shared by
- * pointer from the plan or streamed, never copied into a string, and shown in
- * a view as `body_file_placeholder`.
+ * pointer from the plan or streamed, never copied into a string, and shown in a
+ * view as `body_file_placeholder`.
  */
 [[nodiscard]] std::string wire_body_bytes (const Body& body);
 
@@ -133,23 +131,18 @@ namespace vayu::http {
  * into JSON cannot be left to libcurl's `x-www-form-urlencoded` default; `xml`,
  * `json` and `mcp` because the mode *is* the type.
  *
- * **`json` was absent until issue #889, and that was a bug rather than the
- * restraint it read as.** The old rule here - "those clients own the header and
- * the request builder writes it" - was true of exactly one client. The request
- * builder does write the row, so a request authored in the UI went out
- * correctly; every other origin did not. A request created over MCP, imported,
- * or posted straight to `/execute` with `mode: "json"` reached the server as
- * `application/x-www-form-urlencoded`, which is libcurl's default for a POST
- * carrying a body - the same failure `graphql` was fixed for, one mode over.
- * Deriving it here takes no header away from anyone, because a declared one
- * still wins.
+ * **`json` is not left to the clients (#889).** Only the request builder writes
+ * the row; a request created over MCP, imported, or posted straight to
+ * `/execute` with `mode: "json"` would reach the server as
+ * `application/x-www-form-urlencoded`, libcurl's default for a POST carrying a
+ * body - the failure deriving `graphql` here prevents, one mode over. Deriving
+ * it here takes no header away from anyone, because a declared one still wins.
  *
- * **text** is `text/plain` (issue #2464). It was empty, as restraint: `text/csv`,
- * a JWT and a raw signature are all `text`, so the header was left to the
- * author. But an author who wrote none got libcurl's `x-www-form-urlencoded`,
- * not "no type", and Postman and Bruno send `text/plain` for the same body. The
- * author's override is unchanged: a typed row wins, `disabledSystemHeaders`
- * sends none.
+ * **text** is `text/plain` (#2464), though `text/csv`, a JWT and a raw
+ * signature are all `text`: an author who writes no header would otherwise get
+ * libcurl's `x-www-form-urlencoded`, not "no type", and Postman and Bruno send
+ * `text/plain` for the same body. The author overrides it: a typed row wins,
+ * `disabledSystemHeaders` sends none.
  *
  * Empty for **multipart**, whose type libcurl writes with the boundary
  * (`content_type_is_engine_owned`), and for a body with nothing to send.
@@ -169,15 +162,15 @@ namespace vayu::http {
  *
  * One body mode's transport depends on the **method**: a `graphql` body goes
  * out as query parameters on a GET and as a JSON envelope on everything else
- * (`graphql_get_parameters`, issue #1228). So "has a body?", "which bytes?" and
+ * (`graphql_get_parameters`, #1228). So "has a body?", "which bytes?" and
  * "which Content-Type?" have a request-level answer that the `Body` overloads
  * above cannot give - a `Body` does not know the method it will be sent with.
  *
  * **Every send site asks these**, and the raw-request view with them, so what
  * is shown is what went out. The `Body` overloads remain for the callers that
  * genuinely hold only a body - the script surface's `pm.request.body`, and the
- * three functions here - and reaching for one at a send site is how a request
- * would go back to carrying a GraphQL body on a GET.
+ * three functions here - and one used at a send site would send a GraphQL body
+ * on a GET.
  *
  * `wire_url` is the fourth question, and it is only ever asked here: it is the
  * URL a request is sent to, which is `request.url` for everything except the
@@ -185,10 +178,10 @@ namespace vayu::http {
  * non-ASCII host as its punycode name (`to_ascii_host`), because libcurl has no
  * IDN support and this is the one URL every driver hands it. Unless
  * `disable_url_encoding`, the whole URL is written as Postman writes it
- * (`core::encode_url_as_postman`, issue #2465), so Send, a load run, a
- * collection run and `pm.sendRequest` put out one request line for one URL.
- * Every check made beside the transfer (the scheme and loopback gates, the DNS
- * pin, the client-certificate match) reads this URL too, never `request.url`.
+ * (`core::encode_url_as_postman`, #2465), so Send, a load run, a collection run
+ * and `pm.sendRequest` put out one request line for one URL. Every check made
+ * beside the transfer (the scheme and loopback gates, the DNS pin, the
+ * client-certificate match) reads this URL too, never `request.url`.
  */
 [[nodiscard]] bool has_wire_body (const Request& request);
 
@@ -207,8 +200,8 @@ namespace vayu::http {
  * Only multipart. Its Content-Type must carry the same boundary as the body
  * libcurl encoded, so a caller-supplied `multipart/form-data` - which has no
  * way to name a boundary that does not exist yet - would make the body
- * unparseable. Dropping it is what every code generator in the app already
- * does for multipart (`services/codegen/prepare.ts`).
+ * unparseable. Every code generator in the app drops it for multipart too
+ * (`services/codegen/prepare.ts`).
  */
 [[nodiscard]] bool content_type_is_engine_owned (const Body& body);
 
@@ -230,9 +223,9 @@ namespace vayu::http {
  * the send names another.
  *
  * The path itself is deliberately not part of any answer built from this: it
- * discloses this machine's layout to anything a script logs and adds nothing the
- * request sends. `render_form_data_parts` and `pm.request.body.formdata` (issue
- * #1003) are the two surfaces that show a part, and they show this.
+ * discloses this machine's layout to anything a script logs and adds nothing
+ * the request sends. `render_form_data_parts` and `pm.request.body.formdata`
+ * (#1003) are the two surfaces that show a part, and they show this.
  */
 [[nodiscard]] std::string declared_file_name (const FormField& field);
 

@@ -6,12 +6,10 @@
  */
 
 /**
- * What the session Console's toolbar narrows the list to (#3634): a row type,
- * a console level and a text query, as one predicate over a ring row.
- *
- * The list applies it to every row in the ring before it takes its window, as
- * the response pane's `ConsoleOutput` does, so a match far above what is drawn
- * is found without being scrolled to.
+ * What the session Console's toolbar narrows the list to (#3634): a row type, a console level and a
+ * text query, as one predicate over a ring row. The list applies it to every ring row before taking
+ * its window, as the response pane's `ConsoleOutput` does, so a match far above what is drawn is
+ * found without being scrolled to.
  */
 
 import type { ConsoleLevel } from "@/types";

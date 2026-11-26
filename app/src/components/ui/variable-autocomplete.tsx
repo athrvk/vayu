@@ -6,18 +6,10 @@
  */
 
 /**
- * VariableAutocomplete Component
- *
- * Use Case 1: Display a list of available variables for selection
- * - Shows the entries `buildVariableSuggestions` offers for the search query
- * - Displays variable name and scope badge
- * - Used when user types {{ to select a variable
- *
- * **It does not own the keyboard.** The keys arrive at the text field the list
- * hangs off, not at this list - nothing here is ever focused - so `VariableInput`
- * moves the highlight through the controlled `value` prop and calls `onSelect`
- * itself (issue #1215). The ordering both sides step through is
- * `lib/variable-suggestions.ts`, so there is one list and not two.
+ * The variables the `{{` search offers (`buildVariableSuggestions`), each with its name and scope
+ * badge. **It does not own the keyboard**: keys arrive at the text field the list hangs off and
+ * this is never focused, so `VariableInput` moves the highlight through `value` and calls
+ * `onSelect` (#1215). Both sides step through `lib/variable-suggestions.ts`'s ordering, one list.
  */
 
 import { useMemo } from "react";
@@ -41,42 +33,32 @@ import {
 	type VariableSuggestion,
 } from "@/lib/variable-suggestions";
 
-// Re-export ResolvedVariable as VariableInfo for backward compatibility
+// `ResolvedVariable` re-exported as `VariableInfo`, the name older importers use.
 export type { ResolvedVariable as VariableInfo };
 
 export interface VariableAutocompleteProps {
-	/** All available variables */
 	variables: Record<string, ResolvedVariable>;
-	/** Search query to filter variables */
 	searchQuery?: string;
-	/** Callback when a variable is selected */
 	onSelect: (variableName: string) => void;
-	/** Optional className for the container */
 	className?: string;
 	/**
-	 * The data contract in scope, when the collection chain declares one
-	 * (issue #600). Its columns are offered as `data.<column>` names, which is
-	 * how a request field addresses them - the same string the token carries.
-	 *
-	 * Each column is offered a second way too, bare (issue #1007): Postman binds
-	 * a dataset's columns to bare names, so an imported collection is already
-	 * written `{{username}}`, and a bound row answers that spelling exactly as it
-	 * answers `{{data.username}}`.
+	 * The data contract in scope, when the chain declares one (#600): its columns are offered as
+	 * `data.<column>`, the string a token carries, and bare too (#1007), as Postman binds a
+	 * dataset's columns to bare names, so an imported `{{username}}` is answered by a bound row
+	 * like `{{data.username}}`.
 	 */
 	dataColumns?: DataContractScope;
 	/**
-	 * The highlighted entry, as a `variableSuggestionKey`. Supplied by
-	 * `VariableInput`, which owns arrow-key navigation because the keys arrive at
-	 * the text field rather than at this list (issue #1215) - so the highlight
-	 * has to be state the field can move. Omitted, `cmdk` highlights on its own,
-	 * which is what a direct render in a test gets.
+	 * The highlighted entry, as a `variableSuggestionKey`, from `VariableInput`, which owns the
+	 * arrows as they arrive at its field (#1215). Omitted, `cmdk` highlights itself, as a direct
+	 * render in a test gets.
 	 */
 	value?: string;
 	/** Fires when `cmdk` moves the highlight itself - a pointer over a row. */
 	onValueChange?: (value: string) => void;
 	/**
-	 * Reports the listbox and highlighted-option ids, which `cmdk` mints and
-	 * which the combobox outside this list has to name. Must be stable.
+	 * Reports the listbox and highlighted-option ids `cmdk` mints, which the outside combobox must
+	 * name; must be stable.
 	 */
 	onListboxState?: (state: CommandListboxState) => void;
 }
@@ -104,10 +86,9 @@ export function VariableAutocomplete({
 	);
 
 	/*
-	 * Drawn group by group, in the one declared order. The groups exist so a name
-	 * no scope defines - a generator, a column, an iteration identity - is not
-	 * interleaved with the ones the user created; `variable-suggestions.ts` says
-	 * which entry falls where and why.
+	 * Drawn group by group, in the one declared order, so a name no scope defines (a generator, a
+	 * column, an iteration identity) is not interleaved with the user's; `variable-suggestions.ts`
+	 * says which entry falls where and why.
 	 */
 	const groups = useMemo(
 		() =>
@@ -126,9 +107,8 @@ export function VariableAutocomplete({
 	return (
 		<div
 			className={cn(
-				// `w-3xs` (16rem), not `w-64`: the list holds variable names, a
-				// text measure, and `w-64` rides `--spacing` - 192px at the Default
-				// density rather than the 256px `w-3xs` reads as.
+				// `w-3xs` (16rem), not `w-64`: names are a text measure, and `w-64` rides
+				// `--spacing` (192px at Default, not 256px).
 				"enter-fade w-3xs rounded-lg border bg-popover shadow-md",
 				className
 			)}
@@ -147,9 +127,9 @@ export function VariableAutocomplete({
 									<CommandItem
 										key={key}
 										/*
-										 * The key, not the name: a column offered bare can
-										 * collide with a workspace variable of the same name,
-										 * and `cmdk` highlights by value.
+										 * The key, not the name: a bare column can share a
+										 * workspace variable's name, and `cmdk` highlights by
+										 * value.
 										 */
 										value={key}
 										onSelect={() => onSelect(suggestion.name)}

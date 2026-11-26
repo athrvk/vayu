@@ -6,17 +6,13 @@
  */
 
 /**
- * "Go to this setting" - the one definition.
+ * "Go to this setting", the one definition. Two calls in a load-bearing order: select first, then
+ * open, so the settings tab renders the asked-for panel, not the previous selection for one frame.
+ * The anchor is what `useRevealedSetting` scrolls to and outlines.
  *
- * Two calls in a fixed order, and the order is load-bearing: select first, then
- * open, so the settings tab renders the asked-for panel rather than the
- * previous selection for one frame. The anchor is what `useRevealedSetting`
- * scrolls to and outlines.
- *
- * Extracted from the command palette's own copy when the curl-paste disclosure
- * ledger (issue #708) became the third caller. A hand-rolled second copy of
- * this would be a second answer to "what does a pointer to a setting do", and
- * the palette's rows and the ledger's pointers must behave identically.
+ * The palette and the curl-paste disclosure ledger (#708) both call it: a second copy would be a
+ * second answer to "what does a pointer to a setting do", and the palette's rows and the ledger's
+ * pointers must behave identically.
  */
 
 import { useTabsStore } from "@/stores";

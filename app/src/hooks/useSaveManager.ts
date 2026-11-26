@@ -6,13 +6,9 @@
  */
 
 /**
- * useSaveManager Hook
- *
- * Centralized auto-save manager that:
- * - Handles debounced auto-save for any saveable entity
- * - Registers with centralized save store for app-wide Ctrl/Cmd+S
- * - Reports its own edit's state to the save store, which the Dock reads
- * - Manages save queue and prevents duplicate saves
+ * Auto-save for one entity: a debounced save, registration with the save store for app-wide
+ * Ctrl/Cmd+S, this entity's own edit state reported to the store (which the Dock reads), and a
+ * queue that serializes saves rather than skipping one in flight (see `performSave`).
  */
 
 import { useEffect, useRef, useCallback } from "react";
@@ -189,30 +185,25 @@ export function useSaveManager({
 		onSaveRef.current = onSave;
 	}, [onSave]);
 
-	// Keep hasChanges ref updated
 	useEffect(() => {
 		hasChangesRef.current = hasChanges;
 	}, [hasChanges]);
 
-	// Keep the change token ref updated
 	useEffect(() => {
 		changeTokenRef.current = changeToken;
 	}, [changeToken]);
 
-	// Keep enabled ref updated
 	useEffect(() => {
 		enabledRef.current = enabled;
 	}, [enabled]);
 
-	// Keep the retry delay ref updated
 	useEffect(() => {
 		autoSaveDelayMsRef.current = autoSaveDelayMs;
 	}, [autoSaveDelayMs]);
 
-	// Clear the pending auto-save on unmount. The "saved" indicator's own reset
-	// is the store's now, and deliberately survives this component: the Dock
-	// outlives the request pane, so the status it is showing has to be cleared by
-	// whoever set it, not by whichever pane happened to unmount.
+	// Clear the pending auto-save on unmount. The "saved" indicator's own reset is the store's, and
+	// survives this component on purpose: the Dock outlives the request pane, so the status it
+	// shows must be cleared by whoever set it, not by whichever pane happened to unmount.
 	useEffect(() => {
 		return () => {
 			if (timeoutRef.current) {
@@ -223,24 +214,17 @@ export function useSaveManager({
 		};
 	}, [clearRetry]);
 
-	// Perform the actual save.
+	// Perform the actual save, serialized rather than skipped: a caller that arrives mid-flight
+	// queues behind the save in flight, and its promise resolves only once *its* save has run. A
+	// skip would lie: the flying request carries the snapshot taken when it started, so anything
+	// typed since is not in it, yet Cmd+S, the quit flush and the entity-switch flush would all
+	// await the skip and report "saved"; for the switch the edits would be gone, since the provider
+	// resets its state right after. The cost is one redundant round trip when nothing changed in
+	// between, the right trade against reporting a save that never happened.
 	//
-	// A save already in flight used to make this a no-op. That silently lied:
-	// the flying request carries the snapshot taken when it started, so anything
-	// typed since is not in it - yet Cmd+S, the quit flush and the
-	// entity-switch flush all awaited that no-op and reported "saved". The
-	// switch case was the destructive one, because the provider resets its state
-	// right after, so the skipped edits were gone rather than merely unsaved.
-	//
-	// Saves are therefore serialized instead of skipped: a caller that arrives
-	// mid-flight queues behind it and its promise resolves only once *its* save
-	// has run. The cost is one redundant round trip when nothing changed in
-	// between, which is the right trade against reporting a save that never
-	// happened.
-	//
-	// The verdict is returned as well as reported: `status` is derived from
-	// every surface's reports, so a caller that needs to know what became of
-	// *this* save (`flushAll`, the retry) cannot read it back from there.
+	// The verdict is returned as well as reported: `status` is derived from every surface's
+	// reports, so a caller that needs to know what became of *this* save (`flushAll`, the retry)
+	// cannot read it back from there.
 	const performSave = useCallback(
 		(onError?: ErrorSink): Promise<SaveOutcome | void> => {
 			if (!entityId) return Promise.resolve();
@@ -260,12 +244,11 @@ export function useSaveManager({
 				reportSaving(contextId);
 				try {
 					await save();
-					// "Saved" is a claim about the editor, not about the round trip.
-					// An edit that landed while this save was in flight is not in
-					// what went out, so the honest status is still "unsaved" - the
-					// Dock reads this store, and it used to flash "Saved" over an
-					// edit nobody had persisted. The caller re-arms the save; this
-					// only refuses to mislabel it.
+					// "Saved" is a claim about the editor, not the round trip: an edit that landed
+					// while this save was in flight is not in what went out, so the honest status
+					// is still "unsaved" (the Dock reads this store, and would flash "Saved" over
+					// an edit nobody persisted). The caller re-arms the save; this only refuses to
+					// mislabel it.
 					if (changeTokenRef.current !== savedGeneration) {
 						reportPending(contextId);
 						return "pending";
@@ -314,19 +297,15 @@ export function useSaveManager({
 	);
 
 	/**
-	 * The auto-save path specifically, not every `performSave` caller.
+	 * The auto-save path specifically, not every `performSave` caller. Cmd+S and the
+	 * entity-switch/unmount goodbye flush call `performSave` directly and report their own outcome
+	 * once: retrying either would save into a pane the user has left, or double a save they just
+	 * asked for by hand. Only the debounced timer below needs a failure to try again, so only it
+	 * (and the retry it schedules for itself) goes through this wrapper.
 	 *
-	 * Cmd+S and the entity-switch/unmount goodbye flush call `performSave`
-	 * directly and report their own outcome once - retrying either would save
-	 * into a pane the user has already left, or double a save they just asked
-	 * for by hand. Only the debounced timer below needs a failure to try
-	 * again, so only it (and the retry this schedules for itself) goes through
-	 * this wrapper.
-	 *
-	 * `performSave` swallows its own errors and always resolves, so a failure
-	 * is read from the verdict it returns rather than from a rejection. Never
-	 * from the store's `status`: that is every surface's at once, and another
-	 * surface's failure is not this save's to retry.
+	 * `performSave` swallows its own errors and always resolves, so a failure is read from the
+	 * verdict it returns, not from a rejection; never from the store's `status`, which is every
+	 * surface's at once, and another surface's failure is not this save's to retry.
 	 */
 	const attemptAutoSave = useCallback(async () => {
 		const outcome = await performSave();
@@ -449,7 +428,6 @@ export function useSaveManager({
 
 	// Force save (for manual triggers)
 	const forceSave = useCallback(async () => {
-		// Cancel any pending auto-save
 		if (timeoutRef.current) {
 			clearTimeout(timeoutRef.current);
 			timeoutRef.current = null;
@@ -458,15 +436,12 @@ export function useSaveManager({
 		await performSave();
 	}, [performSave]);
 
-	// Auto-save on changes, debounced from the *last* edit.
-	//
-	// `changeToken` is in the dependency list and `hasChanges` alone is not
-	// enough: the boolean is already `true` by the second keystroke, so this
-	// effect did not re-run and the timer armed by the first keystroke ran to
-	// term - a save fired five seconds into a burst carrying a half-typed
-	// script, every burst, which is what made the in-flight-edit race fire so
-	// often. With the token here, each edit clears the pending timer in the
-	// cleanup below and arms a fresh one, so one save follows the pause.
+	// Auto-save on changes, debounced from the *last* edit. `changeToken` is in the dependency list
+	// because `hasChanges` alone is not enough: the boolean is already `true` by the second
+	// keystroke, so the effect would not re-run and the timer armed by the first keystroke would
+	// run to term, a save firing one delay into every burst with a half-typed script, which is what
+	// makes the in-flight-edit race common. With the token, each edit clears the pending timer in
+	// the cleanup below and arms a fresh one, so one save follows the pause.
 	useEffect(() => {
 		if (!enabled || !hasChanges || !entityId) {
 			return;
@@ -489,7 +464,6 @@ export function useSaveManager({
 			return;
 		}
 
-		// Clear existing timeout
 		if (timeoutRef.current) {
 			clearTimeout(timeoutRef.current);
 		}

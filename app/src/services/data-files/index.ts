@@ -6,36 +6,31 @@
  */
 
 /**
- * Data files - CSV / TSV / JSON / JSONL parsed into the rows a collection run
- * sends on its payload (issue #402).
+ * Data files: CSV / TSV / JSON / JSONL parsed into the rows a collection run sends on its payload
+ * (#402).
  *
- * **The app parses; the engine never opens a file.** The script sandbox has no
- * filesystem access by design, and handing the daemon a user-supplied path
- * would be a new trust boundary (traversal, arbitrary reads) bought for a
- * parsing job the app already does well - it owns every import parser. So the
- * rows travel inline on `POST /runs`, bounded engine-side by
- * `maxScenarioDataRows` and `maxScenarioDataBytes`.
+ * **The app parses; the engine never opens a file.** The script sandbox has no filesystem access by
+ * design, and handing the daemon a user-supplied path would be a new trust boundary (traversal,
+ * arbitrary reads) bought for a parsing job the app can do itself. So the rows travel inline on
+ * `POST /runs`, bounded engine-side by `maxScenarioDataRows` and `maxScenarioDataBytes`.
  *
- * **The header row IS the mapping.** Column names become `{{data.*}}` tokens
- * and `pm.iterationData` keys, with no remapping step - Postman, JMeter and k6
- * all work this way, and a mapping UI would be a second source of truth for
- * something the file already states. An empty or duplicated header cell is
- * therefore a parse error, not a column nobody can address.
+ * **The header row IS the mapping.** Column names become `{{data.*}}` tokens and `pm.iterationData`
+ * keys with no remapping step, as in Postman, JMeter and k6; a mapping UI would be a second source
+ * of truth for something the file already states. So an empty or duplicated header cell is a parse
+ * error, not a column nobody can address.
  *
- * **CSV and TSV values are strings, unless the file opts in.** `007` stays
- * `007` and a 20-digit id survives, matching JMeter and k6. `castNumbers` is the
- * per-file opt-in for Newman's reading (#2540): an unquoted integer or decimal
- * cell becomes a number, a quoted one never does (`numeric-cell.ts`). JSON and
- * JSONL keep their native types, because the file said what they were, and
- * ignore the option. The preview states the asymmetry rather than leaving it to
- * be discovered.
+ * **CSV and TSV values are strings, unless the file opts in.** `007` stays `007` and a 20-digit id
+ * survives, matching JMeter and k6. `castNumbers` is the per-file opt-in for Newman's reading
+ * (#2540): an unquoted integer or decimal cell becomes a number, a quoted one never does
+ * (`numeric-cell.ts`). JSON and JSONL keep their native types, because the file said what they
+ * were, and ignore the option. The preview states the asymmetry rather than leaving it to be
+ * discovered.
  *
- * Everything here is pure: text in, rows out. Reading the file is the caller's
- * (a `FileReader`, exactly as `ImportModal` does it - no Electron dialog IPC),
- * and turning its bytes into that text is {@link decodeDataFile}'s. The one
- * read this layer does own is the *second* one - re-opening the path a
- * collection's `dataFile` binding names - and it lives apart in `read-declared.ts`
- * precisely so this module stays pure.
+ * Everything here is pure: text in, rows out. Reading the file is the caller's (a `FileReader`, as
+ * `ImportModal` does it, no Electron dialog IPC), and turning its bytes into that text is
+ * {@link decodeDataFile}'s. The one read this layer does own is the *second* one, re-opening the
+ * path a collection's `dataFile` binding names, and it lives apart in `read-declared.ts` so this
+ * module stays pure.
  */
 
 import { DATA_FILE_MAX_NESTING } from "@/constants/data-files";
@@ -90,15 +85,12 @@ function stripBom(text: string): string {
 }
 
 /**
- * The file's format: its extension when it has a known one, otherwise a sniff
- * of the content, mirroring how `importers/factory.ts` treats a pasted body.
- *
- * The sniff order matters. A leading `[` is the only shape a JSON data file may
- * take (the engine requires an array), and a leading `{` at top level cannot be
- * that array, so it is JSONL. Only then does the delimiter question arise, and
- * it is decided on the first line: whichever of tab and comma appears more
- * often outside quotes is the delimiter, with comma winning a tie because CSV
- * is the far more common export.
+ * The file's format: its extension when it has a known one, otherwise a sniff of the content, as
+ * `importers/factory.ts` treats a pasted body. The sniff order matters. A leading `[` is the only
+ * shape a JSON data file may take (the engine requires an array), and a leading `{` at top level
+ * cannot be that array, so it is JSONL. Only then is the delimiter decided, on the first line:
+ * whichever of tab and comma appears more often outside quotes, with comma winning a tie because
+ * CSV is the far more common export.
  */
 export function detectDataFileFormat(text: string, fileName?: string): DataFileFormat {
 	const extension = fileName?.split(".").pop()?.toLowerCase();
@@ -202,12 +194,10 @@ function parseTabular(
 }
 
 /**
- * Whether a parsed JSON value nests more than `limit` levels, a scalar being
- * depth 0 and each array or object one more than its deepest child - the
- * engine's `vayu::json::exceeds_depth`, so both sides refuse the same cells.
- *
- * Iterative on purpose: the input is a file someone else wrote, and a recursive
- * walk of a 100000-level cell is a stack overflow the user sees as a crash.
+ * Whether a parsed JSON value nests more than `limit` levels, a scalar being depth 0 and each array
+ * or object one more than its deepest child: the engine's `vayu::json::exceeds_depth`, so both
+ * sides refuse the same cells. Iterative on purpose: the input is a file someone else wrote, and a
+ * recursive walk of a 100000-level cell is a stack overflow the user sees as a crash.
  */
 function exceedsNesting(value: unknown, limit: number): boolean {
 	const pending: Array<[unknown, number]> = [[value, 0]];
@@ -259,17 +249,13 @@ function columnsOf(rows: DataFileRow[]): string[] {
 const UNEVEN_COLUMNS_NAMED = 5;
 
 /**
- * Warn about columns the union has but some rows lack.
- *
- * A CSV cannot get here - a short row is already a refusal - but JSON and JSONL
- * have no header, so `columnsOf` unions the keys and a file whose row 7 dropped
- * `email` previews a full `email` column. Without this, the run starts, six
- * iterations execute, and iteration 7 dies on the engine's missing-column error:
- * exactly the late refusal the picker exists to move earlier.
- *
- * A warning and not an error, because an uneven column may simply go
- * unreferenced - only the collection's steps know whether `{{data.email}}` is
- * ever written, and this layer does not see them.
+ * Warn about columns the union has but some rows lack. A CSV cannot get here (a short row is
+ * already refused), but JSON and JSONL have no header, so `columnsOf` unions the keys and a file
+ * whose row 7 dropped `email` previews a full `email` column. Unwarned, the run starts, six
+ * iterations execute and iteration 7 dies on the engine's missing-column error: the late refusal
+ * the picker exists to move earlier. A warning, not an error, because an uneven column may simply
+ * go unreferenced: only the collection's steps know whether `{{data.email}}` is ever written, and
+ * this layer does not see them.
  */
 function warnAboutUnevenColumns(columns: string[], rows: DataFileRow[], warnings: string[]): void {
 	const uneven = columns
@@ -363,12 +349,10 @@ function parseJsonLines(text: string, warnings: string[]): ParsedDataFile {
 }
 
 /**
- * Parse a data file's text into rows.
- *
- * Throws `DataFileError` with a message naming the row, line or column at
- * fault. A file that parses to no rows throws too: the engine rejects an empty
- * `data` array (a data set that binds nothing is a mistake, not an empty run),
- * and refusing it here means the user hears it before starting anything.
+ * Parse a data file's text into rows. Throws `DataFileError` with a message naming the row, line or
+ * column at fault. A file that parses to no rows throws too: the engine rejects an empty `data`
+ * array (a data set that binds nothing is a mistake, not an empty run), and refusing it here means
+ * the user hears it before starting anything.
  */
 export function parseDataFile(
 	text: string,
@@ -403,14 +387,11 @@ export function parseDataFile(
 }
 
 /**
- * How many iterations a run will actually perform.
- *
- * With rows and no explicit count, the row count is it (Postman's default).
- * With both, the explicit count wins and the row index wraps - which is the
- * case worth showing before the run, because a user who picks a 500-row file
- * and gets one iteration must see that rather than discover it afterwards.
- * This is the engine's rule (`parse_scenario_request`), stated once here so the
- * pre-run summary cannot describe a different run from the one that happens.
+ * How many iterations a run will actually perform. With rows and no explicit count, the row count
+ * (Postman's default). With both, the explicit count wins and the row index wraps, the case worth
+ * showing before the run: a user who picks a 500-row file and gets one iteration must see that
+ * rather than discover it afterwards. This is the engine's rule (`parse_scenario_request`), stated
+ * once here so the pre-run summary cannot describe a different run from the one that happens.
  */
 export function resolveIterationCount(
 	rowCount: number,

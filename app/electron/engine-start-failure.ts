@@ -6,33 +6,30 @@
  */
 
 /**
- * What an engine start or restart that threw was, read once for both callers
- * in main.ts (`startEngine`, `restartEngine`).
+ * What an engine start or restart that threw was, read once for both callers in main.ts
+ * (`startEngine`, `restartEngine`).
  *
- * None of the outcomes closes the window or quits (#3610). The window is where
- * an engine that is not there is explained and offered back: a crashed child is
- * the lifecycle's own `crashed` state, which the Dock names beside Restart, and
- * a failure with no child to describe it is the one sentence returned here as
- * the start failure (`engine:startFailure`), which the Dock shows beside Retry.
+ * No outcome closes the window or quits (#3610): the window is where an engine that is not there is
+ * explained and offered back. A crashed child is the lifecycle's own `crashed` state, which the
+ * Dock names beside Restart; a failure with no child to describe it is the one sentence returned
+ * here as the start failure (`engine:startFailure`), which the Dock shows beside Retry.
  *
- * Kept out of main.ts so it can be tested - main.ts creates windows and starts
- * the engine at import time, which no unit test can do.
+ * Kept out of main.ts so it can be tested: main.ts creates windows and starts the engine at import
+ * time, which no unit test can do.
  */
 
 import { EngineNotReadyError, EnginePortInUseError, type EngineLifecycle } from "./sidecar.js";
 
 /**
- * - `slow`: the readiness budget is spent but the child is alive, still working
- *   through its startup housekeeping. Not ours to kill: the renderer's health
- *   poll adopts it when it answers, and quitting here ended launches that were
- *   about to succeed.
- * - `port-in-use`: another program, or a Vayu engine serving another data
- *   directory, holds every port the engine may use; `reason` tells the user
- *   what to free before Retry.
- * - `overtaken`: the app is quitting, or a restart asked for during the start
- *   is queued behind it and answers `engine:restart` itself.
- * - `failed`: anything else. `reason` is null when the lifecycle is `crashed`,
- *   whose exit code and stderr tail already say why.
+ * - `slow`: the readiness budget is spent but the child is alive, still working through its startup
+ *   housekeeping. Not ours to kill: the renderer's health poll adopts it when it answers, and
+ *   quitting here would end launches that were about to succeed.
+ * - `port-in-use`: another program, or a Vayu engine serving another data directory, holds every
+ *   port the engine may use; `reason` tells the user what to free before Retry.
+ * - `overtaken`: the app is quitting, or a restart asked for during the start is queued behind it
+ *   and answers `engine:restart` itself.
+ * - `failed`: anything else. `reason` is null when the lifecycle is `crashed`, whose exit code and
+ *   stderr tail already say why.
  */
 export type EngineStartOutcome =
 	| { kind: "slow" }

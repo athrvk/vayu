@@ -6,21 +6,11 @@
  */
 
 /**
- * The two pure ends of the execute pipeline: editor state to the body the
- * engine takes, and the engine's result back to the response pane's state.
- *
- * Both were inline in `request-builder/index.tsx` and then copied wholesale
- * into the History run view when it grew its own send path. That is the
- * "hand-rolled copy does not receive the primitive's fixes" trap - the copies
- * had already drifted cosmetically before anyone read them side by side. The
- * body branches and the ~20-field response mapping are pure functions of their
- * inputs, so they live here and both callers use them.
- *
- * Deliberately *not* moved: auth resolution (already shared via
- * `auth-resolution.ts`), the script-part list (each caller builds a different one -
- * the builder walks the live collection chain, the run view replays what was
- * recorded), and the header/URL resolution, which differs in which variables
- * are in scope.
+ * The two pure ends of the execute pipeline: editor state to the body the engine takes, and the
+ * engine's result back to the response pane's state, shared by the builder and the History run
+ * view's send path so no hand-rolled copy misses a fix. Not here: auth resolution
+ * (`auth-resolution.ts`), the script-part list (the builder walks the live chain, the run view
+ * replays the recording), and header/URL resolution, whose variable scopes differ.
  */
 
 import type {
@@ -47,7 +37,7 @@ export interface ExecBody {
 	mode: string;
 	content?: string;
 	fields?: ExecField[];
-	/** A `binary` body's file - a path, never bytes. */
+	/** A `binary` body's file: a path, never bytes. */
 	file?: WireFileRef;
 	/** An `mcp` body's tool, sent as stored: the engine reads it at send time. */
 	mcpTool?: McpTool;
@@ -57,12 +47,10 @@ export interface ExecBody {
 export type WireFileRef = Omit<FileRef, "unresolved">;
 
 /**
- * One form field on the wire payload. A file part sends its path and what the
- * part should declare about itself - never bytes: the engine opens the file, so
- * a renderer that read it would be copying the upload through two processes.
- * A text part sends no more than `contentType`, the type it declares itself
- * (#2539). No trust flag: the engine decides from its allowed folders and grants
- * (`lib/file-trust.ts`).
+ * One wire form field. A file part sends its path and what it declares about itself, never bytes:
+ * the engine opens the file, and a renderer reading it would copy the upload through two processes.
+ * A text part sends at most its own `contentType` (#2539). No trust flag: the engine decides from
+ * its allowed folders and grants (`lib/file-trust.ts`).
  */
 export interface ExecField {
 	key: string;
@@ -75,9 +63,8 @@ export interface ExecField {
 }
 
 /**
- * A binary body's file as the stored and the wire shape both take it: empty
- * optional members and the engine's `unresolved` answer left out
- * (`lib/file-trust.ts`).
+ * A binary body's file in the stored and wire shape: empty optional members and the engine's
+ * `unresolved` left out (`lib/file-trust.ts`).
  */
 export function toFileRef(
 	file: FileRef | undefined,
@@ -91,10 +78,9 @@ export function toFileRef(
 }
 
 /**
- * The flattened editor body as the wire's discriminated `RequestBody`, with
- * `{{vars}}` left as written - the stored shape, not the sent one (that is
- * `buildExecBody` below). Shared by the builder's save, the "gone" pane's cURL
- * snippet (issue #1436) and the Send snapshot `sentRequestOf` takes.
+ * The flattened editor body as the wire's discriminated `RequestBody`, `{{vars}}` as written: the
+ * stored shape, not the sent one (`buildExecBody`). Shared by the save, the "gone" pane's cURL
+ * snippet (#1436) and the Send snapshot `sentRequestOf` takes.
  */
 export function toBodyPayload(
 	request: Pick<
@@ -111,8 +97,8 @@ export function toBodyPayload(
 	if (request.bodyMode === "binary") {
 		return { mode: "binary", file: toFileRef(request.binaryFile) };
 	}
-	// An absent `mcpTool` is a body that stores none, which clears one a
-	// previous save wrote: the body is replaced whole.
+	// An absent `mcpTool` stores none, clearing one a previous save wrote: the body is replaced
+	// whole.
 	if (request.bodyMode === "mcp") {
 		return {
 			mode: "mcp",
@@ -130,12 +116,10 @@ export function toBodyPayload(
 }
 
 /**
- * The request as the user wrote it, in the stored request-column shapes
- * (issue #1763) - the same row mapping the builder's save sends, path rows
- * included. The engine reads it with its own `savedFrom` reader, which checks
- * only the outer shapes (an HTTP method, a string url, arrays of rows, an
- * object body), not with a request save's appliers. Taken at Send and
- * carried on the response as `sentRequest`.
+ * The request as written, in stored request-column shapes (#1763), the save's row mapping, path
+ * rows included. The engine reads it with its `savedFrom` reader, which checks only outer shapes
+ * (an HTTP method, a string url, row arrays, an object body), not a save's appliers. Taken at Send
+ * and carried on the response as `sentRequest`.
  */
 export function sentRequestOf(request: RequestState): ExampleSentRequest {
 	return {
@@ -148,13 +132,10 @@ export function sentRequestOf(request: RequestState): ExampleSentRequest {
 }
 
 /**
- * Build the outgoing body from the flat editor fields, resolving `{{vars}}` on
- * the way. Returns `undefined` for a request that carries no body, so the field
- * is omitted rather than sent as an empty object.
- *
- * The two field-based modes resolve each key and value individually; the
- * content-based modes resolve the whole string, and `binary` resolves its
- * file's three strings. `mode: "none"` and an empty body both mean "no body".
+ * The outgoing body from the flat editor fields, resolving `{{vars}}` on the way; `undefined` for a
+ * request with no body, so the field is omitted, not an empty object. Field modes resolve each key
+ * and value; content modes the whole string; `binary` its file's three strings. `mode: "none"` and
+ * an empty body both mean none.
  */
 export function buildExecBody(
 	request: RequestState,
@@ -169,13 +150,12 @@ export function buildExecBody(
 					value: resolveString(e.value),
 					enabled: e.enabled,
 				};
-				// A text part may declare its own type too (a Postman import keeps
-				// one), so the type is read before the file branch splits off.
+				// A text part may declare its own type (a Postman import keeps one), so it is read
+				// before the file branch.
 				if (e.contentType) field.contentType = resolveString(e.contentType);
 				if (e.type !== "file") return field;
-				// A file part's path and declared name are as templatable as its
-				// key - a fixture directory is what an environment variable
-				// holds - and the engine resolves them with the type.
+				// A file part's path and name are as templatable as its key (a fixture directory is
+				// an environment variable), and the engine resolves them with the type.
 				field.type = "file";
 				field.value = "";
 				field.src = resolveString(e.src ?? "");
@@ -196,16 +176,16 @@ export function buildExecBody(
 		};
 	}
 
-	// Sent even with an empty path: the engine refuses it as "no file
-	// selected", which says more than a request that went out bodiless.
+	// Sent even with an empty path: the engine refuses it as "no file selected", clearer than a
+	// bodiless request.
 	if (request.bodyMode === "binary") {
 		return { mode: "binary", file: toFileRef(request.binaryFile, resolveString) };
 	}
 
 	const resolvedBody = request.body ? resolveString(request.body) : request.body;
 	if (request.bodyMode !== "none" && resolvedBody) {
-		// The tool is the engine's input for the headers it derives, and its
-		// schema is not text a variable lives in, so it goes unresolved.
+		// The tool feeds the engine's derived headers, and its schema holds no variables, so it
+		// goes unresolved.
 		const mcpTool = request.bodyMode === "mcp" ? request.mcpTool : undefined;
 		return {
 			mode: request.bodyMode || "text",
@@ -218,37 +198,24 @@ export function buildExecBody(
 }
 
 /**
- * The identity fields the engine hands the script sandbox as `pm.info`, for
- * the inline half of the compose payload (issue #300).
- *
- * Only the name lives here: `requestId` is attached at execute time by each
- * caller, because the two disagree about where it comes from - the builder
- * sends the saved row's id, the run view sends the id the run was filed under -
- * while both mean the same thing by "the name in the editor right now".
- *
- * It has to come from the client at all because Send executes editor state: an
- * unsaved request has a name and no row to look it up in, and a detached
- * replay copy has a name that is not the stored one. An empty name is omitted
- * rather than sent as `""`, so a script reads `undefined` and its `typeof`
- * check answers truthfully.
+ * The identity the engine gives the sandbox as `pm.info`, for the compose payload's inline half
+ * (#300). Only the name: `requestId` is attached by each caller, as they disagree on its source
+ * (the saved row's id, or the run's filed id) while meaning the same by "the name in the editor
+ * now". From the client because Send executes editor state: an unsaved request has a name but no
+ * row, and a detached replay copy a non-stored name. An empty name is omitted, so a script's
+ * `typeof` check reads `undefined` truthfully.
  */
 export function execIdentity(request: RequestState): { requestName?: string } {
 	return request.name ? { requestName: request.name } : {};
 }
 
 /**
- * The request's **stored** protocol settings (issue #1765), for the inline half
- * of a compose payload.
- *
- * Always all three, never elided at the default - the `verifySSL` rule: the
- * editor may be ahead of the saved row, so an omitted `false` would let the
- * stored value win, and composition carries them through to `/execute` and
- * `/runs`. `disabledSystemHeaders` is the stored per-request list; the per-send
- * {@link disabledDefaults} beside it is a different field, and the engine
- * unions the two.
- *
- * Shared by the builder's Send (buffered and streaming, one compose), its load
- * run and the History run view's replay.
+ * The request's **stored** protocol settings (#1765) for the compose payload's inline half, always
+ * all three, never elided (the `verifySSL` rule): the editor may be ahead of the saved row, and an
+ * omitted `false` would let the stored value win through composition to `/execute` and `/runs`.
+ * `disabledSystemHeaders` is the stored list; the per-send {@link disabledDefaults} is another
+ * field, unioned engine-side. Shared by Send (buffered and streaming), its load run and the History
+ * replay.
  */
 export function protocolSettings(
 	request: Pick<RequestState, "disableCookies" | "disabledSystemHeaders" | "disableUrlEncoding">
@@ -261,16 +228,10 @@ export function protocolSettings(
 }
 
 /**
- * The engine defaults this send refuses (issue #1229), as the wire field - or
- * nothing at all.
- *
- * Absent rather than `[]` when the user switched none off, so a payload that
- * refuses nothing is byte-for-byte the payload sent before the field existed.
- * The engine refuses a malformed list with a 400 and ignores a name it adds
- * nothing under, so there is nothing to filter here.
- *
- * Shared by the builder's Send, its stream, its load run and the History run
- * view's replay - the four places a request leaves this app.
+ * The engine defaults this send refuses (#1229), as the wire field or nothing: absent, not `[]`,
+ * when none, so such a payload is byte-identical to before the field. The engine 400s a malformed
+ * list and ignores a name it adds nothing under, so nothing is filtered here. Shared by Send, its
+ * stream, its load run and the History replay, the four places a request leaves this app.
  */
 export function disabledDefaults(request: Pick<RequestState, "disabledDefaultHeaders">): {
 	disabledDefaultHeaders?: string[];
@@ -280,14 +241,10 @@ export function disabledDefaults(request: Pick<RequestState, "disabledDefaultHea
 }
 
 /**
- * The stream text path a streaming send or load run declares (issue #3773), as
- * the wire field - or nothing at all.
- *
- * It rides beside the composed payload rather than through composition: an
- * inline compose carries no path, only a by-id one reads the stored row's.
- * Absent when the request does not stream (the engine refuses a path on a
- * buffered send, and the editor's field is hidden then) and when the field is
- * empty or blank, so a request that declares none sends what it always sent.
+ * The stream text path a streaming send or load run declares (#3773), as the wire field or nothing,
+ * beside the composed payload: an inline compose carries no path, only a by-id one reads the stored
+ * row's. Absent when not streaming (the engine refuses a path on a buffered send; the field is
+ * hidden) and when blank, so a request declaring none sends what it always sent.
  */
 export function streamTextPathOf(request: Pick<RequestState, "stream" | "streamTextPath">): {
 	streamTextPath?: string;
@@ -297,13 +254,10 @@ export function streamTextPathOf(request: Pick<RequestState, "stream" | "streamT
 }
 
 /**
- * The first content marker a streaming load run declares (issue #3774), as the
- * wire field - or nothing at all.
- *
- * Load runs only: a Send checks the field and times nothing with it, so a send
- * that carried it would be a write nothing reads. Absent when the request does
- * not stream (the engine refuses a marker beside a buffered request) and when
- * the field is empty. Not trimmed: the engine matches the bytes as written.
+ * The first content marker a streaming load run declares (#3774), as the wire field or nothing.
+ * Load runs only: a Send checks it and times nothing, so carrying it would be a write nothing
+ * reads. Absent when not streaming (refused beside a buffered request) and when empty. Not trimmed:
+ * matched as written.
  */
 export function streamFirstContentMarkerOf(
 	request: Pick<RequestState, "stream" | "streamFirstContentMarker">
@@ -314,20 +268,12 @@ export function streamFirstContentMarkerOf(
 }
 
 /**
- * The string the pane's `body` holds, given the text the server sent: that text
- * indented when it is JSON (`lib/json-format.ts`), else as received.
- *
- * It is built from @p bodyRaw and never from the engine's parsed `body`, which
- * is key-sorted, collapses a repeated key to its last value and rounds any
- * integer past 2^53 (issue #2459). A JSON `null` or scalar needs no case of its
- * own: its text is its own formatting.
- *
- * Above `LARGE_BODY_BYTES` the pane never calls `formatBody` (`ResponseBody`
- * shows a raw prefix instead), so there the raw text is handed back unindented
- * and a multi-megabyte response costs no pass at all on the send path.
- *
- * Shared with `responseFromRunResult`, which must build the same pane for the
- * same send.
+ * The pane's `body` from the server's text: indented when JSON (`lib/json-format.ts`), else as
+ * received. Built from @p bodyRaw, never the engine's parsed `body`, which key-sorts, collapses a
+ * repeated key to its last value and rounds integers past 2^53 (#2459); a JSON `null` or scalar is
+ * its own formatting. Above `LARGE_BODY_BYTES` the pane never calls `formatBody` (`ResponseBody`
+ * shows a raw prefix), so the text returns unindented and a huge response costs no pass. Shared
+ * with `responseFromRunResult`, which must build the same pane.
  */
 export function paneBody(bodyRaw: string): string {
 	if (bodyRaw.length > LARGE_BODY_BYTES) return bodyRaw;
@@ -335,10 +281,9 @@ export function paneBody(bodyRaw: string): string {
 }
 
 /**
- * What a send's auth wrote, as `ResponseState` carries it: the live body's
- * top-level keys or the stored trace's `request` node, which one engine
- * function writes. Each key stays absent when there is no name, so the two
- * funnels build the same state; an empty list or string is no name.
+ * What a send's auth wrote, as `ResponseState` carries it: the live body's top-level keys or the
+ * trace's `request` node, written by one engine function. A key stays absent without a name (an
+ * empty list or string is none), so both funnels agree.
  */
 export function authProvenance(
 	source: Pick<SanityResult, "authHeaders" | "authQueryParam">
@@ -351,22 +296,19 @@ export function authProvenance(
 }
 
 /**
- * The response codes a refusal's rule code stands for. A buffered send answers
- * a refused file as a response carrying `UNSENDABLE_FILE`; a streaming one has
- * no response yet, so the engine refuses it with a `400` under the rule's own
- * code (`unsendable_file`, documented in `docs/engine/api-reference.md`) and
- * `ClientErrorView` only knows the response spelling (#3693).
+ * Response codes a refusal's rule code stands for. A buffered send answers a refused file as a
+ * response with `UNSENDABLE_FILE`; a streaming one has no response yet, so the engine 400s it under
+ * the rule's code (`unsendable_file`, `docs/engine/api-reference/request-body.md`), and
+ * `ClientErrorView` knows only the response spelling (#3693).
  */
 const RESPONSE_CODE_OF_RULE: Readonly<Record<string, string>> = {
 	unsendable_file: "UNSENDABLE_FILE",
 };
 
 /**
- * The `errorCode` the pane shows for a Send that failed before it had a
- * response: Vayu's own `ENGINE_ERROR` when the engine never answered, the
- * engine's code when it refused, spelled as a response carries it. The one
- * place a refusal's code becomes a response's, for the buffered and the
- * streaming Send alike.
+ * The pane's `errorCode` for a Send that failed without a response: `ENGINE_ERROR` when the engine
+ * never answered, else the engine's code spelled as a response carries it; the one place a
+ * refusal's code becomes a response's, for buffered and streaming alike.
  */
 export function responseCodeOfFailure(error: unknown): string {
 	if (!(error instanceof ApiError)) return "ENGINE_ERROR";
@@ -374,35 +316,23 @@ export function responseCodeOfFailure(error: unknown): string {
 }
 
 /**
- * Map an engine execute result onto the response pane's state.
+ * An engine execute result as the response pane's state.
  *
- * Two subtleties worth keeping:
- *
- * - **status 0 is meaningful**, so it must not be defaulted to 200. It is what
- *   a client-side failure (no server response) reports, and it is what makes
- *   the pane render `ClientErrorView` instead of an empty 200.
- * - **`bodyRaw` is the received text**, carried through unchanged for the Raw
- *   view, Copy, Download and Save as example; `body` is that text formatted for
- *   the Pretty view (`paneBody`).
+ * - **status 0 is meaningful**, never defaulted to 200: it is a client-side failure (no server
+ *   response), and it makes the pane render `ClientErrorView`, not an empty 200.
+ * - **`bodyRaw` is the received text**, kept unchanged for Raw, Copy, Download and Save as example;
+ *   `body` is it formatted for Pretty (`paneBody`).
  */
 export function responseFromExecuteResult(result: SanityResult): ResponseState {
 	/*
-	 * The engine always sends `bodyRaw` (`serialize (Response)` in
-	 * `utils/json.cpp`): the body's UTF-8 text, or its bytes in base64 with
-	 * `bodyEncoding: "base64"` when they are not text. It is the field whose
-	 * entire job is to be what the server actually sent, so it is never rebuilt
-	 * from the parsed `body` while it is there.
-	 *
-	 * `body` is the engine's JSON parse of that text, and may be `null`: this
-	 * renderer asks for `includeParsedBody: false` (`apiService.executeRequest`),
-	 * so it is `null` in every answer it receives, and the engine leaves it
-	 * `null` anyway for a non-JSON or base64 body and past 4 MiB. The stringify
-	 * below is only a guard against a producer that sends no `bodyRaw`: the
-	 * original bytes are already gone by then, and compact is the closest honest
-	 * reconstruction - indenting would invent formatting the server never sent.
-	 *
-	 * A base64 `bodyRaw` (issue #2458) is decoded first, so from here on
-	 * `bodyRaw` is text or nothing: the bytes ride `rawBytes`.
+	 * The engine always sends `bodyRaw` (`serialize (Response)`, `utils/json.cpp`): the body's
+	 * UTF-8 text, or base64 with `bodyEncoding: "base64"` for non-text bytes, so it is never
+	 * rebuilt from `body` while present. `body` is the engine's JSON parse and may be `null`: this
+	 * renderer asks `includeParsedBody: false` (`apiService.executeRequest`), so it always is, and
+	 * the engine also nulls it for non-JSON, base64 or past 4 MiB. The stringify is a guard for a
+	 * producer sending no `bodyRaw`: the bytes are gone, compact is the closest honest
+	 * reconstruction, and indenting would invent formatting. A base64 `bodyRaw` (#2458) is decoded
+	 * first, so from here `bodyRaw` is text or nothing; the bytes ride `rawBytes`.
 	 */
 	const decoded = decodeResponseBody({
 		bodyRaw: result.bodyRaw ?? "",
@@ -423,52 +353,42 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		status,
 		statusText: result.statusText || "",
 		headers: result.headers || {},
-		// The engine sends `[]` for a response with no headers, the stored trace
-		// omits the key: `receivedHeaderLines` makes both absent, so the funnels
-		// agree and the Cookies tab can tell a legacy answer from a received
-		// one (issue #2460).
+		// The engine sends `[]` for no headers, the trace omits the key; `receivedHeaderLines`
+		// makes both absent, so the funnels agree and Cookies can tell a legacy answer from a
+		// received one (#2460).
 		headerLines: receivedHeaderLines(result.headerLines),
 		// Same normalisation, for the hops before this response (issue #2461).
 		redirects: receivedRedirects(result.redirects),
 		requestHeaders: result.requestHeaders,
-		// `[]` when nothing was recorded, absent from an engine before the key and
-		// from a stored trace: `sentHeaderLines` makes all of them absent.
+		// `[]` when nothing was recorded, absent from older engines and from a trace:
+		// `sentHeaderLines` makes all of them absent.
 		requestHeaderLines: sentHeaderLines(result.requestHeaderLines),
 		rawRequest: result.rawRequest,
 		...wireRequestHeadersField(status !== 0, result.rawRequest),
 		httpVersion: result.httpVersion,
 		httpVersionDowngraded: result.httpVersionDowngraded,
-		// The engine omits the key when it has nothing to say; `|| undefined` also
-		// keeps a producer's `""` from drawing an empty banner, so this funnel and
-		// the restored one agree whatever they are handed (issue #2474).
+		// Omitted by the engine when silent; `|| undefined` also keeps a `""` from drawing an empty
+		// banner, so both funnels agree (#2474).
 		authNotice: result.authNotice || undefined,
 		// Absent when auth wrote none, on both funnels (`sentSide` reads the trace's).
 		...authProvenance(result),
-		// Always present on a live body, `[]` when empty (issue #3307); the stored
-		// trace writes the key only when non-empty, so both funnels read it through
-		// `receivedWarnings`.
+		// Always present live, `[]` when empty (#3307); the trace writes the key only when
+		// non-empty, so both funnels read it through `receivedWarnings`.
 		warnings: receivedWarnings(result.warnings),
-		// `""` means no certificate matched, and the pane has nothing to show
-		// for that - mapped to `undefined` so this funnel and the restored one
-		// build the same state (see `clientCertificateFromTrace`).
+		// `""` means no certificate matched, nothing to show: `undefined`, so both funnels agree
+		// (`clientCertificateFromTrace`).
 		clientCertificate: result.clientCertificate || undefined,
 		body,
 		bodyRaw,
-		// The engine read only this much of it (issue #1157). Carried on both
-		// funnels - `responseFromRunResult` reads the same fact off the stored
-		// trace - because a restored response must say what the live one said.
-		//
-		// `false` becomes `undefined` for the same reason `clientCertificate`'s
-		// `""` does: the live body always carries the key while the stored trace
-		// writes it only when it happened, so without this the two funnels would
-		// disagree in type on every uncapped response.
+		// The engine read only this much (#1157), carried on both funnels so a restored response
+		// says what the live one did. `false` becomes `undefined` as `clientCertificate`'s `""`
+		// does: live always has the key, the trace only when it happened, so the funnels would
+		// otherwise differ in type on every uncapped one.
 		bodyCapped: result.bodyCapped || undefined,
-		// Absent for a `"utf8"` body, the same normalisation as `bodyCapped`: the
-		// stored trace marks only a base64 one.
+		// Absent for a `"utf8"` body, normalised as `bodyCapped`: the trace marks only base64.
 		...(decoded.bytes && { rawBytes: decoded.bytes }),
-		// When it arrived, as opposed to how long it took. The status bar shows
-		// it as an age, which is the only thing distinguishing a fresh response
-		// from one sent before the request beside it was edited.
+		// When it arrived, not how long it took: the status bar's age is what tells a fresh
+		// response from one sent before the request was edited.
 		receivedAt: new Date().toISOString(),
 		time: result.timing?.totalMs || 0,
 		timing: result.timing,
@@ -480,33 +400,22 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		elements: result.elements,
 		preScriptError: result.preScriptError,
 		postScriptError: result.postScriptError,
-		// Spread, not assigned: the stored node writes the key only when a script
-		// sent something, and the two funnels must build the same state.
+		// Spread, not assigned: the stored node writes the key only when a script sent something,
+		// and both funnels must agree.
 		...(Array.isArray(result.scriptRequests) && { scriptRequests: result.scriptRequests }),
-		// Absent stays absent: the engine writes no `validation` at all for a
-		// request whose collection binds no document, and spreading a key with
-		// `undefined` would make the pane render an "unchecked" state for a
-		// response nothing was ever going to check.
+		// Absent stays absent: the engine writes no `validation` for a collection with no document,
+		// and a key set to `undefined` would render "unchecked" for a response never going to be
+		// checked.
 		...(result.validation ? { validation: result.validation } : {}),
 	};
 }
 
 /**
- * Whether an execute that ran these elements could have written a variable
- * the UI is showing, and so needs the environment/globals/collection caches
- * invalidated.
- *
- * Every kind counts, not just scripts (issue #1512): `extract.json` /
- * `extract.regex` / `extract.header` write to `env` / `collection` / `globals`
- * scope exactly as `pm.environment.set` does, so treating only `script.*` as
- * write-capable would leave a stale variables editor after a plain extractor
- * ran. `pm.environment.set` / `pm.globals.set` / `pm.collectionVariables.set`
- * persist engine-side from a post-request script exactly as from a
- * pre-request one, so a request whose only script was in the Tests tab stored
- * the value while the variables editor and the resolver kept showing the old
- * one - `refetchOnWindowFocus` is off, so nothing else was coming to correct
- * it. A non-empty resolved list is treated as write-capable; an empty one, as
- * no element at all.
+ * Whether elements that ran could have written a variable the UI shows, so the environment, globals
+ * and collection caches need invalidating. Every kind counts (#1512): `extract.json` / `.regex` /
+ * `.header` write `env` / `collection` / `globals` like `pm.environment.set`, and post-request
+ * scripts persist engine-side like pre-request ones; with `refetchOnWindowFocus` off nothing else
+ * would correct a stale editor. A non-empty list is write-capable; an empty one, no element.
  */
 export function elementsMayWriteVariables(elements?: ResolvedElement[]): boolean {
 	return Boolean(elements?.length);

@@ -6,12 +6,9 @@
  */
 
 /**
- * AuthInheritBanner
- *
- * Shown in the request AuthPanel when the request's auth mode is "inherit". Walks the
- * ancestor chain of the request's collection via the shared `resolveAuthSource`
- * (so the banner cannot disagree with what execution sends - including an
- * ancestor set to No Auth, which blocks inheriting) and renders:
+ * Shown in the request's AuthPanel when its auth is "inherit". Walks the collection's ancestors
+ * with the shared `resolveAuthSource`, so the banner cannot disagree with what execution sends (an
+ * ancestor set to No Auth blocks inheriting), and renders:
  *   - a summary line: effective auth type + resolved source name
  *   - the ancestor chain root → leaf with a SOURCE tag on the resolved row
  *   - `{{variable}}` references in the accent color
@@ -35,10 +32,8 @@ interface AuthInheritBannerProps {
 }
 
 /**
- * What to call this collection's auth, and the credential hint to preview under
- * it. The name comes from the shared registry: this used to hold a fourth
- * private list, which had drifted to rendering raw `OAUTH2` / `AWS` for modes
- * the two pickers called "OAuth 2.0" and "AWS Signature".
+ * This collection's auth label (from the shared registry) and the credential hint previewed under
+ * it.
  */
 function describeAuth(c: Collection): { label: string; secret: string | null } {
 	const auth = c.auth;
@@ -82,8 +77,8 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 		);
 	}
 
-	// Nearest ancestor that defines auth wins (leaf-closest precedence per
-	// data-model PRD), unless one explicitly set to No Auth blocks inheriting.
+	// The nearest ancestor defining auth wins (leaf-closest, per the data-model PRD), unless one
+	// set to No Auth blocks inheriting.
 	const { source, blockedBy } = resolveAuthSource(ancestors);
 
 	if (!source) {

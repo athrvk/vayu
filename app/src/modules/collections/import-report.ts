@@ -6,13 +6,10 @@
  */
 
 /**
- * What happens once an import has been applied (issue #2109): the report of
- * what each file lost is kept, the new collections are revealed, and one toast
- * says what arrived.
- *
- * Outside the dialog on purpose. The dialog closes first, so none of this can
- * live in its state, and the stores it writes are the ones the rest of the app
- * already reads.
+ * What happens once an import is applied (issue #2109): each file's loss report is kept, the new
+ * collections are revealed, and one toast says what arrived. Outside the dialog because the dialog
+ * closes first, so none of this can live in its state, and the stores it writes are the ones the
+ * rest of the app reads.
  */
 
 import { useCollectionsStore } from "./collections-store";
@@ -111,15 +108,13 @@ function openImportNotes(rootId: string): void {
 }
 
 /**
- * Keep every file's report, expand and open what was created, and raise the toast.
+ * Keep every file's report, expand and open what was created, and raise the toast. The first new
+ * collection becomes the active tab (two imports are not two things to look at), while every new
+ * root is expanded so the sidebar shows them all.
  *
- * The first new collection becomes the active tab - two imports are not two
- * things to look at - while every new root is expanded so the sidebar shows
- * all of them.
- *
- * The toast has one action slot. "Review import notes" holds it whenever there
- * is a report to read, and the environment outcome (#2115) then rides in the
- * message alone; otherwise the outcome's own action, if it has one, takes it.
+ * The toast has one action slot: "Review import notes" holds it whenever there is a report to read,
+ * and the environment outcome (#2115) then rides in the message alone; otherwise the outcome's own
+ * action, if any, takes it.
  */
 export function announceImport(
 	reports: readonly ImportReport[],

@@ -6,22 +6,16 @@
  */
 
 /**
- * App settings registry
+ * The client-side (app) settings panels, declared as data, as the engine side is driven by
+ * `/config`. The sidebar tree renders `label`/`icon` from here, and `SettingsMain` looks the panel
+ * component up in `app-panel-components.ts` rather than branch on a category string. Adding an app
+ * category is one entry, one panel file and its line in that map, which the compiler demands.
  *
- * The client-side (app) settings panels, declared as data - mirroring how the
- * engine settings side is driven by the `/config` API. The sidebar tree renders
- * `label`/`icon` from here, and `SettingsMain` looks the panel component up in
- * `app-panel-components.ts` instead of branching on a category string. Adding
- * an app category is one entry + one panel file + its line in that map, which
- * the compiler demands.
- *
- * **This file holds no component.** It is imported by the Drawer's category
- * tree and by the command registry, both mounted on every tab, so a static
- * import of the panels here put all eight of them - and everything they pull -
- * in the startup chunk, whatever `Shell` did with `SettingsMain` (#1146). The
- * split is between the data and the components, not between panels: the map is
- * keyed by `ClientSettingsCategory`, so an id without a panel is a type error
- * rather than a second list to keep in step.
+ * **This file holds no component.** The Drawer's category tree and the command registry import it,
+ * both mounted on every tab, so importing the panels here would put all eight, and everything they
+ * pull, in the startup chunk whatever `Shell` does with `SettingsMain` (#1146). The split is
+ * between data and components, not between panels: the map is keyed by `ClientSettingsCategory`, so
+ * an id without a panel is a type error, not a second list to keep in step.
  */
 
 import type { LucideIcon } from "lucide-react";
@@ -46,24 +40,21 @@ export interface AppSettingsPanel {
 	description: string;
 	icon: LucideIcon;
 	/**
-	 * Which named motion this panel's glyph plays on hover or focus of the
-	 * sidebar row it sits in (`ICON_MOTION`, docs/design-system.md → Motion →
-	 * Icon motion). The same shape `DRAWER_VIEWS` carries, and for the same
-	 * reason: `SettingsCategoryTree` draws fifteen glyphs generically and must
-	 * not learn which one it has been handed.
+	 * The named motion this panel's glyph plays on hover or focus of its sidebar row
+	 * (`ICON_MOTION`, docs/design-system/motion.md → Motion → Icon motion): the shape
+	 * `DRAWER_VIEWS` carries, for the same reason, as `SettingsCategoryTree` draws fifteen glyphs
+	 * generically and must not learn which one it holds.
 	 *
-	 * Optional in the type and named by every entry in practice - a category
-	 * row is a navigation affordance exactly like a rail entry, so a glyph
-	 * that answers nothing reads as unfinished. The panel *header* draws no
-	 * glyph at all, which is where the same icon would be reporting rather
-	 * than offering; `SettingsCategoryTree.test.tsx` holds both halves.
+	 * Optional in the type, named by every entry in practice: a category row is a navigation
+	 * affordance like a rail entry, and a glyph that answers nothing reads as unfinished. The panel
+	 * *header* draws no glyph, as there the icon would be reporting rather than offering;
+	 * `SettingsCategoryTree.test.tsx` holds both halves.
 	 */
 	motion?: IconMotion;
 	/**
-	 * How this panel saves, stated in its header. Three save models coexist in
-	 * Settings - these panels autosave, the engine view has an explicit Save
-	 * bar, and MCP commits number fields on blur - and nothing on screen used to
-	 * say which one you were looking at. Omit for the autosave default.
+	 * How this panel saves, stated in its header: Settings has three save models (these panels
+	 * autosave, the engine view has a Save bar, MCP commits number fields on blur), and the header
+	 * is what says which one is on screen. Omit for the autosave default.
 	 */
 	saveNote?: string;
 }

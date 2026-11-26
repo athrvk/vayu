@@ -6,17 +6,12 @@
  */
 
 /**
- * The one reading of a tick's latency percentiles (issue #2385).
- *
- * A tick's `latency_p*_ms` mean different things by where the tick came from:
- * a stored tick holds its whole second's percentiles, while a live frame holds
- * only the last ~100 ms window - a tenth of the second, which plotted beside a
- * stored series is a different quantity under the same name. Every reader that
- * wants a per-second figure (the percentile chart, the response-time scatter,
- * the breakpoint, the anomaly detector's p99) goes through
- * {@link secondPercentiles}, and the hero card's run-so-far figures through
- * {@link cumulativePercentiles}, so no chart or threshold re-derives the
- * distinction inline.
+ * The one reading of a tick's latency percentiles (issue #2385). A stored tick's `latency_p*_ms`
+ * hold its whole second's percentiles; a live frame's hold only its last ~100 ms window, a tenth of
+ * the second and a different quantity under the same name. Every reader wanting a per-second figure
+ * (the percentile chart, the response-time scatter, the breakpoint, the anomaly detector's p99)
+ * goes through {@link secondPercentiles}, and the hero card's run-so-far figures through
+ * {@link cumulativePercentiles}, so no chart or threshold re-derives the distinction inline.
  */
 
 import type { LoadTestMetrics } from "@/types";
@@ -79,12 +74,10 @@ export function worstReading(a: number | null, b: number | null): number | null 
 }
 
 /**
- * The percentiles over the run so far, the span `avg_latency_ms` covers.
- *
- * A live frame carries them on every frame, `null` until something has
- * completed, which reads as 0 here because the card prints 0 as "awaiting
- * samples". A tick without the keys (a stored one) falls back to its own
- * `latency_p*_ms`, and an empty second's absent ones read as 0 the same way.
+ * The percentiles over the run so far, the span `avg_latency_ms` covers. A live frame carries them
+ * on every frame, `null` until something has completed, read as 0 here because the card prints 0 as
+ * "awaiting samples". A tick without the keys (a stored one) falls back to its own `latency_p*_ms`,
+ * and an empty second's absent ones read as 0 the same way.
  */
 export function cumulativePercentiles(
 	m: Pick<

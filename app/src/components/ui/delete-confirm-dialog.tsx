@@ -6,22 +6,13 @@
  */
 
 /**
- * DeleteConfirmDialog
- *
- * Reusable confirmation dialog for destructive delete actions.
- *
- * Keyboard behaviour is deliberate. `DialogContent` renders a close "X" as its
- * first focusable child, so Radix's default open-focus lands there and neither
- * button appears focused - which matters most when the dialog was opened *by*
- * keyboard (Delete on a tree row). Focus is redirected to Cancel instead: the
- * safe action, so a reflexive Enter cancels rather than deletes. Left/Right move
- * between the actions the way native confirmation dialogs behave.
- *
- * `name` (`deleteConfirmCopy`, in the sibling module) replace the three
- * phrasings call sites used to write for themselves: "permanently removed",
- * "removed for good", "will be deleted". This file is the one place any of
- * those three may still appear - as this sentence, naming them - which is what
- * `collection-constants.test.ts`'s guard checks.
+ * A confirmation dialog for destructive actions. `DialogContent` renders its close "X" first, so
+ * Radix's open-focus would land there with neither button focused, which matters most when opened
+ * by keyboard (Delete on a tree row). Focus goes to Cancel instead, the safe action, so a reflexive
+ * Enter cancels. Left/Right move between the actions, as native confirmations do. With `name`, the
+ * sentence is `deleteConfirmCopy`'s (sibling module), replacing the call sites' "permanently
+ * removed", "removed for good" and "will be deleted"; `delete-confirm-dialog.test.tsx` holds the
+ * generated sentence clear of all three.
  */
 
 import { useRef } from "react";
@@ -41,63 +32,46 @@ import { deleteConfirmCopy } from "./delete-confirm-copy";
 export interface DeleteConfirmDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	/**
-	 * Omit when `name` is given - the title is then built by `deleteConfirmCopy`.
-	 */
+	/** Omit when `name` is given: `deleteConfirmCopy` builds it. */
 	title?: string;
 	/**
-	 * Omit when `name` is given - the description is then built by
-	 * `deleteConfirmCopy`. Pass this instead for prose the template does not
-	 * cover (a count, a conditional clause) - it always wins over `name`.
+	 * Omit when `name` is given (`deleteConfirmCopy` builds it); pass it for prose the template
+	 * lacks (a count, a conditional clause). Always wins over `name`.
 	 */
 	description?: React.ReactNode;
-	/**
-	 * The entity's name, quoted straight into the generated sentence. Ignored
-	 * when `description` is also given.
-	 */
+	/** The entity's name, quoted into the generated sentence; ignored with `description`. */
 	name?: string;
 	/**
-	 * The refusal of a delete that failed, rendered between the description and
-	 * the actions - a `Callout severity="blocking"`. A slot of its own rather
-	 * than part of `description`: `DialogDescription` is a `<p>` and a `Callout`
-	 * is a `<div>`, so nesting one in the other is invalid HTML.
+	 * A failed delete's refusal, between the description and the actions (a
+	 * `Callout severity="blocking"`). Its own slot: `DialogDescription` is a `<p>` and a `Callout`
+	 * a `<div>`, so nesting is invalid HTML.
 	 */
 	error?: React.ReactNode;
 	onConfirm: () => void | Promise<void>;
 	isDeleting?: boolean;
 	/**
-	 * Word on the confirming button. Defaults to "Delete".
-	 *
-	 * Not every irreversible action is a deletion - "Reset to defaults" is the
-	 * case that forced this. Before it existed the only in-app confirm said
-	 * "Delete", so a reset either lied about what it was doing or fell back to
-	 * `window.confirm`, which ignores the theme, the accent and the roundedness
-	 * that the very panel it appears over exists to configure.
+	 * The confirming button's word, "Delete" by default. Not every irreversible action deletes
+	 * ("Reset to defaults"), and without this such a confirm would either say "Delete" or fall back
+	 * to `window.confirm`, which ignores the theme, accent and roundedness the panel configures.
 	 */
 	confirmLabel?: string;
 	/**
-	 * Word on the declining button. Defaults to "Cancel".
-	 *
-	 * "Cancel" is right when the dialog interrupts something the user started,
-	 * and ambiguous when it asks a question the user did not - declining an
-	 * offer to keep the machine awake is not cancelling anything, so that caller
-	 * names the outcome ("Allow sleep") instead. The button keeps its role
-	 * either way: it is the one focus opens on.
+	 * The declining button's word, "Cancel" by default: right when the dialog interrupts something
+	 * the user started, ambiguous for a question they did not ask (declining to keep the machine
+	 * awake cancels nothing, so that caller says "Allow sleep"). The button keeps its role: focus
+	 * opens on it.
 	 */
 	cancelLabel?: string;
 	/**
-	 * `destructive` (default) for anything that removes data. `primary` for an
-	 * irreversible-but-not-destructive action, where a red button overstates it.
+	 * `destructive` (the default) for anything removing data; `default` for an irreversible but not
+	 * destructive action, where red overstates it.
 	 */
 	confirmVariant?: "destructive" | "default";
 	/**
-	 * Where focus goes when the dialog closes.
-	 *
-	 * Radix restores it to whatever held it before the dialog opened, which is
-	 * right for a Cancel and wrong for a confirmed delete: the control that
-	 * opened it was usually inside the thing just deleted, so focus lands on
-	 * `<body>` (#1218). A caller that knows what survives passes a handler and
-	 * calls `preventDefault` on the event.
+	 * Where focus goes on close. Radix restores it to its pre-open holder, right for Cancel and
+	 * wrong for a confirmed delete: the opener was usually inside what was deleted, so focus lands
+	 * on `<body>` (#1218). A caller knowing what survives passes a handler and calls
+	 * `preventDefault`.
 	 */
 	onCloseAutoFocus?: (event: Event) => void;
 }
@@ -125,10 +99,7 @@ export function DeleteConfirmDialog({
 		if (!next) onOpenChange(false);
 	};
 
-	/**
-	 * Roving Left/Right across whatever actions the footer holds, so this keeps
-	 * working if a third button is ever added. Wraps at both ends.
-	 */
+	/** Roving Left/Right across the footer's actions, however many, wrapping at both ends. */
 	const handleFooterKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
 		if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
 		const buttons = Array.from(

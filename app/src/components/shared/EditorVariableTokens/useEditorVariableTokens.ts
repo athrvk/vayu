@@ -32,7 +32,7 @@
  * (`lib/script-variable-tokens.ts`): a script reaches a variable through
  * `pm.<accessor>.get(...)`, `pm.<accessor>.replaceIn(...)` (every accessor but
  * `pm.iterationData`), or - not interpolated at all, so painted muted and
- * read-only - a bare `{{name}}` (D16, `docs/engine/scripting.md`). This is a different gate from
+ * read-only - a bare `{{name}}` (D16, `docs/engine/scripting/variables.md`). This is a different gate from
  * `BODY_LANGUAGES` in `useVariableCompletionProvider.ts`, which is the `{{`
  * **completion** list's own list and stays as it is: offering brace
  * completion in a script would still teach the wrong syntax, even though the
@@ -47,14 +47,9 @@
  * which is what Monaco's API is anyway. The one piece of state is the time
  * card, set from a hover timer and never from `onMount`.
  *
- * **The hover is this editor's too** (issue #1320). It used to be a Monaco
- * hover provider, registered once per language for the whole app, which is why
- * the token had to mark its model for the provider to know which `{{x}}` was a
- * variable and which was a response body someone was sent. The card is now the
- * app's own tooltip over the token's rectangle, drawn by the provider that
- * already draws the popover there - so it exists only on editors that reach
- * this far, and the marking, the model registry and the per-language
- * registration are all gone with it.
+ * **The hover is this editor's too** (issue #1320). The card is the app's own
+ * tooltip over the token's rectangle, drawn by the provider that already draws
+ * the popover there - so it exists only on editors that reach this far.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -232,8 +227,7 @@ interface Installation {
 	pointerOnContent?: boolean;
 	/**
 	 * The spans `paint` last found, read back by `hoverAt` instead of scanning
-	 * again. A per-character mouse move used to re-scan the one line under the
-	 * pointer; a script's spans are not line-local (a `replaceIn(...)` argument
+	 * again. A script's spans are not line-local (a `replaceIn(...)` argument
 	 * or a block comment can open on an earlier line), so the fix that covers
 	 * every language is to answer from what the last paint already found rather
 	 * than re-deriving a line-local answer per language.

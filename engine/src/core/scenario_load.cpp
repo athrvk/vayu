@@ -39,9 +39,9 @@ namespace vayu::core {
 
 namespace {
 
-/// Steady-clock milliseconds, the same clock `take_ready_vu`'s `ready_at_ms`
-/// check and `timer.think`'s own wait are measured against - never
-/// `system_clock`, which can step backwards under a load run's wall time.
+/// Steady-clock milliseconds, the clock `take_ready_vu`'s `ready_at_ms` check
+/// and `timer.think`'s wait use; never `system_clock`, which can step backwards
+/// under a load run.
 int64_t steady_now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::steady_clock::now ().time_since_epoch ())
@@ -59,10 +59,9 @@ int64_t steady_now_us () {
 } // namespace
 
 std::mt19937_64 derive_vu_rng (uint64_t run_seed, size_t vu_index) {
-    // A fixed-point splitmix64 round rather than `run_seed ^ vu_index`
-    // directly: two adjacent VU indices must not produce two adjacent, highly
-    // correlated seeds, which is exactly what XOR-with-a-small-integer would
-    // do to `std::mt19937_64`'s seed-sequence input.
+    // A fixed-point splitmix64 round, not `run_seed ^ vu_index`: adjacent VU
+    // indices must not give adjacent, correlated seeds, which XOR with a small
+    // integer would feed `std::mt19937_64`'s seed sequence.
     uint64_t mixed = run_seed + (static_cast<uint64_t> (vu_index) * 0x9E3779B97F4A7C15ULL);
     mixed = (mixed ^ (mixed >> 30)) * 0xBF58476D1CE4E5B9ULL;
     mixed = (mixed ^ (mixed >> 27)) * 0x94D049BB133111EBULL;
@@ -178,9 +177,9 @@ StepHistograms::~StepHistograms () {
 }
 
 void StepHistograms::record_latency (size_t step, double latency_ms) {
-    // Microseconds, matching the aggregate histogram's unit. Atomic because
-    // every event-loop worker records concurrently - the plain record is a
-    // non-atomic read-modify-write on counts[] and loses increments.
+    // Microseconds, the aggregate histogram's unit. Atomic because every
+    // event-loop worker records concurrently, and the plain record is a
+    // non-atomic read-modify-write on counts[] that loses increments.
     hdr_record_value_atomic (histograms_[step], histogram_latency_us (latency_ms, 0));
 }
 
@@ -288,9 +287,8 @@ MetricsCollector::Percentiles StepHistograms::percentiles (size_t step) const {
 namespace {
 
 /// Every enabled element of @p kind in @p plan asking for cross-VU state
-/// rather than per-VU (`perUser: false`, whether stated or left to @p
-/// per_user_default), deduplicated and in plan order - the one scan both
-/// shared primitives are sized from.
+/// (`perUser: false`, stated or left to @p per_user_default), deduplicated, in
+/// plan order: the one scan both shared primitives are sized from.
 std::vector<std::string>
 shared_element_ids (const ScenarioPlan& plan, std::string_view kind, bool per_user_default) {
     std::vector<std::string> ids;
@@ -389,8 +387,8 @@ ScriptsOverrideMode scripts_mode) {
             { "httpErrors", steps.http_errors (i) },
             { "noResponse", steps.no_response (i) },
             // Requests this step sent with a `{{token}}` composition never
-            // resolved (issue #1503) - counted, not refused, so a literal
-            // brace a caller meant to send still goes out.
+            // resolved (#1503): counted, not refused, so a literal brace a
+            // caller meant still goes out.
             { "unresolvedTokens", steps.unresolved_tokens (i) },
             { "latency",
             { { "min", percentiles.min }, { "p50", percentiles.p50 },
@@ -401,10 +399,10 @@ ScriptsOverrideMode scripts_mode) {
             entry["label"] = plan.steps[i].mcp_label;
         }
         auto element_outcomes = elements.build (plan, i);
-        // Kept as the field's pre-#1495 meaning for a step whose `script.pre`
-        // is still left behind; one that ran inline reports its real outcome
-        // in `elements` instead of this fixed string, which would otherwise
-        // contradict it. The same rule `build_run_warnings` reads (#1938).
+        // `"skipped"` for a step whose `script.pre` is still deferred (the
+        // field's pre-#1495 meaning); one that ran inline reports its outcome
+        // in `elements` instead, which this fixed string would contradict.
+        // `build_run_warnings` reads the same rule (#1938).
         if (step_has_deferred_script (plan.steps[i], "script.pre", scripts_mode)) {
             entry["preRequestScript"] = "skipped";
         }
@@ -567,31 +565,21 @@ IterationIdentity identity) {
 // The virtual-user state machine
 // ============================================================================
 
-/**
- * The producer side of a scenario load run: which virtual user is free, what a
- * finished step does to it, and how the next step is submitted.
- *
- * One object rather than three lambdas over the same locals, because every one
- * of them writes state the other two read - `cursor`, `live_vus`, and each VU's
- * `busy` edge - and the ownership rules are only statable where they sit
- * together.
- */
 namespace {
 
-/// The row @p row indexes into @p data_rows, or null for a run with no
-/// dataset behind it - what `run_step_before` / `run_step_after` pass
-/// through to `resolve_template_with_optional_row` (issue #1515). A free
-/// function rather than inline in `submit_one`, which is already at its
-/// cognitive-complexity budget.
+/// The row @p row indexes into @p data_rows, or null for a run with no dataset:
+/// what `run_step_before` / `run_step_after` pass to
+/// `resolve_template_with_optional_row` (#1515). A free function because
+/// `submit_one` is at its cognitive-complexity budget.
 const nlohmann::json* data_row_at (const std::vector<nlohmann::json>& data_rows,
 std::optional<size_t> row) {
     return row ? &data_rows.at (*row) : nullptr;
 }
 
-/// This step's `id`-less request identity and the submission's row, for
-/// `pm.info` and `pm.iterationData` inside an inline script - the same fields
-/// `execute_exchange`'s own `bind` lambda sets (#3124). @p data_row is null
-/// for a run with no dataset, which a script reads as `undefined`.
+/// The step's `id`-less request identity and the submission's row, for
+/// `pm.info` and `pm.iterationData` in an inline script: the fields
+/// `execute_exchange`'s `bind` lambda sets (#3124). @p data_row is null without
+/// a dataset, which a script reads as `undefined`.
 void bind_step_identity (vayu::runtime::ScriptContext& ctx,
 const ScenarioStep& step,
 size_t iteration,
@@ -607,15 +595,14 @@ const nlohmann::json* data_row) {
     ctx.iteration_data = data_row;
 }
 
-/// `run_step_before`'s answer: elapsed pipeline time on `includeScriptTime`'s
-/// terms, whether a controller kind (`control.if` / `control.once` /
-/// `control.throughput`, issue #1515) asked to skip this occurrence - the
-/// load path's own skip, which an inline script cannot ask for - and `control.switch`'s own
-/// dispatch target, if it fired (issue #1569's `Kind::Next`, read the same
-/// way the sequential run's `decide_next_step` reads a pre-request script's).
-/// `assertion_failed` and `script_threw` are carried to the completion, which
-/// alone knows whether a response arrived for the execution to count as
-/// `failed` or `errored` (#2824, #2947).
+/// `run_step_before`'s answer: pipeline time on `includeScriptTime`'s terms;
+/// whether a controller (`control.if` / `control.once` / `control.throughput`,
+/// #1515) asked to skip this occurrence, the load path's own skip, which an
+/// inline script cannot ask for; and `control.switch`'s dispatch target if it
+/// fired (#1569's `Kind::Next`, read as the sequential run's `decide_next_step`
+/// reads a pre-request script's). `assertion_failed` and `script_threw` go to
+/// the completion, which alone knows whether a response arrived for the
+/// execution to count as `failed` or `errored` (#2824, #2947).
 struct StepBeforeResult {
     int64_t elapsed_ms = 0;
     bool skip          = false;
@@ -634,11 +621,9 @@ struct StepAfterResult {
     std::vector<vayu::core::ElementOutcome> outcomes;
 };
 
-/**
- * Adds @p tests to the run's inline assertion tally (issue #1497) and answers
- * whether any of them failed - the per-execution bit the summary's `failed`
- * is counted from (#2824), so several failures in one execution count once.
- */
+/// Adds @p tests to the run's inline assertion tally (#1497) and answers
+/// whether any failed: the per-execution bit the summary's `failed` counts
+/// (#2824), so several failures in one execution count once.
 bool tally_inline_tests (ScenarioLoadState& state,
 const std::vector<vayu::TestResult>& tests) {
     bool any_failed = false;
@@ -653,12 +638,10 @@ const std::vector<vayu::TestResult>& tests) {
     return any_failed;
 }
 
-/**
- * Runs this step's `step.before` elements - the residual-token pass is the
- * caller's, since it is not gated on whether the step carries any elements at
- * all - for one VU's submission, mutating @p request with whatever an inline
- * `extract.*` or `script.pre` wrote and tallying every outcome.
- */
+/// Runs this step's `step.before` elements for one VU's submission, mutating
+/// @p request with whatever an inline `extract.*` or `script.pre` wrote and
+/// tallying every outcome. The residual-token pass is the caller's, since it
+/// runs whether or not the step has elements.
 StepBeforeResult run_step_before (const std::shared_ptr<RunContext>& context,
 ScenarioLoadState& state,
 VirtualUser& vu,
@@ -713,10 +696,9 @@ const nlohmann::json* data_row) {
             return vu.scope_overlay.unset (scope, name, base.scopes);
         },
         .should_stop = nullptr,
-        // This iteration's bound row, under its `data.*` namespace, beside
-        // the scopes (issue #1515), this VU's local scope above the row
-        // (#2564) - the same precedence a script's own
-        // `pm.variables.replaceIn` already gives it.
+        // This iteration's bound row under its `data.*` namespace beside the
+        // scopes (#1515), this VU's local scope above the row (#2564): the
+        // precedence `pm.variables.replaceIn` gives a script.
         .resolve_template =
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = base.vars;
@@ -746,17 +728,16 @@ const nlohmann::json* data_row) {
     // A controller kind's skip (issue #1515) - the load path's own
     // `pm.execution.skipRequest()`.
     const bool skip = pre_result.control.kind == vayu::ScriptControl::Kind::Skip;
-    // `control.switch`'s own dispatch (issue #1569) - a skip always wins
-    // over a dispatch on the same "last write wins" terms `pre_result` is a
-    // single shared field either way, matching the sequential run's own
-    // priority when both a skip and a jump are asked for on one step.
+    // `control.switch`'s dispatch (#1569). A skip wins over a dispatch on the
+    // same step, as in the sequential run; `pre_result` is one shared field,
+    // last write wins.
     std::optional<std::string> next_target;
     if (!skip && pre_result.control.kind == vayu::ScriptControl::Kind::Next) {
         next_target = pre_result.control.target;
     }
-    // `pre_result.tests` is populated only when `script.pre` actually ran
-    // above (a deferred one never invokes `run_pre_script`, so it stays
-    // empty) - the inline half of issue #1497's assertion tally.
+    // `pre_result.tests` is filled only when `script.pre` ran inline above (a
+    // deferred one never calls `run_pre_script`): the inline half of #1497's
+    // assertion tally.
     const bool assertion_failed = tally_inline_tests (state, pre_result.tests);
     const bool threw            = script_threw (pre_result);
 
@@ -776,16 +757,16 @@ const nlohmann::json* data_row) {
 
 /**
  * Runs this step's `step.after` elements for one VU's completed submission,
- * writing anything an inline `extract.*` or `script.post` produced into
- * @p vu's overlay before the caller retires or advances it.
+ * writing what an inline `extract.*` or `script.post` produced into @p vu's
+ * overlay before the caller retires or advances it.
  *
- * @param response Read-only by contract (see `ElementContext::response`'s own
- *        comment); the `const_cast` exists because the completion callback
- *        only ever holds a `const Response&` off `Result::value()`, and
- *        copying a response to avoid it would pay for the body twice.
- * @return elapsed milliseconds, on the same terms @ref run_step_before returns
- *         them, whether an assertion failed, whether a script threw, and the
- *         outcomes, not yet tallied.
+ * @param response Read-only by contract (`ElementContext::response`); the
+ *        `const_cast` exists because the completion holds only a
+ *        `const Response&` off `Result::value()`, and copying it would pay for
+ *        the body twice.
+ * @return elapsed milliseconds on @ref run_step_before's terms, whether an
+ *         assertion failed, whether a script threw, and the outcomes, not yet
+ *         tallied.
  */
 StepAfterResult run_step_after (const std::shared_ptr<RunContext>& context,
 ScenarioLoadState& state,
@@ -893,6 +874,13 @@ const nlohmann::json* data_row) {
 
 } // namespace
 
+/**
+ * The producer side of a scenario load run: which virtual user is free, what a
+ * finished step does to it, and how the next step is submitted. One object
+ * rather than three lambdas over the same locals, because each writes state the
+ * others read (`cursor`, `live_vus`, each VU's `busy` edge), and the ownership
+ * rules are statable only where they sit together.
+ */
 class ScenarioLoadDriver {
     public:
     ScenarioLoadDriver (const std::shared_ptr<RunContext>& context,
@@ -918,31 +906,29 @@ class ScenarioLoadDriver {
     }
 
     /**
-     * The next ready virtual user, claimed and walked to its next send.
+     * The next ready virtual user, claimed and walked to its next send. A step
+     * a controller skipped puts nothing in flight, so the claim carries on to
+     * the VU's next step rather than ending a refill pass on a skipped login
+     * before the request that goes out. The walk stops at the first step that
+     * goes out, or after one whole iteration with nothing sent: that claim
+     * leaves `requests_sent` unchanged, which is how `maintain_concurrency`
+     * tells an idle pass from a working one and waits rather than re-entering
+     * at once (#3540).
      *
-     * A step a controller skipped puts nothing in flight, so the claim carries
-     * on to the same VU's next step rather than ending a refill pass on a
-     * skipped login in front of the request that does go out. The walk stops
-     * at the first step that goes out, and after one whole iteration with
-     * nothing sent: that claim leaves `requests_sent` unchanged, which is how
-     * `maintain_concurrency` tells a pass that did no work from one that did
-     * and waits it out instead of re-entering at once (#3540).
-     *
-     * @return whether a VU was actually claimed. `false` means every VU is
-     *         deferred, in flight or retired; `maintain_concurrency` waits
-     *         out the nearer of a completion or the earliest deferral
-     *         (`deferred_wait_ms`) rather than retrying at once (issue
-     *         #1596) - not counting a submission here is what keeps
-     *         `in_flight()` honest either way.
+     * @return whether a VU was claimed. `false` means every VU is deferred, in
+     *         flight or retired; `maintain_concurrency` then waits for the
+     *         nearer of a completion or the earliest deferral
+     *         (`deferred_wait_ms`) rather than retrying (#1596). Not counting a
+     *         submission here keeps `in_flight()` honest either way.
      */
     bool submit_one () {
         VirtualUser* vu = take_ready_vu ();
         if (vu == nullptr) {
             return false;
         }
-        // A claim that lands mid-iteration may walk on into the next one, so a
-        // trailing skipped step still reaches the first step of the next
-        // iteration; a claim that begins an iteration walks at most to its end.
+        // A claim landing mid-iteration may walk into the next one, so a
+        // trailing skipped step still reaches the next iteration's first step;
+        // a claim that begins an iteration walks at most to its end.
         const size_t last_iteration =
         vu->iteration + (vu->steps_this_iteration == 0 ? 0 : 1);
         while (submit_step (vu) == StepSubmission::Skipped && !context_->should_stop &&
@@ -952,14 +938,12 @@ class ScenarioLoadDriver {
     }
 
     /**
-     * Ms until the earliest deferred VU `take_ready_vu` last skipped over
-     * becomes ready, or `nullopt` when its last scan found no deferral -
-     * either it found a VU (this cycle submitted), or every VU it skipped
-     * was busy or retired rather than deferred, which `maintain_concurrency`'s
-     * plain `in_flight() < target` wait already handles correctly (issue
-     * #1596). Recomputed against the current time on every call, not cached
-     * from the scan, so a wait started slightly after the scan still ends on
-     * time.
+     * Ms until the earliest deferred VU `take_ready_vu` last skipped becomes
+     * ready, or `nullopt` when its last scan found no deferral: it found a VU
+     * (this cycle submitted), or every VU it skipped was busy or retired, which
+     * `maintain_concurrency`'s plain `in_flight() < target` wait handles
+     * (#1596). Recomputed against the current time on each call, so a wait
+     * started just after the scan still ends on time.
      */
     [[nodiscard]] std::optional<int64_t> deferred_wait_ms () const {
         if (!earliest_deferred_ready_at_ms_) {
@@ -978,9 +962,9 @@ class ScenarioLoadDriver {
         const size_t step_index         = vu->step;
         const ScenarioStep& step        = execution_.plan.steps[step_index];
         const std::optional<size_t> row = vu->data_row;
-        // Read here rather than in the completion: `finish_step` advances it at
-        // an iteration boundary, so the callback would report the iteration the
-        // VU moved on to instead of the one this step ran in.
+        // Read here, not in the completion: `finish_step` advances it at an
+        // iteration boundary, so the callback would report the next iteration
+        // instead of this step's.
         const size_t iteration = vu->iteration;
         const size_t vu_index  = vu->index;
         vayu::Request request  = step.request;
@@ -997,16 +981,16 @@ class ScenarioLoadDriver {
         request.track_cookies = !request.disable_cookies;
         request.cookie_lines  = vu->cookies;
 
-        // The data pass and the identity pass, per iteration and before the
-        // send. A step carrying neither kind of token, and no auth waiting on
-        // its scripts, has empty templates and is not walked at all, which is
-        // what makes a token-free plan free per iteration.
+        // The data and identity passes, per iteration, before the send. A step
+        // with neither kind of token and no auth waiting on its scripts has
+        // empty templates and is not walked, which keeps a token-free plan free
+        // per iteration.
         std::optional<vayu::http::Auth> late_auth;
         if (step_binds_per_iteration (step)) {
-            // Every half through the one binder the single-request load path
-            // also drives (issues #993, #994), so a request binds identically
-            // whether it is repeated on its own or walked as a step - including
-            // the credentials-after-fields order the encoding depends on.
+            // Through the one binder the single-request load path drives too
+            // (#993, #994), so a request binds identically alone or as a step,
+            // the credentials-after-fields order the encoding depends on
+            // included.
             auto bound = bind_step_iteration (request, step, execution_.data_rows,
             row, IterationIdentity{ vu_index, iteration }, late_auth);
             // A path a row bound is filled from what the plan checked; the
@@ -1015,12 +999,11 @@ class ScenarioLoadDriver {
                 bound = fill_bound_files (execution_.files.get (), step.request, request);
             }
             if (!bound.ok) {
-                // Nothing goes on the wire, so nothing will ever complete for
-                // this step: this path owns the whole accounting a completion
-                // would have done. `requests_sent` is incremented beside the
-                // error record so `in_flight()` - sent minus completed - stays
-                // honest, and the step's `errors` column in the report's
-                // breakdown is what attributes the failure to a step.
+                // Nothing goes on the wire, so nothing completes for this step
+                // and this path does a completion's accounting: `requests_sent`
+                // is incremented beside the error record so `in_flight()` (sent
+                // minus completed) stays honest, and the step's `errors` column
+                // in the report attributes the failure.
                 context_->requests_sent++;
                 context_->bind_failures_submitted++;
                 finish_step (context_, state_, execution_.plan, vu, step_index,
@@ -1034,26 +1017,23 @@ class ScenarioLoadDriver {
         }
 
         // The element pipeline's `step.before` phase, then the residual pass
-        // over what it (and the bind above) left unresolved (issue #1495) -
-        // against this VU's own scope, so a token an earlier step's inline
-        // `extract.*` wrote for this VU resolves here. Never refused, only
-        // counted: the load path's rule since #1503 is "send it regardless",
-        // which this keeps - a real resolution attempt now runs first, but a
-        // name still unanswered, or a header-name collision the attempt
-        // itself produced, is exactly as survivable as one composition alone
-        // left behind. Auth that waited on the scripts (issue #2473) is
-        // applied by that pass, against the same view.
+        // over what it and the bind left unresolved (#1495), against this VU's
+        // own scope, so a token an earlier step's inline `extract.*` wrote for
+        // this VU resolves here. Never refused, only counted: the load path's
+        // rule (#1503) is "send it regardless"; a real resolution runs first,
+        // but an unanswered name, or a header-name collision that attempt
+        // produced, is as survivable as one composition left. Auth waiting on
+        // the scripts (#2473) is applied by that pass, against the same view.
         const nlohmann::json* data_row = data_row_at (execution_.data_rows, row);
         const StepBeforeResult before_result = run_step_before (context_,
         *state_, *vu, step, step_index, iteration, vu_index, request, data_row);
         if (before_result.skip) {
             // `control.if` / `control.once` / `control.throughput` asked to
-            // skip this occurrence (issue #1515) - nothing goes out, on the
-            // same "never blocks a worker thread" terms every other
-            // controller decision here holds to. The VU still advances
-            // exactly as a sent step would; there is simply no `Result` to
-            // store and no coverage to record, matching a design send's own
-            // skip (`execute_exchange`'s `outcome.sent = false` branch).
+            // skip this occurrence (#1515): nothing goes out, and no worker
+            // thread blocks, as for every controller decision here. The VU
+            // advances as for a sent step, with no `Result` to store and no
+            // coverage to record, as a design send's skip (`execute_exchange`'s
+            // `outcome.sent = false` branch).
             finish_step (context_, state_, execution_.plan, vu, step_index,
             StepSignals{ .script_threw = before_result.script_threw,
             .assertion_failed          = before_result.assertion_failed },
@@ -1073,12 +1053,11 @@ class ScenarioLoadDriver {
             }
         }
 
-        // `step.after` needs the sent request back (declarative kinds may
-        // read `ctx.request`, e.g. a URL a `metric.record` names), which the
-        // event loop's own copy is not - `EventLoop::submit` copies @p request
-        // for the transfer but does not hand that copy back to the completion.
-        // Held only for a step that actually carries elements, so a
-        // token-free, element-free plan still pays no copy per iteration.
+        // `step.after` needs the sent request back (a declarative kind may read
+        // `ctx.request`, e.g. a URL a `metric.record` names), and
+        // `EventLoop::submit` copies @p request for the transfer without
+        // handing it back. Held only for a step with elements, so a token-free,
+        // element-free plan pays no copy per iteration.
         std::shared_ptr<vayu::Request> sent_request =
         step.elements && !step.elements->empty () ?
         std::make_shared<vayu::Request> (request) :
@@ -1087,9 +1066,9 @@ class ScenarioLoadDriver {
         // `step`'s address is stable for the run's whole life: the plan is
         // immutable, const data shared by the run's context.
         const ScenarioStep* step_ptr = &step;
-        // `control.switch`'s own dispatch (issue #1569), decided above at
-        // `step.before` and carried into the completion for `finish_step` to
-        // resolve, or drop, once this step's outcome is known.
+        // `control.switch`'s dispatch (#1569), decided at `step.before` and
+        // carried into the completion for `finish_step` to resolve, or drop,
+        // once the outcome is known.
         std::optional<std::string> next_target_before = before_result.next_target;
         const bool assertion_failed_before = before_result.assertion_failed;
         const bool script_threw_before     = before_result.script_threw;
@@ -1123,10 +1102,9 @@ class ScenarioLoadDriver {
             static_cast<double> (pipeline_before_ms + after.elapsed_ms) :
             0.0;
             record_step_response (*state, step_index, response, script_ms);
-            // Every completion, including the failed ones: a transport error is
-            // a request this operation was sent and did not answer, and coverage
-            // that counted only successes would report the send as if it never
-            // happened.
+            // Every completion, failures included: a transport error is a
+            // request this operation was sent and did not answer, and counting
+            // only successes would report the send as never made.
             state->coverage.record (step_index, response.status_code);
             // A `Retry-After` wait (#3782), stamped before `finish_step`
             // releases the VU so the producer's acquire sees it; the step's
@@ -1167,16 +1145,12 @@ class ScenarioLoadDriver {
     }
 
     /**
-     * A virtual user that is neither busy nor retired and not deferred,
-     * claimed for one step.
-     *
-     * Returns null when every VU is deferred, in flight or retired - not
-     * counting a submission either way is what keeps `in_flight()` honest.
-     * The two cases are told apart for `deferred_wait_ms`'s sake: a scan that
-     * skips a deferred VU records the soonest of them in
-     * `earliest_deferred_ready_at_ms_`, reset at the top of every call so a
-     * stale value from calls ago never lingers into one that found nothing
-     * deferred at all.
+     * A virtual user neither busy, retired nor deferred, claimed for one step;
+     * null when every VU is deferred, in flight or retired (not counting a
+     * submission either way keeps `in_flight()` honest). For `deferred_wait_ms`
+     * the two are told apart: a scan skipping a deferred VU records the soonest
+     * in `earliest_deferred_ready_at_ms_`, reset at the top of every call so a
+     * stale value never outlives a scan that found nothing deferred.
      */
     VirtualUser* take_ready_vu () {
         earliest_deferred_ready_at_ms_.reset ();
@@ -1198,18 +1172,16 @@ class ScenarioLoadDriver {
         }
         // Acquire pairs with the completion's release store, so the step,
         // iteration, cookies and scope overlay this VU was left with are
-        // visible here.
+        // visible.
         if (vu.busy.load (std::memory_order_acquire)) {
             return false;
         }
-        // `timer.pacing` / gaussian `timer.think` (issues #1498, #1570,
-        // #1571) defer a VU by stamping this in the future. A deferred VU
-        // is never in flight, so `maintain_concurrency` cannot tell "wait
-        // for a completion" and "wait for this VU" apart from
-        // `in_flight()` alone; recording the soonest one here is what lets
-        // `deferred_wait_ms` bound the wait instead of busy-spinning
-        // (issue #1596). Read after the acquire above for the same reason
-        // `step` and `iteration` are.
+        // `timer.pacing` / gaussian `timer.think` (#1498, #1570, #1571) defer a
+        // VU by stamping this in the future. A deferred VU is never in flight,
+        // so `in_flight()` alone cannot tell `maintain_concurrency` "wait for a
+        // completion" from "wait for this VU"; recording the soonest one lets
+        // `deferred_wait_ms` bound the wait instead of busy-spinning (#1596).
+        // Read after the acquire above, as `step` and `iteration` are.
         if (vu.ready_at_ms > 0 && vu.ready_at_ms > steady_now_ms ()) {
             if (!earliest_deferred_ready_at_ms_ ||
             vu.ready_at_ms < *earliest_deferred_ready_at_ms_) {
@@ -1228,40 +1200,36 @@ class ScenarioLoadDriver {
             vu.iteration_boundary   = false;
             vu.iteration_started_us = steady_now_us ();
             if (state_->data_row_count > 0) {
-                // One claim per iteration off the run-wide cursor, wrapping
-                // always. Claimed here rather than per step so every step
-                // of the iteration binds the same row - a checkout that
-                // used a different row than its login is not a user.
+                // One claim per iteration off the run-wide cursor, always
+                // wrapping. Per iteration, not per step, so every step of the
+                // iteration binds the same row: a checkout using a different
+                // row than its login is not a user.
                 vu.data_row = state_->data_cursor++ % state_->data_row_count;
             }
         }
-        // The producer is the only writer of this edge, so a plain store is
-        // enough - no compare-exchange, and nothing on the completion path
-        // has to loop.
+        // The producer is this edge's only writer, so a plain store suffices:
+        // no compare-exchange, and no loop on the completion path.
         vu.busy.store (true, std::memory_order_relaxed);
         return true;
     }
 
     /**
-     * `step.between` (issue #1498), for the step that just completed -
-     * `timer.think`'s load-path counterpart to `scenario_runner.cpp`'s own
-     * dispatch, run here instead of blocking a worker thread: every
-     * outcome's `waited_ms` is summed and applied to `vu.ready_at_ms`, never
-     * to the step's own recorded latency, which by this point is already
-     * decided. A `timer.pacing` element here is always `_scopeEntry: false`
-     * (its entry occurrence dispatches at `step.before` of its own step, not
-     * `step.between` of whatever preceded it) and reports `waited_ms: 0`, so
-     * it contributes nothing through this path - see @ref
-     * schedule_next_entry_wait for its actual scheduling.
+     * `step.between` (#1498) for the step that just completed: `timer.think`'s
+     * load-path counterpart to `scenario_runner.cpp`'s dispatch, run here
+     * instead of blocking a worker thread. Every outcome's `waited_ms` is
+     * summed onto `vu.ready_at_ms`, never onto the step's recorded latency,
+     * decided by now. A `timer.pacing` element here is always
+     * `_scopeEntry: false` (its entry occurrence dispatches at its own step's
+     * `step.before`) and reports `waited_ms: 0`, so it contributes nothing;
+     * @ref schedule_next_entry_wait schedules it.
      *
-     * Also `control.loop`'s own seam (issue #1569): its `Next` decision -
-     * only the folder's *last* member ever makes one, per its own
-     * `needs_span` check - is returned the same way `run_step_before`
-     * returns `control.switch`'s, for `finish_step` to resolve against the
-     * run's `step_index`.
+     * Also `control.loop`'s seam (#1569): its `Next` decision (only the
+     * folder's *last* member makes one, by its `needs_span` check) is returned
+     * as `run_step_before` returns `control.switch`'s, for `finish_step` to
+     * resolve against the run's `step_index`.
      *
-     * @return the folder-start step name a `control.loop` asked to repeat,
-     *         or `nullopt` when nothing at this step decided one.
+     * @return the folder-start step name a `control.loop` asked to repeat, or
+     *         `nullopt` when nothing here decided one.
      */
     static std::optional<std::string> run_step_between (
     const std::shared_ptr<RunContext>& context,
@@ -1277,9 +1245,9 @@ class ScenarioLoadDriver {
         vayu::ScriptResult unused_post;
         vayu::core::ElementContext ctx{
             // Never read or written by a `step.between` kind (`timer.think`,
-            // `timer.pacing`) - bound to the step's own stored request only
-            // because `ElementContext::request` is a reference, on the same
-            // `const_cast` precedent `run_step_after` uses for `response`.
+            // `timer.pacing`); bound to the step's stored request only because
+            // `ElementContext::request` is a reference, on `run_step_after`'s
+            // `const_cast` precedent for `response`.
             .request = const_cast<vayu::Request&> (completed_step.request), // NOLINT(cppcoreguidelines-pro-type-const-cast)
             .response           = nullptr,
             .run_pre_script     = nullptr,
@@ -1319,17 +1287,15 @@ class ScenarioLoadDriver {
     }
 
     /**
-     * `timer.pacing`'s actual scheduling (issue #1498): asks every element of
-     * @p next_step - the step this VU will run once ready again, already
-     * advanced past the wrap-to-0 / step+1 decision - whether it should hold
-     * the VU back, and applies the longest such answer to `ready_at_ms`.
-     * Called here, before the VU can next be selected, because `step.before`
-     * (where `timer.pacing` actually dispatches) only ever runs *after*
-     * `take_ready_vu` has already chosen this VU - too late to defer without
-     * blocking the caller. @p shared (issues #1570, #1571) is the run's own
-     * cross-VU coordination state, threaded through unconditionally: a
-     * `perUser: true` element never touches it, and a plan with nothing
-     * shared in it leaves both members empty.
+     * `timer.pacing`'s scheduling (#1498): asks every element of @p next_step
+     * (the step this VU runs once ready, already past the wrap-to-0 / step+1
+     * decision) whether to hold the VU back, and applies the longest answer to
+     * `ready_at_ms`. Called before the VU can next be selected, because
+     * `step.before`, where `timer.pacing` dispatches, runs only after
+     * `take_ready_vu` chose the VU, too late to defer without blocking the
+     * caller. @p shared (#1570, #1571) is the run's cross-VU state, passed
+     * unconditionally: a `perUser: true` element never touches it, and a plan
+     * with nothing shared leaves both members empty.
      */
     static void schedule_next_entry_wait (const ScenarioStep& next_step,
     VirtualUser& vu,
@@ -1351,14 +1317,14 @@ class ScenarioLoadDriver {
 
     /**
      * A completed transfer in its step's histogram: the latency of every one
-     * that ran, answered or not (#2384), and an HTTP error status in the
-     * step's error tally (#2134). The status never makes the step `errored`,
-     * which is the iteration-abort edge: a 4xx/5xx is a response the next step
-     * can still follow (a 404 lookup, a 409 retry). A failed transfer is
-     * counted by `finish_step`'s `record_error`, so here it adds only its
-     * duration, and one refused before the wire adds nothing. @p script_ms is
-     * the pipeline time `includeScriptTime` folds in, 0 without it; the run's
-     * population receives the same figure through `ResultAnnotations`.
+     * that ran, answered or not (#2384), and an HTTP error status in the step's
+     * error tally (#2134). The status never makes the step `errored`, the
+     * iteration-abort edge: a 4xx/5xx is a response the next step can follow (a
+     * 404 lookup, a 409 retry). A failed transfer is counted by `finish_step`'s
+     * `record_error`, so here it adds only its duration; one refused before the
+     * wire adds nothing. @p script_ms is the pipeline time `includeScriptTime`
+     * folds in, 0 without it; the run's population gets the same figure through
+     * `ResultAnnotations`.
      */
     static void record_step_response (ScenarioLoadState& state,
     size_t step_index,
@@ -1396,11 +1362,9 @@ class ScenarioLoadDriver {
         bool transaction_error = false;
     };
 
-    /**
-     * The execution's outcome before flow control is read, in the sequential
-     * runner's `classify_step` order: no response or a thrown inline script
-     * is `errored`, over a skip and over a failed assertion (#2824, #2947).
-     */
+    /// The execution's outcome before flow control is read, in the sequential
+    /// runner's `classify_step` order: no response or a thrown inline script is
+    /// `errored`, over a skip and a failed assertion (#2824, #2947).
     static StepOutcome classify_execution (const StepSignals& signals) {
         if (signals.no_response || signals.script_threw) {
             return StepOutcome::Errored;
@@ -1411,13 +1375,11 @@ class ScenarioLoadDriver {
         return signals.assertion_failed ? StepOutcome::Failed : StepOutcome::Passed;
     }
 
-    /**
-     * The execution's one outcome in the run's tallies, and in its step's
-     * `executed` when nothing else put it there: every outcome but `skipped`
-     * is in `executed`, and an answered one is already, by
-     * `record_step_response`. Only a no-response execution is in the step's
-     * `noResponse`. `passed` is the summary's remainder, so it is not counted.
-     */
+    /// The execution's one outcome in the run's tallies, and in its step's
+    /// `executed` unless already there: every outcome but `skipped` is in
+    /// `executed`, and an answered one already is, by `record_step_response`.
+    /// Only a no-response execution is in the step's `noResponse`. `passed` is
+    /// the summary's remainder, so it is not counted.
     static void count_outcome (ScenarioLoadState& state,
     size_t step_index,
     StepOutcome outcome,
@@ -1444,13 +1406,11 @@ class ScenarioLoadDriver {
         }
     }
 
-    /**
-     * The session @ref finish_step leaves the VU with after a step: none after
-     * an error, the step's own capture after an ordinary send, and - for a
-     * step with `disableCookies` (issue #1765), whose transfer tracked
-     * nothing - the VU's own session unchanged, since its empty capture would
-     * otherwise replace the session with nothing.
-     */
+    /// The session @ref finish_step leaves the VU after a step: none after an
+    /// error, the step's capture after an ordinary send, and for a
+    /// `disableCookies` step (#1765), whose transfer tracked nothing, the VU's
+    /// session unchanged, since the empty capture would replace it with
+    /// nothing.
     static const std::vector<std::string>* session_after (bool errored,
     const vayu::Request& step_request,
     const vayu::Response& response,
@@ -1462,17 +1422,14 @@ class ScenarioLoadDriver {
     }
 
     /**
-     * A completion that carried no `Response` at all - nothing for
-     * `step.after` to run against, exactly as before #1495.
-     *
-     * A step a user Stop cancelled (#2136) only releases its VU: it neither
-     * ran nor failed, so it is no step error, no coverage send and no
-     * abandoned iteration, and the run is ending, so the VU's position is
-     * never read again. Any other is the step's failure, and coverage still
-     * counts it: a request this operation was sent and did not answer,
-     * reported as status 0 rather than a status the server never sent (issue
-     * #629). Either way the VU is released before `handle_result`, for
-     * `finish_step`'s reason.
+     * A completion with no `Response`: nothing for `step.after` to run against.
+     * A step a user Stop cancelled (#2136) only releases its VU: it neither ran
+     * nor failed, so it is no step error, coverage send or abandoned iteration,
+     * and the run is ending, so the VU's position is never read again. Any
+     * other is the step's failure, and coverage still counts it, as a request
+     * this operation was sent and did not answer, status 0 rather than one the
+     * server never sent (#629). Either way the VU is released before
+     * `handle_result`, for `finish_step`'s reason.
      */
     static void finish_without_response (const std::shared_ptr<RunContext>& context,
     vayu::db::Database& db,
@@ -1494,25 +1451,23 @@ class ScenarioLoadDriver {
 
     /**
      * One step's outcome applied to the run's tallies and the VU's state
-     * machine, and - beside a Stop's cancellation in
-     * `finish_without_response` - the only writer of `busy`'s `true -> false`
-     * edge. Shared by the completion callback, the controller skip and the
-     * data-binding failure, so a step that never reached the wire retires its
-     * VU exactly as a completed one does - a VU left busy permanently shrinks
-     * effective concurrency.
+     * machine; beside a Stop's cancellation in `finish_without_response`, the
+     * only writer of `busy`'s `true -> false` edge. Shared by the completion
+     * callback, the controller skip and the data-binding failure, so a step
+     * that never reached the wire retires its VU as a completed one does: a VU
+     * left busy permanently shrinks effective concurrency.
      *
-     * A step that got no response ends its iteration as abandoned (#2947), and
-     * so does one that set a jump the run cannot honour (#2974); both are
-     * `errored`. One whose inline script threw is `errored` and the iteration
-     * walks on, so a script bug cannot shrink the load. A response with an
-     * HTTP error status is no outcome at all (`record_step_response` counts it
-     * in `httpErrors`).
+     * A step with no response ends its iteration as abandoned (#2947), as does
+     * one that set a jump the run cannot honour (#2974); both are `errored`.
+     * One whose inline script threw is `errored` and the iteration walks on, so
+     * a script bug cannot shrink the load. An HTTP error status is no outcome
+     * at all (`record_step_response` counts it in `httpErrors`).
      *
-     * @p next_cookies is null for an outcome that carries none - an error, or a
-     * step that was never sent. @p after_outcomes are the step's `step.after`
-     * outcomes, empty for a step that never reached that phase.
-     * @p next_target_from_before is `control.switch`'s own dispatch (issue
-     * #1569, `run_step_before`'s return), which `read_flow_control` weighs.
+     * @p next_cookies is null for an outcome carrying none (an error, or a step
+     * never sent). @p after_outcomes are the step's `step.after` outcomes,
+     * empty for a step that never reached that phase.
+     * @p next_target_from_before is `control.switch`'s dispatch (#1569,
+     * `run_step_before`'s return), which `read_flow_control` weighs.
      */
     static void finish_step (const std::shared_ptr<RunContext>& context,
     const std::shared_ptr<ScenarioLoadState>& state,
@@ -1536,10 +1491,10 @@ class ScenarioLoadDriver {
             step_index, *vu, outcome, std::move (next_target_from_before));
             next = decide_next_position (context, *state, plan, *vu, step_index, next_target);
         }
-        // A jump the run cannot honour is the step's error, decided before
-        // the outcome is counted so the execution has one outcome, as a
-        // collection run's `decide_next_step` decides it before the row is
-        // classified (#2974).
+        // A jump the run cannot honour is the step's error, decided before the
+        // outcome is counted so the execution has one outcome, as a collection
+        // run's `decide_next_step` decides before the row is classified
+        // (#2974).
         if (next.abandoned) {
             outcome = StepOutcome::Errored;
         }
@@ -1553,30 +1508,27 @@ class ScenarioLoadDriver {
             end_iteration (*state, *vu, next.abandoned);
         } else {
             vu->step = next.position;
-            // Replace, never merge - the captured list is the whole jar the
-            // handle held, so merging would resurrect a cookie the server
-            // deleted by expiring it. This step's own send (a jump target
-            // does not change whether *this* step sent one) is what
-            // @p next_cookies describes either way.
+            // Replace, never merge: the captured list is the handle's whole
+            // jar, so merging would resurrect a cookie the server expired.
+            // @p next_cookies describes this step's own send either way (a jump
+            // target does not change whether *this* step sent one).
             vu->cookies =
             next_cookies != nullptr ? *next_cookies : std::vector<std::string>{};
         }
 
-        // Always, even after an errored step: the VU still has a next step
-        // (the wrap-to-0 above already decided which), and a folder's
-        // pacing must hold whether the pass that just ended succeeded or
-        // not - "regardless of the folder's own duration" includes an
-        // error's duration too.
+        // Always, even after an errored step: the VU still has a next step (the
+        // wrap-to-0 above decided which), and a folder's pacing holds whether
+        // or not the pass that ended succeeded; "regardless of the folder's own
+        // duration" includes an error's.
         schedule_next_entry_wait (plan.steps[vu->step], *vu,
         SharedScheduleState{ .pacing = &state->shared_pacing,
         .throughput                  = &state->shared_throughput_budgets,
         .timers_override             = &context->timers_override,
         .rng                         = &vu->rng });
 
-        // Released *before* handle_result, which is what increments the
-        // completion count `in_flight()` is derived from: a VU that became
-        // ready after the count moved would leave the controller computing
-        // a deficit it cannot fill.
+        // Released *before* handle_result, which increments the completion
+        // count `in_flight()` derives from: a VU becoming ready after the count
+        // moved would leave the controller computing a deficit it cannot fill.
         vu->busy.store (false, std::memory_order_release);
     }
 
@@ -1590,13 +1542,11 @@ class ScenarioLoadDriver {
         bool abandoned = false;
     };
 
-    /**
-     * `control.transaction` (#3054): every transaction the step is a member
-     * of, settled on the sequential run's terms (`settle_transactions`), then
-     * the step's `step.after` outcomes tallied with any close written onto
-     * them, and each pass that closed here recorded. A close is the one
-     * outcome carrying `duration_us`, with its declared name in `message`.
-     */
+    /// `control.transaction` (#3054): settles every transaction the step is a
+    /// member of on the sequential run's terms (`settle_transactions`), tallies
+    /// the step's `step.after` outcomes with any close written onto them, and
+    /// records each pass that closed here. A close is the one outcome carrying
+    /// `duration_us`, its declared name in `message`.
     static void settle_step_transactions (ScenarioLoadState& state,
     const ScenarioStep& step,
     size_t step_index,
@@ -1636,22 +1586,21 @@ class ScenarioLoadDriver {
 
     /**
      * The jump this step asks for, if any: `control.loop`'s from
-     * `step.between`, which is chronologically last and so overrides
-     * `control.switch`'s from `step.before` on the sequential run's "last
-     * call wins" terms (`decide_next_step` reads its post-script over its
-     * pre).
+     * `step.between`, chronologically last, so it overrides `control.switch`'s
+     * from `step.before` on the sequential run's "last call wins" terms
+     * (`decide_next_step` reads its post-script over its pre).
      *
-     * An `errored` step's own instruction is never read (#2526, #2974): it
-     * came from a step that did not finish, so the iteration walks to the
-     * next position, as on a collection run. That drops both `Next`
-     * channels, a matching `control.switch` and a `control.loop` repeat,
-     * and with them a `"null"` target's end of the iteration. A controller's
-     * skip has already happened, before the wire, and no other instruction
-     * reaches this path: an inline script's `pm.execution` call throws on a
-     * load run. `step.between` still runs, which a collection run skips after
-     * an errored step, so its waits hold: dropping them would let a script
-     * bug raise the rate the target receives. A `control.loop` there still
-     * counts the pass it is not allowed to repeat.
+     * An `errored` step's instruction is never read (#2526, #2974): it came
+     * from a step that did not finish, so the iteration walks to the next
+     * position, as on a collection run. That drops both `Next` channels (a
+     * matching `control.switch`, a `control.loop` repeat) and with them a
+     * `"null"` target's end of the iteration. A controller's skip already
+     * happened before the wire, and no other instruction reaches this path: an
+     * inline script's `pm.execution` call throws on a load run. `step.between`
+     * still runs, unlike after an errored step on a collection run, so its
+     * waits hold: dropping them would let a script bug raise the rate the
+     * target receives. A `control.loop` there still counts the pass it may not
+     * repeat.
      */
     static std::optional<std::string> read_flow_control (
     const std::shared_ptr<RunContext>& context,
@@ -1668,14 +1617,12 @@ class ScenarioLoadDriver {
         return next_target ? std::move (next_target) : std::move (next_target_from_before);
     }
 
-    /**
-     * Where the VU goes after a step that got a response or was skipped. A
-     * jump target resolves against the plan the way a script's own
-     * `setNextRequest` does (`resolve_next_step`). A target no step answers
-     * to, and a jump past `maxStepsPerIteration`, end the iteration as
-     * abandoned and make the step `errored`, with the collection run's
-     * error text in the log, since a load run stores no step rows.
-     */
+    /// Where the VU goes after a step that got a response or was skipped. A
+    /// jump target resolves against the plan as a script's `setNextRequest`
+    /// does (`resolve_next_step`). A target no step answers to, or a jump past
+    /// `maxStepsPerIteration`, ends the iteration as abandoned and makes the
+    /// step `errored`, with the collection run's error text in the log, since a
+    /// load run stores no step rows.
     static NextStep decide_next_position (const std::shared_ptr<RunContext>& context,
     const ScenarioLoadState& state,
     const ScenarioPlan& plan,
@@ -1719,13 +1666,11 @@ class ScenarioLoadDriver {
         { "stepError", vayu::utils::bounded_log_text (error) } });
     }
 
-    /**
-     * The VU's iteration over: counted, and the VU reset to start the next
-     * one at step 0. An abandoned iteration ends here rather than stranding
-     * the VU, which would permanently shrink effective concurrency for the
-     * rest of the run; an ordinary last step or an explicit end of the
-     * iteration counts as completed - neither is a failure.
-     */
+    /// The VU's iteration over: counted, and the VU reset to start the next at
+    /// step 0. An abandoned iteration ends here rather than stranding the VU,
+    /// which would shrink effective concurrency for the rest of the run; an
+    /// ordinary last step or an explicit end counts as completed, neither a
+    /// failure.
     static void end_iteration (ScenarioLoadState& state, VirtualUser& vu, bool abandoned) {
         if (abandoned) {
             state.iterations_abandoned.fetch_add (1, std::memory_order_relaxed);
@@ -1751,9 +1696,8 @@ class ScenarioLoadDriver {
     size_t max_iterations_ = 0;
     size_t cursor_         = 0;
     size_t live_vus_       = 0;
-    // `take_ready_vu`'s single writer, `deferred_wait_ms`'s single reader -
-    // both called only from the strategy thread, so this needs no lock of
-    // its own (issue #1596).
+    // `take_ready_vu` its single writer, `deferred_wait_ms` its single reader,
+    // both only on the strategy thread, so it needs no lock (#1596).
     std::optional<int64_t> earliest_deferred_ready_at_ms_;
     // One per `context_->auth_refresh_states` entry, in the same order. Read
     // and written by the strategy thread only, never by a completion callback.
@@ -1773,9 +1717,9 @@ vayu::http::routes::RunVariableScopes run_scopes) {
     const auto& config       = context->config;
 
     if (step_count == 0) {
-        // Resolution rejects an empty plan with a 400, so reaching here means a
-        // caller built a ScenarioExecution by hand. Refuse loudly rather than
-        // spinning a controller whose submit can never do anything.
+        // Resolution rejects an empty plan with a 400, so this is a hand-built
+        // ScenarioExecution; refused loudly rather than spinning a controller
+        // whose submit can do nothing.
         throw std::invalid_argument ("Scenario load run has no steps");
     }
 
@@ -1813,9 +1757,9 @@ vayu::http::routes::RunVariableScopes run_scopes) {
     std::move (run_scopes), script_config);
     state->data_row_count = execution.data_rows.size ();
     state->scripts_mode   = context->scripts_override;
-    // The same cycle guard the sequential run's own `setNextRequest` walk
-    // uses (issue #1569), against a `control.switch`/`control.loop` plan
-    // whose jump never reaches an end.
+    // The cycle guard the sequential run's `setNextRequest` walk uses (#1569),
+    // against a `control.switch` / `control.loop` plan whose jump never reaches
+    // an end.
     state->max_steps_per_iteration = resolve_max_steps_per_iteration (
     db.get_config_int ("maxStepsPerIteration", 0), step_count);
     state->vus.reserve (vu_count);
@@ -1837,17 +1781,16 @@ vayu::http::routes::RunVariableScopes run_scopes) {
         context->requests_expected = max_iterations * step_count;
     }
 
-    // Which steps the deferred pass will read a sample of. Sized here, before
-    // the first submission, because the completion path only ever reads it.
-    // A plan no deferred pass will look at gets no stores at all, so it samples
-    // nothing and the report omits the sections rather than showing zeros.
+    // Which steps the deferred pass will read a sample of, sized before the
+    // first submission because the completion path only reads it. A plan no
+    // deferred pass looks at gets no stores, samples nothing, and the report
+    // omits the sections rather than showing zeros.
     //
-    // Two reasons to keep a step's responses, not one (issue #682): a script to
-    // replay against them, or a contract to check them against. A step bound to
-    // an operation is a candidate whenever the run carries a schema index -
-    // whether the index actually *declares* that operation is a question only
-    // the deferred pass can answer, and answering it here would mean parsing
-    // the whole index on the setup path to save a reservoir.
+    // Two reasons to keep a step's responses (#682): a script to replay, or a
+    // contract to check. A step bound to an operation is a candidate whenever
+    // the run carries a schema index: whether the index *declares* that
+    // operation only the deferred pass can answer, and answering here would
+    // parse the whole index on the setup path to save a reservoir.
     {
         const bool validating = !execution.spec.response_schemas.empty ();
         std::vector<bool> sampled (step_count, false);
@@ -1874,9 +1817,8 @@ vayu::http::routes::RunVariableScopes run_scopes) {
 
     ScenarioLoadDriver driver (context, db, execution, state, max_iterations);
 
-    // Through the one duration parser, so a mistyped "30sec" fails this run the
-    // same way it fails a single-request one rather than silently running for a
-    // minute.
+    // Through the one duration parser, so a mistyped "30sec" fails this run as
+    // it fails a single-request one rather than silently running for a minute.
     const int64_t duration_ms = *type == LoadTestType::Iterations ?
     std::numeric_limits<int64_t>::max () :
     duration_field_ms (config, "duration", 60000);
@@ -1892,9 +1834,8 @@ vayu::http::routes::RunVariableScopes run_scopes) {
         }
         return ramp_target_concurrency (start_vus, target_vus, ramp_ms, elapsed);
     },
-    // The budget is how many VUs could still be given work. For a duration-
-    // bounded run that is every live VU; for an `iterations` run it shrinks to
-    // zero as they retire, which is what ends the loop.
+    // The budget: VUs that could still be given work
+    // (`ScenarioLoadDriver::live_vus`).
     [&driver] () { return driver.live_vus (); },
     [type, duration_ms, &driver] (int64_t elapsed) {
         return *type == LoadTestType::Iterations ? driver.live_vus () > 0 :
@@ -1906,7 +1847,7 @@ vayu::http::routes::RunVariableScopes run_scopes) {
     *type == LoadTestType::RampUp ? std::optional<int64_t> (duration_ms) : std::nullopt);
 
     // The start-of-run figure is an upper bound: an abandoned iteration never
-    // sends its later steps (#2914). A natural end has retired every VU, and
+    // sends its later steps (#2914). A natural end has retired every VU and
     // `submit_one` is `requests_sent`'s only writer, so the count is final
     // here. A stopped run keeps the bound, which is what it fell short of.
     if (max_iterations > 0 && !context->stop_decides_outcome ()) {

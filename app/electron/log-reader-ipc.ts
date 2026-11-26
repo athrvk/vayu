@@ -6,25 +6,22 @@
  */
 
 /**
- * @file log-reader-ipc.ts
- * @brief The Logs tab's IPC (#3635) over `log-reader.ts`: `logs:list` and
- *        `logs:read` (invoke), `logs:tail-start` / `logs:tail-stop` (invoke),
- *        and `logs:records`, the one-way push main sends the tailing renderer.
+ * @brief The Logs tab's IPC (#3635) over `log-reader.ts`: `logs:list` and `logs:read` (invoke),
+ *        `logs:tail-start` / `logs:tail-stop` (invoke), and `logs:records`, the one-way push main
+ *        sends the tailing renderer.
  *
- * The log files are the user's data and include what the app logged about
- * them, so every handler answers only the app window's main frame
- * (`ipc-sender.ts`). A renderer names no path: it sends names it was given by
- * `logs:list` and cursors it was given by `logs:read`, and the reader resolves
- * both through its own listing. What this module adds is the shape check of
- * what the wire carries, since the reader's own checks start from its types.
+ * The log files are the user's data and include what the app logged about them, so every handler
+ * answers only the app window's main frame (`ipc-sender.ts`). A renderer names no path: it sends
+ * names `logs:list` gave it and cursors `logs:read` gave it, and the reader resolves both through
+ * its own listing. What this module adds is the shape check of what the wire carries, since the
+ * reader's own checks start from its types.
  *
- * One tail per renderer: a second `logs:tail-start` replaces the first, and a
- * tail ends with `logs:tail-stop`, its renderer being destroyed or navigating,
- * or the app quitting (`stopAll`). The tail's batches go out as they arrive;
- * nothing here logs per batch, since a log line written while tailing is
- * itself a line for the tail to deliver. The reply types are the reader's
- * (`ReadLogsResult`, `LogBatch`), mirrored by `electronAPI.logs` in
- * `preload.ts` and `src/types/electron.d.ts`, neither of which can import.
+ * One tail per renderer: a second `logs:tail-start` replaces the first, and a tail ends with
+ * `logs:tail-stop`, its renderer being destroyed or navigating, or the app quitting (`stopAll`).
+ * The tail's batches go out as they arrive; nothing here logs per batch, since a log line written
+ * while tailing is itself a line for the tail to deliver. The reply types are the reader's
+ * (`ReadLogsResult`, `LogBatch`), mirrored by `electronAPI.logs` in `preload.ts` and
+ * `src/types/electron.d.ts`, neither of which can import.
  */
 
 import { LEVEL_ORDER } from "./log.js";
@@ -159,10 +156,9 @@ function readCursor(value: unknown): LogCursor {
 }
 
 /**
- * `logs:read`'s payload as the reader's options. The reader checks the values
- * (a name against the log file pattern, an offset a whole number, `around` a
- * timestamp, one of `before`, `around` and `after`); this checks that each is
- * the type it will be asked to compare.
+ * `logs:read`'s payload as the reader's options. The reader checks the values (a name against the
+ * log file pattern, an offset a whole number, `around` a timestamp, one of `before`, `around` and
+ * `after`); this checks that each is the type it will be asked to compare.
  */
 export function readLogsRequest(value: unknown): ReadLogsOptions {
 	const input = asRecord(value, "the payload");
@@ -190,9 +186,8 @@ export function registerLogReaderIpc(ipc: IpcLike, deps: LogReaderIpcDeps): LogR
 	const readerDeps = () => ({ fs: deps.fs, logsDir: deps.logsPath() });
 	const tails = new Map<number, LogTail>();
 	/**
-	 * What a start is waiting on: `createLogTail` is async, so a stop or a
-	 * second start can land while the first is still opening files, and the
-	 * tail it then returns must not be kept.
+	 * What a start is waiting on: `createLogTail` is async, so a stop or a second start can land
+	 * while the first is still opening files, and the tail it then returns must not be kept.
 	 */
 	const starts = new Map<number, symbol>();
 

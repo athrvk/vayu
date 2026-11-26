@@ -6,44 +6,33 @@
  */
 
 /**
- * useVariableCompletionProvider Hook
+ * `{{variable}}` autocomplete inside the Monaco editors, as `VariableInput` offers on every plain
+ * field the moment you type `{{`; the body editors are where the *longest* payloads are written.
  *
- * `{{variable}}` autocomplete inside the Monaco editors.
+ * **Registered for the body languages only.** `json`, `plaintext`, `graphql` and `xml` are what
+ * `CodeEditor` mounts for a request body. Deliberately *not* `javascript`: the script editors are
+ * the one place `{{name}}` is not the syntax (a script reaches variables through
+ * `pm.environment.get()`, its sibling scope accessors, or the merged `pm.variables.get()`), and
+ * offering brace completion there would teach the wrong thing.
  *
- * Every plain field in the request builder has had this for a long time -
- * `VariableInput` pops a list the moment you type `{{`. The body editors never
- * did, so the one place you write the *longest* payloads was also the only
- * place you had to remember a variable's name and spell it yourself.
+ * **Scoped to the active tab's collection.** A provider is registered once per language, so unlike
+ * `VariableInput` it has no request builder context to take a `collectionId` from, and without one
+ * `useVariableResolver` leaves every collection-scope variable out. `useActiveCollectionId`
+ * supplies it, so the list is globals + the whole ancestor chain + the active environment, exactly
+ * the set `{{name}}` resolves against at compose time.
  *
- * **Registered for the body languages only.** `json`, `plaintext`, `graphql`
- * and `xml` are what `CodeEditor` mounts for a request body. Deliberately *not*
- * `javascript`: the script editors are the one place `{{name}}` is not the
- * syntax - a script reaches variables through `pm.environment.get()`, its
- * sibling scope accessors, or the merged `pm.variables.get()`, and offering
- * brace completion there would teach the wrong thing.
+ * **Declared data columns are offered too** (#600). `{{data.email}}` is not a variable (the
+ * namespace is disjoint from the scopes), so the columns come from the contract the collection
+ * chain declares rather than from the resolver's map, as a group of their own between the variables
+ * and the generators.
  *
- * **Scoped to the active tab's collection.** A provider is registered once per
- * language, so unlike `VariableInput` it has no request builder context to take
- * a `collectionId` from - and without one `useVariableResolver` leaves every
- * collection-scope variable out. `useActiveCollectionId` supplies it, so the
- * list is globals + the whole ancestor chain + the active environment, which is
- * exactly the set `{{name}}` resolves against at compose time.
+ * **Each declared column offers both spellings a bound row answers** (#1007): `{{data.email}}`, the
+ * collision-proof one no scope can shadow, and bare `{{email}}`, the one an imported Postman
+ * collection is already written with. Each carries its own `detail` naming which is which, so
+ * picking one from the list is a deliberate choice rather than a guess.
  *
- * **Declared data columns are offered too** (issue #600). `{{data.email}}` is
- * not a variable - the namespace is disjoint from the scopes - so the columns
- * come from the contract the collection chain declares rather than from the
- * resolver's map, and they are a group of their own between the variables and
- * the generators.
- *
- * **Each declared column offers both spellings a bound row answers** (issue
- * #1007): `{{data.email}}`, the collision-proof one that a scope can never
- * shadow, and bare `{{email}}`, the one an imported Postman collection is
- * already written with. Each carries its own `detail` naming which is which,
- * so picking one from the list is a deliberate choice rather than a guess.
- *
- * Called once, in App - a completion provider is global per language, so one
- * registration covers every editor instance. The same shape as
- * `useScriptCompletionProvider` beside it.
+ * Called once, in App: a completion provider is global per language, so one registration covers
+ * every editor instance, the shape of `useScriptCompletionProvider` beside it.
  */
 
 import { useEffect } from "react";
@@ -60,12 +49,10 @@ import { DATA_NAMESPACE_PREFIX } from "@/lib/variable-resolution";
 const CLOSE_BRACES = "}}";
 
 /**
- * What `CodeEditor` mounts for a request body. Scripts are excluded - see above.
- *
- * Exported so `body-editor-completion.test.tsx` can render every body mode and
- * check this list still covers the `language` each editor asks for. The two are
- * wired only by matching strings, several files apart, so a new body mode with
- * a new language would lose completion silently.
+ * What `CodeEditor` mounts for a request body; scripts are excluded (see above). Exported so
+ * `body-editor-completion.test.tsx` can render every body mode and check this list still covers the
+ * `language` each editor asks for: the two are wired only by matching strings, several files apart,
+ * so a new body mode with a new language would lose completion silently.
  */
 export const BODY_LANGUAGES = ["json", "plaintext", "graphql", "xml"];
 
@@ -97,10 +84,9 @@ export function useVariableCompletionProvider() {
 	const collectionId = useActiveCollectionId();
 	const { getAllVariables } = useVariableResolver({ collectionId });
 	/*
-	 * The declared columns of whichever collection in the chain declares them
-	 * (issue #600). Offered from the contract rather than from the variable map
-	 * because the namespace is disjoint from the scopes - `{{data.email}}` is
-	 * never a variable, so nothing in `getAllVariables` can carry it.
+	 * The declared columns of whichever collection in the chain declares them (#600), from the
+	 * contract rather than the variable map: the namespace is disjoint from the scopes, so
+	 * `{{data.email}}` is never a variable and nothing in `getAllVariables` can carry it.
 	 */
 	const dataColumns = useDataContract(collectionId);
 
@@ -215,10 +201,9 @@ export function useVariableCompletionProvider() {
 						filterText: `{{${name}`,
 						range,
 					});
-					// The bare spelling a bound row answers too (issue #1007) - Postman's
-					// own spelling, and what an imported collection is already written
-					// with. Same sort group as the prefixed form above so the two sit
-					// together instead of scattering.
+					// The bare spelling a bound row answers too (#1007): Postman's own, and what an
+					// imported collection is already written with. The prefixed form's sort group,
+					// so the two sit together instead of scattering.
 					suggestions.push({
 						label: column,
 						kind: monaco.languages.CompletionItemKind.Field,

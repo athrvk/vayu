@@ -6,21 +6,15 @@
  */
 
 /**
- * The one place a `DataTokenTone` becomes a colour.
+ * The one place a `DataTokenTone` becomes a colour. Two surfaces paint `{{data.*}}` names, the
+ * `RuntimeToken` overlay and the script panel's "Referenced" chips (#604), and "which colour is
+ * this state" is exactly the fact they must not disagree on; a hand-rolled copy of a primitive does
+ * not receive the primitive's fixes.
  *
- * It lived inside `RuntimeToken` while the overlay was the only surface that
- * painted a `{{data.*}}` name. The script panel's "Referenced" chips paint the
- * same names (issue #604) and were reaching for `destructive` instead, so the
- * table moved out here rather than being copied - a hand-rolled copy of a
- * primitive does not receive the primitive's fixes, and "which colour is this
- * state" is exactly the fact the two surfaces must not disagree on.
- *
- * Its own module, not an export from `RuntimeToken.tsx`: a file that exports
- * both a component and a value cannot be hot-reloaded
- * (`react-refresh/only-export-components`) - the same reason `badgeVariants`
- * sits beside `badge.tsx` rather than in it. Not in `data-contract.ts` either,
- * which is deliberately pure logic shared with the completion providers and the
- * audit, none of which render anything.
+ * Its own module, not an export from `RuntimeToken.tsx`: a file that exports both a component and a
+ * value cannot be hot-reloaded (`react-refresh/only-export-components`), the reason `badgeVariants`
+ * sits beside `badge.tsx` rather than in it. Not in `data-contract.ts` either, which is pure logic
+ * shared with the completion providers and the audit, none of which render anything.
  */
 
 import type { DataTokenTone } from "./data-contract";

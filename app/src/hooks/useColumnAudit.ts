@@ -6,19 +6,16 @@
  */
 
 /**
- * Which columns do these requests reference, measured against `columns`
- * (issues #600, #2050). The collecting half of the audit: `auditDataColumns`
- * buckets, this hook gathers what it buckets, the way a run would see it.
+ * Which columns these requests reference, measured against `columns` (#600, #2050). The collecting
+ * half of the audit: `auditDataColumns` buckets, this hook gathers what it buckets, the way a run
+ * would see it.
  *
- * **What a request sends, not what it holds** (issue #729): a request's
- * `inherit` auth is resolved through its collection chain
- * (`resolveEffectiveAuth`), since a data row binds into the credentials a step
- * presents, and the chain's own scripts are scanned because a run executes them
- * around every step.
+ * **What a request sends, not what it holds** (#729): `inherit` auth is resolved through the
+ * collection chain (`resolveEffectiveAuth`), since a data row binds into the credentials a step
+ * presents, and the chain's own scripts are scanned because a run executes them around every step.
  *
- * Which requests are the caller's question, not this hook's: the Data tab
- * audits every collection its contract answers for, a run audits what it runs,
- * and a load run audits the one request it is about to send.
+ * Which requests is the caller's question: the Data tab audits every collection its contract
+ * answers for, a run audits what it runs, and a load run the one request it is about to send.
  */
 
 import { useMemo } from "react";
@@ -37,15 +34,13 @@ export type ColumnAuditRequest = Pick<
 >;
 
 /**
- * What to audit.
+ * What to audit. Pass a memoised value: it is a dependency of the audit.
  *
- * - **Collection ids**: every stored request in each of them, each under its
- *   own collection's chain.
- * - **Explicit requests**: exactly these, under `collectionId`'s chain (`null`
- *   for a request in no collection, which inherits nothing). For a caller that
- *   holds a request the stored rows may not match yet - a draft being sent.
- *
- * Pass a memoised value: it is a dependency of the audit.
+ * - **Collection ids**: every stored request in each of them, each under its own collection's
+ *   chain.
+ * - **Explicit requests**: exactly these, under `collectionId`'s chain (`null` for a request in no
+ *   collection, which inherits nothing). For a caller that holds a request the stored rows may not
+ *   match yet: a draft being sent.
  */
 export type ColumnAuditSubject =
 	string[] | { collectionId: string | null; requests: readonly ColumnAuditRequest[] };

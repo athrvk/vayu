@@ -6,14 +6,11 @@
  */
 
 /**
- * The run-level average of each network phase: five label/value pairs driven
- * by the shared phase descriptor.
- *
- * Gated on the averages themselves, not on `timingBreakdown`: that object also
- * carries the per-phase percentiles, which exist for runs that stored no
- * traces, and this card renders averages only, so it would print five dashes
- * for them. This is the one renderer with room for the spelled-out label, so it
- * reads `longLabel` ("First byte") where the dense ones read "TTFB".
+ * The run-level average of each network phase: five label/value pairs from the shared phase
+ * descriptor. Gated on the averages themselves, not on `timingBreakdown`: that object also carries
+ * the per-phase percentiles, present for runs that stored no traces, and this card would print five
+ * dashes for them. The one renderer with room for the spelled-out label, so it reads `longLabel`
+ * ("First byte") where the dense ones read "TTFB".
  */
 
 import { Card, CardContent, CardHeader, CardTitle, InfoChip } from "@/components/ui";

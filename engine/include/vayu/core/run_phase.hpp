@@ -8,7 +8,6 @@
  */
 
 /**
- * @file core/run_phase.hpp
  * @brief Where a run's worker is, and where it was when the first Stop
  *        landed (#3341).
  *

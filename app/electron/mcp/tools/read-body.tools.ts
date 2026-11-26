@@ -6,7 +6,6 @@
  */
 
 /**
- * @file read-body.tools.ts
  * @brief `read_body` (#3704): a stored body past the inline cap, a page at a
  *        time; `diff_bodies` (#3705): the bounded difference between two.
  */

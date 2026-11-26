@@ -20,11 +20,10 @@ import { DEFAULT_DRAWER_WIDTH, type SidePanelMode } from "@/constants/layout";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
-// The tree's own file, not `@/modules/settings`: that barrel also exports
-// `SettingsMain`, so importing it here - the Drawer is mounted on every tab -
-// would pull the settings surface back into the eager graph and undo the split
-// `Shell` makes of it (#1146). The sibling trees above are deep imports for the
-// same reason.
+// The tree's own file, not `@/modules/settings`: that barrel also exports `SettingsMain`, and the
+// Drawer is mounted on every tab, so the barrel would pull the settings surface back into the eager
+// graph and undo `Shell`'s split (#1146). The sibling trees above are deep imports for the same
+// reason.
 import SettingsCategoryTree from "@/modules/settings/sidebar/SettingsCategoryTree";
 import { ServicesPanel } from "@/modules/services";
 import { TrashList } from "@/modules/trash";
@@ -47,29 +46,27 @@ export function Drawer({ mode = "push", siblingMode = "push" }: DrawerProps) {
 	// An overlay has done its job and leaves, with focus on the tab it opened.
 	const onItemOpened = useCallback(() => {
 		if (mode !== "overlay") return;
-		// Commit the tab the caller just opened first. `Shell` reveals the drawer
-		// when the active tab's type changes, from an effect that this flush runs;
-		// closing before it would be undone by it.
+		// Commit the tab the caller just opened first: `Shell` reveals the drawer when the active
+		// tab's type changes, from an effect this flush runs, and closing before it would be
+		// undone.
 		flushSync(() => {});
 		setDrawerOpen(false);
 		focusActiveTab();
 	}, [mode, setDrawerOpen]);
 
 	return (
-		// See `ContextBar.tsx` for why `Collapsible`/`CollapsibleContent` sit
-		// here rather than the vertical-only wrapper in `collapsible.tsx`, and
-		// for why both carry `asChild` - same primitive, the other axis, the
-		// two sidebars facing each other across the window.
+		// `Collapsible`/`CollapsibleContent` with `asChild`, not `collapsible.tsx`'s vertical-only
+		// wrapper, for `ContextBar.tsx`'s reason: the same primitive on the other axis.
 		<Collapsible asChild open={drawerOpen} onOpenChange={setDrawerOpen}>
 			<CollapsiblePrimitive.CollapsibleContent asChild className="rail-collapse">
-				{/* <aside>, so the sidebar is a landmark a screen reader can jump to
-				   instead of an anonymous div. Labelled by the active view because
-				   the drawer hosts six different panels - "Complementary" alone
-				   would not say which one is showing.
-
-				   Overlay mode is the context bar's, mirrored: the same shadow and
-				   z-index, on the content's left edge where the bar takes its right
-				   one (`Shell` gives the drawer a positioned box of its own). */}
+				{/*
+				 * <aside>, so the sidebar is a landmark a screen reader can jump to. Labelled by
+				 * the active view: the drawer hosts six panels, and "Complementary" alone would not
+				 * say which is showing.
+				 *
+				 * Overlay mode is the context bar's mirrored: the same shadow and z-index, on the
+				 * content's left edge (`Shell` gives the drawer a positioned box of its own).
+				 */}
 				<aside
 					ref={panelRef}
 					className={cn(
@@ -80,29 +77,25 @@ export function Drawer({ mode = "push", siblingMode = "push" }: DrawerProps) {
 					)}
 					style={{ width: drawerWidth }}
 					aria-label={`${drawerView.charAt(0).toUpperCase()}${drawerView.slice(1)} sidebar`}
-					// A stop in the F6 cycle - see `region-focus.ts` for why the bands
-					// are marked rather than found by tag name.
+					// An F6 stop; `region-focus.ts` says why the bands are marked rather than found
+					// by tag name.
 					{...regionProps("drawer")}
 				>
 					<div
 						key={drawerView}
-						// `.enter-fade` fades the view in on every switch - the key
-						// forces a fresh node per view (the six branches below are
-						// already different component types, so this adds no remount
-						// cost beyond what switching views already does). Panel-tier
-						// duration: a sidebar page swap is panel-scale, not the
-						// small-chrome surface `.enter-fade`'s default menu timing was
-						// built for.
+						// `.enter-fade` fades the view in on every switch, the key forcing a fresh
+						// node per view (the six branches are already different component types, so
+						// no extra remount cost). Panel-tier duration: a sidebar page swap is
+						// panel-scale, not the small chrome `.enter-fade`'s default menu timing is
+						// for.
 						className="enter-fade [--enter-fade-duration:var(--dur-panel-in)] panel-clip flex-1 overflow-hidden flex flex-col min-w-0"
 					>
-						{/* Each view supplies its own DrawerPanel, which owns the header
-						    and the scroll region - the Drawer no longer wraps some views
-						    in a ScrollArea and leaves others to manage their own.
-
-						    Views fetch their own data too. The Drawer used to query
-						    collections and environments purely to hand them to the
-						    Variables view, which meant the loading state was lost at the
-						    boundary and an in-flight query rendered as an empty tree. */}
+						{/*
+						 * Each view supplies its own DrawerPanel, which owns the header and the
+						 * scroll region, and fetches its own data: data handed down from here loses
+						 * its loading state at the boundary, and an in-flight query renders as an
+						 * empty tree.
+						 */}
 						<DrawerItemOpenedProvider value={onItemOpened}>
 							{drawerView === "collections" && <CollectionTree />}
 							{drawerView === "history" && <HistoryList />}

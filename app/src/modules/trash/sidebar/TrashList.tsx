@@ -30,9 +30,8 @@ import { restoreNotice } from "../restore-notice";
 import type { TrashEntry } from "@/types";
 
 /**
- * What "Delete forever" says beyond the generic sentence: a collection states
- * the engine's purge totals, a certificate its passphrase. Anything else takes
- * the dialog's own wording.
+ * What "Delete forever" adds to the generic sentence: a collection's purge totals, a certificate's
+ * passphrase. Other kinds take the dialog's own wording.
  */
 function purgeDescription(entry: TrashEntry | null): string | undefined {
 	if (entry?.kind === "clientCertificate") return clientCertificatePurgeDescription(entry.name);
@@ -50,12 +49,8 @@ export default function TrashList() {
 	const restoreMutation = useRestoreTrashMutation();
 	const purgeMutation = usePurgeTrashMutation();
 
-	/*
-	 * The retention window comes from the config the Settings panel already
-	 * fetches, so this costs a cache read rather than a request - and it stays
-	 * right when the user changes the setting, because the update mutation
-	 * writes that same cache.
-	 */
+	// From the config the Settings panel already fetches, so a cache read, not a request, and it
+	// stays right when the setting changes because the update mutation writes that cache.
 	const { data: config } = useConfigQuery();
 	const retention = retentionCopy(retentionDaysFrom(config?.entries));
 
@@ -71,11 +66,9 @@ export default function TrashList() {
 	// array on every render while the query has no data.
 	const entries = useMemo(() => data?.items ?? [], [data]);
 
-	/*
-	 * Gated on there being nothing cached, the way HistoryList gates its own:
-	 * TanStack keeps the last good list through a failed background refetch, and
-	 * a list that is still correct should not be replaced by an error pane.
-	 */
+	// Only while nothing is cached, as HistoryList gates its own: TanStack keeps the last good list
+	// through a failed background refetch, and a list that is still correct should not become an
+	// error pane.
 	const showError = isError && entries.length === 0;
 
 	const handleRestore = async (entry: TrashEntry) => {
@@ -87,12 +80,9 @@ export default function TrashList() {
 			const notice = restoreNotice(restored, entry.name);
 			if (notice) showToast({ message: notice, variant: "info" });
 		} catch (err) {
-			/*
-			 * The engine's refusals are specific and worth repeating verbatim: a
-			 * request whose collection is itself in the trash is a 409 naming
-			 * the item and the Trash root to restore first, which tells the user
-			 * exactly what to do next. Wording invented here could not.
-			 */
+			// The engine's refusals are specific and worth repeating verbatim: a request whose
+			// collection is itself in the trash is a 409 naming the Trash root to restore first,
+			// which wording invented here could not.
 			showToast(
 				err instanceof Error ? err.message : `Couldn't restore "${entry.name}"`,
 				"error"
@@ -120,16 +110,11 @@ export default function TrashList() {
 	};
 
 	/**
-	 * Empty trash (issue #1689): the panel-header counterpart to per-row purge.
-	 *
-	 * No bulk-purge engine route exists (checked against `engine/CLAUDE.md`'s
-	 * HTTP API contract), and the owner's #1683 decision rules out adding one for
-	 * a client-only convenience - so this loops the same per-row mutation the
-	 * rows already use, one at a time rather than in parallel: the trash and the
-	 * engine's file moves behind it are not built for concurrent purges of the
-	 * same list, and a serial loop is the one shape that is definitely safe. A
-	 * row that fails is reported and skipped, not retried, so one stuck entry
-	 * cannot block the rest.
+	 * Empty trash (#1689), the panel-header counterpart to per-row purge. There is no bulk-purge
+	 * engine route (`docs/engine/api-reference/index.md#pages`) and #1683 rules one out for a
+	 * client-only convenience, so this loops the per-row mutation, one at a time: the trash and the
+	 * engine's file moves behind it are not built for concurrent purges of one list. A row that
+	 * fails is reported and skipped, not retried, so one stuck entry cannot block the rest.
 	 */
 	const handleEmptyTrash = async () => {
 		const targets = entries;
@@ -159,12 +144,10 @@ export default function TrashList() {
 	};
 
 	/*
-	 * A purge dialog is controlled with no trigger, so Radix's close-focus has
-	 * nowhere to land and the row it was opened from is about to go (#1234). The
-	 * list is flat, so the rule is simply the next row, or the one before it when
-	 * the purged row was last - and, as in the tree, the move waits for the row
-	 * to actually leave, which here is always after the dialog has closed: this
-	 * dialog closes before the purge is even sent.
+	 * A purge dialog is controlled with no trigger, so Radix's close-focus has nowhere to land, and
+	 * its row is about to go (#1234). The list is flat, so focus goes to the next row, or the one
+	 * before when the purged row was last. As in the tree, the move waits for the row to leave,
+	 * which here is always after the dialog has closed: it closes before the purge is sent.
 	 */
 	const { capture, onCloseAutoFocus } = useRemovalRefocus();
 
@@ -178,9 +161,8 @@ export default function TrashList() {
 
 		capture({
 			doomed: () => rowFor(purgeTarget.id),
-			// Purging the last entry leaves no row to move to, and Trash has no
-			// create control to fall back on the way the trees do - so focus goes
-			// to the list itself, which is still there holding the empty state.
+			// Purging the last entry leaves no row, and Trash has no create control to fall back on
+			// as the trees do, so focus goes to the list itself, which still holds the empty state.
 			successor: () => (successor ? rowFor(successor.id) : listRef.current),
 			focus: (row) => row.focus(),
 		});

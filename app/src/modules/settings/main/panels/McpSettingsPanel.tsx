@@ -6,8 +6,6 @@
  */
 
 /**
- * McpSettingsPanel
- *
  * Client-side panel for the MCP server that exposes Vayu to AI agents (Claude
  * Code, Cursor, Codex). Shows the connection status + one-command onboarding,
  * and edits the safety guardrails (allowlist / caps / writes). Config is
@@ -23,7 +21,7 @@
  * surfaces as a toast and a Retry, with the editors disabled, rather than an
  * empty allowlist the next click would persist over the real one.
  *
- * See docs/engine/mcp.md and SECURITY.md.
+ * See docs/engine/mcp/index.md and SECURITY.md.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -92,13 +90,11 @@ const NETWORK = appSetting("mcp-network-settings");
 const REVEAL = appSetting("mcp-reveal-secrets");
 
 /**
- * Shown until `mcp:status` reports the live URL - deliberately not a URL.
- *
- * The endpoint has one source of truth in the main process (`mcpEndpointUrl`,
- * built from `MCP_HOST`, the configured port and `MCP_PATH`), which this file
- * cannot import: renderer and main share no module graph. A hardcoded copy here is a copy that
- * drifts, and a plausible-looking URL is worse than no URL - it would be copied
- * into an agent's config and silently fail to connect.
+ * Shown until `mcp:status` reports the live URL, deliberately not a URL. The endpoint's one source
+ * of truth is the main process's (`mcpEndpointUrl`, from `MCP_HOST`, the configured port and
+ * `MCP_PATH`), which this file cannot import (renderer and main share no module graph). A hardcoded
+ * copy drifts, and a plausible URL is worse than none: copied into an agent's config, it silently
+ * fails to connect.
  */
 const ENDPOINT_UNKNOWN = "(unavailable - MCP status not loaded)";
 
@@ -133,9 +129,9 @@ function endpointHostPort(url: string): string {
 }
 
 /**
- * What follows the callout's title; the port conflict has its own title and
- * wording. A listener that went away with no recorded failure has no reason to
- * give, and guessing one would be the claim this used to make about the port.
+ * What follows the callout's title; the port conflict has its own title and wording. A listener
+ * that went away with no recorded failure has no reason to give, and a guessed one (such as the
+ * port) would be a false claim.
  */
 function notListeningDetail(error: McpStartError | undefined): string | undefined {
 	if (!error) return undefined;
@@ -274,10 +270,9 @@ function CopyButton({
 	className?: string;
 	disabled?: boolean;
 }) {
-	// Was a fire-and-forget write with the feedback inside its `then`: a denied
-	// permission rejected instead, so the check never appeared and nothing said
-	// why (#1686). Spelling that old call here would trip
-	// `clipboard-single-writer.test.ts`, which scans the source as written.
+	// `useCopy` reports a denied clipboard permission, so the check never fails silently (#1686).
+	// `clipboard-single-writer.test.ts` scans the source as written, so no direct clipboard call is
+	// spelled here, not even in a comment.
 	const { copy, copied } = useCopy({ feedback: "icon" });
 	return (
 		<Button
@@ -601,8 +596,8 @@ export default function McpSettingsPanel() {
 					showToast(res.message || `Couldn't connect ${CLIENT_LABEL[client]}.`, "error");
 				}
 			} catch (err) {
-				// Without this the rejected invoke only stopped the spinner, so a
-				// connect that never reached the CLI looked like nothing happened.
+				// Otherwise a rejected invoke only stops the spinner, and a connect that never
+				// reached the CLI looks like nothing happened.
 				showToast(
 					err instanceof Error
 						? `Couldn't connect ${CLIENT_LABEL[client]}: ${err.message}`
@@ -633,10 +628,9 @@ export default function McpSettingsPanel() {
 	);
 
 	/*
-	 * The draft lives in the row primitive now, so this only decides whether the
-	 * committed number is worth an IPC round trip: zero and negatives are held
-	 * back rather than sent for the main process to clamp, and an unchanged
-	 * value is not re-persisted.
+	 * The draft lives in the row primitive, so this only decides whether the committed number is
+	 * worth an IPC round trip: zero and negatives are held back rather than sent for the main
+	 * process to clamp, and an unchanged value is not re-persisted.
 	 */
 	const commitCap = useCallback(
 		(key: CapField["key"], raw: string) => {

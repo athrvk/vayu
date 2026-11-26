@@ -14,14 +14,10 @@ interface ScriptsOverrideToggleProps {
 }
 
 /**
- * The `elements.scripts` run override (issue #1594), the same control and the
- * same three values `RunCollectionDialog`'s Scripts toggle offers. No Timers
- * control here, unlike that dialog - not because the engine ignores
- * `elements.timers` on this path (it applies it the same way,
- * `load_strategy.cpp`'s `step.before` / `step.between` contexts), but because
- * this dialog offers nothing to override it with yet: a single request's own
- * `timer.think` is the only timer kind `requestElements` accepts, and there is
- * no UI here for it at all, marked or not.
+ * The `elements.scripts` run override (#1594): `RunCollectionDialog`'s Scripts toggle, the same
+ * three values. No Timers control: the engine does apply `elements.timers` here
+ * (`load_strategy.cpp`'s `step.before` / `step.between`), but a single request's only accepted
+ * timer is its own `timer.think`, and this dialog has no UI for it.
  */
 export function ScriptsOverrideToggle({ value, onChange }: ScriptsOverrideToggleProps) {
 	return (
@@ -39,8 +35,8 @@ export function ScriptsOverrideToggle({ value, onChange }: ScriptsOverrideToggle
 				aria-label="Scripts"
 				value={value}
 				onValueChange={(next) => {
-					// Radix emits "" when the active segment is clicked again; a choice
-					// is not optional here.
+					// Radix emits "" when the active segment is clicked again; a choice is required
+					// here.
 					if (next === "asMarked" || next === "allInline" || next === "allDeferred") {
 						onChange(next);
 					}

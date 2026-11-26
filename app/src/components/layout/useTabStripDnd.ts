@@ -6,24 +6,21 @@
  */
 
 /**
- * Drag-to-reorder for the tab strip: the pointer half of moving a tab, beside
- * the Alt+Arrow chords (#2038).
+ * Drag-to-reorder for the tab strip, the pointer half of moving a tab beside the Alt+Arrow chords
+ * (#2038): the collection tree's `useTreeDnd` with everything tree-shaped removed. The gesture
+ * (`lib/drag/drag-gesture`) and the slot arithmetic (`lib/drag/drop-slot`) are the shared
+ * primitives; what is left is pointer capture, hit testing against the rendered tabs, and the one
+ * write, `moveTabAndFocus`, the keyboard path's call, so a drop and an Alt+Arrow cannot disagree
+ * about focus.
  *
- * The collection tree's `useTreeDnd` with everything tree-shaped removed. The
- * gesture (`lib/drag/drag-gesture`) and the slot arithmetic (`lib/drag/drop-slot`)
- * are the shared primitives; what is left is pointer capture, hit testing against
- * the rendered tabs, and the one write, which is `moveTabAndFocus` - the same call
- * the keyboard path makes, so a drop and an Alt+Arrow cannot disagree about focus.
+ * **No edge auto-scroll.** The strip is `overflow-hidden` on purpose and what does not fit lives in
+ * the overflow menu, so there is nothing to scroll. A pointer past the last visible tab's midpoint
+ * names the slot after it, wherever it is horizontally: `slotAt` counts midpoints, so a pointer
+ * over the "+N" trigger or the "+" button resolves to that slot with no clamping. Overflowed tabs
+ * take no drop; choosing one from the menu surfaces it in the strip.
  *
- * **No edge auto-scroll.** The strip is `overflow-hidden` on purpose and what does
- * not fit lives in the overflow menu, so there is nothing to scroll. A pointer past
- * the last visible tab's midpoint names the slot after it, wherever it is
- * horizontally: `slotAt` counts midpoints, so a pointer over the "+N" trigger or
- * the "+" button needs no clamping to resolve to that same slot. Overflowed tabs
- * cannot be dropped onto; choosing one from the menu surfaces it in the strip.
- *
- * **Release outside the strip cancels.** The pointer's y outside the strip root's
- * rect resolves no slot, and a release with no slot drops nothing.
+ * **Release outside the strip cancels**: a pointer y outside the strip root's rect resolves no
+ * slot, and a release with no slot drops nothing.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -61,13 +58,12 @@ function extentOf(el: HTMLElement): ItemExtent {
 }
 
 /**
- * The `openTabs` index a visible slot inserts before. The strip renders only the
- * tabs that fit, and the active tab is surfaced beside them from wherever it sits,
- * so the visible tabs can have hidden ones between them. A slot other than the
- * first therefore lands right after the visible tab to its left, never before the
- * one to its right: a drop beside a run of hidden tabs goes to the head of that
- * run and the dropped tab stays on screen. The end slot lands after the last
- * rendered tab. `null` when a tab the slot names has since closed.
+ * The `openTabs` index a visible slot inserts before. The strip renders only the tabs that fit,
+ * with the active tab surfaced beside them from wherever it sits, so hidden tabs can lie between
+ * visible ones. A slot other than the first lands right after the visible tab to its left, never
+ * before the one to its right: a drop beside a run of hidden tabs goes to the head of that run and
+ * the dropped tab stays on screen. The end slot lands after the last rendered tab; `null` when a
+ * tab the slot names has since closed.
  */
 function insertionIndex(slot: number, visibleIds: readonly string[]): number | null {
 	if (visibleIds.length === 0) return null;
@@ -83,9 +79,9 @@ function insertionIndex(slot: number, visibleIds: readonly string[]): number | n
 }
 
 /**
- * Where dropping `draggedId` in visible `slot` moves it in the store's list, or
- * `null` when either tab has since closed. Compared in store terms because a gap
- * of hidden tabs makes the visible neighbours of a tab differ from its store ones.
+ * Where dropping `draggedId` in visible `slot` moves it in the store's list, or `null` when either
+ * tab has since closed. In store terms, as a gap of hidden tabs makes a tab's visible neighbours
+ * differ from its store ones.
  */
 function storeMove(
 	slot: number,
@@ -131,10 +127,9 @@ export function useTabStripDnd({ stripRef, visibleIds, onMoved }: TabStripDndOpt
 	const [slot, setSlot] = useState<number | null>(null);
 
 	/*
-	 * The gesture, the pressed tab and the resolved slot are refs, not state: they
-	 * change on every `pointermove`, and a render per move would rebuild the strip
-	 * to move a 2px line. What renders - the dimmed tab and the line - is state,
-	 * and is only written when it changes.
+	 * The gesture, the pressed tab and the resolved slot are refs, not state: they change on every
+	 * `pointermove`, and a render per move would rebuild the strip to move a 2px line. What renders
+	 * (the dimmed tab, the line) is state, written only when it changes.
 	 */
 	const gestureRef = useRef<DragGesture>(IDLE_GESTURE);
 	const pressedRef = useRef<{ tabId: string; pointerId: number; el: HTMLElement } | null>(null);
@@ -225,9 +220,8 @@ export function useTabStripDnd({ stripRef, visibleIds, onMoved }: TabStripDndOpt
 	}, [endDrag]);
 
 	const onClickCapture = useCallback((e: React.MouseEvent<HTMLElement>) => {
-		// A menu item's click bubbles through the tab it belongs to. Swallowing it
-		// would be the drag eating the very action the user chose *because* the
-		// drag before it left a suppression armed.
+		// A menu item's click bubbles through its tab. Swallowing it, because an earlier drag left
+		// a suppression armed, would eat the very action the user chose.
 		if (!isOwnEvent(e)) return;
 		const { gesture, suppressed } = consumeClick(gestureRef.current);
 		gestureRef.current = gesture;
@@ -236,8 +230,8 @@ export function useTabStripDnd({ stripRef, visibleIds, onMoved }: TabStripDndOpt
 		e.stopPropagation();
 	}, []);
 
-	// Escape cancels mid-drag. On `window` rather than the tab: the tab is not
-	// focused during a drag, so a keydown never reaches it.
+	// Escape cancels mid-drag, on `window` rather than the tab: the tab is not focused during a
+	// drag, so a keydown never reaches it.
 	useEffect(() => {
 		if (!draggingId) return;
 		const onKeyDown = (e: KeyboardEvent) => {

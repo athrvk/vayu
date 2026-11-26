@@ -6,19 +6,13 @@
  */
 
 /**
- * An MCP reply read for the response pane (#3841).
- *
- * The body of an `mcp` request is the raw reply (`engine/include/vayu/http/mcp_reply.hpp`):
- * one JSON-RPC response, or a `text/event-stream` whose last `message` event
- * carrying a `result` or `error` is that response. This reads it into the
- * parts the pane draws - the `content[]` blocks, `isError`, `structuredContent`
- * - and answers `null` for anything it cannot read as a tool result, so the
- * caller falls back to the raw JSON alone.
- *
- * The engine keeps the final response to itself; the app has no other copy, so
- * this is a second reader of that one rule. It reads only what the pane draws
- * and never the request id, which a stream's matching depends on: a stream
- * that carries a second response is shown by its last.
+ * An MCP reply read for the response pane (#3841). An `mcp` request's body is the raw reply
+ * (`engine/include/vayu/http/mcp_reply.hpp`): one JSON-RPC response, or a `text/event-stream` whose
+ * last `message` event with a `result` or `error` is that response. This reads it into what the
+ * pane draws (`content[]`, `isError`, `structuredContent`) and answers `null` for anything not a
+ * tool result, so the caller shows the raw JSON alone. The engine keeps the final response to
+ * itself, so this is a second reader of that rule; it reads only what the pane draws, never the
+ * request id a stream's matching uses, so a stream with a second response is shown by its last.
  */
 
 import { LARGE_BODY_BYTES } from "./utils";
@@ -186,9 +180,8 @@ function readEnvelope(reply: JsonObject): McpResult | null {
 }
 
 /**
- * The tool result or JSON-RPC error a reply carries, or `null` when the text
- * is not one: malformed, a reply that is not a tool result, or past the size
- * the pane formats (`LARGE_BODY_BYTES`), which it does not parse.
+ * The tool result or JSON-RPC error a reply carries, or `null`: malformed, not a tool result, or
+ * past `LARGE_BODY_BYTES`, which the pane does not parse.
  */
 export function readMcpResult(text: string): McpResult | null {
 	if (text.length > LARGE_BODY_BYTES) return null;

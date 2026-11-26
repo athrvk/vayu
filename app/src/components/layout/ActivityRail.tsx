@@ -6,31 +6,21 @@
  */
 
 /**
- * The app's primary navigation, on the one edge the OS never covers (#1615).
+ * The app's primary navigation, on the one edge the OS never covers (#1615). On macOS with Dock
+ * auto-hide on, the pointer crossing the screen's bottom edge summons the system Dock over the
+ * app's lowest 60-80px, where these switchers once sat; the left edge is an infinite-width target
+ * the OS never claims, where IntelliJ, VS Code and Postman put theirs.
  *
- * This used to be the Dock's own left half: six buttons in the window's
- * bottom-edge footer. On macOS with Dock auto-hide on, the pointer crossing
- * the screen's bottom edge summons the system Dock over the app's lowest
- * 60-80px - exactly where the switchers sat - so reaching Collections or
- * Trash meant waiting out an animation or aiming short. The left edge is an
- * infinite-width target the OS never claims, which is where every desktop
- * tool with a switchable side panel already puts this (IntelliJ's
- * tool-window stripes, VS Code's Activity Bar, Postman's own left rail).
+ * **The active view is a 2px accent bar on the outer edge, not a filled tile** (`RailButton`'s
+ * `"indicator"` variant): a row of filled squares reads as independent actions, and this is one
+ * mutually-exclusive choice of what the Drawer shows.
  *
- * **Active view marked by a 2px accent bar on the outer edge, not a filled
- * tile** (`RailButton`'s `"edge-left"` variant): a row of filled squares reads
- * as a toolbar of independent actions, and this is one mutually-exclusive
- * choice of what the Drawer shows.
+ * **Deliberately `role="toolbar"`-free:** that role promises full toolbar semantics, which six
+ * toggle buttons in a `<nav>` do not have. Arrow keys still move focus (`onKeyDown`); a `<nav>`
+ * with roving tabindex and no role is what the issue asks for, not an oversight.
  *
- * **Deliberately `role="toolbar"`-free**, same as the Dock nav this replaces:
- * that role promises full toolbar semantics beyond arrow-key traversal, and
- * claiming it for a plain `<nav>` would overstate what six toggle buttons are.
- * Arrow keys still move focus (see `onKeyDown` below) - a `<nav>` supporting
- * roving tabindex without the role is what the issue asks for, not an
- * oversight.
- *
- * A fifth stop in the F6 region cycle (`region-focus.ts`), so a keyboard user
- * can reach the rail even with the Drawer collapsed.
+ * A stop in the F6 region cycle (`region-focus.ts`), so a keyboard user can reach the rail with the
+ * Drawer collapsed.
  */
 
 import { useCallback, useRef } from "react";
@@ -51,20 +41,17 @@ export function ActivityRail() {
 	const activateDrawerView = useLayoutStore((s) => s.activateDrawerView);
 	const runningServices = useRunningServiceCount();
 	const navRef = useRef<HTMLElement>(null);
-	// The roving stop tracks the *selected* view, not whether the Drawer is
-	// currently open on it - the Drawer being closed must not leave the rail
-	// with zero tab stops.
+	// The roving stop tracks the *selected* view, not whether the Drawer is open on it: a closed
+	// Drawer must not leave the rail with no tab stop.
 	const [rovingView, setRovingView] = useRovingStop(drawerView, VIEW_IDS);
 
 	/**
-	 * Up/Down move focus along the rail without activating - the same shape
-	 * `TabStrip`'s arrow-key handler uses, and for the same reason: arrowing
-	 * past every view on the way to Trash must not switch the Drawer six times.
+	 * Up/Down move focus without activating, as `TabStrip`'s arrow keys do: arrowing to Trash must
+	 * not switch the Drawer six times.
 	 *
-	 * DOM query for the focused button, so it always matches what is rendered;
-	 * the roving stop itself is state (`useRovingStop`), since a `.tabIndex` write
-	 * leaves the prop `RailButton` renders unchanged and a later view change
-	 * would add a second stop beside it (#1856).
+	 * The focused button is a DOM query, so it always matches what is rendered; the roving stop is
+	 * state (`useRovingStop`), since a `.tabIndex` write leaves `RailButton`'s prop unchanged and a
+	 * later view change would add a second stop (#1856).
 	 */
 	const onKeyDown = useCallback(
 		(e: React.KeyboardEvent<HTMLElement>) => {
@@ -112,19 +99,20 @@ export function ActivityRail() {
 						variant="indicator"
 						tabIndex={view === rovingView ? 0 : -1}
 					>
-						{/* The descriptor names the motion, not this file: the rail
-						    draws six glyphs generically and must not learn which one
-						    it has (#1687). An entry without a `motion` renders no
-						    attribute at all, since React drops an undefined one -
-						    which matters, because an empty `data-icon-motion` would
-						    still match the block's default-duration rule. The hover
-						    it fires from is `RailButton`'s own `group`. */}
+						{/*
+						 * The descriptor names the motion: the rail draws six glyphs generically
+						 * and must not learn which one it has (#1687). An entry without `motion`
+						 * renders no attribute (React drops an undefined one), which matters
+						 * because an empty `data-icon-motion` would still match the
+						 * default-duration rule. The hover it fires from is `RailButton`'s own
+						 * `group`.
+						 */}
 						<Icon className="size-icon" data-icon-motion={motion} />
-						{/* The one badge the footer carried that moves here: a local
-						    service listening is otherwise invisible outside the surface
-						    that started it (#502). The Dock keeps its own text chip for
-						    the count; this is a plain presence dot, so the two do not
-						    have to agree on wording. */}
+						{/*
+						 * A presence dot: a listening local service is otherwise invisible outside
+						 * the surface that started it (#502). The Dock's text chip carries the
+						 * count, so the two need not agree on wording.
+						 */}
 						{view === "services" && runningServices > 0 && (
 							<span
 								aria-hidden="true"

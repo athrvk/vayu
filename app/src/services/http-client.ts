@@ -12,13 +12,10 @@ import { DEFAULT_REQUEST_TIMEOUT_MS } from "@/config/network";
 import { SSE_ACCEPT } from "@/constants/request";
 
 /**
- * ApiError represents failures in UI-to-Engine communication.
- * This is NOT for HTTP errors from the target server (those come in the response body).
- *
- * Examples of ApiError scenarios:
- * - Engine is not running (connection refused)
- * - Engine returns HTTP 500 (internal engine error)
- * - Request to engine times out
+ * A failure the engine answered with: a non-2xx response to an engine call (a validation `400`, an
+ * engine-side `500`), read by `readApiError`. Not for HTTP errors from the target server, which
+ * come in the response body, and not for an engine that did not answer, which is
+ * {@link EngineUnreachableError}.
  */
 export class ApiError extends Error {
 	constructor(
@@ -33,56 +30,42 @@ export class ApiError extends Error {
 }
 
 /**
- * No answer came back from the engine at all: the connection was refused or dropped, or
- * the call ran out of time before any response arrived.
+ * No answer came back from the engine at all: the connection was refused or dropped, or the call
+ * ran out of time before any response arrived.
  *
- * Its own class, not a bare `Error`, because what it means depends on when it
- * happens: while an engine is starting it is the ordinary state of the port,
- * not a failure (`lib/query-client.ts` retries it through the start window
- * instead of spending the default budget). An `ApiError` is the opposite case,
- * an engine that answered. `name` is left as `Error` so a message rendered with
- * `String(error)` reads exactly as it did before this class existed.
+ * Its own class, not a bare `Error`, because what it means depends on when it happens: while an
+ * engine is starting it is the ordinary state of the port, not a failure (`lib/query-client.ts`
+ * retries it through the start window instead of spending the default budget). An `ApiError` is the
+ * opposite case, an engine that answered. `name` is left as `Error`, so a message rendered with
+ * `String(error)` reads as a plain error's.
  */
 export class EngineUnreachableError extends Error {}
 
 /**
- * One message from a streamed engine call (issue #882).
- *
- * `event` is an SSE frame, in the order the engine wrote it. `buffered` is the
- * whole response body arriving at once, which happens when the engine has never
- * heard of streaming for this route - the app and the sidecar are not updated
- * together, so a new app can be talking to an older engine. Discriminated rather
- * than folded into an event with a reserved name: a consumer has to be able to
- * tell "the engine reported nothing along the way" from "the engine reported
- * this", and a name it had to know was special would not say that.
+ * One message from a streamed engine call (#882). `event` is an SSE frame, in the order the engine
+ * wrote it. `buffered` is the whole response body at once, from an engine that has no streaming for
+ * this route: the app and the sidecar are not updated together, so a new app can be talking to an
+ * older engine. Discriminated rather than folded into an event with a reserved name: a consumer has
+ * to tell "the engine reported nothing along the way" from "the engine reported this", and a name
+ * it had to know was special would not say that.
  */
 export type StreamMessage =
 	{ kind: "event"; event: string; data: unknown } | { kind: "buffered"; data: unknown };
 
 /**
- * The failure an engine response carries, as an `ApiError`.
- *
- * Shared by `request` and `stream`: a streamed call is refused before its stream
- * opens with exactly the body a buffered one is refused with, so reading that
- * body in two places would be two chances to read it differently - which is the
- * defect issue #173 was.
+ * The failure an engine response carries, as an `ApiError`. Shared by `request` and `stream`: a
+ * streamed call is refused before its stream opens with exactly the body a buffered one is refused
+ * with, so reading that body in two places would be two chances to read it differently, the defect
+ * #173 was.
  */
 async function readApiError(response: Response): Promise<ApiError> {
 	const errorData = (await response.json().catch(() => ({}))) as { error?: unknown };
-	// The engine emits one shape since issue #173:
-	// `{"error": {"code", "message"}}`, built by `error_body` in
-	// routes.hpp. It used to emit two - most routes wrote a flat
-	// `{"error": "some message"}` and a handful wrote the nested
-	// object - and reading only the nested one dropped every
-	// validation message the requests, collections and environments
-	// routes produce, surfacing them as a bare "HTTP 400".
-	//
-	// The flat branch stays as a fallback, not as an alternative
-	// contract: the app and the engine sidecar are not updated
-	// atomically, so a new app can be talking to an older engine,
-	// and reading its message is better than showing the status
-	// line. Anything else - a body that is not JSON, an `error`
-	// that is neither - still falls back to the status text.
+	// The engine emits one shape, `{"error": {"code", "message"}}`, built by `error_body` in
+	// routes.hpp (#173). The flat `{"error": "some message"}` branch stays as a fallback, not as an
+	// alternative contract: the app and the engine sidecar are not updated atomically, so a new app
+	// can be talking to an older engine, and reading its message is better than showing the status
+	// line. Anything else (a body that is not JSON, an `error` that is neither) falls back to the
+	// status text.
 	const rawError: unknown = errorData?.error;
 	const nested = typeof rawError === "object" && rawError !== null;
 	const errorCode = nested
@@ -99,11 +82,9 @@ async function readApiError(response: Response): Promise<ApiError> {
 }
 
 /**
- * The error a caller's own cancel raises (issue #893).
- *
- * Named `AbortError` because that is what the platform calls this and what a
- * caller already checks for; a bespoke class would be a second vocabulary for
- * the one thing `fetch` and every other cancellable API already agree on.
+ * The error a caller's own cancel raises (#893), named `AbortError` because that is what the
+ * platform calls it and what a caller already checks for; a bespoke class would be a second
+ * vocabulary for what `fetch` and every other cancellable API already agree on.
  */
 function abortError(): Error {
 	const error = new Error("Aborted by the caller");
@@ -112,14 +93,11 @@ function abortError(): Error {
 }
 
 /**
- * The one translation from a transport-level rejection to the sentence a caller
- * shows, shared by the plain request path and the streaming one.
- *
- * Every branch carries the original as `cause`. The messages here are written
- * for a user - "Couldn't reach Vayu's engine in time" says nothing about which
- * socket gave up - so without the chain the underlying failure is not
- * recoverable from what was thrown, which is what `preserve-caught-error` is
- * about.
+ * The one translation from a transport-level rejection to the sentence a caller shows, shared by
+ * the plain request path and the streaming one. Every branch carries the original as `cause`: the
+ * messages are written for a user ("Couldn't reach Vayu's engine in time" says nothing about which
+ * socket gave up), so without the chain the underlying failure is not recoverable from what was
+ * thrown, which is what `preserve-caught-error` is about.
  */
 function asTransportError(error: unknown): EngineUnreachableError {
 	if (error instanceof Error) {
@@ -138,12 +116,10 @@ function asTransportError(error: unknown): EngineUnreachableError {
 }
 
 /**
- * Split a buffer into whole SSE frames, keeping whatever is still incomplete.
- *
- * A `ReadableStream` hands over whatever arrived, not whole frames, so a frame
- * straddling a chunk boundary is the normal case rather than the edge one - and
- * with megabytes of content in a single `result` frame it is a certainty. `\r\n`
- * is normalized because SSE permits it; the engine writes `\n`.
+ * Split a buffer into whole SSE frames, keeping whatever is still incomplete. A `ReadableStream`
+ * hands over whatever arrived, not whole frames, so a frame straddling a chunk boundary is the
+ * normal case, and with megabytes of content in a single `result` frame a certainty. `\r\n` is
+ * normalized because SSE permits it; the engine writes `\n`.
  */
 function takeFrames(buffer: string): { frames: string[]; rest: string } {
 	const normalized = buffer.replace(/\r\n/g, "\n");
@@ -152,11 +128,9 @@ function takeFrames(buffer: string): { frames: string[]; rest: string } {
 }
 
 /**
- * One SSE frame's event name and data, or null for a frame that carries neither.
- *
- * A line beginning `:` is SSE's comment - the keep-alive the engine's relays
- * write - and a frame with no `event:` line is named `message`, which is the
- * spec's default rather than a reason to drop it.
+ * One SSE frame's event name and data, or null for a frame that carries neither. A line beginning
+ * `:` is SSE's comment (the keep-alive the engine's relays write), and a frame with no `event:`
+ * line is named `message`, the spec's default rather than a reason to drop it.
  */
 function parseFrame(frame: string): { event: string; data: unknown } | null {
 	let event = "message";
@@ -218,11 +192,10 @@ class HttpClient {
 				url += `?${params.toString()}`;
 			}
 
-			// Build fetch options. `cache: "no-store"` is belt and braces (#1507):
-			// the engine already answers every response with `Cache-Control:
-			// no-store`, but a dev build talking to an older engine, or a future
-			// route that forgets the header, should not refill Chromium's disk
-			// cache with live engine state either.
+			// Build fetch options. `cache: "no-store"` is belt and braces (#1507): the engine
+			// already answers every response with `Cache-Control: no-store`, but a dev build
+			// talking to an older engine, or a route that forgets the header, should not refill
+			// Chromium's disk cache with live engine state either.
 			const fetchOptions: RequestInit = {
 				method,
 				signal: controller.signal,
@@ -281,27 +254,22 @@ class HttpClient {
 	}
 
 	/**
-	 * POST that consumes a `text/event-stream` response as it arrives
-	 * (issue #882).
+	 * POST that consumes a `text/event-stream` response as it arrives (#882).
 	 *
-	 * The timeout is an **idle** one, not a total: the whole point of a streamed
-	 * call is work that takes longer than a request should, and a 10 MB download
-	 * arriving steadily over a minute is healthy while thirty seconds of silence
-	 * is not. Every chunk resets it, so what is bounded is the stall rather than
-	 * the transfer - which is also what lets this outlive `proxiedRequestTimeoutMs`.
+	 * The timeout is an **idle** one, not a total: a streamed call exists for work that takes
+	 * longer than a request should, and a 10 MB download arriving steadily over a minute is healthy
+	 * while thirty seconds of silence is not. Every chunk resets it, so the stall is bounded rather
+	 * than the transfer, which is also what lets this outlive `proxiedRequestTimeoutMs`.
 	 *
-	 * A response that is not a stream yields one `buffered` message instead of
-	 * being retried: the engine has already done the work, and asking again would
-	 * be asking for the same megabytes twice.
+	 * A response that is not a stream yields one `buffered` message instead of being retried: the
+	 * engine has already done the work, and asking again would fetch the same megabytes twice.
 	 *
-	 * @param options.signal the caller's own cancel (issue #893). Abandoning the
-	 * iteration already releases the stream, but a caller that is *not* iterating -
-	 * a dialog closing while an awaited helper sits in the loop on its behalf - has
-	 * no way to reach that, and the engine goes on downloading megabytes for
-	 * nobody. An abort through this raises an `AbortError`, kept distinct from the
-	 * idle stall's timeout message: both end in an `AbortController`, and a
-	 * deliberate cancel reported as a timeout is a banner about a failure nobody
-	 * had.
+	 * @param options.signal the caller's own cancel (#893). Abandoning the iteration already
+	 *        releases the stream, but a caller that is *not* iterating (a dialog closing while an
+	 *        awaited helper sits in the loop on its behalf) cannot reach that, and the engine goes
+	 *        on downloading megabytes for nobody. An abort raises an `AbortError`, kept distinct
+	 *        from the idle stall's timeout message: both end in an `AbortController`, and a
+	 *        deliberate cancel reported as a timeout is a banner about a failure nobody had.
 	 */
 	async *stream(
 		path: string,
@@ -328,11 +296,10 @@ class HttpClient {
 			clearTimeout(idleTimer);
 			idleTimer = setTimeout(() => controller.abort(), idleTimeout);
 		};
-		// Held outside the try so the `finally` can let go of it. A consumer that
-		// stops reading - the import dialog closing mid-download - resumes this
-		// generator at its `finally` and nowhere else, so this is the only place
-		// the stream can be released from. Left open, the engine keeps reading a
-		// download for a listener that has gone.
+		// Held outside the try so the `finally` can let go of it. A consumer that stops reading
+		// (the import dialog closing mid-download) resumes this generator at its `finally` and
+		// nowhere else, so this is the only place the stream can be released; left open, the engine
+		// keeps reading a download for a listener that has gone.
 		let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
 		try {
@@ -423,5 +390,4 @@ class HttpClient {
 	}
 }
 
-// Export singleton instance
 export const httpClient = new HttpClient(API_ENDPOINTS.BASE_URL);

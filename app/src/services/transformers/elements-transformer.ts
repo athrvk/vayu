@@ -6,15 +6,12 @@
  */
 
 /**
- * Normalize a request or collection row's `elements` column (issue #1512).
- *
- * Shared by both transformers rather than duplicated: a request and a
- * collection carry the identical shape, and the "written but never read"
- * defect this codebase repeats is exactly a second reader drifting from the
- * first. A malformed entry (missing `id`/`kind`, or a `config` that is not an
- * object) is dropped rather than passed through - a `Request`/`Collection`
- * elsewhere in the app can otherwise assume every entry validates against its
- * kind's schema, which the engine already guarantees on write.
+ * Normalize a request or collection row's `elements` column (#1512). Shared by both transformers
+ * rather than duplicated: a request and a collection carry the identical shape, and the "written
+ * but never read" defect this codebase repeats is exactly a second reader drifting from the first.
+ * A malformed entry (missing `id`/`kind`, or a `config` that is not an object) is dropped rather
+ * than passed through, so a `Request`/`Collection` elsewhere in the app can assume every entry
+ * validates against its kind's schema, which the engine already guarantees on write.
  */
 
 import { asRecord, asStr } from "@/lib/json-node";

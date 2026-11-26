@@ -19,10 +19,7 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 import { MethodBadge } from "./MethodBadge";
 import { TruncatedText } from "./TruncatedText";
 
-/**
- * A step's row header: its position, its method where it has one, its name, and
- * the engine's label for what the step ran where it has one (#3829).
- */
+/** A step's row header: its position, its method and engine label where it has them, and its name. */
 export function StepLabelCell({
 	index,
 	method,
@@ -33,7 +30,7 @@ export function StepLabelCell({
 	/** Absent live, where a frame names the step and not its request. */
 	method?: string;
 	name: string;
-	/** `RunScenarioStepStat.label`, e.g. `tools/call search`. Absent live and for a step with no label. */
+	/** `RunScenarioStepStat.label` (#3829); absent live. */
 	label?: string;
 }) {
 	return (

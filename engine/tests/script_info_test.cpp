@@ -4,7 +4,7 @@
  *        from on POST /execute, and that POST /compose emits it.
  *
  * The sandbox half - what a script actually reads - lives in
- * script_engine_test.cpp. What is pinned here is the plumbing that decides
+ * script_engine_request_test.cpp. What is pinned here is the plumbing that decides
  * whether the script has anything to read: a name sent inline (the renderer's
  * path, whose editor state may be unsaved), a name looked up from the stored
  * row (MCP's path, which links a `requestId` without sending a name), and the

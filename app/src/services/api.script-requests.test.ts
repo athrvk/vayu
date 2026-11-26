@@ -13,7 +13,7 @@
  * MCP server *before* the engine is called - a request sent from inside a
  * script never passes that gate. The renderer is the surface whose scripts the
  * user wrote, so it asks; the MCP server never does (asserted in
- * `electron/mcp/tools.test.ts`).
+ * `electron/mcp/tools/run-request.tools.test.ts`).
  *
  * Asserted on the captured body rather than on behaviour, for the same reason
  * `api.write-verbs.test.ts` is: nothing about a Send changes shape when this

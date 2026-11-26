@@ -6,27 +6,18 @@
  */
 
 /**
- * RecentRuns
+ * Flat rows, not cards (a card grid reads as a landing page), in the app's run vocabulary (method
+ * badge, type badge, status tokens, mono timestamps) so it matches the dashboard and history views.
  *
- * Flat rows rather than cards - the card grid is what made the old screen read
- * as a landing page. Carries the app's existing run vocabulary (method badge,
- * type badge, status tokens, mono timestamps) so it matches the dashboard and
- * history views.
+ * Each row leads with what was run, or the list reads "Load · Completed · 2 hours ago" five times
+ * with nothing telling the rows apart: the method and URL from the run `summary`, as the history
+ * sidebar shows. Not the request's *name*: a run stores none, and `requestId` is set only for
+ * design runs, so most rows (every load test) would have nothing to look up. The snapshot's URL is
+ * always there and is what was actually sent, even if the request was since renamed, edited or
+ * deleted.
  *
- * Each row leads with what was run. Without that the list read "Load ·
- * Completed · 2 hours ago" five times over, with nothing to tell one row from
- * the next - you had to open a run to find out which one it was.
- *
- * The identifier is the method and URL from the run `summary`, which is what
- * the history sidebar shows for the same records. Not the request's *name*: a run
- * stores no name, and `requestId` is only set for design runs, so most rows -
- * every load test - would have nothing to look up. The snapshot's URL is
- * always there, and it is the truth about what was actually sent, even if the
- * request has since been renamed, edited or deleted.
- *
- * A run whose work is a collection has no URL and no method. Its row names the
- * collection instead, resolved from `summary.scenario.collectionId` the way the
- * history sidebar does (#3496).
+ * A run whose work is a collection has no URL or method; its row names the collection, resolved
+ * from `summary.scenario.collectionId` as the history sidebar does (#3496).
  */
 
 import { ChevronRight } from "lucide-react";
@@ -60,10 +51,9 @@ interface StatusLabel {
 }
 
 /**
- * The word and `--status-*-text` token come from `runStatusDisplay`, fed the
- * run's verdict as the history sidebar's `RunItem` feeds it: two lists of the
- * same runs answering in two different colours is the drift it exists to prevent
- * (#1225), and a collection run with failed steps reading green is that drift
+ * The word and `--status-*-text` token come from `runStatusDisplay`, fed the run's verdict as the
+ * history sidebar's `RunItem` feeds it: two lists of the same runs answering in two colours is the
+ * drift it prevents (#1225), and a collection run with failed steps reading green is that drift
  * again (#3496).
  */
 function statusLabel(run: Run): StatusLabel | null {
@@ -78,10 +68,9 @@ function statusLabel(run: Run): StatusLabel | null {
 }
 
 /**
- * What the row says was run: the collection for a run with a `scenario`
- * descriptor, else its URL. A collection deleted since its run resolves to its
- * id, the one thing the row still has; a run with a descriptor and no id has
- * nothing to say, and the kind chip stands alone.
+ * What the row says was run: the collection for a run with a `scenario` descriptor, else its URL. A
+ * collection deleted since its run resolves to its id, the one thing the row still has; a
+ * descriptor with no id has nothing to say, and the kind chip stands alone.
  */
 function subjectOf(run: Run, collections: readonly Collection[]): string | undefined {
 	const scenario = run.summary?.scenario;
@@ -121,9 +110,8 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 							}${status ? `, ${status.text.toLowerCase()}` : ""}${
 								status?.verdict ? `, verdict ${status.verdict}` : ""
 							}`}
-							// `justify-between` overrides the variant's `justify-start`:
-							// this row's two content groups (identity, meta) split to the
-							// ends rather than packing left.
+							// Overrides the variant's `justify-start`: the row's identity and meta
+							// groups split to the ends.
 							className="group justify-between gap-3 px-2 py-1.5 hover:bg-accent"
 						>
 							<span className="flex min-w-0 flex-1 items-center gap-2">
@@ -139,9 +127,8 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 									</TruncatedText>
 								) : (
 									!isCollectionRun && (
-										// Pre-snapshot runs, and anything the engine stored
-										// without a URL. Say so rather than leaving the row
-										// looking like it failed to render.
+										// Pre-snapshot runs, or a run stored without a URL: said,
+										// so the row does not look broken.
 										<span className="truncate text-xs text-muted-foreground italic">
 											No URL recorded
 										</span>

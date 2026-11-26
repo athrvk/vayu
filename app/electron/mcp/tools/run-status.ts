@@ -6,7 +6,6 @@
  */
 
 /**
- * @file run-status.ts
  * @brief Whether a run is still going: the `get_run` projection, the partial
  *        marker on a report read mid-run and the `nextStep` the start tools hand
  *        back (#2436).
@@ -123,16 +122,13 @@ function nextStepFor(status: unknown, pollSeconds: number): string {
 }
 
 /**
- * `get_run`'s answer from the engine's run row, run through the withhold pass
- * first (a snapshot can carry credentials, so only fields named here leave).
- *
- * `terminal` comes from the status (a status Vayu does not recognise is not
- * terminal and adds `unknownStatus: true`, absent otherwise) and `endTime` is null while the run is going:
- * the engine emits null for a run that has not finished (#2953), and this reads
- * the status first as well, so an engine that predates that still yields null
- * (its stored `endTime` is `startTime` until the run ends). `progress` exists
- * only for a duration-bound run whose duration parses; anywhere else it is null
- * rather than an estimate.
+ * `get_run`'s answer from the engine's run row, run through the withhold pass first (a snapshot can
+ * carry credentials, so only fields named here leave). `terminal` comes from the status: a status
+ * Vayu does not recognise is not terminal and adds `unknownStatus: true` (absent otherwise).
+ * `endTime` is null while the run is going: the engine emits null for a run that has not finished
+ * (#2953), and this reads the status first as well, so an engine that predates that still yields
+ * null (its stored `endTime` is `startTime` until the run ends). `progress` exists only for a
+ * duration-bound run whose duration parses; anywhere else it is null rather than an estimate.
  */
 export function projectRunStatus(row: unknown, now: number = Date.now()): unknown {
 	if (!isRecord(row)) return row;

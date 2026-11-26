@@ -395,11 +395,11 @@ export default function VariableInput({
 	 *
 	 * Built here as well as inside `VariableAutocomplete` - from the same
 	 * function, so it is one ordering read twice rather than two orderings - so
-	 * that "the next row" is answerable without touching the DOM. It used to be
-	 * answered by dispatching a synthetic keydown at
-	 * `document.querySelector("[cmdk-root]")`, which is the first `cmdk` list in
-	 * the *document*: with a second one mounted earlier, the arrows steered a
-	 * list belonging to another field and Enter picked out of it (issue #1215).
+	 * that "the next row" is answerable without touching the DOM:
+	 * `document.querySelector("[cmdk-root]")` is the first `cmdk` list in the
+	 * *document*, so with a second one mounted earlier a synthetic keydown would
+	 * steer a list belonging to another field and Enter would pick out of it
+	 * (issue #1215).
 	 */
 	const variableSuggestions = useMemo(
 		() =>
@@ -561,7 +561,7 @@ export default function VariableInput({
 	 *
 	 * The strip is one Tab stop, not one per token: a URL with five variables
 	 * otherwise put five stops between the URL and Send. This is the roving
-	 * tabindex `docs/design-system.md` describes for the collection tree, in the
+	 * tabindex `docs/design-system/tree-navigation.md` describes for the collection tree, in the
 	 * one shape a tree hook cannot serve - `useRovingTreeFocus` navigates
 	 * `[role="treeitem"]` and dispatches at the tree's own data attributes, so
 	 * pointing it at tokens would silently do nothing.
@@ -610,13 +610,6 @@ export default function VariableInput({
 		}
 	};
 
-	/*
-	 * Handle blur - hide suggestions.
-	 *
-	 * The `isNavigatingRef` latch this used to carry is gone with the synthetic
-	 * keydown that needed it: arrowing the list no longer touches focus at all,
-	 * so there is no self-inflicted blur left to suppress.
-	 */
 	const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
 		// Check if focus is moving to the popover
 		const relatedTarget = e.relatedTarget as HTMLElement;
@@ -674,9 +667,7 @@ export default function VariableInput({
 	 * Put the caret where inside the token's own text the click landed
 	 * (issue #1220 hover redesign).
 	 *
-	 * An editable token's click used to open its popover outright, so the field
-	 * had no way to place a caret inside `{{merchantId}}` with the mouse - only
-	 * arrowing in from an edge reached it. Unlike a run-time token, every
+	 * Unlike a run-time token, every
 	 * position inside an editable name is one a keystroke can legitimately land
 	 * on, so the near edge is not enough here: the field's font is `--font-mono`
 	 * (fixed-width), so the click's fraction across the token's rendered width

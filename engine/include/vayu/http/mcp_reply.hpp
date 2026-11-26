@@ -16,7 +16,6 @@
 #include "vayu/types.hpp"
 
 /**
- * @file mcp_reply.hpp
  * @brief The MCP reply reader (#3762): what an `mcp` request's reply says, as
  *        the final JSON-RPC response and the failure class it carries.
  *

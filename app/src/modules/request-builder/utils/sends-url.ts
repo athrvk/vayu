@@ -6,48 +6,32 @@
  */
 
 /**
- * The URL a request sends, as the Params panel's "Sends" line and the request
- * tab's title both read it (#2637): the URL that reaches the server (#3425).
+ * The URL a request sends, as the Params panel's "Sends" line and the tab title read it (#2637):
+ * the URL that reaches the server (#3425).
  *
- * Path rows are substituted first, each value resolved then encoded as compose
- * does (#1764) - or raw under `disableUrlEncoding` (#1765) - and only then is
- * the URL's own `{{}}` pass run, a value landing in the path, query or fragment
- * encoded by that part's rule and the literal text around it made sendable
- * (#1773, #2465). Two surfaces that resolved this separately disagreed about
- * `a b`: one drew `%20` and the other a space.
+ * Path rows are substituted first, each value resolved then encoded as compose does (#1764), or raw
+ * under `disableUrlEncoding` (#1765); only then the URL's own `{{}}` pass runs, a value landing in
+ * the path, query or fragment encoded by that part's rule and the literal text made sendable
+ * (#1773, #2465). Two surfaces resolving this apart disagreed about `a b`: one drew `%20`, the
+ * other a space.
  *
- * Then what only the wire adds or drops (#3425, #3437), in the engine's order:
- * the auth's query parameter is appended, as `append_query_param` does, then a
- * GraphQL GET's document, and the fragment is cut last, because libcurl never
- * sends it. The auth is the request's *effective* one - `inherit` already walked
- * by the caller - and the title leaves it, the method and the body out, so a
- * title never carries a key, a token or a query. The cut applies to both: a
- * fragment is never part of what is sent.
+ * Then what only the wire adds or drops (#3425, #3437), in the engine's order: the auth's query
+ * parameter (as `append_query_param`), then a GraphQL GET's document, then the fragment is cut, as
+ * libcurl never sends it, for both callers. The auth is the *effective* one (`inherit` walked by
+ * the caller); the title leaves auth, method and body out, so it never carries a key, token or
+ * query. That parameter is an API key in the query, or an OAuth 2.0 token there
+ * (`tokenPlacement: "query"`, under `queryParamName`, else `access_token`). The token is fetched at
+ * send, so the line draws a fixed stand-in the caller masks like any secret. A GraphQL GET's
+ * document goes as query parameters and no body; its `{{}}` are resolved before it is encoded, as
+ * the engine does. The resolution also answers what it appended ({@link SendsResolved}): the caller
+ * masks that rather than resolving the key again, which would reroll a generator in it.
  *
- * The auth parameter is an API key placed in the query, or an OAuth 2.0 token
- * placed there (`tokenPlacement: "query"`, in the config's `queryParamName`,
- * `access_token` when that is empty). The token is fetched at send, so the line
- * draws a fixed stand-in for it that the caller masks like any secret. The
- * GraphQL document is the body of a GET, which the engine sends as query
- * parameters and no body; its `{{}}` are resolved before it is encoded, as the
- * engine resolves them before it builds the query.
- *
- * The line a caller draws carries that value, so the resolution also answers
- * what it appended ({@link SendsResolved}): the caller masks that, and does not
- * resolve the key again, which would reroll a generator in it.
- *
- * A name `POST /compose` reports in `deferredVariables` (#2521) is left written
- * as `{{name}}`: a pre-request script runs before the send and may change what
- * it answers, so the stored value is not what will be sent (#2741). Which names
- * those are is the engine's answer, passed in; nothing here decides whether a
- * script runs.
- *
- * Pure: it takes the resolver rather than reading a hook, so a caller that
- * holds a bound data row passes a resolver closed over it.
- *
- * The same rule serves the field previews that resolve a whole field rather
- * than a URL - the key/value rows' sigma peek and the Body tab's Resolved pane
- * (`leaveDeferredField`, and `deferredNamesIn` in `lib/deferred-note`).
+ * A name `POST /compose` reports in `deferredVariables` (#2521) stays `{{name}}`: a pre-request
+ * script runs first and may change it, so the stored value is not what is sent (#2741). Those names
+ * are the engine's answer, passed in; nothing here decides whether a script runs. Pure: it takes a
+ * resolver, not a hook, so a caller with a bound data row passes one closed over it. The same rule
+ * serves the previews that resolve a whole field, the rows' sigma peek and the Body tab's Resolved
+ * pane (`leaveDeferredField`, and `deferredNamesIn` in `lib/deferred-note`).
  */
 
 import {
@@ -72,9 +56,8 @@ import {
 /** The members of a request the sent URL is a function of. */
 export type SendsUrlInput = Pick<Request, "url" | "params" | "disableUrlEncoding"> & {
 	/**
-	 * The effective auth, `resolveAuthForSend`'s record: `inherit` already walked.
-	 * Only an API key or an OAuth 2.0 token placed in the query changes the URL.
-	 * Omitted by the tab title, which never carries either.
+	 * The effective auth (`resolveAuthForSend`'s, `inherit` walked); only an API key or OAuth 2.0
+	 * token in the query changes the URL. Omitted by the tab title.
 	 */
 	auth?: Record<string, unknown>;
 	/** Read, with {@link body}, only for a GraphQL GET. Omitted by the tab title. */
@@ -88,13 +71,11 @@ type Resolve = (input: string) => string;
 export interface SendsResolved {
 	url: string;
 	/**
-	 * The API key's value as it was appended, resolved and trimmed, or the
-	 * stand-in drawn for an OAuth 2.0 token, or null when nothing secret is on
-	 * the line: no key appended, a blank value, or a `{{token}}` text that
-	 * resolved to itself (an unset name, or one a script defers), which goes
-	 * out as written and hides nothing. A key is a credential whether or not
-	 * its variable is marked secret, so the caller masks this whatever the
-	 * variable's flag says. One auth applies, so there is at most one.
+	 * The API key's value as appended (resolved, trimmed), or the OAuth 2.0 token's stand-in, or
+	 * null when nothing secret is on the line: no key, a blank value, or a `{{token}}` that
+	 * resolved to itself (unset, or deferred by a script), which goes as written. A key is a
+	 * credential whatever its variable's secret flag, so the caller always masks this. One auth
+	 * applies, so at most one.
 	 */
 	secret: string | null;
 }
@@ -106,9 +87,9 @@ interface QueryKey {
 }
 
 /**
- * What the line draws for an OAuth 2.0 token, which is fetched at send and so
- * unknown here. Only unreserved characters, so no encoding touches it and the
- * masker finds it as written; long enough that no URL holds it by chance.
+ * What the line draws for an OAuth 2.0 token, unknown until send. Unreserved characters only, so no
+ * encoding touches it and the masker finds it as written; long enough that no URL holds it by
+ * chance.
  */
 const OAUTH2_TOKEN_STAND_IN = "vayu-oauth2-access-token-stand-in";
 
@@ -116,8 +97,8 @@ const OAUTH2_TOKEN_STAND_IN = "vayu-oauth2-access-token-stand-in";
 const DEFAULT_OAUTH2_QUERY_PARAM = "access_token";
 
 /**
- * Every member the sent URL depends on, so it is the cache's whole key: a field
- * read while resolving and left out of it would never re-resolve.
+ * Every member the sent URL depends on, so the cache's whole key: a field read while resolving and
+ * left out would never re-resolve.
  */
 interface SendsInput {
 	url: string;
@@ -137,8 +118,8 @@ const stringField = (record: Record<string, unknown>, name: string): string => {
 };
 
 /**
- * The API key the engine appends to the query, or null: only mode `apikey` with
- * `in: "query"` and a key that is not blank (the engine writes nothing for one).
+ * The API key the engine appends to the query, or null: only `apikey` mode, `in: "query"`, and a
+ * key that is not blank (the engine writes nothing for one).
  */
 function queryKeyOf(auth: SendsUrlInput["auth"]): QueryKey | null {
 	if (!auth || auth.mode !== "apikey" || auth.in !== "query") return null;
@@ -148,9 +129,8 @@ function queryKeyOf(auth: SendsUrlInput["auth"]): QueryKey | null {
 }
 
 /**
- * The name an OAuth 2.0 token placed in the query goes under, as written, or
- * null when the effective auth is not OAuth 2.0 or places it in the header. The
- * config is nested under `config`, as the engine reads it.
+ * The name an OAuth 2.0 token in the query goes under, as written; null for other auth or header
+ * placement. The config is nested under `config`, as the engine reads it.
  */
 function oauth2ParamOf(auth: SendsUrlInput["auth"]): string | null {
 	if (!auth || auth.mode !== "oauth2") return null;
@@ -174,9 +154,8 @@ function sendsInput(request: SendsUrlInput, deferred: readonly string[]): SendsI
 }
 
 /**
- * @p resolve, except that a `{{name}}` token naming one of @p deferred is
- * returned as written. It works on the text it is given, whether that is one
- * token (the encoded path) or the whole URL (`disableUrlEncoding`).
+ * @p resolve, except that a `{{name}}` token naming one of @p deferred is returned as written,
+ * whether given one token (the encoded path) or the whole URL (`disableUrlEncoding`).
  */
 function leaveDeferred(resolve: Resolve, deferred: readonly string[]): Resolve {
 	if (deferred.length === 0) return resolve;
@@ -185,8 +164,7 @@ function leaveDeferred(resolve: Resolve, deferred: readonly string[]): Resolve {
 		text
 			.split(VARIABLE_SPLIT_PATTERN)
 			.map((part, i) => {
-				// The split keeps each token at an odd index; the even parts are
-				// the literal text between, which has nothing to resolve.
+				// The split puts each token at an odd index; the even parts are literal text.
 				const isToken = i % 2 === 1;
 				return isToken && !names.has(tokenName(part)) ? resolve(part) : part;
 			})
@@ -196,25 +174,20 @@ function leaveDeferred(resolve: Resolve, deferred: readonly string[]): Resolve {
 type ResolveField = (input: string, context?: DataFieldContext) => BoundField;
 
 /*
- * A deferred token is swapped for a stand-in, `{{NUL<index>}}`, that no resolver
- * answers while the field resolves, then swapped back. The field is resolved
- * whole because a picked data row escapes a cell by what surrounds the token
- * (inside a JSON string, in an XML attribute): resolving the pieces apart would
- * lose that scan state. NUL cannot be typed into a token name, so the stand-in
- * cannot collide with one.
+ * A deferred token is swapped for `{{NUL<index>}}`, which no resolver answers, while the field
+ * resolves, then swapped back. The field resolves whole because a picked data row escapes a cell by
+ * its surroundings (a JSON string, an XML attribute), scan state that resolving pieces apart loses.
+ * NUL cannot be typed into a token name, so the stand-in cannot collide.
  */
 const NUL = "\u0000";
 
 const fieldResolvers = new WeakMap<ResolveField, Map<string, ResolveField>>();
 
 /**
- * @p resolve for a whole field, except that a `{{name}}` token naming one of
- * @p deferred is left as written. The rule is `leaveDeferred`'s, shaped for
- * `resolveField`: the context and the refusals pass through untouched.
- *
- * One wrapper per resolver and set of names, so a cache comparing resolvers by
- * identity (`stableRowField`, which keeps a `{{$randomInt}}` from rerolling) is
- * not defeated by the wrapping.
+ * @p resolve for a whole field, except that a `{{name}}` naming one of @p deferred is left as
+ * written: `leaveDeferred`'s rule shaped for `resolveField`, the context and refusals passed
+ * through. One wrapper per resolver and set of names, so a cache comparing resolvers by identity
+ * (`stableRowField`, which keeps `{{$randomInt}}` from rerolling) is not defeated by the wrapping.
  */
 export function leaveDeferredField(
 	resolve: ResolveField,
@@ -296,9 +269,8 @@ function withAuthParameter(url: string, input: SendsInput, resolve: Resolve): Se
 }
 
 /**
- * @p url with a GraphQL GET's document appended as the query parameters the
- * engine sends it as. The document is resolved first and encoded after: encoding
- * first would draw `%7B%7Bname%7D%7D` where the engine sends the value.
+ * @p url with a GraphQL GET's document appended as the engine's query parameters; resolved first
+ * and encoded after, as encoding first draws `%7B%7Bname%7D%7D` where the engine sends the value.
  */
 function withGraphqlQuery(url: string, document: string | null, resolve: Resolve): string {
 	if (document === null) return url;
@@ -318,16 +290,16 @@ function resolveSends(input: SendsInput, resolveAll: Resolve): SendsResolved {
 	// No URL, no line: an appended `?k=v` would hide that the request has none.
 	if (base.trim() === "") return { url: base, secret: null };
 	const authed = withAuthParameter(base, input, resolve);
-	// The fragment is cut last: under `disableUrlEncoding` a `#` in the key or
-	// value is written raw, and libcurl drops everything from it. The GraphQL
-	// query goes in before any `#`, so only the fragment is lost.
+	// The fragment is cut last: under `disableUrlEncoding` a `#` in the key or value is raw and
+	// libcurl drops all from it. The GraphQL query goes in before any `#`, so only the fragment is
+	// lost.
 	const sent = splitFragment(withGraphqlQuery(authed.url, graphql, resolve)).base;
 	return { url: sent, secret: authed.secret };
 }
 
 /**
- * The sent URL resolved straight through `resolve`, with no cache in between.
- * Each name in @p deferred stays written.
+ * The sent URL resolved straight through `resolve`, uncached; each name in @p deferred stays
+ * written.
  */
 export function resolveSendsUrl(
 	request: SendsUrlInput,
@@ -338,9 +310,8 @@ export function resolveSendsUrl(
 }
 
 /**
- * The text the sent URL is built from that can hold a `{{token}}`: the URL, the
- * values of the path rows the line substitutes, an API key placed in the query,
- * an OAuth 2.0 token's parameter name and a GraphQL GET's document, no others.
+ * The sent URL's text that can hold a `{{token}}`: the URL, the substituted path rows' values, a
+ * query API key, an OAuth 2.0 token's parameter name and a GraphQL GET's document, no others.
  */
 function sendsTemplates(request: SendsUrlInput): string[] {
 	const pathValues = answeringPathRows(request.url, composePathParams(request.params)).flatMap(
@@ -359,8 +330,8 @@ function sendsTemplates(request: SendsUrlInput): string[] {
 }
 
 /**
- * Whether the sent URL has a `{{token}}` anywhere: the gate for asking the
- * engine whether a script defers it. A literal URL has nothing to defer.
+ * Whether the sent URL has a `{{token}}` anywhere: the gate for asking the engine whether a script
+ * defers one; a literal URL has nothing to defer.
  */
 export function sendsHasTokens(request: SendsUrlInput): boolean {
 	return sendsTemplates(request).some((text) => containsVariableToken(text));
@@ -375,9 +346,8 @@ export function deferredNamesInSends(
 }
 
 /**
- * The input to {@link sendsResolver}, as the one string a
- * `createStableResolve()` cache keys its validity on: a change to any member
- * the URL depends on re-resolves, anything else keeps the cached value.
+ * The input to {@link sendsResolver} as the one string a `createStableResolve()` cache keys on: a
+ * change to any member the URL depends on re-resolves, nothing else does.
  */
 export function sendsCacheInput(request: SendsUrlInput, deferred: readonly string[] = []): string {
 	return JSON.stringify(sendsInput(request, deferred));
@@ -386,10 +356,9 @@ export function sendsCacheInput(request: SendsUrlInput, deferred: readonly strin
 const sendsResolvers = new WeakMap<Resolve, (input: string) => SendsResolved>();
 
 /**
- * The cache's resolver for {@link sendsCacheInput} text. One wrapper per
- * `resolve`, so the cache's identity check on the resolver still means what it
- * says (`lib/dynamic-variable-cache.ts`). It answers the URL with the secret
- * the resolution appended, so the cache holds both from the one resolution.
+ * The cache's resolver for {@link sendsCacheInput} text. One wrapper per `resolve`, so the cache's
+ * identity check on the resolver keeps its meaning (`lib/dynamic-variable-cache.ts`). It answers
+ * the URL with the secret appended, so the cache holds both from one resolution.
  */
 export function sendsResolver(resolve: Resolve): (input: string) => SendsResolved {
 	let wrapped = sendsResolvers.get(resolve);

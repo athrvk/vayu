@@ -8,7 +8,6 @@
  */
 
 /**
- * @file runtime/shelf_modules.hpp
  * @brief The names `require()` answers (#2578), and the members of crypto-js,
  *        the one library on its shelf the import scan reads member by member.
  *

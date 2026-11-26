@@ -123,18 +123,16 @@ import { isFromAppMainFrame, type IpcSenderLike } from "./ipc-sender.js";
 /*
  * MCP is imported by weight, not through its barrel.
  *
- * `mcp/index.js` re-exports `toolCatalog` from the tool registry, `tools.ts`, and
- * constructs its facade over `http.js`, so importing *anything* runtime from it
- * evaluates the MCP SDK, zod and every tool schema - ~250-300ms of serial
- * main-process evaluation, before `app.whenReady` and therefore ahead of the
- * window, on every launch including the ones where MCP is switched off.
+ * `mcp/index.js` re-exports `toolCatalog` from the tool registry, `tools.ts`, and constructs its
+ * facade over `http.js`, so importing *anything* runtime from it evaluates the MCP SDK, zod and
+ * every tool schema: ~250-300ms of serial main-process evaluation before `app.whenReady`, ahead of
+ * the window, on every launch including those with MCP switched off.
  *
- * `config`, `store`, `connect` and `listener` reach none of that
- * (`node:fs`, `node:child_process` and `node:http` are their heaviest
- * dependencies), so the startup gate, the Settings IPC and the port itself cost
- * nothing. The two symbols that do pull the SDK - the service and the tool
- * catalog - are loaded on demand by `loadMcp()` below: the catalog when Settings
- * asks, the service when the first request reaches the port.
+ * `config`, `store`, `connect` and `listener` reach none of that (`node:fs`, `node:child_process`
+ * and `node:http` are their heaviest dependencies), so the startup gate, the Settings IPC and the
+ * port itself cost nothing. The two symbols that do pull the SDK, the service and the tool catalog,
+ * are loaded on demand by `loadMcp()` below: the catalog when Settings asks, the service when the
+ * first request reaches the port.
  */
 import { resolveSafetyConfig, sanitizeSafetyInput, type McpSafetyConfig } from "./mcp/config.js";
 import {
@@ -188,29 +186,25 @@ const isDev = isDevelopmentBuild();
 // Before any session exists, so the default session is covered (#1355).
 suppressDictionaryDownloads(app);
 
-// Use an in-memory mock keychain for Chromium's OSCrypt instead of the real
-// macOS Keychain. Without this, Chromium stores its cookie/safeStorage
-// encryption key under a "Vayu Safe Storage" Keychain item, which re-prompts
-// for the user's password on every launch because the app is ad-hoc signed
-// (see install.sh) and has no stable code signature to anchor the Keychain
-// ACL to. Vayu keeps all secrets in plaintext SQLite and does not rely on
-// persistent cookies, so the static mock key costs no real protection here.
-// Must be set before app is ready. Revisit if the app ever ships with a
+// Use an in-memory mock keychain for Chromium's OSCrypt instead of the real macOS Keychain. Without
+// this, Chromium stores its cookie/safeStorage encryption key under a "Vayu Safe Storage" Keychain
+// item, which re-prompts for the user's password on every launch because the app is ad-hoc signed
+// (see install.sh) and has no stable code signature to anchor the Keychain ACL to. Vayu keeps all
+// secrets in plaintext SQLite and does not rely on persistent cookies, so the static mock key costs
+// no real protection here. Must be set before app is ready. Revisit if the app ever ships with a
 // Developer ID signature (then "Always Allow" would persist on its own).
 app.commandLine.appendSwitch("use-mock-keychain");
 
-// Windows files a toast under the AppUserModelID of the shortcut that launched
-// the app, and refuses to show one whose id it does not recognise. Electron's
-// default is a generic "electron" identity, so without this the notifications
-// from #1358 would simply not appear on Windows - no error, no toast. Set here,
-// at module scope, because it must precede the first notification and the
+// Windows files a toast under the AppUserModelID of the shortcut that launched the app, and refuses
+// to show one whose id it does not recognise. Electron's default is a generic "electron" identity,
+// so without this the notifications from #1358 would not appear on Windows, with no error and no
+// toast. Set here, at module scope, because it must precede the first notification and the
 // documented requirement is "before app is ready".
 app.setAppUserModelId(APP_USER_MODEL_ID);
 
-// Named explicitly, never left to Electron: it derives `userData` from
-// `app.name` on the first read, so the directory used to depend on whether
-// anything happened to read it before the rename below. Set before anything
-// opens a file there - Chromium's profile, the single-instance lock further
+// Named explicitly, never left to Electron: it derives `userData` from `app.name` on the first
+// read, so the directory depends on whether anything happened to read it before the rename below.
+// Set before anything opens a file there: Chromium's profile, the single-instance lock further
 // down, the settings stores, the engine.
 app.setPath("userData", path.join(app.getPath("appData"), USER_DATA_DIR_NAME));
 
@@ -224,18 +218,15 @@ app.setName(APP_NAME);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// The packaged renderer's origin (#2380). Electron accepts a privileged scheme
-// only before `ready`; the handler that answers it is installed once ready,
-// ahead of the window. See app-protocol.ts.
+// The packaged renderer's origin (#2380). Electron accepts a privileged scheme only before `ready`;
+// the handler that answers it is installed once ready, ahead of the window. See app-protocol.ts.
 protocol.registerSchemesAsPrivileged([{ scheme: APP_SCHEME, privileges: APP_SCHEME_PRIVILEGES }]);
 
-// Global sidecar instance
 let engineSidecar: EngineSidecar | null = null;
 /**
- * The launch's engine start, begun by the primary instance before
- * `app.whenReady` and awaited once the window exists. `startEngine` never
- * rejects - it reports its own failure - so an unawaited stretch of this
- * promise cannot surface as an unhandled rejection.
+ * The launch's engine start, begun by the primary instance before `app.whenReady` and awaited once
+ * the window exists. `startEngine` never rejects (it reports its own failure), so an unawaited
+ * stretch of this promise cannot surface as an unhandled rejection.
  */
 let engineStartup: Promise<void> | null = null;
 /**
@@ -300,13 +291,12 @@ function liveWindow(): BrowserWindow | null {
 }
 
 /**
- * The app's own icon on disk, for the surfaces that draw one themselves.
+ * The app's own icon on disk, for the surfaces that draw one themselves: the native About panel,
+ * and the system notifications, which Linux draws with whatever the notification carries and
+ * nothing otherwise (#1358).
  *
- * Bundled as a loose resource (`extraResources`) so it resolves at runtime
- * rather than from inside the asar; in dev it lives in the repo's shared
- * assets. Two callers: the native About panel, and the system notifications,
- * which Linux draws with whatever the notification carries and nothing
- * otherwise (#1358).
+ * Bundled as a loose resource (`extraResources`) so it resolves at runtime rather than from inside
+ * the asar; in dev it lives in the repo's shared assets.
  */
 function appIconPath(): string {
 	return isDev
@@ -315,9 +305,8 @@ function appIconPath(): string {
 }
 
 /**
- * Open the licence notices the installer ships (#2693), for the Help menu and
- * Settings, General. Resolves with `shell.openPath`'s answer: empty on success,
- * the reason on failure.
+ * Open the licence notices the installer ships (#2693), for the Help menu and Settings, General.
+ * Resolves with `shell.openPath`'s answer: empty on success, the reason on failure.
  */
 function openNotices(): Promise<string> {
 	return openThirdPartyNotices(
@@ -332,14 +321,13 @@ function openNotices(): Promise<string> {
 }
 
 /**
- * Bring the window back to the user, from wherever it is: minimized, hidden,
- * or behind another application.
+ * Bring the window back to the user, from wherever it is: minimized, hidden, or behind another
+ * application.
  *
- * Three calls rather than one, because they answer different states and none of
- * them covers the others - `focus()` on a minimized window raises nothing. One
- * definition, because both callers (a second launch handing the user over to
- * this instance, and a click on a system notification) mean the same thing by
- * "come back".
+ * Three calls rather than one, because they answer different states and none of them covers the
+ * others (`focus()` on a minimized window raises nothing). One definition, because both callers, a
+ * second launch handing the user over to this instance and a click on a system notification, mean
+ * the same thing by "come back".
  */
 function focusMainWindow(): void {
 	const win = liveWindow();
@@ -350,13 +338,12 @@ function focusMainWindow(): void {
 }
 
 /**
- * What the OS is asking Vayu to open: a document dropped on the icon, or an
- * entry picked off the icon's own menu (#1364).
+ * What the OS is asking Vayu to open: a document dropped on the icon, or an entry picked off the
+ * icon's own menu (#1364).
  *
- * At module scope because the earliest of those doors opens before this file's
- * `whenReady` handler runs - macOS raises `open-file` on a cold launch while the
- * app is still starting - and everything it takes is buffered until the renderer
- * reports it has loaded.
+ * At module scope because the earliest of those doors opens before this file's `whenReady` handler
+ * runs (macOS raises `open-file` on a cold launch while the app is still starting), and everything
+ * it takes is buffered until the renderer reports it has loaded.
  */
 const openIntents = createOpenIntents({
 	send: (intent) => {
@@ -372,11 +359,10 @@ const openIntents = createOpenIntents({
 /**
  * What the Dock and taskbar icon carries, and what its menu offers (#1364).
  *
- * Every Electron surface arrives as a closure rather than a value: `app.dock`
- * and the window are both read at paint time, since the app outlives its window
- * on macOS. The menu's own entries go back out through `openIntents` rather than
- * a second channel - a click on a Dock item and the Jump List task beside it are
- * one request through two doors.
+ * Every Electron surface arrives as a closure rather than a value: `app.dock` and the window are
+ * both read at paint time, since the app outlives its window on macOS. The menu's own entries go
+ * back out through `openIntents` rather than a second channel: a click on a Dock item and the Jump
+ * List task beside it are one request through two doors.
  */
 const osIcon = createOsIcon({
 	isFocused: () => liveWindow()?.isFocused() ?? false,
@@ -425,10 +411,9 @@ async function askOnWindow(options: Electron.MessageBoxOptions): Promise<number>
 	return response;
 }
 
-// The dialog the quit flow shows when a flush did not land
-// cleanly (#1489). "Proceed" is the default button, matching the running-
-// services confirm below - Enter takes the destructive option, Esc/close
-// keeps working, which is what leaves the draft exactly as it was.
+// The dialog the quit flow shows when a flush did not land cleanly (#1489). "Proceed" is the
+// default button, matching the running-services confirm below: Enter takes the destructive option,
+// Esc/close keeps working, which is what leaves the draft exactly as it was.
 const askFlushFailure = (prompt: FlushFailurePrompt): Promise<boolean> =>
 	askOnWindow({
 		type: "warning",
@@ -439,12 +424,11 @@ const askFlushFailure = (prompt: FlushFailurePrompt): Promise<boolean> =>
 		cancelId: 1,
 	}).then((choice) => choice === 0);
 
-// Reloading the window when its renderer dies, and asking when reloading is not
-// working. Module-level and reading `mainWindow` at use time for the reason the
-// updater does: on macOS the app outlives its window and a dock-activate builds
-// a replacement, which a captured reference would never reach. The crash
-// history is deliberately kept across that, so a crash loop that takes the
-// window with it is still a loop.
+// Reloading the window when its renderer dies, and asking when reloading is not working.
+// Module-level and reading `mainWindow` at use time for the reason the updater does: on macOS the
+// app outlives its window and a dock-activate builds a replacement, which a captured reference
+// would never reach. The crash history is deliberately kept across that, so a crash loop that takes
+// the window with it is still a loop.
 const rendererRecovery = createRendererRecovery({
 	now: () => Date.now(),
 	reload: () => liveWindow()?.webContents.reload(),
@@ -486,10 +470,9 @@ const rendererRecovery = createRendererRecovery({
 	onRecovered: () => quitFlow.reset(),
 });
 
-// What a close is about to stop, said before it stops it (#1363, #3604). The
-// renderer publishes what the engine is holding for it and the run it shows
-// live; the wording, the platform rule and the button order are this side's.
-// See service-stop-guard.ts.
+// What a close is about to stop, said before it stops it (#1363, #3604). The renderer publishes
+// what the engine is holding for it and the run it shows live; the wording, the platform rule and
+// the button order are this side's. See service-stop-guard.ts.
 const serviceStopGuard = createServiceStopGuard({
 	ask: async (prompt) => {
 		const choice = await askOnWindow({
@@ -534,12 +517,11 @@ const quitFlow = createQuitFlow({
 /**
  * Forward OS theme changes to whichever window is up.
  *
- * Installed once for the process, not per window: `nativeTheme` is a
- * process-wide emitter and `createWindow()` runs again on every macOS
- * dock-reopen, so registering there left one listener per reopen - Node warns
- * at eleven, and every theme flip sent the renderer N copies of the same event.
- * Reading the window through `liveWindow()` at send time is what makes one
- * registration enough for every window that follows.
+ * Installed once for the process, not per window: `nativeTheme` is a process-wide emitter and
+ * `createWindow()` runs again on every macOS dock-reopen, so registering there left one listener
+ * per reopen (Node warns at eleven) and every theme flip sent the renderer N copies of the same
+ * event. Reading the window through `liveWindow()` at send time is what makes one registration
+ * enough for every window that follows.
  */
 function installThemeBridge() {
 	nativeTheme.on("updated", () => {
@@ -549,7 +531,6 @@ function installThemeBridge() {
 			themeSource: nativeTheme.themeSource,
 		});
 
-		// Update titlebar overlay color - Windows only
 		if (process.platform === "win32" && win) {
 			win.setTitleBarOverlay({
 				color: nativeTheme.shouldUseDarkColors ? TITLEBAR_BG_DARK : TITLEBAR_BG_LIGHT,
@@ -566,12 +547,10 @@ function createWindow() {
 	// replaces cannot make the new renderer look unreachable.
 	rendererRecovery.noteRendererAlive();
 	quitFlow.reset();
-	// The new page has no subscriber until its `did-finish-load`; an intent
-	// offered meanwhile waits instead of going to the window this one replaces
-	// (#3339).
+	// The new page has no subscriber until its `did-finish-load`; an intent offered meanwhile waits
+	// instead of going to the window this one replaces (#3339).
 	openIntents.notReady();
 
-	// Load persisted window state
 	const windowState = loadWindowState({
 		defaultWidth: WINDOW_DEFAULT_WIDTH,
 		defaultHeight: WINDOW_DEFAULT_HEIGHT,
@@ -584,18 +563,15 @@ function createWindow() {
 		y: windowState.y,
 		minWidth: WINDOW_MIN_WIDTH,
 		minHeight: WINDOW_MIN_HEIGHT,
-		// Custom titlebar settings
 		frame: false,
 		titleBarStyle: "hidden",
-		// Electron 43 made frameless windows rounded by default on Linux, which
-		// is the shape Vayu wants there - it matches the frame macOS has always
-		// drawn. Stated rather than inherited, so the window's shape does not
-		// move with whichever default the current Electron ships. Windows
-		// ignores the option.
+		// Electron 43 made frameless windows rounded by default on Linux, which is the shape Vayu
+		// wants there: it matches the frame macOS has always drawn. Stated rather than inherited,
+		// so the window's shape does not move with whichever default the current Electron ships.
+		// Windows ignores the option.
 		roundedCorners: true,
-		// Centre the macOS traffic lights in the bar. The frame height is a named
-		// constant because it has been wrong twice: 16 originally, then 12 (the
-		// visible circle) - Electron positions the button frame, which is 14.
+		// Centre the macOS traffic lights in the bar. Electron positions the button frame, not the
+		// visible circle: see `TRAFFIC_LIGHT_FRAME_HEIGHT`.
 		trafficLightPosition:
 			process.platform === "darwin"
 				? {
@@ -630,10 +606,9 @@ function createWindow() {
 				`--vayu-engine-port=${enginePort()}`,
 				...(legacyStorage.hasPending() ? [LEGACY_STORAGE_ARG] : []),
 			],
-			// Off for the whole renderer (#1355). Nothing here is prose - URLs,
-			// header values, {{tokens}} and JSON keys all draw squiggles. This
-			// only silences the checker: the Hunspell download a tool pointed at
-			// internal APIs must not make is stopped by
+			// Off for the whole renderer (#1355). Nothing here is prose: URLs, header values,
+			// {{tokens}} and JSON keys all draw squiggles. This only silences the checker; the
+			// Hunspell download a tool pointed at internal APIs must not make is stopped by
 			// `suppressDictionaryDownloads` above.
 			spellcheck: false,
 		},
@@ -642,10 +617,8 @@ function createWindow() {
 		show: false, // Don't show until ready
 	});
 
-	// Track window state for persistence
 	trackWindowState(mainWindow);
 
-	// Restore maximized state
 	if (windowState.isMaximized) {
 		mainWindow.maximize();
 	}
@@ -673,12 +646,11 @@ function createWindow() {
 	// `legacyStorage`, read before this window and written by its preload.
 	const rendererUrl = isDev ? DEV_SERVER_URL : APP_ENTRY_URL;
 	installWindowNavigationGuard(mainWindow.webContents, rendererUrl);
-	// A new main-frame document has no subscriber yet, a crash or unresponsive
-	// reload included, and nothing tells the main process before the page can
-	// speak (#3339). Registered ahead of the load so the first one is seen.
-	// Main frame only: `did-start-loading` also fires for a subframe (the
-	// response preview's iframe), which never reaches the `did-finish-load`
-	// below, so the gate would stay shut for good.
+	// A new main-frame document has no subscriber yet, a crash or unresponsive reload included, and
+	// nothing tells the main process before the page can speak (#3339). Registered ahead of the
+	// load so the first one is seen. Main frame only: `did-start-loading` also fires for a subframe
+	// (the response preview's iframe), which never reaches the `did-finish-load` below, so the gate
+	// would stay shut for good.
 	mainWindow.webContents.on("did-start-navigation", (details) => {
 		if (startsMainFramePage(details)) openIntents.notReady();
 	});
@@ -715,11 +687,10 @@ function createWindow() {
 		rendererRecovery.handleResponsive();
 	});
 
-	// The X button destroys the renderer before `before-quit` can ask it for
-	// anything (and on macOS it never quits at all), so the close goes through
-	// the quit flow itself. Bound to this window rather than to `mainWindow`,
-	// which may point at a replacement by the time the flow resumes it; one
-	// stable resume per window, so repeated clicks queue one close.
+	// The X button destroys the renderer before `before-quit` can ask it for anything (and on macOS
+	// it never quits at all), so the close goes through the quit flow itself. Bound to this window
+	// rather than to `mainWindow`, which may point at a replacement by the time the flow resumes
+	// it; one stable resume per window, so repeated clicks queue one close.
 	const closingWindow = mainWindow;
 	const closeAgain = () => {
 		if (!closingWindow.isDestroyed()) closingWindow.close();
@@ -732,11 +703,10 @@ function createWindow() {
 	// swipe - neither of which reaches the renderer. See nav-history.ts.
 	watchNavigationGestures(mainWindow, sendNavigationCommand);
 
-	// Electron draws no context menu of its own, so a right-click outside Monaco
-	// showed nothing at all until this (#1359). The window is captured here
-	// rather than read back through `liveWindow()`: the menu belongs to the
-	// contents that raised the event, which may not be the current `mainWindow`
-	// by the time a replacement exists. See context-menu.ts.
+	// Electron draws no context menu of its own, so a right-click outside Monaco shows nothing
+	// without this (#1359). The window is captured here rather than read back through
+	// `liveWindow()`: the menu belongs to the contents that raised the event, which may not be the
+	// current `mainWindow` by the time a replacement exists. See context-menu.ts.
 	const menuWindow = mainWindow;
 	installContextMenu(menuWindow.webContents, {
 		takeTarget: () => contextTargets.take(),
@@ -769,10 +739,9 @@ function openSettings() {
 /**
  * Ask the renderer to move its interface-scale setting (View → zoom, Ctrl+±/0).
  *
- * Deliberately not the `zoomIn`/`zoomOut`/`resetZoom` roles: those drive
- * Chromium's zoom directly, which compounded on top of the saved scale, was
- * never persisted, and made `resetZoom` snap to 100% in defiance of the user's
- * setting. The renderer owns the value, so the menu only nudges it.
+ * Deliberately not the `zoomIn`/`zoomOut`/`resetZoom` roles: those drive Chromium's zoom directly,
+ * which compounded on top of the saved scale, was never persisted, and made `resetZoom` snap to
+ * 100% in defiance of the user's setting. The renderer owns the value, so the menu only nudges it.
  */
 function sendZoomCommand(command: "in" | "out" | "reset") {
 	mainWindow?.webContents.send("menu:zoom", command);
@@ -781,11 +750,10 @@ function sendZoomCommand(command: "in" | "out" | "reset") {
 /**
  * Ask the renderer to step through its navigation history (#1245).
  *
- * The renderer owns the history - it is a history of *tabs*, which are its
- * state - so the menu items and the OS gestures both only report the step, the
- * way the zoom items report a nudge. One channel carrying the direction rather
- * than a channel each: the renderer subscribes once, and a third direction (a
- * future "back to where the run started") would not need a third channel.
+ * The renderer owns the history (a history of *tabs*, which are its state), so the menu items and
+ * the OS gestures both only report the step, the way the zoom items report a nudge. One channel
+ * carrying the direction rather than one each: the renderer subscribes once, and a third direction
+ * (a future "back to where the run started") would not need a third channel.
  */
 function sendNavigationCommand(direction: NavDirection) {
 	mainWindow?.webContents.send("menu:navigate", direction);
@@ -797,7 +765,6 @@ function createMenu() {
 	const labels = menuLabels(process.platform);
 
 	const template: Electron.MenuItemConstructorOptions[] = [
-		// App menu (macOS only)
 		...(isMac
 			? [
 					{
@@ -827,7 +794,6 @@ function createMenu() {
 					},
 				]
 			: []),
-		// File menu
 		{
 			label: "File",
 			// CmdOrCtrl+W belongs to the renderer (close tab) - rebind window
@@ -843,7 +809,6 @@ function createMenu() {
 						{ role: "quit" as const, accelerator: accelerators.quit },
 					],
 		},
-		// Edit menu
 		{
 			label: "Edit",
 			submenu: [
@@ -866,14 +831,12 @@ function createMenu() {
 						]),
 			],
 		},
-		// View menu
 		{
 			label: "View",
 			submenu: [
-				// The platform's own back/forward chords, so the menu advertises
-				// what the renderer already listens for: ⌘[ / ⌘] on macOS, where
-				// Safari and Chrome bind them, and Alt+←/→ everywhere else, where
-				// every browser does.
+				// The platform's own back/forward chords, so the menu advertises what the renderer
+				// already listens for: ⌘[ / ⌘] on macOS, where Safari and Chrome bind them, and
+				// Alt+←/→ everywhere else, where every browser does.
 				{
 					label: "Back",
 					accelerator: accelerators.back,
@@ -905,10 +868,8 @@ function createMenu() {
 					accelerator: accelerators.zoomIn,
 					click: () => sendZoomCommand("in"),
 				},
-				// The role this replaced also answered to Cmd/Ctrl+Plus - the
-				// shifted key on most layouts. A hidden twin keeps that binding
-				// rather than dropping it silently; one menu item can hold only
-				// one accelerator.
+				// The hidden twin of Zoom In for Cmd/Ctrl+Plus; see `zoomInPlus` in
+				// menu-accelerators.ts.
 				{
 					label: labels.zoomIn,
 					accelerator: accelerators.zoomInPlus,
@@ -924,7 +885,6 @@ function createMenu() {
 				{ role: "togglefullscreen" as const },
 			],
 		},
-		// Window menu
 		{
 			label: "Window",
 			submenu: [
@@ -940,9 +900,8 @@ function createMenu() {
 					: [{ role: "close" as const, accelerator: accelerators.closeWindow }]),
 			],
 		},
-		// Help menu - documentation links on all platforms, plus
-		// "Check for updates…" on Windows/Linux (macOS keeps that in the app
-		// menu above).
+		// Documentation links on all platforms, plus "Check for updates…" on Windows/Linux (macOS
+		// keeps that in the app menu above).
 		{
 			label: "Help",
 			role: "help" as const,
@@ -994,9 +953,8 @@ function publishEnginePort(port: number): void {
 }
 
 /**
- * A spawned engine's grant secret, for the one module that sends it (#2356).
- * A new engine is also when the grants and allowed-folder copies can have gone
- * stale.
+ * A spawned engine's grant secret, for the one module that sends it (#2356). A new engine is also
+ * when the grants and allowed-folder copies can have gone stale.
  */
 function receiveGrantSecret(secret: string): void {
 	fileTrust.setSecret(secret);
@@ -1051,16 +1009,15 @@ async function startEngine() {
 }
 
 /**
- * The updater, loaded at most once, on first use: the update channels, the
- * Help menu or the startup arming, whichever asks first.
+ * The updater, loaded at most once, on first use: the update channels, the Help menu or the startup
+ * arming, whichever asks first.
  *
- * `electron-updater` constructs its platform updater the moment its export is
- * read and eagerly requires fs-extra, js-yaml, semver and six updater classes on
- * the way (measured: ~60 ms inside Electron), and the first check it exists for
- * waits out `UPDATE_STARTUP_CHECK_DELAY_MS` anyway - so a static import spent
- * that on every launch before `app.whenReady`, ahead of the window. Cached as a
- * promise for the same reason `loadMcp` is: those callers may
- * ask at once, and a module that failed to load is a broken install.
+ * `electron-updater` constructs its platform updater the moment its export is read and eagerly
+ * requires fs-extra, js-yaml, semver and six updater classes on the way (measured: ~60 ms inside
+ * Electron), and the first check it exists for waits out `UPDATE_STARTUP_CHECK_DELAY_MS` anyway, so
+ * a static import would spend that on every launch before `app.whenReady`, ahead of the window.
+ * Cached as a promise for the same reason `loadMcp` is: those callers may ask at once, and a module
+ * that failed to load is a broken install.
  */
 type UpdaterModule = typeof import("./updater.js");
 let updaterModulePromise: Promise<UpdaterModule> | null = null;
@@ -1077,10 +1034,9 @@ function loadUpdater(): Promise<UpdaterModule> {
 /**
  * Settles when `initAutoUpdater` has run, or the updater failed to load.
  *
- * The update channels and the Help menu item exist from the first moment, but
- * the updater is armed only after the engine is up. A check that went through
- * before that would find it unarmed and answer "only run in packaged builds"
- * in a packaged build; so a check waits here instead.
+ * The update channels and the Help menu item exist from the first moment, but the updater is armed
+ * only after the engine is up. A check that went through before that would find it unarmed and
+ * answer "only run in packaged builds" in a packaged build, so a check waits here instead.
  */
 let markUpdaterArmed!: () => void;
 const updaterArmed = new Promise<void>((resolve) => {
@@ -1095,15 +1051,14 @@ async function checkForUpdates(source: Parameters<UpdaterModule["checkForUpdates
 }
 
 /**
- * The MCP barrel - the SDK, the tool registry - loaded at most once, on demand.
+ * The MCP barrel (the SDK, the tool registry), loaded at most once, on demand.
  *
- * The promise is cached rather than the module, so concurrent callers (a launch
- * starting the server while Settings asks for the catalog) share one evaluation.
- * A rejection is cached with it: the module is a file inside the asar, so a
- * failure to load it is a broken install rather than something a retry fixes.
- * A request that needed it is answered 500 and the cause logged (the listener's
- * `answerInternalError`); the two IPC handlers let it reject, which reaches
- * Settings as the failed call it is.
+ * The promise is cached rather than the module, so concurrent callers (a launch starting the server
+ * while Settings asks for the catalog) share one evaluation. A rejection is cached with it: the
+ * module is a file inside the asar, so a failure to load it is a broken install rather than
+ * something a retry fixes. A request that needed it is answered 500 and the cause logged (the
+ * listener's `answerInternalError`); the two IPC handlers let it reject, which reaches Settings as
+ * the failed call it is.
  */
 type McpModule = typeof import("./mcp/index.js");
 let mcpModulePromise: Promise<McpModule> | null = null;
@@ -1114,25 +1069,23 @@ function loadMcp(): Promise<McpModule> {
 }
 
 /**
- * The MCP port the engine refuses to reach: the one the sidecar is spawning it
- * with or last spawned it with, or the configured one before any spawn. The
- * listener binds this rather than the configured port, so a port saved in
- * Settings moves the server only once the engine has been restarted onto it
- * (#3580).
+ * The MCP port the engine refuses to reach: the one the sidecar is spawning it with or last spawned
+ * it with, or the configured one before any spawn. The listener binds this rather than the
+ * configured port, so a port saved in Settings moves the server only once the engine has been
+ * restarted onto it (#3580).
  */
 function mcpEnginePort(): number {
 	return engineSidecar?.getMcpPort() ?? readMcpPort().port;
 }
 
 /**
- * The MCP server: the port, the service behind it, and why the last start
- * failed, owned by one state machine (#3337). A start or stop never throws; a
- * bind failure is a non-critical convenience lost, kept for `mcp:status` so
- * Settings can say why nothing is listening.
+ * The MCP server: the port, the service behind it, and why the last start failed, owned by one
+ * state machine (#3337). A start or stop never throws; a bind failure is a non-critical convenience
+ * lost, kept for `mcp:status` so Settings can say why nothing is listening.
  *
- * Only the port is paid for at start. The SDK, the tool registry and the
- * service are loaded by the first request that reaches it, so a launch no agent
- * connects to never evaluates them (5-7 MB resident, measured).
+ * Only the port is paid for at start. The SDK, the tool registry and the service are loaded by the
+ * first request that reaches it, so a launch no agent connects to never evaluates them (5-7 MB
+ * resident, measured).
  */
 const mcpLifecycle = createMcpLifecycle<VayuMcpService>({
 	isEnabled: loadMcpEnabled,
@@ -1237,7 +1190,6 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 	}
 }
 
-// IPC Handlers
 function setupIpcHandlers() {
 	// OAuth 2.0 interactive flow (system browser / embedded window)
 	setupOAuthIpcHandlers({ isFocused: () => liveWindow()?.isFocused() ?? false });
@@ -1256,11 +1208,10 @@ function setupIpcHandlers() {
 		})
 	);
 
-	// The OS notifications a run finishing, an engine dropping out or an update
-	// landing raise while the user is in another application (#1358). The
-	// renderer says what happened and whether the user asked to hear about it;
-	// only this side can answer whether the window is the one in front, and
-	// whether the platform will show anything at all.
+	// The OS notifications a run finishing, an engine dropping out or an update landing raise while
+	// the user is in another application (#1358). The renderer says what happened and whether the
+	// user asked to hear about it; only this side can answer whether the window is the one in
+	// front, and whether the platform will show anything at all.
 	registerNotifyIpc(
 		ipcMain,
 		createNotifier({
@@ -1319,7 +1270,6 @@ function setupIpcHandlers() {
 	// engine's next poll closes (#3604). Answers yes at once with no run live.
 	ipcMain.handle(CONFIRM_RESTART_CHANNEL, () => serviceStopGuard.confirm("restart"));
 
-	// Handle engine restart request from renderer
 	ipcMain.handle("engine:restart", async () => {
 		return await restartEngine();
 	});
@@ -1423,7 +1373,6 @@ function setupIpcHandlers() {
 		}
 	);
 
-	// Theme management
 	ipcMain.handle("theme:get", () => {
 		return {
 			shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
@@ -1442,10 +1391,9 @@ function setupIpcHandlers() {
 		};
 	});
 
-	// Start at login (#2098). The OS owns the answer, so this holds no state: each
-	// call reads or writes it. `APPIMAGE` is the file the user launched; Linux's
-	// `process.execPath` inside one is a path in a mount that is gone by the next
-	// login.
+	// Start at login (#2098). The OS owns the answer, so this holds no state: each call reads or
+	// writes it. `APPIMAGE` is the file the user launched; Linux's `process.execPath` inside one is
+	// a path in a mount that is gone by the next login.
 	registerLoginItemIpc(
 		ipcMain,
 		createLoginItem({
@@ -1491,27 +1439,24 @@ function setupIpcHandlers() {
 	/**
 	 * The Windows system menu, popped from the title-bar app icon.
 	 *
-	 * Windows convention is that the icon *is* the system-menu control: left
-	 * click opens it, right click opens it, Alt+Space opens it. Vayu got the
-	 * right-click half for free, because a `-webkit-app-region: drag` area is
-	 * treated as a non-client frame and Windows pops the real menu on it. Left
-	 * click was missing, and it cannot be added to a drag region at all -
-	 * draggable areas ignore every pointer event.
+	 * Windows convention is that the icon *is* the system-menu control: left click opens it, right
+	 * click opens it, Alt+Space opens it. Right-click came free, because a
+	 * `-webkit-app-region: drag` area is treated as a non-client frame and Windows pops the real
+	 * menu on it. Left click cannot be added to a drag region at all: draggable areas ignore every
+	 * pointer event.
 	 *
-	 * So the icon is marked `no-drag` on Windows and both buttons are handled
-	 * here. That trades the OS's own menu for this one, which is why the
-	 * right-click path had to be reimplemented in the same change rather than
-	 * left to the platform.
+	 * So the icon is marked `no-drag` on Windows and both buttons are handled here. That trades the
+	 * OS's own menu for this one, so the right-click path has to be reimplemented rather than left
+	 * to the platform.
 	 *
-	 * The native alternative would be returning HTSYSMENU from WM_NCHITTEST for
-	 * the icon's rect, which is how Win32 does it and would have kept the real
-	 * menu. Electron does not handle WM_NCHITTEST in PreHandleMSG, and
-	 * hookWindowMessage callbacks cannot return a value to the OS
-	 * (electron/electron#8762), so it is unreachable without a native module.
+	 * The native alternative, returning HTSYSMENU from WM_NCHITTEST for the icon's rect, is how
+	 * Win32 does it and would have kept the real menu. It is unreachable without a native module:
+	 * Electron does not handle WM_NCHITTEST in PreHandleMSG, and hookWindowMessage callbacks cannot
+	 * return a value to the OS (electron/electron#8762).
 	 *
-	 * Move and Size are deliberately absent: both are Win32 modal drag loops
-	 * with no Electron equivalent, and a disabled item that never becomes
-	 * enabled is worse than one that was never offered.
+	 * Move and Size are deliberately absent: both are Win32 modal drag loops with no Electron
+	 * equivalent, and a disabled item that never becomes enabled is worse than one that was never
+	 * offered.
 	 */
 	ipcMain.on("window:systemMenu", (_event, position?: { x: number; y: number }) => {
 		if (!mainWindow || process.platform !== "win32") return;
@@ -1550,13 +1495,12 @@ function setupIpcHandlers() {
 	/**
 	 * The application menu, for the two platforms that never draw it (#1361).
 	 *
-	 * `createMenu` installs the same template everywhere, but a frameless window
-	 * has no menu bar on Windows or Linux, so there the template contributes
-	 * accelerators and nothing else - Help > Documentation, About Vayu and Check
-	 * for Updates were reachable by no mouse at all. This pops the menu that is
-	 * already installed rather than building a second template: one definition,
-	 * two surfaces, and no way for the popup to fall behind the menu bar macOS
-	 * still draws from the same object. See app-menu.ts for the decision.
+	 * `createMenu` installs the same template everywhere, but a frameless window has no menu bar on
+	 * Windows or Linux, so there the template contributes accelerators and nothing else, leaving
+	 * Help > Documentation, About Vayu and Check for Updates reachable by no mouse. This pops the
+	 * menu that is already installed rather than building a second template: one definition, two
+	 * surfaces, and no way for the popup to fall behind the menu bar macOS still draws from the
+	 * same object. See app-menu.ts for the decision.
 	 */
 	ipcMain.on("window:appMenu", (_event, position?: unknown) => {
 		showApplicationMenu({
@@ -1570,19 +1514,17 @@ function setupIpcHandlers() {
 	/**
 	 * What the renderer sees under the pointer, announced as it right-clicks.
 	 *
-	 * Synchronous on purpose, and the only `sendSync` a page can reach (the
-	 * other is the preload's own, once, for the legacy-storage hand-off). The
-	 * renderer's `contextmenu` listener runs before Chromium asks the browser
-	 * process for a menu, so blocking there until this returns is what makes the
-	 * announcement and the `context-menu` event a matched pair rather than two
-	 * messages racing on separate channels. It costs one right-click a fraction
-	 * of a millisecond and buys a menu that cannot be built from the previous
-	 * click's context.
+	 * Synchronous on purpose, and the only `sendSync` a page can reach (the other is the preload's
+	 * own, once, for the legacy-storage hand-off). The renderer's `contextmenu` listener runs
+	 * before Chromium asks the browser process for a menu, so blocking there until this returns is
+	 * what makes the announcement and the `context-menu` event a matched pair rather than two
+	 * messages racing on separate channels. It costs one right-click a fraction of a millisecond
+	 * and buys a menu that cannot be built from the previous click's context.
 	 *
-	 * `returnValue` is set first: a `sendSync` whose handler returns without one
-	 * blocks the renderer for good. For the same reason this registration has to
-	 * precede the first window, which it does - `setupIpcHandlers()` runs ahead
-	 * of `createWindow()` in the ready handler, and a test pins that order.
+	 * `returnValue` is set first: a `sendSync` whose handler returns without one blocks the
+	 * renderer for good. For the same reason this registration has to precede the first window,
+	 * which it does (`setupIpcHandlers()` runs ahead of `createWindow()` in the ready handler, and
+	 * a test pins that order).
 	 */
 	ipcMain.on("context-menu:target", (event, target: unknown) => {
 		event.returnValue = true;
@@ -1593,7 +1535,6 @@ function setupIpcHandlers() {
 	// ahead of the window for the same `sendSync` reason as the channel above.
 	registerLegacyStorageIpc(ipcMain, legacyStorage, isAppFrame);
 
-	// Listen for maximize/unmaximize to notify renderer
 	app.on("browser-window-created", (_event, window) => {
 		window.on("maximize", () => {
 			window.webContents.send("window:maximized", true);
@@ -1611,10 +1552,9 @@ function setupIpcHandlers() {
 	// renderer asks for the file, it never names a path.
 	ipcMain.handle("app:openThirdPartyNotices", () => openNotices());
 
-	// Re-open a collection's declared data file (issue #599). The renderer names
-	// the path, so a read passes the extension allowlist, the grant registry (a
-	// file the user picked, dropped or opened, #2357) and the engine's fetched
-	// byte cap; the rationale is in data-file.ts.
+	// Re-open a collection's declared data file (#599). The renderer names the path, so a read
+	// passes the extension allowlist, the grant registry (a file the user picked, dropped or
+	// opened, #2357) and the engine's fetched byte cap; the rationale is in data-file.ts.
 	ipcMain.handle("dataFile:read", async (_event, filePath: unknown) => {
 		return await readDataFile(
 			String(filePath ?? ""),
@@ -1622,11 +1562,10 @@ function setupIpcHandlers() {
 		);
 	});
 
-	// The same file's SHA-256 as it is now, without its bytes (#2051): what a
-	// run's `dataFileHash` is compared against. Same path gates as the read. A
-	// file that has moved, or was never granted, is a reply, `{ status:
-	// "missing" }` (#2057), because an error would reach the renderer as a bare
-	// message.
+	// The same file's SHA-256 as it is now, without its bytes (#2051): what a run's `dataFileHash`
+	// is compared against. Same path gates as the read. A file that has moved, or was never
+	// granted, is a reply, `{ status: "missing" }` (#2057), because an error would reach the
+	// renderer as a bare message.
 	ipcMain.handle("dataFile:hash", async (_event, filePath: unknown) => {
 		return await hashDataFileReply(
 			String(filePath ?? ""),
@@ -1647,10 +1586,9 @@ function setupIpcHandlers() {
 		appFocus.replace(focus);
 	});
 
-	// Read a file an imported OpenAPI document references (issue #649). The
-	// renderer passes the document's path and the ref's own text; the document
-	// must hold a grant (#2357), and this process resolves the ref against its
-	// directory. Gates are in spec-file.ts.
+	// Read a file an imported OpenAPI document references (#649). The renderer passes the
+	// document's path and the ref's own text; the document must hold a grant (#2357), and this
+	// process resolves the ref against its directory. Gates are in spec-file.ts.
 	ipcMain.handle("specFile:read", async (_event, specPath: unknown, refPath: unknown) => {
 		return await readSpecFile(
 			String(specPath ?? ""),
@@ -1659,13 +1597,12 @@ function setupIpcHandlers() {
 		);
 	});
 
-	// Re-resolve the operating system's proxy and push it to the engine (#708).
-	// The renderer is the second of the two things that can know the network
-	// changed - it holds the `online` event and the settings screen where a
-	// user switches to `system` in the first place - and `refreshSystemProxy`
-	// writes nothing when the answer has not moved, so calling it eagerly is
-	// free. It resolves; it does not read the OS on the renderer's behalf for
-	// any other purpose, so there is no path to name here.
+	// Re-resolve the operating system's proxy and push it to the engine (#708). The renderer is the
+	// second of the two things that can know the network changed (it holds the `online` event and
+	// the settings screen where a user switches to `system`), and `refreshSystemProxy` writes
+	// nothing when the answer has not moved, so calling it eagerly is free. It resolves; it does
+	// not read the OS on the renderer's behalf for any other purpose, so there is no path to name
+	// here.
 	ipcMain.handle("proxy:refreshSystem", async () => {
 		return await refreshSystemProxy(proxyResolution());
 	});
@@ -1688,11 +1625,10 @@ function setupIpcHandlers() {
 		timers: { setTimeout, clearTimeout },
 	});
 
-	// The folder picker behind Settings > Files and the body editor's "Allow
-	// folder...", which allows what was chosen with the grant secret (#2356),
-	// and the size-only stat behind the body editor's file line, which answers
-	// only for a picked file or one under an allowed folder (#2357). Nothing here
-	// reads a file's contents; see file-ipc.ts.
+	// The folder picker behind Settings > Files and the body editor's "Allow folder...", which
+	// allows what was chosen with the grant secret (#2356), and the size-only stat behind the body
+	// editor's file line, which answers only for a picked file or one under an allowed folder
+	// (#2357). Nothing here reads a file's contents; see file-ipc.ts.
 	registerFileIpc(ipcMain, {
 		showOpenDialog: (options) => {
 			const win = liveWindow();
@@ -1728,10 +1664,9 @@ function setupIpcHandlers() {
 }
 
 /**
- * The proxy resolver bound to this process's Chromium session.
- *
- * Built per call rather than once, because `session.defaultSession` does not
- * exist until the app is ready and this module is imported long before that.
+ * The proxy resolver bound to this process's Chromium session. Built per call rather than once,
+ * because `session.defaultSession` does not exist until the app is ready and this module is
+ * imported long before that.
  */
 function proxyResolution(): ProxyResolutionSystem {
 	return {
@@ -1743,15 +1678,14 @@ function proxyResolution(): ProxyResolutionSystem {
 /**
  * Vayu is a single-instance app, and the engine is why.
  *
- * The engine binds one fixed port and owns one SQLite database, so a second
- * launch does not get a second backend - it adopts the first one's. Both UIs
- * then share one engine with nothing to say so, and the first to quit POSTs
- * `/shutdown`, which the engine obeys unconditionally: the survivor's backend
- * dies under it mid-session, its pending saves go into a dead port, and its
- * only surface is the dock dot turning grey.
+ * The engine binds one fixed port and owns one SQLite database, so a second launch does not get a
+ * second backend, it adopts the first one's. Both UIs then share one engine with nothing to say so,
+ * and the first to quit POSTs `/shutdown`, which the engine obeys unconditionally: the survivor's
+ * backend dies under it mid-session, its pending saves go into a dead port, and its only surface is
+ * the dock dot turning grey.
  *
- * Losing the lock means another instance is already up, so hand the user over
- * to it and leave. `second-instance` fires in the instance that holds the lock.
+ * Losing the lock means another instance is already up, so hand the user over to it and leave.
+ * `second-instance` fires in the instance that holds the lock.
  */
 const isPrimaryInstance = app.requestSingleInstanceLock();
 
@@ -1759,36 +1693,32 @@ if (!isPrimaryInstance) {
 	appLogger().info("main", "Another Vayu instance is already running; focusing it and exiting.");
 	app.quit();
 } else {
-	// A second launch is how a Jump List task and a Windows file association
-	// reach an app that is already up: the request is on that launch's command
-	// line, and this instance is the one that can act on it (#1364).
-	// `offerArgv` focuses the window itself when it finds something; a launch
-	// carrying nothing is the plain double-click this always answered.
+	// A second launch is how a Jump List task and a Windows file association reach an app that is
+	// already up: the request is on that launch's command line, and this instance is the one that
+	// can act on it (#1364). `offerArgv` focuses the window itself when it finds something; a
+	// launch carrying nothing is the plain double-click this always answered.
 	app.on("second-instance", (_event, argv) => {
 		focusMainWindow();
 		openIntents.offerArgv(argv);
 	});
 
-	// macOS hands a dropped or double-clicked document over here rather than on
-	// the command line, and it fires before `whenReady` resolves on a cold
-	// launch - which is why the intents are buffered rather than sent. The
-	// event carries whatever path the OS hands over, so it passes the same
-	// allowlist the command-line door does.
+	// macOS hands a dropped or double-clicked document over here rather than on the command line,
+	// and it fires before `whenReady` resolves on a cold launch, which is why the intents are
+	// buffered rather than sent. The event carries whatever path the OS hands over, so it passes
+	// the same allowlist the command-line door does.
 	app.on("open-file", (event, filePath) => {
 		event.preventDefault();
 		if (!isImportableFile(filePath)) return;
 		openIntents.offer({ kind: "import", path: filePath });
 	});
 
-	// The engine starts here, as soon as this process knows it is the one that
-	// owns it - not after `app.whenReady` and the window. Its own startup
-	// (opening and checking the database, before it listens) is the longest
-	// wait between launch and data on screen, and nothing about it needs
-	// Chromium: the sidecar spawns a process and polls it over HTTP. Begun here
-	// it runs alongside Chromium's own bootstrap and the window's first paint
-	// instead of after them, so the renderer's first `/health` poll more often
-	// finds an engine already listening. A failure still waits for a ready app
-	// to report itself (`startEngine`).
+	// The engine starts here, as soon as this process knows it is the one that owns it, not after
+	// `app.whenReady` and the window. Its own startup (opening and checking the database, before it
+	// listens) is the longest wait between launch and data on screen, and nothing about it needs
+	// Chromium: the sidecar spawns a process and polls it over HTTP. Begun here it runs alongside
+	// Chromium's bootstrap and the window's first paint instead of after them, so the renderer's
+	// first `/health` poll more often finds an engine already listening. A failure still waits for
+	// a ready app to report itself (`startEngine`).
 	engineStartup = startEngine();
 }
 
@@ -1800,12 +1730,11 @@ app.whenReady().then(async () => {
 	// Setup IPC handlers first
 	setupIpcHandlers();
 
-	// Tell install.sh which version is actually installed. On Linux the
-	// AppImage updates itself, and the version file the installer wrote does
-	// not move with it - so the next `install.sh` run would re-download a
-	// release already on disk. No-op on every other platform and for an
-	// AppImage running from anywhere but the managed path. Fire and forget:
-	// the file is advisory and startup must not wait on it.
+	// Tell install.sh which version is actually installed. On Linux the AppImage updates itself,
+	// and the version file the installer wrote does not move with it, so the next `install.sh` run
+	// would re-download a release already on disk. No-op on every other platform and for an
+	// AppImage running from anywhere but the managed path. Fire and forget: the file is advisory
+	// and startup must not wait on it.
 	void stampInstalledVersion(
 		{
 			platform: process.platform,
@@ -1835,10 +1764,9 @@ app.whenReady().then(async () => {
 		createAppProtocolHandler(path.join(__dirname, "../dist"), (fileUrl) => net.fetch(fileUrl))
 	);
 
-	// What the `file:` builds persisted, read now so it is held by the time the
-	// window is created (#2380). Packaged only: the dev server's origin never
-	// shared the `file://` store. Never rejects; a failed read leaves the window
-	// to start with what its own origin has.
+	// What the `file:` builds persisted, read now so it is held by the time the window is created
+	// (#2380). Packaged only: the dev server's origin never shared the `file://` store. Never
+	// rejects; a failed read leaves the window to start with what its own origin has.
 	const legacyStorageRead = isDev ? Promise.resolve() : legacyStorage.prepare();
 
 	// Populate the native About panel (used by Help → About Vayu on
@@ -1850,16 +1778,13 @@ app.whenReady().then(async () => {
 		copyright: "© 2026 Atharva Kusumbia",
 		website: "https://github.com/athrvk/vayu",
 		iconPath: aboutIconPath,
-		// The panel's fields are platform-scoped, and the two halves cover
-		// different platforms: `website` and `authors` are Linux-only, `credits`
-		// is macOS and Windows. Both are set so the panel names where to go on
-		// every platform - it was version and copyright alone on the two that
-		// could not open it at all until #1361.
+		// The panel's fields are platform-scoped, and the two halves cover different platforms:
+		// `website` and `authors` are Linux-only, `credits` is macOS and Windows. Both are set so
+		// the panel names where to go on every platform (#1361).
 		authors: ["Atharva Kusumbia"],
 		credits: `${DOCS_URL}\nhttps://github.com/athrvk/vayu\n\nLicence notices for the software Vayu includes: Help › Third-party notices.`,
 	});
 
-	// Create application menu
 	createMenu();
 
 	// One registration for the process, ahead of any window - see the function.
@@ -1878,24 +1803,21 @@ app.whenReady().then(async () => {
 		log: (msg, fields) => appLogger().warn("ipc", msg, fields),
 	});
 
-	// The window first, and the engine alongside it. The renderer does not need
-	// the engine to boot - its health query polls `/health` over HTTP and simply
-	// retries, and the Dock renders the disconnected state until it answers - so
-	// nothing was gained by making the user watch an empty screen for the length
-	// of the handshake. What was lost was everything: `db.init()` runs orphan
-	// reconciliation, inbox cleanup and a page-reclaim rewrite before the engine
-	// listens at all, and that whole window was blank screen.
+	// The window first, and the engine alongside it. The renderer does not need the engine to boot
+	// (its health query polls `/health` over HTTP and retries, and the Dock renders the
+	// disconnected state until it answers), so waiting would leave the user an empty screen through
+	// `db.init()`: orphan reconciliation, inbox cleanup and a page-reclaim rewrite all run before
+	// the engine listens at all.
 	//
-	// Nothing may sit between here and the engine that can fail on its own: the
-	// MCP server used to, and because it reads a config file at that point, a
-	// corrupt one left the app with a headless engine and no window. MCP is an
-	// optional convenience with no UI depending on it, so it still starts after
-	// everything the user can see is up and wired.
+	// Nothing may sit between here and the engine that can fail on its own: MCP's config read once
+	// did, and a corrupt file left the app with a headless engine and no window. MCP is an optional
+	// convenience with no UI depending on it, so it starts after everything the user can see is up
+	// and wired.
 	//
-	// The one wait first: the window's renderer is told the engine's port as it
-	// is created (`additionalArguments`), so the sidecar's choice has to exist.
-	// Probing is milliseconds and does not wait for the engine to be ready; a
-	// start that fails before choosing settles `engineStartup` instead.
+	// The one wait first: the window's renderer is told the engine's port as it is created
+	// (`additionalArguments`), so the sidecar's choice has to exist. Probing is milliseconds and
+	// does not wait for the engine to be ready; a start that fails before choosing settles
+	// `engineStartup` instead.
 	await Promise.race([enginePortFixed(), engineStartup]);
 	await legacyStorageRead;
 	createWindow();
@@ -1915,44 +1837,40 @@ app.whenReady().then(async () => {
 	// for any window `activate` builds or page that reloads afterwards.
 	openIntents.offerArgv(process.argv);
 
-	// Awaited, not fired and forgotten: the proxy bridge below talks to the
-	// engine, and the updater and MCP both read state the engine owns. The window
-	// is already loading throughout, which was the point; the start itself was
-	// begun before `app.whenReady` (see `engineStartup`). A failed start never
-	// reaches the arming below, so it releases the checks waiting on it here.
+	// Awaited, not fired and forgotten: the proxy bridge below talks to the engine, and the updater
+	// and MCP both read state the engine owns. The window is already loading throughout; the start
+	// itself was begun before `app.whenReady` (see `engineStartup`). A failed start never reaches
+	// the arming below, so it releases the checks waiting on it here.
 	void engineStartup?.catch(markUpdaterArmed);
 	await engineStartup;
 	// A server switched on before the first spawn bound the configured port, and
 	// the spawn released it if Settings moved the port meanwhile (#3580).
 	await mcpLifecycle.followEndpoint();
 
-	// Bridge the OS proxy into the engine (#708). Fire and forget: it never
-	// throws and never blocks on the network - the resolution is local to
-	// Chromium - so the window has its proxy row a moment later, and the settings
-	// screen refreshes it on arrival anyway. A slow engine is why this is not
-	// awaited: `startEngine` above returns without one, and the settings refresh
-	// is the backstop for the row this call then fails to fill.
+	// Bridge the OS proxy into the engine (#708). Fire and forget: it never throws and never blocks
+	// on the network (the resolution is local to Chromium), so the window has its proxy row a
+	// moment later, and the settings screen refreshes it on arrival anyway. A slow engine is why
+	// this is not awaited: `startEngine` above returns without one, and the settings refresh is the
+	// backstop for the row this call then fails to fill.
 	void refreshSystemProxy(proxyResolution());
 
-	// Waking on a different network is the common way a laptop's proxy changes
-	// under a running app: home to office, office to VPN. Electron surfaces no
-	// network-change event in the main process, so this is the half that can be
-	// caught here; the renderer's `online` listener catches the other half and
-	// calls the `proxy:refreshSystem` channel.
+	// Waking on a different network is the common way a laptop's proxy changes under a running app:
+	// home to office, office to VPN. Electron surfaces no network-change event in the main process,
+	// so this is the half that can be caught here; the renderer's `online` listener catches the
+	// other half and calls the `proxy:refreshSystem` channel.
 	powerMonitor.on("resume", () => {
 		void refreshSystemProxy(proxyResolution());
 	});
 
-	// Arm the update checks once a window exists to receive events. The updater
-	// reads `mainWindow` at send time rather than being handed the window now: on
-	// macOS the app outlives its window, and a dock-activate builds a replacement
-	// that a captured reference would never reach.
+	// Arm the update checks once a window exists to receive events. The updater reads `mainWindow`
+	// at send time rather than being handed the window now: on macOS the app outlives its window,
+	// and a dock-activate builds a replacement that a captured reference would never reach.
 	//
 	// This arms them rather than running one: the first check waits out
-	// `UPDATE_STARTUP_CHECK_DELAY_MS`, so a silent platform's download does not
-	// start while the window, the engine and the user's first requests are still
-	// competing for the link and the disk. The channels it serves are already
-	// registered; a check that arrived first is waiting on `updaterArmed`.
+	// `UPDATE_STARTUP_CHECK_DELAY_MS`, so a silent platform's download does not start while the
+	// window, the engine and the user's first requests are still competing for the link and the
+	// disk. The channels it serves are already registered; a check that arrived first is waiting on
+	// `updaterArmed`.
 	void loadUpdater()
 		.then((updater) => updater.initAutoUpdater(() => mainWindow))
 		.catch((error: unknown) => {
@@ -1965,11 +1883,10 @@ app.whenReady().then(async () => {
 	// that guard would cost the user nothing but MCP.
 	await mcpLifecycle.start();
 
-	// Last of all, and not awaited: it asks Windows to reopen the app after a
-	// restart, which the window and the engine do not depend on and which must
-	// not be able to hold up or fail anything before them. It never rejects, so
-	// a missing binding costs the feature and nothing else. `koffi` is reached
-	// only through this dynamic import, and only on Windows (#2098).
+	// Last of all, and not awaited: it asks Windows to reopen the app after a restart, which the
+	// window and the engine do not depend on and which must not be able to hold up or fail anything
+	// before them. It never rejects, so a missing binding costs the feature and nothing else.
+	// `koffi` is reached only through this dynamic import, and only on Windows (#2098).
 	if (wasRestartedAfterReboot(process.argv)) {
 		appLogger().info("main", "Relaunched by Windows after a restart", {
 			restartedAfterReboot: true,
@@ -1994,10 +1911,9 @@ app.on("window-all-closed", () => {
 // once rather than starting two engine shutdowns.
 const resumeQuit = () => app.quit();
 
-// Second pass of the quit: stop the children exactly once. See quit-shutdown.ts
-// for why "has a shutdown started" is the guard rather than "is the engine
-// still running" - the latter only clears after the awaits, so a quit landing
-// mid-shutdown started a second one on top of it.
+// Second pass of the quit: stop the children exactly once. See quit-shutdown.ts for why "has a
+// shutdown started" is the guard rather than "is the engine still running": the latter only clears
+// after the awaits, so a quit landing mid-shutdown started a second one on top of it.
 const quitShutdown = createQuitShutdown({
 	hasWork: () => Boolean(engineSidecar?.isRunning() || mcpLifecycle.isActive()),
 	stop: async () => {
@@ -2028,17 +1944,15 @@ app.on("will-quit", () => {
 	updaterModule?.disposeAutoUpdater();
 });
 
-// A signal is how anything outside the UI asks Vayu to stop, and Node's default
-// is to terminate the process where it stands - skipping the handler above
-// entirely, so pending saves are lost and the engine and MCP children are
-// orphaned. This routes them into the same shutdown Cmd-Q takes. It matters
-// most on Linux, where install.sh has no Apple Event to quit the app with
-// before it replaces the AppImage, only a signal.
+// A signal is how anything outside the UI asks Vayu to stop, and Node's default is to terminate the
+// process where it stands, skipping the handler above entirely: pending saves are lost and the
+// engine and MCP children are orphaned. This routes them into the same shutdown Cmd-Q takes. It
+// matters most on Linux, where install.sh has no Apple Event to quit the app with before it
+// replaces the AppImage, only a signal.
 //
-// Nobody is behind a signal, so it is also the one quit that must not ask about
-// running services: the dialog would wait for an answer that is never coming,
-// and install.sh's AppImage replacement would wait with it (#1363). The same
-// holds for the flush-failure dialog (#1908).
+// Nobody is behind a signal, so it is also the one quit that must not ask about running services:
+// the dialog would wait for an answer that is never coming, and install.sh's AppImage replacement
+// would wait with it (#1363). The same holds for the flush-failure dialog (#1908).
 installQuitOnSignal(process, () => {
 	quitFlow.markQuitUnattended();
 	app.quit();

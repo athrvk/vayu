@@ -17,7 +17,6 @@
 namespace vayu::http::detail {
 
 EventLoopImpl::EventLoopImpl (EventLoopConfig cfg) : config (std::move (cfg)) {
-    // Determine number of workers
     size_t num_workers = config.num_workers;
     if (num_workers == 0) {
         num_workers =
@@ -40,7 +39,6 @@ void EventLoopImpl::start () {
         return; // Already running
     }
 
-    // Start all workers
     for (auto& worker : workers) {
         worker->start ();
     }
@@ -128,12 +126,10 @@ BatchResult EventLoopImpl::execute_batch (const std::vector<Request>& requests) 
     std::vector<RequestHandle> handles;
     handles.reserve (requests.size ());
 
-    // Submit all requests
     for (const auto& req : requests) {
         handles.push_back (submit_async (req));
     }
 
-    // Wait for all results and collect them
     result.responses.reserve (requests.size ());
     for (size_t i = 0; i < handles.size (); ++i) {
         auto response = handles[i].future.get ();

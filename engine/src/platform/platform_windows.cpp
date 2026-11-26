@@ -5,11 +5,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file platform_windows.cpp
- * @brief Windows platform implementations
- */
-
 #include "vayu/platform/platform.hpp"
 
 #if VAYU_PLATFORM_WINDOWS
@@ -82,11 +77,10 @@ bool is_process_running (int pid) {
 // ============================================================================
 
 LockAcquisition acquire_file_lock (const std::string& path, LockHandle& handle) {
-    // Create or open the lock file
-    // Note: On Windows, file locks are automatically released when the process terminates
-    // (even if it crashes or is killed), so stale locks are not a concern.
-    // Share mode 0 is also what keeps the file from being deleted while held,
-    // so the guard cannot be bypassed the way a POSIX file lock can (issue #2422).
+    // Windows releases the lock when the process ends, crash or kill included,
+    // so a stale lock cannot occur. Share mode 0 also keeps the file from being
+    // deleted while held, so the guard cannot be bypassed the way a POSIX file
+    // lock can (issue #2422).
     handle = CreateFileA (path.c_str (), GENERIC_READ | GENERIC_WRITE,
     0, // No sharing - exclusive access
     nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -118,7 +112,6 @@ bool write_pid_to_lock (LockHandle handle) {
     SetFilePointer (handle, 0, nullptr, FILE_BEGIN);
     SetEndOfFile (handle);
 
-    // Write PID
     std::string pid = std::to_string (get_process_id ()) + "\n";
     DWORD written   = 0;
     if (!WriteFile (handle, pid.c_str (), static_cast<DWORD> (pid.length ()),
@@ -185,7 +178,6 @@ bool create_directory (const std::string& path) {
 void ensure_directory (const std::string& path) {
     DWORD attribs = GetFileAttributesA (path.c_str ());
     if (attribs == INVALID_FILE_ATTRIBUTES) {
-        // Directory doesn't exist, create it
         if (!CreateDirectoryA (path.c_str (), nullptr)) {
             DWORD error = GetLastError ();
             if (error != ERROR_ALREADY_EXISTS) {
@@ -457,20 +449,15 @@ std::vector<std::string> local_ipv4_addresses () {
     return addresses;
 }
 
-// The 1 ms timer request used to live here, held for the process' whole life.
-// It is `HighResolutionTimerScope` in high_resolution_timer.cpp now, taken by
-// each run and released with it (issue #1161).
-
 // ============================================================================
 // Thread Scheduling
 // ============================================================================
 
 bool pin_current_thread (unsigned cpu_index) {
-    // A shift past the mask's own width is undefined behaviour; DWORD_PTR is
-    // 32 bits on a 32-bit build and 64 on a 64-bit one; there is no group
-    // affinity here (that would need SetThreadGroupAffinity for a system with
-    // more logical CPUs than one mask can name), matching the single-mask
-    // Linux/macOS pinning this function offers everywhere else.
+    // A shift past the mask's own width is undefined behaviour, and DWORD_PTR
+    // is 32 bits on a 32-bit build, 64 on a 64-bit one. No group affinity
+    // (SetThreadGroupAffinity, for a system with more logical CPUs than one
+    // mask can name), matching the single-mask pinning Linux and macOS get.
     if (cpu_index >= sizeof (DWORD_PTR) * 8) {
         return false;
     }
@@ -485,11 +472,10 @@ bool raise_current_thread_priority () {
 }
 
 void sleep_until_precise (std::chrono::steady_clock::time_point deadline) {
-    // No Windows equivalent of clock_nanosleep/mach_wait_until at this layer;
-    // the precision problem here is solved separately - HighResolutionTimerScope
-    // plus the caller's own spin tail (see wait_for_next_tick in
-    // load_strategy.cpp) - so this is deliberately sleep_for's ordinary
-    // relative form, not a Windows-specific precision path.
+    // No Windows equivalent of clock_nanosleep/mach_wait_until at this layer:
+    // precision here comes from HighResolutionTimerScope plus the caller's own
+    // spin tail (wait_for_next_tick in load_strategy.cpp), so this is
+    // deliberately sleep_for's ordinary relative form.
     const auto now = std::chrono::steady_clock::now ();
     if (deadline > now) {
         std::this_thread::sleep_for (deadline - now);

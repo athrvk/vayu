@@ -6,23 +6,18 @@
  */
 
 /**
- * Environments and variable keys, as palette results.
+ * Environments and variable keys, as palette results. A `{{token}}` that resolves to the wrong
+ * thing is easy to cause and hard to find, since "where is this defined" means clicking through
+ * every scope in the Variables tab; here the key is what you search for, and the row lands on the
+ * scope that defines it.
  *
- * A `{{token}}` that resolves to the wrong thing is one of the app's easiest
- * mistakes to make and hardest to find, because answering "where is this
- * defined" means opening the Variables tab and clicking through every scope.
- * This makes the key itself the thing you search for, and lands on the scope
- * that defines it.
+ * **Values are never indexed, secret or not.** A value can be a bearer token, and the palette
+ * renders whatever it matches, so this reads keys and scope names and never touches `.value`.
+ * `secret` is only a masking hint (see `VariableValue`), so a rule that trusted it would leak every
+ * token nobody flagged. `useVariableItems.test.ts` holds the invariant.
  *
- * **Values are never indexed, secret or not.** A variable's value is the one
- * piece of this data that can be a bearer token, and the palette is a surface
- * that renders whatever it matches - so this source reads keys and scope names
- * and never touches `.value`. `secret` is only a masking hint (see
- * `VariableValue`), so a rule that trusted it would leak every token nobody
- * remembered to flag. `useVariableItems.test.ts` holds the invariant.
- *
- * Client-side throughout: collections, environments and globals are all in
- * cache, so typing here costs nothing.
+ * Client-side throughout: collections, environments and globals are all in cache, so typing costs
+ * nothing.
  */
 
 import { useMemo } from "react";
@@ -44,21 +39,16 @@ interface Scope {
 	variableKeys: string[];
 }
 
-/**
- * Open the Variables tab on one scope - the two calls the variables tree's own
- * `selectCategory` makes, in that order.
- */
+/** Open the Variables tab on one scope: the variables tree's `selectCategory` calls, in order. */
 function openScope(category: VariableCategory): void {
 	useVariablesStore.getState().setSelectedCategory(category);
 	useTabsStore.getState().openTab({ type: "variables", entityId: null });
 }
 
 /**
- * Prefix matches before contained ones, and everything else in scope order.
- *
- * Lower sorts first; `null` means no match. Deliberately smaller than
- * `searchSettings`' ranking: a variable has a key and a scope name and nothing
- * else to weigh.
+ * Prefix matches before contained ones, the rest in scope order; lower sorts first, `null` is no
+ * match. Smaller than `searchSettings`' ranking on purpose: a variable has a key and a scope name
+ * and nothing else to weigh.
  */
 function matchRank(haystack: string, needle: string): number | null {
 	const value = haystack.toLowerCase();
@@ -68,10 +58,9 @@ function matchRank(haystack: string, needle: string): number | null {
 }
 
 /**
- * The key a query names: a pasted `{{baseUrl}}`, a half-typed `{{base` or a
- * spaced `{{ baseUrl }}` all read as the bare key. A variable key holds no
- * whitespace, so all of it goes; an environment's name can, so it is matched
- * against the plain needle instead.
+ * The key a query names: a pasted `{{baseUrl}}`, a half-typed `{{base` and a spaced `{{ baseUrl }}`
+ * all read as the bare key. A key holds no whitespace, so all of it goes; an environment's name
+ * can, so it is matched against the plain needle.
  */
 function keyNeedle(needle: string): string {
 	return needle.split("{{").join("").split("}}").join("").replace(/\s+/g, "");
@@ -84,9 +73,8 @@ export function useVariableItems(query: string): PaletteItem[] {
 	const needle = query.trim().toLowerCase();
 
 	const scopes = useMemo<Scope[]>(() => {
-		// Palette order only: environments, collections, then globals. It is not the
-		// sidebar tree's section order and neither is precedence; the ladder is in
-		// docs/app/variable-resolution.md.
+		// Palette order only (environments, collections, globals): neither the tree's section order
+		// nor precedence, whose ladder is in docs/app/variable-resolution.md.
 		const built: Scope[] = environments.map((environment) => ({
 			key: environment.id,
 			label: environment.name,
@@ -114,9 +102,8 @@ export function useVariableItems(query: string): PaletteItem[] {
 	}, [collections, environments, globals]);
 
 	return useMemo(() => {
-		// Deep search is search - see `useSettingsItems` for why the empty query
-		// contributes nothing.
-		// After stripping, so a lone `{{` is as empty as no query.
+		// The empty query contributes nothing (see `useSettingsItems`), checked after stripping so
+		// a lone `{{` is as empty as no query.
 		const keyQuery = keyNeedle(needle);
 		if (keyQuery === "") return [];
 
@@ -172,9 +159,8 @@ export function useVariableItems(query: string): PaletteItem[] {
 		// Stable sort, so ties keep scope order (environments, collections,
 		// globals) rather than reshuffling as the query grows.
 		ranked.sort((a, b) => a.rank - b.rank);
-		// No escape row: unlike settings and runs there is no surface that
-		// browses variables across scopes - the Variables tab edits one scope at
-		// a time - so a "see all" row would have nowhere to go.
+		// No escape row: no surface browses variables across scopes (the Variables tab edits one
+		// scope at a time), so a "see all" row would have nowhere to go.
 		return ranked.slice(0, DEEP_GROUP_LIMIT).map((entry) => entry.item);
 	}, [scopes, needle]);
 }

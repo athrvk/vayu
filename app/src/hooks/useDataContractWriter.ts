@@ -6,16 +6,14 @@
  */
 
 /**
- * The two writes that change a collection's data contract (issue #2050):
- * declare it from a file, or clear it - plus the one that changes only how the
- * bound file is read (`rememberReading`, #2540). Shared by every surface where a
- * pick or a Remove names the file a contract comes from, so the rules about
- * *when* the file binding is written live once.
+ * The two writes that change a collection's data contract (#2050), declare it from a file or clear
+ * it, plus the one that changes only how the bound file is read (`rememberReading`, #2540). Shared
+ * by every surface where a pick or a Remove names a contract's file, so the rules about *when* the
+ * file binding is written live once.
  *
- * The schema and the file it was read from are written together, in one
- * collection update (`dataSchema` + `dataFile`, #2765), so the engine never
- * holds a binding to a file whose columns were not declared, nor a contract
- * whose file belongs to an earlier declare.
+ * The schema and the file it was read from are written together, in one collection update
+ * (`dataSchema` + `dataFile`, #2765), so the engine never holds a binding to a file whose columns
+ * were not declared, nor a contract whose file belongs to an earlier declare.
  */
 
 import { useCallback } from "react";
@@ -102,11 +100,10 @@ export function useDataContractWriter(collectionId: string | null | undefined): 
 }
 
 /**
- * The binding a declare writes beside the columns: where `file` is, the hash of
- * the bytes the columns were read from, and how its values were read. A file
- * with no path (a browser, a remote drop) binds nothing and forgets the
- * previous file, so the binding never names a file the contract was not read
- * from. Never the rows.
+ * The binding a declare writes beside the columns: where `file` is, the hash of the bytes the
+ * columns were read from, and how its values were read; never the rows. A file with no path (a
+ * browser, a remote drop) binds nothing and forgets the previous file, so the binding never names a
+ * file the contract was not read from.
  */
 function fileBinding(file: SelectedDataFile): DataFileLocation | null {
 	if (!file.path) return null;

@@ -6,21 +6,13 @@
  */
 
 /**
- * SampleRequestCard Component
+ * A single stored sampled request, expandable. The row, the expansion chrome, the error block and
+ * the timing tiles are the shared `SampledExchange` (#76), as a flat `divide-y` strip, not a boxed
+ * card per row; what is history's alone is a stored run's date formatting and the response section.
  *
- * A single stored sampled request, expandable. The row, the expansion chrome,
- * the error block and the timing tiles are the shared `SampledExchange` (#76),
- * laid out as a flat `divide-y` strip rather than a boxed card per row. What is
- * left here is what is genuinely history's: a stored run's date formatting and
- * the response section.
- *
- * The response comes from `GET /runs/:id/samples` (issue #174), not from the
- * trace. This card used to read `sample.trace.request.headers` and
- * `sample.trace.response.body` - the design-mode nesting - on a surface that
- * only ever shows load-run rows, which no writer produces. Both branches were
- * dead, so the card rendered nothing but its timing tiles. There is also no
- * per-sample request to show any more: a load run's request is constant across
- * iterations and lives once in `runs.config_snapshot`.
+ * The response comes from `GET /runs/:id/samples` (#174), not the trace. There is no per-sample
+ * request: a load run's request is constant across iterations and lives once in
+ * `runs.config_snapshot`.
  */
 
 import {
@@ -66,14 +58,10 @@ export default function SampleRequestCard({
 			? runSampleReference({ resultId: sample.id }, { id: runId })
 			: null;
 
-	// A stored sample is dating a run, not placing a moment inside one, so it
-	// wants the day rather than milliseconds.
-	// Gating on the phases themselves, not on `sample.trace`. The two used to be
-	// decided separately - the wrapper rendered whenever a trace existed, while
-	// the breakdown inside it returned null unless DNS, connect or TLS was
-	// present - so a trace carrying only TTFB and download printed a "Timing
-	// Breakdown" heading with nothing under it. `SampledExchange` gates on the
-	// list, so the heading cannot outlive its content.
+	// A stored sample is dating a run, not placing a moment inside one, so it wants the day rather
+	// than milliseconds. Gated on the phases themselves, not on `sample.trace`, as
+	// `SampledExchange` gates on the list: a trace carrying only TTFB and download must not print a
+	// "Timing Breakdown" heading with nothing under it.
 	const trace = sample.trace;
 	const phases = phasesFromTrace(trace);
 	const isSlow = isSlowSample(sample);
@@ -101,11 +89,10 @@ export default function SampleRequestCard({
 					/>
 				)
 			}
-			// Flat divide-y strip rather than a boxed card per row - no per-row
-			// radius needed, the "square on purpose" exception a full-bleed
-			// divider strip gets. Status rides the `StatusIcon` tint alone, not
-			// a second, redundant colour on the border. `border-rule` reads the
-			// `surface-card` the enclosing `Card` declares (issue #1650).
+			// A flat divide-y strip, not a boxed card per row, so no per-row radius (the "square on
+			// purpose" exception for a full-bleed divider strip). Status rides the `StatusIcon`
+			// tint alone, not a second colour on the border. `border-rule` reads the `surface-card`
+			// the enclosing `Card` declares (#1650).
 			className="border-b border-rule last:border-b-0"
 		>
 			{isSlow && (

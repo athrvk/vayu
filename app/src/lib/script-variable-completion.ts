@@ -8,45 +8,40 @@
 /**
  * "Is the caret inside the name argument of a `pm.*` variable accessor?"
  *
- * A script does not reach variables through `{{name}}` - it calls
- * `pm.environment.get("name")` and its siblings - so the body editors'
- * brace completion is deliberately not registered for `javascript`
- * (see `useVariableCompletionProvider`). That left the script editors with no
- * way to see what is in scope at all: the names live in the panel above the
- * editor, and you had to read them off it and spell them yourself.
+ * A script does not reach variables through `{{name}}`; it calls `pm.environment.get("name")` and
+ * its siblings, so the body editors' brace completion is deliberately not registered for
+ * `javascript` (see `useVariableCompletionProvider`). Without this, the script editors have no way
+ * to see what is in scope: the names live in the panel above the editor, to be read off it and
+ * spelled by hand.
  *
- * This is the rule that fills that gap without teaching brace syntax where it
- * does not apply. It is pure and single-line, which is all a variable name
- * needs - the caret is inside one string literal on one line.
+ * This rule fills that gap without teaching brace syntax where it does not apply. It is pure and
+ * single-line, which is all a variable name needs: the caret is inside one string literal on one
+ * line.
  *
- * **The accessor decides the scope, not a merged list.** `pm.environment.get`
- * only ever reads the environment, so offering a collection variable there
- * would offer a name that resolves to `undefined` at run time. Only
- * `pm.variables` (the merged read) gets everything.
+ * **The accessor decides the scope, not a merged list.** `pm.environment.get` only ever reads the
+ * environment, so offering a collection variable there would offer a name that resolves to
+ * `undefined` at run time. Only `pm.variables` (the merged read) gets everything.
  */
 
 import { variableCompletionContext } from "./variable-completion";
 
 /**
- * Which names belong in the list. `all` is the merged read - `pm.variables`.
- *
- * `data` is the odd one and deliberately named for what it selects rather than
- * for a scope: `pm.iterationData` reads the run's data row, so the list is the
- * *declared columns* of the collection's contract (issue #600), not variables
- * at all. A caller that treats it as a variable scope finds no names, because
- * no variable ever carries one - the namespace is disjoint from the tiers.
+ * Which names belong in the list. `all` is the merged read, `pm.variables`. `data` is named for
+ * what it selects rather than for a scope: `pm.iterationData` reads the run's data row, so the list
+ * is the *declared columns* of the collection's contract (#600), not variables at all. A caller
+ * that treats it as a variable scope finds no names, because no variable ever carries one: the
+ * namespace is disjoint from the tiers.
  */
 export type ScriptVariableScope = "environment" | "collection" | "global" | "all" | "data";
 
 export interface ScriptVariableCompletionContext {
 	scope: ScriptVariableScope;
 	/**
-	 * `name` - a bare variable name, the argument to `get`/`set`/`has`/`unset`.
-	 * `template` - `{{name}}` inside `pm.<accessor>.replaceIn`, which interpolates
-	 * its argument exactly as a URL or body is interpolated, so the braces *are*
-	 * the syntax there and generators (`{{$guid}}`) resolve too. The scope is the
-	 * accessor's, as for `name`: `pm.environment.replaceIn` resolves against the
-	 * environment alone. `pm.iterationData` has no `replaceIn`.
+	 * `name`: a bare variable name, the argument to `get`/`set`/`has`/`unset`. `template`:
+	 * `{{name}}` inside `pm.<accessor>.replaceIn`, which interpolates its argument exactly as a URL
+	 * or body is interpolated, so the braces *are* the syntax there and generators (`{{$guid}}`)
+	 * resolve too. The scope is the accessor's, as for `name`: `pm.environment.replaceIn` resolves
+	 * against the environment alone. `pm.iterationData` has no `replaceIn`.
 	 */
 	mode: "name" | "template";
 	/** 0-based index in the line where the replacement starts. */
@@ -63,11 +58,9 @@ export interface OpenString {
 }
 
 /**
- * Scans a single line for a string literal left open at the caret.
- *
- * Exported because the `pm.*` completion provider needs the same answer for the
- * opposite reason: a dotted member list has no business appearing *inside* a
- * string, where the only useful suggestion is a variable name.
+ * Scans a single line for a string literal left open at the caret. Exported because the `pm.*`
+ * completion provider needs the same answer for the opposite reason: a dotted member list has no
+ * business appearing *inside* a string, where the only useful suggestion is a variable name.
  */
 export function openStringLiteral(textBeforeCaret: string): OpenString | null {
 	let quote: string | null = null;
@@ -105,13 +98,10 @@ const SCOPE_BY_ACCESSOR: Record<string, ScriptVariableScope> = {
 };
 
 /**
- * Methods whose *first* argument is a variable name.
- *
- * `pm.variables` is the odd one: its reads are the merged view, but its `set`
- * and `unset` write the run-local scope (#2564), which is never stored, so no
- * stored name belongs to it. Offering the merged list there would present
- * other scopes' names as if they were local, so those spellings are simply
- * absent here.
+ * Methods whose *first* argument is a variable name. `pm.variables` is the odd one: its reads are
+ * the merged view, but its `set` and `unset` write the run-local scope (#2564), which is never
+ * stored, so no stored name belongs to it. Offering the merged list there would present other
+ * scopes' names as if they were local, so those spellings are absent here.
  */
 const NAME_METHODS: Record<string, readonly string[]> = {
 	environment: ["get", "set", "has", "unset"],
@@ -124,15 +114,14 @@ const NAME_METHODS: Record<string, readonly string[]> = {
 };
 
 /**
- * `pm.<accessor>.<method>(` immediately before the caret's string, allowing the
- * whitespace a formatter might leave. Anchored to the end so only the *first*
- * argument matches - `set`'s second argument is a value, not a name.
+ * `pm.<accessor>.<method>(` immediately before the caret's string, allowing the whitespace a
+ * formatter might leave. Anchored to the end so only the *first* argument matches: `set`'s second
+ * argument is a value, not a name.
  *
- * Optional chaining counts as the dot it is. `pm.iterationData` is `undefined`
- * outside a data-driven run and its own documentation says to guard before
- * calling, so `pm.iterationData?.get("` is how the call is actually written -
- * and a completion list that vanished when the user guarded would be teaching
- * the opposite of what the surface asks for.
+ * Optional chaining counts as the dot it is. `pm.iterationData` is `undefined` outside a
+ * data-driven run and its own documentation says to guard before calling, so
+ * `pm.iterationData?.get("` is how the call is actually written, and a completion list that
+ * vanished when the user guarded would teach the opposite of what the surface asks for.
  */
 const ACCESSOR_CALL = /pm\s*\??\.\s*(\w+)\s*\??\.\s*(\w+)\s*\(\s*$/;
 

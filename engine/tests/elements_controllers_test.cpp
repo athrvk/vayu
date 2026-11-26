@@ -724,7 +724,7 @@ class ElementsControllersTest : public ::testing::Test {
 
     /// Resolve (recursively, so a folder's members are walked), create the
     /// run row and start the worker, exactly as `POST /runs` does minus the
-    /// HTTP layer - mirroring `scenario_runner_test.cpp`'s own helper.
+    /// HTTP layer - mirroring `scenario_runner_fixture.hpp`'s own helper.
     std::string start (size_t iterations, const json& data = json ()) {
         json scenario{ { "source", "collection" }, { "collectionId", "col_1" },
             { "recursive", true }, { "iterations", iterations } };

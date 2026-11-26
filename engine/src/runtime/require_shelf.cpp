@@ -6,30 +6,29 @@
  */
 
 /**
- * @file require_shelf.cpp
- * @brief `require()` and the library globals Postman binds, over a fixed shelf
- *        of bundled libraries (#2578).
+ * `require()` and the library globals Postman binds, over a fixed shelf of
+ * bundled libraries (#2578).
  *
  * `require(name)` answers a library from `SHELF` and refuses every other name;
- * there is no loader behind it, so nothing reads a file or the network. A
- * library is Vayu's own source (the crypto-js shim) or a vendored npm build
- * compiled in by `vayu_embed_js` (`engine/cmake/embed_js.cmake`) with glue
- * around it (`uuid`, #2650; `lodash`, #2651; `moment`, #2652;
- * `csv-parse/lib/sync`, #2653; `xml2js`, #2654; `chai`, #2655; `ajv` and
- * `tv4`, #2656). A name is matched whole, so a sub-path is on the shelf only
- * as itself. A library global (`CryptoJS`, `_`, `xml2Json`, `tv4`) is an
- * accessor that loads its library on first read and then replaces itself with
- * the value, as `responseCookies` does; the value is the module, or what the
- * row's adapter builds from it (`xml2Json` is a function over xml2js, not
- * xml2js). A library with no global (`uuid`, `moment`, `csv-parse/lib/sync`,
- * `chai`, `ajv`) is reached only through `require`, as in Postman.
+ * no loader sits behind it, so nothing reads a file or the network. A library
+ * is Vayu's own source (the crypto-js shim) or a vendored npm build compiled in
+ * by `vayu_embed_js` (`engine/cmake/embed_js.cmake`) with glue around it
+ * (`uuid`, #2650; `lodash`, #2651; `moment`, #2652; `csv-parse/lib/sync`,
+ * #2653; `xml2js`, #2654; `chai`, #2655; `ajv` and `tv4`, #2656). A name is
+ * matched whole, so a sub-path is on the shelf only as itself.
+ *
+ * A library global (`CryptoJS`, `_`, `xml2Json`, `tv4`) is an accessor that
+ * loads its library on first read and replaces itself with the value, as
+ * `responseCookies` does: the module, or what the row's adapter builds from it
+ * (`xml2Json` is a function over xml2js, not xml2js). A library with no global
+ * (`uuid`, `moment`, `csv-parse/lib/sync`, `chai`, `ajv`) is reached only
+ * through `require`, as in Postman.
  *
  * A library's source is evaluated on first use in an execution, never when a
- * context is built: every script gets a freshly built context
- * (`release_context`), so a library evaluated there would be paid for by every
- * element whether or not it touches the library. Within one execution the
- * evaluated module is kept in `ContextData::shelf_modules`, so `require` and
- * the global share one evaluation of a library (and, where the global is the
+ * context is built: every script gets a fresh context (`release_context`), so
+ * evaluating there would charge every element whether or not it touches the
+ * library. `ContextData::shelf_modules` keeps the module for the execution, so
+ * `require` and the global share one evaluation (and, where the global is the
  * module, answer the same object).
  */
 

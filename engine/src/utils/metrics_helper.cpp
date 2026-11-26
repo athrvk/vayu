@@ -59,11 +59,10 @@ struct TimingTotals {
 
 /**
  * What one result's stored trace adds to the report: its error type, its phase
- * timings, and whether it was slow.
- *
- * One unreadable trace row contributes nothing and the run keeps counting - the
- * per-result counters are recorded by the caller, and a report that stopped at
- * the first bad row would describe fewer requests than the run made.
+ * timings, and whether it was slow. One unreadable trace row contributes
+ * nothing and the run keeps counting: the caller records the per-result
+ * counters, and a report that stopped at the first bad row would describe fewer
+ * requests than the run made.
  */
 void add_trace_metrics (const std::string& trace_data, DetailedReport& report, TimingTotals& timings) {
     if (trace_data.empty ()) {
@@ -117,7 +116,6 @@ void apply_latency_percentiles (std::vector<double>& latencies, DetailedReport& 
     const auto percentile = [&latencies] (double p) {
         size_t idx =
         static_cast<size_t> (std::ceil (p * static_cast<double> (latencies.size ()))) - 1U;
-        // Clamp index to valid range
         idx = std::max (size_t{ 0 }, std::min (idx, latencies.size () - 1));
         return latencies[idx];
     };
@@ -166,7 +164,6 @@ double duration_s) {
         add_trace_metrics (result.trace_data, report, timings);
     }
 
-    // Calculate averages and rates
     report.error_rate = report.total_requests > 0 ?
     (static_cast<double> (report.failed_requests) * 100.0 /
     static_cast<double> (report.total_requests)) :
@@ -186,14 +183,13 @@ double duration_s) {
     // capped at `max_slow_results`. A summary that has one replaces this.
     report.slow_requests_count = report.slow_traces_stored;
 
-    // Phase 1: Categorize errors by status code
+    // Errors by status code: 0 (no response) and every 4xx and 5xx.
     for (const auto& [code, count] : report.status_codes) {
         if (code == 0 || code >= 400) {
             report.errors_by_status_code[code] = count;
         }
     }
 
-    // Phase 1: Set actual RPS (already calculated)
     report.actual_rps      = report.avg_rps;
     report.target_rps      = 0; // Will be set by caller if available
     report.rps_achievement = 0; // Will be calculated by caller

@@ -8,19 +8,17 @@
  */
 
 /**
- * @file core/svg_chart.hpp
- * @brief Line charts of a run's time series as inline `<svg>` (#2135).
+ * Line charts of a run's time series as inline `<svg>` (#2135).
  *
- * The markup carries no script, no external reference and no `url(...)`, so a
- * page that embeds it loads nothing. Colour comes from CSS classes the host
- * page defines (`s-<style>` per series), which is what lets one stylesheet
- * switch the charts between light, dark and print. A chart holds to four
- * rules a reader would otherwise have to check by eye: every y-axis starts at
- * 0 and names its unit; a series is drawn from at most
- * @ref MAX_CHART_POINTS points however long the run, with each bucket's
- * minimum and maximum kept so a one-sample spike survives; each series is
- * labelled where it ends instead of in a legend; and the chart states each
- * series' minimum, maximum and the time of its peak in its `<desc>`.
+ * The markup has no script, external reference or `url(...)`, so an embedding
+ * page loads nothing. Colour comes from CSS classes the host page defines
+ * (`s-<style>` per series), so one stylesheet switches the charts between
+ * light, dark and print. Four rules a reader would otherwise check by eye:
+ * every y-axis starts at 0 and names its unit; a series is drawn from at most
+ * @ref MAX_CHART_POINTS points however long the run, each bucket's minimum and
+ * maximum kept so a one-sample spike survives; each series is labelled at its
+ * end, not in a legend; and `<desc>` states each series' minimum, maximum and
+ * time of peak.
  */
 
 #include <cstddef>

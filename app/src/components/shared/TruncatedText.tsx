@@ -6,21 +6,11 @@
  */
 
 /**
- * TruncatedText
- *
- * One line of user-supplied text - a collection, request, environment or tab
- * name - that ellipses when it does not fit and reveals the full value on
- * hover, only then.
- *
- * This is the single place that behaviour lives. The alternative was
- * `title={name}` written out at every call site, which drifts: some rows get
- * it, some do not, and the ones that do show a tooltip even when the name is
- * fully visible.
- *
- * Distinct from `ScrollOnOverflow`, which marquees the text instead. That is
- * the tab-strip treatment, where the label is the primary target and there is
- * no room to widen. Rows ellipse and use a tooltip; they should not animate
- * under the cursor.
+ * One line of user-supplied text (a collection, request, environment or tab name) that ellipses
+ * when it does not fit and reveals the full value on hover, only then: the one home of that
+ * behaviour, as `title={name}` per call site drifts and tooltips even fully visible names. Not
+ * `ScrollOnOverflow`, which marquees, the tab strip's treatment where the label is the target with
+ * no room to widen; rows ellipse and must not animate under the cursor.
  */
 
 import { useOverflowTitle } from "@/hooks/useOverflowTitle";
@@ -30,9 +20,8 @@ interface TruncatedTextProps {
 	/** The full text. Shown inline, and as the tooltip when it does not fit. */
 	children: string;
 	/**
-	 * What the tooltip says instead, for a piece of a longer label: a name or an
-	 * ancestor prefix whose tooltip is the whole path. Same rule, shown only
-	 * while this element is clipped.
+	 * The tooltip instead of the text, for part of a longer label (a name or ancestor prefix whose
+	 * tooltip is the whole path); shown only while clipped.
 	 */
 	title?: string;
 	className?: string;
@@ -52,13 +41,10 @@ export function TruncatedText({
 	const ref = useOverflowTitle<HTMLElement>(title ?? children);
 
 	return (
-		// `truncate` is not optional - `scrollWidth > clientWidth` only means
-		// "clipped" when the element hides its overflow, so the hook cannot
-		// detect anything without it. Nor is `block`: overflow and
-		// `text-overflow` do nothing on an inline box, so the default `span`
-		// under a non-flex parent (the Trash row) ran past its column, clipped
-		// mid-word by the row with no ellipsis and no tooltip. A flex or grid
-		// child is blockified anyway, so this changes nothing there.
+		// `truncate` is required: `scrollWidth > clientWidth` means clipped only when overflow is
+		// hidden. So is `block`: overflow and `text-overflow` do nothing on an inline box, so the
+		// default `span` under a non-flex parent (the Trash row) ran past its column, clipped
+		// mid-word with no ellipsis or tooltip. A flex or grid child is blockified anyway.
 		<Tag ref={ref as React.Ref<never>} id={id} className={cn("block truncate", className)}>
 			{children}
 		</Tag>

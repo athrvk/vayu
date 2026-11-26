@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/oauth_discovery.hpp
  * @brief Where an MCP server's OAuth 2.0 authorization server is and what it
  *        supports (#3766), found the way the MCP authorization spec orders it.
  *

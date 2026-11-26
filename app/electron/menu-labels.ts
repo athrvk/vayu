@@ -6,13 +6,11 @@
  */
 
 /**
- * The application menu's labels, by platform (#3500).
- *
- * One template serves two surfaces: the menu bar macOS draws at the top of the
- * screen, which follows the platform's Title Case, and the menu popped from the
- * title-bar icon on Windows and Linux, which is an in-app surface and follows
- * the app's sentence case (`docs/ux-writing.md`, "Case"). `createMenu` in
- * main.ts takes every label that differs between the two from `menuLabels`.
+ * The application menu's labels, by platform (#3500). One template serves two surfaces: the menu
+ * bar macOS draws at the top of the screen, which follows the platform's Title Case, and the menu
+ * popped from the title-bar icon on Windows and Linux, an in-app surface following the app's
+ * sentence case (`docs/ux-writing.md`, "Case"). `createMenu` in main.ts takes every label that
+ * differs between the two from `menuLabels`.
  *
  * Kept free of Electron types for the reason `menu-accelerators.ts` gives.
  */

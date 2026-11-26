@@ -6,7 +6,7 @@
  */
 
 /**
- * The reference lines `docs/engine/mcp.md` prints are the formatters' output (#2046).
+ * The reference lines `docs/engine/mcp/runs-and-reports.md` prints are the formatters' output (#2046).
  *
  * The page teaches an agent the grammar by example, and an example that stops
  * matching the app is the agent being taught a line the app never writes. The
@@ -19,7 +19,7 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { DOC_READING_GUARDS, entryCovers, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { collectionNamePath } from "@/modules/collections/tree-utils";
 import {
 	captureReference,
@@ -43,7 +43,8 @@ import {
 } from "./agent-reference";
 import { formatInstant } from "./time-value";
 
-const [page] = DOC_READING_GUARDS.agentReference.paths;
+/** The page that holds the section; the registry entry is its directory. */
+const page = "docs/engine/mcp/runs-and-reports.md";
 const SECTION_HEADING = "### Naming what the user means";
 
 /** The page's fenced blocks under the "Naming what the user means" heading. */
@@ -186,8 +187,15 @@ function pinTimes(lines: string[]): string[] {
 	);
 }
 
-describe("docs/engine/mcp.md reference examples", () => {
+describe("docs/engine/mcp/runs-and-reports.md reference examples", () => {
 	const markdown = readFileSync(fromRepoRoot(page), "utf8");
+
+	it("reads a page the guard registry routes", () => {
+		const routed = DOC_READING_GUARDS.agentReference.paths.some((entry) =>
+			entryCovers(entry, page)
+		);
+		expect(routed).toBe(true);
+	});
 
 	it("finds an example block under the heading", () => {
 		const lines = exampleLines(markdown);

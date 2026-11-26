@@ -6,46 +6,38 @@
  */
 
 /**
- * The renderer half of the taskbar and Dock progress indicator (issue #1362).
+ * The renderer half of the taskbar and Dock progress indicator (#1362).
  *
- * `electron/run-progress.ts` decides how a platform paints an update - and that
- * two of the three paint anything at all. This side decides what the update is,
- * and holds the one rule main cannot answer: **which run the indicator is for.**
+ * `electron/run-progress.ts` decides how a platform paints an update, and that two of the three
+ * paint anything at all. This side decides what the update is, and holds the one rule main cannot
+ * answer: **which run the indicator is for.**
  *
- * There is only ever one, and it is whichever run the renderer is currently
- * watching. `sse-client.ts` is a singleton with one `EventSource` - "one client
- * for both run types, because there is one stream" - so a second
- * `startMonitoring`, from either run service, closes the first stream where it
- * stands. The superseded run keeps running on the engine, but nothing here sees
- * another tick of it, and its *terminal* handlers never fire - it did not end.
- * What does fire is the hand-off (issue #1417): the displaced service is told,
- * and gives the claim up there.
+ * There is only ever one, and it is whichever run the renderer is watching. `sse-client.ts` is a
+ * singleton with one `EventSource` (one client for both run types, because there is one stream), so
+ * a second `startMonitoring`, from either run service, closes the first stream where it stands. The
+ * superseded run keeps running on the engine, but nothing here sees another tick of it, and its
+ * *terminal* handlers never fire: it did not end. What does fire is the hand-off (#1417): the
+ * displaced service is told, and gives the claim up there.
  *
- * So a run `claim`s the indicator when the renderer starts watching it, and
- * every later call names the run it speaks for: one that no longer holds the
- * claim is ignored, whether it reports, fails or clears. Without that guard the
- * older run's stop - the dashboard calls `stopMonitoring` for a run it finds
- * already finished - would wipe the bar of the run that is actually being
- * watched.
+ * So a run `claim`s the indicator when the renderer starts watching it, and every later call names
+ * the run it speaks for: one that no longer holds the claim is ignored, whether it reports, fails
+ * or clears. Without that guard the older run's stop (the dashboard calls `stopMonitoring` for a
+ * run it finds already finished) would wipe the bar of the run that is actually being watched.
  *
- * The claim is a run, not a `RunProgressKey` (issue #1405). The key names a
- * *kind* of run and the thing that owns the indicator is one run, so keying by
- * kind left two gaps: two runs of the same kind, where the superseded one's
- * terminal calls pass the guard outright, and a stranded reporter, where a
- * service that has lost the stream can still paint. The displaced service is
- * now told the moment it loses the stream and clears its own claim there
- * (issue #1417), but that does not retire the guard: a batched flush already in
- * flight lands *after* the hand-off, and a run of the same kind as the one that
- * took over would otherwise pass the guard on its way out. The claim is what
- * tells those apart from the live run; the hand-off is what stops the bar being
- * left standing when nothing else would clear it.
+ * The claim is a run, not a `RunProgressKey` (#1405). The key names a *kind* of run and the thing
+ * that owns the indicator is one run, so keying by kind would leave two gaps: two runs of the same
+ * kind, where the superseded one's terminal calls pass the guard outright, and a stranded reporter,
+ * where a service that has lost the stream can still paint. The hand-off does not retire the guard:
+ * a batched flush already in flight lands *after* it, and a run of the same kind as the one that
+ * took over would otherwise pass the guard on its way out. The claim is what tells those apart from
+ * the live run; the hand-off is what stops the bar being left standing when nothing else would
+ * clear it.
  *
- * Nothing here throttles: a caller reports off the metrics flush, which is
- * already the live-refresh cadence (`throttled-batcher.ts`), so a second timer
- * would only add a second answer to "how often does this paint".
+ * Nothing here throttles: a caller reports off the metrics flush, which is already the live-refresh
+ * cadence (`throttled-batcher.ts`), so a second timer would only add a second answer to "how often
+ * does this paint".
  *
- * Every call here is fire-and-forget by design - no run may wait on the OS to
- * draw a rectangle.
+ * Every call here is fire-and-forget by design: no run may wait on the OS to draw a rectangle.
  */
 
 import type { RunProgressUpdate } from "@/types/electron";
@@ -62,15 +54,11 @@ export type RunProgressKey = (typeof RUN_PROGRESS_KEYS)[keyof typeof RUN_PROGRES
 let shownFor: { key: RunProgressKey; runId: string } | null = null;
 
 /**
- * Whether `runId` is the run the indicator is showing.
- *
- * The run id is the identity - it is unique across both kinds, since every run
- * is one `POST /runs` - and the key rides with it so that a caller naming a run
- * under the wrong kind cannot paint on the strength of the id alone.
- *
- * A caller with no run id at all holds no claim: `null` here is a service whose
- * run has already been forgotten, and the indicator belongs to whichever run is
- * being watched now.
+ * Whether `runId` is the run the indicator is showing. The run id is the identity (unique across
+ * both kinds, since every run is one `POST /runs`), and the key rides with it so that a caller
+ * naming a run under the wrong kind cannot paint on the strength of the id alone. A caller with no
+ * run id holds no claim: `null` here is a service whose run has already been forgotten, and the
+ * indicator belongs to whichever run is being watched now.
  */
 function isShown(key: RunProgressKey, runId: string | null): boolean {
 	return shownFor !== null && shownFor.key === key && shownFor.runId === runId;
@@ -118,12 +106,10 @@ function send(update: RunProgressUpdate): void {
 
 export const runProgress = {
 	/**
-	 * Take the indicator for `runId`, because watching this run is what stopped
-	 * the renderer watching any other.
-	 *
-	 * It starts with no fraction - nothing has ticked yet, so how far along the
-	 * run is has no answer, and "running, length unknown" is the honest one. The
-	 * run's first `report` replaces it where the run has a denominator at all.
+	 * Take the indicator for `runId`, because watching this run is what stopped the renderer
+	 * watching any other. It starts with no fraction: nothing has ticked yet, so "running, length
+	 * unknown" is the honest answer, and the run's first `report` replaces it where the run has a
+	 * denominator at all.
 	 */
 	claim(key: RunProgressKey, runId: string): void {
 		shownFor = { key, runId };
@@ -131,12 +117,10 @@ export const runProgress = {
 	},
 
 	/**
-	 * Say where `runId` is: a 0..1 fraction, or null for a run with no
-	 * denominator, which shows as indeterminate where the platform has one.
-	 *
-	 * A run that no longer holds the claim paints nothing. It can still get
-	 * here: a batched commit fires on a trailing timer, so a run superseded
-	 * inside that window reports once more, with a fraction of its own.
+	 * Say where `runId` is: a 0..1 fraction, or null for a run with no denominator, shown as
+	 * indeterminate where the platform has one. A run that no longer holds the claim paints
+	 * nothing. It can still get here: a batched commit fires on a trailing timer, so a run
+	 * superseded inside that window reports once more, with a fraction of its own.
 	 */
 	report(key: RunProgressKey, runId: string | null, value: number | null): void {
 		if (!isShown(key, runId)) return;

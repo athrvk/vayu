@@ -6,24 +6,12 @@
  */
 
 /**
- * The data table the response pane reads its headers and cookies out of.
- *
- * `HeadersViewer` and `ResponseCookies` had the chrome written out twice and
- * identically - `w-full text-sm`, a `border-b border-rule` head row,
- * `border-b border-rule hover:bg-muted/50` body rows, `py-2 px-3` cells. Two
- * columns in one and three in the other; everything around them the same.
- *
- * **Density is the reason this is `text-xs` and not `text-sm`.** Both tables
- * rendered at 14px with `py-2`, which is a ~36px row, while every other surface
- * in this pane - the tab strip, the toolbar, the console slabs, the timing
- * stats - is 12px or 11px. A response to a real request carries fifteen or
- * twenty headers, so the one tab where vertical space converts directly into
- * information was the loosest thing in the pane. At `text-xs` with `py-1.5` a
- * row is ~26px, which is about seven more headers on screen at the same height.
- *
- * `border-rule`, not a border token: these sit inside the response pane, which
- * declares `surface-card`. `--border` there is the same colour as `--card` in
- * dark, which is why the cookie list used to run together as one block.
+ * The data table the response pane shows headers and cookies in. **`text-xs`, not `text-sm`, for
+ * density**: every other surface in the pane (tab strip, toolbar, console slabs, timing stats) is
+ * 12px or 11px, and a real response carries fifteen or twenty headers, so this tab is where height
+ * becomes information. At `text-xs` with `py-1.5` a row is ~26px against `text-sm` `py-2`'s ~36px,
+ * about seven more headers at the same height. `border-rule`, not a border token: the pane declares
+ * `surface-card`, where `--border` is `--card`'s colour in dark, running the cookie list together.
  */
 
 import * as React from "react";
@@ -43,9 +31,8 @@ function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
 }
 
 /**
- * A body row. The head row is a `TableRow` too - it takes its rule from the
- * same place, because at this surface "one step lighter for the header" lands
- * back at invisible. The head is distinguished by its cell styling instead.
+ * A body row, and the head row too: it takes its rule from the same place, as "one step lighter for
+ * the header" is invisible on this surface; the head is told apart by its cell styling.
  */
 function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
 	return (

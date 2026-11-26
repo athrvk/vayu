@@ -6,7 +6,6 @@
  */
 
 /**
- * @file mock-server.tools.ts
  * @brief Mock servers: start, list, routes, activity and stop.
  */
 

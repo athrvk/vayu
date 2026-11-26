@@ -149,7 +149,7 @@ TEST (LifecycleElementsRunOverrideValidationTest, AcceptsSetupAndTeardown) {
 }
 
 // `Registry::validate` refuses an id-less entry outright - the documented
-// example in api-reference.md's `lifecycleElements` section names no id, so
+// example in docs/engine/api-reference/load-runs.md's `lifecycleElements` section names no id, so
 // this must not 400 the same way `apply_elements_field` (routes.hpp) does
 // not for a stored request/collection's `elements`. Mutation check: drop the
 // `stamp_default_element_ids` call in `validate_lifecycle_elements_run_override`

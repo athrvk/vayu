@@ -4,7 +4,7 @@
 # run from `app/` with an app-relative glob, so it never reaches out here).
 # Every other tree is unclean by policy: docs prose is hand-wrapped, the
 # workflows are written to be read as YAML rather than as prettier output, and
-# `docs/design-system.md` reflows ~480 lines on a single pass. CLAUDE.md has
+# `docs/design-system/` reflows ~570 lines on a single pass. CLAUDE.md has
 # said so in prose since before this file existed; prose is what an editor's
 # "format on save" or a stray repo-root `prettier --write` does not read.
 #

@@ -6,35 +6,29 @@
  */
 
 /**
- * @file http/routes/spec_export.cpp
- * @brief `POST /specs/export` - a collection back out as an OpenAPI document
- *        (issue #630's exporter, moved engine-side by #855).
+ * `POST /specs/export`: a collection back out as an OpenAPI document (#630's
+ * exporter, engine-side per #855). The assembly is `core/openapi_export.hpp`;
+ * this route owns the three reads (the subtree's requests, their stored
+ * examples, the bound document), each a place a caller could get the answer
+ * subtly wrong:
  *
- * The assembly is `core/openapi_export.hpp`; this is the one way to ask for it,
- * and it owns the three reads the renderer used to make itself - the subtree's
- * requests, every request's stored examples, and the bound document - because
- * each of them is a place a caller could get the answer subtly wrong:
- *
- * - **Which requests are exported.** The whole subtree of the named collection,
- *   never a list the caller supplies. An OpenAPI import files its requests under
- *   one sub-collection per tag, so a bound root usually owns none directly.
- * - **Where the subtree stops** (issue #721). Collections re-parent freely, so a
- *   collection bound to spec B can sit under one bound to spec A. B's requests
- *   carry B's operation stamps, and the bound direction matches a stamp by
- *   `operationId` and then by method+path - names generators hand out in every
- *   document (`listUsers`, `GET /users`) - so without a boundary B's rows would
- *   claim A's operations and rewrite them with B's values. The walk therefore
- *   refuses to descend into a collection bound to a *different* document.
- *   *Another* document, not *a* document: a descendant bound to the same spec
- *   describes the very operations being patched, and excluding it would have the
- *   export remove them as operations "nothing here claims" - trading a
- *   cross-document rewrite for a silent deletion.
+ * - **Which requests.** The named collection's whole subtree, never a caller's
+ *   list: an OpenAPI import files requests under one sub-collection per tag, so
+ *   a bound root usually owns none directly.
+ * - **Where the subtree stops** (#721). A collection bound to spec B can sit
+ *   under one bound to A, and the bound direction matches a stamp by
+ *   `operationId`, then method and path, names generators reuse in every
+ *   document (`listUsers`, `GET /users`), so B's rows would claim A's
+ *   operations and rewrite them with B's values. The walk refuses to descend
+ *   into a collection bound to *another* document; one bound to the same spec
+ *   describes the operations being patched, and excluding it would delete them
+ *   as operations "nothing here claims".
  * - **Which examples.** `get_request_examples` filters the tombstones a deleted
- *   imported example leaves (#722), so an example the user removed does not come
- *   back as part of the contract.
+ *   imported example leaves (#722), so a removed example does not return as
+ *   contract.
  *
- * It writes nothing: an export is a read of everything the collection already
- * is. The document it returns is the caller's to save, copy or hand to an agent.
+ * It writes nothing; the returned document is the caller's to save, copy or
+ * hand to an agent.
  */
 
 #include "vayu/core/constants.hpp"
@@ -64,12 +58,10 @@ namespace {
 enum class RowSide : std::uint8_t { Query, Path };
 
 /**
- * The Params / Headers rows of a stored request.
- *
- * Deliberately not the readers `request_composer.cpp` and the mock server use:
- * those drop a disabled row because a disabled row is not *sent*, and this one
- * keeps it because the endpoint accepts the parameter either way. A toggle says
- * what this request does, not what the API takes.
+ * A stored request's Params / Headers rows. Not the readers
+ * `request_composer.cpp` and the mock server use, which drop a disabled row as
+ * unsent: this keeps it, because the endpoint accepts the parameter either way.
+ * A toggle says what this request does, not what the API takes.
  */
 std::vector<vayu::core::ExportKeyValue>
 read_rows (const std::string& blob, RowSide side = RowSide::Query) {
@@ -138,10 +130,8 @@ vayu::core::ExportAuth read_auth (const std::string& blob) {
     return auth;
 }
 
-/**
- * The collection's own `baseUrl` variable value - a skeleton export needs it to
- * give `{{baseUrl}}` a real server-variable default.
- */
+/// The collection's own `baseUrl` value: a skeleton export needs it as
+/// `{{baseUrl}}`'s server-variable default.
 std::string base_url_value_of (const std::string& blob) {
     const auto parsed = nlohmann::json::parse (blob, nullptr, /*allow_exceptions=*/false);
     if (!parsed.is_object ()) {
@@ -174,9 +164,9 @@ const std::string& target_id) {
     }
     std::vector<vayu::db::Collection> reversed;
     std::string current = target_id;
-    // The subtree walk that built `collections` already refuses a cycle back
-    // to the root's own document; this still bounds the climb rather than
-    // trusting that, since a malformed `parent_id` chain must stop, not loop.
+    // The subtree walk already refuses a cycle back to the root's document;
+    // this still bounds the climb, since a malformed `parent_id` chain must
+    // stop, not loop.
     for (std::size_t hops = 0; hops < collections.size () + 1; ++hops) {
         const auto found = by_id.find (current);
         if (found == by_id.end ()) {
@@ -205,9 +195,7 @@ std::vector<std::string> folder_names_of (const std::vector<vayu::db::Collection
 /**
  * The auth an `inherit` request sends, resolved through @p chain by the one
  * rule `POST /compose` applies (`resolve_inherited_auth`: the nearest level
- * with a credential, `noauth` ending the walk). Without it a request under a
- * folder that sets its own auth was exported as though it sent the root
- * collection's.
+ * with a credential, `noauth` ending the walk).
  */
 vayu::core::ExportAuth inherited_auth_of (const std::vector<vayu::db::Collection>& chain) {
     const nlohmann::json resolved = resolve_inherited_auth (chain);
@@ -468,14 +456,11 @@ vayu::core::BoundMode& bound_mode) {
 } // namespace
 
 /**
- * Testable core of POST /specs/export - the document, assembled and returned,
- * nothing written.
- *
- * A collection that does not exist is a 404. A binding the store cannot answer
- * - a spec row that is gone, or bytes that will not read as a document - is a
- * 409 naming what is wrong, never a silent fall back to a skeleton: a skeleton
- * in place of the document the user believes they are updating would drop every
- * member of their spec Vayu does not model.
+ * Testable core of POST /specs/export: the document, assembled and returned,
+ * nothing written. An unknown collection is a 404. A binding the store cannot
+ * answer (a spec row gone, bytes that will not read) is a 409 naming what is
+ * wrong, never a fallback to a skeleton, which in place of the document the
+ * user believes they are updating would drop every member Vayu does not model.
  */
 std::pair<int, nlohmann::json>
 export_spec_response (vayu::db::Database& db, const nlohmann::json& json) {

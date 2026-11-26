@@ -6,52 +6,43 @@
  */
 
 /**
- * SpecTab - what OpenAPI document this collection answers to (issue #638,
- * phase 1b of #625).
+ * What OpenAPI document this collection answers to (issue #638, phase 1b of #625). An import
+ * produces requests; the binding keeps the contract: which document the collection came from, which
+ * version of it, and which operation each request is, so a changed spec can be re-fetched instead
+ * of imported again beside the old copy, and a response checked against the schema that describes
+ * it.
  *
- * The problem it exists for: importing a spec produced requests and threw the
- * contract away. Nothing recorded which document the collection came from,
- * which version of it, or which operation each request was - so re-fetching a
- * changed spec meant importing it again beside the old copy, and a response
- * could not be checked against the schema that described it.
+ * Two halves, stored in two places, the Data tab's law:
  *
- * Two halves, stored in two places, the same law the Data tab follows:
+ * - **The binding and the document** are collection state and ride the engine (`Collection.openapi`
+ *   -> `spec_documents`): they are the same on every machine and travel through import.
+ * - **A picked file's path** rides the collection row too (`Collection.specFile`, #2765), so a
+ *   backup carries it, but it is true of one filesystem only and never travels through an export or
+ *   an import. A URL-sourced spec keeps its origin portably instead, in
+ *   `spec_documents.source_url`.
  *
- * - **The binding and the document** are collection state and ride the engine
- *   (`Collection.openapi` -> `spec_documents`), because they are the same on
- *   every machine and travel through import.
- * - **A picked file's path** rides the collection row too (`Collection.specFile`,
- *   #2765), so a backup carries it - but it is true of one filesystem only, so
- *   it never travels through an export or an import. A URL-sourced spec keeps
- *   its origin portably instead, in `spec_documents.source_url`.
+ * **Binding** creates and deletes nothing: it matches what is already there and stamps identity on
+ * the matches; the operations with no request and the requests with no operation are *reported* and
+ * left alone. The one field it rewrites is a request's own `specOperation`, and only to clear one
+ * recorded against a **different** document (#718): after a bind, a request's identity is the
+ * operation it matched here, or nothing. Unbinding leaves stamps as they are, so
+ * unbind-then-bind-the-same-document costs nothing; re-binding to a different one would otherwise
+ * leave a request claiming an operation of a document nothing is bound to.
  *
- * **Binding** deliberately creates and deletes nothing: it matches what is
- * already there and stamps identity on the matches - the operations with no
- * request, and the requests with no operation, are *reported* and left alone.
- * The one field it does rewrite is a request's own `specOperation`, and only to
- * clear one recorded against a **different** document (#718): after a bind, a
- * request's identity is the operation it matched here, or nothing. Unbinding
- * still leaves stamps exactly as they are, so unbind-then-bind-the-same-document
- * costs nothing - it is re-binding to a different one that would otherwise leave
- * a request claiming an operation of a document nothing is bound to.
- * **The bind itself is one engine call** (#862, `POST /specs/bind`): the
- * document, the binding and both halves of the stamping commit together, and
- * the pairing is worked out engine-side from the bytes it stores. So this tab
- * sends a document and a collection, and nothing it decided. The match query
- * below is the *preview* - it writes nothing, and is what the counts above the
- * Bind button are painted from.
- * **Nor does this tab read the document any more** (#869, `POST
- * /specs/describe`): the format, the title and the operations the card shows
- * before a bind come from the reader the bind itself uses, so the identities
- * previewed here are the identities that will be stamped. It parsed the picked
- * file until then, which made the preview and the write two opinions about one
- * document.
- * **What is bound is the bundled document** (#3032): a pick runs through the
- * same `$ref` bundler import and Sync use before it is described, so a spec
- * split across files is stored whole, and the next Sync compares like with like.
- * The one place this tab writes *other* request fields is the Sync section, and
- * only for the items the user ticks: it re-reads the document and says what
- * moved (#654), and applies the selection in one engine transaction (#655).
+ * **The bind is one engine call** (#862, `POST /specs/bind`): the document, the binding and both
+ * halves of the stamping commit together, the pairing worked out engine-side from the bytes it
+ * stores, so this tab sends a document and a collection and nothing it decided. The match query
+ * below is the *preview*: it writes nothing, and paints the counts above the Bind button.
+ *
+ * **Nor does this tab read the document** (#869, `POST /specs/describe`): the format, the title and
+ * the operations the card shows before a bind come from the reader the bind itself uses, so the
+ * identities previewed are the identities stamped. **What is bound is the bundled document**
+ * (#3032): a pick runs through the `$ref` bundler import and Sync use before it is described, so a
+ * spec split across files is stored whole, and the next Sync compares like with like.
+ *
+ * The one place this tab writes *other* request fields is the Sync section, only for the items the
+ * user ticks: it re-reads the document, says what moved (#654), and applies the selection in one
+ * engine transaction (#655).
  */
 
 import { useMemo, useRef, useState } from "react";
@@ -122,11 +113,9 @@ interface PickedSpec {
 	unresolvedRefs: number;
 	refReport: RefReport;
 	/**
-	 * What names *this* pick, for the read that describes it (issue #869).
-	 *
-	 * The document is not stored and so has no id, and its bytes are not a cache
-	 * key - so each pick gets a token, and the query keyed by it can be cached
-	 * indefinitely: the same token is always the same document.
+	 * What names *this* pick, for the read that describes it (issue #869). The document is not
+	 * stored, so it has no id, and its bytes are no cache key: each pick gets a token, and the
+	 * query keyed by it can be cached indefinitely, as one token is always one document.
 	 */
 	token: string;
 	/** The URL it was fetched from; absent for a file. */
@@ -156,10 +145,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 
 	const { data: collections = [] } = useCollectionsQuery();
 	/*
-	 * The whole subtree, not this collection's own requests: an OpenAPI import
-	 * files its requests under one sub-collection per tag, so a spec-bound root
-	 * usually owns none directly. The binding covers everything beneath it, and
-	 * so must the count that describes it.
+	 * The whole subtree, not this collection's own requests: an OpenAPI import files its requests
+	 * under one sub-collection per tag, so a spec-bound root usually owns none directly, and the
+	 * binding and the count that describes it cover everything beneath it.
 	 */
 	const subtreeIds = useMemo(
 		() => collectSubtreeIds(collection.id, collections),
@@ -173,11 +161,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	);
 
 	/*
-	 * The card describes the document; it does not read it (issue #712). A first
-	 * open used to transfer the whole stored spec - 12 MB for Stripe's - to paint
-	 * a source line and a date, because both live on the document rather than on
-	 * the collection's binding. The readers that genuinely need the text (export,
-	 * and the Sync section's comparison) fetch it on the action that needs it.
+	 * The card describes the document without reading it (issue #712): the source line and the date
+	 * live on the document, not on the collection's binding, and the stored spec can be 12 MB
+	 * (Stripe's). The readers that need the text (export, the Sync section's comparison) fetch it
+	 * on the action that needs it.
 	 */
 	const {
 		data: specMeta,
@@ -190,11 +177,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	const bindSpec = useBindSpecMutation();
 
 	const [picked, setPicked] = useState<PickedSpec | null>(null);
-	// `title` carries which of the two failure sources this is: a local file
-	// that didn't read, or a URL fetch that never got a document back. Both
-	// land here rather than in `describeQuery` because that query only ever
-	// runs once a document's bytes are already in hand (issue #869) - the two
-	// cases above it are Vayu never having bytes to describe.
+	// `title` names which failure this is: a local file that did not read, or a URL fetch that got
+	// no document back. Both land here, not in `describeQuery`, which runs only once a document's
+	// bytes are in hand (issue #869); these are the cases with no bytes to describe.
 	const [pickError, setPickError] = useState<{ title: string; message: string } | null>(null);
 	const [url, setUrl] = useState("");
 	// Which export dialog is open, if either. One field: the menu opens one.
@@ -214,22 +199,17 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	/*
-	 * What the picked document *is* is the engine's answer now (issue #869).
-	 * This tab used to run the import parsers over the picked bytes to paint the
-	 * three things below - the format, the title and the operations - while the
-	 * bind derived the same identities from the same bytes engine-side. Two
-	 * readers of one document is the thing #853 set out to end, and here it could
-	 * preview a pairing the bind would not commit.
+	 * What the picked document *is* is the engine's answer (issue #869): a second reader of one
+	 * document (what #853 ends) could preview a pairing the bind would not commit.
 	 */
 	const describeQuery = useSpecDescribeQuery(picked?.token ?? null, picked?.content ?? "");
 	const described = describeQuery.data ?? null;
 
 	/*
-	 * The pairing is the engine's answer now (issue #761): the rule that decides
-	 * which request is which operation moved into `core/operation_match.hpp`, so
-	 * that binding a collection is something an agent over MCP can do the same
-	 * way rather than through a second copy of it. Nothing is written by asking -
-	 * the counts below still appear before the user commits to the bind.
+	 * The pairing is the engine's answer (issue #761): the rule deciding which request is which
+	 * operation lives in `core/operation_match.hpp`, so an agent over MCP binds a collection the
+	 * same way rather than through a second copy of it. Asking writes nothing; the counts below
+	 * appear before the user commits to the bind.
 	 */
 	const matchQuery = useSpecMatchQuery(
 		collection.id,
@@ -242,14 +222,12 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	const mappedCount = requests.filter((r) => r.specOperation).length;
 
 	/*
-	 * Requests carrying identity the document about to be bound does not account
-	 * for (issue #718). Binding is the only moment the app can tell: unbinding
-	 * deliberately leaves stamps alone - so unbind-then-bind-the-same-document is
-	 * lossless - and it is re-binding to a *different* one that would otherwise
-	 * leave a request stamped as an operation of a document this collection is
-	 * no longer bound to. Coverage resolves stamps by `operationId` first, so
-	 * such a stamp does not merely go unread; it claims whatever operation of the
-	 * new document happens to share the id.
+	 * Requests carrying identity the document about to be bound does not account for (issue #718).
+	 * Binding is the only moment the app can tell: unbinding leaves stamps alone (so
+	 * unbind-then-bind-the-same-document is lossless), and re-binding to a *different* document
+	 * would otherwise leave a request stamped as an operation of a document this collection is no
+	 * longer bound to. Coverage resolves stamps by `operationId` first, so such a stamp does not
+	 * merely go unread: it claims whatever operation of the new document shares the id.
 	 */
 	const staleStamps = useMemo(() => {
 		if (!match) return [];
@@ -260,14 +238,13 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	}, [match, requests]);
 
 	/*
-	 * Every pick goes through the bundler before it is described (#3032): the
-	 * stored document is the bundled one, and the describe, match and bind below
-	 * all read `picked.content`. Binding the raw text of a multi-file spec would
-	 * store its relative `$ref`s unresolved, and the next Sync - which does bundle
-	 * - would report the difference as a change forever.
+	 * Every pick goes through the bundler before it is described (#3032): the stored document is
+	 * the bundled one, and the describe, match and bind below all read `picked.content`. Binding a
+	 * multi-file spec's raw text would store its relative `$ref`s unresolved, and the next Sync,
+	 * which does bundle, would report the difference as a change forever.
 	 *
-	 * Returns null after saying why: a document past the engine's cap is refused
-	 * here, in front of the preview, rather than at the bind.
+	 * Returns null after saying why: a document past the engine's cap is refused here, in front of
+	 * the preview, not at the bind.
 	 */
 	const bundlePick = async (
 		text: string,
@@ -355,11 +332,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 			// Never throws: a bundle that fails says so through `pickError` itself.
 			await pickBundled(content, { sourceUrl: url }, { sourceUrl: url });
 		} catch (e) {
-			// A fetch that never got a document back - a bad host, a refused
-			// connection, the engine itself unreachable - is not a document that
-			// failed to read: nothing was ever read. Kept apart from
-			// `describeQuery`'s "Couldn't read that document" below, which only
-			// fires once bytes are already in hand.
+			// A fetch that got no document back (a bad host, a refused connection, the engine
+			// itself unreachable) is not a document that failed to read, as nothing was ever read;
+			// kept apart from `describeQuery`'s "Couldn't read that document" below, which fires
+			// only once bytes are in hand.
 			setPickError({ title: "Couldn't fetch that URL", message: (e as Error).message });
 		} finally {
 			setFetching(false);
@@ -368,11 +344,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 
 	const handleBind = () => {
 		if (!picked || !match) return;
-		// The document and the collection, and nothing else: the engine works
-		// the pairing out from the bytes it stores and stamps both halves of it
-		// in one transaction (issue #862). What `match` gave us above is the
-		// preview the summary is painted from, not a payload. Where the file is
-		// rides beside it, and a URL or a paste forgets an earlier file.
+		// The document and the collection, and nothing else: the engine works the pairing out from
+		// the bytes it stores and stamps both halves in one transaction (issue #862); `match` above
+		// is the preview the summary is painted from, not a payload. Where the file is rides beside
+		// it, and a URL or a paste forgets an earlier file.
 		bindSpec.mutate(
 			{
 				collectionId: collection.id,
@@ -393,11 +368,10 @@ export default function SpecTab({ collection }: SpecTabProps) {
 	};
 
 	const handleUnbind = () => {
-		// `null`, not `{}`: the engine reads absent as "keep" and null as "reset
-		// to the default", and the default is unbound. The document itself stays -
-		// another collection may bind it, and deleting one out from under a
-		// binding is what the engine refuses. The picked file goes in the same
-		// write: a path beside no binding names a document nothing reads.
+		// `null`, not `{}`: the engine reads absent as "keep" and null as "reset to the default",
+		// which is unbound. The document itself stays: another collection may bind it, and the
+		// engine refuses to delete one out from under a binding. The picked file goes in the same
+		// write, as a path beside no binding names a document nothing reads.
 		updateCollection.mutate({ id: collection.id, openapi: null, specFile: null });
 	};
 
@@ -574,10 +548,9 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				<SpecSync
 					collection={collection}
 					collections={collections}
-					// The binding's id, not the document: the section looks up where
-					// that document came from when Check is pressed, and the engine
-					// compares its own stored bytes (issues #712, #854). The requests
-					// are not passed either - the engine walks the subtree itself.
+					// The binding's id, not the document: the section looks up where the document
+					// came from when Check is pressed, and the engine compares its own stored bytes
+					// (issues #712, #854). No requests either: the engine walks the subtree itself.
 					specId={boundSpecId}
 					specFile={specFile}
 					onFileRead={(readable) =>
@@ -706,19 +679,16 @@ function BoundSpec({
 	requestCount: number;
 }) {
 	/*
-	 * Three sources, three different truths, and the order matters. A URL is
-	 * portable and is what a re-fetch will use. A file path is true of the
-	 * machine that picked it: it rides the row (#2765), so a restore elsewhere
-	 * can name a file that is not there - shown, and struck through once a
-	 * check has failed to read it, rather than hidden. Neither means the
-	 * document was pasted - so the third line says where it came from as
-	 * precisely as it can rather than inventing a filename.
+	 * Three sources, three different truths, in order. A URL is portable and is what a re-fetch
+	 * uses. A file path is true of the machine that picked it: it rides the row (#2765), so a
+	 * restore elsewhere can name a missing file, shown struck through once a check has failed to
+	 * read it rather than hidden. Neither means the document was pasted, so the third line says
+	 * where it came from as precisely as it can rather than inventing a filename.
 	 *
-	 * It is the *settled* answer, and only that (issue #712). While the document
-	 * is being described, all three are unknown, and rendering the fallback then
-	 * is not a blank - it is a false statement: a URL-imported spec would claim
-	 * to have come from nowhere in particular right up until the read lands. So
-	 * a pending card renders a skeleton here, never this string.
+	 * Only the *settled* answer (issue #712): while the document is being described all three are
+	 * unknown, and the fallback then would be a false statement (a URL-imported spec claiming to
+	 * have come from nowhere in particular until the read lands), so a pending card renders a
+	 * skeleton here, never this string.
 	 */
 	const source = sourceUrl ?? filePath ?? "a document stored with this collection";
 	const struck = !sourceUrl && !!filePath && fileUnreadable;
@@ -731,9 +701,9 @@ function BoundSpec({
 					{/* The icon is part of the claim - a link icon beside a skeleton would
 					    already be saying the document came from a URL. */}
 					{loading ? (
-						// `w-3xs` (16rem, the container scale), not `w-64`: the skeleton
-						// stands in for a line of source text, not a row's rhythm, and
-						// `w-64` rides `--spacing` the way the toast viewport's `w-80` did.
+						// `w-3xs` (16rem, the container scale), not `w-64`: the skeleton stands in
+						// for a line of source text, not a row's rhythm, and `w-64` rides
+						// `--spacing`.
 						<Skeleton data-testid="spec-source-skeleton" className="h-4 w-3xs" />
 					) : (
 						<>
@@ -749,11 +719,10 @@ function BoundSpec({
 					)}
 				</div>
 				{/*
-				 * A cell is a skeleton while *its own* input is unknown, rather than the
-				 * grid going blank as a block: Hash and Bound are read off the
-				 * collection's binding, which this tab has before it renders, and
-				 * hiding a value that is already known would be a second way of
-				 * describing the document wrongly.
+				 * Each cell is a skeleton while *its own* input is unknown, not the grid as a
+				 * block: Hash and Bound come off the collection's binding, which this tab has
+				 * before it renders, and hiding a known value would be a second way of describing
+				 * the document wrongly.
 				 */}
 				<dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-label text-muted-foreground">
 					<div className="flex gap-1.5">
@@ -764,10 +733,9 @@ function BoundSpec({
 						<dt>Operations mapped</dt>
 						<dd className="text-foreground">
 							{requestsLoading ? (
-								// Fixed rem, not `w-28`: a placeholder for a short count
-								// string ("3 of 10 requests"), which does not get longer or
-								// shorter with the density setting. No container-scale token
-								// is this small, so the width is spelled out directly.
+								// Fixed rem, not `w-28`: a placeholder for a short count string ("3
+								// of 10 requests"), which does not scale with the density setting,
+								// and no container-scale token is this small.
 								<Skeleton
 									data-testid="spec-mapped-skeleton"
 									className="h-3 w-[7rem]"
@@ -853,10 +821,9 @@ function MatchSummary({
 			</p>
 			<p className="text-label text-muted-foreground break-all">from {source}</p>
 			{/*
-			 * All three numbers, always - including the zeros. "matched 12" alone
-			 * reads as a complete result; "matched 12, 3 requests unmatched, 4
-			 * operations with no request" is what the user is actually agreeing to,
-			 * and the two leftovers are what sync (#627) will later offer to act on.
+			 * All three numbers, zeros included: "matched 12" alone reads as a complete result,
+			 * while "matched 12, 3 requests unmatched, 4 operations with no request" is what the
+			 * user is agreeing to, and the two leftovers are what sync (#627) offers to act on.
 			 */}
 			<p className="text-label text-muted-foreground">
 				Matched {matched} {pluralize(matched, "request")} · {unmatchedRequests}{" "}
@@ -864,10 +831,9 @@ function MatchSummary({
 				{pluralize(unmatchedOperations, "operation")} with no request
 			</p>
 			{/*
-			 * The one line here that describes a *write* to something that already
-			 * exists, so it is stated separately and only when it applies. Nothing
-			 * else about a bind touches a request that did not match; this does,
-			 * and the user is agreeing to it (issue #718).
+			 * The one line here describing a *write* to something that already exists, so it stands
+			 * apart and only when it applies: nothing else in a bind touches a request that did not
+			 * match; this does, and the user is agreeing to it (issue #718).
 			 */}
 			{staleStamps > 0 && (
 				<p className="text-label text-muted-foreground">
@@ -881,12 +847,9 @@ function MatchSummary({
 }
 
 /**
- * The document's size, or `-` for a card whose description could not be read.
- *
- * Through the settings formatter rather than a second rounding of the same
- * number: the size shown here and the `maxSpecDocumentBytes` limit shown in
- * Settings are the same quantity, and two spellings of "1.5 MB" would be one
- * more thing to keep in step.
+ * The document's size, or `-` when the description could not be read. Through the settings
+ * formatter, as this size and the `maxSpecDocumentBytes` limit in Settings are one quantity, and
+ * two spellings of "1.5 MB" would be one more thing to keep in step.
  */
 function formatDocumentSize(bytes: number | undefined): string {
 	return bytes === undefined ? "-" : formatBytes(bytes);

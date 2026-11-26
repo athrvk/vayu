@@ -6,32 +6,29 @@
  */
 
 /**
- * The one state machine a quit or a window close goes through before the
- * renderer is let go (#3335).
+ * The one state machine a quit or a window close goes through before the renderer is let go
+ * (#3335).
  *
  *     idle -> confirmingServices -> flushing -> confirmingLoss -> proceeding
  *
- * Each step can be skipped: nothing running skips the services question, a
- * clean flush skips the loss question. The services question comes first
- * because Cancel has to leave the renderer exactly as it was, and a flush has
- * already told it its work is ending. Cancel on the first question and Keep
- * working on the second are both edges back to `idle`, and `idle` forgets the
- * flush and the services answer together - the next gesture flushes again and
- * asks again. `quit-shutdown.ts` is the tail after `proceeding`: it stops the
- * engine and the MCP server once a quit is let through.
+ * Each step can be skipped: nothing running skips the services question, a clean flush skips the
+ * loss question. The services question comes first because Cancel has to leave the renderer exactly
+ * as it was, and a flush has already told it its work is ending. Cancel on the first question and
+ * Keep working on the second are both edges back to `idle`, and `idle` forgets the flush and the
+ * services answer together, so the next gesture flushes again and asks again. `quit-shutdown.ts` is
+ * the tail after `proceeding`: it stops the engine and the MCP server once a quit is let through.
  *
- * Both gestures drive the same flow, so a quit that flushed and then closes the
- * window does not ask a dying renderer a second time, and an X that turns into
- * a quit (`window-all-closed` off macOS) asks nothing twice either.
+ * Both gestures drive the same flow, so a quit that flushed and then closes the window does not ask
+ * a dying renderer a second time, and an X that turns into a quit (`window-all-closed` off macOS)
+ * asks nothing twice either.
  *
- * Every phase change bumps `ticket`, and every asynchronous answer - a dialog's
- * button, the renderer's ACK, the ceiling timer - acts only if the ticket is
- * still the one it was asked under. That is what drops an ACK from an earlier
- * flush, a ceiling that outlived its flush, and a dialog answered after a
- * renderer reload reset the flow. A flush's id is its ticket.
+ * Every phase change bumps `ticket`, and every asynchronous answer (a dialog's button, the
+ * renderer's ACK, the ceiling timer) acts only if the ticket is still the one it was asked under.
+ * That is what drops an ACK from an earlier flush, a ceiling that outlived its flush, and a dialog
+ * answered after a renderer reload reset the flow. A flush's id is its ticket.
  *
- * Kept out of main.ts so it can be tested - main.ts creates windows and starts
- * the engine at import time, which no unit test can do.
+ * Kept out of main.ts so it can be tested: main.ts creates windows and starts the engine at import
+ * time, which no unit test can do.
  */
 
 import {
@@ -70,9 +67,8 @@ export interface QuitFlowDeps {
 	/** Arm the flush's ceiling. Never cancelled: a stale one is dropped by ticket. */
 	schedule: (run: () => void, ms: number) => void;
 	/**
-	 * Run a held gesture's resume past the current turn (`setImmediate` in main),
-	 * so `app.quit()` or `window.close()` is never re-entered from inside the
-	 * handler that held it.
+	 * Run a held gesture's resume past the current turn (`setImmediate` in main), so `app.quit()`
+	 * or `window.close()` is never re-entered from inside the handler that held it.
 	 */
 	defer: (run: () => void) => void;
 	/** Put the loss question in front of the user; true is "proceed anyway". */
@@ -88,10 +84,9 @@ export interface HoldableEvent {
 
 export interface QuitFlow {
 	/**
-	 * Put a gesture through the flow. `true` lets it through now; `false` means
-	 * it has been held, and `resume` repeats it if the flow reaches `proceeding`.
-	 * Pass one stable `resume` per gesture source: the same function joining
-	 * twice runs once, so a double Cmd-Q is one quit to resume.
+	 * Put a gesture through the flow. `true` lets it through now; `false` means it is held, and
+	 * `resume` repeats it if the flow reaches `proceeding`. Pass one stable `resume` per gesture
+	 * source: the same function joining twice runs once, so a double Cmd-Q is one quit to resume.
 	 */
 	gesture: (gesture: StopGesture, event: HoldableEvent, resume: () => void) => boolean;
 	/** The renderer's ACK. Dropped unless `flushId` is the flush in flight. */
@@ -272,10 +267,9 @@ export function createFlushRequest(audience: FlushAudience): QuitFlowDeps["reque
 }
 
 /**
- * Wire the ACK channel. One listener for the life of the process: the id, not
- * a per-flush subscription, is what ties an ACK to its flush. A report main
- * cannot read still settles the flush, as `null`, which asks rather than
- * proceeding on a result nobody can vouch for.
+ * Wire the ACK channel, one listener for the life of the process: the id, not a per-flush
+ * subscription, is what ties an ACK to its flush. A report main cannot read still settles the
+ * flush, as `null`, which asks rather than proceeding on a result nobody can vouch for.
  */
 export function registerFlushAckIpc(
 	ipc: IpcLike,

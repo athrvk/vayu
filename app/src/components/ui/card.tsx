@@ -14,9 +14,8 @@ import type { HeadingTag } from "./heading-level";
 const CARD_PAD = { sm: "p-3", md: "p-4" } as const;
 
 /**
- * `pad` is the padding for a card that is its own body (a stat tile). Leave it
- * off when the card is composed from `CardHeader` / `CardContent`, which carry
- * their own.
+ * `pad` pads a card that is its own body (a stat tile); leave it off for one built from
+ * `CardHeader` / `CardContent`, which pad themselves.
  */
 function Card({
 	className,
@@ -61,10 +60,8 @@ function CardTitle({ className, as, ...props }: React.ComponentProps<"h3"> & { a
 			data-slot="card-title"
 			outside="h3"
 			as={as}
-			// The size belongs to the primitive, not to the caller. Naming no size
-			// here left every card heading in the app to pick one, and most picked
-			// 16px or 18px - a heading register a step above the 15px "Title / small
-			// heading" step the scale already documents (#1202).
+			// The size belongs to the primitive: with none here, most card headings picked 16px or
+			// 18px, a step above the scale's 15px "Title / small heading" (#1202).
 			className={cn("text-md font-semibold leading-none tracking-tight", className)}
 			{...props}
 		/>

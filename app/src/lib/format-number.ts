@@ -35,18 +35,16 @@ function fractionFormat(minimum: number, maximum: number): Intl.NumberFormat {
 }
 
 function formatFraction(value: number, minimum: number, maximum: number): string {
-	// A value that rounds away, or a literal -0, reads "0", never "-0": Intl
-	// signs both, and the axis ticks this replaced (`Number(x.toFixed(d))`)
-	// never did.
+	// A value that rounds away, or a literal -0, reads "0", never "-0": Intl signs both, and the
+	// axis ticks this replaced (`Number(x.toFixed(d))`) never did.
 	const roundsToZero = value === 0 || (value < 0 && -value < 0.5 * 10 ** -maximum);
 	return fractionFormat(minimum, maximum).format(roundsToZero ? 0 : value);
 }
 
 /**
- * Exactly `digits` decimals in the user's locale (2.5 -> "2.50" or "2,50"). The
- * replacement for `toFixed`, which writes "." whatever the locale while every
- * other digit in the app follows it. Ungrouped: a figure that can reach a
- * thousand goes through `formatMs` or `formatNumber`.
+ * Exactly `digits` decimals in the user's locale (2.5 -> "2.50" or "2,50"), where `toFixed` writes
+ * "." whatever the locale and every other digit in the app follows it. Ungrouped: a figure that can
+ * reach a thousand goes through `formatMs` or `formatNumber`.
  */
 export function formatFixed(value: number, digits: number): string {
 	return formatFraction(value, digits, digits);
@@ -67,9 +65,7 @@ function formatMagnitude(num: number | undefined | null): string {
 	return (Math.abs(num) < 10 ? LESS_THAN_TEN : WHOLE).format(num);
 }
 
-/**
- * Format number with thousand separators
- */
+/** Digits grouped in the user's locale (1234 -> "1,234"); missing or NaN reads "0". */
 export function formatNumber(num: number | undefined | null): string {
 	if (num === undefined || num === null || isNaN(num)) return "0";
 	return num.toLocaleString();
@@ -79,11 +75,10 @@ export function formatNumber(num: number | undefined | null): string {
 const LATENCY_FLOOR_MS = 0.01;
 
 /**
- * A duration in milliseconds as digits, no unit: 2.2749 -> "2.27", 1234 ->
- * "1,234". The caller draws the unit, so a value reads the same in a stat card
- * (unit in its own slot), a table cell and a chart tooltip. A measured value
- * under 0.01 prints as "<0.01" because "0" would claim the request took no
- * time (#2243); only an exact 0 prints as "0".
+ * A duration in milliseconds as digits, no unit: 2.2749 -> "2.27", 1234 -> "1,234". The caller
+ * draws the unit, so a value reads the same in a stat card (unit in its own slot), a table cell and
+ * a chart tooltip. A measured value under 0.01 prints "<0.01", because "0" would claim the request
+ * took no time (#2243); only an exact 0 prints "0".
  */
 export function formatMs(ms: number | undefined | null): string {
 	if (!isMissing(ms) && ms > 0 && ms < LATENCY_FLOOR_MS) return "<0.01"; // keep in step with LATENCY_FLOOR_MS
@@ -97,10 +92,9 @@ export interface LatencyParts {
 }
 
 /**
- * A duration in milliseconds as digits and unit: `formatMs` digits and "ms" up
- * to 999, then seconds with two decimals once it rounds to 1000 ms (1234 ->
- * "1.23", "s"); a missing value is "0", "ms". Stat tiles render the two halves
- * in separate elements, so the unit must come from here and never be written
+ * A duration in milliseconds as digits and unit: `formatMs` digits and "ms" up to 999, then seconds
+ * with two decimals once it rounds to 1000 ms (1234 -> "1.23", "s"); missing is "0", "ms". Stat
+ * tiles render the halves in separate elements, so the unit must come from here, never be written
  * beside the number.
  */
 export function formatLatencyParts(ms: number | undefined | null): LatencyParts {
@@ -120,10 +114,9 @@ export function formatLatency(ms: number | undefined | null): string {
 }
 
 /**
- * A latency that may never have been recorded: absent (or NaN) prints "-",
- * where `formatLatency` prints "0ms". A real 0 is a measurement and still
- * reads "0ms". Use this wherever the source is `RunReport["latency"]`, which
- * is absent for a run whose latency was not recorded (#2938).
+ * A latency that may never have been recorded: absent (or NaN) prints "-" where `formatLatency`
+ * prints "0ms"; a real 0 is a measurement and still reads "0ms". Use it wherever the source is
+ * `RunReport["latency"]`, absent for a run whose latency was not recorded (#2938).
  */
 export function formatLatencyOrDash(ms: number | undefined | null): string {
 	return isMissing(ms) ? "-" : formatLatency(ms);
@@ -181,12 +174,10 @@ export function formatByteRateParts(bytesPerSecond: number | undefined | null): 
 const BYTE_UNITS = ["KB", "MB", "GB"] as const;
 
 /**
- * A size in bytes: whole "B" below 1024, then KB, MB and GB with one decimal
- * (2048 -> "2.0 KB", 3 GiB -> "3.0 GB"). 1024-based under the labels KB/MB/GB,
- * so an engine limit of 104857600 reads "100.0 MB"; a rate is
- * `formatByteRateParts`, which is decimal. GB takes everything above, with no
- * TB tier. Missing, non-finite and negative values read "0 B": a size is never
- * either.
+ * A size in bytes: whole "B" below 1024, then KB, MB and GB with one decimal (2048 -> "2.0 KB", 3
+ * GiB -> "3.0 GB"), GB taking everything above with no TB tier. 1024-based under the labels
+ * KB/MB/GB, so an engine limit of 104857600 reads "100.0 MB"; a rate is `formatByteRateParts`,
+ * which is decimal. Missing, non-finite and negative values read "0 B": a size is never either.
  */
 export function formatBytes(bytes: number | undefined | null): string {
 	if (isMissing(bytes) || bytes <= 0) return "0 B";

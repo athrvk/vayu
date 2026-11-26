@@ -6,29 +6,23 @@
  */
 
 /**
- * DataFilePicker - choose a CSV/TSV/JSON/JSONL file for a collection run, and
- * see what it will actually do before starting one (issue #402).
+ * Choose a CSV/TSV/JSON/JSONL file for a collection run, and see what it will do before starting
+ * one (issue #402).
  *
- * The preview is not decoration. The engine rejects a bad data set with a
- * `400`, which is correct but late: by then the user has clicked Run and is
- * reading a message about a file they cannot see. Everything the engine would
- * refuse - a ragged row, a duplicated column, a non-object, a set over
- * `maxScenarioDataRows` or `maxScenarioDataBytes` - is refused here first,
- * against the parsed file, with the row, line or setting named.
+ * The preview is the point. The engine rejects a bad data set with a `400`, correct but late: the
+ * user has clicked Run and reads about a file they cannot see. Everything the engine would refuse
+ * (a ragged row, a duplicated column, a non-object, a set over `maxScenarioDataRows` or
+ * `maxScenarioDataBytes`) is refused here first, against the parsed file, naming the row, line or
+ * setting. The two caps are **fetched, never restated** ({@link useDataFileLimits}): a user who
+ * raised one engine-side and still cannot pick the file could not tell which side refused it.
  *
- * The two caps are **fetched, never restated** ({@link useDataFileLimits}): a
- * user who raises one engine-side and still cannot pick the file would have no
- * way to tell which side refused it.
+ * The **resolved iteration count** is the surprising half: an explicit `iterations` wins over the
+ * row count and the row index wraps, so a 500-row file with `iterations` at 1 runs *once*. Stated
+ * here rather than found in the step list afterwards.
  *
- * The **resolved iteration count** is the other half, and it is the one that
- * surprises people: an explicit `iterations` wins over the row count and the
- * row index wraps, so a 500-row file with `iterations` left at 1 runs *once*.
- * That is stated here rather than discovered in the step list afterwards.
- *
- * The previewed rows and the rows that get sent are the same array - the
- * parent holds one `ParsedDataFile` and this component slices it for display.
- * Two sources would be the "written but never read" defect wearing its other
- * face: a preview describing a set the run did not use.
+ * The previewed rows and the sent rows are one array: the parent holds one `ParsedDataFile` and
+ * this component slices it for display. Two sources would let the preview describe a set the run
+ * did not use.
  */
 
 import { useRef, type ChangeEvent } from "react";
@@ -72,10 +66,9 @@ export interface SelectedDataFile {
 	 */
 	parsed: ParsedDataFile;
 	/**
-	 * The decoded text `parsed` came from, so changing how values are read
-	 * re-parses these same characters. Re-reading the disk instead would fail
-	 * for a file with no path and could answer bytes other than the ones
-	 * previewed. In memory only, exactly like the rows.
+	 * The decoded text `parsed` came from, so a change of reading re-parses these characters;
+	 * re-reading the disk would fail for a file with no path and could answer bytes other than
+	 * those previewed. In memory only, like the rows.
 	 */
 	text: string;
 	/**
@@ -84,12 +77,10 @@ export interface SelectedDataFile {
 	 */
 	hash: string;
 	/**
-	 * Where the file is on this machine, when Electron could say (issue #599).
-	 *
-	 * Only ever used to *bind* the file - the collection's `dataFile` keeps it
-	 * so the Run dialog can pre-fill next time. Empty in a browser
-	 * and for a drag-and-drop of remote content, which is why every reader of it
-	 * has a no-path path.
+	 * Where the file is on this machine, when Electron can say (issue #599). Used only to *bind*
+	 * the file: the collection's `dataFile` keeps it so the Run dialog can pre-fill next time.
+	 * Empty in a browser and for a drag of remote content, which is why every reader has a no-path
+	 * path.
 	 */
 	path?: string;
 }
@@ -115,39 +106,29 @@ export interface DataFilePickerProps {
 	error: string | null;
 	onError: (message: string | null) => void;
 	/**
-	 * The dialog's `iterations` field, or undefined when the user has not set
-	 * one. Only the resolved count is shown - the arithmetic is the engine's
-	 * (`resolveIterationCount` mirrors it), not this component's.
-	 *
-	 * Ignored when {@link DataFilePickerProps.loadTest} is set: a load run is
-	 * bounded by its duration, so there is no pass count to resolve against.
+	 * The dialog's `iterations` field, or undefined when unset. Only the resolved count is shown;
+	 * the arithmetic is the engine's (`resolveIterationCount` mirrors it). Ignored when
+	 * {@link DataFilePickerProps.loadTest} is set: a load run is bounded by its duration, with no
+	 * pass count to resolve against.
 	 */
 	iterations: number | undefined;
 	/**
-	 * Whether the run this file is for is a load test (issue #449).
-	 *
-	 * It changes what a row *means*, which is why the copy cannot be shared: in
-	 * design mode a row is an iteration and the file's length is the run's
-	 * length. Under load the rows are claimed from one cursor shared by every
-	 * virtual user and wrap for as long as the duration lasts, so "12 rows" says
-	 * nothing about how long the run is - only that no two users hold the same
-	 * row at once.
+	 * Whether the run this file is for is a load test (issue #449). It changes what a row *means*,
+	 * so the copy differs: in design mode a row is an iteration and the file's length is the run's.
+	 * Under load the rows are claimed from one cursor every virtual user shares and wrap for the
+	 * duration, so "12 rows" says nothing about the run's length, only that no two users hold the
+	 * same row at once.
 	 */
 	loadTest?: boolean;
 	/**
-	 * What the file is being picked *for* (issue #599).
-	 *
-	 * `"run"` is the original job and the default. `"declare"` is the Data tab:
-	 * the same picker, the same parser and the same refusals, but the file is
-	 * being read to declare a contract from, so there is no iteration count to
-	 * resolve and nothing yet to say about how a row will be bound.
+	 * What the file is picked *for* (issue #599). `"run"`, the default, or `"declare"` (the Data
+	 * tab): the same picker, parser and refusals, but read to declare a contract from, so there is
+	 * no iteration count to resolve and nothing to say yet about how a row is bound.
 	 */
 	mode?: "run" | "declare";
 	/**
-	 * Warnings from outside the parser, shown in the same slot as its own - the
-	 * file-versus-contract diff is the caller that has them, and a user reading
-	 * "here is what is odd about this file" should not have to look in two
-	 * places for the list.
+	 * Warnings from outside the parser (the caller's file-versus-contract diff), shown in the
+	 * parser's own slot so "what is odd about this file" is one list.
 	 */
 	additionalWarnings?: string[];
 	disabled?: boolean;
@@ -195,8 +176,7 @@ export default function DataFilePicker({
 	const readRows = (text: string, fileName: string, castNumbers: boolean): ParsedDataFile => {
 		const parsed = parseDataFile(text, fileName, { castNumbers });
 		// The same sentence a re-read of a remembered path refuses with
-		// (`read-declared.ts`), from one place - the two used to be one
-		// refusal and one silent acceptance.
+		// (`read-declared.ts`), from one place.
 		const overRowCap = describeRowCapRefusal(parsed.rows.length, maxRows);
 		if (overRowCap) throw new DataFileError(overRowCap);
 		return parsed;
@@ -215,12 +195,11 @@ export default function DataFilePicker({
 
 	const handleFile = (file: File) => {
 		/*
-		 * Checked against the file on disk, before a byte of it is read: a
-		 * several-hundred-megabyte file would otherwise be pulled wholesale into
-		 * a renderer string, and what failed then would be the transport rather
-		 * than a message naming the setting. The engine measures the *serialized
-		 * rows*, which for CSV are larger than the file (every row repeats the
-		 * column names), so a file over the cap is a data set over it too.
+		 * Checked against the file on disk before a byte is read: a file of several hundred
+		 * megabytes would be pulled whole into a renderer string, and the failure would be the
+		 * transport's, not a message naming the setting. The engine measures the *serialized rows*,
+		 * larger than the file for CSV (every row repeats the column names), so a file over the cap
+		 * is a data set over it too.
 		 */
 		if (file.size > maxBytes) {
 			refuse(
@@ -401,22 +380,17 @@ export default function DataFilePicker({
 						</p>
 					)}
 
-					{/* The grid scrolls rather than widening the dialog: a file
-					    with twenty columns must not push the footer off-screen.
-
-					    `overflow-auto` alone does not buy that, which is what
-					    issue #701 found the hard way - seven columns of ordinary
-					    CSV was enough. It bounds this box; it does not stop the
-					    table's min-content width propagating up to whichever
-					    ancestor is sized from its content. In the Run dialog that
-					    ancestor is the panel's grid track, and the clamp lives
-					    there (`DialogContent`'s `grid-cols-1`, which is
-					    `minmax(0, 1fr)`); in the Data tab the flex column already
-					    hands its children a definite width, so nothing escapes.
-					    This component cannot defend itself - measured, a clamp
-					    here or on the card changes nothing - so a third host that
-					    lays the picker out from its content has to clamp its own
-					    chain. */}
+					{/*
+					 * The grid scrolls rather than widening the dialog: twenty columns must not
+					 * push the footer off-screen. `overflow-auto` alone does not do it (issue #701:
+					 * seven ordinary CSV columns were enough): it bounds this box but does not stop
+					 * the table's min-content width propagating to an ancestor sized from its
+					 * content. In the Run dialog that ancestor is the panel's grid track, clamped
+					 * by `DialogContent`'s `grid-cols-1` (`minmax(0, 1fr)`); in the Data tab the
+					 * flex column already gives a definite width. A clamp here or on the card
+					 * measurably changes nothing, so a third host laying the picker out from its
+					 * content must clamp its own chain.
+					 */}
 					<div className="max-h-56 overflow-auto rounded-md border border-rule">
 						<Table>
 							<TableHeader>
@@ -442,14 +416,13 @@ export default function DataFilePicker({
 						</Table>
 					</div>
 
-					{/* Said in both directions, because the table can clip without
-					    looking clipped: it scrolls inside `max-h-56`, and on
-					    overlay-scrollbar platforms an unscrolled container draws
-					    no scrollbar at all. A file of a handful of rows then ends
-					    at a half-drawn row with nothing saying the rest are
-					    there - so the count says which rows are in the table, and
-					    that the table is the thing that scrolls. A single row
-					    cannot be cut off by a box this tall and says nothing. */}
+					{/*
+					 * Said both ways, because the table can clip without looking clipped: it
+					 * scrolls inside `max-h-56`, and overlay-scrollbar platforms draw no scrollbar
+					 * on an unscrolled container, so a file can end at a half-drawn row with
+					 * nothing saying more exist. The count names the rows in the table and that the
+					 * table scrolls. A single row cannot be cut off by a box this tall.
+					 */}
 					{rowCount > PREVIEW_ROWS ? (
 						<p className="text-xs text-muted-foreground">
 							Showing the first {PREVIEW_ROWS} of {rowCount} rows - the table scrolls.

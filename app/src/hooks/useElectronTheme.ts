@@ -6,16 +6,12 @@
  */
 
 /**
- * useElectronTheme Hook
- *
- * React face of {@link useThemeStore} - light/dark mode and the accent colour
- * scheme, synced with the OS/Electron theme settings. The store owns the
- * values, the persistence, the OS subscriptions and the one write to `<html>`;
- * this hook only holds the store attached while a component is mounted.
- *
- * Mounted by the app shell, the Appearance panel and the command palette. They
- * all read the same store, so none of them can re-apply a stale copy (#1855).
- * Falls back gracefully when not running in Electron.
+ * React face of {@link useThemeStore}: light/dark mode and the accent colour scheme, synced with
+ * the OS/Electron theme settings. The store owns the values, the persistence, the OS subscriptions
+ * and the one write to `<html>`; this hook only holds the store attached while a component is
+ * mounted. Mounted by the app shell, the Appearance panel and the command palette, which all read
+ * the same store, so none can re-apply a stale copy (#1855). Falls back gracefully outside
+ * Electron.
  */
 
 import { useEffect } from "react";

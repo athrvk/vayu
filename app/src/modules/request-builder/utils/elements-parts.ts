@@ -6,38 +6,28 @@
  */
 
 /**
- * Collect the elements that run for a request (issue #1512): the collection
- * chain's, root to leaf, then the request's own, minus whatever an
- * `inherit.disable` entry at any level names (#3070). Each part records where
- * it came from. A disable entry is never itself a part: it suppresses, it does
- * not run, and a chain level's would reach a single-request run's
- * `requestElements`, where the engine refuses it.
- *
- * Send executes editor state that may be unsaved, so the app resolves the
- * whole chain itself rather than asking the engine to resolve it from a
- * stored id - `POST /compose`'s by-id path (what MCP and a saved request's
- * load-test run, issue #1594, both use instead) resolves the same chain
- * engine-side, since it has a real id to resolve from. That chain is
- * `elementsParts`; Send and code generation take it through
- * `sendElementsParts`, which also leaves out the request's own draft elements
- * that cannot run (#3066).
+ * The elements that run for a request (#1512): the chain's root to leaf, then the request's own,
+ * minus what any `inherit.disable` names (#3070), each part recording its origin. A disable entry
+ * is never a part: it suppresses, and a chain level's would reach a single-request run's
+ * `requestElements`, which the engine refuses. Send executes possibly unsaved editor state, so the
+ * app resolves the chain itself; `POST /compose`'s by-id path (MCP, a saved request's load run,
+ * #1594) resolves the same chain engine-side from a real id. Send and code generation take
+ * `elementsParts` through `sendElementsParts`, which also drops the request's own drafts that
+ * cannot run (#3066).
  */
 
 import type { Collection, ElementDef, ElementKindSchema, ResolvedElement } from "@/types";
 import { elementNeeds, isBlankScriptElement, type LeftOutElement } from "@/lib/elements";
 
-// Re-exported so existing importers of this file keep resolving it; the
-// implementation lives in `lib/` because `lib/request-references.ts` (which
-// this module may not import, and which may not import this module) needs it
-// too. See `@/lib/elements.ts`.
+// Re-exported so this file's importers resolve it; it lives in `lib/` since
+// `lib/request-references.ts`, which this module may not import nor be imported by, needs it too
+// (`@/lib/elements.ts`).
 export { scriptTextFor } from "@/lib/elements";
 
 /**
- * Whether a load run left to its default would replay a post-request script
- * after the run, on a sample of responses: some enabled, non-blank
- * `script.post` in the resolved list (inherited collection scripts included)
- * that is not marked `config.inline`. Takes `elementsParts`' result, so the
- * dialog warns about exactly the list the run composes.
+ * Whether a default load run would replay a post-request script after the run on sampled responses:
+ * an enabled, non-blank `script.post` (inherited included) not marked `config.inline`. Takes
+ * `elementsParts`' result, so the dialog warns about the list the run composes.
  */
 export function hasReplayedPostScript(parts: ElementDef[] | undefined): boolean {
 	return (parts ?? []).some(
@@ -57,30 +47,27 @@ function livePreScripts(elements: ElementDef[] | undefined): ElementDef[] {
 }
 
 /**
- * Whether the list holds an enabled, non-blank `script.pre` that is not marked
- * `config.inline`: the one the load engine skips at Scripts = As marked and
- * All deferred (`script_element_runs_inline`), so the dialog warns about it.
+ * Whether the list has an enabled, non-blank `script.pre` not marked `config.inline`: the one the
+ * load engine skips at As marked and All deferred (`script_element_runs_inline`), so the dialog
+ * warns.
  */
 export function hasUnmarkedPreScript(elements: ElementDef[] | undefined): boolean {
 	return livePreScripts(elements).some((el) => el.config.inline !== true);
 }
 
 /**
- * Whether the list holds an enabled, non-blank `script.pre` marked
- * `config.inline`: it runs at As marked, but All deferred overrides the mark
- * and skips it.
+ * Whether the list has an enabled, non-blank `script.pre` marked `config.inline`: it runs at As
+ * marked; All deferred skips it.
  */
 export function hasInlinePreScript(elements: ElementDef[] | undefined): boolean {
 	return livePreScripts(elements).some((el) => el.config.inline === true);
 }
 
 /**
- * `parts` without its switched-off elements, `undefined` when none are left -
- * `elementsParts`' own empty answer. For a load run's `requestElements` only
- * (#3050): the pipeline skips a disabled element, so sending one buys nothing,
- * and a disabled kind a single-request run has no home for would only burden
- * the run. Send and code generation drop them through `sendElementsParts`,
- * which also drops the incomplete ones (#3066).
+ * `parts` without switched-off elements, `undefined` when none are left (`elementsParts`' empty
+ * answer). For a load run's `requestElements` only (#3050): the pipeline skips them, and a disabled
+ * kind a single-request run cannot hold would burden the run. Send and code generation drop them
+ * via `sendElementsParts`, with the incomplete ones (#3066).
  */
 export function withoutDisabled(
 	parts: ResolvedElement[] | undefined
@@ -90,13 +77,11 @@ export function withoutDisabled(
 }
 
 /**
- * Kinds the engine accepts only on a collection (`collectionOnly` in
- * `GET /elements/kinds`): the run-boundary scripts. A single-request run never
- * takes a collection's lifecycle scripts, and `requestElements` is validated as
- * a request's own, which refuses them. A constant rather than a read of the
- * catalogue because the catalogue is a query that may not have landed when
- * Start is pressed, and a miss there would send the refused kinds;
- * `scenario-only.conformance.test.ts` holds this set to the catalogue fixture.
+ * Kinds the engine accepts only on a collection (`collectionOnly` in `GET /elements/kinds`): the
+ * run-boundary scripts. A single-request run never takes them, and `requestElements` is validated
+ * as a request's own. A constant, not a catalogue read: the catalogue may not have landed at Start,
+ * and a miss would send refused kinds; `scenario-only.conformance.test.ts` holds it to the
+ * catalogue fixture.
  */
 export const COLLECTION_ONLY_KINDS: ReadonlySet<string> = new Set([
 	"script.setup",
@@ -104,11 +89,10 @@ export const COLLECTION_ONLY_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * `parts` without the collection-only elements inherited from a collection,
- * `undefined` when none are left. For a load run's `requestElements` only
- * (#3070), after `withoutDisabled`. Send and code generation compose the
- * chain through `POST /compose`, which validates a collection-origin entry as a
- * collection's own, so they keep these.
+ * `parts` without inherited collection-only elements, `undefined` when none are left; for a load
+ * run's `requestElements` only (#3070), after `withoutDisabled`. Send and code generation compose
+ * through `POST /compose`, which validates a collection-origin entry as a collection's, so they
+ * keep these.
  */
 export function withoutInheritedCollectionOnly(
 	parts: ResolvedElement[] | undefined
@@ -120,10 +104,9 @@ export function withoutInheritedCollectionOnly(
 }
 
 /**
- * Every `inherit.disable` target across the chain and the request's own list.
- * Gathered before any level is emitted and in no order, as `POST /compose`
- * does (`disabled_element_ids`): a folder's disable can name a root element,
- * a root's a folder's, a request's an ancestor's.
+ * Every `inherit.disable` target across the chain and the request's list, gathered before any level
+ * is emitted and in no order, as `POST /compose` does (`disabled_element_ids`): a folder's disable
+ * can name a root element, a root's a folder's, a request's an ancestor's.
  */
 function disabledElementIds(chain: Collection[], requestElements: ElementDef[]): Set<string> {
 	const ids = new Set<string>();
@@ -148,8 +131,8 @@ export function elementsParts(
 	const disabled = disabledElementIds(chain, requestElements);
 	const parts: ResolvedElement[] = [];
 	for (const [depth, c] of chain.entries()) {
-		// The chain is root first, so every collection after it is a folder; the
-		// engine stamps a stored request's chain the same way (#2522).
+		// The chain is root first, so every later collection is nested; the engine stamps a stored
+		// request's chain the same way (#2522).
 		const scope = depth === 0 ? "collection" : "folder";
 		for (const el of c.elements) {
 			if (!isComposed(el, disabled)) continue;
@@ -164,21 +147,14 @@ export function elementsParts(
 }
 
 /**
- * `elementsParts` as a Send puts it on the wire (#3066): the request's own
- * draft elements that are switched off, or that fail the app's own check
- * (`elementNeeds`, the judgement behind the editor's "Needs ..." chip), are
- * left out. The engine refuses an element that fails its schema (#3052), so
- * sending one would turn an unfinished check into a 400 on the whole request.
- * What was left out for being incomplete comes back as `leftOut`, so the caller
- * can say so; a switched-off element is not reported, its row already says it
- * is off.
- *
- * Only the request's own elements are judged. A collection or folder level
- * passes through as `elementsParts` composed it: the editor of a level the
- * request does not own is not where its author is mid-edit, and the saved
- * level was already held to the same check on save (#3048). `kinds` empty (the
- * catalogue not loaded yet) still drops disabled elements and judges the
- * operand rules, which need no schema; a kind with no schema fails nothing.
+ * `elementsParts` as a Send puts it on the wire (#3066): the request's own draft elements that are
+ * off, or fail the app's check (`elementNeeds`, behind the editor's "Needs ..." chip), are left
+ * out. The engine refuses an element failing its schema (#3052), turning an unfinished check into a
+ * 400 on the whole request. Incomplete ones come back as `leftOut` for the caller to report; off
+ * ones are not, as their row says so. Only the request's own are judged: an inherited level passes
+ * as composed, since its author is not mid-edit there and it was held to the same check on save
+ * (#3048). Empty `kinds` (catalogue not loaded) still drops disabled elements and judges operand
+ * rules, which need no schema; a kind with no schema fails nothing.
  */
 export function sendElementsParts(
 	chain: Collection[],

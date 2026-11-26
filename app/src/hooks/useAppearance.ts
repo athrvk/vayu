@@ -6,21 +6,15 @@
  */
 
 /**
- * useAppearance Hook
+ * React face of {@link useAppearanceStore}, the renderer-only interface preferences (UI font,
+ * interface scale, corner roundedness, interface density). The store owns the values, the
+ * persistence and the DOM writes; this hook only re-asserts them against the live DOM on mount. The
+ * pre-paint script in index.html applies the same values before React mounts; the store is the
+ * source of truth once it runs.
  *
- * React face of {@link useAppearanceStore} - the renderer-only interface
- * preferences (UI font, interface scale, corner roundedness, interface
- * density). The store owns
- * the values, the persistence and the DOM writes; this hook only re-asserts
- * them against the live DOM on mount.
- *
- * The View menu's Ctrl+= / Ctrl+- / Ctrl+0 drive the same scale setting, but
- * they are bridged in `useMenuActions` rather than here: this hook is mounted
- * twice (the app shell and the Appearance panel) and a second subscription
- * would move the zoom two steps per keypress.
- *
- * The pre-paint script in index.html applies the same values before React
- * mounts; the store stays the source of truth once it runs.
+ * The View menu's Ctrl+= / Ctrl+- / Ctrl+0 drive the same scale setting but are bridged in
+ * `useMenuActions`, not here: this hook is mounted twice (the app shell and the Appearance panel),
+ * and a second subscription would move the zoom two steps per keypress.
  */
 
 import { useEffect } from "react";

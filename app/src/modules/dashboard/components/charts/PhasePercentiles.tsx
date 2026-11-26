@@ -18,26 +18,21 @@ import {
 import { pluralize } from "@/modules/dashboard/utils/format";
 
 /**
- * Per-phase percentiles - from `report.timingBreakdown.phases`, which History
- * reads off the stored report and the live view fills from the latest gate
- * frame (`utils/liveDistributions.ts`).
+ * Per-phase percentiles, from `report.timingBreakdown.phases`, which History reads off the stored
+ * report and the live view fills from the latest gate frame (`utils/liveDistributions.ts`).
  *
- * The companion to `TimingWaterfall`, and deliberately a separate component
- * rather than more rows inside it: the waterfall shows one *mean* per phase and
- * this shows *percentiles*, and a mean stacked in a column beside a p99 invites
- * the reader to compare them. Both cover every completion for a run whose
- * engine kept the phase histograms; only a report stored before the bank held
- * means has a waterfall over the retained trace sample, and this table is the
- * same every-completion figure either way.
+ * `TimingWaterfall`'s companion, deliberately separate: the waterfall shows one *mean* per phase
+ * and this shows *percentiles*, and a mean stacked beside a p99 invites comparing them. Both cover
+ * every completion for a run whose engine kept the phase histograms; only a report stored before
+ * the bank held means has a waterfall over the retained trace sample, and this table is the
+ * every-completion figure either way.
  *
- * Renders nothing at all when the section is absent - a run whose engine had
- * `phaseHistograms` off, or one recorded before the bank existed, has no
- * distribution to show and an empty table would claim otherwise.
+ * Renders nothing when the section is absent (a run whose engine had `phaseHistograms` off, or one
+ * recorded before the bank existed): there is no distribution, and an empty table would claim one.
  *
- * The tail callout is the reason a percentile view beats an average one: a TLS
- * p50 of 0 beside a p99 of 40ms is a run re-handshaking under load, and the
- * mean of the two is a number that looks merely unremarkable. What a tail means
- * depends on the phase, so each flagged phase is explained by its own group
+ * The tail callout is why a percentile view beats an average: a TLS p50 of 0 beside a p99 of 40ms
+ * is a run re-handshaking under load, and the mean of the two looks merely unremarkable. A tail
+ * means different things by phase, so each flagged phase is explained by its own group
  * (`TAIL_GROUPS`).
  */
 export function PhasePercentiles({
@@ -142,16 +137,12 @@ function tailNotes(flagged: readonly ResolvedPhasePercentiles[]): { key: string;
 }
 
 /**
- * A phase whose tail is worth naming: p99 at least an order of magnitude over
- * p50, or a p50 of zero with a p99 that is not.
- *
- * The zero-p50 branch is not an edge case to tolerate - it is the *strongest*
- * form of the finding. A reused connection does no handshake, so a run with
- * healthy pooling has a TLS p50 of exactly 0; a non-zero p99 beside it means
- * some requests did handshake, and `tailRatio` cannot express that as a number.
- *
- * The sub-millisecond floor keeps the callout off phases that are simply fast:
- * a p50 of 0.01ms and a p99 of 0.4ms is a 40x ratio and 0.4ms of nothing.
+ * A phase whose tail is worth naming: p99 at least an order of magnitude over p50, or a p50 of zero
+ * with a non-zero p99. The zero-p50 branch is the *strongest* form of the finding: a reused
+ * connection does no handshake, so healthy pooling has a TLS p50 of exactly 0, and a non-zero p99
+ * beside it means some requests did handshake, which `tailRatio` cannot express as a number. The
+ * sub-millisecond floor keeps the callout off phases that are simply fast: a p50 of 0.01ms and a
+ * p99 of 0.4ms is a 40x ratio and 0.4ms of nothing.
  */
 const TAIL_RATIO_THRESHOLD = 10;
 const TAIL_FLOOR_MS = 1;

@@ -5,11 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file db_collections.cpp
- * @brief Collections: the tree, the trash (issue #988) and batch reorder
- * (issue #365) (issue #1614).
- */
+/// Collections: the tree, the trash (#988) and batch reorder (#365) (#1614).
 
 #include "database_impl.hpp"
 
@@ -72,29 +68,27 @@ const std::unordered_map<std::string, std::string>& declined_under) {
 
 std::vector<Collection> Database::get_collections () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    // The tie rule is pinned to three keys, not left to the implicit rowid.
+    // The tie rule is pinned to three keys, not the implicit rowid.
     // `INSERT OR REPLACE` on a TEXT primary key reassigns the rowid on every
-    // edit, so a single-key ORDER BY let an unrelated rename silently reshuffle
-    // a collection among its equal-`order` siblings - and the sidebar, the MCP
+    // edit, so a single-key ORDER BY let an unrelated rename reshuffle a
+    // collection among its equal-`order` siblings, and the sidebar, the MCP
     // smoke tool and a scenario plan each saw a different shuffle. `created_at`
-    // second matches what the renderer displays; `id` last makes the result a
-    // total order even for rows written in the same millisecond. That last leg
-    // compares random UUIDs, so it is stable across reads but arbitrary with
-    // respect to the order the caller meant - which is why the contract puts
-    // the duty on the writer (issue #565): anything producing several siblings
-    // at once owes them distinct `order`s, as build_collection_rows and the
-    // examples import already do. A finer timestamp was rejected: it still ties
-    // under a fast enough writer, and it would make row identity depend on
-    // clock resolution across three platforms. See the Ordering section of
-    // docs/engine/api-reference.md. This is the within-kind half of the
-    // sibling order in vayu/db/sibling_order.hpp, which ranks a sub-folder
-    // and a request against each other (#2535); the renderer's comparator
-    // applies the same rule, pinned by tests/fixtures/tree-order-conformance.json.
+    // second matches the renderer's display; `id` last makes it total even
+    // within one millisecond. That leg compares random UUIDs: stable across
+    // reads, arbitrary against the order the caller meant, so the contract puts
+    // the duty on the writer (#565): anything producing several siblings at
+    // once owes them distinct `order`s, as build_collection_rows and the
+    // examples import do. A finer timestamp was rejected: it still ties under a
+    // fast writer, and would make row identity depend on clock resolution on
+    // three platforms. See the Ordering section of
+    // docs/engine/api-reference/resource-writes.md. This is the within-kind
+    // half of the sibling order in vayu/db/sibling_order.hpp, which ranks a
+    // sub-folder against a request (#2535); the renderer's comparator applies
+    // the same rule, pinned by tests/fixtures/tree-order-conformance.json.
     //
-    // Deleted rows are excluded here rather than at each caller (issue #988):
-    // this is what the sidebar, the MCP tools, every export and every plan
-    // resolution read, and a filter one of them forgot is a ghost row
-    // resurfacing in exactly one place.
+    // Deleted rows are excluded here, not at each caller (#988): the sidebar,
+    // the MCP tools, every export and every plan resolution read this, and a
+    // filter one forgot is a ghost row resurfacing in one place.
     return impl_->storage.get_all<Collection> (where (is_null (&Collection::deleted_at)),
     multi_order_by (order_by (&Collection::order),
     order_by (&Collection::created_at), order_by (&Collection::id)));
@@ -145,10 +139,10 @@ bool Database::collection_is_trashed (const std::string& id) {
 namespace {
 
 /// The breadth-first walk behind every "subtree" read: @p root_id first, then
-/// what `children_of (id)` answers for each id reached, each id once. The
-/// visited set is load-bearing (see `collection_subtree_locked`). The walk is
-/// one definition with two sources: the table, one statement per node, and the
-/// rows the trash listing has already read (#2972).
+/// what `children_of (id)` answers for each id reached, each once. The visited
+/// set is load-bearing (`collection_subtree_locked`). One definition, two
+/// sources: the table, one statement per node, and the rows the trash listing
+/// already read (#2972).
 template <typename ChildrenOf>
 std::vector<std::string>
 walk_subtree (const std::string& root_id, const ChildrenOf& children_of) {
@@ -188,11 +182,10 @@ void Database::purge_collection_locked (const std::string& id) {
     // asked for. It stops the walk and goes to the root instead.
     const auto subtree = collection_subtree_locked (id, SubtreeRows::StampedOnly);
 
-    // Deepest-first so foreign-key integrity holds at each step, wrapped in a
-    // single transaction so a crash mid-cascade cannot leave a half-deleted
-    // subtree. Safe under the recursive mutex already held - the lambda only
-    // calls sqlite_orm on the same storage handle (same pattern as
-    // spec_sync_apply).
+    // Deepest-first so foreign-key integrity holds at each step, in one
+    // transaction so a crash cannot leave a half-deleted subtree. Safe under
+    // the recursive mutex already held: the lambda only calls sqlite_orm on the
+    // same storage handle (as spec_sync_apply does).
     impl_->storage.transaction ([&] {
         for (const auto& collection_id : subtree) {
             for (auto& spared : impl_->storage.get_all<Collection> (
@@ -205,9 +198,9 @@ void Database::purge_collection_locked (const std::string& id) {
             }
         }
         for (auto it = subtree.rbegin (); it != subtree.rend (); ++it) {
-            // Examples first, and by request id rather than by collection: they
-            // hang off the request, so deleting the requests before them would
-            // leave rows no read can reach and no later delete can find.
+            // Examples first, by request id rather than collection: they hang
+            // off the request, and deleting the requests first would leave rows
+            // no read reaches and no later delete finds.
             for (const auto& request_id : impl_->storage.select (
                  &Request::id, where (c (&Request::collection_id) == *it))) {
                 impl_->storage.remove_all<RequestExample> (
@@ -225,21 +218,18 @@ void Database::purge_collection_locked (const std::string& id) {
         return true; // Commit
     });
 
-    // The cascade above is deliberately not a cascade *to* the document a
-    // purged collection was bound to - several collections may bind one, so the
-    // binding going away is not the document going away. It is the moment to
-    // ask whether anything still holds it, though, and that is what the sweep
-    // answers (issue #718). Outside the transaction: the subtree is gone either
-    // way, and this must not be able to roll it back. Never throws; see the
-    // declaration.
+    // Deliberately not a cascade *to* the bound document: several collections
+    // may bind one, so losing a binding is not losing the document. It is the
+    // moment to ask whether anything still holds it, which the sweep answers
+    // (#718). Outside the transaction: the subtree is gone either way, and this
+    // must not roll it back. Never throws; see the declaration.
     sweep_orphaned_spec_documents ();
 }
 
-// Soft delete (issue #988): the subtree is stamped, not removed. Every read
-// filters the stamp out, so the tree the user sees is the same tree a hard
-// cascade left - but `GET /trash` can still find it, `POST /trash/:id/restore`
-// can put it back, and only a purge (explicit, or retention at startup) is
-// what finally destroys it.
+// Soft delete (#988): the subtree is stamped, not removed. Every read filters
+// the stamp out, so the user sees what a hard cascade would leave, but
+// `GET /trash` can still find it, `POST /trash/:id/restore` can put it back,
+// and only a purge (explicit, or retention at startup) destroys it.
 void Database::delete_collection (const std::string& id,
 const std::optional<std::string>& declined_under) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
@@ -247,12 +237,10 @@ const std::optional<std::string>& declined_under) {
 
     const auto subtree = collection_subtree_locked (id);
 
-    // The stamp is this delete's cohort key, and a cohort has to be
-    // distinguishable from an *earlier* delete inside the same subtree - that
-    // is what stops restoring a collection from also resurrecting a request the
-    // user deleted separately beforehand. Sharing a millisecond with such a row
-    // would erase the distinction, so the one case where it can happen is
-    // stepped over rather than left to chance.
+    // The stamp is this delete's cohort key, and must differ from any *earlier*
+    // delete inside the subtree, so restoring a collection does not resurrect a
+    // request the user deleted separately before. Sharing a millisecond with
+    // such a row would erase the distinction, so that one case is stepped over.
     int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
                     .count ();
@@ -273,11 +261,11 @@ const std::optional<std::string>& declined_under) {
         ++stamp;
     }
 
-    // Only rows that are still live are stamped. A row an earlier delete
-    // already took keeps that delete's stamp, so restoring this collection
-    // leaves it in the trash - as its own root, since its owner is live again.
-    // The cascade publishes one change, on the root, and only when this call
-    // stamps it: a root already in the trash changes nothing.
+    // Only live rows are stamped. A row an earlier delete took keeps that
+    // stamp, so restoring this collection leaves it in the trash, as its own
+    // root since its owner is live again. The cascade publishes one change, on
+    // the root, and only when this call stamps it: a root already in the trash
+    // changes nothing.
     const auto live_root = impl_->storage.get_all<Collection> (
     where (c (&Collection::id) == id && is_null (&Collection::deleted_at)));
     impl_->storage.transaction ([&] {
@@ -320,9 +308,9 @@ namespace {
 constexpr const char* STAMPED =
 "a row read under is_not_null(deleted_at) carries a stamp";
 
-// Each kind's entry is built from the columns it shows and nothing else, so
-// neither the listing nor a restore loads a body, a script or a header blob
-// to name a row (#2972). Where a builder takes clauses they say which rows.
+// Each kind's entry is built from the columns it shows, so neither the listing
+// nor a restore loads a body, script or header blob to name a row (#2972).
+// Where a builder takes clauses, they say which rows.
 
 /// An entry with what only some kinds carry left at its default: no counts, no
 /// variables, no owner name.
@@ -383,10 +371,10 @@ std::optional<TrashEntry> example_entry (Storage& storage, const std::string& id
     return entry_of (id, "example", std::move (name), deleted_at, std::move (request_id));
 }
 
-/// Every stamped example under a live request, named by that request: the
-/// join keeps neither one under a trashed request, which is part of that
-/// request's entry, nor one whose request row is gone, which has nothing to
-/// come back under (#2971) - the rule `request_is_absent_locked` states.
+/// Every stamped example under a live request, named by it: the join keeps out
+/// one under a trashed request (part of that request's entry) and one whose
+/// request row is gone (nothing to come back under, #2971), the rule
+/// `request_is_absent_locked` states.
 std::vector<TrashEntry> listed_example_entries (Storage& storage) {
     std::vector<TrashEntry> entries;
     for (auto& [id, name, request_id, deleted_at, request_name] :
@@ -424,10 +412,10 @@ std::optional<TrashEntry> first_entry (std::vector<TrashEntry> entries) {
     return std::move (entries.front ());
 }
 
-/// Every collection's place in the tree and its stamp, plus how many stamped
-/// requests each collection holds per stamp: what a collection entry's cohort
-/// counts are computed from. Read in a fixed number of statements however
-/// many folders a trashed subtree holds (#2972).
+/// Every collection's place in the tree and its stamp, plus stamped-request
+/// counts per collection per stamp: what a collection entry's cohort counts
+/// come from. Read in a fixed number of statements however many folders a
+/// trashed subtree holds (#2972).
 struct TrashGraph {
     struct Node {
         std::string name;
@@ -492,8 +480,8 @@ struct TrashGraph {
     }
 
     /// A row whose owner is missing entirely is a root as much as one whose
-    /// owner is live: there is nothing above it a restore could come back
-    /// under. The tree root (no owner) is not a deleted one either.
+    /// owner is live: nothing above it to come back under. The tree root (no
+    /// owner) is not a deleted one.
     bool owner_is_deleted (const std::optional<std::string>& owner_id) const {
         if (!owner_id.has_value ()) {
             return false;
@@ -527,7 +515,7 @@ TrashEntry collection_entry (const TrashGraph& graph, const std::string& root_id
     // The cohort counts are not the subtree's: what this delete took is what
     // restoring it puts back, and a row an earlier delete already held is
     // neither. The walk is `collection_subtree_locked`'s, over the rows the
-    // graph already holds.
+    // graph holds.
     const auto children_of = [&graph] (const std::string& id) -> const auto& {
         return graph.children_of (id);
     };
@@ -601,10 +589,10 @@ std::optional<TrashEntry> Database::trash_entry_locked (const std::string& id) {
     auto& storage = impl_->storage;
 
     // One root, so its subtree is walked through the parent_id and
-    // collection_id indexes rather than read whole the way the listing reads
-    // every root's: a restore, a purge or retention's re-check of one entry
-    // must not cost a scan of either table. `TheListingAndTheRestoreCountTheSameCohort`
-    // holds the two to the same counts.
+    // collection_id indexes, not read whole as the listing reads every root's:
+    // a restore, a purge or retention's re-check of one entry must not scan
+    // either table. `TheListingAndTheRestoreCountTheSameCohort` holds the two
+    // to the same counts.
     const auto collections = storage.select (
     columns (&Collection::name, &Collection::parent_id, &Collection::deleted_at),
     where (c (&Collection::id) == id && is_not_null (&Collection::deleted_at)));
@@ -694,9 +682,9 @@ std::vector<TrashEntry> Database::get_trash () {
         entries.push_back (std::move (certificate));
     }
 
-    // Newest first - what a trash view shows at the top - with `id` as the
-    // tiebreak so a page of same-millisecond deletes is a total order rather
-    // than whatever the two table scans happened to produce.
+    // Newest first, as a trash view shows, with `id` as the tiebreak so a page
+    // of same-millisecond deletes is a total order rather than the scans'
+    // order.
     std::sort (entries.begin (), entries.end (),
     [] (const TrashEntry& a, const TrashEntry& b) {
         return a.deleted_at != b.deleted_at ? a.deleted_at > b.deleted_at :
@@ -762,11 +750,10 @@ const std::optional<TrashRootRef>& root) {
 
 std::expected<TrashOutcome, RestoreFailure> Database::restore_request_locked (
 const TrashEntry& entry) {
-    // A request has no root to come back to: `collection_id` is NOT NULL, so
-    // "re-parent to the tree root" - what a collection does - is not a shape
-    // this row has. Its owner going away is only reachable by deleting the
-    // collection after the request, and the answer is the restore that *does*
-    // work, named rather than guessed at.
+    // A request has no root to come back to: `collection_id` is NOT NULL, so a
+    // collection's "re-parent to the tree root" is not a shape this row has.
+    // Its owner can only go by deleting the collection after the request, and
+    // the answer names the restore that *does* work rather than guessing.
     if (owner_is_absent_locked (entry.parent_id)) {
         return std::unexpected (owner_not_live_refusal ("Request", "collection", entry,
         collection_trash_root_locked (vayu::utils::invariant_value (
@@ -777,10 +764,9 @@ const TrashEntry& entry) {
         for (auto& request : impl_->storage.get_all<Request> (where (
              c (&Request::id) == entry.id && c (&Request::deleted_at) == entry.deleted_at))) {
             request.deleted_at.reset ();
-            // A row trashed before the startup pass ever reached it (issue
-            // #1491: trash is skipped there) gets the same disable-and-mark
-            // treatment on the way back, rather than coming back exactly as
-            // it went in.
+            // A row trashed before the startup pass reached it (#1491: that
+            // pass skips trash) gets the same disable-and-mark treatment on the
+            // way back.
             if (auto rewritten =
                 vayu::http::strip_legacy_managed_headers (request.headers)) {
                 request.headers = std::move (*rewritten);
@@ -810,9 +796,7 @@ TrashOutcome Database::restore_collection_locked (const TrashEntry& entry) {
                  where (c (&Request::collection_id) == collection_id &&
                  c (&Request::deleted_at) == entry.deleted_at))) {
                 request.deleted_at.reset ();
-                // See the same call in `restore_request_locked`: a row
-                // trashed before the startup pass ever reached it comes back
-                // through the same disable-and-mark treatment.
+                // As in `restore_request_locked`.
                 if (auto rewritten =
                     vayu::http::strip_legacy_managed_headers (request.headers)) {
                     request.headers = std::move (*rewritten);
@@ -850,9 +834,8 @@ std::expected<TrashOutcome, RestoreFailure> Database::restore_deleted (
 const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
 
-    // By id, not by root: a row a cascade took is restorable on its own - that
-    // is what the re-parent rule is for - and only a row that is not deleted at
-    // all is a 404.
+    // By id, not by root: a row a cascade took is restorable alone (what the
+    // re-parent rule is for), and only a row not deleted at all is a 404.
     auto entry = trash_entry_locked (id);
     if (!entry) {
         return std::unexpected (RestoreFailure{
@@ -904,11 +887,10 @@ std::optional<TrashOutcome> Database::purge_deleted (const std::string& id) {
     if (!entry) {
         return std::nullopt;
     }
-    // The purge takes every stamped row under the root, whichever delete
-    // stamped it - a row left under a removed collection is reachable by no
-    // read and restorable by nothing, so "the cohort" is the wrong unit here
-    // even though it is the right one for a restore. A live collection is not
-    // taken; see purge_collection_locked.
+    // Every stamped row under the root, whichever delete stamped it: a row left
+    // under a removed collection is reachable by no read and restorable by
+    // nothing, so the cohort, right for a restore, is the wrong unit here. A
+    // live collection is not taken; see purge_collection_locked.
     purge_trash_entry_locked (*entry);
     vayu::utils::log_info (
     "db", "Purged item from trash", { { "kind", entry->kind }, { "id", id } });
@@ -932,10 +914,10 @@ int64_t Database::purge_expired_trash (int retention_days, int64_t now) {
 
     int64_t purged = 0;
     for (const auto& entry : expired) {
-        // A root purged as part of an ancestor's subtree is already gone. It
-        // cannot happen to a *root* by construction, but the re-read is what
-        // says so rather than assuming it, with a count rather than a whole
-        // entry: this runs once per expired root before `/health` answers.
+        // A root purged within an ancestor's subtree is already gone. That
+        // cannot happen to a *root* by construction, but the re-read says so
+        // rather than assuming it, with a count, not a whole entry: this runs
+        // once per expired root before `/health` answers.
         if (!still_trashed (impl_->storage, entry)) {
             continue;
         }
@@ -963,17 +945,16 @@ int64_t Database::purge_expired_trash_configured () {
 // Batch reorder - repositioned collections + requests in one transaction
 // ============================================================================
 
-// Same shape as import_apply: retry_on_busy holds the recursive mutex while the
-// lambda runs, and the lambda only touches the same storage handle. Collections
-// first so a request that moved into a collection this batch also reparented
-// still lands after its owner's row.
+// As import_apply: retry_on_busy holds the recursive mutex while the lambda
+// runs, and the lambda only touches the same storage handle. Collections first,
+// so a request moved into a collection this batch reparented still lands after
+// its owner's row.
 //
-// `update` behind an existence check rather than `replace` (issue #386): a
-// reorder only repositions rows that already exist, so the upsert half of
-// `replace` could only ever re-create a row something else deleted - silently,
-// and inside a transaction the endpoint advertises as all-or-nothing. Throwing
-// out of the transaction lambda leaves the guard uncommitted, so the rows
-// updated before the missing one roll back with it.
+// `update` behind an existence check, not `replace` (#386): a reorder only
+// repositions existing rows, so `replace`'s upsert half could only re-create a
+// row something else deleted, silently, inside a transaction the endpoint
+// advertises as all-or-nothing. Throwing out of the lambda leaves the guard
+// uncommitted, so earlier updates roll back with it.
 void Database::apply_reorder (const std::vector<Collection>& collections,
 const std::vector<Request>& requests,
 const std::unordered_map<std::string, std::string>& declined_under) {
@@ -988,11 +969,10 @@ const std::unordered_map<std::string, std::string>& declined_under) {
     retry_on_busy ("apply reorder", 5, std::chrono::milliseconds (100), [&] {
         std::vector<Change> moved;
         impl_->storage.transaction ([&] {
-            // A deleted row does not exist to this batch (issue #988): the
-            // caller is repositioning the tree it can see, and writing the row
-            // it named would both resurrect it - `update` carries the caller's
-            // whole struct, `deleted_at` included - and move something nobody
-            // is looking at.
+            // A deleted row does not exist to this batch (#988): the caller
+            // repositions the tree it can see, and writing the named row would
+            // resurrect it (`update` carries the caller's whole struct,
+            // `deleted_at` included) and move something nobody is looking at.
             for (const auto& row : collections) {
                 if (impl_->storage.count<Collection> (where (
                     c (&Collection::id) == row.id && is_null (&Collection::deleted_at))) == 0) {

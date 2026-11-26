@@ -6,11 +6,10 @@
  */
 
 /**
- * computeEta - estimated seconds remaining for a closed-ended (iterations) run.
- *
- * ETA = (requestsExpected - requestsSent) / currentRps. Returns null when the
- * run is open-ended (requestsExpected === 0) or when currentRps is non-positive
- * (no basis to project). Clamps to 0 once the run has met its expected count.
+ * Estimated seconds remaining for a closed-ended (iterations) run: (requestsExpected -
+ * requestsSent) / currentRps. Null when the run is open-ended (requestsExpected === 0) or
+ * currentRps is non-positive (no basis to project); clamped to 0 once the run has met its expected
+ * count.
  */
 export interface EtaInputs {
 	requestsExpected: number;
