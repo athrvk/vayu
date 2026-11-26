@@ -15,7 +15,7 @@
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { formatPercent } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
-import { METRIC_LABELS, formatValue } from "./run-comparison-format";
+import { formatValue, metricLabel } from "./run-comparison-format";
 import { deltaVerdict, type ComparabilityWarning, type MetricDelta } from "@/lib/run-compare";
 import { NOT_RECORDED } from "./unrecorded-figures";
 
@@ -50,7 +50,7 @@ export function DeltaChange({ metric }: { metric: MetricDelta }) {
 export function DeltaCell({ metric }: { metric: MetricDelta }) {
 	return (
 		<div className="flex flex-col gap-0.5 min-w-0">
-			<span className="text-xs text-muted-foreground">{METRIC_LABELS[metric.metric]}</span>
+			<span className="text-xs text-muted-foreground">{metricLabel(metric.metric)}</span>
 			{metric.target === null ? (
 				// This run did not record it. Saying so beats a 0 that reads as a
 				// measurement, and beats an em-dash with no explanation.

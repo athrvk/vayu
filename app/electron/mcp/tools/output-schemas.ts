@@ -18,17 +18,23 @@ import { secretsShape, withholdRequestUrl } from "../withhold.js";
 import type { ToolContext } from "./contract.js";
 import { TERMINAL_STATUS_WORDS } from "./run-status.js";
 
-const metricDeltaSchema = z.object({
-	metric: z.string(),
-	base: z.number().nullable(),
-	target: z.number().nullable(),
-	delta: z.number().nullable(),
-	pctChange: z.number().nullable(),
-	// Which way is an improvement. Without it a reader has to know that falling
-	// latency is good and falling throughput is not; `neutral` marks the metric
-	// (total requests) where neither direction is a verdict.
-	direction: z.enum(["lower-is-better", "higher-is-better", "neutral"]),
-});
+// `id` makes the row a `$defs` entry that the five arrays of `runComparisonSchema`
+// point at, instead of five inline copies in `tools/list` (#3781; ceilings in
+// `tool-list-budget.test.ts`). The id is global to zod's registry, so no other
+// schema may take "MetricDelta".
+const metricDeltaSchema = z
+	.object({
+		metric: z.string(),
+		base: z.number().nullable(),
+		target: z.number().nullable(),
+		delta: z.number().nullable(),
+		pctChange: z.number().nullable(),
+		// Which way is an improvement. Without it a reader has to know that falling
+		// latency is good and falling throughput is not; `neutral` marks the metric
+		// (total requests) where neither direction is a verdict.
+		direction: z.enum(["lower-is-better", "higher-is-better", "neutral"]),
+	})
+	.meta({ id: "MetricDelta" });
 
 export const runComparisonSchema = z.object({
 	baseRunId: z.string(),
@@ -46,6 +52,12 @@ export const runComparisonSchema = z.object({
 		z.enum(ERROR_CLASS_KEYS),
 		z.object({ base: z.number(), target: z.number() })
 	),
+	// Rows only where both runs carry the figure (issue #3781), never a null
+	// side: the top-level `stream` figures, and each custom metric both runs
+	// recorded under one type (`p50`/`p95` for a trend, `value` otherwise),
+	// always `neutral`.
+	stream: z.array(metricDeltaSchema),
+	customMetrics: z.array(metricDeltaSchema),
 	// Whether the two runs negotiated a compressed response differently
 	// (issue #1488) - true means the byte and latency deltas above are not
 	// measuring the same thing. A run recorded before this field existed

@@ -103,6 +103,12 @@ description: >-
   The result also carries `errorClasses` (#3828), `{transport?, protocol?, tool?}` of `{base, target}` counts of the two runs' failed `mcp` replies.
   It is `{}` unless **both** runs recorded `summary.errorClasses`: a run stored before the engine counted them has no figure, which is not `0` and would otherwise read as a regression.
   `protocolCodes` is not compared; read it on `get_run_report`.
+  It also carries `stream` and `customMetrics` (#3781), arrays of the same row shape as `latency`.
+  A row exists only when **both** runs carry a finite number at its path: a run that never streamed or never recorded a metric draws no row, never a `null` side or a `0`.
+  `stream` reads the report's top-level `stream` block, in this order: `stream.timeToFirstEvent.p50` and `.p95`, `stream.timeToFirstMatch.p50` and `.p95`, `stream.maxEventGap.p95` (all `lower-is-better`, milliseconds),
+  `stream.eventRate.p50` and `stream.eventsPerSecond` (`higher-is-better`, events per second) and `stream.events.p50` (`neutral`: how many events a stream delivered).
+  `customMetrics` has a row for each name **both** runs recorded as the same `type`, in name order: `customMetrics.<name>.p50` and `.p95` for a `trend`, `customMetrics.<name>.value` for a `counter` or `rate`.
+  Every one is `neutral`, because the data carries no direction. A name one run lacks, or recorded as another type, has no row.
 - **Run housekeeping** (issue #755) is the History surface an agent could otherwise only page through: `list_runs` takes the engine's own filters (`type`, `status`, `outcome`, `requestId`, `collectionId`, `q` over the stored config, `baseline`) plus `limit`/`offset`, so finding one run is a query rather than a scan of 100-row blobs.
   Order is fixed newest-first - `GET /runs` takes no sort parameter, and the app's oldest-first view sorts client-side.
   `collectionId` matches a **collection run** and a **load run over a collection** (both store `scenario.collectionId`), never a single-request design or load run.

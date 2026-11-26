@@ -7,12 +7,12 @@
 
 /**
  * @brief Pure server-side diff of two run reports (the `compare_runs` tool's core). Answers "did my
- *        change regress?" by comparing latency percentiles, error rate, throughput, and status-code
- *        mix, each labelled with which direction counts as an improvement, and reports in
- *        `comparability` where the two runs were not the same experiment (mode, virtual users,
- *        duration, status, ...). Defensive against missing fields so it works across run types, and
- *        a figure the report flags as unrecorded (`summary.summaryMissing`, `summary.partial`,
- *        #2904) is `null` on that side, never a zero.
+ *        change regress?" by comparing latency percentiles, error rate, throughput, status-code
+ *        mix, stream figures and the custom metrics both runs recorded, each labelled with which
+ *        direction counts as an improvement, and reports in `comparability` where the two runs were
+ *        not the same experiment (mode, virtual users, duration, status, ...). Defensive against
+ *        missing fields so it works across run types, and a figure the report flags as unrecorded
+ *        (`summary.summaryMissing`, `summary.partial`, #2904) is `null` on that side, never a zero.
  *
  * **Mirrored by `app/src/lib/run-compare.ts`, which the history view's vs-baseline strip uses.**
  * Neither process can import the other's source: this project emits with `rootDir: "electron"` and
@@ -133,6 +133,16 @@ export interface RunComparison {
 	 * show a regression that never happened. `protocolCodes` is not compared.
 	 */
 	errorClasses: ErrorClassDeltas;
+	/**
+	 * The report's top-level `stream` figures, one row for each both runs carry (`stream.timeToFirstEvent.p50`
+	 * ... `stream.eventsPerSecond`); `[]` when either run never streamed (#3781).
+	 */
+	stream: MetricDelta[];
+	/**
+	 * The custom metrics both runs recorded under the same type (`customMetrics.<name>.p50`,
+	 * `.p95` or `.value`), `neutral`: the data carries no direction (#3781).
+	 */
+	customMetrics: MetricDelta[];
 	/**
 	 * Whether the two runs negotiated a compressed response differently (#1488): a run recorded
 	 * before `loadNegotiateCompression`'s default flipped in 0.26 reads as `false`, so an older
@@ -487,6 +497,79 @@ function errorClassDeltas(base: Report, target: Report): ErrorClassDeltas {
 	return deltas;
 }
 
+/**
+ * A row for `path` only when both reports carry a finite number there (#3781): a run that never
+ * streamed, or never recorded the metric, has no figure, and a 0 read in its place would show a
+ * change that never happened. Unlike {@link delta}, a side is never `null`.
+ */
+function sharedDelta(
+	metric: string,
+	direction: MetricDirection,
+	base: Report,
+	target: Report,
+	path: string[]
+): MetricDelta[] {
+	const from = num(base, ...path);
+	const to = num(target, ...path);
+	return from === null || to === null ? [] : [delta(metric, direction, from, to)];
+}
+
+/**
+ * In the order the report documents them. `stream.events.p50` is how many events a stream
+ * delivered, which no direction improves.
+ */
+const STREAM_METRICS: readonly (readonly [path: string, direction: MetricDirection])[] = [
+	["stream.timeToFirstEvent.p50", "lower-is-better"],
+	["stream.timeToFirstEvent.p95", "lower-is-better"],
+	["stream.timeToFirstMatch.p50", "lower-is-better"],
+	["stream.timeToFirstMatch.p95", "lower-is-better"],
+	["stream.maxEventGap.p95", "lower-is-better"],
+	["stream.eventRate.p50", "higher-is-better"],
+	["stream.eventsPerSecond", "higher-is-better"],
+	["stream.events.p50", "neutral"],
+];
+
+function streamDeltas(base: Report, target: Report): MetricDelta[] {
+	return STREAM_METRICS.flatMap(([path, direction]) =>
+		sharedDelta(path, direction, base, target, path.split("."))
+	);
+}
+
+/** The figures a custom metric of `type` is compared on; none for a type the engine does not name. */
+function customMetricFields(type: string): readonly string[] {
+	if (type === "trend") return ["p50", "p95"];
+	if (type === "counter" || type === "rate") return ["value"];
+	return [];
+}
+
+/** The report's `customMetrics` names, or none when the block is absent or not an object. */
+function customMetricNames(report: Report): string[] {
+	const block = report.customMetrics;
+	if (block === null || typeof block !== "object" || Array.isArray(block)) return [];
+	// The engine walks its keys in byte order of the UTF-8 name; a plain sort is UTF-16 code-unit
+	// order, which agrees with it for every name outside the astral planes.
+	return Object.keys(block).sort();
+}
+
+/**
+ * Every name both reports carry as the same type, in name order, each on its type's figures. A name
+ * recorded as one type by one run and another by the other compares nothing: a trend's percentile
+ * is not a counter's total. No direction is recorded for a custom metric, so none is claimed.
+ */
+function customMetricDeltas(base: Report, target: Report): MetricDelta[] {
+	return customMetricNames(base).flatMap((name) => {
+		const type = str(base, "customMetrics", name, "type");
+		if (type === null || type !== str(target, "customMetrics", name, "type")) return [];
+		return customMetricFields(type).flatMap((field) =>
+			sharedDelta(`customMetrics.${name}.${field}`, "neutral", base, target, [
+				"customMetrics",
+				name,
+				field,
+			])
+		);
+	});
+}
+
 /** Compare two engine run reports and return a structured delta. */
 export function compareReports(
 	baseRunId: string,
@@ -552,6 +635,8 @@ export function compareReports(
 		reliability,
 		statusCodes,
 		errorClasses: errorClassDeltas(base, target),
+		stream: streamDeltas(base, target),
+		customMetrics: customMetricDeltas(base, target),
 		compressionNegotiationDiffers,
 		comparability,
 	};
