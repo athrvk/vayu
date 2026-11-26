@@ -14,8 +14,8 @@ see how the server copes. The MCP Inspector is the first-party reference develop
 for **exploring and debugging** a server, in a browser, a terminal or a script. Vayu is
 an API client with a load engine inside it, and an MCP call is one **request body mode**
 of an ordinary saved request, so it is built to **keep** a server's behaviour: saved
-requests, ordered scenarios that carry data between steps, assertions, run history and a
-a comparison between runs. They overlap on load testing and diverge on what
+requests, ordered scenarios that carry data between steps, assertions, run history and
+comparison between runs. They overlap on load testing and diverge on what
 happens around it.
 
 !!! note "Two different MCP pages"
@@ -31,7 +31,7 @@ happens around it.
 | **Saved suites** | Requests in collections, run in order, with data-driven rows | Load scenarios as a JSON file of independent weighted calls\*\*\* |
 | **Data between steps** | `extract.json` and `extract.header` feed later steps; state is per virtual user under load | The documented scenario step keys have no extraction field\*\*\* |
 | **Assertions** | JSONPath, JSON Schema (draft-07) and a `tools/list`-style snapshot, on the run itself | The documented scenario step keys have no assertion field\*\*\* |
-| **Load shapes** | Constant rate, constant users, one ramp then hold, fixed request count | Concurrency, rate, duration or count, warm-up, open loop, stepped stairs\*\*\* |
+| **Load shapes** | Constant rate, constant users, a ramp-up, a fixed iteration count, a capacity search | Concurrency, rate, duration or count, warm-up, open loop, stepped stairs\*\*\* |
 | **CI gate on a run** | A thresholds block judges the run; the command line starts a run and does not exit on a verdict | Thresholds and baseline regression exit `10`\*\*\* |
 | **Per-call output** | Aggregates only: run summaries, a history report, an HTML, Markdown and JSON export | One NDJSON line per call from the CLI\*\*\* |
 | **Failure classes in reports** | `tool`, `protocol` and `transport` counts per run, compared run to run | `isError` results counted apart from thrown errors\*\*\* |
@@ -158,7 +158,7 @@ the better tool, and several of these are not close:
   schema becomes a form, and the Protocol and Network tabs show the exchange. Vayu's
   request builder has the JSON editor and a rendered tool result, but the tool and its schema
   are typed by hand, and there is no MCP-specific browser for tools, resources and prompts.
-- **Your server uses stdio, or the legacy era.** Vayu's engine spawns no processes and speaks
+- **Your server uses stdio, or the legacy era.** Vayu has no stdio transport and speaks
   the modern Streamable HTTP era only.
 - **You need MCP's authorization flow.** The Inspector runs the OAuth flow, re-authorizes
   and steps up on `insufficient_scope`. Vayu sends the auth a request carries and reports a
@@ -167,7 +167,7 @@ the better tool, and several of these are not close:
 - **You want its load features.** Stepped and ramped stairs, a warm-up, a weighted mix with
   an exact ratio, baselines with a regression budget, a `--load-max-p99`-style exit code
   for CI, an NDJSON line per call, session churn and `--load-workers` are documented on
-  its page. Vayu has no staged ramp, no weighted mix, no baseline-regression budget that
+  its page. Vayu has no stepped stairs, no weighted mix, no baseline-regression budget that
   fails a run, no per-call NDJSON and no multi-process generator.
 - **You test notifications or the other MCP surfaces.** Subscriptions, `listen` and
   notification fan-out load, the Apps, Skills and Tasks surfaces, conformance testing and
