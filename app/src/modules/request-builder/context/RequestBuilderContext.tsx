@@ -5,11 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * RequestBuilder Context
- *
- * Provides shared state and variable resolution for all request builder components
- */
+/** Shared state and variable resolution for every request builder component. */
 
 import { createContext, useContext } from "react";
 import type { RequestBuilderContextValue } from "../types";

@@ -8,41 +8,35 @@
 /**
  * The pure core of `{{variable}}` resolution, as the renderer *previews* it.
  *
- * Since issue #226 the engine owns execution-time resolution (`POST /compose`
- * - interpolation, precedence, the `inherit` auth walk). What the renderer
- * keeps is preview: resolved-URL tab titles, key/value and body previews, the
- * unresolved-token painting, and the "why this value" popover. A preview that
- * disagrees with what the engine will send is worse than none, so this module
- * restates the engine's rules exactly and is held to them by the shared
- * conformance fixture (`engine/tests/fixtures/variable-resolution-conformance
- * .json`), which the engine's gtest suite and this module's vitest suite both
- * drive.
+ * The engine owns execution-time resolution (#226: `POST /compose`, interpolation, precedence, the
+ * `inherit` auth walk). The renderer keeps preview: resolved-URL tab titles, key/value and body
+ * previews, the unresolved-token painting, and the "why this value" popover. A preview that
+ * disagrees with what the engine will send is worse than none, so this module restates the engine's
+ * rules exactly and is held to them by the shared conformance fixture
+ * (`engine/tests/fixtures/variable-resolution-conformance.json`), which the engine's gtest suite
+ * and this module's vitest suite both drive.
  *
- * The rules (issue #226, "Behaviour that must not change" + D17):
+ * The rules (#226, "Behaviour that must not change" + D17):
  *  - precedence: environment > collection chain (leaf over root) > globals
- *  - a definition is disabled only by an explicit `enabled: false`; absent or
- *    malformed counts as enabled (D17 - matches the importers and the engine)
+ *  - a definition is disabled only by an explicit `enabled: false`; absent or malformed counts as
+ *    enabled (D17, matching the importers and the engine)
  *  - a non-string stored `value` reads as "" (D17)
- *  - a name nothing defines keeps its braces, plain or `$name` (issue #1009)
- *  - a `data.*` name keeps its braces too: it addresses the reserved data
- *    namespace (issue #402), which only a scenario run's iteration can bind
- *  - `$vu` and `$iteration` keep their braces too: they address the reserved
- *    identity namespace (issue #994), which only the iteration that sends can
- *    bind - a variable defined with either name never answers for it
- *  - so does a bare name a bound data row will substitute (issue #1007) - the
- *    same deferral for the same reason, spelled the way Postman's data
- *    variables are. A caller that already holds the row is the one exception,
- *    and it reads `resolveTemplateWithRow`: it previews the bind that follows
- *    composition rather than composition alone (issue #1062)
- *  - a user-defined variable named `$guid` beats the generator; generators run
- *    once per occurrence
- *  - a value that itself holds `{{tokens}}` resolves through them, to a depth
- *    bound, cycles left literal (issue #1009); the raw string, never the typed
- *    value
+ *  - a name nothing defines keeps its braces, plain or `$name` (#1009)
+ *  - a `data.*` name keeps its braces too: it addresses the reserved data namespace (#402), which
+ *    only a scenario run's iteration can bind
+ *  - `$vu` and `$iteration` keep their braces too: they address the reserved identity namespace
+ *    (#994), which only the iteration that sends can bind, and a variable defined with either name
+ *    never answers for it
+ *  - so does a bare name a bound data row will substitute (#1007), the same deferral for the same
+ *    reason, spelled the way Postman's data variables are. A caller that already holds the row is
+ *    the one exception, and it reads `resolveTemplateWithRow`: it previews the bind that follows
+ *    composition rather than composition alone (#1062)
+ *  - a user-defined variable named `$guid` beats the generator; generators run once per occurrence
+ *  - a value that itself holds `{{tokens}}` resolves through them, to a depth bound, cycles left
+ *    literal (#1009); the raw string, never the typed value
  *
- * The `{{name}}` matcher itself is `VARIABLE_PATTERN` from
- * `constants/variables.ts` - this module used to declare its own identical
- * copy, which is how the app came to hold four (issue #227).
+ * The `{{name}}` matcher itself is `VARIABLE_PATTERN` from `constants/variables.ts`, the app's one
+ * copy of it (#227).
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -159,21 +153,17 @@ export function dataColumnName(name: string): string | null {
 }
 
 /**
- * The bare column names a bound data row will substitute (issue #1007).
+ * The bare column names a bound data row will substitute (#1007). Postman binds a dataset's columns
+ * to bare names (`{{username}}` in a request reads the current row), so a collection imported from
+ * it is written that way, and the engine answers those names from the row at bind time, above the
+ * environment. Composition holds only the *names*: a payload is composed once and a row is bound
+ * per iteration, so composition treats a bound column exactly as it treats `data.*`, leaving the
+ * token written as it stands.
  *
- * Postman binds a dataset's columns to bare names - `{{username}}` in a request
- * reads the current row - so a collection imported from it is written that way,
- * and the engine answers those names from the row at bind time, above the
- * environment. Composition holds only the *names*: a payload is composed once
- * and a row is bound per iteration, so what composition does about a bound
- * column is exactly what it does about `data.*` - leave the token written as it
- * stands.
- *
- * Empty is every resolution with no dataset behind it, which is every preview
- * that composes without a row in hand; the parameter exists so the preview
- * cannot answer the conformance fixture's cases differently from the engine. A
- * preview that *has* the row reads `resolveTemplateWithRow` instead, which is
- * the bind rather than the composition (issue #1062).
+ * Empty is every resolution with no dataset behind it, which is every preview that composes without
+ * a row in hand; the parameter exists so the preview cannot answer the conformance fixture's cases
+ * differently from the engine. A preview that *has* the row reads `resolveTemplateWithRow` instead,
+ * which is the bind rather than the composition (#1062).
  */
 export type BoundColumnNames = ReadonlySet<string>;
 
@@ -189,19 +179,16 @@ const NO_BOUND_COLUMNS: BoundColumnNames = new Set<string>();
 const MAX_NESTED_RESOLUTIONS = 8;
 
 /**
- * Replace every `{{name}}` in @p input with what @p lookup answers for it, a
- * name it answers `undefined` for keeping its braces.
+ * Replace every `{{name}}` in @p input with what @p lookup answers for it, a name it answers
+ * `undefined` for keeping its braces. The engine's `substitute_tokens`, restated: the recursion and
+ * its bound live here and the tier order lives in the lookup, which lets one core serve both a
+ * composition preview (`resolveTemplate`) and a preview that holds the row
+ * (`resolveTemplateWithRow`) without either restating the other's nesting rules.
  *
- * The engine's `substitute_tokens`, restated: the recursion and its bound live
- * here and the tier order lives in the lookup, which is what lets one core
- * serve both a composition preview (`resolveTemplate`) and a preview that holds
- * the row (`resolveTemplateWithRow`) without either restating the other's
- * nesting rules.
- *
- * A replacement that carries tokens of its own is resolved through the same
- * lookup, to `MAX_NESTED_RESOLUTIONS` levels, so a layered `{{baseUrl}}`
- * previews as the URL it spells. A name already being expanded is a cycle and
- * its token stays literal; the surrounding text is never rescanned.
+ * A replacement that carries tokens of its own is resolved through the same lookup, to
+ * `MAX_NESTED_RESOLUTIONS` levels, so a layered `{{baseUrl}}` previews as the URL it spells. A name
+ * already being expanded is a cycle and its token stays literal; the surrounding text is never
+ * rescanned.
  */
 function substituteTokens(input: string, lookup: (name: string) => string | undefined): string {
 	if (!input || typeof input !== "string") return input;
@@ -265,16 +252,15 @@ function lookupVariable(
 }
 
 /**
- * Substitute `{{name}}` occurrences: the reserved `data.*` namespace and the
- * reserved `$vu` / `$iteration` identity namespace first, with `boundColumns`
- * beside them (all kept verbatim, issue #1007), then scopes, then the
- * dynamic-variable table. A defined name (even one spelled `$guid`) wins over
- * a generator; a name nothing answers keeps its braces, `$name` (issue #186)
- * and ordinary alike (issue #1009) - the token reaching the wire is what makes
- * the miss visible, where an empty string silently changed the request.
+ * Substitute `{{name}}` occurrences: the reserved `data.*` namespace and the reserved `$vu` /
+ * `$iteration` identity namespace first, with `boundColumns` beside them (all kept verbatim,
+ * #1007), then scopes, then the dynamic-variable table. A defined name (even one spelled `$guid`)
+ * wins over a generator; a name nothing answers keeps its braces, `$name` (#186) and ordinary alike
+ * (#1009), because the token reaching the wire makes the miss visible, where an empty string would
+ * silently change the request.
  *
- * `boundColumns` defaults to empty, which is resolution as it was: every caller
- * with no dataset behind it resolves exactly the names it always did.
+ * `boundColumns` defaults to empty: every caller with no dataset behind it resolves exactly the
+ * names it would without one.
  */
 export function resolveTemplate(
 	input: string,
@@ -291,19 +277,16 @@ export function resolveTemplate(
 export type DataRowCells = ReadonlyMap<string, string>;
 
 /**
- * Render one row value as the text a token substitutes - the engine's
- * `render_data_value`, restated.
+ * Render one row value as the text a token substitutes: the engine's `render_data_value`, restated.
+ * A string is its own text; a CSV/TSV cell is one unless the file opted into `castNumbers`, so this
+ * is the ordinary case and it is byte-exact. A JSON or JSONL file may carry any type, and so may a
+ * cast CSV/TSV cell (a number): numbers and booleans render as JSON writes them (`7`, `true`, a
+ * cast `1.50` as `1.5`), `null` renders empty, and an object or array renders as compact JSON so a
+ * nested value can still be dropped into a body.
  *
- * A string is its own text: a CSV/TSV cell is one unless the file opted into
- * `castNumbers`, so this is the ordinary case and it is byte-exact. A JSON or
- * JSONL file may carry any type, and so may a cast CSV/TSV cell (a number):
- * numbers and booleans render as JSON writes them (`7`, `true`, a cast `1.50`
- * as `1.5`), `null` renders empty, and an object or array renders as compact JSON so a nested
- * value can still be dropped into a body.
- *
- * A null cell never reaches a request through the binder - it is refused, for
- * the same reason a missing column is - so the empty rendering is the answer to
- * "what does this value say", not a value the wire ever sees.
+ * A null cell never reaches a request through the binder (it is refused, for the reason a missing
+ * column is), so the empty rendering is the answer to "what does this value say", not a value the
+ * wire ever sees.
  */
 export function renderDataValue(value: unknown): string {
 	if (typeof value === "string") return value;
@@ -315,32 +298,27 @@ export function renderDataValue(value: unknown): string {
 }
 
 /**
- * Resolve @p input as a Send-with-row puts it on the wire, for the preview that
- * holds the row: what composition leaves, with the row bound into it.
- *
- * Composition has no row: a payload is composed once and a row is bound per
- * iteration, which is why `resolveTemplate` above leaves both spellings of a
- * data read written as they stand. A Send-with-row's preview is the other case
- * - the row is already picked, so the preview can show what the send will put
- * on the wire rather than the token that stands in for it.
+ * Resolve @p input as a Send-with-row puts it on the wire, for the preview that holds the row: what
+ * composition leaves, with the row bound into it. Composition has no row (a payload is composed
+ * once and a row is bound per iteration), which is why `resolveTemplate` above leaves both
+ * spellings of a data read written as they stand. A Send-with-row's preview is the other case: the
+ * row is already picked, so the preview can show what the send will put on the wire rather than the
+ * token that stands in for it.
  *
  * The tiers, in the engine's order:
- *  - `{{data.column}}` reads @p row, and a `data.` name the row has no column
- *    for keeps its braces rather than emptying - the token says the value came
- *    from the file, so a name no column answers is a mistake about the column
- *    and the quiet answer hides it (the Data tab's column audit is what names
- *    it, and `describeDataToken` is what paints it)
- *  - a bare name the row carries reads the row too (issue #1007), above the
- *    scopes, because that is where Postman puts a data variable
- *  - every other bare name falls through to `lookupVariable` with no bound
- *    columns: a name the row does not carry is an ordinary variable, not a
- *    mistake about a column, which is what keeps one request previewing the
- *    same way with and without a row picked
+ *  - `{{data.column}}` reads @p row, and a `data.` name the row has no column for keeps its braces
+ *    rather than emptying: the token says the value came from the file, so a name no column answers
+ *    is a mistake about the column and the quiet answer hides it (the Data tab's column audit names
+ *    it, and `describeDataToken` paints it)
+ *  - a bare name the row carries reads the row too (#1007), above the scopes, because that is where
+ *    Postman puts a data variable
+ *  - every other bare name falls through to `lookupVariable` with no bound columns: a name the row
+ *    does not carry is an ordinary variable, not a mistake about a column, which keeps one request
+ *    previewing the same way with and without a row picked
  *
- * A cell is written for the field @p context says it lands in (issue #2639):
- * escaped inside a JSON string or XML, encoded in a URL - the bind's rule,
- * `bindDataTokens`. A value a scope answers is written raw, as composition
- * writes it. `context` defaults to `plain`, where a cell is its own text.
+ * A cell is written for the field @p context says it lands in (#2639): escaped inside a JSON string
+ * or XML, encoded in a URL, the bind's rule (`bindDataTokens`). A value a scope answers is written
+ * raw, as composition writes it. `context` defaults to `plain`, where a cell is its own text.
  */
 export function resolveTemplateWithRow(
 	input: string,
@@ -352,19 +330,15 @@ export function resolveTemplateWithRow(
 }
 
 /**
- * `resolveTemplateWithRow`, with the engine's words for every token the send
- * would refuse the row over (a cell in an XML comment, a line break bound into
- * a header). Such a token previews as itself. One call for both halves, so a
- * generator in the field is drawn once.
+ * `resolveTemplateWithRow`, with the engine's words for every token the send would refuse the row
+ * over (a cell in an XML comment, a line break bound into a header). Such a token previews as
+ * itself. One call for both halves, so a generator in the field is drawn once.
  *
- * Three passes, the send's own: composition (`POST /compose` with the row's
- * columns, which leaves every row token written), the bind, and the residual
- * pass that answers a token a cell's own text carried. That last pass keeps
- * the row's columns written as they stand, where the engine's would ask the
- * scopes, so a refused token is not answered by a variable of the same name.
- *
- * A refusal names the row as the send's own error does ("data row 0") unless
- * @p rowSubject says otherwise.
+ * Three passes, the send's own: composition (`POST /compose` with the row's columns, which leaves
+ * every row token written), the bind, and the residual pass that answers a token a cell's own text
+ * carried. That last pass keeps the row's columns written as they stand, where the engine's would
+ * ask the scopes, so a refused token is not answered by a variable of the same name. A refusal
+ * names the row as the send's own error does ("data row 0") unless @p rowSubject says otherwise.
  */
 export function previewRowBind(
 	input: string,

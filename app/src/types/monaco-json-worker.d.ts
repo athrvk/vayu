@@ -6,17 +6,10 @@
  */
 
 /**
- * Monaco's JSON worker, as a module rather than as a worker.
- *
- * `monaco-editor` ships the class untyped - the package's own types describe the
- * editor API, not the code that runs inside its workers. It is declared here so
- * `variables-diagnostics.test.ts` can validate against the real language service
- * rather than a stub of it: the worker is what decides which squiggles the
- * Variables pane paints, and only a small, honest slice of its surface is used.
- *
- * A monaco upgrade that moves or renames the module fails the *import*, which is
- * loud. A monaco upgrade that changes these signatures does not - so keep this
- * to what the test calls, and nothing wider.
+ * Monaco's JSON worker as a module, which `monaco-editor` ships untyped. Declared so
+ * `variables-diagnostics.test.ts` validates against the real language service (it decides which
+ * squiggles the Variables pane paints), not a stub. A monaco upgrade that moves the module fails
+ * the import; one that changes these signatures does not, so declare only what the test calls.
  */
 declare module "monaco-editor/languages/features/json/jsonWorker.js" {
 	interface MirrorModel {

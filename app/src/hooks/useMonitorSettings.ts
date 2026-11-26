@@ -6,23 +6,19 @@
  */
 
 /**
- * useMonitorSettings
+ * The two server-monitoring limits a user can move: the default scrape cadence and how many metrics
+ * one run may chart.
  *
- * The two server-monitoring limits a user can move: the default scrape cadence
- * and how many metrics one run may chart.
+ * They live **engine-side** (`monitorIntervalMs` / `monitorMaxSeries`), like the live-chart
+ * settings beside them, for the same reason: the engine applies the cadence to any run that names
+ * none and rejects a series list over the cap with a 400. A renderer-local copy could only drift,
+ * in the two directions that hurt most: a dialog that always sends an explicit interval (so the
+ * setting would never apply to a run started here), and one that refuses a metric list the engine
+ * would have accepted.
  *
- * They live **engine-side** (`monitorIntervalMs` / `monitorMaxSeries`), like
- * the live-chart settings beside them, and for the same reason: the engine
- * applies the cadence to any run that names none and rejects a series list over
- * the cap with a 400. A renderer-local copy could only drift - and it would
- * drift in the two directions that hurt most, a dialog that always sends an
- * explicit interval (so the setting would never apply to a run started here)
- * and one that refuses a metric list the engine would have accepted.
- *
- * Read-only: both are edited from the engine settings list, and this hook is
- * how the load-test dialog seeds and bounds its own fields from them. Until the
- * config query resolves, the module defaults stand - the same numbers the
- * engine seeds, so the gap changes nothing.
+ * Read-only: both are edited from the engine settings list; this hook is how the load-test dialog
+ * seeds and bounds its own fields from them. Until the config query resolves the module defaults
+ * stand, the same numbers the engine seeds, so the gap changes nothing.
  */
 
 import { useConfigQuery } from "@/queries";

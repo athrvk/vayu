@@ -8,16 +8,14 @@
  */
 
 /**
- * @file core/scenario_plan.hpp
  * @brief Resolve a collection into an immutable, fully composed ordered plan -
  *        the collection-runner primitive (design doc: "The sequence model").
  *
- * Nothing in the engine held an ordered sequence of requests before this: the
- * MCP smoke handler walks a collection in TypeScript over independent
- * `POST /execute` calls, and a load run repeats one composed request. Every
- * later phase of the collection runner - the sequential runner, flow control,
- * data-driven iterations, load-mode scenarios - consumes the object built here,
- * so it exists and is tested on its own before anything executes it.
+ * The sequential runner, flow control, data-driven iterations and load-mode
+ * scenarios all consume the object built here, so it is tested on its own,
+ * apart from anything that executes it. (The MCP smoke handler walks a
+ * collection in TypeScript over independent `POST /execute` calls, and a
+ * single-request load run repeats one composed request; neither reads a plan.)
  *
  * **Resolution happens exactly once, before the first send.** No step is
  * composed lazily and no execution path touches SQLite for request data
@@ -31,15 +29,15 @@
  *    undo.
  *
  * Composition goes through `compose_request_core` / `build_request` and each
- * step's elements are `compose_elements`' resolved list, compiled once
- * (issue #1514) - which is what keeps a step what a Send of the same request
- * would run. There is deliberately no second copy of resolution here.
+ * step's elements are `compose_elements`' resolved list, compiled once (#1514)
+ * - which is what keeps a step what a Send of the same request would run. There
+ * is deliberately no second copy of resolution here.
  *
- * The structure is fixed here; a value may not be (#2521). A plan in which
- * any step carries an element that writes a variable before some send
- * (`ElementKind::writes_variables`: a script, an extractor) composes every
- * step with its scope names left written, for the send to resolve against
- * what the earlier steps set. A plan with none resolves them here.
+ * The structure is fixed here; a value may not be (#2521). A plan in which any
+ * step carries an element that writes a variable before some send
+ * (`ElementKind::writes_variables`: a script, an extractor) composes every step
+ * with its scope names left written, for the send to resolve against what the
+ * earlier steps set. A plan with none resolves them here.
  */
 
 #include <atomic>
@@ -124,10 +122,10 @@ struct ScenarioStep {
     /// **Non-empty means this step's auth was deferred**: `request` carries no
     /// credential yet, and an executor must call `bind_step_auth` before
     /// sending or the request goes out unauthenticated. An executor does *not*
-    /// always have a row for it: since issue #1055 a credential carrying only
-    /// the `{{$vu}}` / `{{$iteration}}` identity defers too, and the identity
-    /// needs no data set. A data token with no data set is still refused when
-    /// the plan resolves, so a row is there whenever a token wants one.
+    /// always have a row for it: a credential carrying only the `{{$vu}}` /
+    /// `{{$iteration}}` identity defers too (#1055), and the identity needs no
+    /// data set. A data token with no data set is still refused when the plan
+    /// resolves, so a row is there whenever a token wants one.
     StepDataTemplate auth_template{};
     /// A credential still holds a name only the variable scopes answer
     /// (`credentials_await_scripts`, issue #2473), so this step's auth was
@@ -178,11 +176,10 @@ struct ScenarioPlan {
 compute_element_spans (const ScenarioPlan& plan);
 
 /**
- * Whether @p step carries a `script.pre` / `script.post` element (issue
- * #1514's cut-over - `ScenarioStep::pre_script` / `post_script` are gone).
- * Says nothing about whether it ran inline: reporting a script a load run
- * left behind is @ref step_has_deferred_script. The deferred replay reads a
- * step's script *text*, which is `find_step_post_scripts` in `run_manager.cpp`.
+ * Whether @p step carries a `script.pre` / `script.post` element (#1514). Says
+ * nothing about whether it ran inline: reporting a script a load run left
+ * behind is @ref step_has_deferred_script. The deferred replay reads a step's
+ * script *text*, which is `find_step_post_scripts` in `run_manager.cpp`.
  */
 [[nodiscard]] bool step_has_script (const ScenarioStep& step, std::string_view kind);
 
@@ -566,13 +563,13 @@ void stamp_data_file_fields (nlohmann::json& snapshot, const DataFileProvenance&
 /**
  * Validate a `scenario` block and resolve it into a plan.
  *
- * Ordering is the order the sidebar displays, top to bottom (issue #431). A
- * collection's direct requests run by `requests.order`; with `recursive` set,
- * a collection's sub-folders and requests are one sibling list
+ * Ordering is the order the sidebar displays, top to bottom (#431). A
+ * collection's direct requests run by `requests.order`; with `recursive` set, a
+ * collection's sub-folders and requests are one sibling list
  * (`vayu/db/sibling_order.hpp`, #2535), and the walk runs a request where it
- * sits and a sub-folder's whole subtree where the sub-folder sits,
- * depth-first (`Database::get_requests_in_subtree`). The `collections` tree is
- * not constraint-enforced, so the walk carries a visited set exactly as
+ * sits and a sub-folder's whole subtree where the sub-folder sits, depth-first
+ * (`Database::get_requests_in_subtree`). The `collections` tree is not
+ * constraint-enforced, so the walk carries a visited set exactly as
  * `Database::delete_collection`'s BFS does: a `parent_id` cycle terminates
  * instead of growing forever under the DB mutex.
  *
@@ -581,13 +578,13 @@ void stamp_data_file_fields (nlohmann::json& snapshot, const DataFileProvenance&
  * over `limits.max_steps`, a `data` array that is present and empty or over
  * `limits.max_data_rows` or `limits.max_data_bytes`, and any `source` other
  * than `"collection"`. A step carrying a `{{data.*}}` token in a run sent
- * *without* `data` joins that list (issue #415): nothing would bind it, so it
- * would be sent as the literal token - and a step's *credentials* are scanned
- * for one as well as its request, because a data token in a basic-auth field is
- * exactly as unbindable and used to be base64-encoded where nothing could see
- * it (issue #591). A `{{data.*}}` in an **OAuth 2.0** config is refused
- * outright, with or without a data set: that token is acquired here, once, so
- * there is no iteration for a row to reach.
+ * *without* `data` joins that list (#415): nothing would bind it, so it would
+ * be sent as the literal token - and a step's *credentials* are scanned for one
+ * as well as its request, because a data token in a basic-auth field is exactly
+ * as unbindable and would otherwise be base64-encoded where nothing could see
+ * it (#591). A `{{data.*}}` in an **OAuth 2.0** config is refused outright,
+ * with or without a data set: that token is acquired here, once, so there is no
+ * iteration for a row to reach.
  */
 ScenarioResolution resolve_scenario (vayu::db::Database& db,
 const nlohmann::json& scenario,
@@ -638,17 +635,17 @@ bool recursive);
  * Both executors call this rather than the two binds in sequence, so a step
  * cannot bind differently depending on which one ran it - fields first, then
  * the credentials the plan deliberately left unresolved, which is the order
- * `apply_auth` makes load-bearing (issue #591), and the identity last. The row goes first because the identity cannot fail on
- * its own account and a row can, so the more specific refusal is the one a
- * caller reports.
+ * `apply_auth` makes load-bearing (#591), and the identity last. The row goes
+ * first because the identity cannot fail on its own account and a row can, so
+ * the more specific refusal is the one a caller reports.
  *
  * `nullopt` @p row is a run sent without `data` - the identity still binds,
  * which is the whole point of it being independent of the data set. A no-op
  * returning success for the ordinary step, which carries neither kind of token.
  *
  * A step whose auth waits on its scripts (`ScenarioStep::auth_after_scripts`,
- * issue #2473) gets its credentials joined into @p late_auth instead, and
- * nothing applied: the executor owes `http::routes::apply_late_auth` after
+ * #2473) gets its credentials joined into @p late_auth instead, and nothing
+ * applied: the executor owes `http::routes::apply_late_auth` after
  * `step.before` and the residual pass, or the step goes out unauthenticated.
  * @p late_auth is left alone for every other step.
  */

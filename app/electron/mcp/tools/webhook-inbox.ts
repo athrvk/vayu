@@ -6,7 +6,6 @@
  */
 
 /**
- * @file webhook-inbox.ts
  * @brief The webhook inbox payloads and the capture-page bound.
  */
 
@@ -22,13 +21,11 @@ import { boundTraceNode } from "./inline-body-bounds.js";
 const INBOX_RESPONSE_KEYS = ["status", "body", "headers", "delayMs"] as const;
 
 /**
- * The canned response a call described, carrying only the fields it named.
- *
- * An omitted field must stay omitted rather than travel as `null`: the PUT is a
- * merge-patch, so a spelled-out `null` would be the caller saying "reset this"
- * where they said nothing at all. Bounds (a 100-599 status, a delay under 30s)
- * are the engine's and come back as a `400` naming them - the schema owns the
- * shape, the same division `mockIssuerStartPayload` documents.
+ * The canned response a call described, carrying only the fields it named. An omitted field must
+ * stay omitted rather than travel as `null`: the PUT is a merge-patch, so a spelled-out `null`
+ * would say "reset this" where the caller said nothing. Bounds (a 100-599 status, a delay under
+ * 30s) are the engine's and come back as a `400` naming them: the schema owns the shape, the
+ * division `mockIssuerStartPayload` documents.
  */
 export function inboxResponsePayload(response: Record<string, unknown>): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
@@ -41,18 +38,15 @@ export function inboxResponsePayload(response: Record<string, unknown>): Record<
 /**
  * The `POST /inbox/start` body for a `start_webhook_inbox` call.
  *
- * **`bind` and `confirmNonLoopback` are never emitted**, whatever the arguments
- * carry. Binding a listener to a routable interface exposes it beyond this
- * machine, which epic #753 records as a non-goal for every MCP-hosted service -
- * so the guarantee lives here, in the one function that builds the body, rather
- * than in a schema an agent could be tempted to route around. With no `bind`
- * the engine uses its loopback default, and its non-loopback refusal never
- * comes into play.
+ * **`bind` and `confirmNonLoopback` are never emitted**, whatever the arguments carry. Binding a
+ * listener to a routable interface exposes it beyond this machine, which epic #753 records as a
+ * non-goal for every MCP-hosted service, so the guarantee lives in the one function that builds the
+ * body rather than in a schema an agent could route around. With no `bind` the engine uses its
+ * loopback default and its non-loopback refusal never comes into play.
  *
- * `allowedOrigins` (#2367) is CORS policy, which names which browser pages may
- * read the answers and widens nothing about who can connect, so it is forwarded
- * as given and left to the engine to validate; see {@link mockServerStartPayload}
- * for why the schema does not restate the bounds.
+ * `allowedOrigins` (#2367) is CORS policy: it names which browser pages may read the answers and
+ * widens nothing about who can connect, so it is forwarded as given and left to the engine to
+ * validate; see {@link mockServerStartPayload} for why the schema does not restate the bounds.
  */
 export function inboxStartPayload(args: Record<string, unknown>): Record<string, unknown> {
 	const payload: Record<string, unknown> = {};
@@ -63,28 +57,23 @@ export function inboxStartPayload(args: Record<string, unknown>): Record<string,
 }
 
 /**
- * Default page for `get_inbox_captures` - the same 25 `get_run_samples` uses
- * and for the same reason: a capture is a whole recorded request, body
- * included, so a page is measured in bodies rather than rows.
- *
- * The ceiling is this side's, not the engine's. `GET /inbox/:id/requests`
- * clamps to the inbox's retention (500 by default, up to 10000 with
- * `inboxMaxCaptures` raised), and a capture body is bounded by
- * `inboxMaxBodyBytes` - 64 KB by default and configurable to 8 MB - so the
- * engine's own bound says nothing about what a tool result can carry. 100 rows
- * of bounded body is the largest page worth handing an agent; more is `offset`.
+ * Default page for `get_inbox_captures`: the same 25 `get_run_samples` uses, for the same reason: a
+ * capture is a whole recorded request, body included, so a page is measured in bodies rather than
+ * rows. The ceiling is this side's, not the engine's: `GET /inbox/:id/requests` clamps to the
+ * inbox's retention (500 by default, up to 10000 with `inboxMaxCaptures` raised) and a capture body
+ * is bounded by `inboxMaxBodyBytes` (64 KB by default, configurable to 8 MB), so the engine's bound
+ * says nothing about what a tool result can carry. 100 rows of bounded body is the largest page
+ * worth handing an agent; more is `offset`.
  */
 export const DEFAULT_INBOX_CAPTURE_LIMIT = 25;
 export const MAX_INBOX_CAPTURE_LIMIT = 100;
 
 /**
- * Bound the bodies in one capture page.
- *
- * A capture carries the engine's own `body` / `bodyTruncated` / `bodyBytes`
- * disclosure trio - the shape {@link boundTraceNode} already speaks - so the
- * page is bounded by the same function rather than by a copy of it: a webhook
- * posting a 6 MB payload is exactly the #767 case, and the cut has to leave
- * `bodyBytes` alone where the engine already recorded the true original size.
+ * Bound the bodies in one capture page. A capture carries the engine's own `body` / `bodyTruncated`
+ * / `bodyBytes` disclosure trio, the shape {@link boundTraceNode} already speaks, so the page is
+ * bounded by the same function rather than a copy: a webhook posting a 6 MB payload is exactly the
+ * #767 case, and the cut has to leave `bodyBytes` alone where the engine already recorded the true
+ * original size.
  */
 export function boundInboxCaptures(value: unknown): unknown {
 	if (!isRecord(value) || !Array.isArray(value.data)) return value;

@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/set_cookie_limits.hpp
  * @brief Which received `Set-Cookie` lines libcurl's cookie engine discards
  *        without a word (#3307).
  *

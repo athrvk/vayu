@@ -6,16 +6,11 @@
  */
 
 /**
- * Closing or moving a tab from the keyboard, and the focus that has to follow it.
- *
- * The element holding focus *is* the tab being closed, and it unmounts. Nothing
- * claimed focus afterwards, so it fell to `<body>` and the next Tab restarted
- * from the top of the document (#1218) - the same defect the collection tree
- * already fixes for a rename by handing focus back to its row.
- *
- * Two call sites close a tab from the keyboard - Delete/Backspace on a focused
- * tab, and the close-tab chord from wherever focus happens to be - and they
- * share this function rather than a copy each.
+ * Closing or moving a tab from the keyboard, and the focus that must follow. The focused element
+ * *is* the closing tab and it unmounts; with nothing claiming focus it falls to `<body>` and the
+ * next Tab restarts from the top of the document (#1218), the defect the collection tree fixes for
+ * a rename by handing focus back to its row. Both keyboard closes (Delete/Backspace on a focused
+ * tab, the close-tab chord from wherever focus is) share this function rather than a copy each.
  */
 
 import { flushSync } from "react-dom";
@@ -26,38 +21,30 @@ import { tabElementId } from "./tab-aria";
 const ROVING_TAB_STOP = '[role="tab"][tabindex="0"]';
 
 /**
- * Close `tabId` and leave focus on the tab that takes its place.
- *
- * The replacement is the store's own choice of next active tab, read back
- * after the close rather than re-derived here: which tab follows a close is one
- * rule, in `tabs-store`, not two that can drift.
- *
- * The store write is flushed because that replacement need not be in the DOM
- * until the render commits - the strip renders only the tabs that fit, so the
- * tab that becomes active can be one that was inside the overflow menu a moment
- * ago, and a batched `closeTab` leaves it unrendered until after this function
- * returns. No test pins that line: `fireEvent` flushes through `act` either
- * way, and jsdom has no layout, so nothing overflows there. The browser is
- * where it is the difference between the right tab and the "+" fallback.
+ * Close `tabId` and leave focus on the tab taking its place: the store's own next active tab, read
+ * back after the close rather than re-derived, so which tab follows a close is one rule, in
+ * `tabs-store`. The write is flushed because the replacement need not be in the DOM until the
+ * render commits: the strip renders only the tabs that fit, so the new active tab can be one that
+ * was in the overflow menu, and a batched `closeTab` leaves it unrendered until after this returns.
+ * No test pins that line (`fireEvent` flushes through `act` either way, and jsdom has no layout, so
+ * nothing overflows); in the browser it is the difference between the right tab and the "+"
+ * fallback.
  */
 export function closeTabFromKeyboard(tabId: string): void {
 	flushSync(() => useTabsStore.getState().closeTab(tabId));
 
 	const { activeTabId } = useTabsStore.getState();
 	const replacement = activeTabId ? document.getElementById(tabElementId(activeTabId)) : null;
-	// Closing the last tab leaves no tab to hold focus. The button that opens
-	// the next one is where the user is headed anyway, and it is a real stop
-	// rather than the top of the document.
+	// Closing the last tab leaves no tab to hold focus; the button opening the next one is where
+	// the user is headed anyway, and a real stop rather than the top of the document.
 	const fallback = document.querySelector<HTMLElement>("[data-tab-new]");
 	(replacement ?? fallback)?.focus();
 }
 
 /**
- * Focus the active tab's strip element, for a surface that has just opened one
- * and is about to leave the screen (the drawer overlay closing on a selection).
- *
- * Falls back to the roving stop, as `moveTabAndFocus` does, when the strip has
- * not rendered the tab (it draws only the ones that fit).
+ * Focus the active tab's strip element, for a surface that just opened one and is leaving the
+ * screen (the drawer overlay closing on a selection). Falls back to the roving stop, as
+ * `moveTabAndFocus` does, when the strip has not rendered the tab (it draws only those that fit).
  */
 export function focusActiveTab(): void {
 	const { activeTabId } = useTabsStore.getState();
@@ -66,18 +53,13 @@ export function focusActiveTab(): void {
 }
 
 /**
- * Move `tabId` to `toIndex` and keep focus on it.
- *
- * The refocus is not optional. Reordering `openTabs` makes React reinsert the
- * keyed siblings, and Chromium drops focus to `<body>` from an element that
- * is removed and reinserted, after which the next arrow key reaches no handler
- * and the next Tab restarts from the top of the document. jsdom keeps focus
- * through the same reinsert, so a test has to drop it itself.
- *
- * The write is flushed for the reason `closeTabFromKeyboard`'s is: the strip
- * renders only the tabs that fit, so the moved tab's element can be new after
- * the commit and a batched write would look it up too early. Should it still
- * be absent, focus falls back to the roving stop (`useRovingStop`: the active
+ * Move `tabId` to `toIndex` and keep focus on it. The refocus is required: reordering `openTabs`
+ * makes React reinsert the keyed siblings, and Chromium drops focus to `<body>` from a removed and
+ * reinserted element, after which the next arrow key reaches no handler and the next Tab restarts
+ * from the top of the document. jsdom keeps focus through the reinsert, so a test must drop it
+ * itself. The write is flushed for `closeTabFromKeyboard`'s reason (the strip renders only the tabs
+ * that fit, so the moved tab's element can be new after the commit and a batched write would look
+ * it up too early); still absent, focus falls back to the roving stop (`useRovingStop`: the active
  * tab) rather than being lost.
  */
 export function moveTabAndFocus(tabId: string, toIndex: number): void {

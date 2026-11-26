@@ -6,40 +6,32 @@
  */
 
 /**
- * @file withhold.ts
- * @brief What an MCP read hands an agent in place of a secret (#1805): a
- *        variable flagged `secret`, an auth credential, a cookie value, the
- *        credentials in a proxy URL, the credentials a saved request carries in
- *        its URL and Params rows (#1837). Withheld unless the user turns on
+ * @brief What an MCP read hands an agent in place of a secret (#1805): a variable flagged `secret`,
+ *        an auth credential, a cookie value, the credentials in a proxy URL, and those a saved
+ *        request carries in its URL and Params rows (#1837). Withheld unless the user turns on
  *        `revealSecretsToAgents`.
  *
- * Withheld is stated, never silent - the `projectOAuth2Token` precedent. An
- * agent that finds no value and is not told why concludes the data is empty or
- * broken, and acts on that. So a withheld variable or cookie carries
- * `valueWithheld: true`, an auth member `<member>Withheld: true`, a credential
- * row (a Postman attribute, a header or a saved request's Params row)
- * `valueWithheld: true` on the row, and a config or proxy URL
- * `credentialsWithheld: true`. A saved request's own `url` is the one value
- * with no room for a marker: its userinfo password is dropped and a credential
- * query or fragment value is emptied in place (`api_key=`), as the engine's
- * `redact_url_credentials` does for an export, and its Params row says which.
+ * Withheld is stated, never silent (the `projectOAuth2Token` precedent): an agent that finds no
+ * value and is not told why concludes the data is empty or broken and acts on that. So a withheld
+ * variable or cookie carries `valueWithheld: true`, an auth member `<member>Withheld: true`, a
+ * credential row (a Postman attribute, a header, a saved request's Params row)
+ * `valueWithheld: true`, and a config or proxy URL `credentialsWithheld: true`. A saved request's
+ * own `url` has no room for a marker: its userinfo password is dropped and a credential query or
+ * fragment value is emptied in place (`api_key=`), as the engine's `redact_url_credentials` does
+ * for an export, and its Params row says which.
  *
- * What goes through the row projections is what is *stored*: environments,
- * globals, collections, requests and saved examples as the read tools and the
- * `vayu://` resources answer them, the cookie jars, and the config table
- * (`update_engine_config`'s echo included). A write tool's own answer, which
- * echoes the stored row, goes through the same projection as the read of that
- * row: writing does not grant reading.
+ * The row projections cover what is *stored*: environments, globals, collections, requests and
+ * saved examples as the read tools and `vayu://` resources answer them, the cookie jars, and the
+ * config table (`update_engine_config`'s echo included). A write tool's answer echoes the stored
+ * row and goes through the same projection: writing does not grant reading.
  *
- * What a run *recorded* - a trace, a report, a sample, a run row, an inbox
- * capture - goes through {@link runOutputShape} instead (#1809). A request
- * that references a secret still sends it, so the record of what was sent
- * carries the resolved value in whatever encoding it went out in; that value
- * is masked in place with the engine's `<redacted>` marker, the rule the engine
- * applies to a run's config snapshot (#1803), so the record keeps its shape. A
- * credential no stored row holds - an OAuth 2.0 token the engine fetched - is
- * masked by where the record says auth wrote it: the trace's `request` node
- * (#1835) or the live `/execute` answer's top level (#1845).
+ * What a run *recorded* (a trace, a report, a sample, a run row, an inbox capture) goes through
+ * {@link runOutputShape} instead (#1809). A request that references a secret still sends it, so the
+ * record carries the resolved value in whatever encoding it went out in; that value is masked in
+ * place with the engine's `<redacted>` marker, the rule the engine applies to a run's config
+ * snapshot (#1803), so the record keeps its shape. A credential no stored row holds (an OAuth 2.0
+ * token the engine fetched) is masked by where the record says auth wrote it: the trace's `request`
+ * node (#1835) or the live `/execute` answer's top level (#1845).
  */
 
 import type { McpSafetyConfig } from "./config.js";
@@ -67,10 +59,9 @@ export const WITHHELD_AUTH_SENTENCE = `An auth credential (a token, password, cl
 export const REDACTED_MARKER = "<redacted>";
 
 /**
- * Whether @p value is exactly {@link REDACTED_MARKER}: what a run's record shows
- * in place of a credential, so written back into a credential slot (#3553) it
- * would store, or send, the marker as the credential. Whole value only - text
- * that merely contains the marker is data, not a stand-in.
+ * Whether @p value is exactly {@link REDACTED_MARKER}, what a run's record shows in place of a
+ * credential: written back into a credential slot (#3553) it would store, or send, the marker as
+ * the credential. Whole value only; text that merely contains it is data.
  */
 export function isRedactionMarker(value: unknown): boolean {
 	return value === REDACTED_MARKER;
@@ -98,11 +89,10 @@ const WITHHELD_POINTER_SUBJECT: Record<WithheldKind, string> = {
 };
 
 /**
- * The one line a tool's description carries about withholding, with its
- * leading space, so a call site appends it to a description that ends in a
- * full stop; "" when the session reveals secrets. The rules themselves are
- * stated once, in the server instructions' reveal sentence (`server.ts`), which
- * a session gets exactly when this line is not empty (#2441).
+ * The one line a tool's description carries about withholding, with its leading space so a call
+ * site appends it after a full stop; "" when the session reveals secrets. The rules are stated
+ * once, in the server instructions' reveal sentence (`server.ts`), which a session gets exactly
+ * when this line is not empty (#2441).
  */
 export function withheldPointer(
 	config: Pick<McpSafetyConfig, "revealSecretsToAgents">,
@@ -116,10 +106,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-/**
- * `withhold` as a `callEngine` shape, or the identity when the user chose to
- * reveal secrets to agents.
- */
+/** `withhold` as a `callEngine` shape; the identity when the user reveals secrets to agents. */
 export function secretsShape(ctx: RevealContext, withhold: Projection): Projection {
 	return (value) => (ctx.config.revealSecretsToAgents ? value : withhold(value));
 }
@@ -143,12 +130,10 @@ function withholdVariableBag(bag: unknown): unknown {
 // --- Auth ---------------------------------------------------------------------
 
 /**
- * The auth members that hold a credential rather than describe one, across
- * every mode Vayu stores. The engine's `SECRET_AUTH_KEYS`
- * (`engine/src/core/vayu_extensions.cpp`), which blanks the same set when a
- * collection is exported. The renderer's token cache key holds its own copy
- * (`src/services/oauth/credential-params.ts`), held equal to this one by
- * `withhold.conformance.test.ts`.
+ * The auth members that hold a credential rather than describe one, across every mode Vayu stores:
+ * the engine's `SECRET_AUTH_KEYS` (`engine/src/core/vayu_extensions.cpp`), which blanks the same
+ * set when a collection is exported. The renderer's token cache key holds its own copy
+ * (`src/services/oauth/credential-params.ts`), held equal by `withhold.conformance.test.ts`.
  */
 export const CREDENTIAL_AUTH_MEMBERS: ReadonlySet<string> = new Set([
 	"token",
@@ -171,11 +156,10 @@ export const CREDENTIAL_AUTH_MEMBERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The wire names a credential goes by in an OAuth 2.0 extra request parameter
- * row - a Postman block's `tokenRequestParams`, `authRequestParams` and
- * `refreshRequestParams`, or a config's `tokenParams`, `authorizationParams` and
- * `refreshParams` - beside the members above. The engine's `SECRET_PARAM_KEYS`,
- * beside `SECRET_AUTH_KEYS`; the renderer's copy as above.
+ * The wire names a credential goes by in an OAuth 2.0 extra request parameter row (a Postman
+ * block's `tokenRequestParams`, `authRequestParams`, `refreshRequestParams`; a config's
+ * `tokenParams`, `authorizationParams`, `refreshParams`), beside the members above: the engine's
+ * `SECRET_PARAM_KEYS`, with the renderer's copy as above.
  */
 export const CREDENTIAL_PARAM_KEYS: ReadonlySet<string> = new Set([
 	"client_secret",
@@ -196,10 +180,9 @@ function withheldMarker(member: string): string {
 }
 
 /**
- * Whether @p text is one `{{variable}}` reference and nothing else - the
- * engine's `is_variable_reference`. Such a value names where the secret lives
- * without being it, so it is shown: the variable it names is withheld on its
- * own terms.
+ * Whether @p text is one `{{variable}}` reference and nothing else (the engine's
+ * `is_variable_reference`). It names where the secret lives without being it, so it is shown; the
+ * variable it names is withheld on its own terms.
  */
 function isVariableReference(text: string): boolean {
 	const match = /^ *\{\{([^{}]*)\}\} *$/.exec(text);
@@ -228,13 +211,11 @@ function withholdRowValue(row: Record<string, unknown>): Record<string, unknown>
 }
 
 /**
- * Whether an OAuth 2.0 extra request parameter named @p key carries a
- * credential: the engine's `names_param_credential`
- * (`engine/src/core/vayu_extensions.cpp`). A row can be sent as a header as
- * well as in a body or a query, so a credential header's or query parameter's
- * name counts beside the auth members and {@link CREDENTIAL_PARAM_KEYS}. The
- * renderer's token cache key reads the same predicate
- * (`src/services/oauth/credential-params.ts`).
+ * Whether an OAuth 2.0 extra request parameter named @p key carries a credential (the engine's
+ * `names_param_credential` in `engine/src/core/vayu_extensions.cpp`, which the renderer's token
+ * cache key, `src/services/oauth/credential-params.ts`, also reads). A row can be sent as a header
+ * as well as in a body or query, so a credential header's or query parameter's name counts beside
+ * the auth members and {@link CREDENTIAL_PARAM_KEYS}.
  */
 export function namesCredentialParam(key: unknown): boolean {
 	return (
@@ -279,9 +260,8 @@ function withholdPostmanDetail(detail: unknown): unknown {
 }
 
 /**
- * A Postman import's `postman` source (`{type, <type>: detail}`), which keeps
- * the auth as Postman wrote it, raw credentials included. The engine's
- * `redact_postman_auth`.
+ * A Postman import's `postman` source (`{type, <type>: detail}`), which keeps the auth as Postman
+ * wrote it, raw credentials included (the engine's `redact_postman_auth`).
  */
 function withholdPostmanAuth(source: unknown): unknown {
 	if (!isRecord(source)) return source;
@@ -316,12 +296,10 @@ function paramRowKey(row: unknown): string | undefined {
 }
 
 /**
- * One row of a config's extra parameter list, the engine's
- * `redact_config_param_rows`: `key`, `enabled` and `sendAs` stay, `value` is
- * withheld when the key names a credential, and any other member holding a
- * string is withheld as `<member>Withheld`. A row with no non-empty string key
- * names nothing it could be judged by, so one holding a string anywhere is
- * withheld whole, as `{valueWithheld: true}`.
+ * One row of a config's extra parameter list (the engine's `redact_config_param_rows`): `key`,
+ * `enabled` and `sendAs` stay; `value` is withheld when the key names a credential, and any other
+ * string member is withheld as `<member>Withheld`. A row with no non-empty string key has nothing
+ * to judge it by, so one holding a string anywhere is withheld whole, as `{valueWithheld: true}`.
  */
 function withholdConfigParamRow(row: unknown): unknown {
 	const key = paramRowKey(row);
@@ -346,8 +324,8 @@ function withholdConfigMember(member: string, value: unknown): [string, unknown]
 }
 
 /**
- * An auth `config` bag with its credential members withheld and its extra
- * request parameter lists withheld row by row. The engine's `redact_config_bag`.
+ * An auth `config` bag with credential members withheld and extra request parameter lists withheld
+ * row by row (the engine's `redact_config_bag`).
  */
 function withholdConfig(config: Record<string, unknown>): Record<string, unknown> {
 	return Object.fromEntries(
@@ -358,10 +336,10 @@ function withholdConfig(config: Record<string, unknown>): Record<string, unknown
 }
 
 /**
- * An auth block with its credentials withheld: the flat modes keep theirs at
- * the top level (`bearer.token`, `basic.password`, `apikey.value`), the rest
- * under `config` (OAuth 2.0's `clientSecret`, AWS's key pair, ...), and a
- * Postman import also under `postman`. The engine's `redact_level`.
+ * An auth block with its credentials withheld: flat modes keep theirs at the top level
+ * (`bearer.token`, `basic.password`, `apikey.value`), the rest under `config` (OAuth 2.0's
+ * `clientSecret`, AWS's key pair, ...), and a Postman import also under `postman` (the engine's
+ * `redact_level`).
  */
 function withholdAuth(auth: unknown): unknown {
 	if (!isRecord(auth)) return auth;
@@ -428,9 +406,8 @@ function paramRowMarkers(row: unknown, at: string): string[] {
 }
 
 /**
- * The withheld markers of an auth `config`'s extra parameter lists (issue
- * #2536): a list withheld whole, and each marker on a row, the row named by its
- * key or, when it has none, by its position.
+ * The withheld markers of an auth `config`'s extra parameter lists (issue #2536): a list withheld
+ * whole, and each row's marker, the row named by its key or, with none, its position.
  */
 function configParamMarkers(config: Record<string, unknown>): string[] {
 	return OAUTH2_PARAM_LISTS.flatMap((list) => {
@@ -482,10 +459,9 @@ export function withheldAuthMembers(auth: Record<string, unknown>): string[] {
 // --- Headers ------------------------------------------------------------------
 
 /**
- * The header names that hold a credential whatever their value is: a header
- * typed straight into a request is no variable, so the name is the only signal.
- * `app/src/lib/sensitive-headers.ts`'s list, which this module cannot import
- * (`electron/` may not reach into `src/`); both are pinned to the engine's by
+ * The header names that hold a credential whatever their value: a header typed straight into a
+ * request is no variable, so the name is the only signal. `app/src/lib/sensitive-headers.ts`'s
+ * list, which `electron/` cannot import from `src/`; both are pinned to the engine's by
  * `sensitiveHeaderNames` in `engine/tests/fixtures/log-redaction-conformance.json`
  * (`withhold.conformance.test.ts`).
  */
@@ -500,10 +476,9 @@ export const SENSITIVE_HEADER_NAMES: readonly string[] = [
 ];
 
 /**
- * The header name an API-key auth declares, whatever its `in` says: the
- * engine's `api_key_header_names` (`engine/src/utils/json.cpp`), which reads
- * the key off any `apikey` block, so the two mask the same header. The one
- * sensitive name no list can hold.
+ * The header name an API-key auth declares, whatever its `in` says: the engine's
+ * `api_key_header_names` (`engine/src/utils/json.cpp`) reads the key off any `apikey` block, so the
+ * two mask the same header. The one sensitive name no list can hold.
  */
 function apiKeyHeaderName(auth: unknown): string | undefined {
 	if (!isRecord(auth) || auth.mode !== "apikey") return undefined;
@@ -516,9 +491,9 @@ export function foldHeaderName(name: string): string {
 }
 
 /**
- * Whether a header named @p name carries a credential in @p value: a name on
- * the shared list or one of @p apiKeyHeaders (lower-cased), and a value that
- * holds one. One rule for a stored row, a recorded header map and a wire line.
+ * Whether a header named @p name carries a credential in @p value: a name on the shared list or one
+ * of @p apiKeyHeaders (lower-cased), and a value holding one. One rule for a stored row, a recorded
+ * header map and a wire line.
  */
 function isCredentialHeader(
 	name: unknown,
@@ -558,13 +533,11 @@ function withholdHeaderRows(headers: unknown, auth: unknown): unknown {
 // --- Request URL and Params --------------------------------------------------
 
 /**
- * The query-parameter and Params-row names that hold a credential whatever
- * their value is: the engine's `is_secret_param_name`
- * (`engine/src/core/vayu_extensions.cpp`), which is the shared secret-field set
- * (`engine/include/vayu/utils/log_redact.hpp`) less `code`, plus
- * `EXTRA_SECRET_PARAM_NAMES`. `code` (`?code=US`) and `key` (a cache or sort
- * key) are data far more often than a credential, so neither is on it; the key
- * an API-key auth places in the query is added per request. Pinned to
+ * The query-parameter and Params-row names that hold a credential whatever their value: the
+ * engine's `is_secret_param_name` (`engine/src/core/vayu_extensions.cpp`), the shared secret-field
+ * set (`engine/include/vayu/utils/log_redact.hpp`) less `code`, plus `EXTRA_SECRET_PARAM_NAMES`.
+ * `code` (`?code=US`) and `key` (a cache or sort key) are data far more often than credentials, so
+ * neither is on it; the key an API-key auth places in the query is added per request. Pinned to
  * `sensitiveParamNames` in `engine/tests/fixtures/log-redaction-conformance.json`
  * (`withhold.conformance.test.ts`).
  */
@@ -730,13 +703,12 @@ function urlParts(url: string): { head: string; query?: string; fragment?: strin
 }
 
 /**
- * A saved request's `url` with its credentials blanked and every other byte
- * kept: the engine's `redact_url_credentials`, which an export applies to the
- * same field. The password of `user:password@host` is dropped (the user name
- * stays) and the value of a credential query or fragment parameter is emptied
- * (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `{{variable}}` standing
- * alone is kept wherever it is. @p auth is the owning request's, for the API-key
- * name placed in the query. Anything but a string passes through.
+ * A saved request's `url` with its credentials blanked and every other byte kept (the engine's
+ * `redact_url_credentials`, which an export applies to the same field): the password of
+ * `user:password@host` is dropped (the user name stays) and the value of a credential query or
+ * fragment parameter is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `{{variable}}`
+ * standing alone is kept wherever it is. @p auth is the owning request's, for the API-key name
+ * placed in the query. Anything but a string passes through.
  */
 export function withholdRequestUrl(url: unknown, auth: unknown): unknown {
 	return withholdUrlFor(url, apiKeyParamName(auth));
@@ -781,12 +753,11 @@ function foldOriginPart(text: string): string {
 }
 
 /**
- * @p scheme and @p authority as one comparable origin: the userinfo left out,
- * scheme and host folded, the scheme's default port the same as none. What
- * cannot be read as `host[:port]` (a `{{variable}}` port, stray colons) is
- * compared as written. An authority holding a backslash or whitespace is
- * compared whole, userinfo included, because parsers disagree on where its host
- * is; it matches only an identical spelling.
+ * @p scheme and @p authority as one comparable origin: userinfo left out, scheme and host folded,
+ * the scheme's default port the same as none. What cannot be read as `host[:port]` (a
+ * `{{variable}}` port, stray colons) is compared as written; an authority holding a backslash or
+ * whitespace is compared whole, userinfo included, because parsers disagree on where its host is,
+ * so it matches only an identical spelling.
  */
 function foldOrigin(scheme: string, authority: string): string {
 	if (/[\\\s]/.test(authority)) return `${scheme}://${authority}`;
@@ -823,19 +794,17 @@ export function originChanged(stored: unknown, incoming: string): boolean {
 }
 
 /**
- * The inverse of {@link withholdRequestUrl} for a URL an agent writes back
- * (#3549): @p incoming with each slot the read emptied carried forward from
- * @p stored, so editing one thing in a read URL does not delete the credential
- * the read hid. A slot is carried only while @p incoming still holds it in the
- * read's form: the same user with no `:`, or the same-named pair, counted by
- * occurrence, written `name=`. A slot the caller filled, or removed, stays as
- * written; this is why a slot cannot be set to literally empty over a stored
- * value. @p auth is the stored row's, the one the read withheld under.
+ * The inverse of {@link withholdRequestUrl} for a URL an agent writes back (#3549): @p incoming
+ * with each slot the read emptied carried forward from @p stored, so editing one thing in a read
+ * URL does not delete the credential the read hid. A slot is carried only while @p incoming still
+ * holds it in the read's form (the same user with no `:`, or the same-named pair, counted by
+ * occurrence, written `name=`); a slot the caller filled or removed stays as written, which is why
+ * a slot cannot be set to literally empty over a stored value. @p auth is the stored row's, the one
+ * the read withheld under.
  *
- * A credential belongs to the address it was stored for (#3564): when
- * @p incoming changes the origin, nothing is carried and the slots that would
- * have been come back as `notCarried`, so an agent cannot move a stored
- * credential to a host of its choosing.
+ * A credential belongs to the address it was stored for (#3564): when @p incoming changes the
+ * origin, nothing is carried and the slots that would have been come back as `notCarried`, so an
+ * agent cannot move a stored credential to a host of its choosing.
  */
 export function restoreWithheldRequestUrl(
 	stored: unknown,
@@ -960,10 +929,9 @@ function restoreQuery(
 // --- Rows ---------------------------------------------------------------------
 
 /**
- * One stored row - an environment, the globals, a collection, a saved request
- * or one of its examples - with its `variables`, `auth`, credential-bearing
- * `headers`, and a request's credential-bearing `url` and `params` withheld.
- * Every other field passes through.
+ * One stored row (an environment, the globals, a collection, a saved request or an example) with
+ * its `variables`, `auth`, credential-bearing `headers`, and a request's credential-bearing `url`
+ * and `params` withheld; every other field passes through.
  */
 export function withholdRowSecrets(row: unknown): unknown {
 	if (!isRecord(row)) return row;
@@ -1054,12 +1022,11 @@ export function isUrlConfigKey(key: string): boolean {
 }
 
 /**
- * The inverse of {@link withholdConfigCredentials} for a batch an agent writes
- * (#3549): a URL entry written exactly as the read showed it - the stored
- * value with its userinfo stripped - is written as the stored value, so the
- * stored credentials stay. Any other value is written as given: a different
- * address is a different proxy, and the old one's credentials do not follow
- * it. @p current is the `GET /config` answer; `kept` names the keys carried.
+ * The inverse of {@link withholdConfigCredentials} for a batch an agent writes (#3549): a URL entry
+ * written exactly as the read showed it (the stored value without its userinfo) is written as the
+ * stored value, so the credentials stay. Any other value is written as given: a different address
+ * is a different proxy and the old credentials do not follow it. @p current is the `GET /config`
+ * answer; `kept` names the keys carried.
  */
 export function restoreConfigCredentials(
 	entries: Record<string, string>,
@@ -1081,11 +1048,10 @@ export function restoreConfigCredentials(
 }
 
 /**
- * A connection diagnosis (`POST /diagnostics/connection`) with any credentials
- * in `proxy.url` withheld. The engine strips them before it answers (#3258), so
- * this finds nothing today; it is the backstop that keeps a regression there
- * from reaching an agent. It is not behind {@link secretsShape}: revealing
- * secrets to agents does not apply to a URL the engine never reports with them.
+ * A connection diagnosis (`POST /diagnostics/connection`) with any credentials in `proxy.url`
+ * withheld. The engine strips them first (#3258), so this finds nothing today; it is the backstop
+ * against a regression there. Not behind {@link secretsShape}: revealing secrets does not apply to
+ * a URL the engine never reports with them.
  */
 export function withholdDiagnoseCredentials(answer: unknown): unknown {
 	if (!isRecord(answer) || !isRecord(answer.proxy)) return answer;
@@ -1128,10 +1094,9 @@ function displaysCredentialParam(display: unknown, apiKeyParam: string | undefin
 }
 
 /**
- * Whether a `url` display could carry a credential: one {@link withholdRequestUrl}
- * would change, or one the engine's 120-unit cut ended before the authority did
- * (`https://u:pas...`). Cut inside the userinfo there is no `@` left for
- * `withholdRequestUrl` to find, and what remains is a prefix of the password.
+ * Whether a `url` display could carry a credential: one {@link withholdRequestUrl} would change, or
+ * one the engine's 120-unit cut ended before the authority did (`https://u:pas...`), where no `@`
+ * is left for it to find and what remains is a prefix of the password.
  */
 function displaysCredentialUrl(display: unknown, apiKeyParam: string | undefined): boolean {
 	if (typeof display !== "string") return false;
@@ -1235,17 +1200,15 @@ function withholdChangedFields(entry: unknown, storedAuth: StoredAuthByRequest):
 }
 
 /**
- * `diff_spec`'s changed entries with each `headers`, `url` or `params` change
- * whose current side - the stored request's value, as a display line - could
- * carry a credential withheld whole. The line is the engine's lossy rendering
- * (rows joined with `, `, cut at 120 characters), so a value cannot be masked
- * inside it without a `Digest` header's later parameters reading as rows of
- * their own or a cut password passing for a host.
+ * `diff_spec`'s changed entries with each `headers`, `url` or `params` change whose current side
+ * (the stored request's value, as a display line) could carry a credential withheld whole. The line
+ * is the engine's lossy rendering (rows joined with `, `, cut at 120 characters), so a value cannot
+ * be masked inside it: a `Digest` header's later parameters would read as rows of their own, and a
+ * cut password would pass for a host.
  *
- * @p storedAuth is read by the caller ({@link specDiffRequestsToRead} names
- * what to read) so this stays synchronous. A change of a request it does not
- * hold is withheld, not passed: its API-key name is unknown, and a credential
- * under it would read as an ordinary row.
+ * @p storedAuth is read by the caller ({@link specDiffRequestsToRead} names what to read) so this
+ * stays synchronous. A change of a request it does not hold is withheld, not passed: its API-key
+ * name is unknown, and a credential under it would read as an ordinary row.
  */
 export function withholdSpecDiffChanges(
 	changed: unknown,
@@ -1258,10 +1221,9 @@ export function withholdSpecDiffChanges(
 // --- Run output ---------------------------------------------------------------
 
 /**
- * A secret shorter than this many bytes is not masked: the engine's
- * `kMinMaskedSecretLength`. Two or three characters recur in ordinary URL and
- * body text, so masking them would shred the record and withhold nothing a
- * guess could not recover.
+ * A secret shorter than this many bytes is not masked (the engine's `kMinMaskedSecretLength`): two
+ * or three characters recur in ordinary URL and body text, so masking them would shred the record
+ * and withhold nothing a guess could not recover.
  */
 const MIN_MASKED_SECRET_BYTES = 4;
 
@@ -1350,12 +1312,10 @@ function encodeOutsideTokens(text: string, ascii: ReadonlySet<number>): string {
 }
 
 /**
- * The engine's `encode_query_component (text, QueryPart::Value)`, which a query
- * value composition writes goes through: Postman's set, a whole `{{...}}`
- * token kept. The renderer holds the same rule
- * (`src/modules/request-builder/utils/query-encoding.ts`), which `electron/`
- * cannot import; both are pinned to
- * `engine/tests/fixtures/query-encoding-conformance.json`.
+ * The engine's `encode_query_component (text, QueryPart::Value)`, which a composed query value goes
+ * through: Postman's set, a whole `{{...}}` token kept. The renderer holds the same rule
+ * (`src/modules/request-builder/utils/query-encoding.ts`), which `electron/` cannot import; both
+ * are pinned to `engine/tests/fixtures/query-encoding-conformance.json`.
  */
 export function encodeQueryValue(text: string): string {
 	return encodeOutsideTokens(text, QUERY_VALUE_ASCII);
@@ -1428,13 +1388,12 @@ function escapeXmlContent(text: string, quote: "" | '"' | "'"): string {
 }
 
 /**
- * Each secret value as a run's record can hold it - raw, `url_encode`'d,
- * query-encoded, written as a URL's path, fragment and user info are (the
- * sets `encode_url_as_postman` uses, which leave `/ @ & : + '` raw where the
- * query and strict forms escape them), JSON-escaped, and XML-escaped in character data and in each
- * attribute delimiter - longest first, so a secret that contains another is
- * masked whole rather than around the shorter one. The engine's
- * `masked_secret_forms`, form for form.
+ * Each secret value as a run's record can hold it: raw, `url_encode`'d, query-encoded, written as a
+ * URL's path, fragment and user info are (the sets `encode_url_as_postman` uses, which leave
+ * `/ @ & : + '` raw where the query and strict forms escape them), JSON-escaped, and XML-escaped in
+ * character data and in each attribute delimiter. Longest first, so a secret containing another is
+ * masked whole rather than around the shorter one. The engine's `masked_secret_forms`, form for
+ * form.
  */
 export function secretForms(values: readonly string[]): string[] {
 	const forms = new Set<string>();
@@ -1459,9 +1418,9 @@ export interface RunOutputRule {
 	forms: readonly string[];
 	apiKeyHeaders: readonly string[];
 	/**
-	 * Query names auth wrote into the enclosing record, handed to a nested
-	 * record that has no `authQueryParam` of its own (a redirect hop's `url`,
-	 * #2949). Left out where there is no enclosing record.
+	 * Query names auth wrote into the enclosing record, handed to a nested record with no
+	 * `authQueryParam` of its own (a redirect hop's `url`, #2949); left out where there is no
+	 * enclosing record.
 	 */
 	authQueryNames?: readonly string[];
 }
@@ -1478,10 +1437,9 @@ export const HEADER_BODY_SEPARATOR = "\r\n\r\n";
 const WIRE_HEADER_LINE = /^([^:\r\n]+):([ \t]*)([^\r\n]*)(?=\r?$)/gm;
 
 /**
- * A `rawRequest` wire frame with the value of each credential header line
- * masked. Only the header block is read - everything before the first blank
- * line, the split `cap_node_raw_request` makes - so a body line that happens to
- * read `Cookie: x` is the body's, and the request line has no name to match.
+ * A `rawRequest` wire frame with each credential header line's value masked. Only the header block
+ * (everything before the first blank line, the split `cap_node_raw_request` makes) is read, so a
+ * body line reading `Cookie: x` is the body's, and the request line has no name to match.
  */
 function withholdWireHeaders(frame: string, apiKeyHeaders: readonly string[]): string {
 	const end = frame.indexOf(HEADER_BODY_SEPARATOR);
@@ -1515,16 +1473,14 @@ function withholdHeaderSet(headers: unknown, apiKeyHeaders: readonly string[]): 
 }
 
 /**
- * A member holding a header set: `headers`, a trace's `sentHeaders`, a
- * response's `requestHeaders`, or one of the `{name, value}` line lists the
- * folded maps beside them lose a repeat to - a response's `headerLines` (each
- * `Set-Cookie` as received), an exchange's `requestHeaderLines` and a trace's
- * `sentHeaderLines` (issue #2466, a repeated `Authorization` or `Cookie` line
- * as sent). Written `headerLines$`, not `^headerLines$`, so the request-side
- * lists are masked by the same rule and a future `...HeaderLines` member is
- * masked rather than leaked. A redirect hop's `headerLines` (`redirects[]`,
- * #2461) is the same member and is masked by recursion, and its `url`
- * (#2949) is masked as the record's own `url` is.
+ * A member holding a header set: `headers`, a trace's `sentHeaders`, a response's `requestHeaders`,
+ * or one of the `{name, value}` line lists the folded maps beside them lose a repeat to: a
+ * response's `headerLines` (each `Set-Cookie` as received), an exchange's `requestHeaderLines` and
+ * a trace's `sentHeaderLines` (issue #2466, a repeated `Authorization` or `Cookie` line as sent).
+ * Written `headerLines$`, not `^headerLines$`, so the request-side lists are masked by the same
+ * rule and a future `...HeaderLines` member is masked rather than leaked. A redirect hop's
+ * `headerLines` (`redirects[]`, #2461) is the same member and masked by recursion, and its `url`
+ * (#2949) as the record's own `url` is.
  */
 const HEADER_SET_MEMBER = /headers$|headerLines$/i;
 
@@ -1561,11 +1517,10 @@ function maskQueryPairs(query: string, authNames: readonly string[]): string {
 }
 
 /**
- * @p url with the value of each credential query pair masked: the names in
- * @p authNames and {@link SENSITIVE_PARAM_NAMES}, so a credential typed into
- * the saved URL reads as one a stored row withholds. The query is what sits
- * between the first `?` and the first `#`, as the engine's `append_query_param`
- * reads it; the body of a request is never a URL.
+ * @p url with the value of each credential query pair masked (the names in @p authNames and
+ * {@link SENSITIVE_PARAM_NAMES}), so a credential typed into the saved URL reads as one a stored
+ * row withholds. The query is what sits between the first `?` and the first `#`, as the engine's
+ * `append_query_param` reads it; a request body is never a URL.
  */
 function maskUrlQuery(url: string, authNames: readonly string[]): string {
 	const queryAt = url.indexOf("?");
@@ -1651,12 +1606,11 @@ function withholdBase64Body(encoded: string, forms: readonly string[]): string {
 }
 
 /**
- * What the engine's trace says auth wrote into one request record (#1835): the
- * query parameter's raw name (`authQueryParam`) and the header names
- * (`authHeaders`), neither of which the URL or a header set can show on their
- * own. The stored value is raw, but the URL carries the name as
- * `encode_query_component` wrote it unless `disableUrlEncoding` was set, so both
- * spellings are matched. Anything of another type reads as nothing written.
+ * What the engine's trace says auth wrote into one request record (#1835): the query parameter's
+ * raw name (`authQueryParam`) and the header names (`authHeaders`), which neither the URL nor a
+ * header set can show on its own. The stored value is raw but the URL carries the name as
+ * `encode_query_component` wrote it unless `disableUrlEncoding` was set, so both spellings are
+ * matched. Anything of another type reads as nothing written.
  */
 function recordMasking(record: Record<string, unknown>, rule: RunOutputRule): RecordMasking {
 	const param = record.authQueryParam;
@@ -1704,18 +1658,16 @@ function withholdRunMember(
 }
 
 /**
- * Run output with every secret form in every string masked, and every
- * credential header's value in a header set or a `rawRequest` header block.
- * A record that names what auth wrote into it (`authQueryParam`,
- * `authHeaders`) also has that query value masked in its sibling `url` and
- * `rawRequest` request line, and those headers masked in its siblings; a
- * credential-named query value ({@link SENSITIVE_PARAM_NAMES}) is masked in
- * those two places on every record, auth-written or typed. A URL member
- * ({@link RUN_URL_MEMBERS}) also has its userinfo password dropped, as a
+ * Run output with every secret form in every string masked, and every credential header's value in
+ * a header set or a `rawRequest` header block. A record naming what auth wrote into it
+ * (`authQueryParam`, `authHeaders`) also has that query value masked in its sibling `url` and
+ * `rawRequest` request line, and those headers masked in its siblings; a credential-named query
+ * value ({@link SENSITIVE_PARAM_NAMES}) is masked in those two places on every record, auth-written
+ * or typed. A URL member ({@link RUN_URL_MEMBERS}) also has its userinfo password dropped, as a
  * stored request's is.
- * Keys are left alone, as the engine leaves them: a header or field *name* is
- * not a value. Numbers are never touched, so a size the engine reported still
- * describes what it measured.
+ *
+ * Keys are left alone, as the engine leaves them: a header or field *name* is not a value. Numbers
+ * are never touched, so a size the engine reported still describes what it measured.
  */
 export function withholdRunOutput(value: unknown, rule: RunOutputRule): unknown {
 	if (typeof value === "string") return maskSecretForms(value, rule.forms);
@@ -1766,12 +1718,11 @@ const SCOPE_LOOKUPS = {
 type ScopeName = keyof typeof SCOPE_LOOKUPS;
 
 /**
- * A run-output projection that could not be built because a workspace read
- * failed. Masking with the reads that answered would hand an agent every
- * secret the failed one holds, so the read it guards answers this instead:
- * a tool as an error result, a resource or a prompt as a failed request.
- * `cause` is the read's rejection, which the answering surface classes to
- * decide whether the engine being down leads it (#2780, #2854).
+ * A run-output projection that could not be built because a workspace read failed. Masking with the
+ * reads that answered would hand an agent every secret the failed one holds, so the read it guards
+ * answers this instead: a tool as an error result, a resource or a prompt as a failed request.
+ * `cause` is the read's rejection, which the answering surface classes to decide whether the engine
+ * being down leads it (#2780, #2854).
  */
 export class MaskingIncompleteError extends Error {
 	constructor(failed: readonly ScopeName[], reason: unknown) {
@@ -1809,24 +1760,22 @@ async function readScopes(
 }
 
 /**
- * The run-output projection for @p ctx: the identity when the user chose to
- * reveal secrets to agents, with no engine call made; otherwise
- * {@link withholdRunOutput} under the rule read from the workspace now.
+ * The run-output projection for @p ctx: the identity, with no engine call, when the user chose to
+ * reveal secrets to agents; otherwise {@link withholdRunOutput} under the rule read from the
+ * workspace now.
  *
- * The values are every secret variable the workspace holds - globals, every
- * environment, every collection - and every literal credential a collection's
- * or a request's stored auth holds, which the engine writes into a header or
- * the query on the way out; the API-key header names are every stored block's
- * plus @p auth (a block the caller sent inline). That is a superset of the
- * scopes the engine masks a snapshot against (globals, the run's environment,
- * its collection chain), and it is what a read can know: a run row names its
- * environment but not the chain an inline send resolved through, a list reads
- * many runs at once and an inbox capture belongs to no run at all. A secret is
- * a secret whichever scope a run read it from.
+ * The values are every secret variable the workspace holds (globals, every environment, every
+ * collection) and every literal credential a collection's or request's stored auth holds, which the
+ * engine writes into a header or the query on the way out; the API-key header names are every
+ * stored block's plus @p auth (a block the caller sent inline). That is a superset of the scopes
+ * the engine masks a snapshot against (globals, the run's environment, its collection chain), and
+ * it is what a read can know: a run row names its environment but not the chain an inline send
+ * resolved through, a list reads many runs at once and an inbox capture belongs to no run. A secret
+ * is a secret whichever scope a run read it from.
  *
- * Every read must answer: one that fails throws {@link MaskingIncompleteError}
- * rather than masking with what the others read. The values are read now, not
- * as the run read them: a secret changed since masks under its new value only.
+ * Every read must answer: one that fails throws {@link MaskingIncompleteError} rather than masking
+ * with what the others read. Values are read now, not as the run read them: a secret changed since
+ * masks under its new value only.
  */
 export async function runOutputShape(
 	ctx: RunOutputContext,
@@ -1849,12 +1798,10 @@ export async function runOutputShape(
 }
 
 /**
- * A request about to be sent - `start_load_run`'s planned run, composed with
- * everything resolved - as an agent may read it, which is as the run will
- * record it: its `auth` block withheld as a stored row's is, so a literal
- * token reads as `<member>Withheld`, then every string under
- * {@link runOutputShape}'s rule. @p request itself with reveal on, with no
- * engine call made.
+ * A request about to be sent (`start_load_run`'s planned run, composed with everything resolved) as
+ * an agent may read it, which is as the run will record it: its `auth` block withheld as a stored
+ * row's is, so a literal token reads as `<member>Withheld`, then every string under
+ * {@link runOutputShape}'s rule. @p request itself with reveal on, with no engine call made.
  */
 export async function withholdPlannedRequest(
 	ctx: RunOutputContext,

@@ -179,12 +179,10 @@ function parseSentRequest(e: Record<string, unknown>): Partial<ScenarioStepEvent
 }
 
 /**
- * Narrow a raw `step` payload to the shape the step list renders, or reject it.
- *
- * A malformed event is dropped rather than coerced: a step rendered with
- * `iteration` 0 because the key was missing is a row claiming to be a step the
- * run never reported, and the list keys on `(iteration, stepIndex)`, so a
- * defaulted pair would also collide with a real step's row.
+ * Narrow a raw `step` payload to the shape the step list renders, or reject it. A malformed event
+ * is dropped rather than coerced: a step rendered with `iteration` 0 because the key was missing is
+ * a row claiming to be a step the run never reported, and the list keys on
+ * `(iteration, stepIndex)`, so a defaulted pair would also collide with a real step's row.
  */
 export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 	if (typeof raw !== "object" || raw === null) return null;
@@ -222,12 +220,11 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 		// presence, and an empty string would be a link to nothing.
 		...(typeof e.requestId === "string" && e.requestId ? { requestId: e.requestId } : {}),
 		...parseSentRequest(e),
-		// The schema verdict (issue #681), passed through as the object the
-		// engine wrote rather than re-narrowed field by field: it is the same
-		// node the stored trace carries and `validationFromTrace` passes through
-		// for exactly this reason - two narrowings of one shape are two places
-		// for it to drift. Absent stays absent; a collection bound to no
-		// document has no verdict, which is not the same as an empty one.
+		// The schema verdict (#681), passed through as the object the engine wrote rather than
+		// re-narrowed field by field: it is the node the stored trace carries and
+		// `validationFromTrace` passes through for this reason, since two narrowings of one shape
+		// are two places for it to drift. Absent stays absent: a collection bound to no document
+		// has no verdict, which is not the same as an empty one.
 		...(e.validation && typeof e.validation === "object"
 			? { validation: e.validation as ResponseValidation }
 			: {}),
@@ -240,11 +237,9 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 }
 
 /**
- * The `tests` node of a `step` frame, as `{ tests }` to spread, or `null`.
- *
- * Absent stays absent - a step whose script asserted nothing carries no node,
- * and inventing `{ passed: 0, failed: 0 }` for it would put "0 tests passed"
- * on every step of every scriptless run.
+ * The `tests` node of a `step` frame, as `{ tests }` to spread, or `null`. Absent stays absent: a
+ * step whose script asserted nothing carries no node, and inventing `{ passed: 0, failed: 0 }` for
+ * it would put "0 tests passed" on every step of every scriptless run.
  */
 function parseTestTally(raw: unknown): { tests: StepTestTally } | null {
 	if (typeof raw !== "object" || raw === null) return null;
@@ -254,13 +249,11 @@ function parseTestTally(raw: unknown): { tests: StepTestTally } | null {
 }
 
 /**
- * Narrow a raw `plan` frame to the run's size, or reject it (issue #1398).
- *
- * Same rule as {@link parseStepEvent}, and it matters more here: this frame is
- * a denominator. A field defaulted to `0` would make every fraction computed
- * from it either a division by zero or a bar that is full from the first step,
- * where rejecting the frame leaves the run indeterminate - which is what a
- * client that was told nothing should show.
+ * Narrow a raw `plan` frame to the run's size, or reject it (#1398). Same rule as
+ * {@link parseStepEvent}, and it matters more here: this frame is a denominator. A field defaulted
+ * to `0` would make every fraction computed from it a division by zero or a bar that is full from
+ * the first step, where rejecting the frame leaves the run indeterminate, which is what a client
+ * that was told nothing should show.
  */
 export function parsePlanEvent(raw: unknown): ScenarioRunPlanEvent | null {
 	if (typeof raw !== "object" || raw === null) return null;
@@ -271,13 +264,11 @@ export function parsePlanEvent(raw: unknown): ScenarioRunPlanEvent | null {
 }
 
 /**
- * Narrow a raw `monitor` frame to one scrape, or reject it.
- *
- * Same rule as {@link parseStepEvent}: a frame this client cannot read is
- * dropped rather than coerced. A sample defaulted to `timestamp: 0` would join
- * onto the very start of the run's timeline and draw a reading the target never
- * gave at a moment it was never asked; non-numeric series entries are dropped
- * individually, because the rest of the scrape is still real data.
+ * Narrow a raw `monitor` frame to one scrape, or reject it. Same rule as {@link parseStepEvent}: a
+ * frame this client cannot read is dropped rather than coerced. A sample defaulted to
+ * `timestamp: 0` would join onto the very start of the run's timeline and draw a reading the target
+ * never gave at a moment it was never asked; non-numeric series entries are dropped individually,
+ * because the rest of the scrape is still real data.
  */
 export function parseMonitorEvent(raw: unknown): MonitorSample | null {
 	if (typeof raw !== "object" || raw === null) return null;
@@ -295,23 +286,19 @@ export function parseMonitorEvent(raw: unknown): MonitorSample | null {
 export type SSEMessageHandler = (metrics: LoadTestMetrics) => void;
 export type SSEErrorHandler = (error: Error) => void;
 /**
- * How a run's stream ended, when the engine said (issue #1415).
- *
- * `null` for a stream that ended without one. Since the engine reports the
- * status on every `complete` frame this is rare for a frame (#2140: only the
- * 60 s timeout sends it bare), so it mostly means a dropped connection - which
- * {@link SSECloseInfo.frame} tells apart. The caller converges on the stored
- * report either way, and a null here means "ask it", never "it finished".
+ * How a run's stream ended, when the engine said (#1415). `null` for a stream that ended without
+ * one. The engine reports the status on every `complete` frame (only its 60 s timeout sends one
+ * bare, #2140), so this mostly means a dropped connection, which {@link SSECloseInfo.frame} tells
+ * apart. The caller converges on the stored report either way, and a null here means "ask it",
+ * never "it finished".
  */
 export type SSETerminalStatus = TerminalRunStatus | null;
 
 /**
- * What ended the stream, beside what the engine said about the run.
- *
- * `frame` is true when the engine's own `complete` frame arrived, so a null
- * status then means the engine closed the stream without settling the run, and
- * the stored row is about to catch up. False is a dropped connection: the
- * engine said nothing, and the run may well still be going (#2140).
+ * What ended the stream, beside what the engine said about the run. `frame` is true when the
+ * engine's own `complete` frame arrived, so a null status then means the engine closed the stream
+ * without settling the run, and the stored row is about to catch up. False is a dropped connection:
+ * the engine said nothing, and the run may well still be going (#2140).
  */
 export interface SSECloseInfo {
 	frame: boolean;
@@ -320,32 +307,25 @@ export interface SSECloseInfo {
 export type SSECloseHandler = (status: SSETerminalStatus, info: SSECloseInfo) => void;
 
 /**
- * The status off a `complete` frame, or null for anything else.
- *
- * Unknown values are null rather than passed through: the caller decides what
- * a run's end means from this, and an unrecognised string is not a decision
- * either way - it is an engine this client does not understand yet.
+ * The status off a `complete` frame, or null for anything else. Unknown values are null rather than
+ * passed through: the caller decides what a run's end means from this, and an unrecognised string
+ * is not a decision either way but an engine this client does not understand yet.
  */
 export function parseTerminalStatus(raw: string): SSETerminalStatus {
 	try {
 		const { status } = JSON.parse(raw) as { status?: unknown };
-		// Lowercase, matching the engine's `to_string(RunStatus)` - the same
-		// values `RunReport["status"]` and a stored report's `metadata.status`
-		// already carry (issue #1497's `failRun` makes `Failed` a run-of-the-mill
-		// outcome rather than a crash-only rarity, which is what made this
-		// case mismatch worth closing: capitalized comparisons here never
-		// matched a real frame).
+		// Lowercase, matching the engine's `to_string(RunStatus)`, the values `RunReport["status"]`
+		// and a stored report's `metadata.status` carry. `Failed` is an ordinary outcome since
+		// `failRun` (#1497), so a case mismatch here would miss real frames.
 		return typeof status === "string" && isRunTerminal(status) ? status : null;
 	} catch {
 		return null;
 	}
 }
 /**
- * Another run took this client (issue #1417).
- *
- * Not a variant of {@link SSECloseHandler}: a close says the run ended and the
- * subscriber converges on the stored report, where this says only that nobody
- * is watching the run any more. The run itself is still going in the engine.
+ * Another run took this client (#1417). Not a variant of {@link SSECloseHandler}: a close says the
+ * run ended and the subscriber converges on the stored report, where this says only that nobody is
+ * watching the run any more. The run itself is still going in the engine.
  */
 export type SSESupersededHandler = () => void;
 /** One step execution of a scenario run, from the `step` event. */
@@ -543,18 +523,16 @@ export class SSEClient {
 			});
 
 			this.eventSource.addEventListener("error", (_event) => {
-				// If the connection is definitively closed, treat as terminal.
-				// The engine now sends an explicit `complete` event for normal run end,
-				// so a CLOSED error state means a genuine connection failure.
+				// A definitively closed connection is terminal. The engine sends an explicit
+				// `complete` event for a normal run end, so a CLOSED error state is a genuine
+				// connection failure.
 				//
-				// NOTE: we intentionally do NOT reconnect here. Whether the client
-				// should resume by itself once the browser gives up (CLOSED) is
-				// undecided; until it is, the recovery is to converge on
-				// `GET /runs/:id/report`, which the load-test service does in its
-				// onClose handler, and the user's Reconnect, which re-attaches
-				// through `connect` and resumes from the last frame held. The
-				// browser's own retry (while in CONNECTING) carries `Last-Event-ID`
-				// itself.
+				// NOTE: deliberately no reconnect here. Whether the client should resume by itself
+				// once the browser gives up (CLOSED) is undecided; until it is, the recovery is to
+				// converge on `GET /runs/:id/report`, which the load-test service does in its
+				// onClose handler, and the user's Reconnect, which re-attaches through `connect`
+				// and resumes from the last frame held. The browser's own retry (while in
+				// CONNECTING) carries `Last-Event-ID` itself.
 				if (this.eventSource?.readyState === EventSource.CLOSED) {
 					// A warn, not chatter: the stream ended without the engine's
 					// `complete`, so the metrics shown are whatever arrived before

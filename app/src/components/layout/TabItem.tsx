@@ -6,12 +6,10 @@
  */
 
 /**
- * One tab in `TabStrip`, in its own module so `TabStrip.render-count.test.tsx`
- * can `vi.mock` it: the real implementation (`TabItemImpl`) is exported
- * alongside the memoized default so a test can wrap it in its own counting
- * `memo` rather than the component carrying render-counting instrumentation
- * itself (#1714). The comparator lives in `tab-item-props-equal.ts`, not
- * here - see that file for why.
+ * One tab in `TabStrip`, in its own module so `TabStrip.render-count.test.tsx` can `vi.mock` it:
+ * the real implementation (`TabItemImpl`) is exported beside the memoized default, so a test wraps
+ * it in its own counting `memo` instead of the component carrying render-counting instrumentation
+ * (#1714). The comparator lives in `tab-item-props-equal.ts`, which says why.
  */
 
 import { memo, useContext } from "react";
@@ -50,23 +48,20 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 	// What this tab can do, beside what it is called. See tab-actions.ts.
 	const actions = useTabActions(tab, descriptor);
 	// Roving tabindex: the strip is one Tab stop, and Left/Right move within it.
-	// Previously every tab carried tabIndex={0}, so a developer with a dozen tabs
-	// open had to press Tab a dozen times to get past the strip.
 	const rovingTabIndex = isRovingStop ? 0 : -1;
 	const Icon = descriptor.icon;
-	// Drag-to-reorder state arrives by context, not props, so `tabItemPropsEqual`
-	// is untouched: the value changes only while a drag is live.
+	// Drag-to-reorder state arrives by context, not props, so `tabItemPropsEqual` is
+	// untouched: the value changes only while a drag is live.
 	const dnd = useContext(TabStripDndContext);
 	const isDragging = dnd?.draggingId === tab.id;
 	const dropEdge = dnd?.dropTabId === tab.id ? dnd.dropEdge : null;
 
 	return (
 		/*
-		 * Right-click, and the Menu key and Shift+F10 the platform raises the
-		 * same `contextmenu` event for - so the keyboard path here is the
-		 * browser's own, not a second handler that would open a menu beside the
-		 * one Chromium already asked for. The tree needs its own key handling
-		 * because its keys reach a `⋯` button; a tab has none to reach.
+		 * Right-click, and the Menu key and Shift+F10 the platform raises the same `contextmenu`
+		 * event for, so the keyboard path is the browser's own, not a second handler opening a menu
+		 * beside the one Chromium asked for. The tree needs its own key handling because its keys
+		 * reach a `⋯` button; a tab has none to reach.
 		 */
 		<RowContextMenu label={`More actions for ${descriptor.title}`} actions={actions}>
 			<div
@@ -85,15 +80,13 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 						e.preventDefault();
 						focusTab(tab.id);
 					}
-					// Closing was mouse-only: the X is `tabIndex={-1}` and only appears
-					// on hover, and no close shortcut existed anywhere in the app. Delete
-					// on the focused tab is the WAI-ARIA pattern for a deletable tab.
-					// Backspace is the same key on a Mac keyboard: the one labelled
-					// "delete" there reports `"Backspace"`, and `"Delete"` is
-					// forward-delete (Fn+Delete), so a `"Delete"`-only handler closes
-					// nothing on macOS (#931). Accepted on every platform rather than
-					// behind an `isMac` fork - a tab is a view, so closing one loses no
-					// work and the request it showed is still in its collection.
+					// The X is `tabIndex={-1}` and shows only on hover, so Delete on the focused
+					// tab, the WAI-ARIA pattern for a deletable tab, is the keyboard close.
+					// Backspace too: the Mac key labelled "delete" reports `"Backspace"`, and
+					// `"Delete"` is forward-delete (Fn+Delete), so a `"Delete"`-only handler closes
+					// nothing on macOS (#931). Accepted on every platform rather than behind an
+					// `isMac` fork: a tab is a view, so closing one loses no work and its request
+					// is still in its collection.
 					if (e.key === "Delete" || e.key === "Backspace") {
 						e.preventDefault();
 						// Through the shared helper, because this tab is what holds
@@ -108,40 +101,30 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 				data-active={isActive}
 				{...dnd?.handlers}
 				className={cn(
-					// `key={tab.id}` (in TabStrip, where this is mapped) makes a
-					// genuinely new tab a fresh node - `.enter-fade` fades it in rather
-					// than popping it into a strip full of tabs that did not just move.
-					// An existing tab re-rendering keeps its node, so this never
-					// re-fires for one - only a real open does.
+					// `key={tab.id}` (in TabStrip, where this is mapped) makes a genuinely new tab
+					// a fresh node, which `.enter-fade` fades in rather than popping it into a
+					// strip of tabs that did not move; an existing tab re-rendering keeps its node,
+					// so only a real open re-fires it.
 					"enter-fade",
 					"group relative flex h-full shrink-0 cursor-pointer select-none items-center gap-1.5",
-					// px-3 (issue #1679), not the old pl-2 pr-2.5 - see tab-fit.ts's
-					// TAB_CHROME for the reserved-width side of this.
+					// px-3 (#1679); `tab-fit.ts`'s TAB_CHROME reserves the width it takes.
 					"border-r border-border/40 px-3 text-sm",
-					// The rule sits on the edge the content is on, and matches the
-					// section tabs. It reads identically in both themes, unlike a
-					// surface shift, which light mode carries far more weakly (see
-					// --tab-active). A stable base plus a `data-active` modifier
-					// rather than the two-branch ternary this replaced: that ternary
-					// swapped the *entire* class string, so the active tab's `after:`
-					// bar and the inactive tab's `border-b` never coexisted as the
-					// same element with a changing value - one was simply absent,
-					// which nothing can transition between. Both are always present
-					// now, `border-b-border`/`after:bg-transparent` at rest, so
-					// switching the active tab only ever changes a colour.
-					// `after:transition-colors` is its own line: a pseudo-element
-					// paints its background separately from the box it is on, so the
-					// element's own colour transition does not reach it.
+					// The rule sits on the edge the content is on, matching the section tabs, and
+					// reads alike in both themes, unlike a surface shift, which light mode carries
+					// far more weakly (see --tab-active). A stable base plus a `data-active`
+					// modifier, both always present (`border-b-border` and `after:bg-transparent`
+					// at rest), so switching the active tab only ever changes a colour: a ternary
+					// swapping the whole class string leaves the `after:` bar or the `border-b`
+					// absent, and nothing transitions from absent. `after:transition-colors` is its
+					// own line: a pseudo-element paints its background apart from its box, so the
+					// element's own colour transition misses it.
 					//
-					// `transition-[...]` explicit, not `transition-colors`: this
-					// element also carries `.enter-fade`, whose own `transition:
-					// opacity ...` is a full shorthand that a plain `transition-colors`
-					// utility (a different, later-cascading `@layer utilities` rule)
-					// silently replaces rather than merges with - confirmed live via
-					// computed `transitionProperty`, opacity was missing from the list
-					// entirely and a new tab never faded in. Naming every property
-					// this element transitions in one utility is the same fix applied
-					// everywhere else this bug turned up this session.
+					// `transition-[...]` explicit, not `transition-colors`: this element carries
+					// `.enter-fade`, whose `transition: opacity ...` shorthand a plain
+					// `transition-colors` utility (a later-cascading `@layer utilities` rule)
+					// replaces rather than merges with, so opacity drops out of the computed
+					// `transitionProperty` (confirmed live) and a new tab never fades in. One
+					// utility names every property this element transitions.
 					"transition-[background-color,color,border-color,opacity] duration-150",
 					"bg-transparent text-muted-foreground",
 					"border-b border-b-border",
@@ -164,17 +147,14 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 				)}
 				{Icon && <Icon className="size-icon-sm shrink-0" />}
 				{/*
-				 * ScrollOnOverflow is kept: it reads the full name on hover, which an
-				 * ellipsis cannot. At rest it fades the clipped edge instead of
-				 * ellipsing: `truncate` cannot engage inside its `w-fit` track.
-				 *
-				 * The right margin is the close button's strip. The button is
-				 * absolute, so without the margin a clamped name runs under it.
-				 * The label ends where the button begins - its width plus its
-				 * `right-0.5` offset, less the row's own `px-3` - written in the
-				 * same density-scaled units as those three so it cannot drift from
-				 * them. `tab-fit.ts` budgets this strip into the natural width, so
-				 * a name that fits keeps fitting.
+				 * ScrollOnOverflow is kept: it reads the full name on hover, which an ellipsis
+				 * cannot, and at rest fades the clipped edge, as `truncate` cannot engage inside
+				 * its `w-fit` track. The right margin is the close button's strip: the button is
+				 * absolute, so without it a clamped name runs under the button. The label ends
+				 * where the button begins (its width plus its `right-0.5` offset, less the row's
+				 * `px-3`), in the same density-scaled units as those three so it cannot drift from
+				 * them; `tab-fit.ts` budgets this strip into the natural width, so a name that fits
+				 * keeps fitting.
 				 */}
 				<ScrollOnOverflow className="mr-[calc(var(--spacing-target)_-_var(--spacing)_*_2.5)] min-w-0 flex-1">
 					<span className={cn("block", descriptor.isPath && "tab-path")}>
@@ -191,18 +171,15 @@ export function TabItemImpl({ tab, isActive, isRovingStop, width, descriptor }: 
 						e.stopPropagation();
 						closeTab(tab.id);
 					}}
-					// Absolute, over the trailing padding: in the flow it reserved 22px on
-					// every tab for a control only the hovered or active one ever shows.
-					// `size-target` (issue #1679, 24px - was a 16px hit box): the
-					// close button is a real interactive target and sat under the
-					// WCAG 2.2 SC 2.5.8 24x24px floor. The glyph inside stays
-					// `size-icon-sm` (12px, unchanged) - only the hit area grew, and
-					// `tab-fit.ts`'s TAB_CLOSE_SPACE reserves strip width for it.
-					// `transition-[opacity,background-color]`, not `transition-opacity`:
-					// this is `role="button"`, which the baseline (`index.css`) would
-					// otherwise cover for free, but a scoped `transition-*` utility here
-					// overrides that shorthand rather than merging with it - narrowing
-					// coverage to opacity alone and leaving `hover:bg-muted` untransitioned.
+					// Absolute, over the trailing padding: in the flow it would reserve 22px on
+					// every tab for a control only the hovered or active one shows. `size-target`
+					// (#1679, 24px; a 16px hit box is under the WCAG 2.2 SC 2.5.8 24x24px floor);
+					// the glyph inside stays `size-icon-sm` (12px), and `tab-fit.ts`'s
+					// TAB_CLOSE_SPACE reserves strip width for it.
+					// `transition-[opacity,background-color]`, not `transition-opacity`: this
+					// `role="button"` gets the baseline's (`index.css`) transitions for free, but a
+					// scoped `transition-*` utility overrides that shorthand rather than merging
+					// with it, leaving `hover:bg-muted` untransitioned.
 					className="absolute right-0.5 flex size-target items-center justify-center rounded-md opacity-0 transition-[opacity,background-color,scale] duration-150 active:scale-[0.98] hover:bg-muted focus-visible:opacity-100 group-hover:opacity-100 data-[active=true]:opacity-100"
 					data-active={isActive}
 				>

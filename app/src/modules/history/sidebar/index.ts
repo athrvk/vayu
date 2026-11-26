@@ -5,10 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * History Sidebar Components
- *
- * Components displayed in the sidebar for browsing run history.
- */
+/** The History drawer's run list. */
 
 export { default as HistoryList } from "./HistoryList";

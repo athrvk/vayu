@@ -8,11 +8,10 @@
 import { createContext } from "react";
 
 /**
- * The pointer wiring a tab spreads onto its own box. One object because a tab
- * takes all of it or none: the gesture is only coherent if the same element
- * sees the press, the moves and the release. Which tab an event belongs to is
- * read from the element (`data-tab-id`), so the object is one stable value
- * shared by every tab rather than a closure per tab.
+ * The pointer wiring a tab spreads onto its own box, one object as a tab takes all of it or none:
+ * the gesture is coherent only if one element sees the press, the moves and the release. The tab an
+ * event belongs to is read from the element (`data-tab-id`), so this is one stable value shared by
+ * every tab, not a closure per tab.
  */
 export interface TabStripPointerHandlers {
 	onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
@@ -24,12 +23,10 @@ export interface TabStripPointerHandlers {
 }
 
 /**
- * What a tab needs to know about a drag in progress. It arrives through context
- * rather than props so `tabItemPropsEqual` is untouched: the value changes only
- * while a drag is live, so at rest no tab re-renders on its account.
- *
- * `null` means no drag machinery is mounted, which is what a test rendering one
- * tab in isolation gets - the tab must stay usable without it.
+ * What a tab needs to know about a live drag, through context rather than props so
+ * `tabItemPropsEqual` is untouched: the value changes only during a drag, so at rest no tab
+ * re-renders on its account. `null` means no drag machinery is mounted (a test rendering one tab
+ * alone), and the tab must stay usable without it.
  */
 export interface TabStripDnd {
 	/** The tab being dragged, or `null` when no drag is armed. */

@@ -6,12 +6,10 @@
  */
 
 /**
- * What the Launcher's "Open demo API" tile creates (issue #1694).
- *
- * A public, stable, CORS-open GET that always answers the same small JSON
- * body - no account, no key, nothing for the click to explain. Kept as its
- * own module rather than inlined in `DemoApiTile.tsx` so a test can assert on
- * the URL without parsing the component that renders the tile.
+ * What the Launcher's "Open demo API" tile creates (#1694): a public, stable, CORS-open GET that
+ * always answers the same small JSON body, with no account or key for the click to explain. Its own
+ * module, not inlined in `DemoApiTile.tsx`, so a test can assert on the URL without parsing the
+ * component.
  */
 
 import type { RequestPreset } from "@/hooks/useNewRequest";

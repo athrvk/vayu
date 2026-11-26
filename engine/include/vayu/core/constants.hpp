@@ -104,9 +104,9 @@ constexpr const char* EOL_CHARS = "\r\n";
 /// 0 = unbounded, which is what every caller that sets nothing still gets.
 constexpr size_t MAX_DESIGN_RESPONSE_BODY_BYTES = size_t{ 32 } * 1024 * 1024;
 /// Largest UTF-8 response body `POST /execute` also answers parsed, as `body`
-/// beside `bodyRaw` (issue #2544). A JSON DOM costs several times its text in
-/// nodes and strings, and the answer is dumped from it once more, so a 20 MB
-/// body made the daemon's peak around ten times that for a copy no reader in
+/// beside `bodyRaw` (#2544). A JSON DOM costs several times its text in nodes
+/// and strings, and the answer is dumped from it once more, so a 20 MB body
+/// would put the daemon's peak around ten times that for a copy no reader in
 /// the engine uses and the app's pane does not show (it reads `bodyRaw`). Past
 /// this the parse is skipped and `body` is `null`, whatever the caller asked
 /// for. Not a setting: it bounds the engine's own convenience copy, never what
@@ -173,7 +173,7 @@ constexpr int64_t MAX_CONCURRENCY = 10 * static_cast<int64_t> (event_loop::MAX_C
 /// Upper bound on `maxInFlight`, the open-loop backpressure ceiling. It is
 /// deliberately **not** `MAX_CONCURRENCY`: that bounds an eager curl-handle
 /// pre-allocation, while this bounds a counter of outstanding requests that
-/// allocates nothing up front. Reusing the connection guard here refused
+/// allocates nothing up front. Reusing the connection guard here would refuse
 /// configurations the engine already runs implicitly - the default ceiling is
 /// `max(targetRps * 10, 1000)` (`load_strategy.cpp`), which reaches 500,000 at
 /// the load dialog's 50k RPS maximum. A million covers the default formula
@@ -275,9 +275,9 @@ constexpr int64_t STEP_DURATION_MS = 5000;
 /// step this mode walks a level every 5s, so a minute is a dozen levels and a
 /// search that almost always ends `deadline` rather than finding anything. It
 /// is a named constant rather than a literal because the MCP duration cap has
-/// to know it - a guard assuming one default for every mode let a capacity run
-/// past a cap it was under - and `safety.test.ts` reads this line to stay in
-/// step.
+/// to know it - a guard assuming one default for every mode would let a
+/// capacity run past a cap it was under - and `safety.test.ts` reads this line
+/// to stay in step.
 constexpr int64_t DEADLINE_MS = 300000;
 /// Ticks discarded at the start of each level: the in-flight count is still
 /// climbing to the new target, so those windows measure the transition rather
@@ -303,12 +303,11 @@ constexpr double ERROR_RATE_PCT = 1.0;
  * @brief How a `constant_rps` tick waits out its remainder.
  *
  * All three platforms sleep the coarse leg and spin the last
- * `spin_tail_us (remaining)` of every tick (issue #1370 landed it for
- * Windows; the same shape now runs on Linux and macOS too, through
- * `platform::sleep_until_precise`). Only the *shape* of the tail is
- * platform-specific, because the sleep primitive each platform's leg
- * actually uses overshoots by a different amount and, on macOS, in a
- * different way (see below).
+ * `spin_tail_us (remaining)` of every tick (#1370; Linux and macOS use the
+ * same shape through `platform::sleep_until_precise`). Only the *shape* of the
+ * tail is platform-specific, because the sleep primitive each platform's leg
+ * actually uses overshoots by a different amount and, on macOS, in a different
+ * way (see below).
  */
 namespace pacing {
 namespace detail {
@@ -349,16 +348,13 @@ compute_spin_tail_us (int64_t remaining_us, int64_t divisor, int64_t base_us, in
 /// for the last few percent of ticks, and a sidecar that pins a core is not
 /// an improvement (issue #1370).
 ///
-/// It is also the old spin *threshold*, unchanged in value: before #1370 a
-/// remainder at or under 2000 us was spun whole and anything longer was slept
-/// whole. The first half of that rule is what this constant still says, so
-/// every tick from ~500 RPS up - where the remainder never exceeds the tail -
-/// paces exactly as it did. Flat (`divisor = 0`), so Windows's `spin_tail_us`
-/// always returns `WINDOWS_CAP_US` regardless of the remainder - the exact
-/// behavior this constant had before it became a function argument.
+/// A remainder at or under it is spun whole, so every tick from ~500 RPS up,
+/// where the remainder never exceeds the tail, is all spin. Flat
+/// (`divisor = 0`), so Windows's `spin_tail_us` always returns
+/// `WINDOWS_CAP_US` regardless of the remainder.
 ///
 /// Named unconditionally (not inside the `#if` below), alongside every other
-/// platform's parameters, so `SpinTailUs.*` in `load_strategy_test.cpp` can
+/// platform's parameters, so `SpinTailUs.*` in `load_strategy_pacing_test.cpp` can
 /// exercise every platform's tail shape - through `detail::compute_spin_tail_us`
 /// directly - on whichever single platform actually built this translation
 /// unit.
@@ -804,8 +800,8 @@ constexpr size_t DEFAULT_MAX_SAMPLE_BYTES = size_t{ 2 } * 1024 * 1024;
 /// - truncating it would make that check report a failure the target never
 /// produced. So the budget drops whole samples instead, and this is where it
 /// starts: against a target answering 1 MiB bodies the count cap alone
-/// (`max_response_samples`, 1000) allowed ~1 GB resident, held through the
-/// retention window after the run (issue #1155).
+/// (`max_response_samples`, 1000) would allow ~1 GB resident, held through the
+/// retention window after the run (#1155).
 constexpr size_t DEFAULT_MAX_RESPONSE_SAMPLE_BYTES = size_t{ 256 } * 1024 * 1024;
 /// How many exemplars of each distinct status code a run guarantees to retain.
 /// Small on purpose: exemplars answer "what does a 503 from this target look
@@ -835,11 +831,10 @@ constexpr bool DEFAULT_PHASE_HISTOGRAMS = true;
 
 /// Whether a streaming load run feeds the per-completion event,
 /// time-to-first-event, largest-gap and event-rate histograms (run config
-/// `stream_metrics`, issues #576, #3234 and #3776). On by default: it is at
-/// most four atomic histogram records per completion, paid only by runs that
-/// stream, and it is
-/// the whole point of running a stream under load - events/sec is the number
-/// such a run exists to produce.
+/// `stream_metrics`, #576, #3234, #3776). On by default: it is at most four
+/// atomic histogram records per completion, paid only by runs that stream, and
+/// it is the whole point of running a stream under load - events/sec is the
+/// number such a run exists to produce.
 constexpr bool DEFAULT_STREAM_METRICS = true;
 
 /// Ceiling on the event histogram's value range - events delivered by one
@@ -1321,13 +1316,13 @@ constexpr uint64_t PROGRESS_EVERY_BYTES = 256ULL * 1024;
 constexpr long PROGRESS_EVERY_MS        = 100;
 
 /// How long a fetch may sit below a trickle before it is abandoned, and what
-/// counts as a trickle (issue #882).
+/// counts as a trickle (#882).
 ///
-/// Replaces the 30s *total* this route inherited from `Request::timeout_ms`,
-/// which bounded a download's size rather than its health - 10 MB needed better
-/// than 340 KB/s just to arrive. 30s of near-silence is a dead transfer; 30s of
-/// steady bytes is a large file. The floor is deliberately near zero, because
-/// the question is whether anything is arriving at all and not whether it is
+/// A *total* timeout (the 30s `Request::timeout_ms` default) would bound a
+/// download's size rather than its health - 10 MB would need better than 340
+/// KB/s just to arrive. 30s of near-silence is a dead transfer; 30s of steady
+/// bytes is a large file. The floor is deliberately near zero, because the
+/// question is whether anything is arriving at all and not whether it is
 /// arriving quickly: a genuinely slow link should finish, slowly.
 constexpr long STALL_TIMEOUT_MS          = 30000;
 constexpr long STALL_FLOOR_BYTES_PER_SEC = 256;
@@ -1471,7 +1466,7 @@ constexpr int TEMP_STORE = 2;
 /// disk or an externally truncated file would kill the engine with no log line
 /// and no 500. Mapping 256 MB cut SQLite's read time by 5-55%: 1-6 ms per
 /// 1,000 result rows, about 50 ms at the default 10,000 stored errors (Windows,
-/// OS cache warm; docs/engine/db-schema.md has the numbers) - not worth that.
+/// OS cache warm; docs/engine/db-schema/index.md has the numbers) - not worth that.
 /// Windows also refuses to truncate a mapped file, which `reclaim_freed_pages`
 /// needs.
 constexpr size_t MMAP_SIZE_BYTES = 0;

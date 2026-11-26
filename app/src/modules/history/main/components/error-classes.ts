@@ -6,10 +6,9 @@
  */
 
 /**
- * How the MCP failure classes (`summary.errorClasses`, #3828) are named, for
- * the Overview card and the comparison table alike. Not `httpStatusClass`: a
- * class is not a status, and borrowing its tints would read a tool failure as
- * a 4xx.
+ * The names of the MCP failure classes (`summary.errorClasses`, #3828), for the Overview card and
+ * the comparison table alike. Not `httpStatusClass`: a class is not a status, and its tints would
+ * read a tool failure as a 4xx.
  */
 
 import type { ErrorClassKey } from "@/lib/run-compare";

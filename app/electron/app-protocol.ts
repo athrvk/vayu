@@ -6,20 +6,18 @@
  */
 
 /**
- * The scheme a packaged build serves its renderer from, `vayu-app://app/`
- * (#2380).
+ * The scheme a packaged build serves its renderer from, `vayu-app://app/` (#2380).
  *
- * A `file:` document has no origin of its own: Chromium matches CSP `'self'`
- * there by scheme, so the policy admitted any local file as a script, a frame
- * or an image. Served from a privileged standard scheme the document has one
- * origin, and `'self'` names it alone.
+ * A `file:` document has no origin of its own: Chromium matches CSP `'self'` there by scheme, so
+ * the policy admits any local file as a script, a frame or an image. Served from a privileged
+ * standard scheme the document has one origin, and `'self'` names it alone.
  *
- * What the scheme may answer is this module's whole job: a file the build
- * shipped under `dist/`, and nothing else - not a path that climbs out of it,
- * not a symlink that points out of it, not another host on the scheme.
+ * What the scheme may answer is this module's whole job: a file the build shipped under `dist/`,
+ * and nothing else (not a path that climbs out of it, not a symlink pointing out of it, not another
+ * host on the scheme).
  *
- * Kept free of Electron so the mapping is tested against a real directory;
- * main.ts registers the scheme and hands `net.fetch` in.
+ * Kept free of Electron so the mapping is tested against a real directory; main.ts registers the
+ * scheme and hands `net.fetch` in.
  */
 
 import { promises as fs } from "node:fs";
@@ -29,15 +27,13 @@ import { APP_HOST, APP_SCHEME } from "./constants.js";
 import { isWithin } from "./path-within.js";
 
 /**
- * What the scheme is registered with, before the app is ready. `standard`
- * gives it a host and relative-URL resolution (the build's `base: "./"` asset
- * paths); `secure` makes the document a secure context; `supportFetchAPI` lets
- * the renderer fetch from it, which Monaco's module workers need.
+ * Registered with the scheme before the app is ready. `standard` gives it a host and relative-URL
+ * resolution (the build's `base: "./"` asset paths); `secure` makes the document a secure context;
+ * `supportFetchAPI` lets the renderer fetch from it, which Monaco's module workers need.
  *
- * Absent on purpose: `bypassCSP` (the policy applying is the point),
- * `corsEnabled` (the engine is reached through `engine-origin.ts`, not through
- * a CORS grant on this scheme) and `allowServiceWorkers` (the app registers
- * none).
+ * Absent on purpose: `bypassCSP` (the policy applying is the point), `corsEnabled` (the engine is
+ * reached through `engine-origin.ts`, not a CORS grant on this scheme) and `allowServiceWorkers`
+ * (the app registers none).
  */
 export const APP_SCHEME_PRIVILEGES = {
 	standard: true,
@@ -61,22 +57,20 @@ function requestedPath(requestUrl: string): string | null {
 	} catch {
 		return null;
 	}
-	// The pathname always begins with "/". What follows is relative to the root,
-	// so a second leading slash (`//etc/passwd`) stays absolute and is refused by
-	// the containment check rather than quietly re-rooted.
+	// The pathname always begins with "/"; a second leading slash (`//etc/passwd`) stays absolute,
+	// so the containment check refuses it rather than quietly re-rooting it.
 	const relative = decoded.slice(1);
 	return relative === "" ? "index.html" : relative;
 }
 
 /**
- * The file under @p distRoot that @p requestUrl names, or null when it names
- * nothing the build shipped: another scheme or host, a path outside the root,
- * or no regular file there. `/` is the entry document.
+ * The file under @p distRoot that @p requestUrl names (`/` is the entry document), or null when it
+ * names nothing the build shipped: another scheme or host, a path outside the root, or no regular
+ * file there.
  *
- * Containment is decided on canonical paths, both ends through `realpath`, so
- * one check refuses `..` (however it was encoded), an absolute path and a
- * symlink that resolves out of the root alike. A lexical check alone would
- * pass the symlink.
+ * Containment is decided on canonical paths, both ends through `realpath`, so one check refuses
+ * `..` (however encoded), an absolute path and a symlink resolving out of the root alike. A lexical
+ * check alone would pass the symlink.
  */
 export async function resolveAppFile(requestUrl: string, distRoot: string): Promise<string | null> {
 	const relative = requestedPath(requestUrl);

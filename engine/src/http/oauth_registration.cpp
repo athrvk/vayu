@@ -6,9 +6,8 @@
  */
 
 /**
- * @file http/oauth_registration.cpp
- * @brief Dynamic client registration (RFC 7591) for a discovered MCP server's
- *        authorization server (#3766).
+ * Dynamic client registration (RFC 7591) for a discovered MCP server's
+ * authorization server (#3766).
  */
 
 #include "vayu/http/oauth_registration.hpp"

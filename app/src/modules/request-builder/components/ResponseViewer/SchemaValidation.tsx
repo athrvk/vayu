@@ -6,17 +6,10 @@
  */
 
 /**
- * The schema verdict in full, inside the Tests tab (issue #628).
- *
- * It lives in Tests rather than in a tab of its own because the tab set is a
- * constant (see the long comment in `ResponseViewer/index.tsx`: a tab that comes
- * and goes was issue #59), and because a schema check *is* a test result - the
- * one the spec wrote rather than the one a script did.
- *
- * Everything a verdict knows is shown, including the two things that are easy
- * to leave out and dishonest to leave out: how many failures there were when
- * more were found than are listed, and which schema keywords the validator
- * could not evaluate.
+ * The schema verdict in full, inside the Tests tab (#628): the tab set is constant (`index.tsx`; a
+ * tab that comes and goes was #59), and a schema check *is* a test result, the one the spec wrote.
+ * Everything the verdict knows is shown, including two things dishonest to drop: the failure count
+ * when more were found than listed, and the keywords the validator could not evaluate.
  */
 
 import { AlertTriangle, CheckCircle2, HelpCircle, XCircle } from "lucide-react";
@@ -87,8 +80,7 @@ export default function SchemaValidation({ validation }: SchemaValidationProps) 
 			)}
 
 			{/*
-			 * Said out loud, never elided: a list that is shorter than the count
-			 * reads as the whole set of problems unless it says otherwise.
+			 * Said, never elided: a list shorter than the count reads as the whole set otherwise.
 			 */}
 			{total > failures.length && (
 				<p className="text-xs text-muted-foreground tabular-nums">
@@ -97,9 +89,9 @@ export default function SchemaValidation({ validation }: SchemaValidationProps) 
 			)}
 
 			{/*
-			 * The dialect gap. A body can pass every check that ran while the part
-			 * of its schema that would have rejected it was never evaluated, so
-			 * this is not a footnote - it is what makes the verdict above honest.
+			 * The dialect gap: a body can pass every check that ran while the schema part that
+			 * would reject it was never evaluated, so this is what makes the verdict honest, not a
+			 * footnote.
 			 */}
 			{unevaluated.length > 0 && (
 				<div className="flex items-start gap-1.5 text-xs text-muted-foreground">

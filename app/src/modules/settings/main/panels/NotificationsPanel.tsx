@@ -6,30 +6,22 @@
  */
 
 /**
- * NotificationsPanel
+ * Two cards, for two ways of being told something.
  *
- * Two cards, because the panel now covers two ways of being told something.
+ * The first is the one interruption Vayu makes outside its window: an OS notification for events
+ * that land while the user is in another application (#1358). Off by default and unavailable on
+ * some builds; `electron/notify.ts` is what this row asks.
  *
- * The first is the one interruption Vayu makes outside its own window: an OS
- * notification for the events that land while the user is in another
- * application (#1358). Off by default, and unavailable on some builds - see
- * `electron/notify.ts`, which is what this row asks.
+ * The second is the four toast preferences: where the stack sits, how long entries stay, how many
+ * stack, and what is loud enough to show. Three of the four are read when a toast is *enqueued*,
+ * not drawn, so changing them does not restyle what is on screen, which is why this panel has a
+ * Preview: choosing a position or a duration without seeing it is guessing.
  *
- * The second is the four toast preferences: where the stack sits, how long
- * entries stay, how many stack at once, and what is loud enough to show at all.
- * Three of the four are read when a toast is *enqueued* rather than when it is
- * drawn, so changing them does not restyle what is already on screen - which is
- * why this panel has a Preview button. Choosing a position or a duration
- * without being able to see it is guessing.
- *
- * **Each card carries exactly one Preview, and they are the same control.**
- * Same word, same icon, same row under the settings it demonstrates, and the
- * same shape of hint beside it - including what it says when it cannot fire,
- * which is a floor on one card and the build on the other. Two names for one
- * verb ("Preview" here, "Send a test notification" there) would read as two
- * unrelated features rather than one channel each. Only the accessible name
- * distinguishes them, because a screen reader hearing "Preview" twice on one
- * screen learns nothing.
+ * **Each card carries exactly one Preview, and they are the same control**: the same word, icon and
+ * row under the settings it demonstrates, and the same shape of hint beside it, including when it
+ * cannot fire (a floor on one card, the build on the other). Two names for one verb would read as
+ * two unrelated features rather than one per channel. Only the accessible name tells them apart, as
+ * a screen reader hearing "Preview" twice learns nothing.
  */
 
 import { useEffect, useState } from "react";
@@ -111,16 +103,14 @@ export default function NotificationsPanel() {
 		<>
 			<SystemNotificationsCard />
 
-			{/* One card, four rows: the card is the topic ("Toasts") and each
-			    preference is a row inside it. It was four cards, one per setting. */}
+			{/* One card, four rows: the card is the topic, each preference a row. */}
 			<Card>
 				<CardHeader className="pb-3">
-					{/* "Toasts", not "Notifications": the pane's band already carries
-					    the panel's name and description, so a card repeating them was
-					    two headings a few pixels apart (issue #1688). This card is one
-					    topic inside the panel, and that is what it is called - the
-					    description it used to carry now lives once, in
-					    `app-panels.ts`. */}
+					{/*
+					 * "Toasts", not "Notifications": the pane's band carries the panel's name and
+					 * description (#1688), so this card is named for its one topic; the description
+					 * lives once, in `app-panels.ts`.
+					 */}
 					<div className="flex items-center gap-2">
 						<Bell className="w-5 h-5 text-muted-foreground" />
 						<CardTitle>Toasts</CardTitle>
@@ -271,19 +261,15 @@ const PREVIEW_RESULT_HINTS: Record<PreviewResult, string> = {
 };
 
 /**
- * The one interruption Vayu makes outside its own window.
+ * The one interruption Vayu makes outside its window. A card of its own, not a fifth toast row: it
+ * is not a toast preference, and its events are a fixed list (`services/notify.ts`), not
+ * configurable.
  *
- * A card of its own rather than a fifth row among the toast settings: it is not
- * a toast preference, and the events it covers are a fixed list rather than
- * anything the user configures. `services/notify.ts` holds that list.
- *
- * The availability line is asked of the main process rather than guessed from
- * the platform. macOS authorizes notifications per bundle and refuses one whose
- * code signature does not bind its own `Info.plist` - which is the dev
- * `Electron.app` and anything taken straight out of the DMG, though not an
- * installed build, since `install.sh` re-signs it. The app only learns which it
- * is when the first notification fails. A toggle that silently does nothing is
- * the outcome this line exists to prevent.
+ * The availability line is asked of the main process, not guessed from the platform. macOS
+ * authorizes notifications per bundle and refuses one whose code signature does not bind its own
+ * `Info.plist` (the dev `Electron.app` and anything run straight from the DMG, not an installed
+ * build, which `install.sh` re-signs), and the app learns which only when the first notification
+ * fails. A toggle that silently does nothing is what this line prevents.
  */
 function SystemNotificationsCard() {
 	const enabled = useClientSettingsStore((s) => s.systemNotifications);
@@ -307,16 +293,12 @@ function SystemNotificationsCard() {
 	}, []);
 
 	/**
-	 * Post a real one, and say what the system did with it.
-	 *
-	 * The toast card's Preview exists because three of its settings only apply
-	 * to the *next* toast, so nothing on screen answers "what will this look
-	 * like". This card has the same question with a harder answer: whether the
-	 * OS will show one at all is not knowable from here, and on macOS the
-	 * refusal arrives *after* the notification is posted. So the outcome is
-	 * waited for rather than assumed, and the availability line is re-read once
-	 * it lands - the refusal latches in main, and this is what surfaces it
-	 * without a run having to finish first.
+	 * Post a real one, and say what the system did with it. The toast Preview exists because three
+	 * of its settings apply only to the *next* toast; this card asks the same with a harder answer:
+	 * whether the OS shows one at all is not knowable here, and on macOS the refusal arrives
+	 * *after* the post. So the outcome is awaited, not assumed, and the availability line is
+	 * re-read once it lands: the refusal latches in main, and this surfaces it without waiting for
+	 * a run to finish.
 	 */
 	const previewSystem = async () => {
 		if (previewing || unavailableReason !== null || !enabled) return;
@@ -333,10 +315,9 @@ function SystemNotificationsCard() {
 	};
 
 	/*
-	 * The same shape the toast card's Preview uses, including what it says when
-	 * it cannot fire: a button that silently does nothing is indistinguishable
-	 * from a setting that did not apply, which is the defect that card's hint
-	 * was written to prevent. Here the reason is the build rather than a floor.
+	 * The toast Preview's shape, including what it says when it cannot fire: a button that silently
+	 * does nothing is indistinguishable from a setting that did not apply. Here the reason is the
+	 * build, not a floor.
 	 */
 	const previewHint = previewResult
 		? PREVIEW_RESULT_HINTS[previewResult]
@@ -367,10 +348,9 @@ function SystemNotificationsCard() {
 					onChange={setEnabled}
 				/>
 				{/*
-				 * One Preview per channel, in the same row idiom, so the panel
-				 * offers one verb rather than two names for it. Disabled until the
-				 * setting above is on, like the toggle it sits beside: a control that
-				 * fires past a switch reading "off" is the trust defect this row
+				 * One Preview per channel, in the same row idiom, so the panel offers one verb, not
+				 * two names for it. Disabled until the setting above is on, like the toggle beside
+				 * it: a control that fires past a switch reading "off" is the trust defect this row
 				 * exists not to have (#1447).
 				 */}
 				<div className="flex items-center gap-2 mt-3">

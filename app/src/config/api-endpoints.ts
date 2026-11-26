@@ -5,12 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * API Endpoints Configuration
- *
- * All backend API endpoints in one place.
- * Change these if the backend API routes change.
- */
+/** Every engine API endpoint, in one place. */
 
 import { ENGINE_BASE_URL, STATS_PAGE_LIMIT } from "./network";
 
@@ -23,18 +18,17 @@ export const API_ENDPOINTS = {
 	// Health & Config
 	HEALTH: `/health`,
 	CONFIG: `/config`,
-	// What the engine adds to a request that names none of it (issue #1229):
-	// User-Agent, a negotiated Accept-Encoding, an optional correlation id and,
-	// while sendExpectContinue is on, Expect: 100-continue.
-	// Config-derived but not config: the engine resolves the set, so a client
-	// displays it rather than working it out from the entries.
-	// `?scope=design|load` selects which send is being described (issue #1338):
-	// a load run resolves Accept-Encoding from its own compression setting.
+	// What the engine adds to a request that names none of it (#1229): User-Agent, a negotiated
+	// Accept-Encoding, an optional correlation id and, while sendExpectContinue is on, Expect:
+	// 100-continue. Config-derived but not config: the engine resolves the set, so a client
+	// displays it rather than working it out from the entries. `?scope=design|load` selects which
+	// send is described (#1338): a load run resolves Accept-Encoding from its own compression
+	// setting.
 	REQUEST_DEFAULTS: `/request-defaults`,
 
 	// Collections. POST the collection path to create; PUT the by-id path to
-	// update. The engine split the verbs in #95 - POST no longer upserts, so an
-	// update sent as a POST is a 409, and a create sent as a PUT is a 404.
+	// update. POST is create-only (#95), so an update sent as a POST is a 409, and a
+	// create sent as a PUT is a 404.
 	COLLECTIONS: `/collections`,
 	COLLECTION_BY_ID: (id: string) => `/collections/${id}`,
 	COLLECTIONS_UPDATE: (id: string) => `/collections/${id}`,
@@ -61,59 +55,49 @@ export const API_ENDPOINTS = {
 	CHANGES: `/changes`,
 	CHANGE_SUBSCRIPTIONS: `/changes/subscriptions`,
 
-	// Saved example responses, nested under their request (issue #481). Nested
-	// rather than a top-level `/examples?requestId=` because an example is owned
-	// by exactly one request - the engine checks the owner before the example,
-	// so the owning id is part of every path including the per-example ones.
-	//
-	// The list path is also the create path (issue #588: save a live response as
-	// an example). `PUT` still has no caller - the panel is a viewer, and
-	// editing a stored example is its own change - so no constant for it.
+	// Saved example responses, nested under their request (#481), not a top-level
+	// `/examples?requestId=`: an example is owned by exactly one request, and the engine checks the
+	// owner before the example, so the owning id is part of every path, the per-example ones
+	// included. The list path is also the create path (#588). `PUT` has no caller (the panel is a
+	// viewer, and editing a stored example is its own change), so it has no constant.
 	REQUEST_EXAMPLES: (requestId: string) => `/requests/${requestId}/examples`,
 	REQUEST_EXAMPLE_BY_ID: (requestId: string, exampleId: string) =>
 		`/requests/${requestId}/examples/${exampleId}`,
 
-	// OpenAPI documents (issue #637). Create and read-by-id only: a spec is
-	// immutable once stored - a re-fetch is a new document and a moved binding -
-	// and deleting one is a route with no caller here, because unbinding is a
-	// `PUT /collections/:id` with `{"openapi": null}` and the document stays for
-	// whoever else binds it.
+	// OpenAPI documents (#637). Create and read-by-id only: a spec is immutable once stored (a
+	// re-fetch is a new document and a moved binding), and deleting one is a route with no caller
+	// here, because unbinding is a `PUT /collections/:id` with `{"openapi": null}` and the document
+	// stays for whoever else binds it.
 	SPECS: `/specs`,
 	SPEC_BY_ID: (id: string) => `/specs/${id}`,
-	// The same document without the document (issue #712): what the Spec tab's
-	// card needs, so opening the tab does not transfer a 12 MB spec to paint a
-	// URL and a date. The full read above still backs sync and matching.
+	// The same document without the document (#712): what the Spec tab's card needs, so opening the
+	// tab does not transfer a 12 MB spec to paint a URL and a date. The full read above backs only
+	// the import dialog's bound-spec check (`useBoundSpecReader`).
 	SPEC_META: (id: string) => `/specs/${id}/meta`,
 	// Applying a re-fetched document to the collection bound to it (issue #655):
 	// the new document, the moved binding and the created/updated/deleted
 	// requests in one engine transaction.
 	SPEC_SYNC: `/specs/sync`,
-	// Which request of a collection is which operation of a document (issue
-	// #761): the matcher moved engine-side, so binding an existing collection
-	// asks for the pairing rather than working it out here. Reads only - the
-	// tab shows the counts before the user commits to the bind.
+	// Which request of a collection is which operation of a document (#761): the matcher is
+	// engine-side, so binding an existing collection asks for the pairing rather than working it
+	// out here. Reads only: the tab shows the counts before the user commits to the bind.
 	SPEC_MATCH: `/specs/match`,
-	// What a re-fetched document would change about the collection bound to it
-	// (issue #854): the comparison moved engine-side, so the Sync section asks
-	// rather than working it out here - and an agent can ask the same way.
-	// Reads only; applying the answer is SPEC_SYNC below.
+	// What a re-fetched document would change about the collection bound to it (#854): the
+	// comparison is engine-side, so the Sync section asks rather than working it out here, and an
+	// agent can ask the same way. Reads only; applying the answer is SPEC_SYNC above.
 	SPEC_DIFF: `/specs/diff`,
-	// What a picked document *is*, before anything is stored (issue #869):
-	// the dialect, the title and the operations it declares. The Spec tab used
-	// to read those out of the document itself; describing it here is what
-	// leaves one reader of a document - the one the bind below derives its
-	// stamps from. Reads only, and stores nothing.
+	// What a picked document is, before anything is stored (#869): the dialect, the title and the
+	// operations it declares. Describing it engine-side leaves one reader of a document, the one
+	// the bind below derives its stamps from. Reads only, and stores nothing.
 	SPEC_DESCRIBE: `/specs/describe`,
-	// The bind itself (issue #862): the document, the binding that moves to it
-	// and every stamp - the ones written and the ones cleared - in one engine
-	// transaction. The pairing above previews what this will do; this one works
-	// it out again from the document it stores, because a bind is a write and
-	// the identity it records must come from the bytes it recorded.
+	// The bind itself (#862): the document, the binding that moves to it and every stamp (the ones
+	// written and the ones cleared) in one engine transaction. The pairing above previews what this
+	// will do; the bind works it out again from the document it stores, because a bind is a write
+	// and the identity it records must come from the bytes it recorded.
 	SPEC_BIND: `/specs/bind`,
-	// A collection back out as an OpenAPI document (issue #855): its own bound
-	// document updated, or a skeleton when it binds none. The assembly moved
-	// engine-side with the rest of #761's phase B, so the renderer asks for the
-	// finished text rather than reading the stored document to build it here.
+	// A collection back out as an OpenAPI document (#855): its own bound document updated, or a
+	// skeleton when it binds none. Assembled engine-side (#761 phase B), so the renderer asks for
+	// the finished text rather than reading the stored document to build it.
 	SPEC_EXPORT: `/specs/export`,
 	// The same collection as a Postman Collection v2.1 document. A read like the
 	// one above: the engine assembles it and nothing is stored.
@@ -137,10 +121,9 @@ export const API_ENDPOINTS = {
 	// Global Variables
 	GLOBALS: `/globals`,
 
-	// Cookie jar (issue #301). GET reads every jar; DELETE clears one or all -
-	// its `environmentId` parameter follows the engine's null-vs-absent rule,
-	// so omitting it clears every jar and sending it empty clears the one used
-	// by requests with no environment selected.
+	// Cookie jar (#301). GET reads every jar; DELETE clears one or all: its `environmentId`
+	// parameter follows the engine's null-vs-absent rule, so omitting it clears every jar and
+	// sending it empty clears the one used by requests with no environment selected.
 	COOKIES: `/cookies`,
 
 	// Client-certificate registry (issue #707). A registry rather than a
@@ -213,72 +196,63 @@ export const API_ENDPOINTS = {
 	RUN_BASELINE: (id: string) => `/runs/${id}/baseline`,
 	RUN_REPORT: (id: string) => `/runs/${id}/report`,
 	RUN_STOP: (id: string) => `/runs/${id}/stop`,
-	// The response headers and body captured for a run's retained samples.
-	// Separate from the report on purpose: the report path loads and parses
-	// every result row for a run on each fetch and the dashboard polls it, so
-	// bodies are fetched here instead, only when a sample is expanded.
+	// The response headers and body captured for a run's retained samples. Apart from the report on
+	// purpose: the report path loads and parses every result row for a run on each fetch and the
+	// dashboard polls it, so bodies are fetched here, only when a sample is expanded.
 	RUN_SAMPLES: (id: string, limit: number, offset: number) =>
 		`/runs/${id}/samples?limit=${limit}&offset=${offset}`,
 
 	// Real-time stats (SSE, memory-based, faster)
 	METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,
 
-	// A streaming request's own events have no constant here on purpose
-	// (issue #574): `POST /execute` answers a stream with the `eventsUrl` it
-	// created, and `useExecutionEvents` opens exactly that. A second spelling
-	// of the path in this file would be a copy that can disagree with the
-	// engine's own answer, and the answer is the one that is right.
+	// A streaming request's own events have no constant here on purpose (#574): `POST /execute`
+	// answers a stream with the `eventsUrl` it created, and `useExecutionEvents` opens exactly
+	// that. A second spelling of the path here would be a copy that can disagree with the engine's
+	// own answer, and the answer is the one that is right.
 
-	// Time-series metrics (JSON, paginated). Always JSON - no format param.
-	// `maxPoints` asks for the whole series downsampled to at most that many
-	// ticks (#2547); the engine then ignores `limit` and `offset`, so they are
-	// not sent.
+	// Time-series metrics (JSON, paginated; always JSON, no format param). `maxPoints` asks for the
+	// whole series downsampled to at most that many ticks (#2547); the engine then ignores `limit`
+	// and `offset`, so they are not sent.
 	STATS_TIME_SERIES: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0, maxPoints?: number) =>
 		maxPoints === undefined
 			? `/runs/${runId}/metrics?limit=${limit}&offset=${offset}`
 			: `/runs/${runId}/metrics?maxPoints=${maxPoints}`,
 
-	// Server vitals scraped during the run (JSON, paginated, same envelope).
-	// Its own endpoint rather than extra keys on the tick objects: those keys
-	// are the /metrics contract, and scrapes land on the user's own cadence.
-	// `maxPoints` has the same contract as on STATS_TIME_SERIES (#2611).
+	// Server vitals scraped during the run (JSON, paginated, same envelope). Its own endpoint, not
+	// extra keys on the tick objects: those keys are the /metrics contract, and scrapes land on the
+	// user's own cadence. `maxPoints` has the same contract as on STATS_TIME_SERIES (#2611).
 	RUN_MONITOR: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0, maxPoints?: number) =>
 		maxPoints === undefined
 			? `/runs/${runId}/monitor?limit=${limit}&offset=${offset}`
 			: `/runs/${runId}/monitor?maxPoints=${maxPoints}`,
 
-	// Import. FETCH proxies a remote collection past CORS; APPLY persists the
-	// whole parsed tree in one atomic call and returns the temp-id -> real-id map
-	// (the import path no longer creates items one POST at a time).
-	// PARSE turns a raw document into that tree - every format the app accepts,
-	// read by the engine's one reader (issue #877). DOCUMENT is the narrower
-	// half of it: a document's bytes as a JSON DOM, which is all the ref bundler
-	// needs to find and rewrite external `$ref`s before a spec is stored.
+	// Import. FETCH proxies a remote collection past CORS; APPLY persists the whole parsed tree in
+	// one atomic call and returns the temp-id -> real-id map. PARSE turns a raw document into that
+	// tree, every format the app accepts, read by the engine's one reader (#877). DOCUMENT is the
+	// narrower half of it: a document's bytes as a JSON DOM, which is all the ref bundler needs to
+	// find and rewrite external `$ref`s before a spec is stored.
 	IMPORT_FETCH: `/import/fetch`,
 	IMPORT_PARSE: `/import/parse`,
 	IMPORT_DOCUMENT: `/import/document`,
 	IMPORT_APPLY: `/import/apply`,
 
-	// Transport diagnostics (issue #708). One policy-honouring request whose
-	// outcome says *which hop* failed - the proxy, the TLS handshake, or the
-	// endpoint - so a wrong proxy URL is caught where it is configured rather
-	// than mid-demo. It returns an outcome and never the response body; it is
+	// Transport diagnostics (#708). One policy-honouring request whose outcome says which hop
+	// failed (the proxy, the TLS handshake, or the endpoint), so a wrong proxy URL is caught where
+	// it is configured rather than mid-demo. It returns an outcome and never the response body:
 	// deliberately not a second IMPORT_FETCH.
 	DIAGNOSTICS_CONNECTION: `/diagnostics/connection`,
 
-	// Workspace backup (issue #987). A verb path rather than a stored resource,
-	// like INBOX_START and MOCK_SERVER_START: the engine takes a snapshot and
-	// the file it writes is not a row anything here reads back. There is no
-	// restore counterpart on purpose - a live engine overwriting its own open
-	// database is the thing this feature exists to spare the user, so restoring
-	// is a documented manual copy with the engine stopped.
+	// Workspace backup (#987). A verb path, not a stored resource, like INBOX_START and
+	// MOCK_SERVER_START: the engine takes a snapshot, and the file it writes is not a row anything
+	// here reads back. No restore counterpart on purpose: a live engine overwriting its own open
+	// database is what this feature exists to spare the user, so restoring is a documented manual
+	// copy with the engine stopped.
 	WORKSPACE_BACKUP: `/workspace/backup`,
 
-	// Webhook inbox (issue #480). The engine hosts the listener; these drive its
-	// lifecycle and read what it captured. START is a verb path rather than a
-	// POST to `/inbox` because an inbox is not a stored resource - it exists for
-	// as long as the engine process does, so the create/update split #95 draws
-	// for collections and requests does not apply.
+	// Webhook inbox (#480). The engine hosts the listener; these drive its lifecycle and read what
+	// it captured. START is a verb path, not a POST to `/inbox`, because an inbox is not a stored
+	// resource: it exists for as long as the engine process does, so the create/update split #95
+	// draws for collections and requests does not apply.
 	INBOX: `/inbox`,
 	INBOX_START: `/inbox/start`,
 	INBOX_STOP: (inboxId: string) => `/inbox/${inboxId}/stop`,

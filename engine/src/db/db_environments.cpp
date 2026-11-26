@@ -5,11 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file db_environments.cpp
- * @brief Environments (including the single-active-environment invariant)
- * and the app-wide globals singleton (issue #1614).
- */
+/// Environments (with the single-active-environment invariant) and the app-wide
+/// globals singleton (#1614).
 
 #include "database_impl.hpp"
 
@@ -36,14 +33,13 @@ namespace vayu::db {
 // Environments - Named variable sets (dev, staging, prod)
 // ============================================================================
 
-// At most one environment is active, and the switch is atomic. Enforced here
-// rather than in the routes because three write paths reach this table (POST,
-// PUT, and bulk import), and a rule living in the handlers would have to be
-// repeated in each - the shape of bug this table already had, when `is_active`
-// was honoured on create but not update. A caller that stores an active
-// environment gets the previous one deactivated in the same transaction, so no
-// reader can observe two actives, and none can observe zero either. A trashed
-// row is outside the rule (#2970): its delete already cleared the flag.
+// At most one environment is active, and the switch is atomic. Enforced here,
+// not in the routes, because three write paths reach this table (POST, PUT,
+// bulk import), and a rule in the handlers would need repeating in each, the
+// bug this table had when `is_active` was honoured on create but not update.
+// Storing an active environment deactivates the previous one in the same
+// transaction, so no reader sees two actives, or zero. A trashed row is outside
+// the rule (#2970): its delete cleared the flag.
 void Database::deactivate_other_environments_locked (const std::string& keep_id) {
     impl_->storage.update_all (set (c (&Environment::is_active) = false),
     where (c (&Environment::is_active) == true &&
@@ -67,9 +63,9 @@ void Database::save_environment (const Environment& e) {
     changes_.publish (environment_change (e.id, op));
 }
 
-// Deleted rows are excluded here rather than at each caller (#2970), the
-// `get_collections` reasoning: composition, script scopes and the export all
-// read through these two.
+// Deleted rows are excluded here, not per caller (#2970), on `get_collections`'
+// reasoning: composition, script scopes and the export all read through these
+// two.
 std::vector<Environment> Database::get_environments () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<Environment> (where (is_null (&Environment::deleted_at)));
@@ -84,8 +80,8 @@ std::optional<Environment> Database::get_environment (const std::string& id) {
     return envs.front ();
 }
 
-// Soft delete (#2970): the row is stamped, not removed, and leaves the active
-// slot in the same write - a trashed environment is never the one a client
+// Soft delete (#2970): the row is stamped, not removed, and gives up the active
+// slot in the same write, so a trashed environment is never the one a client
 // restores on launch. A restore does not take the slot back.
 void Database::delete_environment (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);

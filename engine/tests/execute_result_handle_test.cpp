@@ -14,7 +14,7 @@
  * `GET /runs/:runId/results/:resultId` reads back whole; a transient send
  * answers neither. Driven through the real handlers on one server, because the
  * keys are written by the route and the route's pattern is what decides which
- * ids reach the core. The core's own cases are runs_route_test.cpp's.
+ * ids reach the core. The core's own cases are runs_route_report_test.cpp's.
  */
 
 // Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /

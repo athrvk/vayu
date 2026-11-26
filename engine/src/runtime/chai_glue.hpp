@@ -8,8 +8,7 @@
  */
 
 /**
- * @file chai_glue.hpp
- * @brief The factory around the vendored `chai` (engine/vendor/chai, #2655).
+ * The factory around the vendored `chai` (engine/vendor/chai, #2655).
  *
  * `CHAI_GLUE_OPEN + CHAI_JS + CHAI_GLUE_CLOSE` is the source the shelf
  * evaluates. The library is chai 4.4.1 with its seven dependencies bundled into

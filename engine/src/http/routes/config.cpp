@@ -5,10 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file http/routes/config.cpp
- * @brief Configuration management routes
- */
+/** Configuration management routes. */
 
 #include <algorithm>
 #include <cctype>
@@ -35,14 +32,13 @@ namespace vayu::http::routes {
 
 /**
  * @p text as a double, or nothing unless the whole of it is one.
- *
  * `std::from_chars` would be the primitive (`utils/parse.hpp`), but its
- * floating-point overloads are unavailable below macOS 26 and the engine
- * targets 13.3 (`docs/engine/building.md`). `std::stod` stops at the first
- * character it cannot use, so "1.5x" is checked by how far it read, and the
- * leading whitespace it skips is refused the way `parse_number` refuses it.
- * Extern rather than file-local so `tests/config_route_test.cpp` can drive it:
- * no seeded entry is typed `number` yet, so no route request reaches it.
+ * floating-point overloads are missing below macOS 26 and the engine targets
+ * 13.3 (`docs/engine/building.md`). `std::stod` stops at the first character it
+ * cannot use, so "1.5x" is checked by how far it read, and the leading
+ * whitespace it skips is refused as `parse_number` refuses it. Extern so
+ * `tests/config_route_test.cpp` can drive it: no seeded entry is typed `number`
+ * yet, so no route request reaches it.
  */
 std::optional<double> parse_whole_double (const std::string& text) {
     if (text.empty () || std::isspace (static_cast<unsigned char> (text.front ())) != 0) {
@@ -64,8 +60,7 @@ std::optional<double> parse_whole_double (const std::string& text) {
 
 namespace {
 
-// Serialize a config entry to the wire JSON shape shared by the GET and POST
-// responses (keeps the two paths from drifting).
+// A config entry in the wire shape the GET and POST responses share.
 nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
     nlohmann::json entry_json;
     entry_json["key"]         = entry.key;
@@ -82,35 +77,28 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
         entry_json["max"] = *entry.max_value;
     }
     // What the value measures ("ms", "sec", "days", "bytes"), omitted rather
-    // than sent as null when the entry measures nothing - the same shape as
-    // `min`/`max`/`options` above, so a client has one rule for optional
-    // scalars on this payload rather than one per field. Absent means "this
-    // number is a count", which is the only other thing it can be.
+    // than null when it measures nothing, like `min` / `max` / `options`, so a
+    // client has one rule for this payload's optional scalars. Absent means a
+    // count.
     if (entry.unit) {
         entry_json["unit"] = *entry.unit;
     }
     // The boolean sibling this entry is nested under and disabled without,
-    // omitted when the entry stands on its own - a catalogue fact the seed
-    // asserts is internally consistent (`ConfigSeeder::validate_dependencies`),
-    // never a value `POST /config` reads back.
+    // omitted for a standalone entry: a catalogue fact the seed checks
+    // (`ConfigSeeder::validate_dependencies`), never read back by
+    // `POST /config`.
     if (entry.depends_on) {
         entry_json["dependsOn"] = *entry.depends_on;
     }
     if (entry.options) {
-        // Stored as a JSON-array string (JSON-in-TEXT, same convention as
-        // every other structured column); parse it back to a real array so
-        // the wire shape is `"options": [...]`, not a string of one.
-        //
-        // Guarded for the same reason the enum branch of apply_config_update
-        // is: an unguarded parse here would turn one malformed row into a 500
-        // on the whole of GET /config, taking the entire settings screen down
-        // rather than one entry. Omitting the key leaves an enum entry with no
-        // option list, which a renderer can show as unavailable.
-        //
-        // Only seed_default_config writes this column today, so a malformed
-        // value means the stored row was tampered with or truncated. Log it -
-        // silently dropping the key would make the setting vanish from the UI
-        // with no trail to follow.
+        // Stored as a JSON-array string (JSON-in-TEXT, like every structured
+        // column), parsed back so the wire shape is `"options": [...]`.
+        // Guarded, as the enum branch of `apply_config_update` is: one
+        // malformed row must not make all of GET /config a 500 and take the
+        // settings screen down; without the key, a renderer can show the entry
+        // as unavailable. Only `seed_default_config` writes the column, so a
+        // malformed value is a tampered or truncated row, logged so the setting
+        // does not vanish from the UI without a trail.
         try {
             entry_json["options"] = nlohmann::json::parse (*entry.options);
         } catch (const std::exception& e) {
@@ -119,16 +107,14 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
             "' has malformed options JSON, omitting it: " + e.what ());
         }
     }
-    // Always present, both of them: a consumer that has to distinguish "false"
-    // from "this engine does not send it" is back to guessing, which is the
-    // habit the typed flag replaced.
+    // Always present, both: a consumer distinguishing "false" from "this engine
+    // does not send it" is back to guessing.
     entry_json["requiresRestart"] = entry.requires_restart;
     entry_json["advanced"]        = entry.advanced;
-    // Search terms, and always an array - empty for the entries that declare
-    // none. Unlike `options`, which is omitted when it cannot be parsed, this
-    // key is never dropped: a client that had to tell "no keywords" from "this
-    // engine does not send them" would be back to guessing, and an empty list
-    // is the honest answer to both a malformed row and an entry with none.
+    // Search terms, always an array, empty for an entry declaring none. Unlike
+    // `options`, never dropped: "no keywords" and "not sent" must not need
+    // telling apart, and an empty list is honest for a malformed row and an
+    // entry with none.
     nlohmann::json keywords = nlohmann::json::array ();
     try {
         auto parsed = nlohmann::json::parse (entry.keywords);
@@ -148,19 +134,17 @@ nlohmann::json config_entry_json (const vayu::db::ConfigEntry& entry) {
     return entry_json;
 }
 
-// A /config validation failure, which names its own code rather than taking the
-// per-status default. Thin wrapper over the shared builder so the shape stays in
-// one place (routes.hpp).
+// A /config validation failure names its own code rather than the per-status
+// default; `config_error` wraps the shared builder (routes.hpp).
 constexpr std::string_view INVALID_CONFIG_CODE = "invalid_config";
 
 nlohmann::json config_error (const std::string& message) {
     return error_body (400, message, INVALID_CONFIG_CODE);
 }
 
-// Every stored config row this engine's own catalogue declares (issue #1492) -
-// the one list `GET /config` and `POST /config`'s echoed `entries` both serve,
-// so a row a newer engine wrote and this one does not understand never reaches
-// a client through either path.
+// Every stored config row this engine's catalogue declares (#1492), the one
+// list `GET /config` and `POST /config`'s echoed `entries` serve, so a row a
+// newer engine wrote reaches no client through either.
 nlohmann::json catalogued_config_entries_json (vayu::db::Database& db) {
     nlohmann::json entries_array = nlohmann::json::array ();
     for (const auto& entry : db.get_all_config_entries ()) {
@@ -171,16 +155,15 @@ nlohmann::json catalogued_config_entries_json (vayu::db::Database& db) {
     return entries_array;
 }
 
-// One config value as the string the store holds. Shared by the two body
-// shapes below so a number or a boolean cannot mean different text depending
-// on which of them carried it.
+// One config value as the string the store holds, shared by both body shapes so
+// a number or boolean cannot mean different text by which carried it.
 std::string config_value_string (const nlohmann::json& value) {
     if (value.is_string ()) {
         return value.get<std::string> ();
     }
     if (value.is_number ()) {
-        // `dump` keeps an integer an integer: `to_string (double)` wrote 16 as
-        // "16.000000", which an integer entry now refuses.
+        // `dump` keeps an integer an integer: `to_string (double)` gives 16 as
+        // "16.000000", which an integer entry refuses.
         return value.dump ();
     }
     if (value.is_boolean ()) {
@@ -218,12 +201,11 @@ std::unordered_map<std::string, std::string>& out) {
 }
 
 /**
- * Why @p value is not a number this entry accepts, or an empty string.
- *
- * @p parse maps a whole string to a number or nothing. The bounds go through
- * it as well, on purpose: a stored `min` that does not parse is a broken row,
- * and rejecting the write is the safe direction for a validator that cannot
- * tell whether the bound was met.
+ * Why @p value is not a number this entry accepts, or an empty string. @p parse
+ * maps a whole string to a number or nothing, and the bounds go through it too:
+ * a stored `min` that does not parse is a broken row, and refusing the write is
+ * the safe direction for a validator that cannot tell whether the bound was
+ * met.
  */
 template <typename Value, typename Parse>
 std::string numeric_rejection (const vayu::db::ConfigEntry& entry,
@@ -316,30 +298,29 @@ std::string type_rejection (const vayu::db::ConfigEntry& entry, const std::strin
 }
 
 /**
- * The rules a single key carries beyond its declared type, the way the proxy
- * URL's lives in `proxy_url_rejection`: the type system says "text" and only
- * the key knows what the text has to be.
+ * The rules a key carries beyond its declared type, as the proxy URL's live in
+ * `proxy_url_rejection`: the type says "text" and only the key knows what the
+ * text must be.
  *
- * `customCaCertificates` is rejected at the boundary rather than at handshake
- * time, because a pasted key, a truncated block or a block OpenSSL cannot
- * parse would otherwise be stored, materialized, and reported as an unrelated
- * verification failure on every request afterwards (issues #706, #3256).
+ * `customCaCertificates` is refused at the boundary, not at handshake time: a
+ * pasted key, a truncated block or one OpenSSL cannot parse would otherwise be
+ * stored, materialized and reported as an unrelated verification failure on
+ * every later request (#706, #3256).
  *
- * `proxyBypass` is judged entry by entry (`proxy_bypass_rejection`): libcurl
- * reads a `localhost:8080` or a `*.example.com` as a hostname no transfer dials,
- * so the exemption would be stored, shown in Settings and never apply.
+ * `proxyBypass` is judged per entry (`proxy_bypass_rejection`): libcurl reads
+ * `localhost:8080` or `*.example.com` as a hostname no transfer dials, so the
+ * exemption would be stored, shown in Settings and never apply.
  *
- * `proxySystemUrl` the app writes from the operating system's answer (issue
- * #708), and the same rule applies to it as to a hand-typed `proxyUrl`: a shape
- * libcurl has no proxy support for would be stored, read under `system` mode,
- * and fall back to the environment with only a log line to say so. Empty is not
- * a rejection - it is how the app records "this machine has no proxy", and
- * clearing it is how `system` goes direct.
+ * `proxySystemUrl`, which the app writes from the operating system's answer
+ * (#708), takes a hand-typed `proxyUrl`'s rule: a shape libcurl has no proxy
+ * support for would be stored, read under `system` mode and fall back to the
+ * environment with only a log line. Empty is no rejection: it is how the app
+ * records "no proxy here", and clearing it is how `system` goes direct.
  */
 std::string key_rejection (const vayu::db::ConfigEntry& entry, const std::string& value) {
-    // `correlationIdHeader` is a header *name*, and a name that is not one
-    // would put a broken line on every request afterwards - the same shape of
-    // invisible failure the proxy URL is refused for (issue #1229).
+    // `correlationIdHeader` is a header name, and one that is not would put a
+    // broken line on every later request, the invisible failure the proxy URL
+    // is refused for (#1229).
     if (entry.key == std::string (vayu::http::CORRELATION_ID_HEADER_KEY)) {
         if (const auto rejection = vayu::http::unusable_header_name (value)) {
             return "'" + entry.label + "' is not usable: " + *rejection;
@@ -365,10 +346,10 @@ std::string key_rejection (const vayu::db::ConfigEntry& entry, const std::string
 
 /**
  * The cross-field proxy rule: `manual` mode with no usable URL would accept the
- * write, say "Manual" in Settings and send every request direct - the invisible
- * failure issue #705 exists to end. Judged against the state the batch would
- * *leave*, not against either half alone, because the two keys may arrive in one
- * request or in either order across two.
+ * write, say "Manual" in Settings and send every request direct, the invisible
+ * failure #705 exists to end. Judged against the state the batch leaves, not
+ * either half alone: the two keys may arrive together or in either order across
+ * two requests.
  */
 std::optional<std::string> proxy_batch_rejection (vayu::db::Database& db,
 const std::unordered_map<std::string, std::string>& updates) {
@@ -383,9 +364,8 @@ const std::unordered_map<std::string, std::string>& updates) {
         const auto stored = db.get_config_entry (key);
         return stored ? stored->value : std::string ();
     };
-    // The display label a key's own catalogue row carries, or the wire key
-    // itself if the row is somehow missing - the same defensive fallback
-    // `Registry::find` callers use for an element kind.
+    // The key's catalogue label, or the wire key if the row is missing: the
+    // fallback `Registry::find` callers use for an element kind.
     const auto label_of = [&] (const char* key) {
         const auto entry = db.get_config_entry (key);
         return entry ? entry->label : std::string (key);
@@ -400,9 +380,8 @@ const std::unordered_map<std::string, std::string>& updates) {
         }
         return std::nullopt;
     }
-    // A URL stored under another mode is inert rather than wrong - it is how
-    // someone keeps their proxy while temporarily switching it off - so it is
-    // validated but not required.
+    // A URL stored under another mode is inert, not wrong (how someone keeps a
+    // proxy while switching it off), so it is validated but not required.
     if (!url.empty ()) {
         if (const auto rejection = vayu::http::proxy_url_rejection (url)) {
             return "'" + label_of ("proxyUrl") + "' is not usable: " + *rejection;
@@ -417,8 +396,8 @@ const std::unordered_map<std::string, std::string>& updates) {
  * The parse-validate-write of POST /config, run under the caller's lock.
  *
  * @param before_write Test seam, invoked inside the lock scope immediately
- *        before the batch is written - the only way to drive a competing
- *        client into the window this closes (`tests/competing_writer.hpp`).
+ *        before the batch is written: the only way to drive a competing client
+ *        into the window this closes (`tests/competing_writer.hpp`).
  */
 static std::pair<int, nlohmann::json> apply_config_update_locked (vayu::db::Database& db,
 const std::string& body,
@@ -437,31 +416,27 @@ const std::function<void ()>& before_write) {
         return { 400, config_error (*rejection) };
     }
 
-    // Validate every key first; apply nothing unless all pass (all-or-nothing).
-    // True on both halves since #1453: the caller's lock (see
-    // apply_config_update below) holds this validation and the write below to
-    // one scope, so no reader can observe the keys that passed applied one at
-    // a time, and the write itself is one transaction (Database::with_lock is
-    // a mutex, not a transaction, so the write still needs its own atomicity).
+    // Every key is validated before any is applied (all-or-nothing, #1453): the
+    // caller's lock holds validation and write to one scope, so no reader sees
+    // the passing keys land one at a time, and the write is one transaction
+    // (`Database::with_lock` is a mutex, not a transaction).
     std::vector<vayu::db::ConfigEntry> to_update;
     std::vector<std::string> errors;
 
     for (const auto& [key, value] : updates) {
-        // Checked against this engine's own catalogue (issue #1492), not
-        // merely against whether a row exists: a workspace a newer engine
-        // opened can carry a row for a key this build's `seed_default_config`
-        // does not declare, and this build has no validator for it - accepting
-        // the write on the strength of the row alone would apply a value this
-        // engine cannot check against the rules the key was defined with.
+        // Against this engine's catalogue (#1492), not mere row existence: a
+        // workspace a newer engine opened can hold a row for a key this build
+        // does not declare and has no validator for, so the row alone would
+        // admit a value this engine cannot check.
         if (!db.is_known_config_key (key)) {
             errors.push_back ("Unknown config key '" + key + "'");
             continue;
         }
         auto existing = db.get_config_entry (key);
         if (!existing) {
-            // Not reachable in practice - every catalogued key has a row by
-            // the time a request is served, seeded before the listener
-            // starts - kept as the honest answer if it ever is.
+            // Unreachable in practice (every catalogued key is seeded before
+            // the listener starts), kept as the honest answer if it ever is
+            // reached.
             errors.push_back ("Unknown config key '" + key + "'");
             continue;
         }
@@ -513,25 +488,21 @@ const std::function<void ()>& before_write) {
 }
 
 /**
- * @brief Parse, validate, and apply a POST /config request body.
+ * Parses, validates and applies a POST /config body, outside the handler so
+ * validation and its failure reasons are unit-testable without a server.
  *
- * Split out of the route handler so the validation path (and the specific
- * failure reason it now returns) is unit-testable without a live server.
- *
- * **The validation and the write are one lock scope** (#1453). A batch that
- * wrote each row under its own separate acquisition of the database mutex let
- * a concurrent reader - `GET /config`, or an internal reader like
- * `resolve_transport_policy` that reads `proxyMode` and `proxyUrl` as two
- * separate calls - land between two of the batch's writes and see one key
- * updated and the other stale, and let a mid-batch failure leave the rows
- * before it applied. Holding the lock across the whole composite closes the
- * reader window the same way `update_request_response` closes it for a
+ * **The validation and the write are one lock scope** (#1453). Writing each row
+ * under its own acquisition let a reader (`GET /config`, or
+ * `resolve_transport_policy` reading `proxyMode` and `proxyUrl` in two calls)
+ * land between two writes and see one key updated and the other stale, and let
+ * a mid-batch failure leave the earlier rows applied. The lock across the
+ * composite closes the reader window, as `update_request_response` does for a
  * merge-patch (#1440); `Database::save_config_entries` closes the failure
- * window by writing every row in one transaction rather than one per call.
+ * window by writing every row in one transaction.
  *
  * @return {http_status, json_body}. On validation failure the body carries the
- *         specific reason(s) - which key, and why (bad type / out of range) -
- *         so the app can show it instead of a generic "check the logs".
+ *         specific reasons (which key, and why: bad type, out of range), so the
+ *         app can show them instead of "check the logs".
  */
 std::pair<int, nlohmann::json> apply_config_update (vayu::db::Database& db,
 const std::string& body,
@@ -548,14 +519,11 @@ apply_config_update (vayu::db::Database& db, const std::string& body) {
 }
 
 /**
- * @brief Which send the caller is asking `GET /request-defaults` to describe.
- *
- * A `scope` nobody named is a design send, which is what the endpoint answered
- * before it took the parameter at all. An empty one is absent rather than a
- * scope of "", the reading `parse_live_resume_point` gives an empty
- * `lastEventId`. Anything else is refused: the two answers differ (a load run
- * reads `loadNegotiateCompression`), so a typo silently served the design
- * answer would be the misdescription issue #1338 exists to end.
+ * Which send the caller asks `GET /request-defaults` to describe. No `scope` is
+ * a design send; an empty one is absent rather than a scope of "", as
+ * `parse_live_resume_point` reads an empty `lastEventId`. Anything else is
+ * refused: the answers differ (a load run reads `loadNegotiateCompression`), so
+ * a typo served the design answer would be the misdescription #1338 ends.
  */
 std::expected<vayu::http::DefaultHeaderScope, RouteError>
 parse_default_header_scope (std::string_view scope) {
@@ -570,21 +538,14 @@ parse_default_header_scope (std::string_view scope) {
 }
 
 /**
- * @brief What the engine will add to a request that names none of it.
- *
- * The body of `GET /request-defaults`, split out for the reason
- * `apply_config_update` is: it is the whole of the route, and a test that has a
- * `Database` should not need a live server to read it.
- *
- * A client renders these as the auto rows beside a request's own headers, and
- * sends the names it wants back off as `disabledDefaultHeaders`. It is
- * deliberately the engine that declares them: a renderer re-deriving the set
- * from the config entries would be a second definition of the same rule, which
- * is how the two came to disagree before issue #1229.
- *
- * @p scope decides which compression key the answer reflects, because that is
- * the one default a load run resolves differently from a Send (#1338). The
- * caller names it; the endpoint never assumes one.
+ * What the engine adds to a request that names none of it: the body of
+ * `GET /request-defaults`, outside the route so a test with a `Database` needs
+ * no server. A client renders these as the auto rows beside a request's headers
+ * and sends the names it wants off as `disabledDefaultHeaders`. The engine
+ * declares them: a renderer deriving the set from config entries would be a
+ * second definition (#1229). @p scope picks the compression key the answer
+ * reflects, the one default a load run resolves differently from a Send
+ * (#1338); the caller names it, never assumed.
  */
 nlohmann::json request_defaults_json (vayu::db::Database& db,
 vayu::http::DefaultHeaderScope scope) {
@@ -646,7 +607,8 @@ void register_config_routes (RouteContext& ctx) {
 
     /**
      * GET /config
-     * Retrieves all configuration entries with metadata for UI display.
+     * Every catalogued configuration entry, with metadata for UI display
+     * (`catalogued_config_entries_json`).
      */
     ctx.server.Get ("/config", [&ctx] (const httplib::Request&, httplib::Response& res) {
         try {

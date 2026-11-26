@@ -6,9 +6,8 @@
  */
 
 /**
- * @file http/routes/reorder.cpp
- * @brief POST /reorder - the atomic batch reorder/move for collections and
- *        requests (issue #365).
+ * POST /reorder: the atomic batch reorder and move for collections and requests
+ * (#365).
  */
 
 #include "vayu/core/spec_binding.hpp"
@@ -35,10 +34,10 @@ namespace vayu::http::routes {
 namespace {
 
 /**
- * Cap on entries per call, mirroring `/import/apply`'s. Every row is loaded and
- * built before anything is written, so an unbounded batch is an unbounded
- * allocation; a drop writes a handful of rows and a whole-workspace renumber
- * stays far below this.
+ * Entries per call, as for `/import/apply`: every row is loaded and built
+ * before anything is written, so an unbounded batch is an unbounded allocation;
+ * a drop writes a handful of rows and a whole-workspace renumber stays far
+ * below this.
  */
 constexpr size_t MAX_REORDER_ENTRIES = 10000;
 
@@ -61,9 +60,9 @@ struct Scope {
 
 /** One row's new position, and - when it changes owner - its new owner. */
 struct Move {
-    // Defaulted because `read_move` fills this out-parameter and can refuse
-    // the entry before it gets there: an enum left indeterminate is read as
-    // one on any path that forgets to check the refusal first.
+    // Defaulted because `read_move` can refuse the entry before filling this
+    // out-parameter: an indeterminate enum reads as a value on any path that
+    // forgets to check the refusal.
     Kind kind = Kind::Collection;
     std::string id;
     int order         = 0;
@@ -99,20 +98,15 @@ R"(a scope is {"parentId": <collection id, or null for the roots>} and covers )"
 "the parent's sub-folders and requests together";
 
 /**
- * Reads one `normalize` entry.
- *
- * A scope must *state* `parentId` (`null` or `""` for the roots, through
- * `read_parent_id_field`) rather than omitting it: absent would have to mean
- * either "the roots" or "whatever parent you infer", and a renumber that
- * silently picked the wrong scope is a whole folder reshuffled. A named
- * parent must exist - unlike the single-row `PUT`, which tolerates an
- * unresolvable parent because bulk import writes rows that cannot see each
- * other yet. Nothing here is bulk-created, so a scope that resolves to
- * no row is a client bug, not an ordering artifact.
- *
- * The per-kind shapes from before #2535 (`type` with `parentId` or
- * `collectionId`) are refused rather than read: renumbering one kind alone
- * would leave it tied with the other kind's slots.
+ * Reads one `normalize` entry. A scope must state `parentId` (`null` or `""`
+ * for the roots, through `read_parent_id_field`): absent could mean the roots
+ * or an inferred parent, and a renumber of the wrong scope reshuffles a whole
+ * folder. A named parent must exist, unlike for the single-row `PUT`, which
+ * tolerates one because bulk import writes rows that cannot see each other yet;
+ * nothing here is bulk-created, so an unresolved scope is a client bug. The
+ * per-kind shapes predating #2535 (`type` with `parentId` or `collectionId`)
+ * are refused: renumbering one kind alone would leave it tied with the other
+ * kind's slots.
  */
 RouteResult
 read_scope (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Scope& out) {
@@ -139,14 +133,12 @@ read_scope (vayu::db::Database& db, const nlohmann::json& entry, size_t index, S
 }
 
 /**
- * Reads one `moves` entry and checks that the row it names is stored.
- *
- * `order` is required and goes through `read_order_field`: this endpoint
- * exists to write dense positions, and a float, a negative or a value past
- * `int` would be a truncated, unreachable or wrapped slot. The owner fields
- * follow the merge-patch rule the single-row endpoints use - absent keeps the
- * current owner, present states a move - except that a stated owner must
- * exist, for the reason in `read_scope`.
+ * Reads one `moves` entry and checks the row it names is stored. `order` is
+ * required, through `read_order_field`: this endpoint writes dense positions,
+ * and a float, a negative or a value past `int` would be a truncated,
+ * unreachable or wrapped slot. The owner fields follow the single-row
+ * merge-patch rule (absent keeps, present moves), except that a stated owner
+ * must exist, for `read_scope`'s reason.
  */
 RouteResult
 read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Move& out) {
@@ -204,23 +196,18 @@ read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Mo
 }
 
 /**
- * Rejects a batch that would leave a collection as its own ancestor.
+ * Refuses a batch that would leave a collection its own ancestor. The walk runs
+ * over the graph the batch would produce (stored parents with each move's
+ * `parentId` on top), under the one acquisition of the DB mutex the write holds
+ * (`reorder_response`), which closes the race the per-row `PUT` has: of two
+ * concurrent reparents each legal alone, the second revalidates against the
+ * first's committed graph and is refused. `PUT /collections/:id` validates
+ * against what it read, under a different lock than the write.
  *
- * The walk runs over the shape the batch *would* produce - stored parents with
- * every move's `parentId` applied on top - which is what makes this endpoint
- * close the TOCTOU race the per-row `PUT` has: this walk and the write it
- * guards run under one acquisition of the DB mutex (see `reorder_response`), so
- * two concurrent reparents that each look legal alone cannot both land - the
- * second one revalidates against the first one's committed graph and is
- * rejected. `PUT /collections/:id` validates against the shape it read before
- * writing, under a different lock than the write.
- *
- * Only moved collections start a walk: a cycle in the post-move graph must pass
- * through an edge this batch changed, so a chain that reaches a root or an
- * already-visited node is proof enough. The visited set also keeps a
- * pre-existing corrupt cycle (written before write-time validation existed, and
- * explicitly tolerated by `validate_parent_assignment`) from hanging the
- * validator.
+ * Only moved collections start a walk: a post-move cycle must pass through an
+ * edge this batch changed, so reaching a root or a visited node is proof
+ * enough. The visited set also keeps a pre-existing corrupt cycle (one
+ * `validate_parent_assignment` tolerates) from hanging the validator.
  */
 RouteResult reject_post_move_cycles (vayu::db::Database& db, const std::vector<Move>& moves) {
     std::unordered_map<std::string, std::optional<std::string>> parent_of;
@@ -262,11 +249,10 @@ RouteResult reject_post_move_cycles (vayu::db::Database& db, const std::vector<M
 }
 
 /**
- * The rows a batch will write, keyed by id so a row named by both a
- * normalization and a move is written once, with the move's position winning.
- *
- * Ordered maps rather than hash maps: the response lists what was written, and
- * a client diffing two responses should not have to sort them first.
+ * The rows a batch writes, keyed by id so a row named by a normalization and a
+ * move is written once, the move's position winning. Ordered maps: the response
+ * lists what was written, and a client diffing two responses should not have to
+ * sort them.
  */
 struct WriteSet {
     std::map<std::string, vayu::db::Collection> collections;
@@ -292,15 +278,12 @@ void stage_position (const Row& row, int index, int64_t now, std::map<std::strin
 /**
  * Renumbers one parent's children dense `0..n-1` in sibling order
  * (`sibling_order.hpp`: `order`, folders before requests, `createdAt`, `id`),
- * over its sub-folders and requests merged into one list, so a tie across the
- * two kinds comes out as distinct numbers with the folder first.
- *
- * Only rows whose position actually changes are added, which is what makes the
- * operation observably idempotent: normalizing an already-dense scope writes
- * nothing at all. It is also the whole point of the `normalize` list - a
- * parent whose rows all sit at the legacy `0` has a display order that exists
- * nowhere but the sort, and the first drop into it has to materialize that
- * order before it can name a slot, or every sibling appears to jump.
+ * sub-folders and requests as one list, so a tie across kinds comes out
+ * distinct with the folder first. Only rows whose position changes are added,
+ * so normalizing a dense scope writes nothing. That is the point of
+ * `normalize`: a parent whose rows all sit at the legacy `0` has a display
+ * order only the sort knows, and the first drop into it must materialize that
+ * order before naming a slot, or every sibling appears to jump.
  */
 void normalize_scope (vayu::db::Database& db, const Scope& scope, int64_t now, WriteSet& out) {
     const std::vector<vayu::db::Collection> collections = db.get_collections ();
@@ -325,9 +308,9 @@ void normalize_scope (vayu::db::Database& db, const Scope& scope, int64_t now, W
     }
 }
 
-/// `read_move` proved every named row exists before any of them was staged, and
-/// the whole batch runs under the DB mutex `reorder_response` holds - so a row a
-/// move names is still there when it is read back.
+/// `read_move` proved every named row exists before staging, and the batch runs
+/// under the DB mutex `reorder_response` holds, so a moved row is still there
+/// when read back.
 constexpr std::string_view ROW_EXISTS_INVARIANT =
 "a validated move names a stored row, under the DB mutex the batch holds";
 
@@ -361,8 +344,8 @@ void stage_move (vayu::db::Database& db, const Move& move, int64_t now, WriteSet
 /**
  * The stored rows of every stamped request whose binding the batch can change:
  * each one a move names with an owner, and each one beneath a collection a move
- * names with a parent. Read before anything is written, so these are the rows
- * as they stand before the batch. Only a stamped request can decline anything.
+ * reparents. Read before anything is written, so they are the rows as they
+ * stand; only a stamped request can decline anything.
  */
 std::map<std::string, vayu::db::Request>
 stamped_requests_moved (vayu::db::Database& db, const std::vector<Move>& moves) {
@@ -424,8 +407,8 @@ WriteSet& writes) {
 }
 
 /**
- * The batch a reorder is about to stage: the scopes to renumber and the moves to
- * apply, each read through the same validation a single write uses.
+ * The batch a reorder is about to stage: the scopes to renumber and the moves
+ * to apply, each through the validation a single write uses.
  */
 RouteResult read_reorder_batch (vayu::db::Database& db,
 const nlohmann::json& body,
@@ -472,9 +455,9 @@ std::vector<Move>& moves) {
         if (auto outcome = read_move (db, (*moves_in)[i], i, move); !outcome) {
             return outcome;
         }
-        // Two positions for one row is not a resolvable batch - whichever won
-        // would be an accident of iteration order, and the client that sent it
-        // has a bug the 400 names.
+        // Two positions for one row is no resolvable batch: whichever won would
+        // be an accident of iteration order, and the client has a bug the 400
+        // names.
         if (!claimed.insert (move.id).second) {
             return std::unexpected (body_error ("Duplicate move for '" + move.id + "'"));
         }
@@ -484,37 +467,26 @@ std::vector<Move>& moves) {
 }
 
 /**
- * The batch, from validation to commit. Runs with the DB mutex already held by
- * `reorder_response` - see there for why the whole of it has to.
+ * The batch, from validation to commit, with the DB mutex already held by
+ * `reorder_response` (which says why). The order is fixed and load-bearing:
  *
- * A drop that displaces N siblings used to have no sane write path: the only
- * write verbs are one row per `PUT`, so a renumber was N sequential requests -
- * non-atomic (a crash mid-sequence half-renumbers a parent), racy against a
- * concurrent create computing `max_order + 1` between two of them and against
- * `POST /import/apply`'s own transactional order slots, and an invalidation
- * storm on the client. This endpoint takes the whole batch instead.
- *
- * The order of business is fixed and load-bearing:
- *
- *  1. **Everything is validated first** - entry shapes, that every named row and
- *     owner exists, and that the *post-move* collection graph is acyclic. A
- *     failure is a 400 naming the offending row, with nothing written; the
- *     partial batch that per-row PUTs could leave behind is unreachable here.
+ *  1. **Everything is validated first**: entry shapes, that every named row and
+ *     owner exists, and that the post-move collection graph is acyclic. A
+ *     failure is a 400 naming the row, with nothing written, so the partial
+ *     batch per-row PUTs could leave is unreachable.
  *  2. **`normalize` renumbers, then `moves` position.** Normalization
- *     materializes a scope's displayed order as dense `0..n-1` so a first drop
+ *     materializes a scope's displayed order as dense `0..n-1`, so a first drop
  *     into a legacy all-zeros collection has real slots to name; the moves then
- *     state the positions the drop actually produced, and win over the
- *     renumber for any row named by both. A stamped request the moves take out
- *     of its contract is then staged with its stamp cleared
- *     (`stage_binding_departures`, #3446).
- *  3. **One transaction** (`Database::apply_reorder`), whose rows are updates,
- *     never inserts - a row deleted out from under the batch is a 409 naming it
- *     and a whole rollback, not a silent resurrection. The departures' declines
- *     are recorded in it.
+ *     state the positions the drop produced and win for any row named by both.
+ *     A stamped request a move takes out of its contract is staged with its
+ *     stamp cleared (`stage_binding_departures`, #3446).
+ *  3. **One transaction** (`Database::apply_reorder`) of updates, never
+ *     inserts: a row deleted under the batch is a 409 naming it and a whole
+ *     rollback, not a silent resurrection. The departures' declines are
+ *     recorded in it.
  *
- * The response carries the rows as written, because the client that drew the
- * drop optimistically needs the authoritative positions to settle its caches on
- * - a count would tell it nothing it could use.
+ * The response carries the rows as written: the client that drew the drop
+ * optimistically settles its caches on the authoritative positions.
  */
 std::pair<int, nlohmann::json> reorder_locked (vayu::db::Database& db,
 const nlohmann::json& body,
@@ -567,11 +539,11 @@ const std::function<void ()>& before_write) {
         try {
             db.apply_reorder (collection_rows, request_rows, departures);
         } catch (const vayu::db::MissingRowError& e) {
-            // Unreachable while every writer takes the DB mutex - the lock this
-            // runs under is what makes it so. It stays because `apply_reorder`
-            // is a public method whose no-resurrection rule holds for any
-            // caller, and a 409 is the honest answer to "the row you staged is
-            // gone": the client's tree is behind, and a retry is what fixes it.
+            // Unreachable while every writer takes the DB mutex, which this
+            // runs under. It stays because `apply_reorder` is public, its
+            // no-resurrection rule holds for any caller, and a 409 is the
+            // honest answer to "the staged row is gone": the client's tree is
+            // behind, and a retry fixes it.
             return { 409, error_body (409, e.what ()) };
         }
     }
@@ -581,35 +553,27 @@ const std::function<void ()>& before_write) {
 } // namespace
 
 /**
- * Testable core of POST /reorder - one drop, one round trip, one lock scope
- * (issues #365, #386), returning {http_status, json_body}.
- *
- * A drop that displaces N siblings used to have no sane write path: the only
- * write verbs are one row per `PUT`, so a renumber was N sequential requests -
- * non-atomic (a crash mid-sequence half-renumbers a parent), racy against a
- * concurrent create computing `max_order + 1` between two of them and against
- * `POST /import/apply`'s own transactional order slots, and an invalidation
- * storm on the client. This endpoint takes the whole batch instead.
+ * Testable core of POST /reorder: one drop, one round trip, one lock scope
+ * (#365, #386), {http_status, json_body}. A drop displacing N siblings has no
+ * sane path through the single-row verbs: N sequential requests are non-atomic
+ * (a crash half-renumbers a parent), race a concurrent create computing
+ * `max_order + 1` and `POST /import/apply`'s transactional slots, and storm the
+ * client with invalidations.
  *
  * **The whole batch runs under one acquisition of the DB mutex**, not one per
- * call into `Database`. cpp-httplib serves on a thread pool and the renderer and
- * MCP are genuinely concurrent clients, so a batch that validated under one lock
- * and committed under another left three windows open (#386): two conflicting
- * reparents both passing an acyclicity check neither one's commit was visible
- * to, a create reading `max_order + 1` from inside the range being renumbered,
- * and a cascade deleting a staged row between the read and the write. Holding
- * the lock across the composite is what makes the validation still true when the
- * write lands; `Database::with_lock` documents the cost of holding it.
+ * `Database` call. cpp-httplib serves on a thread pool and the renderer and MCP
+ * are concurrent clients, so validating under one lock and committing under
+ * another leaves three windows (#386): two conflicting reparents each passing
+ * an acyclicity check the other's commit was invisible to, a create reading
+ * `max_order + 1` inside the range being renumbered, and a cascade deleting a
+ * staged row between read and write. `Database::with_lock` documents the cost
+ * of holding it.
  *
  * @param before_write Test seam, invoked inside the lock once the batch is
- *        staged and immediately before it commits. It is the only way to
- *        observe the window this issue closed: a probe that starts a competing
- *        writer proves that writer waits, and one that mutates the DB directly
- *        (the mutex is recursive) stages the delete-at-commit case. Production
- *        callers omit it.
- *
- * Extracted for reorder_route_test.cpp, following the suite's route-test
- * convention (no in-process HTTP server).
+ *        staged and immediately before it commits: the only way to observe the
+ *        window. A probe starting a competing writer proves it waits, and one
+ *        mutating the DB directly (the mutex is recursive) stages the
+ *        delete-at-commit case. Production callers omit it.
  */
 std::pair<int, nlohmann::json> reorder_response (vayu::db::Database& db,
 const nlohmann::json& body,

@@ -8,28 +8,22 @@
 /**
  * Monaco's widgets, painted from the app's own tokens (#1321).
  *
- * The editor text is Monaco's syntax palette and stays that way - `inherit`
- * below keeps it. What this module replaces is the *chrome* Monaco draws
- * around it: the suggest list the three completion providers open, the find
- * and replace widget, the hover card, the context menu. Those shipped in VS
- * Code's colours (`#252526` panels on `#454545` borders in dark, white on
- * white in light) next to Radix popovers on `--popover`, because
- * `CodeEditor` handed Monaco the built-in theme names and the app defined
- * none of its own.
+ * The editor text is Monaco's syntax palette and stays that way (`inherit` below keeps it). What
+ * this module replaces is the *chrome* Monaco draws around it: the suggest list the three
+ * completion providers open, the find and replace widget, the hover card, the context menu.
+ * Monaco's built-in themes paint those in VS Code's colours (`#252526` panels on `#454545` borders
+ * in dark, white on white in light), next to Radix popovers on `--popover`.
  *
- * **Only the active mode is defined.** `getComputedStyle` reports the values
- * that are live on the element, so the light palette is unreadable while the
- * `dark` class is on `<html>` and the reverse. `registerMonacoTheme` therefore
- * defines the one theme the app is wearing, and is called again whenever the
- * mode or the accent scheme changes - see `useMonacoTheme`, which also
- * explains why that call cannot wait for a React effect.
+ * **Only the active mode is defined.** `getComputedStyle` reports the values live on the element,
+ * so the light palette is unreadable while the `dark` class is on `<html>`, and the reverse.
+ * `registerMonacoTheme` therefore defines the one theme the app is wearing, and is called again
+ * whenever the mode or the accent scheme changes; `useMonacoTheme` also explains why that call
+ * cannot wait for a React effect.
  *
- * The rejected alternative was CSS: a `defineTheme`-free stylesheet over
- * `.monaco-hover` and `.suggest-widget`. Monaco writes the theme's colours
- * onto those nodes as inline styles and paints selection and find matches on
- * its own canvas, where no rule reaches them at all, so the CSS answer covers
- * part of one widget and needs `!important` to do it. Colours that come from
- * the theme data are colours the tokens actually own.
+ * Not CSS (a `defineTheme`-free stylesheet over `.monaco-hover` and `.suggest-widget`): Monaco
+ * writes the theme's colours onto those nodes as inline styles and paints selection and find
+ * matches on its own canvas, where no rule reaches, so CSS covers part of one widget and needs
+ * `!important` to do it. Colours from the theme data are colours the tokens actually own.
  */
 
 import type * as Monaco from "monaco-editor";
@@ -60,20 +54,17 @@ interface TokenRef {
 
 /**
  * The app's scrollbar thumb, from `::-webkit-scrollbar-thumb` in `index.css`
- * (`bg-muted-foreground/30`, `/50` on hover). Monaco draws its bars as its own
- * DOM and no stylesheet rule reaches them - the same reason `SCROLLBAR_SIZE`
- * in `code-editor.tsx` exists - so the two alphas are restated here and the
- * third is the pressed state Monaco has and the native bar does not.
+ * (`bg-muted-foreground/30`, `/50` on hover). Monaco draws its bars as its own DOM that no
+ * stylesheet rule reaches (the reason `SCROLLBAR_SIZE` in `code-editor.tsx` exists), so the two
+ * alphas are restated here; the third is the pressed state Monaco has and the native bar does not.
  */
 const SLIDER_ALPHA = { rest: 0.3, hover: 0.5, active: 0.65 } as const;
 
 /**
- * Every widget colour the app owns, and the token behind it.
- *
- * A key absent from here keeps whatever the base theme says, which is the
- * right answer for anything the tokens have no opinion about (bracket pair
- * colours, the diff editor). A key present here and missing a token at runtime
- * is dropped rather than defaulted - see `buildMonacoTheme`.
+ * Every widget colour the app owns, and the token behind it. A key absent here keeps the base
+ * theme's colour, the right answer for anything the tokens have no opinion about (bracket pair
+ * colours, the diff editor). A key present here and missing a token at runtime is dropped rather
+ * than defaulted (see `buildMonacoTheme`).
  */
 export const WIDGET_COLORS = {
 	// The editor surface itself, so the canvas under the widgets is the app's
@@ -151,10 +142,9 @@ function channel(value: number): string {
 }
 
 /**
- * One of the app's HSL triples (`240 6% 11%`, the shape every colour token is
- * declared in) as the hex Monaco's theme data requires. Returns null for a
- * value that is not a triple, including the empty string `getComputedStyle`
- * gives for a token that does not exist.
+ * One of the app's HSL triples (`240 6% 11%`, the shape every colour token is declared in) as the
+ * hex Monaco's theme data requires. Null for a value that is not a triple, including the empty
+ * string `getComputedStyle` gives for a token that does not exist.
  */
 export function hslTokenToHex(value: string, alpha?: number): string | null {
 	const parsed = /^([\d.]+)\s+([\d.]+)%\s+([\d.]+)%$/.exec(value.trim());
@@ -184,9 +174,8 @@ export function hslTokenToHex(value: string, alpha?: number): string | null {
 }
 
 /**
- * The theme data for one mode. Pure: the tokens come in, so a test can drive
- * it without a stylesheet (vitest stubs a CSS import to `""`, and jsdom
- * computes nothing from one that was never loaded).
+ * The theme data for one mode. Pure: the tokens come in, so a test can drive it without a
+ * stylesheet (vitest stubs a CSS import to `""`, and jsdom computes nothing from one never loaded).
  */
 export function buildMonacoTheme(
 	mode: EditorMode,
@@ -218,14 +207,11 @@ function readTokenValues(root: HTMLElement = document.documentElement): TokenVal
 }
 
 /**
- * Define the theme for the mode the document is in, and name it.
- *
- * Idempotent, and the only way the themes are registered: `monaco-setup` calls
- * it once as it composes Monaco (before any editor can be created with a name
- * Monaco does not know), and `useMonacoTheme` calls it again on every mode or
- * accent change. Redefining the *active* theme is how a scheme change reaches
- * an open editor - Monaco re-applies a theme that is redefined under the name
- * it is already showing.
+ * Define the theme for the mode the document is in, and name it. Idempotent, and the only way the
+ * themes are registered: `monaco-setup` calls it once as it composes Monaco (before any editor can
+ * be created with a name Monaco does not know), and `useMonacoTheme` calls it again on every mode
+ * or accent change. Redefining the *active* theme is how a scheme change reaches an open editor:
+ * Monaco re-applies a theme redefined under the name it is already showing.
  */
 export function registerMonacoTheme(
 	monaco: MonacoApi,

@@ -6,10 +6,7 @@
  */
 
 /**
- * RowContextMenu
- *
- * Right-click on a row, offering the same actions its `⋯` menu offers (#1360).
- * Wrap the row's own root element:
+ * Right-click on a row, offering its `⋯` menu's actions (#1360). Wrap the row's root element:
  *
  * ```tsx
  * <RowContextMenu label="Actions for Get users" actions={actions}>
@@ -17,28 +14,17 @@
  * </RowContextMenu>
  * ```
  *
- * **It wraps rather than replaces.** `asChild` puts the trigger's handlers on
- * the row itself, so no element is added to the tree - a row that is a grid or
- * flex child of its container stays one, and the drawer's indent maths is
- * untouched.
- *
- * **The actions are the pointed-at row's, without selecting it.** What "select"
- * would mean in the collection tree is opening the request in a tab
- * (`selectedRequestId` is derived from the active tab, `CollectionTree.tsx`),
- * and no file manager opens a document because you right-clicked it. The
- * property that needs guaranteeing - that Delete deletes the row under the
- * pointer and not the one that happens to be open - comes from the actions
- * themselves: each row builds its own list over its own entity. What the
- * right-click does move is focus, to the row it opened over, which is the
- * tree's own "you are here".
- *
- * **The native menu is kept away by the marker, not by `preventDefault`.** The
- * main process draws its edit menu from Chromium's own `context-menu` event on
- * the web contents (`electron/context-menu.ts`), which a renderer's
- * `preventDefault` does not reach. `contextProps("own-menu")` is what says a
- * surface draws its own, and it is spread here so every row that takes this
- * component is covered without spelling it out again - the same arrangement
- * Monaco already had.
+ * **It wraps, not replaces**: `asChild` puts the handlers on the row, adding no element, so a grid
+ * or flex child stays one and the drawer's indent maths holds. **The actions are the pointed-at
+ * row's, without selecting it**: selecting in the collection tree opens the request in a tab
+ * (`selectedRequestId` derives from the active tab, `CollectionTree.tsx`), and no file manager
+ * opens a document on right-click. Delete deleting the row under the pointer, not the open one,
+ * comes from the actions, each row building its list over its entity. The right-click does move
+ * focus to the row, the tree's "you are here". **The native menu is kept away by the marker, not
+ * `preventDefault`**: the main process draws its edit menu from Chromium's `context-menu` event
+ * (`electron/context-menu.ts`), which a renderer's `preventDefault` does not reach.
+ * `contextProps("own-menu")` says a surface draws its own, spread here so every row is covered, as
+ * for Monaco.
  */
 
 import { Fragment, type ReactElement } from "react";
@@ -59,13 +45,10 @@ interface RowContextMenuProps {
 	label: string;
 	actions: RowAction[];
 	/**
-	 * Stand down: no menu, and no marker either.
-	 *
-	 * For the moments a row is not a row - an inline rename field is open in
-	 * it, or it is mid-delete. The marker has to come off with the menu,
-	 * because it is what refuses the main process's edit menu: left on, a
-	 * right-click inside the rename field would offer neither Cut/Copy/Paste
-	 * nor anything of ours.
+	 * Stand down: no menu and no marker, for a row that is momentarily not a row (an inline rename
+	 * is open, or it is mid-delete). The marker comes off too: it refuses the main process's edit
+	 * menu, so left on, a right-click in the rename field would offer neither Cut/Copy/Paste nor
+	 * ours.
 	 */
 	disabled?: boolean;
 	/** The row itself - one element, which becomes the trigger. */
@@ -73,10 +56,9 @@ interface RowContextMenuProps {
 }
 
 export function RowContextMenu({ label, actions, disabled, children }: RowContextMenuProps) {
-	// A row with nothing to offer keeps the platform's own behaviour rather than
-	// swallowing the gesture into an empty menu. Stated as `off` rather than an
-	// early return of `children`: a wrapper that comes and goes remounts the row
-	// under it, which loses focus and any field open inside it.
+	// A row with nothing to offer keeps the platform's behaviour rather than an empty menu. `off`,
+	// not an early return of `children`: a wrapper coming and going remounts the row, losing focus
+	// and any open field.
 	const off = disabled || actions.length === 0;
 
 	return (
@@ -87,17 +69,12 @@ export function RowContextMenu({ label, actions, disabled, children }: RowContex
 				{...(off ? {} : contextProps("own-menu"))}
 				onContextMenu={(event) => {
 					/*
-					 * Focus the row on the way past. A right-click does not move
-					 * focus on its own, so without this the menu's focus scope
-					 * has nowhere of ours to return to on Escape and drops the
-					 * user on `<body>` - outside the tree that was holding its
-					 * one tab stop. The `⋯` menu makes the same promise from the
-					 * other direction (`RowActionsMenu`'s `onCloseAutoFocus`).
-					 * A row that is not focusable is unmoved by this.
-					 *
-					 * Radix runs this handler even when the trigger is disabled,
-					 * so the guard is here: a right-click on an open rename field
-					 * must not pull focus out of it.
+					 * Focus the row on the way: a right-click moves no focus, so the menu's focus
+					 * scope would drop the user on `<body>` on Escape, outside the tree holding its
+					 * one tab stop (`RowActionsMenu`'s `onCloseAutoFocus` keeps the same promise).
+					 * A row that is not focusable is unmoved. Radix runs this even with the trigger
+					 * disabled, hence the guard: a right-click on an open rename field must not
+					 * take its focus.
 					 */
 					if (!off) event.currentTarget.focus();
 				}}
@@ -110,24 +87,22 @@ export function RowContextMenu({ label, actions, disabled, children }: RowContex
 }
 
 /**
- * The menu's items, for a `ContextMenu` whose trigger is not one row: the
- * collection tree opens one menu for every row and resolves the row from the
- * click (#2543). One drawing of the list, so the two cannot drift.
+ * The menu's items, for a `ContextMenu` whose trigger is not one row: the collection tree opens one
+ * menu for every row and resolves the row from the click (#2543). One drawing of the list, so the
+ * two cannot drift.
  */
 export function RowContextMenuContent({ label, actions }: { label: string; actions: RowAction[] }) {
 	const { onSelectOf, runDeferred } = useAfterMenuClose();
 
 	return (
-		// `min-w-[10rem]`, not `min-w-40`: the floor exists to hold the action
-		// labels, a text measure, and `min-w-40` rides `--spacing` - at the
-		// Default density it resolved under the primitive's own fixed
-		// `min-w-[8rem]` default (context-menu.tsx), overriding a deliberately
-		// density-independent floor with a smaller, density-scaled one.
+		// `min-w-[10rem]`, not `min-w-40`: the floor holds action labels, a text measure, and
+		// `min-w-40` rides `--spacing`, falling under the primitive's fixed `min-w-[8rem]`
+		// (context-menu.tsx) at Default.
 		<ContextMenuContent
 			aria-label={label}
 			className="min-w-[10rem]"
-			// Radix would hand focus back to the row the menu opened over, taking
-			// it from the field an action opened (`useAfterMenuClose`, #3443).
+			// Radix would return focus to the row, taking it from a field an action opened
+			// (`useAfterMenuClose`, #3443).
 			onCloseAutoFocus={runDeferred}
 		>
 			{rowActionRows(actions).map(({ action, separatorBefore }) => (

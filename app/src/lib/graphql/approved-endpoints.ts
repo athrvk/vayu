@@ -6,28 +6,23 @@
  */
 
 /**
- * Which endpoints the GraphQL body may introspect without being asked.
- *
- * Introspection composes the request with the user's variables and auth and
- * sends it, so doing it on its own for any URL that reaches the screen - a
- * request that came from an imported file included - is contact the user never
- * chose. The rule is that the automatic path only reaches an origin the user has
- * already contacted: pressed Send or Load test on a request to it
- * (`hooks/useEngine.ts`), or loaded its schema by hand (`schema-cache.ts`). The
+ * Which endpoints the GraphQL body may introspect without being asked. Introspection composes the
+ * request with the user's variables and auth and sends it, so doing it on its own for any URL that
+ * reaches the screen (one from an imported file included) is contact the user never chose. So the
+ * automatic path only reaches an origin the user has already contacted: pressed Send or Load test
+ * on a request to it (`hooks/useEngine.ts`), or loaded its schema by hand (`schema-cache.ts`). The
  * list lives in the persisted client settings, so it outlasts the session.
  *
- * Judged on the **composed** URL, the one the request would actually go to: the
- * text in the URL bar can be `{{baseUrl}}/graphql`, whose host is whatever the
- * environment says it is.
+ * Judged on the **composed** URL, the one the request would actually go to: the text in the URL bar
+ * can be `{{baseUrl}}/graphql`, whose host is whatever the environment says it is.
  */
 
 import { useClientSettingsStore } from "@/stores/client-settings-store";
 
 /**
- * The origin (scheme, host, port) a URL contacts, or null when it does not name
- * one: unparseable, a scheme the engine does not send over, or a host still
- * holding a `{{variable}}`, which the URL parser accepts as a hostname but which
- * names no machine.
+ * The origin (scheme, host, port) a URL contacts, or null when it names none: unparseable, a scheme
+ * the engine does not send over, or a host still holding a `{{variable}}`, which the URL parser
+ * accepts as a hostname but names no machine.
  */
 export function endpointOrigin(url: string): string | null {
 	try {

@@ -6,7 +6,6 @@
  */
 
 /**
- * @file oauth2.tools.ts
  * @brief The OAuth 2.0 token cache: fetch, status and clear.
  */
 

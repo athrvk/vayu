@@ -6,30 +6,21 @@
  */
 
 /**
- * One sentence about the schema in hand, derived from the cache entry alone.
- *
- * Pure and Monaco-free, beside the store whose state it reads. It had two
- * renderers - the explorer's header badge and the Query pane's chip - and a
- * second copy of these words in one of them is how the two came to say the same
- * thing differently in the first place (#455). The badge now has one home, in
- * the Query header, in the same place whether the explorer is open or shut
- * (#1224); the sentence stays here rather than moving into that one caller,
- * because a second surface asking the same question is what this file is for.
+ * One sentence about the schema in hand, derived from the cache entry alone. Pure and Monaco-free,
+ * beside the store whose state it reads. Its one caller is the badge in the Query header, in the
+ * same place whether the explorer is open or shut (#1224); the sentence stays here because a second
+ * copy of these words in a second surface is how two came to say the same thing differently (#455).
  */
 
 import type { SchemaEntry, SchemaFailure } from "./schema-cache";
 import { formatInstant } from "@/lib/time-value";
 
 /**
- * What the badge says about a failure, per kind.
- *
- * The store keeps the classified failure and the engine's own words; this is
- * the sentence that names the fix. One static "introspection failed" used to
- * cover all of them, so an expired token and an endpoint with introspection
- * switched off - opposite actions - read identically (#383).
- *
- * Exhaustive by type: a new failure kind in `introspect.ts` is a type error
- * here rather than a silent fall back to the generic sentence.
+ * What the badge says about a failure, per kind: the store keeps the classified failure and the
+ * engine's own words, and this is the sentence that names the fix, so an expired token and an
+ * endpoint with introspection switched off (opposite actions) never read alike (#383). Exhaustive
+ * by type: a new failure kind in `introspect.ts` is a type error here rather than a silent fall
+ * back to the generic sentence.
  */
 export const FAILURE_HINT: Record<SchemaFailure["kind"], string> = {
 	auth: "Credentials were rejected. Check the request's auth, then refresh.",
@@ -58,10 +49,8 @@ export function schemaStatusTitle(entry: SchemaEntry | null, awaitingLoad = fals
 	const hint = FAILURE_HINT[failure?.kind ?? "unknown"];
 	const detail = failure?.message ? `${hint} ${failure.message}` : hint;
 	/*
-	 * A refresh that failed over a schema that loaded earlier is not "no
-	 * schema": the editors still complete against the last good one, so this
-	 * says how old it is and what went wrong rather than claiming there is
-	 * nothing.
+	 * A refresh that failed over a schema that loaded earlier is not "no schema": the editors still
+	 * complete against the last good one, so this says how old it is and what went wrong.
 	 */
 	if (entry?.schema) return age ? `${detail} ${age}` : detail;
 	return `${detail} Syntax checking only.`;

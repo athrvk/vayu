@@ -8,16 +8,15 @@
  */
 
 /**
- * @file core/run_export_markdown.hpp
  * @brief The run-report document as GitHub-flavoured Markdown (#2131).
  *
  * A pure function of the document `build_run_export_document` wrote: it never
- * reaches the database, so it can say nothing the document does not, and the
- * leak guarantees of the document (#2127) hold for it by construction. What
- * each section says is `run_export_view.hpp`; this renders it. The output is
- * plain GFM - no raw HTML, no images - and its size does not grow with the run:
- * the time series is never read, and a table fed by an open set (status codes,
- * error types, warnings) is capped.
+ * reaches the database, so it says nothing the document does not, and the
+ * document's leak guarantees (#2127) hold for it by construction. What each
+ * section says is `run_export_view.hpp`; this renders it. The output is plain
+ * GFM (no raw HTML, no images) and does not grow with the run: the time series
+ * is never read, and a table fed by an open set (status codes, error types,
+ * warnings) is capped.
  */
 
 #include <nlohmann/json.hpp>

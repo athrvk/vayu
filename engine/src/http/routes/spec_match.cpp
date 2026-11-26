@@ -6,39 +6,28 @@
  */
 
 /**
- * @file http/routes/spec_match.cpp
- * @brief `POST /specs/match` - which request of a collection is which operation
- *        of a document (issue #638's matcher, moved engine-side by #761).
+ * `POST /specs/match`: which request of a collection is which operation of a
+ * document (#638's matcher, engine-side per #761), what binding an existing
+ * collection must work out. The rule is `core/operation_match.hpp`; this route
+ * owns the two things a caller must not be trusted with:
  *
- * Binding a collection that already exists has to work out which of its
- * requests is which of the document's operations, and until #761 that lived in
- * the renderer - which put it out of reach of everything that is not the Spec
- * tab, MCP first among them. The rule itself is `core/operation_match.hpp`;
- * this is the one way to ask it, and it owns the two things a caller must not
- * be trusted with:
+ * - **Which requests are matched.** The named collection's whole subtree, never
+ *   a caller's list: an import files requests under one sub-collection per tag,
+ *   so "the collection's requests" would silently exclude almost all, and the
+ *   counts shown would be wrong rather than empty.
+ * - **What an operation index may be.** The `operations` sent go through
+ *   `validate_operations_index`, so a set the store would refuse is never
+ *   matched and reported on. They are sent here, unlike to `POST /specs` (which
+ *   reads them off the stored document, #853), because a bind preview matches a
+ *   document not yet stored; the optional `basePaths` come from the same
+ *   `POST /specs/describe` answer (#3030).
  *
- * - **Which requests are matched.** The whole subtree of the named collection,
- *   never a list the caller supplies. An OpenAPI import files its requests
- *   under one sub-collection per tag, so a bound root usually owns none
- *   directly - a caller passing "the collection's requests" would match against
- *   a set that silently excludes almost all of them, and the counts it then
- *   showed the user would be wrong rather than empty.
- * - **What an operation index may be.** The `operations` it is handed go
- *   through `validate_operations_index`, so a set the store would refuse cannot
- *   first be matched against and reported on. They are sent here, unlike on
- *   `POST /specs` - which reads them off the document it stores (issue #853) -
- *   because this route matches against a document that has not been stored yet,
- *   which is the whole point of a bind preview. The optional `basePaths` come
- *   from the same `POST /specs/describe` answer (#3030).
- *
- * It writes nothing and stores nothing: the caller sees the counts, and
- * `POST /specs/bind` (issue #862) performs the write. That split is deliberate
- * - the Spec tab shows this result *before* the user commits to it, so a route
- * that stored the document to answer would store one for every document merely
- * looked at. The bind matches again rather than being handed this answer, over
- * the same walk and the same `core::match_operations`, because between a
- * preview and a commit a request may have moved; what the two share is the
- * rule, not a result the caller carried between them.
+ * It writes nothing: the caller sees the counts and `POST /specs/bind` (#862)
+ * writes. The Spec tab shows this before the user commits, so storing the
+ * document to answer would store one for every document merely looked at. The
+ * bind matches again, over the same walk and `core::match_operations`, as a
+ * request may move between preview and commit: the two share the rule, not a
+ * result.
  */
 
 #include "vayu/core/operation_match.hpp"

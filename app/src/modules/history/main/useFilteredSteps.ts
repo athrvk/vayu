@@ -6,60 +6,47 @@
  */
 
 /**
- * The window of step rows a filter matches, kept across a live run's commits
- * (issues #1205, #1297).
+ * The window of step rows a filter matches, kept across a live run's commits (#1205, #1297).
  *
- * A scenario run's list grows for the length of the run and every batch hands
- * the view a new array (immutability, which zustand's change detection depends
- * on). Filtering that array per commit therefore ran the predicate over every
- * row the run had produced, every flush - and the predicate is the expensive
- * kind: a search lowercases each step's name, allocating a string per row per
- * flush. #1205 removed that pass by keeping the rows already matched and
- * testing the batch alone. What it left was the *copy*: those kept rows were
- * rebuilt as one array on every commit whose batch matched something, so a
- * flush still cost one pointer per row that had ever matched.
+ * A scenario run's list grows for the length of the run, and every batch hands the view a new array
+ * (immutability, which zustand's change detection depends on). Filtering it per commit runs the
+ * predicate over every row the run has produced, every flush, and the predicate is expensive (a
+ * search lowercases each name, a string per row per flush). Keeping the rows already matched and
+ * testing the batch alone (#1205) removes that pass, but rebuilding those kept rows as one array
+ * per matching commit still costs a pointer per row ever matched.
  *
- * A reader is never shown all of them. The list renders a growing window - 200
- * rows, more as the end scrolls into view - so what a flush has to produce is
- * bounded by that window, and only the *total* has to know about the rest.
- * This hook keeps the two separately:
+ * A reader is never shown them all: the list renders a growing window (200 rows, more as the end
+ * scrolls into view), so a flush need only produce that window, and only the *total* has to know
+ * the rest. This hook keeps the two apart:
  *
- * - **A count, maintained incrementally.** One pass over the rows that arrived
- *   since the last one, added to what was counted before. O(batch), and it
- *   allocates nothing: the count is what the "showing X of Y" line states and
- *   what the window is sized against.
- * - **A window, produced as far as it is needed.** The first `visible` matches
- *   never change once found, because a live list only appends after them. So
- *   the source index the window was produced through is remembered, and the
- *   scan resumes from it when the sentinel grows `visible`. Once the window is
- *   full the pass is skipped outright and the array is handed back by identity:
- *   a flush under an active filter then copies nothing at all.
+ * - **A count, maintained incrementally.** One pass over the rows since the last one, added to the
+ *   earlier count: O(batch), no allocation. It is what "showing X of Y" states and what the window
+ *   is sized against.
+ * - **A window, produced as far as needed.** The first `visible` matches never change once found,
+ *   as a live list only appends after them, so the source index the window was produced through is
+ *   remembered and the scan resumes there when the sentinel grows `visible`. Once the window is
+ *   full the pass is skipped and the array handed back by identity: a flush under an active filter
+ *   copies nothing.
  *
- * **Why this hook owns the growing window.** `visible` comes from
- * {@link useGrowingWindow}, whose total is the count this hook maintains, and
- * the window pass needs `visible` to know when to stop - so the two are one
- * ordering, not two. Kept apart they would be two caches over the same rows
- * with the same three invalidation axes (the filter, the list identity, a
- * replay) to keep in step, and nothing to fail loudly if they drifted. One
- * cache holds both, invalidated once.
+ * **Why this hook owns the growing window.** `visible` comes from {@link useGrowingWindow}, whose
+ * total is this hook's count, and the window pass needs `visible` to know when to stop: one
+ * ordering. Apart they would be two caches over the same rows with the same three invalidation axes
+ * (the filter, the list identity, a replay) to keep in step, and nothing to fail loudly on drift.
+ * One cache holds both, invalidated once.
  *
- * **What tells it the list only grew.** `appendKey` identifies *which* list
- * this is - the store's `appendEpoch` for the live rows, the array itself for
- * the stored ones - the same shape as `useGrowingWindow`'s `resetKey`, and for
- * the same reason. It moves whenever anything but an append happened, so a
- * replay that replaced a row, a run that restarted, or the changeover to stored
- * rows starts the matching over. The epoch is monotone, so two commits
- * coalesced into one render are still either "both appended" (what was found
- * still holds) or "the number moved" (start over). Nothing compares rows to
- * decide, which is the scan this exists to avoid.
+ * **What tells it the list only grew.** `appendKey` identifies *which* list this is (the store's
+ * `appendEpoch` for live rows, the array itself for stored ones), shaped like `useGrowingWindow`'s
+ * `resetKey` for the same reason. It moves whenever anything but an append happened, so a replay
+ * that replaced a row, a restarted run or the changeover to stored rows starts the matching over.
+ * The epoch is monotone, so two commits coalesced into one render are still "both appended" (what
+ * was found holds) or "the number moved" (start over). Nothing compares rows to decide, which is
+ * the scan this avoids.
  *
- * **What a commit still costs.** One predicate pass over the batch, always.
- * Plus, while the window is not yet full, a second pass over that same batch -
- * the count runs to the end of the list and the window pass follows it - which
- * stops for good once the first `visible` matches have been found, and resumes
- * only for the rows a grown `visible` still lacks. Nothing is rescanned twice
- * over a run's lifetime beyond that; the steady state of a long run streaming
- * past a filled window is one pass over the batch and no allocation.
+ * **What a commit still costs.** One predicate pass over the batch, always; while the window is not
+ * full, a second pass over the same batch (the count runs to the end, the window pass follows),
+ * which stops once the first `visible` matches are found and resumes only for rows a grown
+ * `visible` still lacks. The steady state of a long run streaming past a filled window is one pass
+ * over the batch and no allocation.
  */
 
 import { useState } from "react";
@@ -78,12 +65,10 @@ export interface FilteredStepWindow {
 	/** How many rows matched - the total the "showing X of Y" line states. */
 	total: number;
 	/**
-	 * The matching rows to render: the first `visible` of them, in plan order.
-	 *
-	 * Held across commits, so the reference is stable while the window is full
-	 * and the list only grows - that identity is the copy this hook exists to
-	 * avoid, and the cost tests assert it. Never mutated in place: a longer
-	 * window is a new array, so what a caller holds cannot change under it.
+	 * The matching rows to render: the first `visible`, in plan order. Held across commits, so the
+	 * reference is stable while the window is full and the list only grows (that identity is the
+	 * copy this hook avoids, and the cost tests assert it). Never mutated in place: a longer window
+	 * is a new array, so what a caller holds cannot change under it.
 	 */
 	rows: readonly ScenarioStepRow[];
 	/** Attach to an element at the end of the rendered list. */
@@ -115,12 +100,9 @@ interface MatchedRows extends ProducedWindow {
 }
 
 /**
- * How many of `steps[from..]` the predicate matches, added to what was counted
- * before.
- *
- * Allocation-free by construction, which is the point: this is the pass that
- * has to run to the end of the list every flush, because the total is what the
- * window is sized against and what the "showing X of Y" line states.
+ * How many of `steps[from..]` the predicate matches, added to the earlier count. Allocation-free by
+ * construction, which is the point: this pass runs to the end of the list every flush, as the total
+ * sizes the window and is what "showing X of Y" states.
  */
 function countMatches(
 	steps: readonly ScenarioStepRow[],
@@ -136,15 +118,11 @@ function countMatches(
 }
 
 /**
- * `held` extended to `wanted` rows, resuming at the source index it was last
- * produced through.
- *
- * Returns `held` itself once the window is full or the list holds nothing more:
- * that identity is what makes a flush past a filled window free, and it is what
- * the cost tests assert. The copy is made only once a row is actually found, so
- * a batch that matched nothing leaves the array alone rather than duplicating
- * it. Nothing already in `held.rows` is touched - a longer window is a new
- * array, so what a caller is holding cannot change under it.
+ * `held` extended to `wanted` rows, resuming at the source index it was last produced through.
+ * Returns `held` itself once the window is full or the list holds nothing more: that identity makes
+ * a flush past a filled window free, and the cost tests assert it. The copy is made only once a row
+ * is found, so a batch matching nothing leaves the array alone; nothing in `held.rows` is touched,
+ * as a longer window is a new array.
  */
 function growWindow(
 	steps: readonly ScenarioStepRow[],
@@ -176,11 +154,10 @@ export function useFilteredSteps(
 	 */
 	appendKey: unknown,
 	/**
-	 * Which list this is, for the window's own reset. Deliberately *not*
-	 * `appendKey`: a replay moves that, and a window that snapped back to the top
-	 * on a reconnect would throw away a reader's scroll for a row they cannot
-	 * see. The filter is added to it here, because a narrowed list is a new list
-	 * and starts at its own top.
+	 * Which list this is, for the window's own reset. Deliberately *not* `appendKey`: a replay
+	 * moves that, and a window snapping to the top on a reconnect would throw away a reader's
+	 * scroll for a row they cannot see. The filter is added to it here, as a narrowed list is a new
+	 * list and starts at its own top.
 	 */
 	listKey: string,
 	step: number = GROWING_WINDOW_STEP
@@ -188,14 +165,11 @@ export function useFilteredSteps(
 	const [matched, setMatched] = useState<MatchedRows | null>(null);
 
 	/*
-	 * Nothing narrows: there is no predicate to run and nothing to keep. What
-	 * was kept is dropped, which matters - a filter cleared and pressed again
-	 * must not extend rows gathered under the old one.
-	 *
-	 * This cannot return early, the shape the pre-window version of this hook
-	 * used: `useGrowingWindow` is called below, and a hook behind a branch is a
-	 * hook whose state moves. So the unnarrowed case walks the same path with no
-	 * matcher, and every branch reads `match === null` as "the list itself".
+	 * Nothing narrows: no predicate to run and nothing to keep. What was kept is dropped, so a
+	 * filter cleared and pressed again cannot extend rows gathered under the old one. No early
+	 * return: `useGrowingWindow` is called below, and a hook behind a branch is a hook whose state
+	 * moves, so the unnarrowed case walks the same path with no matcher, and every branch reads
+	 * `match === null` as "the list itself".
 	 */
 	const match = narrowsSteps(filter) ? stepMatcher(filter) : null;
 
@@ -209,11 +183,9 @@ export function useFilteredSteps(
 		matched.scanned <= steps.length;
 
 	/*
-	 * The query is compared as typed rather than trimmed: two queries that
-	 * differ only in whitespace match the same rows, so starting over for one is
-	 * work that was not needed - but it is one keystroke's worth, and the
-	 * alternative is this file holding its own opinion about what the predicate
-	 * ignores. `narrowsSteps` is where that opinion lives.
+	 * The query is compared as typed, not trimmed: queries differing only in whitespace match the
+	 * same rows, so starting over for one is needless, but it is one keystroke's work, against this
+	 * file holding its own opinion of what the predicate ignores (`narrowsSteps` holds that).
 	 */
 	const held = usable ? matched : null;
 
@@ -245,11 +217,10 @@ export function useFilteredSteps(
 				);
 
 	/*
-	 * Adjusted during render rather than in an effect - the shape
-	 * `useGrowingWindow` uses and React documents: the component re-renders
-	 * immediately with what it just derived instead of painting a stale list and
-	 * correcting it. It settles in one extra pass, because the second finds the
-	 * whole list counted and the window already as long as it asked for.
+	 * Adjusted during render, not in an effect (the shape `useGrowingWindow` uses and React
+	 * documents): the component re-renders at once with what it derived rather than painting a
+	 * stale list and correcting it. It settles in one extra pass, as the second finds the whole
+	 * list counted and the window as long as it asked for.
 	 */
 	if (match === null) {
 		if (matched !== null) setMatched(null);
@@ -265,21 +236,18 @@ export function useFilteredSteps(
 	}
 
 	/*
-	 * Longer than the window only when `visible` was reset under rows that stay
-	 * valid, which takes `listKey` moving while the filter and `appendKey` hold
-	 * still - the window's key carries the filter, so every other reset comes
-	 * with a cache this cannot reuse anyway. `HistoryDetail` keys
-	 * `ScenarioRunView` on the run, so its one caller no longer reaches this;
-	 * it stays because `listKey` is a parameter, and a caller that moved it
-	 * without remounting would otherwise show a window longer than it asked for
-	 * (two idle lists with no stored rows share an `appendKey`: `0`, and the one
-	 * `EMPTY_STEPS`).
+	 * Longer than the window only when `visible` was reset under rows that stay valid, which takes
+	 * `listKey` moving while the filter and `appendKey` hold still (the window's key carries the
+	 * filter, so every other reset comes with a cache this cannot reuse). `HistoryDetail` keys
+	 * `ScenarioRunView` on the run, so its one caller never reaches this; it stays because
+	 * `listKey` is a parameter, and a caller moving it without remounting would otherwise show a
+	 * longer window than it asked for (two idle lists with no stored rows share an `appendKey`:
+	 * `0`, and the one `EMPTY_STEPS`).
 	 *
-	 * What was found stays found - the cache keeps it, and a sentinel that grows
-	 * `visible` again asks for none of it twice - while the view is handed the
-	 * window it asked for, so the rows on screen and the "showing X of Y" line
-	 * beside them cannot disagree. The re-slice per render that costs is bounded
-	 * by `visible` and lasts until the window grows back past what is held.
+	 * What was found stays found (the cache keeps it, and a sentinel growing `visible` again asks
+	 * for none of it twice) while the view gets the window it asked for, so the rows on screen and
+	 * "showing X of Y" beside them cannot disagree. The re-slice per render is bounded by `visible`
+	 * and lasts until the window grows back past what is held.
 	 */
 	return {
 		total,

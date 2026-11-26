@@ -6,22 +6,19 @@
  */
 
 /**
- * @file client-sessions.ts
  * @brief Which MCP client sent a request, for the stateless HTTP host (#1817).
  *
- * The host builds a fresh server per POST, so the server that answers
- * `initialize` is gone before the client's first `tools/call` arrives, and the
- * SDK's `getClientVersion()` is empty on every request that can start a run.
- * The host hands out an `Mcp-Session-Id` on the `initialize` response instead
- * (a client must echo it on every later request) and records the handshake's
- * `clientInfo.name` here under it. Nothing else is kept per session: safety
- * config and the tool list stay rebuilt per request.
+ * The host builds a fresh server per POST, so the server that answers `initialize` is gone before
+ * the client's first `tools/call` arrives, and the SDK's `getClientVersion()` is empty on every
+ * request that can start a run. The host hands out an `Mcp-Session-Id` on the `initialize` response
+ * instead (a client must echo it on every later request) and records the handshake's
+ * `clientInfo.name` here under it. Nothing else is kept per session: safety config and the tool
+ * list stay rebuilt per request.
  *
- * Bounded both ways, because the ids are minted for whoever can reach the
- * port: a cap on the entry count, evicting the least recently seen, and an
- * idle expiry. An unknown, missing or expired id answers no name, which costs
- * the run its client label and nothing else - it is still recorded as an MCP
- * run.
+ * Bounded both ways, because the ids are minted for whoever can reach the port: a cap on the entry
+ * count, evicting the least recently seen, and an idle expiry. An unknown, missing or expired id
+ * answers no name, which costs the run its client label and nothing else: it is still recorded as
+ * an MCP run.
  */
 
 /**

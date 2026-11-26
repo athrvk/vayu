@@ -10,11 +10,9 @@ import { decodeResponseBody } from "@/modules/request-builder/utils/response-byt
 import type { InboxCannedResponse, InboxCapture } from "@/types";
 
 /**
- * The absolute URL a capture arrived at.
- *
- * The engine records the raw path and the raw query separately - that is what the
- * capture *is* - so the URL the viewer and the raw HTTP text need is rebuilt
- * here rather than stored twice.
+ * The absolute URL a capture arrived at. The engine records the raw path and the raw query
+ * separately (that is what the capture *is*), so the URL the viewer and the raw HTTP text need is
+ * rebuilt here rather than stored twice.
  */
 export function captureUrl(capture: InboxCapture, inboxUrl: string): string {
 	const base = inboxUrl.endsWith("/") ? inboxUrl.slice(0, -1) : inboxUrl;
@@ -22,12 +20,10 @@ export function captureUrl(capture: InboxCapture, inboxUrl: string): string {
 }
 
 /**
- * A React key that changes exactly when the served canned response does.
- *
- * `CannedResponseControls` holds every field as a draft, so it is re-seeded by
- * remount rather than by an effect - and that only works if the key covers all
- * four fields. It covered two, so a body or header set changed by an MCP tool
- * or a curl left the panel showing the values it was mounted with.
+ * A React key that changes exactly when the served canned response does: `CannedResponseControls`
+ * holds every field as a draft and is re-seeded by remount, which works only if the key covers all
+ * four fields; otherwise a body or header set changed by an MCP tool or a curl leaves the panel
+ * showing the values it was mounted with.
  */
 export function cannedResponseKey(inboxId: string, response: InboxCannedResponse): string {
 	const headers = Object.entries(response.headers)
@@ -37,13 +33,11 @@ export function cannedResponseKey(inboxId: string, response: InboxCannedResponse
 }
 
 /**
- * The exact bytes a base64 capture stored, or `null` for a body that is text or
- * whose base64 does not decode. Never throws: the capture is read in render,
- * and a body the engine mislabelled must leave the rest of the pane readable.
- *
- * No headers are passed on purpose. `decodeResponseBody` would otherwise read a
- * `text/*` type as a body to decode through a charset, and a capture whose bytes
- * the engine already found are not UTF-8 is shown as bytes whatever it claims.
+ * The exact bytes a base64 capture stored, or `null` for a body that is text or whose base64 does
+ * not decode. Never throws: the capture is read in render, and a body the engine mislabelled must
+ * leave the rest of the pane readable. No headers, on purpose: `decodeResponseBody` would read a
+ * `text/*` type as a body to decode through a charset, and a capture whose bytes the engine found
+ * are not UTF-8 is shown as bytes whatever it claims.
  */
 export function captureBinaryBytes(
 	capture: Pick<InboxCapture, "body" | "bodyEncoding">

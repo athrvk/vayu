@@ -15,7 +15,6 @@
 #include <cstdint>
 #include <exception>
 #include <expected>
-#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -104,7 +103,9 @@ template <typename Entry> class ListenerRegistry {
     public:
     using Entries = std::map<std::string, std::unique_ptr<Entry>>;
 
-    static constexpr std::size_t UNBOUNDED = std::numeric_limits<std::size_t>::max ();
+    // `SIZE_MAX`, not `numeric_limits::max ()`: see `core/constants.hpp` on
+    // `windows.h`'s `max` macro.
+    static constexpr std::size_t UNBOUNDED = SIZE_MAX;
 
     /**
      * One start's slot, held from `reserve` to `commit`. Destroyed without a

@@ -25,17 +25,15 @@ export function createImportApi(): ImportApi {
 }
 
 /**
- * Bind the picked file to every root the import bound a spec to (#2765).
- *
- * After the apply, not inside it: `POST /import/apply` refuses a file binding,
- * because an import describes a document from elsewhere, and the collection has
- * no id until the engine answers with the temp-id map. Called only for a
- * file-picked import - a URL-sourced spec records its origin portably, in
+ * Bind the picked file to every root the import bound a spec to (#2765). After the apply, not
+ * inside it: `POST /import/apply` refuses a file binding, because an import describes a document
+ * from elsewhere, and the collection has no id until the engine answers with the temp-id map. Only
+ * for a file-picked import: a URL-sourced spec records its origin portably, in
  * `spec_documents.source_url`.
  *
- * A write that fails is logged and the import still reports what it committed:
- * the tree landed, and failing the mutation would invite an import of it all
- * again. The Spec tab's check then says the binding has no file to re-read.
+ * A write that fails is logged and the import still reports what it committed: the tree landed, and
+ * failing the mutation would invite an import of it all again. The Spec tab's check then says the
+ * binding has no file to re-read.
  */
 async function bindSpecFiles(
 	result: ImportResult,
@@ -86,12 +84,11 @@ function realIds(
 export function useImportMutation() {
 	const queryClient = useQueryClient();
 	return useMutation({
-		// `POST /import/apply` is create-only, atomic and carries no idempotency key -
-		// the engine mints fresh ids per temp id on every call - so a second attempt
-		// is a second full copy of the tree, not a resumed write. The shared
-		// QueryClient defaults mutations to `retry: 1`, and TanStack re-invokes
-		// `mutationFn` whole, so a *lost response* (commit succeeded, the 30s fetch
-		// timeout fired) would duplicate everything and then report one clean import.
+		// `POST /import/apply` is create-only, atomic and carries no idempotency key (the engine
+		// mints fresh ids per temp id on every call), so a second attempt is a second full copy of
+		// the tree, not a resumed write. The shared QueryClient defaults mutations to `retry: 1`,
+		// and TanStack re-invokes `mutationFn` whole, so a lost response (commit succeeded, the 30s
+		// fetch timeout fired) would duplicate everything and then report one clean import.
 		// Retrying safely needs an engine-side idempotency key; until then, never.
 		retry: false,
 		mutationFn: async ({
@@ -102,10 +99,9 @@ export function useImportMutation() {
 			result: ImportResult;
 			opts: ImportApplyOptions;
 			/**
-			 * Where the imported document sits on this machine, when it was picked
-			 * as a file. Ignored unless the tree actually carries a spec - every
-			 * other format is a file too, and binding its path would claim a spec
-			 * file that does not exist.
+			 * Where the imported document sits on this machine, when it was picked as a file.
+			 * Ignored unless the tree carries a spec: every other format is a file too, and binding
+			 * its path would claim a spec file that does not exist.
 			 */
 			specFile?: SpecFileLocation;
 		}): Promise<ImportApplied> => {
@@ -118,11 +114,10 @@ export function useImportMutation() {
 				environmentIds: realIds(withTempIds.environments, idMap),
 			};
 		},
-		// Settled, not success: `run()` can throw *after* the tree is committed (the
-		// id-map completeness check, or the globals write behind it), and with
-		// `refetchOnWindowFocus: false` an uninvalidated sidebar hides a persisted
-		// import until a manual reload. Invalidating after a failure that committed
-		// nothing only costs a refetch.
+		// Settled, not success: `run()` can throw after the tree is committed (the id-map
+		// completeness check, or the globals write behind it), and with
+		// `refetchOnWindowFocus: false` an uninvalidated sidebar hides a persisted import until a
+		// manual reload. Invalidating after a failure that committed nothing costs only a refetch.
 		onSettled: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 			queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });

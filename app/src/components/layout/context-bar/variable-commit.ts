@@ -6,19 +6,13 @@
  */
 
 /**
- * Where a context-bar variable edit lands, and what it carries when it gets
- * there.
+ * Where a context-bar variable edit lands, and what it carries when it gets there. Shared by both
+ * variables sections, which show different sets (the request tab what resolved, the collection tab
+ * what that collection defines) while a commit is the same act either way; the defects the comments
+ * below describe took a while to find, and a second copy would not receive their fixes.
  *
- * This was `VariablesSection`'s own code until the collection tab grew a
- * variables section of its own. The two show different sets - the request tab
- * shows what resolved, the collection tab shows what that collection defines -
- * but a commit is the same act either way, and the comments below describe
- * defects that took a while to find. A second copy of them is exactly the
- * "hand-rolled copy does not receive the primitive's fixes" trap.
- *
- * The caller supplies the `ResolvedVariable` whose definition it displayed;
- * nothing here re-derives a target. That is the whole point - see the note on
- * `commitScopeFor`.
+ * The caller supplies the `ResolvedVariable` whose definition it displayed; nothing here re-derives
+ * a target, which is the whole point (see `commitScopeFor`).
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -38,15 +32,11 @@ import { variableTargetOf } from "@/lib/variable-target";
 import type { Collection, Environment, GlobalVariables, ResolvedVariable } from "@/types";
 
 /**
- * Where one scope's variables live and how a commit gets written back.
- *
- * The three scopes differ only in those two things, so they are named once
- * rather than spelled out three times. `read` deliberately goes to the query
- * cache rather than to a hook's `data`: a commit built from the render closure
- * is a snapshot of the cache as it was when the input was drawn, and the
- * transport replaces the whole map - so blurring a second variable before the
- * first mutation settled re-sent the first one's pre-edit value and silently
- * reverted it.
+ * Where one scope's variables live and how a commit is written back, the only two ways the three
+ * scopes differ, so they are named once. `read` goes to the query cache, not a hook's `data`: a
+ * commit built from the render closure is a snapshot of the cache when the input was drawn, and the
+ * transport replaces the whole map, so blurring a second variable before the first mutation settles
+ * would re-send the first one's pre-edit value and silently revert it.
  */
 interface CommitScope {
 	/** The stored map as of now, not as of the render that drew the input. */
@@ -54,22 +44,19 @@ interface CommitScope {
 	/** Patch the cache so a later commit's `read` already sees this one. */
 	write: (next: VariableMap) => void;
 	/**
-	 * Send the map to the engine. The mutation's own promise, never `mutate`'s
-	 * per-call callbacks: an observer holds one set of those, replaced by the
-	 * next `mutate` and never called once its host unmounts (query-core's
-	 * `MutationObserver`), so a commit whose callbacks were dropped never
-	 * settled and the Dock said "Saving…" until restart.
+	 * Send the map to the engine. The mutation's own promise, never `mutate`'s per-call callbacks:
+	 * an observer holds one set of those, replaced by the next `mutate` and never called once its
+	 * host unmounts (query-core's `MutationObserver`), and a commit whose callbacks were dropped
+	 * never settles, leaving the Dock on "Saving…" until restart.
 	 */
 	mutate: (next: VariableMap) => Promise<unknown>;
 }
 
 /**
- * The bar's single entry in the save-context registry.
- *
- * One id for the whole bar, not one per section: the registry gives a tab at
- * most one variables section (the request tab's resolved set, or the collection
- * tab's own definitions), so two of them are never mounted at once, and the
- * quit-time flush has one thing to wait for either way.
+ * The bar's single entry in the save-context registry. One id for the whole bar, not one per
+ * section: the registry gives a tab at most one variables section (the request tab's resolved set,
+ * or the collection tab's own definitions), so two are never mounted at once, and the quit-time
+ * flush has one thing to wait for either way.
  */
 const SAVE_CONTEXT_ID = "context-bar-variables";
 
@@ -85,23 +72,19 @@ function verdictOf(outcomes: SaveOutcome[]): SaveOutcome {
 }
 
 /**
- * Track in-flight commits so the quit-time flush waits for them.
+ * Track in-flight commits so the quit-time flush waits for them. `onBeforeQuit` awaits `flushAll`
+ * (`App.tsx`), which knows only *registered* save contexts, so without one the renderer could be
+ * torn down mid-PUT with the input already showing the value as committed. One context covers the
+ * whole bar: `hasPendingChanges` says whether any commit is outstanding, and `save()` resolves with
+ * their verdict when the last one settles.
  *
- * `onBeforeQuit` awaits `flushAll` (`App.tsx`), which only knows about
- * *registered* save contexts - the bar registered none, so the renderer could be
- * torn down mid-PUT with the input already showing the value as committed. One
- * context covers the whole bar: `hasPendingChanges` says whether any commit is
- * outstanding, and `save()` resolves with their verdict when the last one
- * settles.
+ * The Dock shows "Saving…" under the bar's id while any commit is out. A failed commit rolls its
+ * input back, so it leaves no unsaved edit: its batch withdraws the report instead of reporting it
+ * saved, and the failure is the caller's toast, never "Not saved" (`save-store.ts`).
  *
- * The Dock shows "Saving…" under the bar's id while any commit is out. A failed
- * commit rolls its input back, so it leaves no unsaved edit: the batch it was
- * in withdraws the report instead of reporting it saved, and the failure is the
- * caller's toast, never "Not saved" (`save-store.ts`).
- *
- * Returns a function that opens a commit and hands back its `settle` callback,
- * for when the mutation's promise settles. Commits are held as promises rather
- * than counted so `save()` can await the requests themselves.
+ * Returns a function that opens a commit and hands back its `settle` callback, for when the
+ * mutation's promise settles. Commits are held as promises rather than counted, so `save()` can
+ * await the requests themselves.
  */
 function usePendingCommits(): () => (outcome: SaveOutcome) => void {
 	const registerContext = useSaveStore((s) => s.registerContext);
@@ -149,17 +132,13 @@ function usePendingCommits(): () => (outcome: SaveOutcome) => void {
 }
 
 /**
- * Commit an edited value back to the definition the bar displayed.
- *
- * The returned function takes the input element, not the string, because every
- * failure below has to put the old value back on screen. These inputs are
- * uncontrolled - `defaultValue` with a `key` derived from the stored value - so
- * a rejected save changes nothing: the cache is untouched, therefore the key is
- * untouched, therefore React keeps the DOM node and the typed text sits there
- * looking committed. Failures used to end here entirely (no `onError`, no
- * `isError` reader, and there is no global `MutationCache.onError` either),
- * which is the same defect `CollectionDetail/shared.tsx` documents for the
- * collection tabs.
+ * Commit an edited value back to the definition the bar displayed. The returned function takes the
+ * input element, not the string, because every failure below puts the old value back on screen:
+ * these inputs are uncontrolled (`defaultValue` with a `key` derived from the stored value), so a
+ * rejected save changes nothing, the cache and so the key are untouched, and React keeps the DOM
+ * node with the typed text looking committed. Nothing else catches the failure (no global
+ * `MutationCache.onError`), the defect `CollectionDetail/shared.tsx` documents for the collection
+ * tabs.
  */
 export function useVariableCommit(): (
 	name: string,
@@ -174,18 +153,14 @@ export function useVariableCommit(): (
 	const beginCommit = usePendingCommits();
 
 	/**
-	 * The scope that owns the definition the bar *displayed*, or null if that
-	 * source is gone.
-	 *
-	 * Keyed off `resolved.sourceId`, which the resolver emits precisely to name
-	 * the winning source (`useVariableResolver`, `ResolvedVariable`). The bar used
-	 * to re-derive the target instead - walking the collection chain for the first
-	 * definition with a truthy `enabled` - which disagrees with the resolver's
-	 * `isEnabledDefinition` wherever `enabled` is absent (D17: absent counts as
-	 * enabled). A leaf definition with no `enabled` key therefore displayed while
-	 * an *ancestor's* definition took the write, silently and cross-collection.
-	 * Re-deriving a winner someone else already picked is the whole bug; there is
-	 * no version of that walk that cannot drift from the resolver again.
+	 * The scope that owns the definition the bar *displayed*, or null if that source is gone. Keyed
+	 * off `resolved.sourceId`, which the resolver emits precisely to name the winning source
+	 * (`useVariableResolver`, `ResolvedVariable`). Re-deriving the target, by walking the
+	 * collection chain for the first definition with a truthy `enabled`, disagrees with the
+	 * resolver's `isEnabledDefinition` wherever `enabled` is absent (D17: absent counts as
+	 * enabled): a leaf definition with no `enabled` key displays while an *ancestor's* takes the
+	 * write, silently and cross-collection. No re-derivation of a winner someone else picked can be
+	 * kept from drifting.
 	 */
 	const commitScopeFor = (resolved: ResolvedVariable): CommitScope | null => {
 		const target = variableTargetOf(resolved);
@@ -272,10 +247,9 @@ export function useVariableCommit(): (
 		scope.mutate(next).then(
 			() => settle("saved"),
 			(error: unknown) => {
-				// Restore this name alone rather than the whole snapshot: another
-				// variable's commit may have patched the map in the meantime, and
-				// replacing it wholesale would revert that one too - the very
-				// staleness the fresh read exists to avoid.
+				// Restore this name alone, not the whole snapshot: another variable's commit may
+				// have patched the map meanwhile, and replacing it wholesale would revert that one
+				// too, the staleness the fresh read exists to avoid.
 				const current = scope.read();
 				if (current) scope.write(mergeVariableChanges(current, { [name]: previous }));
 				const fallback = `Couldn't save {{${name}}}`;

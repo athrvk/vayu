@@ -6,15 +6,11 @@
  */
 
 /**
- * The level an assertion or a console line came from (issue #2522): a request
- * runs the scripts of every collection and folder it inherits, and the list
- * would otherwise read as if the request alone had written all of it.
- *
- * Neutral text, never a status tint - in the Tests list colour is the verdict,
- * and in the Console it is the `console.*` method. The request's own level
- * needs no tag, and neither does an absent scope (a trace stored before the
- * field) or a value a newer engine might add: an unlabelled row is better than
- * a wrong label.
+ * The level an assertion or console line came from (#2522): a request runs the scripts of every
+ * collection it inherits, and the list would otherwise read as the request's alone. Neutral text,
+ * never a status tint: in Tests colour is the verdict, in Console the `console.*` method. No tag
+ * for the request's own level, an absent scope (an older trace), or a value a newer engine adds: no
+ * label beats a wrong one.
  */
 
 import { cn } from "@/lib/utils";

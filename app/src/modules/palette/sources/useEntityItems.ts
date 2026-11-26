@@ -6,18 +6,13 @@
  */
 
 /**
- * Saved requests and collections, as palette results.
+ * Saved requests and collections, as palette results: a request four folders deep is otherwise the
+ * collections drawer and several clicks away.
  *
- * The point of the whole feature: reaching a request today means opening the
- * collections drawer and expanding a tree, and a request four folders deep is
- * several clicks from anywhere.
- *
- * Both kinds open through the same `openTab` calls the tree uses (see
- * `useTreeCrud`'s `navigateToRequest` / `navigateToCollection`), so a request
- * opened from here is indistinguishable from one opened from the sidebar.
- *
- * Reads come straight from the cache `usePrefetchCollectionsAndRequests` warms
- * at startup, so opening the palette fetches nothing.
+ * Both open through the `openTab` calls the tree uses (`useTreeCrud`'s `navigateToRequest` /
+ * `navigateToCollection`), so a request opened here is indistinguishable from one opened from the
+ * sidebar. Reads come from the cache `usePrefetchCollectionsAndRequests` warms at startup, so
+ * opening the palette fetches nothing.
  */
 
 import { useMemo } from "react";
@@ -54,15 +49,11 @@ export function useEntityItems(): PaletteItem[] {
 	const lastSent = useMemo(() => lastSentByRequest(flattenRunPages(runsData)), [runsData]);
 	const byId = useMemo(() => new Map(collections.map((c) => [c.id, c])), [collections]);
 
-	// The palette re-renders on every keystroke (it is filtering as the user
-	// types), and this build was unmemoized - every collection, every request in
-	// it, and a `collectionPath` walk per collection, redone on every one of
-	// those renders for no reason the keystroke gave it (issue #1716).
-	// `useRunItems`, `useSettingsItems` and `useVariableItems` all memoise
-	// theirs; this is the one that did not. Keyed on the five values the loop
-	// actually reads - a query result the loop does not consume (`runsData`
-	// itself, already folded into `lastSent`) staying out of the deps is what
-	// keeps this from re-running on the query's own unrelated refetches.
+	// The palette re-renders on every keystroke, so this build (every collection, every request in
+	// it, a `collectionPath` walk per collection) is memoised, as `useRunItems`, `useSettingsItems`
+	// and `useVariableItems` are (#1716). Keyed on the five values the loop reads: `runsData` stays
+	// out of the deps (it is folded into `lastSent`), so the query's unrelated refetches do not
+	// re-run it.
 	return useMemo(() => {
 		const result: PaletteItem[] = [];
 
@@ -88,15 +79,11 @@ export function useEntityItems(): PaletteItem[] {
 					// its URL path rather than "New Request" (#3323).
 					title: requestTabTitle(request.name, request.url),
 					subtitle: path,
-					// The URL finds a request whose name says nothing about it - and
-					// it is a keyword rather than the subtitle because the collection
-					// is what the eye needs to tell two "Get user"s apart.
-					//
-					// It is matched literally rather than fuzzily: a path is character
-					// soup to a subsequence scorer, and this one line was the palette's
-					// noise generator - almost any five-letter query found its letters
-					// scattered through some URL, and that request then outranked the
-					// setting the user was actually looking for.
+					// The URL finds a request whose name says nothing about it; a keyword, not the
+					// subtitle, because the collection is what tells two "Get user"s apart. Matched
+					// literally, not fuzzily: a path is character soup to a subsequence scorer, and
+					// fuzzily almost any five-letter query found its letters scattered through some
+					// URL and outranked the setting the user wanted.
 					keywords: [request.method],
 					substringKeywords: [request.url],
 					method: request.method,

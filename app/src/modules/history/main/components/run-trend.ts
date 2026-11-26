@@ -13,13 +13,11 @@ import type { Run } from "@/types";
 export const RUN_TREND_LIMIT = 20;
 
 /**
- * The runs a trend is drawn from: load runs that finished and recorded a
- * summary. A stopped run stays, flagged `stopped` - it is the run the user
- * judged enough, and dropping it would hide the latest state of a request they
- * stop routinely - and so does a failed one. A run still executing has no
- * summary yet, so the summary is the filter.
- *
- * Reads only the list row's `resultSummary` (#2130): no report is fetched.
+ * The runs a trend is drawn from: load runs that finished and recorded a summary. A stopped run
+ * stays, flagged `stopped` (it is the run the user judged enough, and dropping it would hide the
+ * latest state of a request they stop routinely), as does a failed one. A run still executing has
+ * no summary yet, so the summary is the filter. Reads only the list row's `resultSummary` (#2130):
+ * no report is fetched.
  */
 export function buildRunTrend(
 	runs: readonly Run[],

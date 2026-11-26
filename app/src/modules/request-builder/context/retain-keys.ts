@@ -6,15 +6,10 @@
  */
 
 /**
- * The open-tab sweep's answer for a per-request map held as state (issue
- * #1271).
- *
- * `rowIndexByRequest` is `useState` because `lastRowIndex` is read during
- * render, so its sweep is a `setState` - and a `setState` that returns a new
- * object every time a tab is focused would charge the request the user is
- * working in for a map that did not change. Hence the identity guard:
- * `previous` itself when every key is still live, which React compares with
- * `Object.is` and bails out on.
+ * The open-tab sweep for a per-request map held as state (#1271). `rowIndexByRequest` is `useState`
+ * since `lastRowIndex` is read during render, so its sweep is a `setState`, and a new object on
+ * every tab focus would re-render the working request for an unchanged map. Hence the identity
+ * guard: `previous` itself when every key is live, which React's `Object.is` bails out on.
  */
 export function retainKeys<T>(
 	previous: Record<string, T>,

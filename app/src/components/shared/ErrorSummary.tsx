@@ -6,27 +6,17 @@
  */
 
 /**
- * A run's error card: the total and its rate, the HTTP-error / no-response
- * split (issue #2124), then the engine's two breakdowns - by transport error
- * type and by status code.
- *
- * Drawn by the history Overview, which the dashboard also shows for a finished
- * run (#2220). It was shared out because the dashboard's own report once kept
- * a copy that had drifted: it printed the bare total and the raw type keys and
- * omitted By status code, which left a run whose errors were all HTTP 500
- * showing an empty list under a non-zero total.
- *
- * Absent for a run with no errors. `onSelectStatus` / `onSelectErrorType` turn
- * the By status code / By error type rows into buttons that report their key;
- * without them the rows are plain text. `hasSamples` disables a row the run kept
- * no example of (#2213).
- *
- * By error type can cover fewer errors than the total (#2400): a run stored
- * before the engine kept exact per-type counts breaks down only the errors its
- * store kept. `sampling.errorsDropped` says how many were not kept, and the
- * note under the rows says so. It is silent for a run whose types account for
- * every no-response request, whatever `errorsDropped` reads, because the
- * breakdown is exact there.
+ * A run's error card: the total and its rate, the HTTP-error / no-response split (#2124), then the
+ * engine's breakdowns by transport error type and by status code. Drawn by the history Overview,
+ * which the dashboard also shows for a finished run (#2220); shared because the dashboard's own
+ * copy had drifted (bare total, raw type keys, no By status code, so an all-500 run listed nothing
+ * under a non-zero total). Absent for a run with no errors. `onSelectStatus` / `onSelectErrorType`
+ * make the rows buttons reporting their key, plain text without; `hasSamples` disables a row the
+ * run kept no example of (#2213). By error type can cover fewer errors than the total (#2400): a
+ * run stored before exact per-type counts breaks down only the errors its store kept, and
+ * `sampling.errorsDropped` says how many were not, in the note under the rows. Silent when the
+ * types account for every no-response request, whatever `errorsDropped` reads, as the breakdown is
+ * then exact.
  */
 
 import type { ReactNode } from "react";
@@ -39,14 +29,10 @@ import { formatErrorPercent, pickByCount } from "@/modules/dashboard/utils/forma
 import type { RunReport } from "@/types";
 
 /**
- * Display labels for `report.errors.types` keys (`error_type_name` in the
- * engine's `load_strategy.cpp`, one entry per `vayu::ErrorCode`).
- *
- * Not `errorType.replace(/_/g, " ")` through `capitalize`: that renders
- * protocol acronyms as "Ssl Error" / "Dns Failed" / "Invalid Url", losing
- * the casing SSL/DNS/URL carry everywhere else in the UI. A key this map
- * does not carry (a future `ErrorCode`) falls back to the same
- * underscore-to-space, sentence-cased rendering rather than the raw token.
+ * Labels for `report.errors.types` keys (`error_type_name` in the engine's `load_strategy.cpp`, one
+ * per `vayu::ErrorCode`), not `capitalize` over an underscore replace, which writes "Ssl Error",
+ * "Dns Failed", "Invalid Url". A key missing here (a future `ErrorCode`) falls back to that
+ * sentence-cased rendering, not the raw token.
  */
 const ERROR_TYPE_LABELS: Record<string, string> = {
 	timeout: "Timeout",
@@ -62,8 +48,8 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
 	bad_content_encoding: "Bad content encoding",
 	protocol_mismatch: "Protocol mismatch",
 	unsendable_file: "File can't be sent",
-	// An `mcp` body's failed reply under a success status (#3762). The fallback
-	// would spell them "Mcp transport", losing the acronym.
+	// An `mcp` body's failed reply under a success status (#3762); the fallback would write "Mcp
+	// transport".
 	mcp_transport: "MCP transport",
 	mcp_protocol: "MCP protocol",
 	mcp_tool: "MCP tool",
@@ -100,7 +86,7 @@ function CountRow({ label, count, mono, onSelect, unavailable }: CountRowProps) 
 	);
 	if (!onSelect) return <div className={ROW_CLASS}>{text}</div>;
 
-	// DisabledHint's wrapper is inline-flex; the row has to stay full width.
+	// DisabledHint's wrapper is inline-flex; the row must stay full width.
 	return (
 		<div className="[&>[data-slot=disabled-hint]]:flex [&>[data-slot=disabled-hint]]:w-full">
 			<DisabledHint reason={unavailable && NO_SAMPLE_REASON}>
@@ -129,8 +115,8 @@ function Breakdown({ title, children }: { title: string; children: ReactNode }) 
 }
 
 /**
- * Said under By error type when the rows cover only the errors the run stored.
- * `stored` is the count the breakdown does cover, `dropped` the errors past it.
+ * Said under By error type when the rows cover only the errors the run stored: `stored` is what the
+ * breakdown covers, `dropped` the errors past it.
  */
 function UntypedErrorsNote({ dropped, stored }: { dropped: number; stored: number }) {
 	const first = formatNumber(stored);
@@ -158,14 +144,13 @@ export interface ErrorSummaryProps {
 	onSelectStatus?: (code: string) => void;
 	onSelectErrorType?: (errorType: string) => void;
 	/**
-	 * Whether a row has anything to open. A row with a handler that it refuses is
-	 * drawn disabled; a row without a handler is plain text whatever it says.
-	 * Absent, every such row is open-able.
+	 * Whether a row has anything to open: a row with a handler it refuses is disabled; one without
+	 * a handler is plain text. Absent, every row opens.
 	 */
 	hasSamples?: (target: ErrorRowTarget) => boolean;
 	/**
-	 * The run's retention counts. `errorsDropped` is what By error type did not
-	 * see; absent (an older run) says nothing rather than "nothing was dropped".
+	 * The run's retention counts; `errorsDropped` is what By error type did not see, and absent (an
+	 * older run) says nothing rather than "nothing dropped".
 	 */
 	sampling?: RunReport["sampling"];
 }
@@ -185,8 +170,8 @@ export function ErrorSummary({
 	const types = Object.entries(errors.types ?? {});
 	const statusCodes = Object.entries(errors.byStatusCode ?? {});
 	const unavailable = (target: ErrorRowTarget) => hasSamples?.(target) === false;
-	// A run that counted every error by type has types adding up to its
-	// no-response requests, so dropped stored records cost the breakdown nothing.
+	// A run that counted every error by type has types summing to its no-response requests, so
+	// dropped stored records cost the breakdown nothing.
 	const typed = types.reduce((sum, [, count]) => sum + count, 0);
 	const droppedFromTypes = typed < noResponse ? (sampling?.errorsDropped ?? 0) : 0;
 

@@ -6,11 +6,8 @@
  */
 
 /**
- * Script Type Definitions Query
- *
- * Fetches the engine-generated `.d.ts` for the `pm.*` surface. Cached on the
- * same terms as the completion list beside it: both are derived from one table
- * that only changes when the engine binary does.
+ * The engine-generated `.d.ts` for the `pm.*` surface. Cached on the same terms as the completion
+ * list beside it: both derive from one table that changes only when the engine binary does.
  */
 
 import { useQuery } from "@tanstack/react-query";

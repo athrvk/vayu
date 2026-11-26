@@ -6,31 +6,19 @@
  */
 
 /**
- * Whether the responses a run checked matched the schemas its contract declares
- * (issues #682, #681).
+ * Whether the responses a run checked matched its contract's schemas (#682, #681): the other half
+ * of `ContractCoverage` beside it, which says what the run touched while this says whether the
+ * answers honoured it. Both use the document the run was *planned* with, and both are absent for a
+ * run not measured against one: unchecked responses did not pass a contract.
  *
- * The other half of the answer `ContractCoverage` beside it starts: coverage
- * says which of the contract the run touched, this says whether what came back
- * honoured it. Both are computed against the document the run was *planned*
- * with, and both are absent when the run was not measured against one - a run
- * whose responses were never checked did not pass a contract.
- *
- * **The one thing this component must never let a reader assume is a
- * denominator the run did not have.** Both run modes write the same block and
- * they are counted on different evidence: a load run defers validation to run
- * end over the bounded reservoir it stored, because the load loop refills
- * concurrency per completion, while a collection run checks every step as it
- * runs. `exact` is what separates them, and the sentence the block carries
- * follows it - the same distinction `docs/app/openapi.md`'s exact-vs-sampled
- * table draws. Absent means sampled, because that is what a report written
- * before the field was, and claiming exactness wrongly is the worse error.
- *
- * The file keeps its name from the load-mode block it was written for; the
- * component now serves both callers.
- *
- * Reasons come from `uncheckedReasonText`, the wording the response viewer
- * already shows for a single response. One copy: a second list of sentences
- * here would drift from the one a user reads on their own response.
+ * **Never let a reader assume a denominator the run did not have.** Both run modes write this block
+ * on different evidence: a load run validates at run end over its bounded reservoir, as the load
+ * loop refills concurrency per completion, while a collection run checks every step. `exact`
+ * separates them and the block's sentence follows it, the distinction `docs/app/openapi.md`'s
+ * exact-vs-sampled table draws. Absent means sampled, as a report older than the field was, and
+ * claiming exactness wrongly is the worse error. Reasons come from `uncheckedReasonText`, the
+ * response viewer's wording for one response, so the two cannot drift. The name is from the
+ * load-mode block it was written for; it serves both run modes.
  */
 
 import { AlertTriangle } from "lucide-react";
@@ -48,10 +36,8 @@ export interface SampledSchemaValidationProps {
 export function SampledSchemaValidation({ validation, className }: SampledSchemaValidationProps) {
 	if (!validation || validation.sampled <= 0) return null;
 
-	// A collection run checks every step, so its figures are the run. Default to
-	// the sampled reading when the field is absent: that is what a report from an
-	// engine older than this field was, and overclaiming exactness is the one
-	// mistake this whole block exists to prevent.
+	// A collection run checks every step, so its figures are the run. Absent reads as sampled: an
+	// older engine's report was, and overclaiming exactness is the mistake this block prevents.
 	const exact = validation.exact === true;
 
 	const unchecked = Object.entries(validation.uncheckedReasons ?? {}) as [
@@ -66,14 +52,11 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 			<CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
 				<CardTitle>Schema validation</CardTitle>
 				{/*
-				 * `Badge variant="chip"` for the reason `ContractCoverage` states at
-				 * its own: it is the variant that lets a caller own the background
-				 * without inheriting a `hover:bg-*` tailwind-merge will not replace.
-				 * Text on a tint, never the bare `--status-*` fill as a foreground.
-				 *
-				 * Red only for a real schema failure. A run that checked nothing is
-				 * not a run that broke its contract, so it stays neutral rather than
-				 * borrowing the vocabulary of a failed budget.
+				 * `Badge variant="chip"`, for `ContractCoverage`'s reason: the variant lets a
+				 * caller own the background without a `hover:bg-*` tailwind-merge keeps. Text on a
+				 * tint, never the bare `--status-*` fill as foreground. Red only for a real schema
+				 * failure: a run that checked nothing did not break its contract, so it stays
+				 * neutral.
 				 */}
 				<Badge
 					variant="chip"
@@ -102,10 +85,9 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 						)} declared schema.`}
 				</p>
 				{/*
-				 * The counterpart of the coverage block's "counted on every send",
-				 * and the reason both sentences exist: the two blocks sit together
-				 * and are computed on different evidence, so neither can leave the
-				 * reader to work out which kind its numbers are.
+				 * The counterpart of the coverage block's "counted on every send": the two sit
+				 * together on different evidence, so neither may leave the reader to work out which
+				 * kind its numbers are.
 				 */}
 				<p className="mb-3 text-label text-muted-foreground">
 					{exact
@@ -114,13 +96,11 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 				</p>
 
 				{/*
-				 * Only when the gate was on (issue #720). The flag is stored beside
-				 * the tally precisely because "3 failed" in the step list means a
-				 * different thing with it than without, and a reader who cannot see
-				 * which run this was cannot tell the two apart. Rendered on `true`
-				 * alone: a load run carries no flag at all, and a collection run
-				 * that did not ask for the gate is the default this whole block
-				 * already describes.
+				 * Only when the gate was on (#720). The flag is stored beside the tally because "3
+				 * failed" in the step list means something else with it, and a reader who cannot
+				 * see which run this was cannot tell the two apart. On `true` alone: a load run has
+				 * no flag, and a collection run not asking for the gate is the default this block
+				 * describes.
 				 */}
 				{validation.failOnSchemaError === true && (
 					<p className="mb-3 text-label text-muted-foreground">
@@ -156,8 +136,8 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 				)}
 
 				{/*
-				 * Said out loud, never elided: a list shorter than the count reads as
-				 * the whole set of problems unless it says otherwise.
+				 * Said aloud: a list shorter than its count reads as the whole set of problems
+				 * unless it says so.
 				 */}
 				{validation.failuresTotal > failures.length && (
 					<p className="mt-2 text-xs text-muted-foreground tabular-nums">
@@ -166,9 +146,8 @@ export function SampledSchemaValidation({ validation, className }: SampledSchema
 				)}
 
 				{/*
-				 * The dialect gap, in aggregate. Responses whose schema was half read
-				 * passed every check that *ran*, which is a narrower claim than the
-				 * matched count above makes on its own.
+				 * The dialect gap in aggregate: responses whose schema was half read passed every
+				 * check that *ran*, a narrower claim than the matched count makes alone.
 				 */}
 				{unevaluated.length > 0 && (
 					<div className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground">

@@ -14,7 +14,7 @@ hide:
 engine to Claude Code, Cursor, VS Code, or Codex. One app instead of three, all
 of it on your machine: no account, no cloud sync, no telemetry.
 
-MCP ([Model Context Protocol](engine/mcp.md)) is the open standard that lets
+MCP ([Model Context Protocol](engine/mcp/index.md)) is the open standard that lets
 coding agents such as Claude Code or Cursor call tools; Vayu exposes its engine
 as one, so an agent can send the request it just wrote, load test it and read
 the report without leaving your editor.
@@ -300,13 +300,13 @@ Vayu is a **sidecar**: the Electron + React UI talks to a C++23 daemon over HTTP
 on `127.0.0.1:9876`. That split is why the interface stays responsive while the
 engine saturates a target - and why the engine can be driven on its own, from the
 [command line](engine/cli.md) or by a coding agent over
-[MCP](engine/mcp.md).
+[MCP](engine/mcp/index.md).
 
 [How it works in full](architecture.md){ .md-button }
 
 ## Drive Vayu from your coding agent
 
-MCP ([Model Context Protocol](engine/mcp.md)) is the open standard that lets
+MCP ([Model Context Protocol](engine/mcp/index.md)) is the open standard that lets
 coding agents such as Claude Code or Cursor call tools; Vayu exposes its engine
 as one, so an agent can send the request it just wrote, load test it and read
 the report without leaving your editor.
@@ -355,7 +355,7 @@ panel shows for `9877` in the snippets below.
     url = "http://127.0.0.1:9877/mcp"
     ```
 
-**84 tools, 9 resources, 4 prompts.** Inspection (`list_collections`,
+The tools ([the full list](engine/mcp/tools.md)) cover inspection (`list_collections`,
 `get_run_report`, `compare_runs`), execution (`run_request`,
 `run_collection_smoke`), load (`start_load_run`, `stop_run`), and writes
 (full CRUD over collections, saved requests and environments, plus globals and
@@ -365,7 +365,7 @@ run, variable or GraphQL operation has a Copy for agent button that puts a
 reference on the clipboard - so "load test this" means the thing on your screen.
 
 Zed speaks stdio only, so it connects through the stdio CLI rather than a URL;
-the [MCP reference](engine/mcp.md#stdio-cli-zed--headless--ci) has the details.
+the [MCP reference](engine/mcp/transports.md#stdio-cli-zed--headless--ci) has the details.
 
 **An agent pointed at your engine is a real capability, so it is gated.** Tools
 that touch the network refuse any host outside an **allowlist that starts empty**
@@ -374,7 +374,7 @@ and require confirmation. The tools that mutate saved data sit behind a **write
 toggle that is off by default**. All of it lives in **Settings → MCP** and
 persists.
 
-[MCP reference](engine/mcp.md){ .md-button }
+[MCP reference](engine/mcp/index.md){ .md-button }
 
 ## Reference
 
@@ -383,11 +383,11 @@ persists.
 | Document | Covers |
 |---|---|
 | [Overview](engine/architecture.md) | Core structure, engine-side auth resolution |
-| [HTTP API](engine/api-reference.md) | Every endpoint, payload shape, and status code |
-| [Test Scripting](engine/scripting.md) | The QuickJS sandbox, script globals, hooks, limits |
-| [Local Database](engine/db-schema.md) | SQLite tables and the JSON shapes stored in them |
+| [HTTP API](engine/api-reference/index.md) | Every endpoint, payload shape, and status code |
+| [Test Scripting](engine/scripting/index.md) | The QuickJS sandbox, script globals, hooks, limits |
+| [Local Database](engine/db-schema/index.md) | SQLite tables and the JSON shapes stored in them |
 | [Command Line](engine/cli.md) | Flags and subcommands for running the engine standalone |
-| [MCP Server](engine/mcp.md) | The tool surface exposed to coding agents |
+| [MCP Server](engine/mcp/index.md) | The tool surface exposed to coding agents |
 | [Benchmarks](engine/benchmarks.md) | RPS head-to-head against wrk and vegeta, with methodology |
 
 **Desktop app** - the Electron + React renderer.
@@ -395,10 +395,10 @@ persists.
 | Document | Covers |
 |---|---|
 | [Overview](app/architecture.md) | Renderer-side structural decisions |
-| [UI Components](app/COMPONENTS.md) | The `modules/` + `components/` layout |
-| [Design System](design-system.md) | Tokens, elevation, typography, component patterns |
-| [State Management](app/state-management.md) | Zustand stores, TanStack Query keys, cache policy |
-| [Talking to the Engine](app/api-integration.md) | What the renderer sends the engine, and when |
+| [UI Components](app/COMPONENTS/index.md) | The `modules/` + `components/` layout |
+| [Design System](design-system/index.md) | Tokens, elevation, typography, component patterns |
+| [State Management](app/state-management/index.md) | Zustand stores, TanStack Query keys, cache policy |
+| [Talking to the Engine](app/api-integration/index.md) | What the renderer sends the engine, and when |
 | [Variables](app/variable-resolution.md) | How `{{variables}}` resolve, and scope precedence |
 | [Postman Script Support](app/pm-api-compatibility.md) | Which `pm.*` APIs the runtime supports |
 | [File Naming](app/file-name-conventions.md) | Naming rules across the renderer |
@@ -456,13 +456,13 @@ persists.
 
     Yes - Vayu hosts an MCP server on `127.0.0.1:9877` by default and one command registers
     it with Claude Code, Cursor, VS Code or Codex (Zed connects through the stdio
-    CLI). The agent gets 84 tools
+    CLI). The agent gets tools
     across inspection, execution, load runs and writes, behind a host allowlist,
     load caps, and a write toggle that ships off - and while it is off the write
     tools are not listed at all. It can see what you have open (`get_app_focus`),
     and every request, run, variable or GraphQL operation has a Copy for agent
     button, so "load test this" means the thing on your screen. See the
-    [MCP reference](engine/mcp.md).
+    [MCP reference](engine/mcp/index.md).
 
 ??? question "Does it work offline, and does it need an account?"
 

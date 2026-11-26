@@ -13,7 +13,6 @@
 #include <string>
 
 /**
- * @file jsonrpc_body.hpp
  * @brief The JSON-RPC 2.0 call envelope, applied at the engine's chokepoint.
  *
  * A `jsonrpc` body is stored as one string, and the string is allowed to be
@@ -27,8 +26,8 @@
  * Engine-side rather than renderer-side is the whole point: the renderer is one
  * of four clients (MCP `run_request`, a raw `POST /execute` and the load driver
  * are the others), and a copy in one of them is a copy the other three do not
- * get. GraphQL learned that as a bug report (#417); this mode starts where that
- * one ended up.
+ * get. GraphQL's renderer-side copy was that bug (#417), so this mode starts
+ * engine-side.
  */
 
 namespace vayu::http {
@@ -65,7 +64,7 @@ namespace vayu::http {
  *   resolved reaches the wire as typed rather than being wrapped into a
  *   well-formed request carrying nonsense. Text nested deeper than
  *   `constants::request_body::MAX_JSON_DEPTH` levels takes the same door
- *   (#2672): the field is a string, so the request-body bound never looked
+ *   (#2672): the field is a string, so the request-body bound does not look
  *   inside it, and completing the call would re-serialize it recursively.
  *
  * Members are added to the object the caller wrote rather than to a fresh one,

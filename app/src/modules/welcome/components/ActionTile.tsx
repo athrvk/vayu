@@ -6,11 +6,8 @@
  */
 
 /**
- * ActionTile
- *
- * One action on the welcome screen. `description` is passed only in the
- * first-run state - on the populated launcher the labels stand alone, since a
- * returning user does not need "Create your first API request" explained.
+ * One action on the welcome screen. `description` is passed only on first run: a returning user
+ * needs no "Create your first API request" explained.
  */
 
 import type { LucideIcon } from "lucide-react";
@@ -23,9 +20,8 @@ interface ActionTileProps {
 }
 
 /*
- * `onClick` is wrapped so the handler is called with no arguments: passing it
- * to the button directly hands it the click event, and a handler whose first
- * parameter is optional data (`newRequest(preset?)`) would read the event as that.
+ * `onClick` is wrapped so the handler gets no arguments: given the click event, a handler whose
+ * first parameter is optional data (`newRequest(preset?)`) would read the event as that.
  */
 export function ActionTile({ icon: Icon, label, description, onClick }: ActionTileProps) {
 	return (

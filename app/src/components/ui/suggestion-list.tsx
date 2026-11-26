@@ -6,32 +6,17 @@
  */
 
 /**
- * A plain-text suggestion dropdown, built on the same `Command` primitive as
- * `VariableAutocomplete`.
+ * A plain-text suggestion dropdown on the `Command` primitive `VariableAutocomplete` uses, so the
+ * two lists cannot behave differently: `cmdk` does the highlight, Enter, Tab, Escape and the
+ * click-before-blur a hand-rolled copy reimplemented.
  *
- * **This replaces a hand-rolled copy.** `VariableInput` carried its own
- * dropdown for header-name suggestions: a `selectedSuggestionIndex`, ArrowUp /
- * ArrowDown / Enter / Tab / Escape branches in `handleKeyDown`, a
- * `prevSuggestionCount` render-phase reset to keep the index in range, and a
- * `setTimeout(…, 200)` on blur so a click could land before the list closed.
- * Every one of those is something `cmdk` already does, and `cmdk` was already a
- * dependency - the variable dropdown two branches up in the same file *is* this
- * primitive.
+ * **The arrow keys are the exception.** `cmdk` reads them off its own `Command.Input`, which
+ * neither list renders (the field is `VariableInput`'s, two components up), so the highlight cannot
+ * move by itself: `value` / `onValueChange` let the caller step through the `items` it passed and
+ * say where the highlight is (#1215).
  *
- * The two lists therefore behaved differently for no reason anyone chose, which
- * is precisely the defect the project guide describes: a hand-rolled copy of a
- * primitive does not receive the primitive's fixes.
- *
- * **The arrow keys are the exception, and they always were.** `cmdk` reads them
- * off its own `Command.Input`, which neither list renders - the field is
- * `VariableInput`'s, two components up - so the highlight cannot move on its
- * own here. That is why `value` / `onValueChange` are props: the caller steps
- * through the same `items` it passed and tells the list where the highlight is
- * (issue #1215). Everything else in the paragraph above still holds.
- *
- * Filtering stays with the caller (`shouldFilter={false}`) because the caller
- * decides what "matches" means - the header list matches on substring and hides
- * an exact match, which is not cmdk's default scoring.
+ * Filtering stays with the caller (`shouldFilter={false}`), which decides what "matches" means: the
+ * header list matches substrings and hides an exact match, not cmdk's scoring.
  */
 
 import {
@@ -51,28 +36,22 @@ export interface SuggestionListProps {
 	items: string[];
 	onSelect: (value: string) => void;
 	/**
-	 * Cap on what is shown, if any. Omitted, every item renders and
-	 * `CommandList`'s own `max-h-[300px] overflow-y-auto` scrolls to the rest -
-	 * the same way the command palette's uncapped list already does. A header
-	 * list of 31 names used to be sliced to 10 here on top of an identical
-	 * slice the caller already applied, so the other 21 were never reachable
-	 * by scrolling - there was nothing past the tenth row to scroll *to*.
+	 * Cap on what is shown; omitted, every item renders and `CommandList`'s
+	 * `max-h-[300px] overflow-y-auto` scrolls, as the palette's list does.
 	 */
 	limit?: number;
 	className?: string;
 	/**
-	 * The highlighted item. Supplied by `VariableInput`, which owns the arrow
-	 * keys because they arrive at the text field this list hangs off rather than
-	 * at the list (issue #1215). Omitted, `cmdk` highlights on its own - the first
-	 * row. An empty string is "no row highlighted", which `cmdk` would otherwise
-	 * read as unset and answer with that same first row (#3667).
+	 * The highlighted item, from `VariableInput`, which owns the arrows as they arrive at its field
+	 * (#1215). Omitted, `cmdk` highlights the first row. `""` is "none highlighted", which `cmdk`
+	 * would read as unset and answer with the first row (#3667).
 	 */
 	value?: string;
 	/** Fires when `cmdk` moves the highlight itself - a pointer over a row. */
 	onValueChange?: (value: string) => void;
 	/**
-	 * Reports the listbox and highlighted-option ids, which `cmdk` mints and
-	 * which the combobox outside this list has to name. Must be stable.
+	 * Reports the listbox and highlighted-option ids `cmdk` mints, which the outside combobox must
+	 * name; must be stable.
 	 */
 	onListboxState?: (state: CommandListboxState) => void;
 }
@@ -92,9 +71,8 @@ export function SuggestionList({
 	return (
 		<div
 			className={cn(
-				// `w-3xs` (16rem), not `w-64`: the list holds suggestion text, a
-				// text measure, and `w-64` rides `--spacing` - 192px at the Default
-				// density rather than the 256px `w-3xs` reads as.
+				// `w-3xs` (16rem), not `w-64`: suggestion text is a text measure, and `w-64` rides
+				// `--spacing` (192px at Default, not 256px).
 				"enter-fade w-3xs rounded-lg border bg-popover shadow-md",
 				className
 			)}
@@ -113,10 +91,8 @@ export function SuggestionList({
 								key={item}
 								value={item}
 								/*
-								 * `onMouseDown` with `preventDefault`, not `onClick`.
-								 * The list hangs off a focused input, and a plain click
-								 * blurs it first - which is what the replaced code was
-								 * buying with a 200ms timeout on blur.
+								 * `onMouseDown` with `preventDefault`, not `onClick`: the list
+								 * hangs off a focused input, which a plain click blurs first.
 								 */
 								onMouseDown={(e) => {
 									e.preventDefault();

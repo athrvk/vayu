@@ -6,14 +6,10 @@
  */
 
 /**
- * Over the numbers of a failed run the engine could not fully record (#2895).
- *
- * The two causes read differently and the wording keeps them apart: a report
- * with no summary has no whole-run counts, and one reconciled after a crash has
- * the last figures the engine saved, which are a floor rather than the total.
- * `summaryMissing` is the stronger statement and wins when both are set.
- *
- * Silent for a report that recorded its summary.
+ * Over the numbers of a failed run the engine could not fully record (#2895). The two causes are
+ * worded apart: a report with no summary has no whole-run counts, and one reconciled after a crash
+ * has the last figures the engine saved, a floor rather than the total. `summaryMissing` is the
+ * stronger statement and wins when both are set. Silent for a report that recorded its summary.
  */
 
 import { Callout } from "@/components/shared";

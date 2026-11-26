@@ -8,7 +8,6 @@
 #pragma once
 
 /**
- * @file httplib_client_url.hpp
  * @brief `<httplib.h>` for a translation unit that builds an `httplib::Client`
  *        from a URL.
  *

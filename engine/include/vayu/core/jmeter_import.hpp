@@ -8,39 +8,34 @@
  */
 
 /**
- * @file core/jmeter_import.hpp
- * @brief A JMeter `.jmx` test plan as an import (issue #1518) - the format
- *        every other engine-side importer's own doc names as still missing.
+ * @brief A JMeter `.jmx` test plan as an import (#1518).
  *
- * A `.jmx` file is JMeter's own serialization of its test-plan tree: a
- * `<jmeterTestPlan>` root holding one `<hashTree>`, whose children alternate
- * a test element (`<ThreadGroup>`, `<HTTPSamplerProxy>`, ...) with that
- * element's own `<hashTree>` of children - XML, never JSON or YAML, so this
- * is a second reader beside `core::read_document` (issue #853's "one YAML
- * reader"), through pugixml rather than a hand-rolled walk: the dialect is
- * fixed and small, but attribute/text access, entity decoding and malformed
- * input all belong to a real parser rather than a second, partial one.
+ * A `.jmx` file is JMeter's serialization of its test-plan tree: a
+ * `<jmeterTestPlan>` root holding one `<hashTree>`, whose children alternate a
+ * test element (`<ThreadGroup>`, `<HTTPSamplerProxy>`, ...) with that element's
+ * own `<hashTree>` of children. It is XML, never JSON or YAML, so this is a
+ * second reader beside `core::read_document` (#853's "one YAML reader"),
+ * through pugixml rather than a hand-rolled walk: the dialect is fixed and
+ * small, but attribute/text access, entity decoding and malformed input belong
+ * to a real parser, not a second, partial one.
  *
  * The mapping (JMeter class -> Vayu element kind) is `docs/engine/elements.md`
- * read backwards: `HTTPSamplerProxy` becomes a request, `ThreadGroup` and
- * `TestPlan` flatten into the collection (Vayu has no thread-group concept -
- * a collection already runs every request once; a group's threads, ramp-up,
- * duration and loops are counted as `ThreadGroup_profile`), and everything else JMeter
- * calls a "config element" - extractors, assertions, timers, controllers,
- * pre/post-processors - becomes the matching element kind, attached to
- * whichever request or folder its own `<hashTree>` scopes it under. A class
- * this parser has no mapping for is counted by its own XML tag name in
- * `meta.skipped`, the same "nothing dropped quietly" rule every other
- * importer here follows (issue #1443) - so an unmapped `WhileController` or
- * `CookieManager` costs nothing to add support for later and is never a
- * silent loss today.
+ * read backwards: `HTTPSamplerProxy` becomes a request; `ThreadGroup` and
+ * `TestPlan` flatten into the collection (Vayu has no thread-group concept - a
+ * collection already runs every request once; a group's threads, ramp-up,
+ * duration and loops are counted as `ThreadGroup_profile`); everything else
+ * JMeter calls a "config element" - extractors, assertions, timers,
+ * controllers, pre/post-processors - becomes the matching element kind,
+ * attached to whichever request or folder its own `<hashTree>` scopes it under.
+ * A class with no mapping is counted by its XML tag name in `meta.skipped`, the
+ * "nothing dropped quietly" rule every importer here follows (#1443), so an
+ * unmapped `WhileController` or `CookieManager` is never a silent loss.
  *
- * Every element this parser builds is validated against the live element
- * registry before it is offered (`vayu::core::Registry::validate`) - a
- * config this parser mistranslates is dropped and counted rather than
- * reaching `POST /import/apply`, whose write is atomic across the whole
- * tree and would otherwise fail every other item in the same document for
- * one bad translation.
+ * Every element built is validated against the live element registry
+ * (`vayu::core::Registry::validate`) before it is offered: a mistranslated
+ * config is dropped and counted rather than reaching `POST /import/apply`,
+ * whose write is atomic across the whole tree and would fail every other item
+ * in the document for one bad translation.
  */
 
 #include "vayu/core/import_document.hpp"
@@ -56,22 +51,19 @@ namespace vayu::core {
 /**
  * True when @p text looks like a JMeter `.jmx` test plan.
  *
- * Checked before the engine's one JSON/YAML reader ever sees the bytes - a
- * `.jmx` file is XML and would only fail both of those parses, the same way
- * an actually-unrecognised document does, which would misreport a `.jmx`
- * upload as "Unrecognised format" rather than routing it here. Bounded to a
- * short prefix of @p text: the tag is always near the top of a real file, and
- * scanning a large upload byte-for-byte to answer a yes/no this cheap serves
- * no caller.
+ * Checked before the engine's one JSON/YAML reader sees the bytes: a `.jmx`
+ * file is XML and would fail both parses, like a truly unrecognised document,
+ * and be misreported as "Unrecognised format" instead of routed here. Only a
+ * short prefix of @p text is scanned: the tag is always near the top of a real
+ * file, and a byte-for-byte scan of a large upload serves no caller.
  */
 [[nodiscard]] bool is_jmeter_document (std::string_view text);
 
 /**
  * A `.jmx` document pugixml could not parse as XML at all, or one with no
- * `<jmeterTestPlan>` root despite `is_jmeter_document` claiming it - the
- * `MalformedImport` of this parser, kept as its own type because that one's
- * message is hardcoded to "Malformed Insomnia export" and reused verbatim by
- * every one of its own call sites.
+ * `<jmeterTestPlan>` root despite `is_jmeter_document` claiming it: this
+ * parser's `MalformedImport`, a type of its own because that one's message is
+ * hardcoded to "Malformed Insomnia export" at every call site.
  */
 class MalformedJmeter : public std::runtime_error {
     public:
@@ -83,7 +75,7 @@ class MalformedJmeter : public std::runtime_error {
 /**
  * @brief Parses @p text (already known to be a `.jmx` document) into the same
  *        `{collections, environments, globals, meta}` shape every other
- *        importer builds (issue #877's `ImportResult`).
+ *        importer builds (#877's `ImportResult`).
  *
  * `environments` and `globals` are always empty - a `.jmx` file has neither
  * concept - and `meta.exampleCount` is always 0: JMeter records no saved

@@ -6,20 +6,16 @@
  */
 
 /**
- * The Code section's resolved input: `POST /compose` of the request the tab
- * shows, from the editor when a builder holds it (#2638).
+ * The Code section's resolved input: `POST /compose` of the request the tab shows, from the editor
+ * when a builder holds it (#2638). The editor's body is built by `buildComposeBody` with the inputs
+ * Send gives it (the draft, the builder's collection chain, the request as owner and its
+ * collection), so the snippet is the request Send would put on the wire, edits not yet autosaved
+ * included. With no builder holding the request (one still mounting) it composes the saved row by
+ * id and says so, because that snippet trails the editor.
  *
- * The editor's body is built by `buildComposeBody` with the inputs Send gives
- * it (the draft, the builder's collection chain, the request as owner and its
- * collection), so the snippet is the request Send would put on the wire, edits
- * not yet autosaved included. With no builder holding the request (one still
- * mounting) it composes the
- * saved row by id and says so, because that snippet trails the editor.
- *
- * It is also the one composition the "Sends" line and the tab title read
- * (#2741): they never call `/compose` themselves, they share this query's cache
- * entry for `deferredVariables` - the engine's answer to "does a pre-request
- * script run before this send", which the renderer must not re-derive.
+ * It is also the one composition the "Sends" line and the tab title read (#2741): they never call
+ * `/compose` themselves but share this query's entry for `deferredVariables`, the engine's answer
+ * to "does a pre-request script run before this send", which the renderer must not re-derive.
  */
 
 import { queryOptions, useQuery } from "@tanstack/react-query";
@@ -107,18 +103,16 @@ export function useEditorHeld(requestId: string): boolean {
 }
 
 /**
- * The composition query, shared by every reader of one request's entry. The
- * options carry what must agree across readers - the key and the cost policy -
- * and each reader adds its own `enabled` and mount behaviour.
+ * The composition query, shared by every reader of one request's entry: the options carry what
+ * readers must agree on (the key and the cost policy), and each reader adds its own `enabled` and
+ * mount behaviour.
  *
- * `staleTime: Infinity`: a compose is a round trip, and a reader would
- * otherwise pay one per keystroke behind it (#1310). An entry is refreshed by
- * an explicit act instead - the Code section's refresh button, or an
- * invalidation from a committed write, the renderer's own PUT or an MCP
- * agent's, to this request, its collection chain, an environment or the globals
- * (`invalidateCompositions`, #1438, #1877). `invalidateQueries` refetches a
- * mounted, enabled observer whatever its `staleTime`, so this value gates the
- * cost without gating correctness.
+ * `staleTime: Infinity`: a compose is a round trip, and a reader would otherwise pay one per
+ * keystroke behind it (#1310). An entry refreshes on an explicit act instead: the Code section's
+ * refresh button, or an invalidation from a committed write (the renderer's own PUT or an MCP
+ * agent's) to this request, its collection chain, an environment or the globals
+ * (`invalidateCompositions`, #1438, #1877). `invalidateQueries` refetches a mounted, enabled
+ * observer whatever its `staleTime`, so this value gates the cost without gating correctness.
  */
 export function compositionOptions(
 	requestId: string,
@@ -140,14 +134,12 @@ export function compositionOptions(
 const NO_NAMES: readonly string[] = [];
 
 /**
- * The names the engine left written for a pre-request script to set at send
- * (#2521), for the request @p requestId - empty until the composition lands,
- * and for a request with no id (an unsaved draft has nothing to compose by).
- *
- * @p enabled is the caller's reason to pay for a compose at all; the "Sends"
- * line asks only when its URL holds a `{{` token, so a literal URL costs
- * nothing (#1310). The mount behaviour is the default: a tab switch back to a
- * cached entry does not refetch it.
+ * The names the engine left written for a pre-request script to set at send (#2521), for the
+ * request @p requestId: empty until the composition lands, and for a request with no id (an unsaved
+ * draft has nothing to compose by). @p enabled is the caller's reason to pay for a compose at all;
+ * the "Sends" line asks only when its URL holds a `{{` token, so a literal URL costs nothing
+ * (#1310). The mount behaviour is the default: a tab switch back to a cached entry does not refetch
+ * it.
  */
 export function useDeferredVariables(requestId: string, enabled: boolean): readonly string[] {
 	const environmentId = useSessionStore((s) => s.activeEnvironmentId);

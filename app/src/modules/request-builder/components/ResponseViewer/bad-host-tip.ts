@@ -6,15 +6,12 @@
  */
 
 /**
- * The tip for an `INVALID_URL` whose host holds a `{{variable}}` (#3500).
- *
- * A variable nothing defines is sent as written, so the target is
- * `http://{{host}}/...` and libcurl answers "URL rejected: Bad hostname", which
- * names neither the variable nor the fact that it was one. The engine's message
- * is all the failure carries, so the tip is built from the URL as the user wrote
- * it (`ResponseState.sentRequest`): it names the variables in the host, and says
- * what an undefined one does rather than claiming this one was, because the
- * snapshot is the template, not what the engine resolved it to.
+ * The tip for an `INVALID_URL` whose host holds a `{{variable}}` (#3500). An undefined variable is
+ * sent as written, so libcurl gets `http://{{host}}/...` and answers "URL rejected: Bad hostname",
+ * naming neither the variable nor that it was one. The engine's message is all the failure carries,
+ * so the tip is built from the URL as written (`ResponseState.sentRequest`): it names the host's
+ * variables and says what an undefined one does, without claiming this one was, since the snapshot
+ * is the template, not what the engine resolved.
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
@@ -24,8 +21,8 @@ import { pickByCount } from "@/modules/dashboard/utils/format";
 const AUTHORITY = /^(?:[a-z][a-z0-9+.-]*:\/\/)?([^/?#]*)/i;
 
 /**
- * The `{{names}}` in `url`'s host, each once, in order. A generator
- * (`{{$guid}}`) always resolves, so it is never the cause and is left out.
+ * The `{{names}}` in `url`'s host, once each, in order; a generator (`{{$guid}}`) always resolves,
+ * so is left out.
  */
 export function hostVariables(url: string): string[] {
 	const authority = AUTHORITY.exec(url)?.[1] ?? "";

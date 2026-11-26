@@ -6,16 +6,13 @@
  */
 
 /**
- * What a `binary` body sent, as a stored trace records it.
+ * What a `binary` body sent, as a stored trace records it. The engine writes
+ * `bodyFile: {fileName, size, sha256}` on the trace's request node when the body was a file (never
+ * the bytes, never the path), so a run says which file went out even after the file has changed on
+ * disk; the sha256 tells two runs of "the same" `a.bin` apart.
  *
- * The engine writes `bodyFile: {fileName, size, sha256}` on the trace's
- * request node when the body was a file - never the bytes, never the path -
- * so a run says which file went out even after the file has changed on disk.
- * The sha256 is what tells two runs of "the same" `a.bin` apart.
- *
- * Read defensively: a stored row is whatever the engine that wrote it wrote,
- * so only members of the right type are kept, and a record with none left is
- * no record.
+ * Read defensively: a stored row is whatever the engine that wrote it wrote, so only members of the
+ * right type are kept, and a record with none left is no record.
  */
 
 export interface SentBodyFile {

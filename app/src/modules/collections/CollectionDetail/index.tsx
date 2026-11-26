@@ -6,8 +6,6 @@
  */
 
 /**
- * CollectionDetail
- *
  * Tab shell for the Collection Detail screen. Reached via
  * navigation-store.navigateToCollection(collectionId).
  */
@@ -49,28 +47,19 @@ const TABS: { id: CollectionTab; label: string }[] = [
 ];
 
 /**
- * Tabs that hold an unsaved draft, and therefore must not be torn down when the
- * user looks at a sibling.
+ * Tabs holding an unsaved draft (`useEntityDraft`), which must not be torn down while the user
+ * looks at a sibling: Radix unmounts an inactive `TabsContent`. The draft itself lives in
+ * `entity-draft-store` (#3459), which carries it across `Shell.tsx` unmounting this whole screen;
+ * keeping a visited panel mounted keeps what that store does not hold, the editors' own undo
+ * history and scroll position.
  *
- * These three use the manual save-button model (`useEntityDraft`). Radix
- * unmounts an inactive `TabsContent`, and writing a script, glancing at Auth
- * and coming back used to lose the script - no save, no prompt, no trace. The
- * draft itself now lives in `entity-draft-store` (#3459), which is what carries
- * it across `Shell.tsx` unmounting this whole screen; keeping a visited panel
- * mounted still keeps what that store does not hold, the editors' own undo
- * history and scroll position, across a look at a sibling.
+ * `variables` is absent deliberately: it autosaves and registers its own save context on mount, so
+ * kept alive behind another tab it would claim Ctrl/Cmd+S while something else is on screen.
  *
- * `variables` is absent deliberately: it autosaves and registers its own save
- * context on mount, so keeping it alive behind another tab would leave the
- * variables editor claiming Ctrl/Cmd+S while something else is on screen.
- *
- * `data` is absent for the opposite reason: it saves per gesture (a pick, a Remove), and
- * the only thing it holds between actions is a parsed file - which is user data
- * of unknown sensitivity, so letting it outlive a look at another tab is a cost
- * with nothing bought.
- *
- * `spec` is absent for the same reason as `data`: binding is an explicit action,
- * and what it holds between actions is a whole OpenAPI document read from disk.
+ * `data` is absent for the opposite reason: it saves per gesture (a pick, a Remove), and all it
+ * holds between actions is a parsed file, user data of unknown sensitivity, so letting it outlive a
+ * look at another tab costs something and buys nothing. `spec` likewise: binding is an explicit
+ * action, and what it holds between actions is a whole OpenAPI document read from disk.
  */
 const TABS_HOLDING_DRAFTS: ReadonlySet<CollectionTab> = new Set(["info", "auth", "elements"]);
 
@@ -101,19 +90,15 @@ export default function CollectionDetail() {
 		refetch: refetchCollections,
 	} = useCollectionsQuery();
 	/*
-	 * The whole subtree, not this collection's own requests (issue #723).
+	 * The whole subtree, not this collection's own requests (issue #723): an OpenAPI import files
+	 * its requests under one sub-collection per tag, so a spec-bound root owns none directly and
+	 * would read "0 requests" above a mock serving a thousand routes. Every other surface here
+	 * means the subtree by "this collection" (the mock toggle serves it, the Run dialog runs it,
+	 * the export walks it, the Spec tab counts it), and the count says the same rather than naming
+	 * a narrower set.
 	 *
-	 * An OpenAPI import files its requests under one sub-collection per tag, so
-	 * a spec-bound root owns none directly - and this header read "GitHub v3
-	 * REST API - 0 requests" above a mock serving a thousand routes. Every other
-	 * surface on this screen already means the subtree when it says "this
-	 * collection": the mock toggle beside the count serves it, the Run dialog
-	 * runs it, the export walks it, and the Spec tab counts it with that
-	 * rationale written out. The count says the same thing they do rather than
-	 * describing a narrower set by the same name.
-	 *
-	 * Free of extra fetches in practice: `CollectionTree` already holds a query
-	 * per collection, so these resolve from the cache the sidebar filled.
+	 * No extra fetches in practice: `CollectionTree` already holds a query per collection, so these
+	 * resolve from the cache the sidebar filled.
 	 */
 	const subtreeIds = useMemo(
 		() => (selectedCollectionId ? collectSubtreeIds(selectedCollectionId, collections) : []),
@@ -131,17 +116,13 @@ export default function CollectionDetail() {
 	);
 
 	/*
-	 * Where this collection sits, above the tab strip (#1691).
-	 *
-	 * Only for a nested collection: the chain ends with this collection itself,
-	 * and for a root one that is a line repeating the header title underneath it.
-	 * A parent segment opens that collection's tab; the last is inert, because
-	 * you are already there, and renaming is the Info tab's job.
+	 * Where this collection sits, above the tab strip (#1691), only for a nested collection: for a
+	 * root one the chain is a line repeating the header title. A parent segment opens that
+	 * collection's tab; the last is inert, as you are already there and renaming is the Info tab's
+	 * job. Walked from the collections in hand rather than `useCollectionAncestors`: this screen
+	 * holds the whole list for its subtree count, so it is one memo, not a second query
+	 * subscription over the same data; `walkAncestors` carries the cycle guard.
 	 */
-	// From the collections already in hand rather than `useCollectionAncestors`:
-	// this screen holds the whole list for its subtree count, and walking it here
-	// is one memo instead of a second query subscription over the same data. The
-	// cycle guard lives in `walkAncestors`, so it is not re-implemented either.
 	const ancestors = useMemo(
 		() => (selectedCollectionId ? walkAncestors(selectedCollectionId, collections) : []),
 		[selectedCollectionId, collections]
@@ -162,12 +143,10 @@ export default function CollectionDetail() {
 	);
 
 	/*
-	 * Kept per collection id (`tab-selection-store`), so the active sub-tab
-	 * survives `Shell.tsx` unmounting this screen when its workspace tab is
-	 * not on screen. `CollectionDetail` is not remounted when the user
-	 * switches to a sibling collection's tab (`DataTab` above needs the same
-	 * fact), so the derived-during-render sync below restores it again on
-	 * every collection change too.
+	 * Kept per collection id (`tab-selection-store`), so the active sub-tab survives `Shell.tsx`
+	 * unmounting this screen when its workspace tab is not on screen. `CollectionDetail` is not
+	 * remounted on a switch to a sibling collection's tab (`DataTab` needs the same fact), so the
+	 * derived-during-render sync below restores it on every collection change too.
 	 */
 	const getCollectionTab = useTabSelectionStore((s) => s.getCollectionTab);
 	const setCollectionTab = useTabSelectionStore((s) => s.setCollectionTab);
@@ -184,24 +163,20 @@ export default function CollectionDetail() {
 		},
 		[selectedCollectionId, setCollectionTab]
 	);
-	// Panels are force-mounted from their first visit onwards, not from mount:
-	// a draft can only exist in a tab the user has opened, and two of these
-	// carry a Monaco editor that costs nothing while nobody has asked for it.
-	// Seeded from the restored tab, not a bare "info": a restored "elements"
-	// tab paints its panel this render, and an unseeded `visited` would drop
-	// it - and the draft `TABS_HOLDING_DRAFTS` exists to protect - the moment
-	// the user glanced at a sibling tab.
+	// Panels force-mount from their first visit, not from mount: a draft exists only in a tab the
+	// user has opened, and two of these carry a Monaco editor that costs nothing until asked for.
+	// Seeded from the restored tab, not a bare "info": a restored "elements" tab paints its panel
+	// this render, and an unseeded `visited` would drop it, and the draft `TABS_HOLDING_DRAFTS`
+	// protects, the moment the user glanced at a sibling tab.
 	const [visited, setVisited] = useState<ReadonlySet<CollectionTab>>(
 		() => new Set([initialTab()])
 	);
 
 	/*
-	 * The `useState` initializer above only ever runs once, for whichever
-	 * collection this screen first rendered for - a later collection shown
-	 * without a remount (the sibling-tab-switch case above) needs this
-	 * derived-during-render sync instead, the same shape
-	 * `RequestBuilderProvider`'s per-request reset uses, so the previous
-	 * collection's tab never gets a frame to paint under the new one.
+	 * The `useState` initializer runs once, for the first collection this screen rendered; a later
+	 * collection shown without a remount (the sibling-tab switch above) needs this
+	 * derived-during-render sync, the shape of `RequestBuilderProvider`'s per-request reset, so the
+	 * previous collection's tab never paints a frame under the new one.
 	 */
 	const [tabSyncedFor, setTabSyncedFor] = useState(selectedCollectionId);
 	if (selectedCollectionId !== tabSyncedFor) {
@@ -210,28 +185,24 @@ export default function CollectionDetail() {
 		setTabState(next);
 		setVisited((prev) => withVisited(prev, next));
 	} else if (storedTab && storedTab !== tab) {
-		// A write from outside this screen (`setCollectionTab`) while it is
-		// already on this collection: the import toast's "Review import notes"
-		// is the one today. Every write of our own updates both, so a mismatch
-		// here is always someone else's.
+		// A write from outside this screen (`setCollectionTab`) while it is already on this
+		// collection, such as the import toast's "Review import notes"; every write of our own
+		// updates both, so a mismatch here is someone else's.
 		setTabState(storedTab);
 		setVisited((prev) => withVisited(prev, storedTab));
 	}
 
 	/*
-	 * Something outside this screen pointed at a collection's Spec tab - today
-	 * the import dialog, offering Sync for a document that is already bound
-	 * (issue #680). The store carries the collection rather than the section
-	 * because `openTab` can only name a collection, and which sub-tab is showing
-	 * is state that lives here.
+	 * Something outside this screen pointed at a collection's Spec tab (the import dialog, offering
+	 * Sync for a document that is already bound, issue #680). The store carries the collection
+	 * rather than the section, as `openTab` can only name a collection and which sub-tab shows is
+	 * state that lives here.
 	 *
-	 * Taken once acted on, so a later visit to the same collection opens on Info
-	 * the way every other one does; the store drops it itself when the next
-	 * navigation is not this one. The write cannot be derived away: the intent
-	 * has to survive this tab mounting for the first time, and the tab it selects
-	 * then has to stay put when the intent is taken - so the state is genuinely
-	 * handed over rather than mirrored, and it happens once per navigation rather
-	 * than per render.
+	 * Taken once acted on, so a later visit to the same collection opens on Info like any other;
+	 * the store drops it itself when the next navigation is not this one. It cannot be derived
+	 * away: the intent must survive this tab mounting for the first time, and the tab it selects
+	 * must stay put when the intent is taken, so the state is handed over once per navigation, not
+	 * mirrored per render.
 	 */
 	const specRequested = useTabsStore(
 		(s) => s.navIntent?.kind === "spec" && s.navIntent.target === selectedCollectionId
@@ -244,21 +215,17 @@ export default function CollectionDetail() {
 		setVisited((prev) => withVisited(prev, "spec"));
 	}, [specRequested, selectedCollectionId, takeNavIntent, setTab]);
 
-	// Loading and missing are different answers. `collections` defaults to `[]`,
-	// so a collection tab restored from a previous session resolves to nothing
-	// while its query is still in flight - and telling the user their collection
-	// is gone is worse than telling them nothing yet.
+	// Loading and missing are different answers: `collections` defaults to `[]`, so a collection
+	// tab restored from a previous session resolves to nothing while its query is in flight, and
+	// "your collection is gone" is worse than "nothing yet".
 	if (collectionsLoading) {
 		return <DetailSkeleton label="Loading collection" />;
 	}
 
-	// Failed is the third answer, and here the most damaging one to get wrong:
-	// "Collection not found" asserts that the thing the user opened has been
-	// deleted, when all that happened is a fetch failed.
-	//
-	// Gated on there being no collection to show. TanStack keeps the last good
-	// data through a failed background refetch, and swapping a working pane for
-	// an error would take away more than it tells.
+	// Failed is the third answer, the most damaging to get wrong here: "Collection not found"
+	// asserts a deletion when a fetch failed. Only with no collection to show: TanStack keeps the
+	// last good data through a failed background refetch, and an error in place of a working pane
+	// takes away more than it tells.
 	if (collectionsFailed && !collection) {
 		return (
 			<ErrorState
@@ -310,21 +277,19 @@ export default function CollectionDetail() {
 					}}
 					className="flex-1 flex flex-col overflow-hidden"
 				>
-					{/* The active trigger's weight change used to shift its neighbours
-				    on every switch; TabLabel reserves the bold width, so it no
-				    longer can. */}
+					{/* TabLabel reserves the bold width, so the active trigger's weight
+				    change cannot shift its neighbours. */}
 					<TabsList
 						variant="pane"
 						className="shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
 					>
 						{TABS.map((t) => {
 							/*
-							 * Two of the six can carry a count, and those two render
-							 * `TabCount` unconditionally: it animates its own track open
-							 * from zero width, so the first variable appearing grows in
-							 * rather than instantly pushing Data and Spec rightward, and
-							 * costs nothing while there is nothing to count. The other
-							 * four render no `TabCount` at all and pay no width, ever.
+							 * Two of the six can carry a count and always render `TabCount`, which
+							 * animates its own track open from zero width, so the first variable
+							 * grows in rather than pushing Data and Spec rightward, and costs
+							 * nothing with nothing to count. The other four render no `TabCount`
+							 * and pay no width, ever.
 							 */
 							const counted = t.id === "variables" || t.id === "data";
 							const count =
@@ -339,12 +304,10 @@ export default function CollectionDetail() {
 					</TabsList>
 
 					{/*
-					 * TabsContent per tab, keyed off the same TABS list as the
-					 * triggers. Radix derives each trigger's aria-controls from its
-					 * value, so content in a plain <div> outside the Tabs tree left
-					 * every trigger pointing at a panel id that was never rendered.
-					 * Only the active panel mounts, so the switch below still resolves
-					 * to exactly one tab.
+					 * TabsContent per tab, keyed off the triggers' TABS list: Radix derives each
+					 * trigger's aria-controls from its value, so content outside the Tabs tree
+					 * leaves every trigger pointing at a panel id never rendered. Only the active
+					 * panel mounts, so the switch below resolves to exactly one tab.
 					 */}
 					{TABS.map((t) => (
 						<TabsContent

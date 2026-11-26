@@ -6,19 +6,18 @@
  */
 
 /**
- * @file http/routes/compose.cpp
- * @brief POST /compose - engine-owned request composition (issue #226).
+ * POST /compose: engine-owned request composition (issue #226).
  *
- * Pure: composes and returns an execute-ready payload, sends nothing, creates
- * no run row. Clients POST the result to /execute or /runs unchanged; those
- * endpoints compose nothing of their own, so a value substituted here is
- * substituted once and never revisited. What they do resolve is the leftovers,
- * after the pre-request script and before the send (#1008,
- * `resolve_residual_tokens`): a name composition could not answer keeps its
- * braces (#1009), and so does every name a scope answers in a request a
- * pre-request script runs before (#2521, listed as `deferredVariables`).
- * The logic lives in compose_request_core (request_composer.cpp) so the tests
- * drive it without an in-process HTTP server.
+ * Pure: returns an execute-ready payload, sends nothing, creates no run row.
+ * Clients POST the result to /execute or /runs unchanged; those compose nothing
+ * of their own, so a value substituted here is substituted once and never
+ * revisited. What they resolve is the leftovers, after the pre-request script
+ * and before the send (#1008, `resolve_residual_tokens`): a name composition
+ * could not answer keeps its braces (#1009), and so does every name a scope
+ * answers in a request a pre-request script runs before (#2521, listed as
+ * `deferredVariables`). The logic lives in compose_request_core
+ * (request_composer.cpp) so the tests drive it without an in-process HTTP
+ * server.
  */
 
 #include "vayu/http/request_composer.hpp"

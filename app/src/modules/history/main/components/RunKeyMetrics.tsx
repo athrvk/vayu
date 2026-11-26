@@ -6,15 +6,11 @@
  */
 
 /**
- * RunKeyMetrics Component
- *
- * The p99-led glance at the top of the Overview tab: the latency the run is
- * judged on, how much it sent and how much of it worked. Success rate is the
- * HTTP one; a scenario run with failed assertions (#2820) gains a fourth tile
- * for them, because a run whose every assertion failed against `200`s reads
- * 100.0% here and the tile is the only place that says otherwise at a glance.
- * A scenario load run's P99 pools every step, and the tile says which step set
- * it (#2823).
+ * The p99-led glance at the top of the Overview tab: the latency the run is judged on, how much it
+ * sent and how much worked. Success rate is the HTTP one; a scenario run with failed assertions
+ * (#2820) gains a fourth tile for them, as a run whose every assertion failed against `200`s reads
+ * 100.0% here and the tile is the one glanceable place that says otherwise. A scenario load run's
+ * P99 pools every step, and the tile says which step set it (#2823).
  */
 
 import type { ReactNode } from "react";

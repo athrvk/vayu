@@ -37,9 +37,9 @@ rather than per URL; a headless engine with nothing resolved falls back to
 environment-variable pickup rather than to no proxy. Client certificates carry
 no qualification any more - they are proven on a wire on all three platforms,
 in both PEM-pair and PKCS#12 form. Detail:
-[proxy settings](../engine/api-reference.md#proxy-settings),
-[TLS trust](../engine/api-reference.md#tls-trust-settings) and
-[client certificates](../engine/api-reference.md#client-certificates).
+[proxy settings](../engine/api-reference/health-config.md#proxy-settings),
+[TLS trust](../engine/api-reference/health-config.md#tls-trust-settings) and
+[client certificates](../engine/api-reference/cookies-and-certificates.md#client-certificates).
 
 ## The native load engine is the difference
 
@@ -68,7 +68,7 @@ limit.
 
 Bruno ships an official MCP server that wraps its `bru` CLI, so an agent can run
 your collections. Vayu's MCP server runs inside the app on `127.0.0.1:9877` by default and
-exposes **84 typed tools** covering inspection, execution, **load runs**, and
+exposes **typed tools** covering inspection, execution, **load runs**, and
 writes over collections, requests and environments. The distinction worth caring
 about is the load engine: an agent can start a capped load run and read the
 report back. It is gated accordingly - an allowlist that starts empty, caps on
@@ -76,7 +76,7 @@ RPS, concurrency and duration, and a write toggle that ships off. The agent can
 see what you have open (`get_app_focus`), and every request, run, variable or
 GraphQL operation has a Copy for agent button that puts a reference on the
 clipboard - so "load test this" means the thing on your screen. See the
-[MCP reference](../engine/mcp.md).
+[MCP reference](../engine/mcp/index.md).
 
 ## When to choose Bruno
 

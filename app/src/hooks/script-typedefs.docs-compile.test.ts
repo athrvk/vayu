@@ -41,6 +41,7 @@ import {
 	DOC_READING_GUARDS,
 	ENGINE_READING_GUARDS,
 	fromRepoRoot,
+	markdownFiles,
 	repoRoot,
 } from "@/lib/routed-inputs.testkit";
 import { SCRIPT_COMPILER_OPTIONS, SUPPRESSED_DIAGNOSTICS } from "./useScriptTypeDefinitions";
@@ -49,12 +50,15 @@ import { SCRIPT_COMPILER_OPTIONS, SUPPRESSED_DIAGNOSTICS } from "./useScriptType
 const [DECLARATIONS_PATH] = ENGINE_READING_GUARDS.scriptTypedefs.paths.map(fromRepoRoot);
 
 /**
- * The two pages whose `pm.*` blocks are the contract. They are held in the
- * testkit with the other guards' pages, because the workflow filter that routes
- * an edit to them back to this suite is compared against the union of all four
- * (`routed-inputs.test.ts`).
+ * The pages whose `pm.*` blocks are the contract: every page of the scripting
+ * guide and the compatibility page. They are held in the testkit with the other
+ * guards' pages, because the workflow filter that routes an edit to them back to
+ * this suite is compared against the union of all four (`routed-inputs.test.ts`).
+ * A directory entry is every Markdown page in it.
  */
-const DOC_PATHS = DOC_READING_GUARDS.scriptTypedefs.paths.map(fromRepoRoot);
+const DOC_PATHS = DOC_READING_GUARDS.scriptTypedefs.paths.flatMap((entry) =>
+	entry.endsWith("/") ? markdownFiles(fromRepoRoot(entry)) : [fromRepoRoot(entry)]
+);
 
 interface DocBlock {
 	doc: string;

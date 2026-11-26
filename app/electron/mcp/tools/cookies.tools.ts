@@ -6,7 +6,6 @@
  */
 
 /**
- * @file cookies.tools.ts
  * @brief The engine's cookie jar: reading and clearing it.
  */
 

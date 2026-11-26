@@ -7,7 +7,7 @@
 
 /**
  * `text-subtle-foreground` is reserved for units, dash placeholders and
- * decorative icons (#2302, `docs/design-system.md` "Foreground Scale").
+ * decorative icons (#2302, `docs/design-system/surfaces.md` "Foreground Scale").
  *
  * The tier measures 2.69:1 light and 2.89:1 dark, deliberately below AA, so a
  * label, an axis tick or a group heading on it is unreadable by construction.

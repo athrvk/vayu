@@ -6,18 +6,14 @@
  */
 
 /**
- * @file http.ts
- * @brief Hosts the MCP server over Streamable HTTP on loopback, through the
- *        SDK's `createMcpHandler`: a fresh server per request, for both
- *        protocol eras. A 2026-07-28 client is served per request by design;
- *        a 2025-era one statelessly, which keeps the safety config current on
- *        every call. What a 2025-era client carries across requests is keyed
- *        by the `Mcp-Session-Id` issued here: its handshake name
- *        (`client-sessions.ts`), and an abort handle per request still in
- *        flight, so its cancel reaches it (`in-flight-calls.ts`). The Host and
- *        Origin checks the handler does not make are made here, so a browser
- *        tab cannot reach the endpoint through DNS rebinding (MCP spec
- *        requirement).
+ * @brief Hosts the MCP server over Streamable HTTP on loopback, through the SDK's
+ *        `createMcpHandler`: a fresh server per request, for both protocol eras. A 2026-07-28
+ *        client is served per request by design; a 2025-era one statelessly, which keeps the safety
+ *        config current on every call. What a 2025-era client carries across requests is keyed by
+ *        the `Mcp-Session-Id` issued here: its handshake name (`client-sessions.ts`), and an abort
+ *        handle per request still in flight, so its cancel reaches it (`in-flight-calls.ts`). The
+ *        Host and Origin checks the handler does not make are made here, so a browser tab cannot
+ *        reach the endpoint through DNS rebinding (MCP spec requirement).
  */
 
 import type http from "node:http";
@@ -108,22 +104,19 @@ export class McpHttpServer {
 	}
 
 	/**
-	 * End every exchange a socket's close would otherwise wait on, on both
-	 * legs. A 2026-07-28 exchange is ended by the SDK when its handler closes:
-	 * a `subscriptions/listen` stream (which lasts as long as the client likes)
-	 * with its own final answer, a call in flight with none. Every 2025-era
-	 * exchange in flight is cut here, held in the cancel registry or not. The
-	 * cut reaches the handler as a disconnect does, so the tool's signal fires
-	 * and its engine request is aborted. What the client is sent depends on how
-	 * far its answer got (#3598): a 2025-era call with nothing written yet has
-	 * its connection dropped, so the client's fetch fails at once (a 2026-07-28
-	 * one is answered with the SDK's bare `499`, as fast); a call of either era
-	 * whose stream is under way (a progress event or a keep-alive comment is
-	 * out) ends with a JSON-RPC error for its request id, the one thing that
-	 * client acts on before its own timeout (`held-exchange.ts`).
-	 * Everything else finishes as it would have: an upload still arriving is
-	 * drained and answered (see `readJsonBody`), not cut off. The SDK's
-	 * `close()` is final, so a fresh handler takes the next request.
+	 * End every exchange a socket's close would otherwise wait on, on both legs. A 2026-07-28
+	 * exchange is ended by the SDK when its handler closes: a `subscriptions/listen` stream (which
+	 * lasts as long as the client likes) with its own final answer, a call in flight with none.
+	 * Every 2025-era exchange in flight is cut here, held in the cancel registry or not. The cut
+	 * reaches the handler as a disconnect does, so the tool's signal fires and its engine request
+	 * is aborted. What the client is sent depends on how far its answer got (#3598): a 2025-era
+	 * call with nothing written yet has its connection dropped, so the client's fetch fails at once
+	 * (a 2026-07-28 one is answered with the SDK's bare `499`, as fast); a call of either era whose
+	 * stream is under way (a progress event or a keep-alive comment is out) ends with a JSON-RPC
+	 * error for its request id, the one thing that client acts on before its own timeout
+	 * (`held-exchange.ts`). Everything else finishes as it would have: an upload still arriving is
+	 * drained and answered (see `readJsonBody`), not cut off. The SDK's `close()` is final, so a
+	 * fresh handler takes the next request.
 	 */
 	async endStreams(): Promise<void> {
 		// Before `close()`: a stream the SDK ends must already carry its cause.
@@ -176,18 +169,16 @@ export class McpHttpServer {
 		try {
 			body = await readJsonBody(req);
 		} catch (err) {
-			// A client-side payload mistake is the client's, not a Vayu crash: the
-			// generic catch above would answer 500 / -32603 ("Internal error"),
-			// which reads as the server having fallen over. The body is read here
-			// rather than by the handler so that an oversized upload is drained
-			// rather than cut off (see `readJsonBody`), so the codes are answered
+			// A client-side payload mistake is the client's, not a Vayu crash: the generic catch
+			// above would answer 500 / -32603 ("Internal error"), which reads as the server having
+			// fallen over. The body is read here rather than by the handler so that an oversized
+			// upload is drained rather than cut off (see `readJsonBody`), so the codes are answered
 			// here too.
 			//
-			// Only the two *client-caused* failures are answered here, each with a
-			// message written at its throw site. `readJsonBody` also rejects with
-			// the socket's own error, which is neither the client's mistake nor
-			// safe to echo - that keeps falling through to the 500 path, where a
-			// dead socket belongs.
+			// Only the two *client-caused* failures are answered here, each with a message written
+			// at its throw site. `readJsonBody` also rejects with the socket's own error, which is
+			// neither the client's mistake nor safe to echo: that keeps falling through to the 500
+			// path, where a dead socket belongs.
 			if (!(err instanceof BodyReadError)) throw err;
 			res.writeHead(err.status, { "Content-Type": "application/json" });
 			res.end(
@@ -240,11 +231,10 @@ export class McpHttpServer {
 	}
 
 	/**
-	 * Count @p exchange among those a stop cuts until its response closes,
-	 * however it closes. Every one, not only the calls `inFlight` holds: that
-	 * registry is keyed and capped for cancels, and a call without a session
-	 * id, inside a longer batch, evicted or replaced under its key still holds
-	 * its connection open.
+	 * Count @p exchange among those a stop cuts until its response closes, however it closes. Every
+	 * one, not only the calls `inFlight` holds: that registry is keyed and capped for cancels, and
+	 * a call without a session id, inside a longer batch, evicted or replaced under its key still
+	 * holds its connection open.
 	 */
 	private holdUntilClosed(exchange: HeldExchange): void {
 		if (exchange.res.destroyed) return;
@@ -253,12 +243,11 @@ export class McpHttpServer {
 	}
 
 	/**
-	 * Hand the request to the handler. A 2025-era request is served under a
-	 * signal of the host's own, which a cut aborts: the SDK's legacy leg tears
-	 * a request's server down when that signal aborts, which aborts the tool's
-	 * `mcpReq.signal`. Under an issued session id, the request is also held in
-	 * `inFlight` by its request id until its exchange ends, however it ends, so
-	 * that client's `notifications/cancelled` cuts it (#3574).
+	 * Hand the request to the handler. A 2025-era request is served under a signal of the host's
+	 * own, which a cut aborts: the SDK's legacy leg tears a request's server down when that signal
+	 * aborts, which aborts the tool's `mcpReq.signal`. Under an issued session id, the request is
+	 * also held in `inFlight` by its request id until its exchange ends, however it ends, so that
+	 * client's `notifications/cancelled` cuts it (#3574).
 	 */
 	private async fetchCancellable(
 		request: Request,
@@ -327,11 +316,10 @@ function soleMessageOf(body: unknown): unknown {
 }
 
 /**
- * The client named by a message that is an `initialize`. Read from the body
- * rather than from a server: the one that answered is gone with its request,
- * and the stateless leg runs no server that sees the `initialized`
- * notification and the handshake both. `isInitializeRequest` is the SDK's own
- * schema check of the handshake, so a name it passes is one the SDK accepted.
+ * The client named by a message that is an `initialize`. Read from the body rather than from a
+ * server: the one that answered is gone with its request, and the stateless leg runs no server that
+ * sees the `initialized` notification and the handshake both. `isInitializeRequest` is the SDK's
+ * own schema check of the handshake, so a name it passes is one the SDK accepted.
  */
 function handshakeOf(message: unknown): { clientName: string } | undefined {
 	return isInitializeRequest(message)
@@ -345,13 +333,12 @@ function cancelledRequestIdOf(message: unknown): RequestId | undefined {
 }
 
 /**
- * A body the *client* got wrong, carrying the status and JSON-RPC code that
- * says which way. Every message is a literal written here, never an underlying
- * error's text: the response goes to whoever can reach the endpoint, so it
- * states what the client did wrong and nothing about this process.
+ * A body the *client* got wrong, carrying the status and JSON-RPC code that says which way. Every
+ * message is a literal written here, never an underlying error's text: the response goes to whoever
+ * can reach the endpoint, so it states what the client did wrong and nothing about this process.
  *
- * Size and syntax are separate codes on purpose - the oversized body was never
- * parsed, so calling it malformed would send the client rewriting valid JSON.
+ * Size and syntax are separate codes on purpose: the oversized body was never parsed, so calling it
+ * malformed would send the client rewriting valid JSON.
  */
 class BodyReadError extends Error {
 	constructor(
@@ -376,15 +363,13 @@ function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
 		let size = 0;
 		let overflowed = false;
 		req.on("data", (chunk: Buffer) => {
-			// Past the cap the body keeps arriving and is thrown away chunk by
-			// chunk. Neither of the alternatives delivers the 413 it is meant to:
-			// destroying the socket, or closing it while the upload is still in
-			// flight, resets the connection before the client can read the
-			// response - it sees a dropped request, which is exactly what a
-			// documented status code exists to prevent. (This showed up as a
-			// macOS-only CI failure; on Linux the response happened to flush
-			// first.) Draining costs bandwidth already committed by the sender
-			// and protects what the cap is really for: this process's memory.
+			// Past the cap the body keeps arriving and is thrown away chunk by chunk. Neither of
+			// the alternatives delivers the 413 it is meant to: destroying the socket, or closing
+			// it while the upload is still in flight, resets the connection before the client can
+			// read the response, so it sees a dropped request, which is exactly what a documented
+			// status code exists to prevent. (This showed up as a macOS-only CI failure; on Linux
+			// the response happened to flush first.) Draining costs bandwidth already committed by
+			// the sender and protects what the cap is really for: this process's memory.
 			if (overflowed) return;
 			size += chunk.length;
 			if (size > MAX_BODY_BYTES) {

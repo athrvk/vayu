@@ -6,16 +6,13 @@
  */
 
 /**
- * What a streaming load run has delivered so far (issue #3236), between the
- * hero row and the charts: events received, events per second now, the streams
- * open and, once one has finished and delivered an event, the time to first
- * event - with the rate on the run's timeline below.
- *
- * Rendered only for a run whose frames carry `stream_events`
- * (`utils/liveStream.ts`), so an ordinary load run never shows a "0 events/sec"
- * it did not measure. A figure the frame lacks gets no tile, never a `0`.
- * `firstEvent` is the latest gate frame's block, so this panel does not flicker
- * between the gates that carry it.
+ * What a streaming load run has delivered so far (issue #3236), between the hero row and the
+ * charts: events received, events per second now, the streams open and, once one has finished and
+ * delivered an event, the time to first event, with the rate on the run's timeline below. Rendered
+ * only for a run whose frames carry `stream_events` (`utils/liveStream.ts`), so an ordinary load
+ * run never shows a "0 events/sec" it did not measure; a figure the frame lacks gets no tile, never
+ * a `0`. `firstEvent` is the latest gate frame's block, so the panel does not flicker between the
+ * gates that carry it.
  */
 
 import { memo } from "react";

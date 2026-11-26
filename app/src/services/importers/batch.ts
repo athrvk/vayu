@@ -6,39 +6,31 @@
  */
 
 /**
- * Importing several documents in one flow (issue #666).
+ * Importing several documents in one flow (#666).
  *
- * **The defect this closes.** The import dialog read `dataTransfer.files[0]` and
- * its `<input type="file">` carried no `multiple`, so a user who dropped a
- * folder's contents got the first file and **no word at all** about the rest.
- * Silent loss is the failure mode this subsystem refuses everywhere else - every
- * parser tallies what it could not represent - so the drop path was a bug on its
- * own terms, independent of whether batches were ever wanted.
+ * **Every picked file gets a row.** A drop of a folder's contents, or a multi-select, imports each
+ * file and says what became of it; taking the first and saying nothing about the rest would be the
+ * silent loss this subsystem refuses everywhere else, where every parser tallies what it could not
+ * represent. Batches are also wanted for their own sake: a vendor shipping one spec per service is
+ * the norm (PayPal's public API surface is 13 OpenAPI documents in one folder), otherwise 13
+ * round-trips through the dialog.
  *
- * And they are wanted: a vendor shipping one spec per service is the norm
- * (PayPal's public API surface is 13 OpenAPI documents in one folder), which
- * before this meant 13 round-trips through the dialog.
+ * **This is a layer above the parsers, not a change to them.** Each document runs the bundle ->
+ * detect -> parse pipeline on its own, so a batch may mix formats by construction: detection is per
+ * file. What this module adds is the ledger those per-file results live in, and the one thing a
+ * batch knows that a single file cannot: a `$ref` to a sibling file may name a document the user
+ * *also just picked*.
  *
- * **This is a layer above the parsers, not a change to them.** Each document
- * still runs the existing bundle -> detect -> parse pipeline on its own, so a
- * batch may mix formats by construction: detection is per file and already
- * decides. What this module adds is the ledger those per-file results live in,
- * and the one thing a batch knows that a single file cannot - that a `$ref` to
- * a sibling file may name a document the user *also just picked*.
+ * **Siblings come from the batch first.** `bundleExternalRefs` reads a referenced file through the
+ * gated `specFile:read` IPC; when that file is already in the batch, its text is right here, and
+ * the IPC round-trip would re-read from disk what the picker handed over. A file another document
+ * inlined is marked `bundledInto` and excluded from the apply: it is part of that spec, not a
+ * collection of its own, and importing it twice is the double import the mark prevents.
  *
- * **Siblings come from the batch first.** `bundleExternalRefs` reads a
- * referenced file through the gated `specFile:read` IPC; when the referenced
- * file is already in the batch, its text is right here and the IPC round-trip
- * would re-read from disk what the picker handed over. A file that another
- * document inlined is then marked `bundledInto` and excluded from the apply -
- * it is part of that spec, not a collection of its own, and importing it twice
- * is exactly the double-import the mark prevents.
- *
- * **Per-file atomicity is the caller's job, and deliberate.** Each entry is
- * applied as its own `POST /import/apply` transaction (see `ImportModal`), so a
- * seventh file the engine refuses cannot roll back six good ones. That is what N
- * manual imports already produce; a combined payload would make unrelated files
- * share a failure.
+ * **Per-file atomicity is the caller's job, and deliberate.** Each entry is applied as its own
+ * `POST /import/apply` transaction (see `ImportModal`), so a seventh file the engine refuses cannot
+ * roll back six good ones. That is what N manual imports produce; a combined payload would make
+ * unrelated files share a failure.
  */
 
 import {
@@ -53,14 +45,11 @@ import { UnrecognisedFormatError, type ImportOptions, type ImportResult } from "
 import type { ImportFetchOptions } from "@/types/api";
 
 /**
- * What a folder pick will even look at.
- *
- * A folder is picked wholesale - `webkitdirectory` hands over every file under
- * it, `.git` objects and PNGs included - so this filter is what keeps the ledger
- * about specs. It is **not** applied to a drop or an explicit multi-select:
- * there the user named the files, and dropping one for its extension would be
- * the silent discard this whole change exists to remove. Those arrive as an
- * "Unrecognized format" row instead, which says so.
+ * What a folder pick will even look at. A folder is picked wholesale (`webkitdirectory` hands over
+ * every file under it, `.git` objects and PNGs included), so this filter keeps the ledger about
+ * specs. It is **not** applied to a drop or an explicit multi-select: there the user named the
+ * files, and dropping one for its extension would be the silent discard this module exists to
+ * remove. Those arrive as an "Unrecognized format" row instead, which says so.
  */
 export const IMPORTABLE_EXTENSIONS = [".json", ".yaml", ".yml", ".jmx"] as const;
 
@@ -145,17 +134,13 @@ export interface BatchIntake {
 }
 
 /**
- * How far through a batch the work is (issue #882).
- *
- * Two stages, because they are two different waits: `bundling` follows each
- * document's `$ref`s (disk, or the network), `parsing` is one engine round trip
- * per document. Both totals are real counts of real work - `parsing`'s is the
- * documents that will actually be parsed, which is fewer than the documents
- * picked whenever one could not be read or was inlined into another. A total
- * that included those would leave the bar permanently short of itself.
- *
- * File *reads* get no stage. They are local and effectively instant; a counter
- * for them would be motion without information.
+ * How far through a batch the work is (#882). Two stages, because they are two different waits:
+ * `bundling` follows each document's `$ref`s (disk, or the network), `parsing` is one engine round
+ * trip per document. Both totals count real work: `parsing`'s is the documents that will actually
+ * be parsed, fewer than those picked whenever one could not be read or was inlined into another,
+ * and a total that included those would leave the bar permanently short of itself. File *reads* get
+ * no stage: they are local and effectively instant, and a counter for them would be motion without
+ * information.
  */
 export interface BatchProgress {
 	stage: "bundling" | "parsing";
@@ -164,10 +149,8 @@ export interface BatchProgress {
 }
 
 /**
- * Report progress, or throw it away for a caller that wants none.
- *
- * A zero total is silence rather than a `0 of 0` tick: a stage with no work in
- * it is not a stage, and a bar for it would be a bar that can never move.
+ * Report progress, or throw it away for a caller that wants none. A zero total is silence, not a
+ * `0 of 0` tick: a stage with no work in it is not a stage, and a bar for it could never move.
  */
 function reporter(onProgress?: (progress: BatchProgress) => void) {
 	return (stage: BatchProgress["stage"], done: number, total: number): void => {
@@ -210,12 +193,9 @@ export function applicableEntries(entries: BatchEntry[]): BatchEntry[] {
 }
 
 /**
- * What to call one entry on screen.
- *
- * A pasted document has neither a file name nor a URL, and every surface that
- * names an entry - the ledger row, and the re-import dialog (issue #680) - has
- * to fall back the same way, or the same file is called two different things in
- * two places.
+ * What to call one entry on screen. A pasted document has neither a file name nor a URL, and every
+ * surface that names an entry (the ledger row, the re-import dialog of #680) has to fall back the
+ * same way, or one file is called two things in two places.
  */
 export function entryLabel(entry: BatchEntry): string {
 	return entry.fileName || entry.sourceUrl || "Pasted document";
@@ -237,12 +217,10 @@ interface BundledDocument {
 }
 
 /**
- * Bundle, detect and parse every document in the batch.
- *
- * Two passes rather than one, because the first pass is what discovers which
- * files are `$ref` targets of another: an entry cannot be labelled a bundled
- * sibling until every document has had its chance to name it, and the document
- * that names it may be picked after it.
+ * Bundle, detect and parse every document in the batch. Two passes, because the first discovers
+ * which files are `$ref` targets of another: an entry cannot be labelled a bundled sibling until
+ * every document has had its chance to name it, and the document that names it may be picked after
+ * it.
  */
 export async function detectBatch(
 	documents: BatchDocument[],
@@ -341,10 +319,9 @@ export async function detectBatch(
 	);
 
 	/**
-	 * A file another document inlined, or one that could not be read, is never
-	 * parsed - the first is a fragment of somebody else's spec and the second has
-	 * nothing to parse. Decided once, here, because the parse is now a round trip
-	 * to the engine and the map below has to be synchronous.
+	 * A file another document inlined, or one that could not be read, is never parsed: the first is
+	 * a fragment of somebody else's spec and the second has nothing to parse. Decided once, here,
+	 * because the parse is a round trip to the engine and the map below has to be synchronous.
 	 */
 	const skipParse = (bundle: (typeof bundles)[number]): boolean => {
 		const key = batchKey(bundle.document);
@@ -443,13 +420,10 @@ async function parseEntry(
 }
 
 /**
- * Re-parse a batch after an option toggle, from the text already bundled.
- *
- * Nothing is re-fetched: `raw` is the bundled document, and the refs that stayed
- * unresolved are still unresolved, so the count is restated rather than
- * recomputed - a re-parse that dropped it would quietly un-report a loss the
- * user was already told about. Anything already applied keeps its outcome and
- * stays out of the next apply.
+ * Re-parse a batch after an option toggle, from the text already bundled. Nothing is re-fetched:
+ * `raw` is the bundled document and the refs that stayed unresolved still are, so the count is
+ * restated, not recomputed; a re-parse that dropped it would quietly un-report a loss the user was
+ * already told about. Anything already applied keeps its outcome and stays out of the next apply.
  */
 export async function reparseBatch(
 	entries: BatchEntry[],

@@ -5,11 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file db_requests.cpp
- * @brief Requests and their saved examples (issue #481), plus bulk import
- * (issue #96) (issue #1614).
- */
+/// Requests and their saved examples (#481), plus bulk import (#96) (#1614).
 
 #include "database_impl.hpp"
 
@@ -85,18 +81,17 @@ namespace {
 // The filters and orders below are shared by the full-row and the summary
 // reads (#2546), so the two answers cannot come to list different rows.
 
-// Deleted rows are excluded (issue #988); a deleted *collection* answers with
-// nothing at all, because every caller reaches this through a
-// `get_collection` that already refused.
+// Deleted rows are excluded (#988); a deleted *collection* answers nothing,
+// since every caller reaches this through a `get_collection` that refused.
 auto live_requests_in (const std::string& collection_id) {
     return where (c (&Request::collection_id) == collection_id &&
     is_null (&Request::deleted_at));
 }
 
 // A deleted collection stamps its whole subtree, requests included, so the
-// request's own stamp already excludes most of what the trash holds; the
-// collection filter is what excludes a live request left inside a deleted
-// collection by anything that stamped the collection alone.
+// request's stamp excludes most of the trash; the collection filter excludes a
+// live request left inside a deleted collection by anything that stamped only
+// the collection.
 auto live_requests_in_live_collections () {
     return where (is_null (&Request::deleted_at) &&
     in (&Request::collection_id,
@@ -205,10 +200,9 @@ std::vector<Request> Database::get_requests_in_subtree (const std::string& root_
 
     const std::vector<const Collection*> no_folders;
     std::vector<Request> ordered;
-    // The visited set is what makes a corrupted `parent_id` (a self-parent, or
-    // an A -> B -> A loop written before write-time validation existed)
-    // terminate rather than grow `ordered` forever under the mutex - the same
-    // guard `delete_collection`'s BFS carries.
+    // The visited set makes a corrupted `parent_id` (a self-parent, or an A ->
+    // B -> A loop) terminate rather than grow `ordered` forever under the
+    // mutex, as `delete_collection`'s BFS does.
     std::unordered_set<std::string> visited;
     std::vector<SubtreeEntry> stack{ SubtreeEntry{ root_id } };
     while (!stack.empty ()) {
@@ -229,10 +223,10 @@ std::vector<Request> Database::get_requests_in_subtree (const std::string& root_
     return ordered;
 }
 
-// Soft delete (issue #988): the row is stamped, not removed. Its examples stay
-// where they are - every read of them is by request id and goes through a
-// request this stamp has made unreadable, so they are as gone as the request
-// is, and a restore that had to re-create them could not.
+// Soft delete (#988): the row is stamped, not removed. Its examples stay: every
+// read of them is by request id through a request this stamp makes unreadable,
+// so they are as gone as it is, and a restore that had to re-create them could
+// not.
 void Database::delete_request (const std::string& id,
 const std::optional<std::string>& declined_under) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
@@ -311,11 +305,10 @@ void Database::save_request_example (const RequestExample& e) {
 
 namespace {
 
-// The one definition of "an example a reader may see" (issues #722, #2971):
-// neither a tombstone nor a trashed row. The list and the count share it, so
-// the list route, the mock server, both exports, the spec sync and the cap
-// cannot disagree about which rows exist; `get_request_example` states the
-// same two conditions by id.
+// The one definition of "an example a reader may see" (#722, #2971): neither a
+// tombstone nor a trashed row. The list and the count share it, so the list
+// route, the mock server, both exports, the spec sync and the cap agree on
+// which rows exist; `get_request_example` states the same two conditions by id.
 auto live_examples_of (const std::string& request_id) {
     return where (c (&RequestExample::request_id) == request_id &&
     c (&RequestExample::suppressed) == false && is_null (&RequestExample::deleted_at));
@@ -323,15 +316,10 @@ auto live_examples_of (const std::string& request_id) {
 
 } // namespace
 
-/**
- * One example by id - a tombstoned or trashed row reads as gone (issues #722,
- * #2971).
- *
- * The filter is here rather than in each caller because this is what the
- * owner check of every `/requests/:id/examples/:exampleId` route reads: a
- * hidden row answering 200 would let a `PUT` bring a deleted example back by
- * writing over it.
- */
+/// One example by id; a tombstoned or trashed row reads as gone (#722, #2971).
+/// Filtered here, not per caller, because the owner check of every
+/// `/requests/:id/examples/:exampleId` route reads this: a hidden row answering
+/// 200 would let a `PUT` bring a deleted example back by writing over it.
 std::optional<RequestExample> Database::get_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     auto rows = impl_->storage.get_all<RequestExample> (
@@ -344,24 +332,20 @@ std::optional<RequestExample> Database::get_request_example (const std::string& 
 
 std::vector<RequestExample> Database::get_request_examples (const std::string& request_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    // The same three-key tie rule the other list reads use (see
-    // get_collections), and here it is a contract rather than a display
-    // preference: a mock server serves the *first* matching example. `order`
-    // has to lead, because a bulk import writes every example of one request in
-    // the same millisecond - on `created_at` alone they all tie and the id
-    // tiebreak returns the author's list shuffled.
+    // The three-key tie rule of the other list reads (get_collections), here a
+    // contract, not a display preference: a mock server serves the *first*
+    // matching example. `order` leads because a bulk import writes all of a
+    // request's examples in one millisecond, so on `created_at` alone they tie
+    // and the id tiebreak shuffles the author's list.
     return impl_->storage.get_all<RequestExample> (live_examples_of (request_id),
     multi_order_by (order_by (&RequestExample::order),
     order_by (&RequestExample::created_at), order_by (&RequestExample::id)));
 }
 
-/**
- * The request's tombstones - deleted imported examples (issue #722).
- *
- * The one read that sees suppressed rows, and it exists for one caller: the
- * spec sync's `refresh_examples`, which has to know which statuses the user
- * removed before writing the document's examples back.
- */
+/// The request's tombstones, deleted imported examples (#722): the one read
+/// that sees suppressed rows, for one caller, the spec sync's
+/// `refresh_examples`, which must know which statuses the user removed before
+/// writing the document's examples back.
 std::vector<RequestExample> Database::get_suppressed_request_examples (
 const std::string& request_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
@@ -373,8 +357,8 @@ const std::string& request_id) {
 int64_t Database::count_request_examples (const std::string& request_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     // Neither tombstones nor trashed rows count against `MAX_PER_REQUEST`: a
-    // user who deletes an example has fewer examples, not the same number with
-    // one hidden. A restore re-checks the cap for the same reason.
+    // user who deletes an example has fewer, not the same number with one
+    // hidden. A restore re-checks the cap for that reason.
     return impl_->storage.count<RequestExample> (live_examples_of (request_id));
 }
 
@@ -384,8 +368,8 @@ bool Database::request_example_id_taken (const std::string& id) {
 }
 
 // Soft delete (#2971): the row is stamped, not removed. A user's example is the
-// one thing on a request a person makes by hand that a delete used to destroy
-// outright; now it waits in `GET /trash` like the request it hangs under.
+// one hand-made thing on a request a hard delete would destroy outright; it
+// waits in `GET /trash` like the request it hangs under.
 void Database::delete_request_example (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Deleting request example (soft)", { { "id", id } });
@@ -449,12 +433,9 @@ void Database::purge_example_locked (const std::string& id) {
     impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
 }
 
-/**
- * Turns an imported example into a tombstone (issue #722).
- *
- * The row stays so a later sync knows the status was removed on purpose; what
- * it held does not, because nothing reads a suppressed row's body.
- */
+/// Turns an imported example into a tombstone (#722): the row stays so a later
+/// sync knows the status was removed on purpose; its contents do not, since
+/// nothing reads a suppressed row's body.
 void Database::suppress_request_example (const std::string& id, int64_t now) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Suppressing imported request example", { { "id", id } });
@@ -480,7 +461,7 @@ void Database::suppress_request_example (const std::string& id, int64_t now) {
 // Bulk import - collections + requests + environments in one transaction
 // ============================================================================
 
-// A payload that fails to write leaves nothing behind (issue #96). Same shape as
+// A payload that fails to write leaves nothing behind (#96). As
 // spec_sync_apply: retry_on_busy holds the recursive mutex while the lambda
 // runs, and the lambda only touches the same storage handle.
 void Database::import_apply (const std::vector<Collection>& collections,
@@ -528,10 +509,10 @@ const std::vector<SpecDocument>& specs) {
                 impl_->storage.replace (x);
             }
             for (const auto& e : environments) {
-                // Same at-most-one-active rule as save_environment, applied per
-                // row: an import that carries an active environment deactivates
-                // the one already stored, and if the payload somehow carries
-                // two the last one wins rather than both surviving.
+                // save_environment's at-most-one-active rule, per row: an
+                // imported active environment deactivates the stored one, and
+                // of two in one payload the last wins rather than both
+                // surviving.
                 if (e.is_active) {
                     deactivate_other_environments_locked (e.id);
                 }

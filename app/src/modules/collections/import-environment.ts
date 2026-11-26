@@ -6,18 +6,15 @@
  */
 
 /**
- * What an import does about the active environment (issue #2115).
+ * What an import does about the active environment (issue #2115). An import that creates exactly
+ * one environment and finds none active makes it active: the one case where the user has already
+ * said which environment they mean, and without it every `{{variable}}` in the file resolves to
+ * nothing until they find the switcher. Anything else changes nothing: a second environment would
+ * be a guess, and an active one is the user's choice to override.
  *
- * An import that creates exactly one environment and finds none active makes it
- * the active one: that is the one case where the user has already said which
- * environment they mean, and without it every `{{variable}}` in the file they
- * just imported resolves to nothing until they find the switcher. Anything else
- * changes nothing - a second environment would be a guess, and an active
- * environment is the user's own choice to override.
- *
- * "None active" is read from the engine after the apply, never from the session
- * store: the store is a per-window cache of a choice the engine persists, and a
- * fresh install or a second window can disagree with it.
+ * "None active" is read from the engine after the apply, never from the session store: the store is
+ * a per-window cache of a choice the engine persists, and a fresh install or a second window can
+ * disagree with it.
  */
 
 import { useEnvSwitcherStore, useToastStore } from "@/stores";
@@ -65,12 +62,10 @@ export interface EnvironmentActivationDeps {
 }
 
 /**
- * Plan and, where the plan says so, carry out the activation.
- *
- * Resolves `null` when there is nothing to say. That includes a list the engine
- * would not give: the import itself succeeded, so not knowing whether an
- * environment is active changes nothing rather than failing the import.
- * A rejected activation is `failed`, not an error for the same reason.
+ * Plan and, where the plan says so, carry out the activation. Resolves `null` when there is nothing
+ * to say, including a list the engine would not give: the import succeeded, so not knowing whether
+ * an environment is active changes nothing rather than failing it. A rejected activation is
+ * `failed`, not an error, for the same reason.
  */
 export async function activateImportedEnvironment(
 	createdIds: readonly string[],
@@ -124,10 +119,7 @@ async function switchToImported(
 	}
 }
 
-/**
- * The clause that joins the import toast's one sentence, after its `;`. It
- * starts lower-case for that reason.
- */
+/** The clause after the `;` of the import toast's one sentence, so it starts lower-case. */
 export function environmentClause(outcome: EnvironmentOutcome): string {
 	switch (outcome.kind) {
 		case "activated":

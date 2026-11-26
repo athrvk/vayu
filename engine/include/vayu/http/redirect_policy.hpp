@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/redirect_policy.hpp
  * @brief What the engine's own redirect loop decides between two hops (#3255).
  *
  * A send that follows redirects runs one transfer per hop and decides here what
@@ -19,11 +18,11 @@
  * consumer (#3301) and the load path's event loop (#3302) drive their chains
  * through `RedirectChain`.
  *
- * The rules restate what libcurl did, so a send behaves as it did when libcurl
- * followed: which statuses are followed, how a `Location` resolves, which
- * method and body a hop keeps, which headers stay with the first origin and
- * how the limit is worded. The one rule that is Vayu's own is the cookie rule
- * at the bottom.
+ * The rules are libcurl's, so a send behaves as it would under
+ * `CURLOPT_FOLLOWLOCATION`: which statuses are followed, how a `Location`
+ * resolves, which method and body a hop keeps, which headers stay with the
+ * first origin and how the limit is worded. The one rule that is Vayu's own is
+ * the cookie rule at the bottom.
  */
 
 #include <curl/curl.h>
@@ -80,10 +79,10 @@ struct RedirectedRequest {
  *
  * libcurl's `CURLFOLLOW_ALL` rule: a 301, 302 or 303 drops the body, and a
  * `POST` among them becomes a `GET`; every other verb keeps its name, because
- * libcurl kept sending a custom method string. Any other 3xx (307 and 308
+ * libcurl keeps sending a custom method string. Any other 3xx (307 and 308
  * above all) keeps the method and the body. One deliberate difference: libcurl
- * re-sent a streamed (`CURLOPT_UPLOAD`) body on a 301 or 302 with its verb; the
- * rule here drops it, as it does every other body (#3300).
+ * re-sends a streamed (`CURLOPT_UPLOAD`) body on a 301 or 302 with its verb;
+ * the rule here drops it, as it does every other body (#3300).
  */
 [[nodiscard]] RedirectedRequest redirected_request (int status, HttpMethod method);
 
@@ -97,12 +96,12 @@ struct RedirectedRequest {
 [[nodiscard]] bool same_origin (const std::string& a, const std::string& b);
 
 /**
- * @brief Whether a request header named @p name stays with the origin the
- *        send started at: `Authorization` and `Cookie`.
+ * @brief Whether a request header named @p name stays with the origin the send
+ *        started at: `Authorization` and `Cookie`.
  *
- * libcurl's rule, kept as it was: a hop to any other origin goes without them,
- * and a hop back to the first origin carries them again. Every other header
- * follows, an API key in `X-Api-Key` included (`SECURITY.md`).
+ * libcurl's rule: a hop to any other origin goes without them, and a hop back
+ * to the first origin carries them again. Every other header follows, an API
+ * key in `X-Api-Key` included (`SECURITY.md`).
  */
 [[nodiscard]] bool is_origin_bound_header (std::string_view name);
 
@@ -120,8 +119,8 @@ struct RedirectedRequest {
 [[nodiscard]] bool redirect_limit_reached (int followed, int max_redirects);
 
 /**
- * @brief The `TooManyRedirects` error a chain ends with at @p max_redirects,
- *        in the words libcurl's own limit used (#2462).
+ * @brief The `TooManyRedirects` error a chain ends with at @p max_redirects, in
+ *        the words libcurl's own limit uses (#2462).
  */
 [[nodiscard]] Error too_many_redirects_error (int max_redirects);
 
@@ -195,12 +194,12 @@ class RedirectChain {
     redirect_target (const std::vector<HeaderLine>& lines, int status) const;
 
     /**
-     * @brief Points @p curl at @p next_url after a @p status redirect: the
-     *        URL, the method and body the redirect asks for, and the request
-     *        lines that go to its origin.
+     * @brief Points @p curl at @p next_url after a @p status redirect: the URL,
+     *        the method and body the redirect asks for, and the request lines
+     *        that go to its origin.
      *
      * `Authorization` and the typed `Cookie` rows (`CURLOPT_COOKIE`) go only to
-     * the origin the chain started at, as libcurl compared against its first
+     * the origin the chain started at, as libcurl compares against its first
      * origin: a hop back there carries them again.
      */
     void advance (CURL* curl, int status, std::string next_url);
@@ -240,20 +239,20 @@ class RedirectChain {
 [[nodiscard]] std::optional<std::string> expired_cookie_line (std::string_view netscape_line);
 
 /**
- * @brief Keeps a cookie one hop set off a later hop to another origin
- *        (#3300).
+ * @brief Keeps a cookie one hop set off a later hop to another origin (#3300).
  *
  * Vayu's rule, not libcurl's: libcurl's cookie engine matches by host and path
  * alone, so on its own a cookie `127.0.0.1:8080` set rides a redirect to
- * `127.0.0.1:9090`. A `Set-Cookie` is stored in the handle's cookie engine
- * (and the jar after it) under the origin that set it, and goes out on a later
- * hop of the same send only when that hop's origin is the setter's. A cookie
- * the jar held before the send is not a hop's and is matched as always.
+ * `127.0.0.1:9090`. A `Set-Cookie` is stored in the handle's cookie engine (and
+ * the jar after it) under the origin that set it, and goes out on a later hop
+ * of the same send only when that hop's origin is the setter's. A cookie the
+ * jar held before the send is not a hop's and is matched by libcurl's rule
+ * alone.
  *
  * Works on the handle's cookie engine between transfers: `before_hop` removes
  * what the coming hop must not carry, `after_hop` notes what the hop set and
- * puts the removed cookies back, so the jar is reconciled from a complete
- * list. The handle must not be reset between hops.
+ * puts the removed cookies back, so the jar is reconciled from a complete list.
+ * The handle must not be reset between hops.
  */
 class HopCookies {
     public:

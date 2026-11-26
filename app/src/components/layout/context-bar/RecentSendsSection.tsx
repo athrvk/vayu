@@ -8,23 +8,17 @@
 /**
  * The last few sends of this request: status, latency and age, newest first.
  *
- * **More than one send is the whole point.** The response pane already says
- * everything there is to say about the *latest* one - `ResponseStatusBar`
- * paints the same status chip, the same duration and the same age, from the
- * same stored run - so a section restating it would be a poorer copy a few
- * hundred pixels to its left, which is why the "last result" section specced in
- * #344 was built and then removed. What the pane structurally cannot show is a
- * sequence: whether that 500 is the first one, whether latency has been
- * drifting, when this last worked. That costs a trip to the History drawer and
- * a tab switch away from the request being debugged, and this is that trip.
+ * **More than one send is the whole point.** The response pane already says everything about the
+ * *latest* one (`ResponseStatusBar` paints the same status chip, duration and age from the same
+ * stored run), so restating it would be a poorer copy a few hundred pixels to its left (#344). What
+ * the pane cannot show is a sequence: whether that 500 is the first one, whether latency has been
+ * drifting, when this last worked. Finding out costs a trip to the History drawer and a tab switch
+ * away from the request being debugged, and this is that trip.
  *
- * One list call, no report fetch. Each row's status code and latency ride on
- * the run's own list row (`resultSummary`, added to the paginated `GET /runs`
- * for this); reading them through `GET /runs/:id/report` instead would load and
- * JSON-parse every result's trace, per row, on every expansion.
- *
- * Rows open the run rather than just reporting it - a trend is where you notice
- * the one send worth looking at, and the History tab is where you look at it.
+ * One list call, no report fetch: each row's status code and latency ride on the run's list row
+ * (`resultSummary`, on the paginated `GET /runs`), where `GET /runs/:id/report` would load and
+ * JSON-parse every result's trace, per row, on every expansion. Rows open the run: a trend is where
+ * you notice the send worth looking at, and the History tab is where you look at it.
  */
 
 import { Button } from "@/components/ui";

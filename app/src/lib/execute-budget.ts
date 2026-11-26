@@ -41,23 +41,21 @@ function runnableScriptCount(payload: Record<string, unknown> | undefined): numb
 }
 
 /**
- * How long a `POST /execute` may legitimately take, as a worst case for the
- * request being sent, plus the grace that lets the engine's own error arrive
- * before the client gives up (issue #2836).
+ * How long a `POST /execute` may legitimately take, as a worst case for the request being sent,
+ * plus the grace that lets the engine's own error arrive before the client gives up (#2836).
  *
- * One call runs, in order: each pre-request script (up to `scriptTimeout`
- * apiece), the late OAuth 2.0 token fetch (bounded by the request timeout), the
- * transfer (up to the request timeout), and each test script. So the budget is
- * the request timeout - the payload's own `timeout`, else `defaultTimeout`, else
- * the 300 s ceiling when the setting is unknown - counted once for the transfer
- * and again when `auth.mode` is `oauth2`, plus `scriptTimeout` for every enabled
- * `script.pre` / `script.post` element. The engine runs each element through its
- * own deadline, so a collection's script and a request's are two budgets, not
- * one. A payload with neither OAuth nor a script is exactly timeout + grace, so
- * a hung engine is still declared dead as fast as before for the common send.
+ * One call runs, in order: each pre-request script (up to `scriptTimeout` apiece), the late OAuth
+ * 2.0 token fetch (bounded by the request timeout), the transfer (up to the request timeout), and
+ * each test script. So the budget is the request timeout (the payload's own `timeout`, else
+ * `defaultTimeout`, else the 300 s ceiling when the setting is unknown), counted once for the
+ * transfer and again when `auth.mode` is `oauth2`, plus `scriptTimeout` for every enabled
+ * `script.pre` / `script.post` element. The engine runs each element under its own deadline, so a
+ * collection's script and a request's are two budgets, not one. A payload with neither OAuth nor a
+ * script gets exactly timeout + grace, so the common send still declares a hung engine dead as soon
+ * as its timeout allows.
  *
- * `electron/mcp/execute-budget.ts` is the main process's copy (it cannot import
- * this module); `execute-budget.parity.test.ts` holds the two to the same answer.
+ * `electron/mcp/execute-budget.ts` is the main process's copy (it cannot import this module);
+ * `execute-budget.parity.test.ts` holds the two to the same answer.
  */
 export function executeBudgetMs(payload: unknown, settings: BudgetSettings): number {
 	const body = asRecord(payload);

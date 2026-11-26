@@ -6,31 +6,27 @@
  */
 
 /**
- * Live dashboard chart retention: the window and the tick ceiling that bound
- * how much history the charts keep.
+ * Live dashboard chart retention: the window and the tick ceiling that bound how much history the
+ * charts keep.
  *
- * They live **engine-side**, as the `liveReplayWindowMs` and
- * `liveMaxRetainedTicks` config entries, not in localStorage. The engine needs
- * the same two numbers to size the in-memory SSE tick ring that
- * `/runs/:id/live` replays - from offset 0 on a first attach, which rebuilds
- * these charts when the dashboard attaches mid-run - so a renderer-local copy
- * could only drift from it, with one side retaining less than the other assumes.
- * Reading and writing the same entries is what keeps them equal by construction.
+ * They live **engine-side**, as the `liveReplayWindowMs` and `liveMaxRetainedTicks` config entries,
+ * not in localStorage. The engine needs the same two numbers to size the in-memory SSE tick ring
+ * `/runs/:id/live` replays (from offset 0 on a first attach, which rebuilds these charts when the
+ * dashboard attaches mid-run), so a renderer-local copy could only drift from it, one side
+ * retaining less than the other assumes. Reading and writing the same entries keeps them equal by
+ * construction.
  *
  * Two hooks, because reading and editing have different lifetimes (#1936):
  *
- * - {@link useLiveWindowSync} pushes both values into the dashboard store. It is
- *   mounted once at the App root, since a run streams into the store whether or
- *   not Settings is open; scoped to the editor it only ran while Settings >
- *   Dashboard was on screen, and the store otherwise kept its module defaults.
- *   Until the config query resolves the store keeps those defaults, so
- *   retention is bounded from the first tick.
- * - {@link useLiveChartSettings} is the editor the Live Dashboard panel's picker
- *   uses. The picker is the window's **only** editor (#586): the engine settings
- *   list used to offer a second one under a second label and a second save
- *   model, and `ENGINE_SETTINGS_EDITED_IN_APP` is what keeps that row out of it.
- *   The ceiling is a memory backstop, edited from the engine list and only read
- *   here, which is why it is returned rather than settable.
+ * - {@link useLiveWindowSync} pushes both values into the dashboard store. Mounted once at the App
+ *   root, since a run streams into the store whether or not Settings is open; scoped to the editor
+ *   it would run only while Settings > Dashboard is on screen. Until the config query resolves the
+ *   store keeps its module defaults, so retention is bounded from the first tick.
+ * - {@link useLiveChartSettings} is the editor the Live Dashboard panel's picker uses. The picker
+ *   is the window's **only** editor (#586): `ENGINE_SETTINGS_EDITED_IN_APP` keeps that row out of
+ *   the engine settings list, which would otherwise offer a second one under a second label and
+ *   save model. The ceiling is a memory backstop, edited from the engine list and only read here,
+ *   which is why it is returned rather than settable.
  */
 
 import { useCallback, useEffect } from "react";

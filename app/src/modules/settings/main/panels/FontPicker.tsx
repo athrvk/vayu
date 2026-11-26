@@ -6,8 +6,6 @@
  */
 
 /**
- * FontPicker
- *
  * Shared font selector for the settings panels: a grid of preset faces (each
  * previewed in its own family) plus a VS Code-style "Custom…" tile that reveals
  * a free-text family field. Used for both the UI font (Appearance) and the code

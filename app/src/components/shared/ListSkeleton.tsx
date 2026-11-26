@@ -6,16 +6,10 @@
  */
 
 /**
- * ListSkeleton
- *
- * Loading placeholder for the drawer's list views. The three of them previously
- * handled loading three different ways - skeleton rows, a centred spinner, and
- * nothing at all. The last case was the worst: with `= []` defaults, an
- * in-flight query renders as a populated-but-empty tree, so the user is told
- * "you have no environments" when the real answer is "not loaded yet".
- *
- * Skeletons over a spinner: they hold the shape of the content, so nothing
- * jumps when data lands, and there is no message to translate.
+ * The loading placeholder for the drawer's list views: with `= []` defaults an in-flight query
+ * renders as an empty list, telling the user "you have no environments" before anything loaded. A
+ * skeleton, not a spinner: it holds the content's shape, so nothing jumps, and has no message to
+ * translate.
  */
 
 import { Skeleton } from "@/components/ui";
@@ -38,9 +32,8 @@ export function ListSkeleton({
 	className,
 }: ListSkeletonProps) {
 	return (
-		// aria-hidden + role=status on the wrapper: the placeholder bars carry no
-		// information, but their presence does. A screen reader gets "Loading"
-		// once instead of reading a fake list.
+		// aria-hidden bars, role=status on the wrapper: the bars say nothing, their presence does,
+		// so a screen reader hears "Loading" once rather than a fake list.
 		<div className={cn("enter-fade", className)} role="status" aria-label="Loading">
 			<div className="space-y-2 py-2" aria-hidden="true">
 				{Array.from({ length: rows }, (_, i) => (

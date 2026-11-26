@@ -6,13 +6,9 @@
  */
 
 /**
- * Deleting an inbox (issue #553), for both surfaces that offer it.
- *
- * Two surfaces delete an inbox - the drawer row and this tab - and they have to
- * agree on the two things that matter: when the confirmation appears, and what
- * it says is about to be lost. Kept here rather than written twice, because two
- * copies of a destructive rule drift in the direction of the one that forgot to
- * ask.
+ * Deleting an inbox (#553), for both surfaces that offer it (the drawer row and the tab), which
+ * must agree on when the confirmation appears and what it says is about to be lost. One copy,
+ * because two copies of a destructive rule drift towards the one that forgot to ask.
  */
 
 import { useState } from "react";
@@ -21,13 +17,10 @@ import { useToastStore } from "@/stores";
 import type { Inbox } from "@/types";
 
 /**
- * How many captures deleting @p inbox would destroy.
- *
- * The record's own count is up to one services poll (10s) old, while a surface
- * holding the capture list has the live stream's arrivals already merged in -
- * so the higher of the two is the one that has seen the newest capture. Taking
- * only the record would let the tab silently destroy a capture it is currently
- * displaying, which is the exact case the confirmation exists for.
+ * How many captures deleting @p inbox would destroy. The record's count is up to one services poll
+ * (10s) old, while a surface holding the capture list has the live stream's arrivals merged in, so
+ * the higher of the two has seen the newest capture. The record alone would let the tab silently
+ * destroy a capture it is displaying, the case the confirmation exists for.
  */
 export function capturesAtRisk(inbox: Inbox, listedTotal?: number): number {
 	return Math.max(inbox.captureCount, listedTotal ?? 0);

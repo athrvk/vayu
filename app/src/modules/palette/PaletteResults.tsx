@@ -8,23 +8,20 @@
 /**
  * The palette's list: every source, grouped and ranked.
  *
- * Mounted only while the palette is open - the same cost model the context
- * bar's sections use. The sources read collections, requests, settings,
- * variables and run history, and a palette that is shut has no business holding
- * query observers on any of it.
+ * Mounted only while the palette is open (the context bar sections' cost model): the sources read
+ * collections, requests, settings, variables and run history, and a shut palette holds no query
+ * observers on any of it.
  *
- * Two shapes of source meet here. The shallow ones return everything they know
- * and let the ranking narrow it; the deep ones (settings, variables, runs)
- * search corpora too large to render - so they take the query, rank and cap it
- * themselves, and offer an escape row into the surface that browses the rest.
+ * Two shapes of source meet here. The shallow ones return everything they know and let the ranking
+ * narrow it; the deep ones (settings, variables, runs) search corpora too large to render, so they
+ * take the query, rank and cap it themselves, and offer an escape row into the surface that browses
+ * the rest.
  *
- * What this file does *not* do is match. `ranking.ts` decides what renders and
- * in what order, once, and the palette tells cmdk not to score anything a
- * second time (`shouldFilter={false}` in `CommandPalette`). So the order below
- * is the order on screen: the lead sections the ranking lifted rows into - a
- * promoted top result when something is typed, Recents and the verbs when
- * nothing is, the verbs again when what was typed matched nothing - and then
- * the fixed sections.
+ * This file does not match: `ranking.ts` decides what renders and in what order, once, and the
+ * palette tells cmdk not to score again (`shouldFilter={false}` in `CommandPalette`). So the order
+ * below is the order on screen: the lead sections the ranking lifted rows into (a promoted top
+ * result when something is typed, Recents and the verbs when nothing is, the verbs again when the
+ * query matched nothing), then the fixed sections.
  */
 
 import { useLayoutEffect, useMemo } from "react";
@@ -52,15 +49,13 @@ interface PaletteResultsProps {
 	/** Run the item and close - the palette never stays open after a pick. */
 	onPick: (item: PaletteItem) => void;
 	/**
-	 * What the commands can see. Built by the palette rather than here, because
-	 * the dialogs it carries have to outlive the list: picking "Run" closes the
-	 * palette, and this component with it.
+	 * What the commands can see. Built by the palette, not here: the dialogs it carries outlive the
+	 * list, since picking "Run" closes the palette and this component with it.
 	 */
 	commandContext: CommandContext;
 	/**
-	 * Whether the query matched nothing, so the rows below are suggestions. The
-	 * palette uses it to keep Enter from running one nobody chose, and reads it
-	 * from here because this is where the ranking is.
+	 * The query matched nothing, so the rows are suggestions; the palette then keeps Enter from
+	 * running one nobody chose. Reported from here, where the ranking is.
 	 */
 	onNothingMatchedChange: (nothingMatched: boolean) => void;
 }
@@ -89,23 +84,19 @@ export function PaletteResults({
 	);
 
 	/*
-	 * The count is exact because the ranking decided it: every row it kept is a
-	 * row this renders or one a capped group's "N more" line accounts for, so
-	 * nothing is dropped unannounced. `aria-live="polite"`
-	 * on an sr-only line is the announcement - a listbox that silently swaps its
-	 * contents as you type tells a screen-reader user nothing about whether the
-	 * query narrowed anything.
+	 * The count is exact because the ranking decided it: every kept row renders here or is counted
+	 * by a capped group's "N more" line, so nothing is dropped unannounced. `aria-live="polite"` on
+	 * an sr-only line is the announcement: a listbox that silently swaps its rows tells a
+	 * screen-reader user nothing about whether the query narrowed anything.
 	 */
 	const { total } = ranked;
 
 	/*
-	 * The sections above the fixed order, in the order they render. Each holds
-	 * rows lifted out of the sections below rather than copied into it - two
-	 * rows carrying the same `value` would both read as selected - so no row
-	 * reaches this list twice. The top result answers a typed query and Recents
-	 * and the verbs both answer an empty one, so the two of them do render
-	 * together; a row that qualifies for both belongs to Recents, the earlier
-	 * section, and `ranking.ts` has already taken it out of the other.
+	 * The sections above the fixed order, in render order. Each holds rows lifted out of the
+	 * sections below, not copied (two rows with one `value` would both read as selected), so no row
+	 * appears twice. The top result answers a typed query, Recents and the verbs an empty one, so
+	 * those two do render together; a row that qualifies for both belongs to Recents, the earlier
+	 * section, and `ranking.ts` has already removed it from the other.
 	 */
 	const lead: LeadSection[] = [
 		{ key: "top", heading: TOP_RESULT_LABEL, items: ranked.top },
@@ -114,28 +105,24 @@ export function PaletteResults({
 	].filter((section) => section.items.length > 0);
 
 	/*
-	 * Nothing the query could match. The ranking answers that by handing back
-	 * the verbs (#1177), so the line below introduces them rather than ending
-	 * the palette on "No matches."
+	 * Nothing the query could match: the ranking hands back the verbs (#1177), so this line
+	 * introduces them rather than ending on "No matches."
 	 *
-	 * It is a line of its own rather than either primitive for the job, and
-	 * both were considered: cmdk's `CommandEmpty` renders only when the list
-	 * has no rows at all, and the verbs under this are rows; `EmptyState`'s
-	 * `inline` variant is a centred `p-8` block that owns the space it sits in,
-	 * and overriding it to a tight left-aligned lead-in would leave nothing of
-	 * it but `text-sm text-muted-foreground`. This is not an empty state - the
-	 * list below it is full.
+	 * A line of its own, not a primitive, and both were considered: cmdk's `CommandEmpty` renders
+	 * only when the list has no rows, and the verbs under it are rows; `EmptyState`'s `inline`
+	 * variant is a centred `p-8` block that owns its space, and overriding it to a tight
+	 * left-aligned lead-in would leave nothing of it but `text-sm text-muted-foreground`. The list
+	 * below is full; this is not an empty state.
 	 *
-	 * The verbs are an offer, not an answer: `CommandPalette` keeps any of them
-	 * from being highlighted until the user moves to one, so Enter on a miss does
-	 * nothing (#3321). It learns of this state from `onNothingMatchedChange`.
+	 * The verbs are an offer, not an answer: `CommandPalette` keeps them unhighlighted until the
+	 * user moves to one, so Enter on a miss does nothing (#3321). It learns of this state from
+	 * `onNothingMatchedChange`.
 	 */
 	const nothingMatched = query.trim() !== "" && total === 0;
 
 	/*
-	 * A layout effect, so the palette withholds the highlight before the frame
-	 * that would show the first suggestion lit. The cleanup is what clears it when
-	 * the palette closes and this list unmounts.
+	 * A layout effect, so the highlight is withheld before the frame that would show the first
+	 * suggestion lit. The cleanup clears it when the palette closes and the list unmounts.
 	 */
 	useLayoutEffect(() => {
 		onNothingMatchedChange(nothingMatched);
@@ -210,11 +197,9 @@ interface LeadSection {
 }
 
 /**
- * What a capped group says about the rows it did not render (#2545).
- *
- * A plain element and not a disabled `CommandItem`: cmdk only navigates and
- * selects its items, so this is out of reach of the arrow keys and Enter
- * without leaning on a disabled state, and it mounts no per-item effect.
+ * What a capped group says about the rows it did not render (#2545): a plain element, not a
+ * disabled `CommandItem`, because cmdk navigates and selects only its items, so this is out of
+ * reach of the arrows and Enter without a disabled state, and mounts no per-item effect.
  */
 function HiddenRowsHint({ count }: { count: number }) {
 	return (
@@ -234,16 +219,14 @@ function PaletteRow({
 	showRecency?: boolean;
 }) {
 	const Icon = item.icon;
-	// Only where the section asked for it *and* the row knows one: a row with no
-	// recency in Recents cannot happen (that is what put it there), and the
-	// check is what keeps it from printing an epoch date if it ever did.
+	// Only where the section asked *and* the row knows one: a Recents row always has a recency
+	// (that put it there), and the check keeps an epoch date off the row if one ever did not.
 	const recencyAt = showRecency ? item.recencyAt : undefined;
 	return (
 		<CommandItem
-			// cmdk no longer matches on these - `ranking.ts` does, against the
-			// same two fields - but `value` is still how cmdk tells one row from
-			// another for selection and keyboard navigation, so it stays what
-			// the row *reads* as.
+			// cmdk does not match on these (`ranking.ts` does, on the same two fields), but `value`
+			// is how cmdk tells rows apart for selection and keyboard navigation, so it stays what
+			// the row reads as.
 			value={[item.title, item.subtitle].filter(Boolean).join(" ")}
 			keywords={item.keywords}
 			onSelect={() => onPick(item)}
@@ -269,20 +252,19 @@ function PaletteRow({
 					{item.subtitle}
 				</TruncatedText>
 			)}
-			{/* One of the two trailing slots below draws, never both, and the
-			    chord is the one that wins: a stamp is why a row is in Recents,
-			    but the chord is how the row is run, and how to run it outlasts
-			    when it last was. The recency carries the guard because it is
-			    the slot that yields. Both at once would print `⌘K  2m ago` with
-			    the spacing of neither - each carries `ml-auto`, so the second
-			    no longer pushes right (#1260). No source stamps a command row
-			    today; #1197 made one survivable by keeping such a row out of
-			    two sections at once, and this is the same premise held here.
-
-			    One cap per key, the `Kbd` docstring's own chord form, drawn from
-			    the chord the handler matches rather than a second spelling of
-			    it (#938). A row without a bound chord prints nothing: an empty
-			    slot is honest, a made-up key is not. */}
+			{/*
+			 * One of the two trailing slots draws, never both, and the chord wins: a stamp is why a
+			 * row is in Recents, but the chord is how the row runs, and that outlasts when it last
+			 * ran. The recency carries the guard because it is the slot that yields. Both would
+			 * print `⌘K  2m ago` with the spacing of neither: each carries `ml-auto`, so the second
+			 * no longer pushes right (#1260). No source stamps a command row today; #1197 made one
+			 * survivable by keeping such a row out of two sections, and this holds the same
+			 * premise.
+			 *
+			 * One cap per key, the `Kbd` docstring's chord form, drawn from the chord the handler
+			 * matches rather than a second spelling of it (#938). A row without a bound chord
+			 * prints nothing: an empty slot is honest, a made-up key is not.
+			 */}
 			{item.shortcut && (
 				<span className="ml-auto flex shrink-0 items-center gap-1 pl-3">
 					{chordKeys(item.shortcut).map((cap) => (

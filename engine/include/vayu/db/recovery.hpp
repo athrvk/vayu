@@ -8,18 +8,17 @@
  */
 
 /**
- * @file db/recovery.hpp
  * @brief The startup recovery marker - what `Database`'s constructor did to the
- *        user's data, written where it outlives the data (issue #922).
+ *        user's data, written where it outlives the data (#922).
  *
  * `Database::Database` validates the database at startup and, when it cannot be
  * opened and no backup restores it, moves it aside so the daemon starts rather
- * than crash-looping. That is the right call and the whole record of it used to
- * be two lines in the engine log: every collection, request, environment,
- * example, spec and run the user had was gone and the app came up looking like
- * a fresh install. (It *deleted* the file until issue #984 quarantined it
- * instead; a marker written before that says `deleted_corrupt` and still means
- * exactly what it says.)
+ * than crash-looping. That is the right call, but two lines in the engine log
+ * are no record of it: every collection, request, environment, example, spec
+ * and run the user had is gone, and the app comes up looking like a fresh
+ * install. (A marker from an engine that deleted the file rather than
+ * quarantining it, before #984, says `deleted_corrupt` and still means exactly
+ * what it says.)
  *
  * The fact cannot live in the database - the database is the thing that just
  * went away - so it lives in a small JSON file beside it, and `GET /health`
@@ -52,14 +51,14 @@
 namespace vayu::db {
 
 /**
- * @brief What the startup probe found at a database path (issue #2420).
+ * @brief What the startup probe found at a database path (#2420).
  *
- * Three answers, not two, because only one of the failures is the file's
- * fault. `Corrupt` sends the file to the recovery branch, which quarantines
- * it; `Unavailable` means the probe could not finish for a reason outside
- * the file (another connection holding a lock, a full disk, a read-only
- * directory, an I/O error, a migration step that failed) and nothing may be
- * renamed, restored or deleted on its strength.
+ * Three answers, not two, because only one of the failures is the file's fault.
+ * `Corrupt` sends the file to the recovery branch, which quarantines it;
+ * `Unavailable` means the probe could not finish for a reason outside the file
+ * (another connection holding a lock, a full disk, a read-only directory, an
+ * I/O error, a migration step that failed) and nothing may be renamed, restored
+ * or deleted on its strength.
  */
 struct ProbeResult {
     enum class Verdict : std::uint8_t { Valid, Corrupt, Unavailable };
@@ -105,9 +104,9 @@ enum class RecoveryOutcome : std::uint8_t {
     /// **deleted**.
     ///
     /// No longer written by a startup that could quarantine the file instead
-    /// (issue #984) - it survives because a rename can fail, and because a
-    /// marker written by an engine that predates quarantining still spells this
-    /// and must keep reading back as the outcome it names.
+    /// (#984) - it survives because a rename can fail, and because a marker
+    /// written by an engine that predates quarantining still spells this and
+    /// must keep reading back as the outcome it names.
     DeletedCorrupt,
     /// The database failed validation, a `.bak` backup existed and failed the
     /// same validation, so it was left on disk untouched; the corrupt database
@@ -137,7 +136,7 @@ struct RecoveryRecord {
     int64_t at = 0;
     /**
      * Where the corrupt database was moved to, when it was moved rather than
-     * deleted (issue #984).
+     * deleted (#984).
      *
      * The salvage route - `sqlite3 <path> .recover` - is only a route if the
      * user can be told the path, and the app is the only thing that tells them
@@ -178,7 +177,7 @@ const std::optional<std::string>& quarantined_path = std::nullopt);
 inline constexpr std::string_view QUARANTINE_INFIX = ".corrupt-";
 
 /**
- * @brief How many quarantined sets a database keeps beside it (issue #984).
+ * @brief How many quarantined sets a database keeps beside it (#984).
  *
  * Two, not one: the set from the corruption a user is currently looking at, and
  * the one before it, which is what tells them this has happened before. Not

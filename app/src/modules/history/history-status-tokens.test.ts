@@ -25,7 +25,7 @@
  * here as a documented decorative categorical palette. It no longer exists:
  * #76 folded it into the shared `TimingPhaseTiles`, whose tiles are neutral,
  * and moved the per-phase hues to `--chart-*` in `timing-phases.ts`. The
- * exception it stood on is gone from design-system.md with it.
+ * exception it stood on is gone from design-system/categorical-colors.md with it.
  */
 
 import { describe, it, expect } from "vitest";

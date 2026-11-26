@@ -6,43 +6,32 @@
  */
 
 /**
- * The rAF-coalesced-write, commit-on-release drag (issue #1715), shared
- * between `PanelResizeHandle` (drawer/context-bar width) and
- * `ScriptElementForm` (script editor height) rather than hand-rolled twice
- * (issue #1738 - the two copies had already drifted on day one: this hook's
- * keyboard handling and `pointercancel` cleanup did not exist in either
- * before this file, so neither copy had them).
+ * The rAF-coalesced-write, commit-on-release drag (#1715), shared by `PanelResizeHandle`
+ * (drawer/context-bar width) and `ScriptElementForm` (script editor height) rather than hand-rolled
+ * twice (#1738: two copies drift, and neither had this hook's keyboard handling or `pointercancel`
+ * cleanup).
  *
- * A pointer drag does not call `commit` per `pointermove` - a mouse or
- * trackpad fires 120-240 of those a second, which turns a naive per-move
- * commit into that many `JSON.stringify` + `localStorage.setItem` calls of
- * the whole persisted layout slice (`layout-store` is a zustand `persist`
- * store), plus a re-render of every subscriber. The live value is painted
- * straight into the DOM instead - through the imperative `paint` the caller
- * supplies - once per animation frame, and `commit` runs exactly once, on
- * release, with the final value; the store's own re-render then lands on the
- * same value the last frame already painted, so there is nothing to jump
- * from. (`ScriptElementForm` used to debounce `commit` mid-drag instead,
- * which left a window where a stale debounced write could land after the
- * live override cleared - a revert-then-jump flash on release. This
- * mechanism has no such window: nothing but `commit` ever writes the store,
- * and it writes once.)
+ * A pointer drag does not call `commit` per `pointermove`: a mouse or trackpad fires 120-240 of
+ * those a second, each a `JSON.stringify` + `localStorage.setItem` of the whole persisted layout
+ * slice (`layout-store` is a zustand `persist` store) plus a re-render of every subscriber. The
+ * live value is painted straight into the DOM instead, through the imperative `paint` the caller
+ * supplies, once per animation frame, and `commit` runs exactly once, on release, with the final
+ * value; the store's own re-render then lands on the value the last frame already painted, so there
+ * is nothing to jump from. Nothing but `commit` writes the store, and it writes once, so no stale
+ * mid-drag write can land after the live override clears (a revert-then-jump flash on release).
  *
- * `pointercancel` (a touch interruption, an OS overlay taking the gesture)
- * aborts rather than commits: the live paint reverts to the value the drag
- * started from and the store is never touched, because the drag did not
- * happen.
+ * `pointercancel` (a touch interruption, an OS overlay taking the gesture) aborts rather than
+ * commits: the live paint reverts to the value the drag started from and the store is never
+ * touched, because the drag did not happen.
  *
- * A held key (OS auto-repeat) is a flood of its own, but a slower one: key
- * repeat arrives every 30-100 ms, longer than a ~16 ms frame, so coalescing
- * per frame would still commit once per repeat. Repeats are throttled on
- * time instead (`KEY_COMMIT_INTERVAL_MS`). A single press (`e.repeat ===
- * false`) still commits immediately, matching the double-click / Enter-reset
- * contract a caller may also expose; `flushKey` (wired to `onKeyUp` and
- * `onBlur`) commits whatever the throttle has not yet written, so releasing
- * the key never drops the final position. The handle's own `aria-valuenow`
- * still updates on every keystroke regardless of repeat, so the announced
- * value never lags behind what a screen reader user just pressed.
+ * A held key (OS auto-repeat) is a flood of its own, but a slower one: key repeat arrives every
+ * 30-100 ms, longer than a ~16 ms frame, so per-frame coalescing would still commit once per
+ * repeat. Repeats are throttled on time instead (`KEY_COMMIT_INTERVAL_MS`). A single press
+ * (`e.repeat === false`) still commits immediately, matching the double-click / Enter-reset
+ * contract a caller may also expose; `flushKey` (wired to `onKeyUp` and `onBlur`) commits whatever
+ * the throttle has not yet written, so releasing the key never drops the final position. The
+ * handle's own `aria-valuenow` updates on every keystroke regardless of repeat, so the announced
+ * value never lags what a screen reader user just pressed.
  */
 
 import { useCallback, useRef } from "react";

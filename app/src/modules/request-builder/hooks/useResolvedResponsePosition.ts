@@ -12,14 +12,10 @@ import { AUTO_RESPONSE_BELOW_MAX_WIDTH, AUTO_RESPONSE_HYSTERESIS } from "@/const
 export { AUTO_RESPONSE_BELOW_MAX_WIDTH };
 
 /**
- * The arrangement `auto` picks for a builder `width` px wide, given the one it
- * is showing now.
- *
- * Below under the threshold, beside at or above it - with a band on the way
- * back: a builder that stacked at 879px does not un-stack until it is
- * `AUTO_RESPONSE_HYSTERESIS` wider, so a drawer or window drag that hovers
- * around the threshold does not re-arrange the split on every pixel. Exported
- * for the unit test; the hook is the only production caller.
+ * The arrangement `auto` picks at `width` px, given the current one: below under the threshold,
+ * beside at or above it, with a band on the way back (a builder stacked at 879px un-stacks only
+ * `AUTO_RESPONSE_HYSTERESIS` wider), so a drag hovering at the threshold does not re-arrange per
+ * pixel. Exported for the unit test; the hook is its only caller.
  */
 export function pickAutoArrangement(
 	width: number,
@@ -32,24 +28,13 @@ export function pickAutoArrangement(
 }
 
 /**
- * Which arrangement the builder inside `containerRef` should draw right now
- * (issue #1711): the `responsePosition` setting itself, or - for `auto` - the
- * one its own width calls for.
- *
- * The measurement is the container's, not the window's: the drawer and the
- * context bar take their share of the window first, and it is the pane left
- * over that has to fit a URL bar next to a JSON body. A `ResizeObserver` on
- * the container therefore sees every cause at once - a window resize, a drawer
- * drag, the context bar opening - with nothing to subscribe to separately.
- *
- * `auto`'s pick is written to `layout-store` rather than kept here, because
- * two readers outside this tree need it: the Dock button shows the current
- * arrangement while the setting says `auto`, and `toggleResponsePosition`
- * flips *from* it. The observer runs only while the setting is `auto`; an
- * explicit Beside or Below costs no measurement at all.
- *
- * A layout effect, so the first paint of an `auto` builder already has the
- * right arrangement instead of drawing Beside and then flipping.
+ * The arrangement the builder in `containerRef` draws now (#1711): the `responsePosition` setting,
+ * or for `auto` what its own width calls for. The container is measured, not the window: the drawer
+ * and context bar take their share first, and the leftover pane must fit a URL bar beside a body,
+ * so one `ResizeObserver` sees every cause. `auto`'s pick goes to `layout-store`: the Dock button
+ * shows it while the setting is `auto`, and `toggleResponsePosition` flips from it. The observer
+ * runs only for `auto`. A layout effect, so an `auto` builder's first paint is right, not Beside
+ * then flipped.
  */
 export function useResolvedResponsePosition(
 	containerRef: RefObject<HTMLElement | null>
@@ -65,30 +50,25 @@ export function useResolvedResponsePosition(
 
 		const measure = () => {
 			const width = el.getBoundingClientRect().width;
-			// A container that has not been laid out yet (a hidden tab, the
-			// first frame of a test) reports 0, and 0 is not "narrow" - it is
-			// "unknown", so it leaves the last pick standing.
+			// An unlaid-out container (a hidden tab, a test's first frame) reports 0, which is
+			// "unknown", not narrow, so the last pick stands.
 			if (width <= 0) return;
 			const { autoResponseArrangement } = useLayoutStore.getState();
 			const next = pickAutoArrangement(width, autoResponseArrangement);
 			if (next !== autoResponseArrangement) setAutoResponseArrangement(next);
 		};
 
-		// The mount measurement runs inside a layout effect, outside any
-		// observer delivery, so it may flip synchronously: the first paint of
-		// an `auto` builder is then already the right arrangement.
+		// The mount measurement runs in the layout effect, outside any observer delivery, so it may
+		// flip synchronously and the first paint is right.
 		measure();
 		if (typeof ResizeObserver === "undefined") return;
 
 		/*
-		 * From the observer, the flip is deferred to the next frame. A
-		 * ResizeObserver delivery that changes the layout of elements the same
-		 * delivery already reported on - the panel library observes the group
-		 * and both panes, and the flip re-sizes all three - is the browser's
-		 * "ResizeObserver loop completed with undelivered notifications",
-		 * which `main.tsx` logs as a high-severity window error. One frame of
-		 * the old arrangement at a threshold crossing is the whole cost; the
-		 * flip happens once per crossing, not per pixel.
+		 * From the observer the flip waits a frame: a delivery that relayouts elements it already
+		 * reported (the panel library observes the group and both panes, and a flip resizes all
+		 * three) is the browser's "ResizeObserver loop completed with undelivered notifications",
+		 * which `main.tsx` logs as a high-severity error. One old frame per threshold crossing is
+		 * the whole cost.
 		 */
 		let frame: number | null = null;
 		const observer = new ResizeObserver(() => {

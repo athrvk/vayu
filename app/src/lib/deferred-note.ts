@@ -9,13 +9,11 @@ import { VARIABLE_PATTERN } from "@/constants/variables";
 import { pickByCount } from "@/modules/dashboard/utils/format";
 
 /**
- * Names the tokens left written because a pre-request script runs before the
- * send (#2521), so a `{{token}}` reads as deliberate rather than as a variable
- * that failed to resolve. The Code section's note, the "Sends" line's hint and a
- * deferred token's hover are this one sentence.
- *
- * Its own module, apart from `code-composition.ts`, because the token painters
- * under `components/shared/` say it too and must not load a query to do so.
+ * Names the tokens left written because a pre-request script runs before the send (#2521), so a
+ * `{{token}}` reads as deliberate rather than as a variable that failed to resolve. The Code
+ * section's note, the "Sends" line's hint and a deferred token's hover are this one sentence. Its
+ * own module, apart from `code-composition.ts`, because the token painters under
+ * `components/shared/` say it too and must not load a query to do so.
  */
 export function deferredNote(names: readonly string[]): string {
 	const tokens = deferredTokens(names);

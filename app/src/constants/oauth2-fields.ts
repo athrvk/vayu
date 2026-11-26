@@ -6,28 +6,22 @@
  */
 
 /**
- * The OAuth 2.0 config fields the **engine names in error prose**, and the label
- * each one carries on screen.
+ * The OAuth 2.0 config fields the **engine names in error prose**, and the label each one carries
+ * on screen. The engine's messages are written against the JSON contract, which is right for an API
+ * (`accessTokenUrl must be an http(s) URL` is exactly what an MCP client or a curl user needs) and
+ * the wrong string in front of someone looking at a form field labelled **Access token URL**. Those
+ * messages reach three toasts unaltered (the token action in `TokenStatusRow`, and the
+ * `AUTH_FAILED` path in the request builder and `DesignRunView`), so the renderer relabels on the
+ * way out, in one place, rather than each toast site paraphrasing.
  *
- * The engine's messages are written against the JSON contract, which is right
- * for an API - `accessTokenUrl must be an http(s) URL` is exactly what an MCP
- * client or a curl user needs. It is the wrong string to put in front of someone
- * looking at a form field labelled **Access token URL**, and those messages reach
- * three toasts unaltered: the token action in `TokenStatusRow`, and the
- * `AUTH_FAILED` path in the request builder and `DesignRunView`. So the renderer
- * relabels on the way out, in one place, rather than each toast site paraphrasing.
+ * Only the eight fields that actually appear in an engine message are listed: `OAuth2Form` has ~25,
+ * and registering the rest would add entries no code path ever reads, this codebase's most repeated
+ * defect. Each key here has two real readers (the form's own field label and
+ * {@link humanizeOAuth2Error}), and six also name a missing field in the token status row.
  *
- * Only the eight fields that actually appear in an engine message are listed.
- * `OAuth2Form` has ~25 fields; registering the rest would add entries no code
- * path ever reads, which is this codebase's most repeated defect.
- * Each key here has two real readers - the form's own field label and
- * {@link humanizeOAuth2Error} - and six of them also name a missing field in
- * the token status row.
- *
- * `subject` is an ordinary English word, so a provider's own prose that says
- * "subject" comes out capitalised. That is the price of naming the member the
- * engine's `subject is required` refusal points at; the provider's sentence is
- * otherwise untouched.
+ * `subject` is an ordinary English word, so a provider's own prose that says "subject" comes out
+ * capitalised: the price of naming the member the engine's `subject is required` refusal points at.
+ * The provider's sentence is otherwise untouched.
  */
 
 import type { OAuth2DiscoveredField } from "@/types";
@@ -50,9 +44,8 @@ export const OAUTH2_FIELD_LABELS = {
 export type OAuth2LabelledField = keyof typeof OAUTH2_FIELD_LABELS;
 
 /**
- * The `discoverUrl` field's label (#3766). Outside the registry because no
- * engine message names `discoverUrl`; its two readers are the form's field and
- * the token row's missing-field sentence.
+ * The `discoverUrl` field's label (#3766), outside the registry because no engine message names
+ * `discoverUrl`; its two readers are the form's field and the token row's missing-field sentence.
  */
 export const DISCOVER_URL_LABEL = "Server URL";
 

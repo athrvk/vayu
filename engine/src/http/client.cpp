@@ -5,10 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file http/client.cpp
- * @brief HTTP client implementation using libcurl
- */
+/** The HTTP client, over libcurl. */
 
 #ifdef _WIN32
 #include <windows.h>
@@ -66,18 +63,17 @@ namespace vayu::http {
 namespace {
 
 /**
- * @brief What a transfer's debug stream leaves behind for the caller.
+ * What a transfer's debug stream leaves behind for the caller.
  *
- * The outbound header frame is captured on every send regardless of log
- * level, because the raw-request view is built from it (issue #339). Since
- * the cookie jar, libcurl synthesizes headers we never composed (`Cookie`, from
- * CURLOPT_COOKIELIST), so the composed header map no longer describes what went
- * on the wire and only libcurl can say what did.
+ * The outbound header frame is captured on every send at any log level, because
+ * the raw-request view is built from it (issue #339). With the cookie jar,
+ * libcurl adds headers the engine never composed (`Cookie`, from
+ * CURLOPT_COOKIELIST), so only libcurl can say what went on the wire.
  *
- * The captured frame is deliberately **not** redacted. It backs the raw-request
- * view, which exists to show exactly what was sent and whose values the user can
- * already read in Settings; the verbose log below keeps its redaction because
- * logs get exported and shared. Two surfaces, two audiences, two policies.
+ * The captured frame is deliberately **not** redacted: the raw-request view
+ * exists to show exactly what was sent, values the user can already read in
+ * Settings. The verbose log below keeps its redaction because logs get exported
+ * and shared. Two surfaces, two audiences, two policies.
  */
 struct TransferDebug {
     /// The last CURLINFO_HEADER_OUT frame, verbatim. Last, not first, so a
@@ -109,10 +105,9 @@ int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, v
         note_cookie_notice (debug->cookie_notices, std::string_view (data, size));
     }
     // Nothing else to do when the caller only wanted the capture: the frames
-    // below are logging, and DATA_OUT can be a whole request body. Gated on
-    // the logger's own level (issue #1510), not a bool threaded down from the
-    // daemon's `-v` flag through `Server`/`RouteContext`/`execute_exchange` -
-    // `-v 2` is what these frames have always meant "debug" as.
+    // below are logging, and DATA_OUT can be a whole request body. Gated on the
+    // logger's own level (issue #1510), `-v 2`, not a bool threaded down from
+    // the daemon's flag through `Server`/`RouteContext`/`execute_exchange`.
     if (vayu::utils::Logger::instance ().get_verbosity () < 2) {
         return 0;
     }
@@ -134,9 +129,7 @@ void flush_transfer_debug (TransferDebug& debug) {
     vayu::utils::log_debug ("client", "curl exchange", fields);
 }
 
-/**
- * @brief What one transfer buffers, and the bound it may not pass (issue #784).
- */
+/** What one transfer buffers, and the bound it may not pass (issue #784). */
 struct BodySink {
     std::string body;
     /// Largest body this transfer may buffer, 0 = unbounded - copied from
@@ -226,20 +219,19 @@ int progress_callback (void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_o
 std::optional<unsigned long long> declared_content_length (const Headers& headers);
 
 /**
- * @brief Callback for writing response body, bounded by the sink's cap.
+ * The response-body callback, bounded by the sink's cap.
  *
- * The same short-count refusal the load loop's callback uses
+ * The same short-count refusal as the load loop's callback
  * (`curl_callbacks.cpp`): keep the prefix that fits, then hand curl fewer bytes
- * than it offered, which fails the transfer. That is what makes the bound a
- * bound on what is *read* rather than a check run after a whole hostile
- * response has already been buffered.
+ * than it offered, which fails the transfer. That makes the bound a bound on
+ * what is *read*, not a check run after a whole hostile response is buffered.
  *
- * Deliberately the only enforcement, rather than a belt to `CURLOPT_MAXFILESIZE`:
- * curl 8.21 refuses an over-bound `Content-Length` at header time *and* aborts a
- * length-less transfer that grows past the value, so setting both left whichever
- * fired first deciding how the failure was reported - and one of the two branches
- * dead in every case. This one is version-independent and is the idiom the engine
- * already enforces a body cap with.
+ * Deliberately the only enforcement, not a belt to `CURLOPT_MAXFILESIZE`: curl
+ * 8.21 refuses an over-bound `Content-Length` at header time *and* aborts a
+ * length-less transfer that grows past the value, so setting both would leave
+ * whichever fired first deciding how the failure is reported, and one of the
+ * two branches dead in every case. This one is version-independent and is the
+ * engine's idiom for a body cap.
  */
 size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     auto* sink        = static_cast<BodySink*> (userdata);
@@ -276,13 +268,11 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
         return total_size > 0 ? total_size - 1 : 0;
     }
 
-    // Reported after the append, so `received` is the body a reader would see
-    // and not the one that is about to exist. A refusal is a short count for
-    // the same reason the bound's is - it is the only way to stop curl from
-    // inside the callback - and the transfer surfaces as curl's generic write
-    // failure, which is the honest outcome: the only party who could be told
-    // anything more specific is the one that just said it had stopped
-    // listening.
+    // Reported after the append, so `received` is the body a reader would see,
+    // not the one about to exist. A refusal is a short count, the only way to
+    // stop curl from inside the callback, and surfaces as curl's generic write
+    // failure: the honest outcome, since the only party who could be told more
+    // is the one that just said it had stopped listening.
     if (sink->on_progress != nullptr && *sink->on_progress) {
         if (!sink->total_resolved) {
             sink->total_resolved = true;
@@ -302,19 +292,18 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
 }
 
 /**
- * @brief The size the server declared for this response, if it declared one.
+ * The size the server declared for this response, if it declared one.
  *
- * Read off the headers the header callback already collected rather than from
+ * Read off the headers the header callback collected, not from
  * `CURLINFO_CONTENT_LENGTH_DOWNLOAD_T`: a transfer aborted at the bound never
- * finished, and libcurl's progress info for one that did not run is `-1`
- * whether the server declared a length or not. The header block is there
- * either way, because headers arrive before the first byte of body.
+ * finished, and libcurl reports `-1` for one that did not run whether the
+ * server declared a length or not. The header block is there either way,
+ * because headers arrive before the first byte of body.
  */
 std::optional<unsigned long long> declared_content_length (const Headers& headers) {
-    // `Headers` orders by `CaseInsensitiveLess`, so this lookup already answers
-    // every casing the wire can spell the name in, and the map holds one value
-    // per name - there is no second `content-length` for a first-match rule to
-    // choose between.
+    // `Headers` orders by `CaseInsensitiveLess`, so this lookup answers every
+    // casing the wire can spell, and the map holds one value per name: there is
+    // no second `content-length` for a first-match rule to choose between.
     const auto declaration = headers.find ("content-length");
     if (declaration == headers.end ()) {
         return std::nullopt;
@@ -332,12 +321,12 @@ std::optional<unsigned long long> declared_content_length (const Headers& header
 }
 
 /**
- * @brief Why a bounded transfer was refused, in the terms the caller set it.
+ * Why a bounded transfer was refused, in the terms the caller set it.
  *
- * Names the count when there is an honest one to name - the length the server
- * declared - and says so plainly when there is not, because a body cut off at
- * the bound is only known to be *at least* that large and reporting the bound
- * as the size would be a measurement the engine never made.
+ * Names the count when there is an honest one, the length the server declared,
+ * and says so plainly when there is not: a body cut off at the bound is only
+ * known to be *at least* that large, and reporting the bound as the size would
+ * be a measurement the engine never made.
  */
 std::string too_large_message (const Headers& headers, size_t max_bytes) {
     const std::string bound = std::to_string (max_bytes) + " byte limit";
@@ -392,7 +381,7 @@ std::optional<int> status_line_code (std::string_view line) {
 }
 
 /**
- * @brief Callback for writing response headers.
+ * The response-header callback.
  *
  * Captures BOTH:
  *  - the reason phrase from the status line ("HTTP/1.1 404 Not Found"
@@ -400,9 +389,8 @@ std::optional<int> status_line_code (std::string_view line) {
  *    "404 Object Not Found" or GitHub's "422 Unprocessable Entity";
  *  - subsequent "Key: Value" header lines.
  *
- * HTTP/2 and HTTP/3 don't carry reason phrases on the wire - the status
- * line is just "HTTP/2 200". In that case status_text is cleared and the
- * caller falls back to its code→phrase lookup.
+ * HTTP/2 and HTTP/3 carry no reason phrase ("HTTP/2 200"), so status_text is
+ * cleared and the caller falls back to its code→phrase lookup.
  *
  * One transfer can still emit more than one block: a 1xx interim response
  * (`100 Continue`) and the 2xx a proxy `CONNECT` answers with precede the
@@ -410,9 +398,9 @@ std::optional<int> status_line_code (std::string_view line) {
  * the one kept. A redirect hop is a transfer of its own, recorded by the
  * chain (`record_hop`).
  *
- * A header name that arrives more than once in the same block keeps every
- * value, folded with ", " - see ingest_header_line for why. The lossless list
- * `Response::header_lines` is filled beside the map (issue #2460).
+ * A name repeated in one block keeps every value, folded with ", " (see
+ * ingest_header_line for why). The lossless list `Response::header_lines` is
+ * filled beside the map (issue #2460).
  */
 size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata) {
     auto* sink         = static_cast<HeaderSink*> (userdata);
@@ -421,7 +409,6 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
 
     std::string line (buffer, total_size);
 
-    // Remove trailing \r\n
     while (!line.empty () && (line.back () == '\r' || line.back () == '\n')) {
         line.pop_back ();
     }
@@ -456,8 +443,7 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
         return total_size;
     }
 
-    // Parse header: "Key: Value". A repeated name folds rather than replaces -
-    // see ingest_header_line.
+    // A repeated name folds rather than replaces; see ingest_header_line.
     vayu::http::detail::ingest_header_line (line, response->headers, &response->header_lines);
     watch_set_cookie (sink->cookies, line, total_size);
 
@@ -465,9 +451,9 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
 }
 
 /**
- * @brief The body the raw-request view shows: the wire bytes, or for a binary
- * body the file's placeholder (`<file a.bin, 1234 bytes>`) - a view never
- * carries a file's contents, however small.
+ * The body the raw-request view shows: the wire bytes, or for a binary body the
+ * file's placeholder (`<file a.bin, 1234 bytes>`). A view never carries a
+ * file's contents, however small.
  */
 std::string raw_view_body (const Request& request) {
     if (request.body.mode == BodyMode::Binary && vayu::http::has_wire_body (request)) {
@@ -499,13 +485,13 @@ bool header_declares_body (std::string_view name, std::string_view value) {
 }
 
 /**
- * @brief Whether an outbound header frame declares a body behind it.
+ * Whether an outbound header frame declares a body behind it.
  *
- * Read from the frame because that is the request that was last sent: a
- * 301/302/303 answer to a POST makes libcurl re-send as a body-less GET (and a
- * `GET` carrying a body is re-sent without it), so the composed request's body
- * is not what the final hop carried (issue #2462). HTTP/2 frames spell the
- * names lower-case, which `header_declares_body` does not mind.
+ * Read from the frame because that is the request last sent: a 301/302/303
+ * answer to a POST makes libcurl re-send as a body-less GET (and a `GET`
+ * carrying a body is re-sent without it), so the composed request's body is not
+ * what the final hop carried (issue #2462). HTTP/2 frames spell the names
+ * lower-case, which `header_declares_body` does not mind.
  */
 bool frame_declares_body (std::string_view frame) {
     bool request_line = true;
@@ -530,18 +516,18 @@ bool frame_declares_body (std::string_view frame) {
 }
 
 /**
- * @brief The raw-request view, built from the header block libcurl actually sent.
+ * The raw-request view, built from the header block libcurl actually sent.
  *
- * @p header_frame is a whole CURLINFO_HEADER_OUT frame - request line included,
- * terminated by its own blank line - so the body is all that has to be added,
- * and only when that frame declares one (`frame_declares_body`).
- * Being the wire's own bytes, it carries what libcurl added on our behalf
- * (`Cookie` from the jar, `Accept`, `Content-Length`, and the h2 pseudo-headers
- * rendered in HTTP/1 form) rather than what we composed and hoped matched.
+ * @p header_frame is a whole CURLINFO_HEADER_OUT frame, request line included
+ * and terminated by its own blank line, so only the body is added, and only
+ * when that frame declares one (`frame_declares_body`). Being the wire's own
+ * bytes, it carries what libcurl added (`Cookie` from the jar, `Accept`,
+ * `Content-Length`, and the h2 pseudo-headers rendered in HTTP/1 form) rather
+ * than what was composed and hoped to match.
  *
- * The terminator is re-normalized rather than trusted: whether a frame ends in
- * one CRLF or two is libcurl's business, and the body must not run into the
- * last header line.
+ * The terminator is re-normalized, not trusted: whether a frame ends in one
+ * CRLF or two is libcurl's business, and the body must not run into the last
+ * header line.
  */
 std::string raw_request_from_wire (std::string header_frame, const std::string& body) {
     const bool has_body = frame_declares_body (header_frame);
@@ -557,17 +543,14 @@ std::string raw_request_from_wire (std::string header_frame, const std::string& 
 }
 
 /**
- * @brief The raw-request view when there is no wire to read it off.
- *
- * The fallback for a transfer that failed before libcurl sent anything - DNS
- * failure, connection refused, a timeout during connect. Synthesized from the
- * composed request, which is what this view was built from throughout before
- * #339, so an unreachable host still shows the request that was attempted.
+ * The raw-request view when there is no wire to read it off: a transfer that
+ * failed before libcurl sent anything (DNS failure, connection refused, a
+ * connect timeout). Synthesized from the composed request (#339), so an
+ * unreachable host still shows the request that was attempted.
  */
 std::string synthesize_raw_request (const Request& request, const Response& response) {
     std::stringstream raw_req;
 
-    // Parse URL to extract host and path
     std::string host;
     std::string path = "/";
     // The URL the transfer would have used, not the one that was typed: a
@@ -575,20 +558,18 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
     // the bare URL beside no body would describe neither (issue #1228).
     std::string url = vayu::http::wire_url (request);
 
-    // Remove protocol prefix
     size_t proto_end = url.find ("://");
     if (proto_end != std::string::npos) {
         url = url.substr (proto_end + 3);
     }
 
-    // Split host and path
     size_t path_start = url.find ('/');
     if (path_start != std::string::npos) {
         host = url.substr (0, path_start);
         path = url.substr (path_start);
     } else {
         host = url;
-        // Check for query string without path
+        // A query string with no path: "host?q" is the path "/?q".
         size_t query_start = host.find ('?');
         if (query_start != std::string::npos) {
             path = "/" + host.substr (query_start);
@@ -596,14 +577,13 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
         }
     }
 
-    // Request line: METHOD /path <version>. Normally the negotiated version.
-    // When nothing was negotiated (connection refused, DNS failure) this line
-    // still has to read as syntactically valid HTTP, so it cannot be blank the
-    // way response.http_version is - but it falls back to what was *requested*
-    // rather than a flat HTTP/1.1. Printing HTTP/1.1 after the user asked for
-    // http2 and never reached a server would contradict both their intent and
-    // the outcome, which is the kind of confident wrong answer this whole task
-    // exists to remove. The fallback never reaches response.http_version.
+    // Request line: METHOD /path <version>, normally the negotiated version.
+    // When nothing was negotiated (connection refused, DNS failure) the line
+    // must still read as valid HTTP, so it cannot be blank as
+    // response.http_version is; it falls back to the *requested* version, not a
+    // flat HTTP/1.1, which after the user asked for http2 and never reached a
+    // server would contradict both their intent and the outcome. The fallback
+    // never reaches response.http_version.
     std::string display_version = response.http_version;
     if (display_version.empty ()) {
         display_version =
@@ -614,9 +594,7 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
     // Host header (required for HTTP/1.1)
     raw_req << "Host: " << host << "\r\n";
 
-    // Add all request headers
     for (const auto& [key, value] : response.request_headers) {
-        // Skip if it's a Host header (we already added it)
         if (key == "Host" || key == "host")
             continue;
         raw_req << key << ": " << value << "\r\n";
@@ -632,15 +610,12 @@ std::string synthesize_raw_request (const Request& request, const Response& resp
     request.body.file.size :
     body.size ();
 
-    // Add Content-Length for body
     if (!body.empty ()) {
         raw_req << "Content-Length: " << length << "\r\n";
     }
 
-    // End of headers
     raw_req << "\r\n";
 
-    // Body
     if (!body.empty ()) {
         raw_req << body;
     }
@@ -687,9 +662,9 @@ void fail_if_proxy_refused (Response& response, CURL* curl, long status) {
 // ============================================================================
 
 /**
- * @brief What one send hands libcurl pointers into, kept on the send's frame
- *        so it outlives every hop of the chain. The header lists the hops send
- *        are the `RedirectChain`'s.
+ * What one send hands libcurl pointers into, kept on the send's frame so it
+ * outlives every hop of the chain. The header lists the hops send belong to the
+ * `RedirectChain`.
  */
 struct SendFrame {
     Response response;
@@ -743,12 +718,12 @@ const std::vector<std::string>& secret_params) {
 }
 
 /**
- * @brief Why the chain stops before a redirected hop's transfer, or nullopt
- *        to send it, with the hop's share of the request's timeout set.
+ * Why the chain stops before a redirected hop's transfer, or nullopt to send
+ * it, with the hop's share of the request's timeout set.
  *
  * One deadline spans the chain, as one transfer's did: a later hop gets what
- * the earlier ones left. Stall mode has no total bound to share; its window
- * and the cancel flag are watched by each transfer on its own.
+ * the earlier ones left. Stall mode has no total bound to share; its window and
+ * the cancel flag are watched by each transfer on its own.
  */
 std::optional<Error> start_redirected_hop (CURL* curl,
 const Request& request,
@@ -777,14 +752,14 @@ std::chrono::steady_clock::time_point started) {
 }
 
 /**
- * @brief Runs the send as one transfer per hop, following redirects itself
- *        rather than through `CURLOPT_FOLLOWLOCATION` (#3300).
+ * Runs the send as one transfer per hop, following redirects itself rather than
+ * through `CURLOPT_FOLLOWLOCATION` (#3300).
  *
  * The handle is configured for the first hop already and is never reset in
- * between, so its cookie engine and its connections serve the whole chain.
- * What a hop changes is re-asserted per hop: the URL, the method and body and
- * the lines that stay with the first origin (@p chain), and the transport
- * policy, which matches the client certificate against this hop's own origin.
+ * between, so its cookie engine and its connections serve the whole chain. What
+ * a hop changes is re-asserted per hop: the URL, the method and body and the
+ * lines that stay with the first origin (@p chain), and the transport policy,
+ * which matches the client certificate against this hop's own origin.
  */
 ChainOutcome run_chain (CURL* curl,
 const Request& request,
@@ -842,16 +817,15 @@ std::chrono::steady_clock::time_point started) {
 }
 
 /**
- * @brief Whether a bounded stream ended the way one is meant to, once the
- *        server had answered with one: at a cap, or at a stop
- *        (`ClientConfig::cancel`).
+ * Whether a bounded stream ended the way one is meant to, once the server had
+ * answered with one: at a cap, or at a stop (`ClientConfig::cancel`).
  *
- * Either is a **success** whatever libcurl calls the abort that delivered it,
- * the event loop's reading of a cap, and a stop is the end a design stream's
+ * Either is a **success** whatever libcurl calls the abort that delivered it: a
+ * cap as the event loop reads one, and a stop as the end a design stream's
  * `POST /runs/:id/stop` names (`SseEndReason::Stopped`), not a failure of the
- * request. @p response is reported already, so its `stream_events` says
- * whether the reply announced `text/event-stream` (#3771); before that there
- * is no stream to end, and the error branch says why.
+ * request. @p response is reported already, so its `stream_events` says whether
+ * the reply announced `text/event-stream` (#3771); before that there is no
+ * stream to end, and the error branch says why.
  */
 bool stream_ended_by_rule (const StreamTally& stream,
 const ProgressWatch& watch,
@@ -861,15 +835,15 @@ const Response& response) {
 }
 
 /**
- * @brief The error for a transfer this engine ended itself, or none when
- *        libcurl's own reading of the failure stands.
+ * The error for a transfer this engine ended itself, or none when libcurl's own
+ * reading of the failure stands.
  *
- * A refused body is not a network failure, and curl's own word for it says
- * nothing a caller can act on: the write callback's short count surfaces as a
- * generic CURLE_WRITE_ERROR. So it is recognized here and reported as the
- * condition it is, which `/import/fetch` answers with a 413 rather than a 502.
- * A cancel is this engine's own abort too, and so is a stream's duration cap
- * that passed before the server answered with an event stream.
+ * A refused body is not a network failure, and the write callback's short count
+ * surfaces as a generic CURLE_WRITE_ERROR a caller cannot act on, so it is
+ * recognized here and reported as the condition it is, which `/import/fetch`
+ * answers with a 413 rather than a 502. A cancel is this engine's own abort
+ * too, and so is a stream's duration cap that passed before the server answered
+ * with an event stream.
  */
 std::optional<Error> engine_abort_error (const BodySink& sink,
 const Headers& headers,
@@ -931,11 +905,11 @@ Client::Client (Client&&) noexcept            = default;
 Client& Client::operator= (Client&&) noexcept = default;
 
 Result<Response> Client::send (const Request& request) {
-    // Same gate as the event loop's: a request curl cannot send as written is
-    // refused rather than silently sent as something else. Reported as a
-    // status-0 response, not an Error, because send() never returns an Error -
-    // every caller (including /execute, which calls .value() unguarded) reads
-    // the failure off the response.
+    // The event loop's gate: a request curl cannot send as written is refused,
+    // not silently sent as something else. Reported as a status-0 response, not
+    // an Error, because send() never returns an Error: every caller reads the
+    // failure off the response, and `execute_exchange` calls .value()
+    // unguarded.
     auto invalid = detail::validate_transferable (request);
     if (!invalid) {
         invalid = refused_reference_url (impl_->config, request);
@@ -968,8 +942,8 @@ Result<Response> Client::send (const Request& request) {
     const std::string url = vayu::http::wire_url (request);
     set_opt<CURLOPT_URL> (curl, url.c_str ());
 
-    // Set method and body (shared with the event loop path so the two cannot
-    // disagree about what goes on the wire - see apply_method_and_body)
+    // Shared with the event loop, so the two cannot disagree about what goes on
+    // the wire.
     detail::apply_method_and_body (curl, request, frame.body_source);
 
     // Set headers, and record the same set as what was sent.
@@ -988,7 +962,6 @@ Result<Response> Client::send (const Request& request) {
     // rawRequest is read off the wire, so it can only be built after the
     // transfer completes - see below, just before the error-path early return.
 
-    // Set callbacks
     set_opt<CURLOPT_WRITEFUNCTION> (curl, write_callback);
     set_opt<CURLOPT_WRITEDATA> (curl, &sink);
     set_opt<CURLOPT_HEADERFUNCTION> (curl, header_callback);
@@ -997,15 +970,15 @@ Result<Response> Client::send (const Request& request) {
     frame.header_sink.body      = &sink;
     set_opt<CURLOPT_HEADERDATA> (curl, &frame.header_sink);
 
-    // Set timeout. The connect bound is set on every send because the handle
-    // is reused, and in stall mode it is the only bound the handshake has: the
-    // low-speed window never runs during it (#2835).
+    // The connect bound is set on every send because the handle is reused, and
+    // in stall mode it is the only bound the handshake has: the low-speed
+    // window never runs during it (#2835).
     namespace server_limits = vayu::core::constants::server;
     if (impl_->config.stall_timeout_ms > 0) {
-        // A stall bound in place of the total one (issue #882). Both together
-        // would leave the total deciding whenever it fired first, which is the
-        // behaviour this exists to replace - so the total is left unset and
-        // `max_response_bytes` is what bounds a transfer that never ends.
+        // A stall bound in place of the total one (issue #882): both together
+        // would leave the total deciding whenever it fired first, so the total
+        // is left unset and `max_response_bytes` bounds a transfer that never
+        // ends.
         set_opt<CURLOPT_LOW_SPEED_LIMIT> (curl,
         static_cast<long> (vayu::core::constants::import_fetch::STALL_FLOOR_BYTES_PER_SEC));
         set_opt<CURLOPT_LOW_SPEED_TIME> (
@@ -1032,20 +1005,16 @@ Result<Response> Client::send (const Request& request) {
         frame.peer_check.local_peers = &*local_peer_rule;
     }
 
-    // Protocol selection. This path (POST /execute, "Send") previously set no
-    // CURLOPT_HTTP_VERSION at all and ran at libcurl's implicit default -
-    // the same NONE value Auto maps to, but not by anything that named the
-    // request's field, so a Send and a load test of the same request had no
-    // structural guarantee of agreeing. Both drivers now go through the one
-    // shared mapping.
+    // Protocol selection through the one mapping both drivers share, so a Send and a
+    // load test of the same request cannot disagree.
     set_opt<CURLOPT_HTTP_VERSION> (
     curl, vayu::http::to_curl_http_version (request.http_version));
 
     // The debug stream is always on, verbose or not: the raw-request view is
-    // built from the outbound header frame it carries, which is the only place
-    // libcurl's own additions (jar cookies above all) can be read from. Whether
-    // the frames are also logged is `debug_callback`'s own read of the
-    // logger's level - see TransferDebug.
+    // built from the outbound header frame it carries, the only place libcurl's
+    // own additions (jar cookies above all) can be read. Whether the frames are
+    // also logged is `debug_callback`'s read of the logger's level
+    // (TransferDebug).
     frame.transfer_debug.secret_header_names = request.secret_header_names;
     set_opt<CURLOPT_VERBOSE> (curl, 1L);
     set_opt<CURLOPT_DEBUGFUNCTION> (curl, debug_callback);
@@ -1059,11 +1028,10 @@ Result<Response> Client::send (const Request& request) {
         frame.header_sink.cookies = &frame.incoming_cookies;
     }
 
-    // Perform the request. Stamp submission just before perform so that
-    // perceived latency excludes our own setup cost above but covers everything
-    // libcurl does on this thread, every hop of a redirect chain included. For
-    // single-shot sends there is no generator queue, so queue_wait_ms will be
-    // near zero - that's the correct contract.
+    // Submission is stamped just before perform, so perceived latency excludes
+    // the setup above but covers everything libcurl does on this thread, every
+    // hop of a redirect chain included. A single send has no generator queue,
+    // so queue_wait_ms is near zero, which is the correct contract.
     auto submitted_at = std::chrono::steady_clock::now ();
     if (const auto& bounds = request.stream_bounds) {
         sink.stream.start (*bounds, submitted_at);
@@ -1083,9 +1051,8 @@ Result<Response> Client::send (const Request& request) {
         impl_->config.cookie_scope, frame.jar_seeded_from);
     }
 
-    // The event loop's semantics through the shared helper, which had drifted
-    // from this code once already (negative TLS ms on the load path). The
-    // phase timers are every hop's, summed.
+    // The event loop's semantics through the shared helper. The phase timers are
+    // every hop's, summed.
     double perceived_ms =
     std::chrono::duration<double, std::milli> (completion - submitted_at).count ();
     detail::apply_transfer_timing (response.timing, chain.phases, perceived_ms);
@@ -1098,10 +1065,10 @@ Result<Response> Client::send (const Request& request) {
     response.client_certificate =
     chain.certificate != nullptr ? client_cert_label (*chain.certificate) : "";
 
-    // Negotiated protocol (try to get even on errors, same as timing above -
-    // a transfer that fails after the connection was established still knows
-    // what it negotiated). Empty when nothing was negotiated at all, e.g. a
-    // connection that never reached a server - see http_version_from_curl.
+    // Read even on errors, like the timing: a transfer that fails after the
+    // connection was established still knows what it negotiated. Empty when
+    // nothing was negotiated (a connection that never reached a server; see
+    // http_version_from_curl).
     long negotiated_version = 0;
     get_info<CURLINFO_HTTP_VERSION> (curl, &negotiated_version);
     response.http_version = vayu::http::http_version_from_curl (negotiated_version);
@@ -1109,11 +1076,10 @@ Result<Response> Client::send (const Request& request) {
     vayu::http::http_version_downgraded (request.http_version, response.http_version);
     if (response.http_version_downgraded) {
         // A cleartext URL is the one downgrade with an answer, so the line says
-        // it rather than leaving the reader to wonder whether the engine is
+        // it rather than leave the reader wondering whether the engine is
         // broken: CURL_HTTP_VERSION_2TLS offers h2 over TLS only, so an
-        // `http://` request never attempts it. Naming that is why this is one
-        // message with a suffix and not two call sites. The last hop's URL,
-        // because that is the connection the version was negotiated on.
+        // `http://` request never attempts it. The last hop's URL, because that
+        // is the connection the version was negotiated on.
         const bool cleartext = chain.last_url.rfind ("http://", 0) == 0;
         vayu::utils::log_warning ("client",
         "HTTP/2 was requested but the connection negotiated " + response.http_version +
@@ -1125,12 +1091,11 @@ Result<Response> Client::send (const Request& request) {
     }
 
     // The raw-request view: what libcurl put on the wire, read off the last
-    // outbound header frame it handed the debug callback. Built here rather
-    // than before the transfer because there is nothing to read until the
-    // transfer has run - and because only the wire knows about the headers
-    // libcurl adds itself, which since the cookie jar includes `Cookie`
-    // (issue #339). A transfer that never sent anything has no frame; it falls
-    // back to the composed request, which is all that ever existed for it.
+    // outbound header frame it handed the debug callback. Built after the
+    // transfer because there is nothing to read before it, and only the wire
+    // knows the headers libcurl adds itself, `Cookie` among them (issue #339).
+    // A transfer that sent nothing has no frame and falls back to the composed
+    // request, all that ever existed for it.
     const std::string& last_header_out = frame.transfer_debug.last_header_out;
     response.raw_request               = last_header_out.empty () ?
     synthesize_raw_request (request, response) :
@@ -1143,14 +1108,13 @@ Result<Response> Client::send (const Request& request) {
         return std::move (response);
     }
 
-    // The bound was reached and this caller asked to keep what was read
-    // (issue #1157). Everything the transfer did produce before the write
-    // callback cut it - the status line, the headers, the prefix - is real, so
-    // the response is assembled by the ordinary path below rather than
-    // discarded; `body_truncated` is what says it is a prefix. Only the
-    // completion is synthetic: curl reports the short count as
-    // CURLE_WRITE_ERROR, which is this engine stopping the transfer on purpose
-    // and not a failure to report.
+    // The bound was reached and this caller asked to keep what was read (issue
+    // #1157). Everything the transfer produced before the write callback cut it
+    // (the status line, the headers, the prefix) is real, so the response is
+    // assembled by the ordinary path below; `body_truncated` says it is a
+    // prefix. Only the completion is synthetic: curl's CURLE_WRITE_ERROR for
+    // the short count is this engine stopping the transfer on purpose, not a
+    // failure.
     const bool keep_truncated_body = sink.limit_exceeded && impl_->config.truncate_over_limit;
 
     // What a bounded stream delivered, on every path below.
@@ -1158,7 +1122,6 @@ Result<Response> Client::send (const Request& request) {
     const bool stream_ended =
     stream_ended_by_rule (sink.stream, frame.progress_watch, response);
 
-    // Check for errors
     if (res != CURLE_OK && !keep_truncated_body && !stream_ended) {
         // The handle describes the hop that failed, so the code is that hop's.
         auto error = engine_abort_error (sink, response.headers, frame.progress_watch);
@@ -1167,32 +1130,27 @@ Result<Response> Client::send (const Request& request) {
             curl, res, impl_->errors, &request, &frame.peer_check);
         }
 
-        // Return Response object with error details (Postman-compatible approach).
         // raw_request and timing are already populated above; headers and body
         // stay as the transfer left them (empty when nothing answered).
         mark_failed (response, *error);
         return std::move (response);
     }
 
-    // Get response info for successful requests
     long http_code = 0;
     get_info<CURLINFO_RESPONSE_CODE> (curl, &http_code);
 
     response.status_code = static_cast<int> (http_code);
-    // Prefer the wire reason phrase captured by header_callback. Only fall
-    // back to the code→phrase lookup when the server (or HTTP/2+ stack)
-    // didn't supply one.
+    // The wire's reason phrase, from header_callback; the code→phrase lookup
+    // only when the server (or the HTTP/2+ stack) supplied none.
     if (response.status_text.empty ()) {
         response.status_text = vayu::http::status_text (response.status_code);
     }
     response.error_code = ErrorCode::None; // Explicitly set to None for successful requests
 
-    // Set body. `body_size` stays what is held rather than what the server
-    // declared, here as everywhere else it is written: a caller reading it as
-    // the length of `body` is right, and the length of the body that *would*
-    // have arrived is a number this transfer never measured - the declared
-    // length, when there was one, is still on the headers for a reader that
-    // wants it.
+    // `body_size` is what is held, not what the server declared, here as
+    // everywhere it is written: a caller reading it as the length of `body` is
+    // right, and the length that *would* have arrived is a number this transfer
+    // never measured. A declared length is still on the headers.
     response.body           = std::move (sink.body);
     response.body_size      = response.body.size ();
     response.body_truncated = keep_truncated_body;
@@ -1234,19 +1192,18 @@ std::string Client::last_error () const {
 // ============================================================================
 
 TlsBackendSelection pin_tls_backend () {
-    // Cached rather than repeated: libcurl answers `CURLSSLSET_TOO_LATE` to
-    // every call after the first, and the fixtures call `global_init` again
-    // per suite - so a second call would report a failure that is really just
-    // "already done". The first call's verdict is the one that describes this
-    // process, which is what `TlsBackend` asserts.
+    // Cached, not repeated: libcurl answers `CURLSSLSET_TOO_LATE` to every call
+    // after the first, and the fixtures call `global_init` again per suite, so
+    // a second call would report "already done" as a failure. The first call's
+    // verdict describes this process, which is what `TlsBackend` asserts.
     static const TlsBackendSelection selected = [] {
         const CURLsslset result =
         curl_global_sslset (CURLSSLBACKEND_OPENSSL, nullptr, nullptr);
         if (result != CURLSSLSET_OK) {
-            // Not fatal here - the daemon still serves, and http:// work is
-            // unaffected - but every TLS statement this engine makes is now
-            // about a backend it did not choose, so it is said once and loudly
-            // rather than discovered by a user whose mTLS stopped working.
+            // Not fatal: the daemon still serves, and http:// work is
+            // unaffected. But every TLS statement this engine makes is now
+            // about a backend it did not choose, so it is said once and loudly,
+            // not discovered by a user whose mTLS stopped working.
             const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
             vayu::utils::log_error ("client",
             "Could not select the OpenSSL TLS backend "

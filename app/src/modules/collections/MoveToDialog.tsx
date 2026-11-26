@@ -6,20 +6,15 @@
  */
 
 /**
- * "Move to…": the row menu's answer to a drag, for anyone not making one.
+ * "Move to…": the row menu's answer to a drag, for anyone not making one. Alt+Arrow gives the
+ * keyboard parity with the pointer, but as a chord, one step at a time; this is the discoverable
+ * path (pick a destination, the row lands after everything already in it, folders and requests
+ * alike, #2535), and the only one that does not require knowing the feature exists.
  *
- * Alt+Arrow already gives the keyboard full parity with the pointer, but it is
- * a chord and it moves one step at a time. This is the discoverable version -
- * pick a destination, the row lands after everything already in it, folders
- * and requests alike (#2535) - and it is the only path that does not require
- * knowing the feature exists.
- *
- * The list walks collections only, so it sorts them with `compareTreeOrder`
- * directly: among rows of one kind that is the order `childrenOf` gives.
- *
- * The candidate list is the same refusal set the drag enforces, computed from
- * the same `isDescendant`: a folder cannot move into itself or its own subtree,
- * and neither kind of row is offered the parent it is already in.
+ * The list walks collections only, so it sorts them with `compareTreeOrder` directly: among rows of
+ * one kind that is `childrenOf`'s order. The candidates are the drag's refusal set, from the same
+ * `isDescendant`: a folder cannot move into itself or its own subtree, and neither kind of row is
+ * offered the parent it is already in.
  */
 
 import { Folder, FolderTree } from "lucide-react";

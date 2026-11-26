@@ -6,13 +6,10 @@
  */
 
 /**
- * The GraphQL body: a query pane over a variables pane, with the schema
- * lifecycle that makes both of them smart.
- *
- * This was roughly 40% of `BodyPanel`, and the only mode with an editor *pair*,
- * an introspection lifecycle and a header side effect of its own. Everything
- * here is GraphQL-specific; nothing here is shared with the JSON, text or
- * key/value modes, which is why it now lives on its own.
+ * The GraphQL body: a query pane over a variables pane, with the schema lifecycle that makes both
+ * smart. The only mode with an editor *pair*, an introspection lifecycle and a header side effect
+ * of its own, and nothing here is shared with the JSON, text or key/value modes, hence its own
+ * file.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -89,57 +86,43 @@ export interface GraphQLBodyProps {
 	body: string;
 	onBodyChange: (body: string) => void;
 	/**
-	 * Whose body this is. Tells a reveal command written for this request from
-	 * one written for another, for the reason the body drafts carry the same
-	 * field (`utils/body-drafts.ts`), and files each pane's Monaco model, with
-	 * its undo stack, under this request (`utils/editor-models.ts`).
+	 * Whose body this is: tells a reveal command for this request from another's, as the body
+	 * drafts do (`utils/body-drafts.ts`), and files each pane's Monaco model and undo stack under
+	 * this request (`utils/editor-models.ts`).
 	 */
 	requestId: string | null;
 	/**
-	 * The endpoint to introspect: the request as typed plus its scope, which
-	 * the engine composes (`POST /compose`) before the introspection query is
-	 * sent. Unresolved on purpose - only `resolvedUrl` and `resolvedAuth` inside
-	 * it are previews, used for cache identity and display, never sent.
+	 * The endpoint to introspect: the request as typed plus its scope, composed by the engine
+	 * (`POST /compose`) before introspection. Unresolved on purpose; only `resolvedUrl` and
+	 * `resolvedAuth` in it are previews, for cache identity and display, never sent.
 	 */
 	schemaTarget: SchemaTarget;
 	/**
-	 * The Variables pane's text as this request last had it, or null for none.
-	 *
-	 * Seeds the pane instead of the body, because the body cannot hold text that
-	 * is neither JSON nor a template. It comes from the provider rather than from
-	 * here so that it outlives this component, which Radix unmounts on every
-	 * glance at another tab (`utils/body-drafts.ts`).
+	 * The Variables pane's last text for this request, or null. Seeds the pane instead of the body,
+	 * which cannot hold text that is neither JSON nor a template; from the provider so it outlives
+	 * this component, which Radix unmounts on every glance elsewhere (`utils/body-drafts.ts`).
 	 */
 	variablesDraft: string | null;
 	onVariablesDraftChange: (text: string) => void;
 	/**
-	 * The method this request will be sent with.
-	 *
-	 * Read for one thing: GraphQL over `GET` is a different transport - the
-	 * document travels as query parameters and a mutation cannot be sent that
-	 * way - and the Query header says so when that is what will happen
-	 * (issue #1228).
+	 * The send method, read for one thing: GraphQL over `GET` is another transport (the document
+	 * goes as query parameters, a mutation cannot be sent), and the Query header says so then
+	 * (#1228).
 	 */
 	method: HttpMethod;
 	/**
-	 * The agent reference line for an operation of this request
-	 * (`graphqlOperationReference`), or undefined while the request is unsaved or
-	 * its saved row has not loaded: the line names the request by its id, and a
-	 * request with none has nothing for an agent's tools to look up. A prop, not a
-	 * query in here, so this lazy body stays free of the data layer.
+	 * The agent reference line for an operation (`graphqlOperationReference`), undefined while the
+	 * request is unsaved or its row loading: the line names the request by id. A prop, not a query,
+	 * so this lazy body stays free of the data layer.
 	 */
 	operationReference?: (operationName: string) => string;
 }
 
 /**
- * What the Variables pane's text will do when the request is sent.
- *
- * Nothing at all for `empty` and `json`, which is the common case and needs no
- * chrome. The other two are the point: to Monaco's JSON worker a `{{token}}` and
- * an unclosed brace are the same red squiggle, and on the wire they could not be
- * more different - one is resolved and sent, the other is not sent at all. The
- * silent drop is what #384 item 5 reports; naming it is the fix, because the
- * request otherwise goes out with no variables and nothing on screen says so.
+ * What the Variables text will do on send. Nothing for `empty` and `json`, the common case. The
+ * other two are the point: to Monaco's JSON worker a `{{token}}` and an unclosed brace are the same
+ * squiggle, but one is resolved and sent, the other not sent at all. Naming the silent drop (#384
+ * item 5) is the fix, as the request otherwise goes without variables and nothing says so.
  */
 function VariablesFormBadge({ form }: { form: VariablesForm }) {
 	if (form === "empty" || form === "json") return null;
@@ -168,15 +151,10 @@ function VariablesFormBadge({ form }: { form: VariablesForm }) {
 }
 
 /**
- * What a `GET` will do with this document, when that is what is about to happen.
- *
- * Nothing at all on any other method, which is the common case: choosing the
- * GraphQL mode on a request still holding the default `GET` moves it to `POST`
- * (`graphql-method.ts`), so this renders for a `GET` the user chose themselves
- * or one an import wrote. It describes a transport rather than reporting an
- * error - `GET` is a legitimate way to send a query, and the wrong way to send
- * a mutation - which is why the sentence names both halves and the method
- * selector is one click away.
+ * What a `GET` will do with this document, when that is about to happen. Silent on other methods:
+ * choosing GraphQL on a default `GET` moves it to `POST` (`graphql-method.ts`), so this renders for
+ * a `GET` the user chose or an import wrote. A transport, not an error (`GET` is fine for a query,
+ * wrong for a mutation), so the sentence names both and the method selector is one click away.
  */
 function GetTransportBadge({ method }: { method: HttpMethod }) {
 	if (!sendsGraphQLInTheUrl(method)) return null;
@@ -205,26 +183,19 @@ const PANE_HEADER_CLASS =
 	"flex h-band w-full items-center justify-between gap-2 px-3 border-b border-rule bg-panel shrink-0";
 
 /**
- * A pane's header bar, fixed at the `band` step (`h-band`).
- *
- * The height is a token rather than padding-plus-content because the Variables
- * pane collapses to exactly this bar, and the panel's `collapsedSize`
- * (`GRAPHQL_PANE_HEADER_HEIGHT`, held equal to `--spacing-band` by
- * `titlebar-height.test.ts`) has to be the same number. Padding that happened
- * to add up would drift the first time a control inside changed size.
+ * A pane's header bar, fixed at `h-band`. A token, not padding plus content, because the Variables
+ * pane collapses to exactly this bar and its `collapsedSize` (`GRAPHQL_PANE_HEADER_HEIGHT`, held
+ * equal to `--spacing-band` by `titlebar-height.test.ts`) must match; padding would drift when a
+ * control inside changed size.
  */
 function PaneHeader({ children }: { children: React.ReactNode }) {
 	return <div className={PANE_HEADER_CLASS}>{children}</div>;
 }
 
 /**
- * The same bar, as the control that collapses its pane.
- *
- * The whole bar is the button rather than a chevron inside it: a header with a
- * narrow activator and a wide box is the composite-row hit-area trap
- * `drawer-row-hit-area` was written against. The badges ride inside it as
- * spans, which is what keeps them readable while the pane is collapsed - the
- * moment "2 variables need a value" most needs to be on screen.
+ * The same bar, as its pane's collapse control. The whole bar is the button, not a chevron in it: a
+ * narrow activator in a wide box is the hit-area trap `drawer-row-hit-area` guards. The badges ride
+ * inside as spans, readable while collapsed, when "2 variables need a value" most needs showing.
  */
 function CollapsiblePaneHeader({
 	collapsed,
@@ -248,9 +219,8 @@ function CollapsiblePaneHeader({
 }
 
 function PaneTitle({ children, collapsed }: { children: string; collapsed?: boolean }) {
-	// `EYEBROW_CLASS` rather than the `Eyebrow` component: this sits in a
-	// `flex items-center justify-between` bar beside a control, where the
-	// primitive's `<p>` would be the wrong element for an inline label.
+	// `EYEBROW_CLASS`, not `Eyebrow`: inline in a `justify-between` bar beside a control, where the
+	// primitive's `<p>` is the wrong element.
 	if (collapsed === undefined) return <span className={EYEBROW_CLASS}>{children}</span>;
 	return (
 		<span className={cn(EYEBROW_CLASS, "flex items-center gap-1")}>
@@ -265,32 +235,19 @@ function PaneTitle({ children, collapsed }: { children: string; collapsed?: bool
 }
 
 /**
- * Everything about the schema, in one row that does not move: the toggle for
- * the pane, what state the schema is in, and Refresh.
+ * Everything about the schema in one row that does not move: the pane toggle, the schema's state,
+ * and Refresh.
  *
- * **It sits at the Query header's left edge because that is the edge the pane
- * arrives at.** The explorer is the first panel of the horizontal group below,
- * so it opens to the *left* of these editors, while the control that opened it
- * used to sit at the far right of this header drawing a `PanelRightOpen` - a
- * user reaching for the side the pane appears on found nothing, and the icon
- * named the opposite side outright (#1224).
+ * - **At the Query header's left edge**, where the pane arrives: the explorer is the first panel of
+ *   the horizontal group below, so it opens to the *left* of the editors (#1224).
+ * - **The same three parts open or closed**; only the toggle's icon and label flip.
+ * - **Nothing is hover-revealed.** This is the app's only Refresh for the schema, always in one
+ *   place, so "no duplicated Refresh" (#455) holds by construction, and a blind refresh (endpoint
+ *   changed, an `Authorization` typed by hand, which the cache key cannot see) costs one click, not
+ *   open, refresh and close (#507).
  *
- * **The same three parts render whether the pane is open or closed.** Only the
- * toggle's icon and label flip. The layout used to be a different shape per
- * state - a chip here while closed, a badge and two icons in the pane's header
- * while open - which taught a position and then abandoned it.
- *
- * **Nothing here is hover-revealed.** #455 made "no duplicated Refresh"
- * structural by moving the only one into the explorer, which left a blind
- * refresh - the endpoint changed, or an `Authorization` was typed by hand, and
- * the cache key cannot see either - costing open-the-pane plus refresh plus
- * close again (#507). The answer then was a Refresh transparent at rest, which
- * bought *one standing Refresh* at the price of a control the user had to know
- * about already. This is now the app's only Refresh for the subject, standing in
- * one place, so the rule holds by construction rather than by transparency.
- *
- * The three parts are separate elements because a button cannot nest in a
- * button - the row is what makes them read as one control.
+ * Separate elements, since a button cannot nest in a button; the row makes them read as one
+ * control.
  */
 function SchemaControls({
 	entry,
@@ -324,19 +281,12 @@ function SchemaControls({
 				onClick={onToggle}
 			/>
 			{/*
-			 * The badge carries the status sentence in its own `title`, so it wears
-			 * no second tooltip: a Radix tooltip over an element that already has a
-			 * native one is the same fact told twice. It is plain text rather than
-			 * a target - the two things a user does about the schema are the
-			 * buttons on either side of it - except while the schema is waiting
-			 * for the user to contact the endpoint, when it is Load schema.
-			 *
-			 * A schema nothing has been said about yet is the badge's own `idle`
-			 * face now, not a fallback spelled out here: the badge renders
-			 * unconditionally and holds its width across every state, so the row
-			 * keeps its shape from the first render *and* keeps it when the state
-			 * changes - Refresh, one element to the right, used to slide out from
-			 * under the pointer that had just pressed it.
+			 * The badge carries the status in its own `title`, so no second tooltip (a Radix
+			 * tooltip over a native one says it twice). Plain text, not a target (the two actions
+			 * are the buttons beside it), except as Load schema while waiting for the user to
+			 * contact the endpoint. An unknown schema is the badge's own `idle` face, and the badge
+			 * holds its width in every state, so Refresh beside it never slides from under the
+			 * pointer.
 			 */}
 			<SchemaStatusBadge entry={entry} awaitingLoad={awaitingLoad} onLoad={onRefresh} />
 			<TooltipIconButton
@@ -366,25 +316,22 @@ export function GraphQLBody({
 	method,
 	operationReference,
 }: GraphQLBodyProps) {
-	// One subscription, not three: the entry object is the store's own reference,
-	// so it is a stable snapshot, and status/schema/error/freshness cannot be
-	// read a render apart from each other.
+	// One subscription, not three: the entry is the store's own reference, a stable snapshot, so
+	// status, schema, error and freshness cannot be read a render apart.
 	const entry = useSchemaCache((s) => s.getActiveEntry());
 	const activeSchema = entry?.schema ?? null;
 	const awaitingLoad = useSchemaCache((s) => !!s.activeKey && !!s.awaitingLoad[s.activeKey]);
-	// Read so that approving this endpoint elsewhere (Send on this request) runs
-	// the effect below again, which then loads the schema.
+	// Read so approving this endpoint elsewhere (Send here) re-runs the effect below, which loads
+	// it.
 	const approvedEndpoints = useClientSettingsStore((s) => s.approvedEndpoints);
 
 	const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
 	const [variablesModelUri, setVariablesModelUri] = useState<string | null>(null);
 	/*
-	 * The pane's markers come from a masked twin of its model, so that a
-	 * `{{token}}` - which the badge above says is resolved and sent - stops
-	 * reading as a syntax error (`lib/graphql/variables-diagnostics.ts`). Held in
-	 * a ref because the twin outlives no mount: Radix tears this tab down on
-	 * every glance at another one, and a twin left behind would keep validating a
-	 * model nobody is editing.
+	 * The pane's markers come from a masked twin of its model, so a `{{token}}` (resolved and sent,
+	 * as the badge says) is not a syntax error (`lib/graphql/variables-diagnostics.ts`). A ref
+	 * because the twin outlives no mount: Radix tears this tab down on every glance elsewhere, and
+	 * a leftover twin would keep validating a model nobody edits.
 	 */
 	const variablesDiagnostics = useRef<{ dispose: () => void } | null>(null);
 	const attachVariablesModel = (
@@ -400,8 +347,8 @@ export function GraphQLBody({
 	const handleVariablesMount: OnMount = (editorInstance, monacoInstance) => {
 		monacoRef.current = monacoInstance;
 		attachVariablesModel(monacoInstance, editorInstance.getModel());
-		// A request switch moves this editor to the next request's model (#3136),
-		// and the schema and the masked twin belong to the model, not the editor.
+		// A request switch moves this editor to the next request's model (#3136); schema and twin
+		// belong to the model, not the editor.
 		editorInstance.onDidChangeModel(() =>
 			attachVariablesModel(monacoInstance, editorInstance.getModel())
 		);
@@ -419,10 +366,9 @@ export function GraphQLBody({
 	const clearReveal = useRevealStore((s) => s.clearReveal);
 	const queryEditorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 	/*
-	 * State beside the ref, so that a reveal command which arrived before Monaco
-	 * finished loading is served once it has. The editor mounts asynchronously,
-	 * and this component mounts *because* of the command in the tab-was-hidden
-	 * case, so "no editor yet" is the ordinary path rather than the odd one.
+	 * State beside the ref, so a reveal command that arrived before Monaco loaded is served once it
+	 * has: the editor mounts asynchronously, and this component mounts *because* of the command
+	 * when the tab was hidden, so "no editor yet" is the ordinary path.
 	 */
 	const [queryEditorReady, setQueryEditorReady] = useState(false);
 	const handleQueryMount: OnMount = (editorInstance) => {
@@ -431,83 +377,54 @@ export function GraphQLBody({
 	};
 
 	/*
-	 * The explorer's two outputs that are not the document itself: what to say,
-	 * and which variables the pane could not be given a value for.
-	 *
-	 * The announcement is keyed as well as stored, because a live region is only
-	 * announced when its text *changes* - inserting the same field twice would
-	 * otherwise be silent the second time, which reads as the click not landing.
-	 * Same fix, same reason, as `ResponseAnnouncer`.
+	 * The explorer's non-document outputs: what to say, and which variables the pane could not be
+	 * given. The announcement is keyed as well as stored: a live region speaks only when its text
+	 * *changes*, so a second identical insertion would be silent, reading as a missed click (as
+	 * `ResponseAnnouncer` fixes it).
 	 */
 	const [announcement, setAnnouncement] = useState("");
 	const [announcementSeq, setAnnouncementSeq] = useState(0);
 	/*
-	 * The same words as the announcement above, on screen, for the one outcome
-	 * that leaves nothing else to look at.
-	 *
-	 * An insertion shows itself in the editor and an already-there selects the
-	 * line it means; a refusal used to reach `sr-only` text alone, so a sighted
-	 * user clicking a row that cannot be inserted saw the click do nothing. Held
-	 * here rather than in the pane because this is where the decision is made,
-	 * and cleared by the next activation that lands - a refusal about the last
-	 * row is not an answer about this one.
-	 *
-	 * It carries the request it was written for, and is only shown while that is
-	 * still the request on screen. Switching tabs does not remount this
-	 * component - nothing above it is keyed on the request - so a notice about
-	 * one request's schema would otherwise sit in the pane describing another's,
-	 * which is worse than saying nothing. Compared during render rather than
-	 * cleared in an effect, so the wrong text is never painted even once.
+	 * The announcement's words on screen, for the one outcome with nothing else to see: an
+	 * insertion shows in the editor and an already-there selects its line, but a refusal reached
+	 * only `sr-only` text, so a sighted click seemed to do nothing. Held here, where the decision
+	 * is made, and cleared by the next landed activation. It carries its request and shows only
+	 * while that request is on screen: nothing above is keyed on the request, so a tab switch would
+	 * leave one request's notice describing another's. Compared during render, not cleared in an
+	 * effect, so it never paints wrongly.
 	 */
 	const [explorerNotice, setExplorerNotice] = useState<{
 		requestId: string | null;
 		text: string;
 	} | null>(null);
 	const [pendingVariables, setPendingVariables] = useState<string[]>([]);
-	// Stable, so the reveal effect below can depend on it without re-running per
-	// render. The two setters are stable already; this only says so.
+	// Stable, so the reveal effect can depend on it; the setters already are, this only says so.
 	const announce = useCallback((message: string) => {
 		setAnnouncement(message);
 		setAnnouncementSeq((n) => n + 1);
 	}, []);
 
 	/*
-	 * Where to put the caret once the new document has reached the editor.
-	 *
-	 * Deferred to an effect rather than set inline: the query pane is controlled
-	 * by its `value` prop, so at the moment of the insertion Monaco's model still
-	 * holds the old text and an offset into the new one would land anywhere.
-	 * `CodeEditor` is a child, and a child's effects run before this one, so by
-	 * the time the effect fires the model holds the text the offset was computed
-	 * against.
-	 *
-	 * A ref rather than state: nothing renders from it, and clearing it as state
-	 * inside the effect that consumes it is a second render per insertion for a
-	 * value nobody draws (`react-hooks/set-state-in-effect` flags exactly that).
+	 * Where to put the caret once the new document reaches the editor, deferred to an effect: the
+	 * pane is controlled by `value`, so at insertion Monaco still holds the old text. `CodeEditor`
+	 * is a child, whose effects run first, so the model then holds the text the offset was computed
+	 * on. A ref, not state: nothing renders it, and clearing state in its consuming effect is a
+	 * second render per insertion (`react-hooks/set-state-in-effect` flags that).
 	 */
 	const pendingCursor = useRef<number | null>(null);
 
-	// No endpoint means no schema to browse, and the toggle that opens this is
-	// hidden for the same reason - the pane would only ever say "no schema".
+	// No endpoint, no schema to browse; the toggle is hidden for the same reason.
 	const showExplorer = explorerOpen && !!schemaTarget.url;
 
 	/*
-	 * Track the endpoint as the active schema target and (debounced) introspect
-	 * it, so the editors' language providers can validate and autocomplete
-	 * against the real schema. `ensureSchema` does so only for an endpoint the
-	 * user has already contacted; otherwise the badge offers Load schema.
-	 *
-	 * Keyed on the cache key rather than the URL: the credentials are part of
-	 * the target now, so changing environment - or the auth block, or a variable
-	 * either resolves through - is a different schema to fetch, not the same one
-	 * already cached.
-	 *
-	 * The cleanup clears the target as well as the debounce. This component
-	 * mounts only while the body mode is graphql, so unmounting *is* leaving
-	 * GraphQL, and leaving the last one pointing at a schema kept Monaco
-	 * completing a closed tab's endpoint. The clear is guarded on still being
-	 * the active target, so switching requests - which mounts the next body
-	 * before this one's cleanup runs - does not blank the new one.
+	 * Track the endpoint as the active schema target and (debounced) introspect it, so the editors'
+	 * language providers validate and complete against the real schema; `ensureSchema` does so only
+	 * for an endpoint the user has contacted, else the badge offers Load schema. Keyed on the cache
+	 * key, not the URL: credentials are part of the target, so another environment, auth block or
+	 * variable they resolve through is another schema. The cleanup clears the target too: this
+	 * mounts only in graphql mode, so unmounting is leaving GraphQL, and a target left set kept
+	 * Monaco completing a closed tab's endpoint. Guarded on still being active, so a request switch
+	 * (which mounts the next body first) does not blank the new one.
 	 */
 	const targetKey = schemaCacheKey(schemaTarget);
 	useEffect(() => {
@@ -521,52 +438,43 @@ export function GraphQLBody({
 			clearTimeout(id);
 			useSchemaCache.getState().clearActiveTarget(schemaTarget);
 		};
-		// `targetKey` is `schemaTarget` serialized, which is the identity the
-		// comment above keys on; `schemaTarget` itself is rebuilt every render,
-		// so depending on it would re-introspect the same endpoint on every
-		// keystroke.
-		// `approvedEndpoints` is not read in the body: it re-runs the effect when
-		// the user contacts this endpoint, so a declined schema then loads.
+		// `targetKey` is `schemaTarget` serialized, the identity keyed on above; `schemaTarget` is
+		// rebuilt every render, so depending on it re-introspects per keystroke.
+		// `approvedEndpoints` is unread in the body: it re-runs the effect when the user contacts
+		// this endpoint, so a declined schema loads.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [targetKey, approvedEndpoints]);
 
 	/*
-	 * Everything the envelope carries, derived from the body. The query and
-	 * `operationName` are always valid strings, and `extras` holds whatever else
-	 * the envelope had - all three ride along on every write, which is what stops
-	 * a keystroke in either pane from deleting them.
+	 * Everything the envelope carries, from the body. The query and `operationName` are always
+	 * valid strings and `extras` holds the rest; all three ride on every write, so a keystroke in
+	 * either pane deletes none.
 	 */
 	const parts = useMemo(() => parseGraphQLBody(body || ""), [body]);
 	const query = parts.query;
 
 	/*
-	 * The variables editor keeps its own raw text as the source of truth: while
-	 * the user types an object, intermediate states are invalid JSON which
-	 * `serializeGraphQLBody` drops - so re-deriving the editor value from the
-	 * body would wipe their input. Re-sync from the body only on external
-	 * changes (request switch, mode switch), tracked via the body we last wrote.
-	 *
-	 * The draft is what makes that survive an unmount: the state below is gone
-	 * the moment Radix tears the tab down, and seeding it from the body alone
-	 * would then lose exactly the text the body could not carry.
+	 * The variables editor keeps its raw text as the truth: mid-typing states are invalid JSON that
+	 * `serializeGraphQLBody` drops, so re-deriving from the body would wipe input. It re-syncs only
+	 * on external changes (request or mode switch), tracked via the body last written. The draft
+	 * makes this survive an unmount: seeded from the body alone, the text the body could not carry
+	 * would be lost.
 	 */
 	const [variables, setVariables] = useState(
 		() => variablesDraft ?? parseGraphQLBody(body || "").variables
 	);
 	/*
-	 * A request switch re-seeds the pane in the render that carries the new
-	 * request, not in the effect below. The pane's model changes with the
-	 * request, and a model created or edited from the previous request's text
-	 * in between is the cross-request undo this keying exists to prevent
-	 * (#3136).
+	 * A request switch re-seeds the pane in the render carrying the new request, not in the effect:
+	 * the model changes with the request, and one made or edited from the previous text in between
+	 * is the cross-request undo this keying prevents (#3136).
 	 */
 	const [variablesFor, setVariablesFor] = useState(requestId);
 	if (variablesFor !== requestId) {
 		setVariablesFor(requestId);
 		setVariables(parseGraphQLBody(body || "").variables);
 	}
-	// Seeded with the mounted body so the effect below does not immediately
-	// re-derive the pane from it and discard the draft just restored.
+	// Seeded with the mounted body so the effect does not re-derive the pane and discard the
+	// restored draft.
 	const lastWrittenBody = useRef<string | undefined>(body);
 	useEffect(() => {
 		if (body === lastWrittenBody.current) return;
@@ -577,10 +485,9 @@ export function GraphQLBody({
 	}, [body, onVariablesDraftChange]);
 
 	/*
-	 * One write path, taking only what changed. The rest comes from `parts` (the
-	 * envelope as last stored) and from `variables` (the pane's own draft, which
-	 * is ahead of the body while it is mid-edit) - so a caller cannot write a
-	 * field by naming it and drop another by not naming it.
+	 * One write path, taking only what changed; the rest comes from `parts` (the stored envelope)
+	 * and `variables` (the pane's draft, ahead of the body mid-edit), so no caller drops a field by
+	 * not naming it.
 	 */
 	const write = (changed: Partial<GraphQLBodyParts>) => {
 		const next = serializeGraphQLBody({ ...parts, variables, ...changed });
@@ -589,15 +496,11 @@ export function GraphQLBody({
 	};
 
 	/*
-	 * A document with two operations must say which one to run - the spec forbids
-	 * an anonymous operation beside a named one, and a server given no
-	 * `operationName` for such a document answers with an error, not a guess. So
-	 * the picker appears exactly when the choice becomes real.
-	 *
-	 * An `operationName` the document no longer defines (renamed, or the pane is
-	 * mid-edit) is still what will be sent, so it is offered as an option rather
-	 * than dropped: the trigger then shows the truth, and picking a real
-	 * operation is one click. Nothing here rewrites the body on its own.
+	 * A document with two operations must say which to run: the spec forbids an anonymous operation
+	 * beside a named one, and a server given no `operationName` errors. So the picker appears when
+	 * the choice is real. An `operationName` the document no longer defines (renamed, or mid-edit)
+	 * is still what is sent, so it stays an option: the trigger shows the truth, and nothing
+	 * rewrites the body.
 	 */
 	const names = useMemo(() => operationNames(query), [query]);
 	const operations =
@@ -605,9 +508,8 @@ export function GraphQLBody({
 			? [...names, parts.operationName]
 			: names;
 
-	// Drive the variables editor's JSON schema from the query's `$variables` plus
-	// the introspected schema, so it validates and autocompletes against what the
-	// operation expects.
+	// The variables editor's JSON schema comes from the query's `$variables` plus the introspected
+	// schema, so it validates and completes against what the operation expects.
 	useEffect(() => {
 		const monaco = monacoRef.current;
 		if (!monaco || !variablesModelUri) return;
@@ -620,15 +522,10 @@ export function GraphQLBody({
 	};
 
 	/*
-	 * The Variables pane's collapse, driven from the store rather than from the
-	 * panel.
-	 *
-	 * The store is the truth and the panel follows it, not the other way round,
-	 * because the panel's own memory dies with the mount - and this component is
-	 * unmounted every time Radix glances at the Headers tab, which is the whole
-	 * reason the body drafts and the explorer store exist. A drag that collapses
-	 * the pane reports back through `onResize`, so the two agree whichever end
-	 * the user reached for.
+	 * The Variables pane's collapse, from the store, not the panel: the panel's memory dies with
+	 * the mount, and Radix unmounts this on every glance at Headers (why the body drafts and
+	 * explorer store exist). A drag that collapses it reports through `onResize`, so the two agree
+	 * either way.
 	 */
 	const variablesPanel = useRef<PanelImperativeHandle | null>(null);
 	const variablesCollapsed = useLayoutStore((s) => s.graphqlVariablesCollapsed);
@@ -644,18 +541,14 @@ export function GraphQLBody({
 			return;
 		}
 		/*
-		 * `resize` to the remembered size rather than `expand`: the panel's
-		 * "most recent size" is only whatever this mount has seen, so after a tab
-		 * glance `expand` would open to the minimum instead of the height the
-		 * user left it at.
+		 * `resize` to the remembered size, not `expand`: the panel's "most recent size" is only
+		 * this mount's, so after a tab glance `expand` would open at the minimum.
 		 */
 		if (panel.isCollapsed()) panel.resize(`${useLayoutStore.getState().graphqlVariablesSize}%`);
 	}, [variablesCollapsed]);
 
-	/*
-	 * Debounced for the same reason the request/response split is: a drag fires
-	 * this on every frame, and the store writes through to localStorage.
-	 */
+	// Debounced as the request/response split is: a drag fires per frame, and the store writes to
+	// localStorage.
 	const sizeSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 	useEffect(() => () => clearTimeout(sizeSaveTimeout.current ?? undefined), []);
 	const handleVariablesResize = (
@@ -664,10 +557,8 @@ export function GraphQLBody({
 		previous: { asPercentage: number } | undefined
 	) => {
 		/*
-		 * The mount call - the one with no previous size - is the panel telling
-		 * us what we just told it. Reading collapse state back from it would let
-		 * a layout that has not settled overwrite the preference that produced
-		 * it, and there is nothing to learn from it either way.
+		 * The mount call (no previous size) is the panel echoing what we told it; reading collapse
+		 * state from it would let an unsettled layout overwrite the preference that produced it.
 		 */
 		if (!previous) return;
 		const panel = variablesPanel.current;
@@ -675,8 +566,7 @@ export function GraphQLBody({
 		if (collapsed !== useLayoutStore.getState().graphqlVariablesCollapsed) {
 			setVariablesCollapsed(collapsed);
 		}
-		// A collapsed panel's size is the header bar, which is not a height to
-		// come back to.
+		// A collapsed panel's size is the header bar, not a height to return to.
 		if (collapsed) return;
 		if (sizeSaveTimeout.current) clearTimeout(sizeSaveTimeout.current);
 		sizeSaveTimeout.current = setTimeout(() => setVariablesSize(size.asPercentage), 200);
@@ -696,19 +586,12 @@ export function GraphQLBody({
 	}, [query]);
 
 	/*
-	 * Scroll to the operation the context bar's outline asked for.
-	 *
-	 * Resolved against *this* document rather than trusting a line the outline
-	 * drew: the bar reads the stored request and the editor holds the live
-	 * buffer, so the two differ by whatever autosave has not written yet
-	 * (`findOperationLine`).
-	 *
-	 * The command is cleared once served **and** when it cannot be - an
-	 * operation renamed since the outline was drawn is not found, and a command
-	 * left in the slot is replayed on the next render and on the next remount,
-	 * which the Body tab does on every glance at Headers. The one case that does
-	 * *not* clear is Monaco not having mounted yet: there is nothing to serve the
-	 * command with, and it is served a moment later when the editor arrives.
+	 * Scroll to the operation the context bar's outline asked for, resolved against *this*
+	 * document: the bar reads the stored request, the editor the live buffer, which differ by
+	 * unsaved autosave (`findOperationLine`). The command is cleared once served **and** when it
+	 * cannot be (an operation renamed since is not found), since a command left in the slot replays
+	 * on the next render and remount, which Body does on every glance at Headers. It is kept only
+	 * while Monaco has not mounted: it is served when the editor arrives.
 	 */
 	useEffect(() => {
 		const serve = (command: OperationRevealCommand | null) => {
@@ -725,20 +608,17 @@ export function GraphQLBody({
 			instance.revealLineInCenter(line);
 			instance.focus();
 		};
-		// The slot is read as well as subscribed to: in the case this exists for -
-		// a click from a hidden Body tab - the command was written before this
-		// component was mounted to hear about it.
+		// Read as well as subscribed: from a hidden Body tab the command was written before this
+		// mounted.
 		serve(useRevealStore.getState().pending);
 		return useRevealStore.subscribe((s) => serve(s.pending));
 	}, [requestId, query, queryEditorReady, clearReveal, announce]);
 
 	/**
-	 * Insert what the explorer row stands for, and say what happened.
-	 *
-	 * The query and the variables are written in **one** `serializeGraphQLBody`
-	 * call rather than two. Two writes would each re-serialise from `parts`,
-	 * and the second - built from this render's closure - would carry the
-	 * pre-merge variables and undo the first.
+	 * Inserts what the explorer row stands for, and says what happened. Query and variables are
+	 * written in **one** `serializeGraphQLBody` call: two would each re-serialise from `parts`, and
+	 * the second, from this render's closure, would carry the pre-merge variables and undo the
+	 * first.
 	 */
 	const handleExplorerInsert = (node: SchemaTreeNode) => {
 		if (!activeSchema) return;
@@ -755,10 +635,8 @@ export function GraphQLBody({
 		}
 		setExplorerNotice(null);
 		/*
-		 * The leaf is already in the set the click would have added it to. Show
-		 * the user the line they already have instead of writing a second one -
-		 * selected, not merely scrolled to, so the editor's own selection paints
-		 * it rather than a highlight hand-rolled beside the one Monaco owns.
+		 * The leaf is already there: show the line instead of writing a second, selected rather
+		 * than scrolled to, so Monaco's selection paints it, not a hand-rolled highlight.
 		 */
 		if (isAlreadyPresent(result)) {
 			const instance = queryEditorRef.current;
@@ -783,10 +661,9 @@ export function GraphQLBody({
 		onVariablesDraftChange(merged.text);
 		setPendingVariables(merged.pending);
 		/*
-		 * An insertion that could not write its variables has just made the pane
-		 * the thing to look at, so a collapsed pane opens itself. This is the one
-		 * moment the badge is not enough on its own: it names variables the user
-		 * now has to type values into, and typing needs the editor.
+		 * An insertion that could not write its variables made the pane the thing to look at, so a
+		 * collapsed pane opens: the badge names values the user must now type, and typing needs the
+		 * editor.
 		 */
 		if (merged.pending.length > 0) setVariablesCollapsed(false);
 
@@ -810,10 +687,9 @@ export function GraphQLBody({
 			<ResizablePanel defaultSize="65%" minSize="25%" className="flex flex-col">
 				<PaneHeader>
 					{/*
-					 * The schema control leads the header, on the edge the explorer
-					 * opens from; the title follows it. Grouped rather than left as
-					 * three children of the bar, whose `justify-between` would push
-					 * the title into the middle.
+					 * The schema control leads, on the edge the explorer opens from, then the
+					 * title; grouped, since the bar's `justify-between` would push the title to the
+					 * middle.
 					 */}
 					<span className="flex items-center gap-2 min-w-0">
 						{schemaTarget.url && (
@@ -850,9 +726,9 @@ export function GraphQLBody({
 							</Select>
 						)}
 						{/*
-						 * Beside the picker, not inside it: a button in a Select trigger
-						 * opens the list. It follows the picker's own rule (a choice that
-						 * is real) and needs the name the envelope will send.
+						 * Beside the picker, not in it (a button in a Select trigger opens the
+						 * list). It follows the picker's rule (a real choice) and needs the name
+						 * the envelope sends.
 						 */}
 						{names.length > 1 &&
 							parts.operationName &&
@@ -866,11 +742,9 @@ export function GraphQLBody({
 					</div>
 				</PaneHeader>
 				{/*
-				 * min-h-0: a flex item will not shrink below its content, so without
-				 * it the editor keeps its old height when the pane is dragged smaller.
-				 * The panel then overflows and grows a native scrollbar beside the
-				 * editor's own - two scrollbars for one editor. Same trap as min-w-0
-				 * on truncating rows.
+				 * `min-h-0`: a flex item will not shrink below content, so the editor kept its
+				 * height when the pane was dragged smaller and the panel grew a second scrollbar
+				 * beside the editor's. As `min-w-0` on truncating rows.
 				 */}
 				<div className="min-h-0 flex-1">
 					<CodeEditor
@@ -886,22 +760,16 @@ export function GraphQLBody({
 			</ResizablePanel>
 
 			{/*
-			 * A hairline, and no grip. This splits one editor from another *inside*
-			 * the box; the handle below the box resizes the whole thing and carries
-			 * the grip. They used to be identical - two 6px grey bars doing different
-			 * jobs with nothing to tell them apart.
+			 * A hairline, no grip: it splits two editors inside the box; the handle below resizes
+			 * the box.
 			 */}
 			<ResizableHandle className="h-px w-full cursor-row-resize bg-rule hover:bg-primary transition-colors" />
 
 			{/*
-			 * Collapsible, because a `{ "code": "IN" }` document is two lines and
-			 * the pane reserved a third of the stack for it. Collapsed it is its
-			 * own header, and the query editor takes the height back.
-			 *
-			 * `collapsedSize` in pixels rather than a percentage: the bar it
-			 * collapses to is a fixed 28px whatever the stack's own height is,
-			 * and a percentage would clip it in a short pane and leave dead
-			 * editor under it in a tall one.
+			 * Collapsible: a `{ "code": "IN" }` document is two lines, and the pane took a third of
+			 * the stack. Collapsed it is its own header and the query editor takes the height.
+			 * `collapsedSize` in pixels: the bar is a fixed 28px whatever the stack height, and a
+			 * percentage would clip it in a short pane and leave dead editor in a tall one.
 			 */}
 			<ResizablePanel
 				panelRef={variablesPanel}
@@ -937,10 +805,8 @@ export function GraphQLBody({
 							onVariablesDraftChange(v ?? "");
 							write({ variables: v ?? "" });
 							/*
-							 * The badge names variables the pane refused to be given.
-							 * Once the user has touched the pane it is their text, and
-							 * a stale list of names they may have just typed in is
-							 * worse than none.
+							 * Once the user touches the pane it is their text, and a stale list of
+							 * names they may have just typed is worse than none.
 							 */
 							setPendingVariables([]);
 						}}
@@ -953,12 +819,9 @@ export function GraphQLBody({
 
 	return (
 		/*
-		 * One horizontal group, always. Rendering the group only while the
-		 * explorer is open would move the editors to a different position in the
-		 * tree on every toggle, and remounting Monaco throws away the undo stack
-		 * and the scroll position - a heavy price for a pane that opens and
-		 * closes. Keys hold the editors' identity across the conditional
-		 * siblings.
+		 * One horizontal group, always: rendering it only with the explorer open would move the
+		 * editors in the tree on every toggle, and remounting Monaco loses undo and scroll. Keys
+		 * hold the editors' identity across the conditional siblings.
 		 */
 		<ResizablePanelGroup orientation="horizontal" className="h-full">
 			{showExplorer && (
@@ -994,10 +857,8 @@ export function GraphQLBody({
 			</ResizablePanel>
 
 			{/*
-			 * The live region is mounted whether or not it has anything to say -
-			 * a region added to the DOM alongside its first message is not
-			 * announced, which is the trap `ResponseAnnouncer` and the Toaster
-			 * both record.
+			 * Mounted whether or not it has anything to say: a region added with its first message
+			 * is not announced (the trap `ResponseAnnouncer` and the Toaster record).
 			 */}
 			<div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
 				<span key={announcementSeq}>{announcement}</span>
@@ -1007,12 +868,9 @@ export function GraphQLBody({
 }
 
 /**
- * Variables an insertion declared but could not write, because the pane held
- * text that was not strict JSON.
- *
- * The alternative was to overwrite the pane, which would delete a working
- * `{{token}}` draft to make room for a placeholder. Naming them is what stops
- * that being a silent gap between the query and the values it needs.
+ * Variables an insertion declared but could not write, as the pane held text that was not strict
+ * JSON. Overwriting the pane would delete a working `{{token}}` draft for a placeholder; naming
+ * them closes the silent gap between the query and the values it needs.
  */
 function PendingVariablesBadge({ names }: { names: string[] }) {
 	if (names.length === 0) return null;

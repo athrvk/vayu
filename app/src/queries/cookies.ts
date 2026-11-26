@@ -6,11 +6,8 @@
  */
 
 /**
- * Cookie Jar Queries
- *
- * The engine keeps one cookie jar per environment for design-mode requests
- * (issue #301). These back the Settings card that shows what is held and
- * clears it.
+ * The engine keeps one cookie jar per environment for design-mode requests (#301). These back the
+ * Settings card that shows what is held and clears it.
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -18,13 +15,10 @@ import { apiService } from "@/services/api";
 import { queryKeys } from "./keys";
 
 /**
- * Every jar the engine holds.
- *
- * Not polled: the jar only changes when a request is sent or when this panel
- * clears it, and the panel invalidates itself after a clear. A user who sends
- * a request in another tab and comes back reads a stale count until the query
- * refetches on focus, which is the ordinary TanStack behaviour and cheap
- * enough to be right often.
+ * Every jar the engine holds. Not polled: a jar changes only when a request is sent or this panel
+ * clears it, and the panel invalidates itself after a clear. A user who sends a request in another
+ * tab and comes back reads a stale count until the query refetches on focus, the ordinary TanStack
+ * behaviour and cheap enough to be right often.
  */
 export function useCookiesQuery() {
 	return useQuery({
@@ -34,11 +28,9 @@ export function useCookiesQuery() {
 }
 
 /**
- * Clear one jar, or every jar.
- *
- * `undefined` clears everything; `{ environmentId: null }` clears the jar used
- * when no environment is selected. They are different calls - see
- * `apiService.clearCookies`.
+ * Clear one jar, or every jar. `undefined` clears everything; `{ environmentId: null }` clears the
+ * jar used when no environment is selected. They are different calls (see
+ * `apiService.clearCookies`).
  */
 export function useClearCookiesMutation() {
 	const queryClient = useQueryClient();

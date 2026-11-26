@@ -24,16 +24,14 @@ export interface PinnedBaseline {
 /**
  * The run pinned as the baseline for the open run's request or collection.
  *
- * The run row is fetched rather than passed in: the report does not carry the
- * run's identity (`requestId` and the collection are properties of the run, not
- * of its aggregates), and every caller sits under a pane that loaded this exact
- * query, so the shared cache answers it without a second request.
+ * The run row is fetched, not passed in: the report does not carry the run's identity (`requestId`
+ * and the collection are the run's properties, not its aggregates'), and every caller sits under a
+ * pane that loaded this exact query, so the shared cache answers without a second request.
  *
- * A saved request is matched by id and a scenario load run by its collection
- * (`runIdentity`); a run of an unsaved request has only the url and method its
- * row recorded (see `useBaselineRunQuery`), and the report's `metadata` -
- * `requestUrl` / `requestMethod` here - stands in where the row's snapshot has
- * neither. Primitives, so a memo'd caller can pass them through.
+ * A saved request is matched by id and a scenario load run by its collection (`runIdentity`); a run
+ * of an unsaved request has only the url and method its row recorded (see `useBaselineRunQuery`),
+ * and the report's `metadata` (`requestUrl` / `requestMethod` here) stands in where the row's
+ * snapshot has neither. Primitives, so a memo'd caller can pass them through.
  */
 export function usePinnedBaseline(
 	runId: string,

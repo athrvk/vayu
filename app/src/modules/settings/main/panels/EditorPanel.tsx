@@ -6,8 +6,6 @@
  */
 
 /**
- * EditorPanel
- *
  * Code-editor behavior - font size, word wrap, minimap, line numbers, tab
  * width. Applies to every Monaco instance (scripts, request/response bodies)
  * via the shared CodeEditor wrapper. Client-side only. The code font family

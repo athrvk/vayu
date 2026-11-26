@@ -5,12 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file db_credentials.cpp
- * @brief Client-certificate registry (issue #707) and its trash (#2973), the
- * allowed folders and picked files for request bodies (`file_roots`,
- * `file_grants`) and the OAuth token cache (issue #1614).
- */
+/// The client-certificate registry (#707) and its trash (#2973), the allowed
+/// folders and picked files for request bodies (`file_roots`, `file_grants`)
+/// and the OAuth token cache (#1614).
 
 #include "database_impl.hpp"
 
@@ -50,9 +47,9 @@ void Database::save_client_certificate (const ClientCertificate& c) {
     impl_->storage.replace (c);
 }
 
-// Deleted rows are excluded here rather than at each caller (#2973): the
-// transport policy every driver applies is built from this list, so a trashed
-// entry that slipped through would be presented to its host on the next send.
+// Deleted rows are excluded here, not per caller (#2973): every driver's
+// transport policy is built from this list, so a trashed entry slipping through
+// would be presented to its host on the next send.
 std::vector<ClientCertificate> Database::get_client_certificates () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<ClientCertificate> (
@@ -112,9 +109,9 @@ void Database::delete_client_certificate (const std::string& id) {
 
 std::expected<TrashOutcome, RestoreFailure>
 Database::restore_client_certificate_locked (const TrashEntry& entry) {
-    // The registry's one-entry-per-target rule, which only code enforces: a
-    // live entry registered for the same host and port since the delete keeps
-    // it, and the way forward is named.
+    // The registry's one-entry-per-target rule, enforced only by code: a live
+    // entry registered for the same host and port since the delete keeps the
+    // target, and the way forward is named.
     auto certificate = vayu::utils::invariant_value (
     impl_->storage.get_optional<ClientCertificate> (entry.id),
     "a client certificate's trash entry names a stored row");

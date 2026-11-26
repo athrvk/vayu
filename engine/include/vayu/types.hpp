@@ -8,7 +8,6 @@
  */
 
 /**
- * @file types.hpp
  * @brief Common types used throughout Vayu Engine
  */
 
@@ -86,9 +85,6 @@ enum class HttpMethod : std::uint8_t {
     OPTIONS
 };
 
-/**
- * @brief Convert HttpMethod enum to string
- */
 inline const char* to_string (HttpMethod method) {
     switch (method) {
     case HttpMethod::GET: return "GET";
@@ -102,9 +98,6 @@ inline const char* to_string (HttpMethod method) {
     return "UNKNOWN";
 }
 
-/**
- * @brief Parse string to HttpMethod
- */
 inline std::optional<HttpMethod> parse_method (const std::string& str) {
     if (str == "GET")
         return HttpMethod::GET;
@@ -127,8 +120,8 @@ inline std::optional<HttpMethod> parse_method (const std::string& str) {
  * @brief Case-insensitive ordering for HTTP header names.
  *
  * HTTP header field names are case-insensitive (RFC 9110 §5.1), so the Headers
- * map treats `Authorization` and `authorization` as the same key. This removes
- * a whole class of duplicate-header / missed-lookup bugs.
+ * map treats `Authorization` and `authorization` as one key, which rules out
+ * duplicate-header and missed-lookup bugs.
  */
 struct CaseInsensitiveLess {
     bool operator() (const std::string& a, const std::string& b) const {
@@ -138,11 +131,11 @@ struct CaseInsensitiveLess {
         });
     }
 
-    /// Header-name equality, for the callers that compare a name outside the
-    /// map - the same rule the map's ordering already applies, rather than a
-    /// private lower-casing copy at each call site. Both halves fold through
-    /// `utils::ascii_lower` (#1060), so the map's ordering and this answer
-    /// cannot come to disagree about what two names being the same means.
+    /// Header-name equality, for callers comparing a name outside the map: the
+    /// map ordering's rule, not a private lower-casing copy at each call site.
+    /// Both halves fold through `utils::ascii_lower` (#1060), so the map's
+    /// ordering and this answer cannot disagree about what two names being the
+    /// same means.
     static bool equal (const std::string& a, const std::string& b) {
         return utils::ascii_lower_equal (a, b);
     }
@@ -158,7 +151,7 @@ struct CaseInsensitiveLess {
 using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
 
 /**
- * @brief One response header line as it arrived (issue #2460).
+ * @brief One response header line as it arrived (#2460).
  *
  * `Headers` folds a repeated name into one lower-cased entry; this keeps what
  * the fold throws away. `name` is as received, case kept. `value` has the
@@ -173,7 +166,7 @@ struct HeaderLine {
 
 /**
  * @brief A request's headers as the lines that go on the wire, in order
- *        (issue #2466).
+ *        (#2466).
  *
  * `Headers` holds one value per name; a `curl_slist` carries any number of
  * same-named lines and sends them in order. So a request keeps every line it
@@ -411,10 +404,10 @@ struct FileGrant {
  */
 struct FormField {
     FormField () = default;
-    /// A text part, which is what three positional values have always meant.
-    /// Written out rather than left to aggregate initialization so that adding
-    /// the file members below does not turn every `{key, value, enabled}` in
-    /// the tree into a `-Wmissing-field-initializers` warning.
+    /// A text part, what three positional values mean. Written out rather than
+    /// left to aggregate initialization, so the file members below do not turn
+    /// every `{key, value, enabled}` in the tree into a
+    /// `-Wmissing-field-initializers` warning.
     FormField (std::string field_key, std::string field_value, bool is_enabled = true)
     : key (std::move (field_key)), value (std::move (field_value)),
       enabled (is_enabled) {
@@ -516,12 +509,12 @@ inline const std::vector<HttpVersion>& all_http_versions () {
 constexpr HttpVersion DEFAULT_HTTP_VERSION = HttpVersion::Auto;
 
 /**
- * @brief A load run's live stream counters (issues #3236, #3304), shared by
- *        every streaming transfer of the run and read by the live tick.
+ * @brief A load run's live stream counters (#3236, #3304), shared by every
+ *        streaming transfer of the run and read by the live tick.
  *
- * Owned by the run's `MetricsCollector` and reached by a transfer only
- * through `StreamBounds::live`, so a transfer that does not stream can never
- * count into it. `StreamTally` is the one writer of both fields.
+ * Owned by the run's `MetricsCollector` and reached by a transfer only through
+ * `StreamBounds::live`, so a transfer that does not stream can never count into
+ * it. `StreamTally` is the one writer of both fields.
  */
 struct LiveStreamCounts {
     /// Events delivered so far, counted as they arrive.
@@ -544,7 +537,7 @@ struct StreamTextPath {
 };
 
 /**
- * @brief The caps that end a bounded streaming transfer (issue #576).
+ * @brief The caps that end a bounded streaming transfer (#576).
  *
  * Present on a `Request` exactly when that request is a stream driven by the
  * load event loop, or a collection run's step whose stored request streams
@@ -581,8 +574,8 @@ struct StreamBounds {
 };
 
 /**
- * @brief A `:name` path variable composition could not finish (issue #1764):
- *        its row's value still holds a `{{token}}` something later answers.
+ * @brief A `:name` path variable composition could not finish (#1764): its
+ *        row's value still holds a `{{token}}` something later answers.
  */
 struct PendingPathVariable {
     std::string key;
@@ -590,9 +583,6 @@ struct PendingPathVariable {
     std::string value;
 };
 
-/**
- * @brief HTTP Request definition
- */
 struct Request {
     HttpMethod method = HttpMethod::GET;
     std::string url;
@@ -601,16 +591,15 @@ struct Request {
      *
      * Composition writes a path variable's value into its segment, encoded as
      * Postman encodes one (`core::encode_path_variable_value`). A value that
-     * still holds a token after composition - a data column bound per
-     * iteration, a deferred `{{$guid}}`, a variable the pre-request script
-     * sets - cannot be encoded yet, because encoding is a property of the
-     * *answer*: joined into the URL afterwards, `a b?c` would go out with a raw
-     * space and a query. So its segment
-     * stays `:name` in `url` and the value waits here, read from the payload's
-     * `params` (the `in: "path"` rows composition left), until the bind or the
-     * residual pass answers it and `core::settle_path_variables` writes it in.
-     * Empty for every request whose path composition finished, which is
-     * nearly all of them.
+     * still holds a token after composition (a data column bound per iteration,
+     * a deferred `{{$guid}}`, a variable the pre-request script sets) cannot be
+     * encoded yet, because encoding is a property of the *answer*: joined into
+     * the URL afterwards, `a b?c` would go out with a raw space and a query. So
+     * its segment stays `:name` in `url` and the value waits here, read from
+     * the payload's `params` (the `in: "path"` rows composition left), until
+     * the bind or the residual pass answers it and
+     * `core::settle_path_variables` writes it in. Empty for every request whose
+     * path composition finished, which is nearly all of them.
      */
     std::vector<PendingPathVariable> path_variables;
     /// Every line the request carries, in send order - see `HeaderList`.
@@ -655,9 +644,9 @@ struct Request {
      * AWS Signature, NTLM, ...), and for a bearer token or an API key name that
      * is empty (#3203); each sends the request without that credential rather
      * than refusing it. Also set for an OAuth 2.0 config that yielded to the
-     * request's own Authorization header (#3202). Recorded as `authNotice` on the live `/execute` answer
-     * and the stored trace (#2474), so the send says what the user could not
-     * otherwise tell from a 401.
+     * request's own Authorization header (#3202). Recorded as `authNotice` on
+     * the live `/execute` answer and the stored trace (#2474), so the send says
+     * what the user could not otherwise tell from a 401.
      */
     std::string auth_notice;
     Body body;
@@ -695,37 +684,37 @@ struct Request {
     std::vector<std::string> cookie_lines;
 
     /**
-     * @brief Keep the cookie jar out of this transfer (issue #1765, Postman's
+     * @brief Keep the cookie jar out of this transfer (#1765, Postman's
      *        `disableCookies`).
      *
      * Neither half runs: no jar cookie is attached and no `Set-Cookie` is
      * stored. A `Cookie` header the request itself carries still goes out, and
      * the response still reports what the server set. With the jar on, that
      * typed `Cookie` and the jar's matches go out as one `Cookie` line, the
-     * jar's first (`typed_cookie_value`, issue #2788). Read by each driver
-     * where it decides whether a jar rides the transfer - the buffered and
-     * streaming design sends and a scenario load run's per-VU session.
+     * jar's first (`typed_cookie_value`, #2788). Read by each driver where it
+     * decides whether a jar rides the transfer - the buffered and streaming
+     * design sends and a scenario load run's per-VU session.
      */
     bool disable_cookies = false;
 
     /**
-     * @brief Write this request's URL as typed, not percent-encoded (issue
-     *        #1765, Postman's `disableUrlEncoding`).
+     * @brief Write this request's URL as typed, not percent-encoded (#1765,
+     *        Postman's `disableUrlEncoding`).
      *
-     * With it set, a path value skips Postman's path encode set entirely
-     * (`a"b` goes out as `a"b`, not `a%22b`), as do the api-key query
-     * parameter, a substituted `{{variable}}` and the URL's literal text,
-     * exactly as Postman's `toNodeUrl (url, disableEncoding)` sends it. With
-     * it clear, the whole URL is written as `toNodeUrl` writes it
-     * (`core::encode_url_as_postman` in `wire_url`, issue #2465). libcurl's
-     * own URL handling is untouched either way: with it set a raw space is
-     * still refused, with a message that names it (`curl_to_error`), and
-     * dot-segments are still normalised.
+     * With it set, a path value skips Postman's path encode set entirely (`a"b`
+     * goes out as `a"b`, not `a%22b`), as do the api-key query parameter, a
+     * substituted `{{variable}}` and the URL's literal text, exactly as
+     * Postman's `toNodeUrl (url, disableEncoding)` sends it. With it clear, the
+     * whole URL is written as `toNodeUrl` writes it
+     * (`core::encode_url_as_postman` in `wire_url`, #2465). libcurl's own URL
+     * handling is untouched either way: with it set a raw space is still
+     * refused, with a message that names it (`curl_to_error`), and dot-segments
+     * are still normalised.
      */
     bool disable_url_encoding = false;
 
     /**
-     * @brief Default headers this send refuses, by name (issue #1229).
+     * @brief Default headers this send refuses, by name (#1229).
      *
      * The engine adds a small, declared set to every request nobody wrote them
      * into - `User-Agent`, `Accept-Encoding`, an optional correlation id; see
@@ -754,9 +743,6 @@ struct Request {
     std::optional<StreamBounds> stream_bounds;
 };
 
-/**
- * @brief Timing breakdown for a request
- */
 struct Timing {
     double total_ms = 0.0; // perceived latency: submit → completion (after Plan 1)
     double wire_ms = 0.0; // CURLINFO_TOTAL_TIME less libcurl's connection-slot queue (detail::wire_seconds)
@@ -773,7 +759,7 @@ struct Timing {
 };
 
 /**
- * @brief Why an `mcp` request's reply failed (issue #3762).
+ * @brief Why an `mcp` request's reply failed (#3762).
  *
  * - `Transport`: no reply, a non-2xx status that carries no JSON-RPC error, or
  *   an event stream that ended before the final response.
@@ -817,65 +803,61 @@ enum class ErrorCode : std::uint8_t {
     /// The proxy hop failed, not the target: an unresolvable proxy host, a
     /// proxy nothing listens on, a SOCKS handshake failure, a 4xx answered to
     /// the CONNECT, or a forwarding proxy's 407 on a plain `http://` request
-    /// (issue #3257). Distinct because reporting these as `ConnectionFailed`
-    /// or `InternalError` sent users debugging an endpoint that was never
-    /// reached (issue #705). Appended for the same reason `DataBindingFailed`
-    /// was.
+    /// (#3257). Distinct because reporting these as `ConnectionFailed` or
+    /// `InternalError` would send users debugging an endpoint that was never
+    /// reached (#705). Appended, for `DataBindingFailed`'s reason.
     ProxyError,
     /// The response was refused because it was larger than the bound the caller
-    /// set for this transfer (`ClientConfig::max_response_bytes`, issue #784) -
+    /// set for this transfer (`ClientConfig::max_response_bytes`, #784) -
     /// either the advertised `Content-Length` was already over it, or the body
     /// grew past it mid-transfer and the write was cut short. Distinct because
     /// the caller has to answer it differently from a network failure: the
     /// `/import/fetch` proxy turns this into a `413` naming the bound, where a
-    /// `ConnectionFailed` is a `502`. Appended for the same reason `ProxyError`
-    /// was. The load path's `maxResponseBodyBytes` overrun keeps reporting
-    /// `InternalError`: that number is an engine memory guard rather than a
-    /// bound a client asked for, and it is what every stored load trace already
-    /// carries.
+    /// `ConnectionFailed` is a `502`. Appended, for `DataBindingFailed`'s
+    /// reason. The load path's `maxResponseBodyBytes` overrun reports
+    /// `InternalError`: that number is an engine memory guard, not a bound a
+    /// client asked for, and every stored load trace carries it.
     ResponseTooLarge,
-    /// The engine cancelled the transfer before it answered: a load run's
-    /// event loop stopping (`EventLoop::stop`). Whether that is an error
-    /// depends on why it stopped, which only the run knows - a user Stop is
-    /// not one, a natural-end drain deadline is (issue #2136,
-    /// `is_stop_cancellation`). Appended for the same reason `ProxyError` was.
+    /// The engine cancelled the transfer before it answered: a load run's event
+    /// loop stopping (`EventLoop::stop`). Whether that is an error depends on
+    /// why it stopped, which only the run knows - a user Stop is not one, a
+    /// natural-end drain deadline is (#2136, `is_stop_cancellation`). Appended,
+    /// for `DataBindingFailed`'s reason.
     Cancelled,
-    /// The server redirected past the request's `maxRedirects` (issue #2462) -
+    /// The server redirected past the request's `maxRedirects` (#2462) -
     /// usually a loop. Distinct because the target answered every hop, so
-    /// `ConnectionFailed` sent users looking for a network fault. Appended for
-    /// the same reason `ProxyError` was.
+    /// `ConnectionFailed` would send users looking for a network fault.
+    /// Appended, for `DataBindingFailed`'s reason.
     TooManyRedirects,
     /// The response declared a `Content-Encoding` libcurl could not decode:
     /// bytes that are not that encoding, or an encoding this build has no
-    /// decoder for (issue #2462). Appended for the same reason `ProxyError`
-    /// was.
+    /// decoder for (#2462). Appended, for `DataBindingFailed`'s reason.
     BadContentEncoding,
-    /// A request header's name is not an RFC 9110 token once trimmed (issue
-    /// #2467). Raised by the payload reader, so it is a refusal a route answers
-    /// as `invalid_header_name` and never reaches a stored trace. Appended for
-    /// the same reason `ProxyError` was.
+    /// A request header's name is not an RFC 9110 token once trimmed (#2467).
+    /// Raised by the payload reader, so it is a refusal a route answers as
+    /// `invalid_header_name` and never reaches a stored trace. Appended, for
+    /// `DataBindingFailed`'s reason.
     InvalidHeaderName,
     /// The target answered in a protocol other than HTTP/1.x, usually an h2c
     /// server's binary preface to a request `CURL_HTTP_VERSION_2TLS` sent as
-    /// HTTP/1.1 over `http://` (issue #3306). Distinct because the target was
-    /// reached and the URL is fine, so `InvalidUrl` sent users to the wrong
-    /// fault. Appended for the same reason `ProxyError` was.
+    /// HTTP/1.1 over `http://` (#3306). Distinct because the target was reached
+    /// and the URL is fine, so `InvalidUrl` would send users to the wrong
+    /// fault. Appended, for `DataBindingFailed`'s reason.
     ProtocolMismatch,
     /// A file the request names cannot be sent, and the cause is the request:
     /// an empty path, a `{{variable}}` left unresolved in one, a missing or
-    /// unreadable file, or one outside the folders the user picked (issue
-    /// #3693, the file rule in `file_ref.hpp`). Distinct because the engine did
-    /// not fail and the target was never reached, so `InternalError` sent users
+    /// unreadable file, or one outside the folders the user picked (#3693, the
+    /// file rule in `file_ref.hpp`). Distinct because the engine did not fail
+    /// and the target was never reached, so `InternalError` would send users
     /// looking for a Vayu fault where the request needs a different path.
-    /// Stored traces from before it keep `InternalError`. Appended for the same
-    /// reason `ProxyError` was.
+    /// Stored traces from before it keep `InternalError`. Appended, for
+    /// `DataBindingFailed`'s reason.
     UnsendableFile,
     /// An `mcp` reply whose status reads as a success failed by its
-    /// `McpErrorClass` (issue #3762), one code per class. Never set on a
-    /// `Response`, whose own status and body stay what the server sent: a load
-    /// run's `handle_result` records such a completion as an error under these,
-    /// so its error tally counts it. Appended for the same reason `ProxyError`
-    /// was.
+    /// `McpErrorClass` (#3762), one code per class. Never set on a `Response`,
+    /// whose own status and body stay what the server sent: a load run's
+    /// `handle_result` records such a completion as an error under these, so
+    /// its error tally counts it. Appended, for `DataBindingFailed`'s reason.
     McpTransport,
     McpProtocol,
     McpTool
@@ -930,9 +912,6 @@ static_cast<std::size_t> (ErrorCode::McpTool) + 1;
     }
 }
 
-/**
- * @brief Convert ErrorCode to string
- */
 constexpr const char* to_string (ErrorCode code) {
     switch (code) {
     case ErrorCode::None: return "NONE";
@@ -1035,16 +1014,16 @@ const std::map<int, size_t>& distribution) noexcept {
 }
 
 /**
- * @brief One redirect response a followed chain passed through (issue #2461).
+ * @brief One redirect response a followed chain passed through (#2461).
  *
- * `Response::headers` holds the final hop only, so a `Set-Cookie` or
- * `Location` on an earlier hop is otherwise gone. `header_lines` is the same
+ * `Response::headers` holds the final hop only, so a `Set-Cookie` or `Location`
+ * on an earlier hop is otherwise gone. `header_lines` is the same
  * received-lines shape `Response::header_lines` uses.
  *
  * `url` is the request URL this response answered, so a reader can see where a
  * chain went; `scheme_downgrade` marks a Location that left `https` for `http`
- * (#2949). libcurl withholds `Authorization` and a typed `Cookie` on a change of
- * scheme, host name or port, but an API-key *header* is not withheld, so the
+ * (#2949). libcurl withholds `Authorization` and a typed `Cookie` on a change
+ * of scheme, host name or port, but an API-key *header* is not withheld, so the
  * downgrade is the one hop a credential can cross in clear text.
  */
 struct RedirectHop {
@@ -1069,7 +1048,7 @@ struct RedirectHop {
 
 /**
  * @brief One thing the engine did or declined to do to an exchange that the
- *        response alone does not show (issue #3307).
+ *        response alone does not show (#3307).
  *
  * `code` is a stable snake_case identifier a client branches on; `message` is
  * the sentence a person reads. A warning never fails the exchange.
@@ -1081,7 +1060,7 @@ struct ResponseWarning {
 
 /**
  * @brief An `mcp` request's reply as the reply reader read it
- *        (`vayu::http::read_mcp_reply`, issue #3762).
+ *        (`vayu::http::read_mcp_reply`, #3762).
  */
 struct McpReply {
     /// The final JSON-RPC response object, as the text it arrived as (the
@@ -1097,9 +1076,6 @@ struct McpReply {
     std::string message;
 };
 
-/**
- * @brief HTTP Response
- */
 // `optin.performance.Padding` is right that size-ordering these fields would
 // save 32 bytes, and the trade is refused deliberately, on the `ReportExtras`
 // precedent (`http/routes/runs.cpp`): the layout groups each field beside the
@@ -1112,21 +1088,21 @@ struct Response {
     Headers headers;
 
     /**
-     * @brief Every response header line in wire order, a repeated name
-     *        repeated (issue #2460).
+     * @brief Every response header line in wire order, a repeated name repeated
+     *        (#2460).
      *
      * `headers` stays the folded, lower-cased map scripts and assertions read.
      * This is the lossless form, which a display or a `Set-Cookie` parser
      * needs, since a cookie line is the one header that cannot be folded back
      * apart. Filled only where a caller asks - `Client::send` and the SSE
-     * reader - and left empty on the load path, which is the hot path.
-     * Holds the final redirect hop only, like `headers`.
+     * reader - and left empty on the load path, which is the hot path. Holds
+     * the final redirect hop only, like `headers`.
      */
     std::vector<HeaderLine> header_lines;
 
     /**
      * @brief The 3xx responses the send followed before the final one, in the
-     *        order they arrived (issue #2461).
+     *        order they arrived (#2461).
      *
      * Filled only by `Client::send`, and only when `Request::follow_redirects`
      * is set; empty on the load path and when nothing was followed. Holds at
@@ -1138,11 +1114,11 @@ struct Response {
 
     /**
      * @brief Every header line `build_request_header_list` put on the wire, in
-     *        order, a repeated name repeated (issue #2466).
+     *        order, a repeated name repeated (#2466).
      *
      * A typed `Cookie` row is listed as typed, one entry per row, though
-     * libcurl sends the rows merged with the jar's matches on one line (issue
-     * #2788); that line is `raw_request`'s.
+     * libcurl sends the rows merged with the jar's matches on one line (#2788);
+     * that line is `raw_request`'s.
      *
      * Served as `requestHeaderLines`, and folded to one value per name
      * (`HeaderList::folded`) as `requestHeaders`.
@@ -1153,8 +1129,8 @@ struct Response {
     size_t body_size = 0;
 
     /**
-     * @brief True when a read cap cut this body short, so `body` is a prefix
-     *        of what the server was sending (issue #1157).
+     * @brief True when a read cap cut this body short, so `body` is a prefix of
+     *        what the server was sending (#1157).
      *
      * Set only where the cap keeps what it read - the design-mode send, which
      * sets `ClientConfig::truncate_over_limit` - never on the paths that refuse
@@ -1251,10 +1227,9 @@ struct Response {
     int connection_replays = 0;
 
     /**
-     * @brief The client-certificate registry entry this transfer presented,
-     *        as `host` or `host:port`; empty when none matched or the final
-     *        hop was not `https`, where no certificate is presented
-     *        (issues #707, #3260).
+     * @brief The client-certificate registry entry this transfer presented, as
+     *        `host` or `host:port`; empty when none matched or the final hop
+     *        was not `https`, where no certificate is presented (#707, #3260).
      *
      * On the *response* rather than left to be re-derived, because "why did
      * this work here and fail there" is the question a per-host certificate
@@ -1273,14 +1248,14 @@ struct Response {
 
     /**
      * @brief What the engine did to this exchange that the response does not
-     *        show, in the order it was found (issue #3307); empty when nothing.
+     *        show, in the order it was found (#3307); empty when nothing.
      *
      * On the *response* for the reason `client_certificate` is: the live
      * `/execute` body and the stored trace both carry it, so a restored
-     * response warns about what the live one did. Design funnels only; the
-     * load path counts instead (`set_cookie_headers_dropped`), because a
-     * per-transfer list of strings is a hot-path cost for what a run reports
-     * as one number.
+     * response warns about what the live one did. Design funnels only; the load
+     * path counts instead (`set_cookie_headers_dropped`), because a
+     * per-transfer list of strings is a hot-path cost for what a run reports as
+     * one number.
      */
     std::vector<ResponseWarning> warnings;
 
@@ -1298,16 +1273,15 @@ struct Response {
 
     /**
      * @brief Events this transfer delivered, when it was a bounded stream
-     *        (`Request::stream_bounds`); absent otherwise (issue #576).
+     *        (`Request::stream_bounds`); absent otherwise (#576).
      *
      * Optional rather than a zero, and for the reason the report's sections are
      * omitted rather than zeroed: "this was not a stream" and "this stream
      * delivered nothing" are different facts, and a run whose target closed
-     * every stream before the first event is exactly the one where telling
-     * them apart matters. A transfer is a stream only when its final hop
-     * announced `text/event-stream` (#3771): a 429 or a 200 JSON reply to a
-     * streaming request leaves this absent, as does a transfer that never got
-     * an answer.
+     * every stream before the first event is exactly the one where telling them
+     * apart matters. A transfer is a stream only when its final hop announced
+     * `text/event-stream` (#3771): a 429 or a 200 JSON reply to a streaming
+     * request leaves this absent, as does a transfer that never got an answer.
      *
      * Counted by `SseFrameCounter` on the write callback (through
      * `StreamTally`, on either curl driver), which agrees with `SseParser` on
@@ -1329,32 +1303,32 @@ struct Response {
 
     /**
      * @brief Milliseconds from submission to the first event of a bounded
-     *        stream (issue #3234); absent when no event arrived, and on every
+     *        stream (#3234); absent when no event arrived, and on every
      *        transfer that was not one.
      *
      * Not `timing.first_byte_ms`, which ends at the response headers: a server
      * that answers at once and then thinks puts its whole wait after them.
      * Measured from the same submission `timing.total_ms` is, so the two
-     * compare. An unterminated last frame counted only at the close leaves
-     * this unset, since nothing measured when it arrived.
+     * compare. An unterminated last frame counted only at the close leaves this
+     * unset, since nothing measured when it arrived.
      */
     std::optional<double> stream_first_event_ms;
 
     /**
      * @brief Milliseconds from submission to the write that delivered the last
-     *        byte of the request's first content marker (issue #3774), on the
-     *        clock `stream_first_event_ms` is read from.
+     *        byte of the request's first content marker (#3774), on the clock
+     *        `stream_first_event_ms` is read from.
      *
      * Absent when the request declared no marker, when the marker never
-     * arrived, and on every transfer that was not a stream. The match is on
-     * the wire bytes, across event framing, so it can land in a frame's
-     * `event:` name or a comment as well as its `data`.
+     * arrived, and on every transfer that was not a stream. The match is on the
+     * wire bytes, across event framing, so it can land in a frame's `event:`
+     * name or a comment as well as its `data`.
      */
     std::optional<double> stream_first_match_ms;
 
     /**
      * @brief The largest wait, in milliseconds, between two consecutive writes
-     *        that completed an event of a bounded stream (issue #3776).
+     *        that completed an event of a bounded stream (#3776).
      *
      * Absent below two such writes, and wherever `stream_first_event_ms` is.
      * Its resolution is the chunk libcurl hands over, not the event: events
@@ -1364,11 +1338,11 @@ struct Response {
     std::optional<double> stream_max_event_gap_ms;
 
     /**
-     * @brief A bounded stream's own event rate (issue #3776): the events
-     *        delivered after the first write that completed an event, over
-     *        the time from that write to the last, in events per second.
-     *        The first write's own events are left out however many it
-     *        carried (a replayed backlog), since they took no measured time.
+     * @brief A bounded stream's own event rate (#3776): the events delivered
+     *        after the first write that completed an event, over the time from
+     *        that write to the last, in events per second. The first write's
+     *        own events are left out however many it carried (a replayed
+     *        backlog), since they took no measured time.
      *
      * Absent below two such writes or over a zero span. An unterminated last
      * frame the close completed is not in it, for the reason it is not in
@@ -1378,22 +1352,22 @@ struct Response {
 
     /**
      * @brief Body bytes the final response delivered over a design stream
-     *        (`consume_sse_stream`, issue #3238); absent on every other path.
+     *        (`consume_sse_stream`, #3238); absent on every other path.
      *
      * Not `body_size`, which is what `body` holds: an event stream holds no
      * body at all, and any other reply holds at most the design bound. The
-     * stored trace writes this as `response.bodyBytes` in place of
-     * `body_size`, which every other response node carries there (#3423).
+     * stored trace writes this as `response.bodyBytes` in place of `body_size`,
+     * which every other response node carries there (#3423).
      */
     std::optional<std::size_t> stream_body_bytes;
 
     /**
      * @brief True when a cap in `Request::stream_bounds` is what ended this
-     *        transfer, rather than the server closing the stream (issue #576).
+     *        transfer, rather than the server closing the stream (#576).
      *
      * Both are successful completions - reaching the cap *is* a bounded
-     * stream's intended end - so the status code cannot tell them
-     * apart and this is what the report's `capped` tally counts.
+     * stream's intended end - so the status code cannot tell them apart and
+     * this is what the report's `capped` tally counts.
      */
     bool stream_capped = false;
 
@@ -1410,8 +1384,8 @@ struct Response {
     std::vector<std::string> cookie_lines;
 
     /**
-     * @brief The reply reader's reading of an `mcp` request's reply (issue
-     *        #3762); absent for every other body mode.
+     * @brief The reply reader's reading of an `mcp` request's reply (#3762);
+     *        absent for every other body mode.
      *
      * Set where each driver hands its response on (`execute_exchange`,
      * `consume_sse_stream`, the event loop's completion), so every consumer
@@ -1421,8 +1395,8 @@ struct Response {
      */
     std::optional<McpReply> mcp_reply;
 
-    // Error information (for client-side failures like invalid URL, connection errors)
-    // When set, indicates the request failed before receiving a server response
+    // Set when the request failed before a server response: an invalid URL, a
+    // connection error and the like.
     ErrorCode error_code = ErrorCode::None;
     std::string error_message;
 
@@ -1452,9 +1426,6 @@ struct Response {
 // Error Information
 // ============================================================================
 
-/**
- * @brief Error information
- */
 struct Error {
     ErrorCode code = ErrorCode::None;
     std::string message;
@@ -1472,9 +1443,6 @@ struct Error {
 // Result Type
 // ============================================================================
 
-/**
- * @brief Result type that holds either a value or an error
- */
 template <typename T> class Result {
     public:
     Result (T value) : data_ (std::move (value)) {
@@ -1510,9 +1478,6 @@ template <typename T> class Result {
 // Event Loop Types
 // ============================================================================
 
-/**
- * @brief Batch execution result
- */
 struct BatchResult {
     std::vector<Result<Response>> responses;
     size_t successful    = 0;
@@ -1520,9 +1485,6 @@ struct BatchResult {
     double total_time_ms = 0.0;
 };
 
-/**
- * @brief Event loop statistics
- */
 struct EventLoopStats {
     size_t total_requests     = 0;
     size_t active_requests    = 0;
@@ -1547,9 +1509,6 @@ struct RunSummary {
     double avg_latency_ms = 0.0;
 };
 
-/**
- * Detailed report containing comprehensive statistics for a run.
- */
 struct DetailedReport {
     // Summary
     size_t total_requests;
@@ -1564,11 +1523,11 @@ struct DetailedReport {
     double latency_max;
     double latency_avg;
     double latency_p50;
-    double latency_p75; // Phase 1: Additional percentile
+    double latency_p75;
     double latency_p90;
     double latency_p95;
     double latency_p99;
-    double latency_p999; // Phase 1: Additional percentile
+    double latency_p999;
 
     // Distribution
     std::map<int, size_t> status_codes;
@@ -1577,7 +1536,7 @@ struct DetailedReport {
     size_t errors_with_details; // Count of errors with trace data
     std::map<std::string, size_t> error_types; // e.g., {"timeout": 3, "connection_failed": 2}
 
-    // Phase 1: Error categorization by status code
+    // Error categorization by status code
     std::map<int, size_t> errors_by_status_code;
 
     // Timing Breakdown (averages in ms) - only if timing data captured
@@ -1595,7 +1554,7 @@ struct DetailedReport {
     // run summary supplies the exact count (#2399), otherwise equal to it.
     size_t slow_traces_stored = 0;
 
-    // Phase 1: Rate Control Metrics
+    // Rate Control Metrics
     double target_rps;      // Configured target RPS (0 if unlimited)
     double actual_rps;      // Actual RPS achieved
     double rps_achievement; // Percentage of target achieved
@@ -1637,9 +1596,9 @@ struct TestResult {
  * @brief Which `console.*` method a script line came from.
  *
  * QuickJS binds all four methods to one C function, so the level has to be
- * captured at the call - it is not recoverable from the text afterwards. It was
- * dropped entirely until now, which is why every line reached the app's Console
- * tab looking the same whether the script called `log` or `error`.
+ * captured at the call: it is not recoverable from the text afterwards, and
+ * without it every line reaches the app's Console tab looking the same whether
+ * the script called `log` or `error`.
  */
 enum class ConsoleLevel : std::uint8_t { Log, Info, Warn, Error };
 
@@ -1675,7 +1634,7 @@ struct ConsoleEntry {
 };
 
 /**
- * @brief What a script asked the sequence around it to do next (issue #355).
+ * @brief What a script asked the sequence around it to do next (#355).
  *
  * `pm.execution.setNextRequest` / `skipRequest` **record** an intent here and
  * reach into nothing. `ScriptResult` is already the channel a script speaks to
@@ -1686,9 +1645,9 @@ struct ConsoleEntry {
  * Last call wins within one script, which is Postman's behaviour.
  *
  * A `Kind` other than `None` is only ever produced inside a scenario run: both
- * bindings throw where `ScriptContext::in_scenario` is false, so a `POST
- * /execute` send and a load run's deferred `tests` script can never hand their
- * caller an instruction it would silently drop.
+ * bindings throw where `ScriptContext::in_scenario` is false, so a
+ * `POST /execute` send and a load run's deferred `tests` script can never hand
+ * their caller an instruction it would silently drop.
  */
 struct ScriptControl {
     enum class Kind : std::uint8_t {
@@ -1787,19 +1746,19 @@ struct ScriptValue {
 /**
  * @brief Variable value with metadata.
  *
- * `value` is always stored as a string on disk. `type` is a UI/script hint
- * (per data-model PRD §5.2) declaring the conversion applied when scripts
- * read this variable via pm.*.get(...). One of:
- *   "string" (default), "number", "boolean", "json".
- * On a "string" row a value a script set this run reads back as that value
- * (`script_value`); the other three keep casting the text.
+ * `value` is always stored as a string on disk. `type` is a UI/script hint (per
+ * data-model PRD §5.2) declaring the conversion applied when scripts read this
+ * variable via pm.*.get(...). One of: "string" (default), "number", "boolean",
+ * "json". On a "string" row a value a script set this run reads back as that
+ * value (`script_value`); the other three keep casting the text.
  *
  * `created_at` (ms epoch) is the app's row-ordering key - the variables editor
  * lists a scope oldest-first. The engine does not display it, but it must
  * round-trip through every read/write of a stored variables blob, or the app's
- * ordering is destroyed (issue #135). `std::nullopt` means "unknown", which the
- * app sorts as older than everything; the engine never invents a value for an
- * existing variable, only for one a script creates or an import creates (#3252).
+ * ordering is destroyed (#135). `std::nullopt` means "unknown", which the app
+ * sorts as older than everything; the engine never invents a value for an
+ * existing variable, only for one a script creates or an import creates
+ * (#3252).
  *
  * Every field here except `script_value` is serialized by
  * `vayu::json::serialize_variables`; adding one without adding it there
@@ -1831,9 +1790,6 @@ struct Variable {
     bool operator== (const Variable&) const = default;
 };
 
-/**
- * @brief Environment (collection of variables)
- */
 using Environment = std::map<std::string, Variable>;
 
 // ============================================================================
@@ -2014,8 +1970,8 @@ namespace db {
 /**
  * @brief A stored body: bytes the client chose, a zero byte included (#3112).
  *
- * A `std::string` member is read back by sqlite_orm through `strlen`, so a
- * body holding a 0x00 byte came back cut at it though the write stored it
+ * A `std::string` member is read back by sqlite_orm through `strlen`, so a body
+ * holding a 0x00 byte would come back cut at it though the write stored it
  * whole. This type is a `std::string` for every caller; what differs is the
  * mapping in `database_impl.hpp`, whose `row_extractor` takes the length from
  * `sqlite3_column_bytes`. Use it for a column whose bytes are not text the
@@ -2041,45 +1997,45 @@ struct Collection {
     std::string description; // TEXT NOT NULL DEFAULT ''
     std::string variables;   // JSON - Collection-scoped variables
     std::string auth; // JSON - Auth config (mode + fields), never 'inherit'
-    // JSON array of elements (issue #1513, run by issue #1514's pipeline): the
-    // ordered, typed behaviours attached to this collection, `script.pre` /
-    // `script.post` included. `[]` is "no elements". The two script columns
-    // this replaced (`pre_request_script` / `post_request_script`) are gone -
-    // `migrate_before_sync` (database.cpp) folds a pre-cutover row's scripts
-    // in here once, ahead of the `DROP COLUMN` `sync_schema` performs.
+    // JSON array of elements (#1513, run by #1514's pipeline): the ordered,
+    // typed behaviours attached to this collection, `script.pre` /
+    // `script.post` included. `[]` is "no elements". `migrate_before_sync`
+    // (database.cpp) folds a pre-cutover row's `pre_request_script` /
+    // `post_request_script` in here once, ahead of the `DROP COLUMN`
+    // `sync_schema` performs.
     std::string elements{ "[]" };
-    // JSON - the data contract this collection declares (issue #599):
+    // JSON - the data contract this collection declares (#599):
     // {"columns":[...], "declaredAt": ms, "fileName"?: "users.csv"}. `{}` means
     // no contract. The *schema* lives here, never the rows - a data file's rows
     // are user data of unknown sensitivity and are persisted nowhere.
     std::string data_schema{ "{}" };
-    // JSON - the OpenAPI document this collection is bound to (issue #637):
+    // JSON - the OpenAPI document this collection is bound to (#637):
     // {"specId": "spec_...", "specHash": "<hex>", "syncedAt": ms}. `{}` means
     // unbound, which is what every collection written before the binding
     // existed backfills to. The *document* lives in `spec_documents`; this is
     // only the edge, so two collections may bind the same spec and unbinding
     // one leaves the document alone.
     std::string openapi{ "{}" };
-    // JSON - the spec file this collection's Spec tab was picked from (issue
-    // #2765): {"path": "...", "fileName": "..."}. `{}` means none. Stored so a
-    // workspace backup carries it; the path is true of one machine, so a
-    // reader treats it as a location to try, never as a file it may read.
+    // JSON - the spec file this collection's Spec tab was picked from (#2765):
+    // {"path": "...", "fileName": "..."}. `{}` means none. Stored so a
+    // workspace backup carries it; the path is true of one machine, so a reader
+    // treats it as a location to try, never as a file it may read.
     std::string spec_file{ "{}" };
-    // JSON - the data file a run of this collection reads its rows from (issue
-    // #2765): {"path", "fileName", "hash"?, "castNumbers"?}. `{}` means none.
+    // JSON - the data file a run of this collection reads its rows from
+    // (#2765): {"path", "fileName", "hash"?, "castNumbers"?}. `{}` means none.
     // The location only, never the rows (see `data_schema`).
     std::string data_file{ "{}" };
     int order          = 0;
     int64_t created_at = 0;
     int64_t updated_at = 0;
     // When this collection was deleted, in Unix ms - NULL while it is live
-    // (issue #988). Every read surface filters on it, so a stamped row is gone
-    // to every caller that is not the trash itself; the value is also the
-    // *cohort key*, shared by every row one cascade stamped, which is what
-    // makes a restore put back exactly what that delete took and nothing a
-    // separate earlier delete removed. Nullable rather than 0-means-live for
-    // the reason `spec_operation` is: NULL is the absence, and a second
-    // spelling of it is one every reader would have to handle.
+    // (#988). Every read surface filters on it, so a stamped row is gone to
+    // every caller that is not the trash itself; the value is also the *cohort
+    // key*, shared by every row one cascade stamped, which is what makes a
+    // restore put back exactly what that delete took and nothing a separate
+    // earlier delete removed. Nullable rather than 0-means-live for the reason
+    // `spec_operation` is: NULL is the absence, and a second spelling of it is
+    // one every reader would have to handle.
     std::optional<int64_t> deleted_at;
 };
 
@@ -2089,13 +2045,13 @@ struct Request {
     std::string name;
     std::string description; // TEXT NOT NULL DEFAULT ''
     HttpMethod method = HttpMethod::GET;
-    // Which app setting set `method`, still untouched by the user since (issue
-    // #1505). Nullable on the `spec_operation` precedent below: the only
-    // writer today is the GraphQL body mode setting `method` to POST on a
-    // fresh GET, and NULL is "the user's own choice, or nothing has set it" -
-    // the same absence a second spelling would make every reader handle twice.
-    // Cleared the moment `method` is written by anything other than that same
-    // switch, so a method the user has since picked is never reverted.
+    // Which app setting set `method`, still untouched by the user since
+    // (#1505). Nullable on the `spec_operation` precedent below: the only
+    // writer is the GraphQL body mode setting `method` to POST on a fresh GET,
+    // and NULL is "the user's own choice, or nothing has set it" - the same
+    // absence a second spelling would make every reader handle twice. Cleared
+    // the moment `method` is written by anything other than that same switch,
+    // so a method the user has since picked is never reverted.
     std::optional<std::string> method_source;
     std::string url;
     std::string params; // JSON array of KeyValueEntry: [{key,value,enabled,description?}]
@@ -2103,8 +2059,8 @@ struct Request {
     std::string body; // JSON discriminated union: {mode,content?} | {mode,fields?}
     std::string body_type; // Denormalized: equals body.mode for queryability
     std::string auth; // JSON - RequestAuth (mode + fields, may be 'inherit')
-    // JSON array of elements (issue #1513, run by issue #1514's pipeline) -
-    // see `Collection::elements` above.
+    // JSON array of elements (#1513, run by #1514's pipeline) - see
+    // `Collection::elements` above.
     std::string elements{ "[]" };
     int order = 0; // INTEGER NOT NULL DEFAULT 0 - position within collection
     // Execution options. Mirror the fields of the executable vayu::Request so a
@@ -2114,74 +2070,73 @@ struct Request {
     bool follow_redirects    = true;   // INTEGER NOT NULL DEFAULT 1
     int max_redirects        = 10;     // INTEGER NOT NULL DEFAULT 10
     std::string http_version = "auto"; // TEXT NOT NULL DEFAULT 'auto'
-    // This endpoint's own whole-transfer timeout in ms (issue #2937), held to
+    // This endpoint's own whole-transfer timeout in ms (#2937), held to
     // `REQUEST_TIMEOUT_FIELD`'s range. Nullable with no default, on the
     // `spec_operation` precedent: NULL is "use the `defaultTimeout` setting",
     // which a stored number would freeze at the value of the day it was saved.
     std::optional<int> timeout_ms;
-    // Whether the TLS certificate is verified (issue #706). Stored beside the
+    // Whether the TLS certificate is verified (#706). Stored beside the
     // redirect policy for the same reason: it is a property of *this* endpoint
     // - the internal host with the self-signed certificate - not a mode the
-    // whole app is put into. Defaults to verifying, here and in the column, so
-    // that no row can arrive at "trust anything" by omission.
+    //   whole app is put into. Defaults to verifying, here and in the column,
+    //   so that no row can arrive at "trust anything" by omission.
     bool verify_ssl = true; // INTEGER NOT NULL DEFAULT 1
-    // Consume this request's response as a `text/event-stream` (issue #574).
-    // Stored rather than chosen per send, because it changes what Send *is* for
-    // this endpoint - the execution model, not one run's options - and a toggle
-    // that reset on every tab switch would have to be re-found every time. The
+    // Consume this request's response as a `text/event-stream` (#574). Stored
+    // rather than chosen per send, because it changes what Send *is* for this
+    // endpoint - the execution model, not one run's options - and a toggle that
+    // reset on every tab switch would have to be re-found every time. The
     // executable `vayu::Request` has no mirror of it: `POST /execute` reads the
     // flag off the payload (`read_stream_flag`), which the by-id compose path
-    // always carries (`payload_from_stored`, issue #3561).
+    // always carries (`payload_from_stored`, #3561).
     bool stream = false; // INTEGER NOT NULL DEFAULT 0
-    // Postman's per-request protocol settings (issue #1765), stored beside
-    // the redirect policy for the same reason it is: each is a property of
-    // this endpoint. `disable_cookies` keeps the cookie jar out of this
-    // request's transfer (neither read nor written); `disabled_system_headers`
-    // is a JSON array of lowercased header names the engine does not add on
-    // its own (unioned into `vayu::Request::suppressed_default_headers`);
+    // Postman's per-request protocol settings (#1765), stored beside the
+    // redirect policy for the same reason it is: each is a property of this
+    // endpoint. `disable_cookies` keeps the cookie jar out of this request's
+    // transfer (neither read nor written); `disabled_system_headers` is a JSON
+    // array of lowercased header names the engine does not add on its own
+    // (unioned into `vayu::Request::suppressed_default_headers`);
     // `disable_url_encoding` sends path-variable values and api-key query
     // parameters as written.
     bool disable_cookies                = false; // INTEGER NOT NULL DEFAULT 0
     std::string disabled_system_headers = "[]";  // TEXT NOT NULL DEFAULT '[]'
     bool disable_url_encoding           = false; // INTEGER NOT NULL DEFAULT 0
     // The JSONPath, in the elements' subset, each event's `data` is read
-    // through for the reply's text (issue #3773). A `stream` setting, placed
-    // beside the other optionals rather than the bools for the struct's
-    // packing. Nullable on the `spec_operation` precedent: NULL is "declares
-    // none". Read only while `stream` is set, so a request whose stream is
-    // switched off keeps the path for the next time it is switched on.
+    // through for the reply's text (#3773). A `stream` setting, placed beside
+    // the other optionals rather than the bools for the struct's packing.
+    // Nullable on the `spec_operation` precedent: NULL is "declares none". Read
+    // only while `stream` is set, so a request whose stream is switched off
+    // keeps the path for the next time it is switched on.
     std::optional<std::string> stream_text_path;
     // The literal byte string a run's stream is watched for, timed as
-    // `stream.timeToFirstMatch` (issue #3774). A `stream` setting under
+    // `stream.timeToFirstMatch` (#3774). A `stream` setting under
     // `stream_text_path`'s rules: NULL declares none, and a row whose stream is
     // switched off keeps it unread.
     std::optional<std::string> stream_first_content_marker;
     // The Postman item's `protocolProfileBehavior` object, verbatim and in
-    // source key order, when the request was imported with one (issue #1765).
-    // Nothing sends it: `POST /export/postman` is its one reader and writes it
-    // back while it still agrees with the typed columns above, so an explicit
+    // source key order, when the request was imported with one (#1765). Nothing
+    // sends it: `POST /export/postman` is its one reader and writes it back
+    // while it still agrees with the typed columns above, so an explicit
     // default and a key Vayu does not apply survive a round trip. Nullable on
     // the `spec_operation` precedent - NULL is "no carrier".
     std::optional<std::string> postman_protocol_behavior;
-    // Which operation of the bound OpenAPI document this request *is*
-    // (issue #637): {"operationId"?: "listPets", "method": "GET",
-    // "path": "/pets"}. Nullable rather than NOT NULL-with-a-default, on the
-    // `config_entries.unit` precedent: a request that answers to no operation
-    // declares nothing, and NULL is that - `{}` would be a second spelling of
-    // the same absence for every reader to handle.
+    // Which operation of the bound OpenAPI document this request *is* (#637):
+    // {"operationId"?: "listPets", "method": "GET", "path": "/pets"}. Nullable
+    // rather than NOT NULL-with-a-default, on the `config_entries.unit`
+    // precedent: a request that answers to no operation declares nothing, and
+    // NULL is that - `{}` would be a second spelling of the same absence for
+    // every reader to handle.
     //
     // `path` is the *template* (`/pets/{petId}`), never a concrete URL, because
     // it is the identity a re-fetched spec is diffed against (#627) and the key
     // coverage counts by (#629). Two requests may name the same operation.
     std::optional<std::string> spec_operation;
-    // Which of the request's saved examples a mock server answers with
-    // (issue #481 phase 3). "first" (the original, and only, behaviour) is
-    // the default so an existing row with no opinion keeps serving what it
-    // always served. Never anything else - validated at write time in
-    // apply_request_fields, defaulted the same way an unparsable stored
-    // value would be for a real enum column (see engine/CLAUDE.md's
-    // row-struct convention), because this one is a plain TEXT column like
-    // http_version, not a sqlite_orm-mapped enum.
+    // Which of the request's saved examples a mock server answers with (#481).
+    // "first" is the default, so a row with no opinion serves its first
+    // example. Never anything else - validated at write time in
+    // apply_request_fields, defaulted the same way an unparsable stored value
+    // would be for a real enum column (see engine/CLAUDE.md's row-struct
+    // convention), because this one is a plain TEXT column like http_version,
+    // not a sqlite_orm-mapped enum.
     std::string mock_response_mode = "first";
     // The example `mock_response_mode == "fixed"` names. Nullable like
     // `spec_operation`: nothing to default it to, and NULL is the only
@@ -2192,10 +2147,10 @@ struct Request {
     std::optional<std::string> mock_example_id;
     int64_t created_at = 0;
     int64_t updated_at = 0;
-    // When this request was deleted, in Unix ms - NULL while it is live
-    // (issue #988). Same rule and same cohort meaning as `Collection::deleted_at`;
-    // a request stamped by its collection's cascade carries that cascade's
-    // timestamp, not one of its own.
+    // When this request was deleted, in Unix ms - NULL while it is live (#988).
+    // Same rule and same cohort meaning as `Collection::deleted_at`; a request
+    // stamped by its collection's cascade carries that cascade's timestamp, not
+    // one of its own.
     std::optional<int64_t> deleted_at;
 };
 
@@ -2218,13 +2173,12 @@ struct RequestSummary {
 };
 
 /**
- * @brief A saved example response for a request (issue #481).
+ * @brief A saved example response for a request (#481).
  *
  * What an importer finds in `item.response[]` (Postman) or under an operation's
- * `responses` (OpenAPI) and used to drop on the floor, because nothing here
- * could hold it. Owned by its request: `request_id` is the only owner, and both
- * `delete_request` and the `delete_collection` cascade remove the examples with
- * it, so an orphaned row is not a state the store can reach.
+ * `responses` (OpenAPI). Owned by its request: `request_id` is the only owner,
+ * and both `delete_request` and the `delete_collection` cascade remove the
+ * examples with it, so an orphaned row is not a state the store can reach.
  *
  * `headers` is a JSON array of KeyValueEntry, the same shape `Request::headers`
  * uses - not the JSON object `result_bodies` / `inbox_requests` store. A stored
@@ -2250,7 +2204,7 @@ struct RequestExample {
      */
     int order = 0;
     /**
-     * `import` or `user` - who wrote this row (issue #588).
+     * `import` or `user` - who wrote this row (#588).
      *
      * Not a display field: it exists so a spec sync (#627) can replace the
      * examples a document produced without touching the ones a person saved
@@ -2259,13 +2213,13 @@ struct RequestExample {
     std::string origin = vayu::core::constants::request_example::ORIGIN_IMPORT;
     /**
      * Whether `body` is only the first slice of the response it was saved from
-     * (issue #659 item 2).
+     * (#659 item 2).
      *
      * A stored example is what a mock server answers with, verbatim and with no
      * sign that anything is missing - so an example saved from a body the trace
      * had already capped (`maxTraceBodyBytes`) is served as though it were a
-     * whole response. That was disclosed only in the default *name*, which a
-     * user renames at save time, and the disclosure went with it.
+     * whole response. The default *name* cannot carry that: a user renames it
+     * at save time.
      *
      * `false` is honest for every row that predates the column: an importer
      * copies a complete documented body, and the app's save is the only writer
@@ -2273,41 +2227,40 @@ struct RequestExample {
      */
     bool body_truncated = false;
     /**
-     * A tombstone: the row is an imported example the user deleted (issue
-     * #722).
+     * A tombstone: the row is an imported example the user deleted (#722).
      *
-     * Deleting an `origin="import"` example used to remove the row and record
-     * nothing, while a spec sync replaces every imported row of a request it
-     * applies *any* change to - so the next rename-only sync brought the
-     * deleted example back. The intent has to survive somewhere, and the row
-     * that held it is the one thing that already carries the identity: this
-     * flag keeps it as a marker of "the document's example for this status is
-     * not wanted here" and `refresh_examples` skips that status.
+     * A spec sync replaces every imported row of a request it applies *any*
+     * change to, so removing an `origin="import"` example's row and recording
+     * nothing would let the next rename-only sync bring the deleted example
+     * back. The intent has to survive somewhere, and the row that held it is
+     * the one thing that carries the identity: this flag keeps it as a marker
+     * of "the document's example for this status is not wanted here", and
+     * `refresh_examples` skips that status.
      *
-     * A suppressed row is not an example any more. `get_request_example(s)`
-     * and `count_request_examples` filter it out, so every reader - the list
-     * route, the mock server, the export - behaves exactly as though the
-     * delete had removed it, and only the sync's own accessor
-     * (`get_suppressed_request_examples`) can see it. `body`, `headers`,
-     * `content_type` and `postman_response` are cleared when the flag goes on: nothing serves a
-     * tombstone, so keeping a response body against a deleted row would retain
-     * bytes for a reader that does not exist.
+     * A suppressed row is not an example any more. `get_request_example(s)` and
+     * `count_request_examples` filter it out, so every reader (the list route,
+     * the mock server, the export) behaves as though the delete had removed it,
+     * and only the sync's own accessor (`get_suppressed_request_examples`) can
+     * see it. `body`, `headers`, `content_type` and `postman_response` are
+     * cleared when the flag goes on: nothing serves a tombstone, so keeping a
+     * response body against a deleted row would retain bytes for a reader that
+     * does not exist.
      *
      * `false` for every row that predates the column, which is what they all
-     * are - a row a delete had reached was gone.
+     * are: a row a delete had reached was gone.
      */
     bool suppressed = false;
     /**
      * The key this example was taken from a 3.x response's named `examples`
-     * map, if it was (issue #1457). NULL for every row that predates the
-     * column and for one taken from a single `example` or sampled off a
-     * schema - nullable rather than NOT NULL with a default, on the
-     * `Request::spec_operation` precedent: nothing to backfill it from, and
-     * NULL is the only spelling of "records no key".
+     * map, if it was (#1457). NULL for every row that predates the column and
+     * for one taken from a single `example` or sampled off a schema - nullable
+     * rather than NOT NULL with a default, on the `Request::spec_operation`
+     * precedent: nothing to backfill it from, and NULL is the only spelling of
+     * "records no key".
      *
-     * Not a display field, the same as `origin`: it exists so the bound
-     * export can write an edited example back into the document entry it
-     * came from instead of adding a new one beside it.
+     * Not a display field, the same as `origin`: it exists so the bound export
+     * can write an edited example back into the document entry it came from
+     * instead of adding a new one beside it.
      */
     std::optional<std::string> spec_example_key;
     /**
@@ -2338,14 +2291,14 @@ struct RequestExample {
 };
 
 /**
- * @brief An OpenAPI document, stored once and bound to collections (issue #637).
+ * @brief An OpenAPI document, stored once and bound to collections (#637).
  *
  * The text is kept verbatim - not a parsed model - because everything the epic
- * stacked behind this needs the *document*: the Spec tab renders it (#638), sync
- * re-fetches and diffs against it (#627), response validation resolves `$ref`s
- * through it (#628), and export writes a new one beside it (#630). A parse here
- * would have to be re-done by each of them anyway, and would lose whatever the
- * author wrote that the parser did not model.
+ * stacked behind this needs the *document*: the Spec tab renders it (#638),
+ * sync re-fetches and diffs against it (#627), response validation resolves
+ * `$ref`s through it (#628), and export writes a new one beside it (#630). A
+ * parse here would have to be re-done by each of them anyway, and would lose
+ * whatever the author wrote that the parser did not model.
  *
  * Owned by nobody: a spec is bound *by* collections (`Collection::openapi`)
  * rather than owned by one, so no cascade reaches it and `DELETE /specs/:id` is
@@ -2356,7 +2309,7 @@ struct SpecDocument {
     std::string content;
     /// Where it was fetched from, when it came from a URL rather than a file.
     /// Nullable: "pasted or uploaded" is an answer, and `""` would be a second
-    /// spelling of it. Phase 2 (#627) re-fetches through this.
+    /// spelling of it. Sync (#627) re-fetches through this.
     std::optional<std::string> source_url;
     int64_t fetched_at = 0;
     /**
@@ -2370,15 +2323,14 @@ struct SpecDocument {
      */
     std::string hash;
     /**
-     * The operations this document declares (issue #629): a JSON array of
+     * The operations this document declares (#629): a JSON array of
      * `{operationId?, method, path, responses[]}`, in document order.
      *
-     * **Derived by the engine from `content`, never supplied** (issue #853):
-     * `core::derive_spec_indexes` reads the document as it is stored, the
-     * way `hash` is computed rather than taken, and a write carrying an
+     * **Derived by the engine from `content`, never supplied** (#853):
+     * `core::derive_spec_indexes` reads the document as it is stored, the way
+     * `hash` is computed rather than taken, and a write carrying an
      * `operations` field is a `400`. One reader answers what a document
-     * declares - which is the rule #625 decided; #761's phase B moved which
-     * side of the wire it lives on.
+     * declares, the rule #625 decided (#761 put that reader engine-side).
      *
      * `""` means no index: a document stored before this column existed, or one
      * that declares no operation at all (a stored file that is not a contract).
@@ -2388,11 +2340,11 @@ struct SpecDocument {
      */
     std::string operations;
     /**
-     * The response schemas this document declares (issue #628): a JSON object of
+     * The response schemas this document declares (#628): a JSON object of
      * `{refRoots?, operations: [{operationId?, method, path, responses: [{status,
      * contentType, schema}]}]}`.
      *
-     * **Derived by the engine from `content`, never supplied** (issue #860), off
+     * **Derived by the engine from `content`, never supplied** (#860), off
      * the *same* read as `operations` above - which is what keeps the two
      * agreeing about which operation declares which status, and what makes
      * translating OpenAPI 3.0's dialect into JSON Schema the engine's job. A
@@ -2455,7 +2407,7 @@ struct Environment {
     // *applies* an active environment to a request, which must name its own
     // environmentId - but the choice is stored here rather than in client-local
     // state, so it survives a reinstall and is shared by every client on the
-    // same database. See docs/engine/db-schema.md.
+    // same database. See docs/engine/db-schema/environments-and-globals.md.
     bool is_active     = false;
     int64_t created_at = 0;
     int64_t updated_at = 0;
@@ -2502,17 +2454,17 @@ struct Run {
     // sync_schema can ALTER TABLE ADD COLUMN it onto an existing runs table -
     // the same pattern as `summary` above and `requests.follow_redirects`.
     bool baseline = false; // INTEGER NOT NULL DEFAULT 0
-    // Whether the terminal `summary` above carries a non-empty `warnings`
-    // array (issue #1503). Derived and stamped by `Database::update_run_summary`
-    // itself, from the same JSON it is about to store, so the two can never
-    // disagree - never set anywhere else. Narrow and separate from `summary`
-    // (issue #1527) so the paginated list route can read it straight off the
-    // row already fetched for every page, with no cache and no per-row JSON
-    // parse: `RunSummaryCache`'s compact-summary table keys on the immutable
+    // Whether the terminal `summary` above carries a non-empty `warnings` array
+    // (#1503). Derived and stamped by `Database::update_run_summary` itself,
+    // from the same JSON it is about to store, so the two can never disagree -
+    // never set anywhere else. Narrow and separate from `summary` (#1527) so
+    // the paginated list route can read it straight off the row already fetched
+    // for every page, with no cache and no per-row JSON parse:
+    // `RunSummaryCache`'s compact-summary table keys on the immutable
     // `config_snapshot` and must never learn a completion-time fact, or a row
     // cached while the run was still running would show no warnings forever.
-    // (Its load-outcome table does read `summary`, and only once the status
-    // is terminal, for the same reason.)
+    // (Its load-outcome table does read `summary`, and only once the status is
+    // terminal, for the same reason.)
     bool has_warnings = false; // INTEGER NOT NULL DEFAULT 0
     // Who started the run, as the starting client asserted it (#1817):
     // `"app"`, `"mcp"` or `"other"`, validated by `read_run_origin` before the
@@ -2534,8 +2486,8 @@ struct Run {
 };
 
 /**
- * @brief One wide row per persisted metrics tick - the whole tick object as
- * stored JSON, replacing the ~18 EAV `metrics` rows a tick used to cost.
+ * @brief One wide row per persisted metrics tick: the whole tick object as
+ *        stored JSON, not ~18 EAV `metrics` rows.
  *
  * `payload` is exactly the snake_case per-tick object `GET /runs/:id/metrics`
  * returns (the app's `LoadTestMetrics` shape), built once at write time instead
@@ -2572,7 +2524,8 @@ struct MonitorSample {
 struct Result {
     // Default-initialized for the reason on `MonitorSample` above - production
     // fills `id` from the DB and the rest from the transfer, but a row built
-    // field-by-field and then copied used to read four indeterminate scalars.
+    // field-by-field and then copied would otherwise read four indeterminate
+    // scalars.
     int id = 0;
     std::string run_id;
     int64_t timestamp = 0;
@@ -2625,7 +2578,7 @@ struct ResultBody {
     /**
      * Events the transfer delivered, when it was a bounded stream
      * (`Response::stream_events`); NULL otherwise, which is also what every row
-     * written before issue #657 reads as (absent, not zero).
+     * written before #657 reads as (absent, not zero).
      *
      * Stored rather than derived from the body for the reason `body_bytes` is:
      * the body may be a prefix, and a count taken from a prefix would report a
@@ -2635,11 +2588,11 @@ struct ResultBody {
      */
     std::optional<int64_t> stream_events;
     /**
-     * The `streamTextPath` the streamed sample was sent with (issue #3773);
-     * NULL for none and for a row written before the column. Stored per row
-     * because a collection run's steps each declare their own and a sample
-     * names no step, and so `GET /runs/:id/samples` derives each event's
-     * `text` from the bytes rather than from a stored copy of it.
+     * The `streamTextPath` the streamed sample was sent with (#3773); NULL for
+     * none and for a row written before the column. Stored per row because a
+     * collection run's steps each declare their own and a sample names no step,
+     * and so `GET /runs/:id/samples` derives each event's `text` from the bytes
+     * rather than from a stored copy of it.
      */
     std::optional<std::string> stream_text_path;
 };
@@ -2670,7 +2623,7 @@ struct PendingResultBody {
 };
 
 /**
- * @brief One request captured by a webhook inbox listener (issue #480).
+ * @brief One request captured by a webhook inbox listener (#480).
  *
  * The inbox itself is process-lifetime state on `InboxManager` - the rows are
  * here because a capture list is paged and must not grow a running daemon's
@@ -2713,9 +2666,9 @@ struct ConfigEntry {
     int64_t updated_at = 0;             // Last update timestamp
     // Whether the running engine keeps the old value until it is restarted.
     // Serialized as `requiresRestart`; the app and the MCP `update_config` tool
-    // both read it. It used to be spelled as a "(Requires Restart)" suffix in
-    // the label and substring-parsed by both, so a stale label lied to both at
-    // once - hence a typed field, and a test that no label carries the suffix.
+    // both read it. A typed field, not a "(Requires Restart)" label suffix
+    // both substring-parse, so a stale label cannot lie to both at once; a
+    // test holds that no label carries the suffix.
     bool requires_restart = false;
     // Whether the setting is an internal that no everyday user story reaches
     // (a lock pragma, a watchdog backoff). Serialized as `advanced`; the app
@@ -2736,9 +2689,8 @@ struct ConfigEntry {
     //
     // The app renders it as the suffix inside the input, which is where a unit
     // is stated once; `bytes` additionally selects the human-readable byte
-    // formatting for the value, the range hint and the default line. It used to
-    // guess that last part from a hardcoded list of three keys, so an entry
-    // added here was invisible to it until someone edited a TypeScript array.
+    // formatting for the value, the range hint and the default line,
+    // so an entry added here needs no app-side key list.
     //
     // Declared after `updated_at` on purpose: the seeds aggregate-initialize
     // positionally up to that member, so every field added since is a trailing
@@ -2796,7 +2748,7 @@ struct OAuthToken {
 };
 
 /**
- * @brief A client certificate and the host it is presented to (issue #707).
+ * @brief A client certificate and the host it is presented to (#707).
  *
  * The registry row behind `vayu::http::ClientCertRule` - that struct is what
  * the transport policy carries onto the wire, this one is what SQLite holds.
@@ -2806,8 +2758,8 @@ struct OAuthToken {
  *
  * `cert_path` / `key_path` are *paths*: the key never enters the database.
  * `passphrase` is the exception and is stored plaintext, on the precedent every
- * stored auth credential already sets - see docs/engine/db-schema.md, which
- * discloses it.
+ * stored auth credential already sets - see
+ * docs/engine/db-schema/credentials-and-files.md, which discloses it.
  */
 struct ClientCertificate {
     std::string id;   // PK, engine-assigned ("cert_...")
@@ -2819,11 +2771,11 @@ struct ClientCertificate {
     std::optional<int> port;
     std::string cert_path;
     std::string key_path; // "" for a PKCS#12 entry, which carries its own key
-    // What `cert_path` holds: `pem` or `p12` (issue #833). Stored rather than
-    // sniffed per transfer - the applier runs on every handle of every load
-    // run, and a format nothing recorded is one the Settings card cannot print.
-    // Held as its wire spelling, like `requests.http_version`, so the column
-    // survives a reorder of `vayu::http::ClientCertFormat`.
+    // What `cert_path` holds: `pem` or `p12` (#833). Stored rather than sniffed
+    // per transfer - the applier runs on every handle of every load run, and a
+    // format nothing recorded is one the Settings card cannot print. Held as
+    // its wire spelling, like `requests.http_version`, so the column survives a
+    // reorder of `vayu::http::ClientCertFormat`.
     std::string cert_format = "pem";
     std::string passphrase; // "" = the key has none; a PKCS#12 import password too
     int64_t created_at = 0;

@@ -6,11 +6,10 @@
  */
 
 /**
- * ModeStatCards - the mode-specific Row 4 stats that exist for only one load
- * mode (constant_concurrency / iterations / ramp_up). The shared cards
- * (Duration, Total requests, Peak virtual users / in-flight requests) and the universal p99 card live
- * in ModeStatsRow.tsx, which routes between these per d.mode. All cards are pure
- * presentational reads off {@link DashboardDerived}; InfoChip copy via TOOLTIPS.
+ * The Row 4 stats that exist for one load mode only (constant_concurrency / iterations / ramp_up).
+ * The shared cards (Duration, Total requests, Peak virtual users / in-flight requests) and the
+ * universal p99 card live in ModeStatsRow.tsx, which routes between these per d.mode. All are pure
+ * presentational reads off {@link DashboardDerived}, with InfoChip copy from TOOLTIPS.
  */
 
 import {
@@ -102,11 +101,10 @@ export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
 // ---- ramp_up ----
 
 /**
- * Breakpoint - concurrency at which p99 first crossed the SLO threshold. An
- * uncrossed run says so and names the line (from the breakpoint, not the current
- * setting), since "-" reads as "not measured": "SLO" for a run's own, "threshold
- * in Settings" for the Settings p99 threshold (#2939). It goes in the sub-line: "not crossed"
- * alone fills most of a card's value row.
+ * Breakpoint: the concurrency at which p99 first crossed the SLO threshold. An uncrossed run says
+ * so and names the line (from the breakpoint, not the current setting), since "-" reads as "not
+ * measured": "SLO" for a run's own, "threshold in Settings" for the Settings p99 threshold (#2939).
+ * It goes in the sub-line, as "not crossed" alone fills most of a card's value row.
  */
 export function BreakpointStat({ d }: { d: DashboardDerived }) {
 	const { crossed, concurrency, sloMs, sloSource } = d.breakpoint;

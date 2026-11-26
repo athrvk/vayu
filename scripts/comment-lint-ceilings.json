@@ -1,0 +1,23 @@
+{
+  "files": {
+    "app/electron/mcp/engine-client.ts": 2,
+    "app/electron/mcp/tools/collection-runs.tools.ts": 1,
+    "app/electron/mcp/tools/environments.tools.ts": 1,
+    "app/electron/mcp/tools/input-schemas.ts": 1,
+    "app/electron/mcp/tools/mock-issuer.tools.ts": 1,
+    "app/electron/mcp/tools/trash.tools.ts": 1,
+    "app/src/components/layout/tab-descriptors.ts": 1,
+    "app/src/components/shared/KeyValueEditor/KeyValueRow.tsx": 1,
+    "app/src/components/shared/OAuth2Form/token-phase.ts": 1,
+    "app/src/components/shared/VariableInput/EditableVariable.tsx": 2,
+    "app/src/components/shared/VariableInput/index.tsx": 3,
+    "app/src/modules/request-builder/components/RequestTabs/panels/SettingsPanel.tsx": 1,
+    "app/src/modules/request-builder/hooks/useSendWithRow.ts": 1,
+    "app/src/queries/keys.ts": 1,
+    "engine/include/vayu/core/openapi_document.hpp": 1,
+    "engine/include/vayu/core/script_config.hpp": 1,
+    "engine/include/vayu/http/default_headers.hpp": 1,
+    "engine/include/vayu/http/request_exchange.hpp": 1,
+    "engine/src/http/routes/script_types.cpp": 1
+  }
+}

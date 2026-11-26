@@ -374,7 +374,7 @@ TEST (ExecutionTrace, StoresTheWireRequestBesideTheComposedHeaders) {
 
     // The composed map is unchanged - it is neither the wire nor the sent
     // record, and the three are deliberately different views
-    // (api-reference.md).
+    // (docs/engine/api-reference/execute.md).
     EXPECT_FALSE (trace["request"]["headers"].contains ("Cookie"));
 }
 

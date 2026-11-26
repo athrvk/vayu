@@ -6,18 +6,10 @@
  */
 
 /**
- * How many document tabs fit, and how wide each one wants to be.
- *
- * The strip sizes each tab to its own name and sends the rest to an overflow
- * menu. It used to do the opposite - `min-w-20 max-w-50 shrink` let all of them
- * compress together, so opening a ninth tab made the other eight worse and the
- * platform decided readability: the same eight tabs degraded differently on
- * macOS, Windows and Linux because each leaves a different amount of strip.
- *
- * Widths are measured with a canvas rather than from the DOM. Measuring rendered
- * tabs is circular here - deciding to hide one changes the widths you would
- * measure next - and a canvas needs no layout pass, so the answer is stable and
- * this file stays a pure function worth unit-testing.
+ * How many document tabs fit, and how wide each wants to be: the strip sizes each tab to its own
+ * name and sends the rest to an overflow menu. Widths come from a canvas, not the DOM: measuring
+ * rendered tabs is circular here (hiding one changes the widths measured next), and a canvas needs
+ * no layout pass, so the answer is stable and this file stays a pure function worth unit-testing.
  */
 
 import {
@@ -28,10 +20,9 @@ import {
 } from "@/constants/layout";
 
 /**
- * The close button's footprint at the trailing edge: a 24px `size-target` hit
- * box (issue #1679 - the button was a 16px target, under the WCAG 2.2 SC
- * 2.5.8 floor), offset 2px from the edge (`TabStrip.tsx`). The glyph inside it
- * stays 12px (`size-icon-sm`) - only the hit area grew.
+ * The close button's footprint at the trailing edge: a 24px `size-target` hit box (#1679; a 16px
+ * target is under the WCAG 2.2 SC 2.5.8 floor), offset 2px from the edge (`TabStrip.tsx`). The
+ * glyph inside stays 12px (`size-icon-sm`); only the hit area grew.
  */
 export const TAB_CLOSE_SPACE = 2 + 24;
 
@@ -39,27 +30,14 @@ export const TAB_CLOSE_SPACE = 2 + 24;
 export const TAB_TRAILING = TAB_CLOSE_SPACE + 2;
 
 /**
- * Everything a tab draws that is not the name, in px.
- *
- * 12px leading padding (`px-3`, issue #1679 - was 8px), the trailing strip
- * above, a 2px method rail, a 1px separator, and 6px of gap when an icon is
- * present. These are Comfortable-density pixel values (`--spacing` at
- * 0.25rem/unit): `px-3` is 12px there and only 9px at Default, `right-0.5`
- * on the close button is 2px there and 1.5px at Default. This constant does
- * not vary by density at all, so using the larger, Comfortable-derived
- * numbers is the safe direction to be wrong in - a few spare px at Default
- * rather than text running under the close button, the defect line 52
- * below describes.
- *
- * The trailing strip is the close button's own footprint plus air. The button is
- * absolutely positioned, so it draws over that strip rather than sitting in the
- * flow, and it used to be budgeted at 0: absolute takes it out of layout, but
- * not out of the way. The name filling its tab ran under the button on the one
- * tab showing it, which was every active tab (#1202). It was invisible while
- * this measurement read the strip's inherited 16px font against a 13px label
- * and over-measured every tab by ~23%; correcting the font is what surfaced it.
- * Still far short of the old strip's 22px per tab, which reserved the button
- * *and* the method word on all of them.
+ * Everything a tab draws that is not the name, in px: 12px leading padding (`px-3`, #1679), the
+ * trailing strip above, a 2px method rail, a 1px separator, and 6px of gap when an icon is present.
+ * These are Comfortable-density pixels (`--spacing` at 0.25rem/unit): `px-3` is 12px there and 9px
+ * at Default, the close button's `right-0.5` 2px there and 1.5px at Default. The constant does not
+ * vary by density, so the larger numbers are the safe direction to be wrong in: a few spare px at
+ * Default rather than text running under the close button. The trailing strip is that button's
+ * footprint plus air: the button is absolutely positioned, out of layout but not out of the way, so
+ * a name filling its tab would run under it on every active tab (#1202).
  */
 export const TAB_CHROME = 12 + TAB_TRAILING + 2 + 1;
 /** Extra when the tab carries a type icon (collection, run, settings…). */
@@ -96,22 +74,18 @@ export function naturalTabWidth(tab: TabMetrics, measure: (text: string) => numb
 }
 
 /**
- * What a Radix `TabsTrigger` draws that is not its name: `px-2` on both sides.
- * The two-pixel `gap-0.5` the list puts between triggers is charged here too, so
- * a trigger's width is also its slot in the row. Comfortable-density pixels, the
- * safe direction to be wrong in - see `TAB_CHROME`.
+ * What a Radix `TabsTrigger` draws that is not its name: `px-2` on both sides, plus the 2px
+ * `gap-0.5` the list puts between triggers, so a trigger's width is also its slot in the row.
+ * Comfortable-density pixels, the safe direction to be wrong in (see `TAB_CHROME`).
  */
 export const TRIGGER_CHROME = 16 + 2;
 
 /**
- * What a trailing mark on a trigger adds once it has arrived, in px, the trigger's
- * own `gap-1.5` (6) included.
- *
- * A mark animates open after the fit has been decided (`MARK_TRACK` in
- * `ui/tabs.tsx`), so the fit budgets for the widest a tab can get rather than
- * for what it shows now; otherwise a badge arriving late widens a trigger past
- * the room the fit gave it and the strip clips again. `wideCount` is for a count
- * with no small ceiling (an event stream's length).
+ * What a trailing mark on a trigger adds once it has arrived, in px, the trigger's own `gap-1.5`
+ * (6) included. A mark animates open after the fit is decided (`MARK_TRACK` in `ui/tabs.tsx`), so
+ * the fit budgets for the widest a tab can get, not for what it shows now; otherwise a late badge
+ * widens a trigger past its room and the strip clips again. `wideCount` is for a count with no
+ * small ceiling (an event stream's length).
  */
 export const MARK_ALLOWANCE = {
 	none: 0,
@@ -122,10 +96,9 @@ export const MARK_ALLOWANCE = {
 } as const;
 
 /**
- * The width a section-tab trigger wants: its name at the bold weight (the label
- * reserves the semibold width in every state, `TabLabel`), the trigger's padding,
- * and room for the marks it may grow. `measure` must be built at the trigger's
- * 600 weight, not the strip's.
+ * The width a section-tab trigger wants: its name at the bold weight (`TabLabel` reserves the
+ * semibold width in every state), the trigger's padding, and room for the marks it may grow.
+ * `measure` must be built at the trigger's 600 weight, not the strip's.
  */
 export function naturalTriggerWidth(
 	label: string,
@@ -149,15 +122,12 @@ export interface FitOptions {
 }
 
 /**
- * Decide which tabs are shown.
+ * Decide which tabs are shown, by two rules that are easy to get wrong:
  *
- * Two rules that are easy to get wrong:
- *
- * - The overflow control's width is reserved *before* choosing how many tabs to
- *   show, not after. Fitting one more tab and then finding nowhere to put the
- *   "+3" is how a strip hides tabs with no way to reach them.
- * - **The active tab is never overflowed.** Picking a tab from the menu has to
- *   put it on screen, or the menu looks like it did nothing.
+ * - The overflow control's width is reserved *before* choosing how many tabs to show: fitting one
+ *   more tab and then finding nowhere for the "+3" hides tabs with no way to reach them.
+ * - **The active tab is never overflowed.** A tab picked from the menu must come on screen, or the
+ *   menu looks like it did nothing.
  */
 export function fitTabs(
 	widths: number[],

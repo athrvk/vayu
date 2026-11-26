@@ -79,10 +79,10 @@ function receivedRateOf(s: RunReport["summary"]): {
 }
 
 /**
- * Adapt a completed-run RunReport into the DashboardDerived bundle the live
- * dashboard's HeroRow/ModeStatsRow consume. Marks isCompleted=true so the
- * components use peak (not instantaneous) concurrency. Fields the report can't
- * supply without per-tick data (breakpoint, ramp deviation) get safe defaults.
+ * Adapt a completed run's RunReport into the DashboardDerived bundle the live dashboard's
+ * HeroRow/ModeStatsRow consume. isCompleted=true makes the components use peak, not instantaneous,
+ * concurrency; fields the report cannot supply without per-tick data (breakpoint, ramp deviation)
+ * get safe defaults.
  */
 export function reportToDerived(report: RunReport): DashboardDerived {
 	const cfg = report.metadata?.configuration ?? {};
@@ -159,10 +159,9 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		droppedRequests,
 		skippedRequests,
 		stalledMs: s.stalledMs ?? 0,
-		// Swap in the Dropped Requests card only when requests were lost - the
-		// live MetricsView calls the same helper. A clean rate-limited run keeps
-		// the Rate Fidelity card (otherwise it shows "0 dropped" with a false
-		// "Server saturating" warning).
+		// The Dropped Requests card only when requests were lost, by the helper the live
+		// MetricsView calls: a clean rate-limited run keeps Rate Fidelity rather than "0 dropped"
+		// with a false "Server saturating" warning.
 		showDropped: shouldShowDropped(mode, targetRps, droppedRequests, skippedRequests),
 		rampDeviationPct: undefined, // filled from the stored series by LoadTestDetail
 		// A unit-aware parse: "2m" is 120 s, not 2 (#1945).

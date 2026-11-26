@@ -6,16 +6,8 @@
  */
 
 /**
- * LoadTestDashboard - Main Container Component
- *
- * Location: Main content area only
- *
- * A running load test's live metrics, and the same run's report once it ends.
- *
- * Architecture:
- * - DashboardHeader: Title, status, stop button
- * - MetricsView: Live metrics, charts
- * - LoadTestDetail: the finished run's report, the component History renders
+ * The load test dashboard: a running load test's live metrics (`DashboardHeader`, `MetricsView`),
+ * and the same run's report once it ends (`LoadTestDetail`, the component History renders).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -114,10 +106,9 @@ export default function LoadTestDashboard() {
 
 	// Track whether we're loading the report
 	const [isLoadingReport, setIsLoadingReport] = useState(false);
-	// Failures and still-running reports count against the same cap as empty
-	// reports, and the last one leaves `awaitingReport` (`reportError`, or
-	// `streamLost` for a run still going): a swallowed throw once re-ran the
-	// fetch forever, silently, showing an empty dashboard the whole time.
+	// Failures and still-running reports count against the empty-report cap, and the last one
+	// leaves `awaitingReport` (`reportError`, or `streamLost` for a run still going): a swallowed
+	// throw would re-run the fetch forever, silently, behind an empty dashboard.
 	const loadAttemptRef = useRef(0);
 	// An engine-stopped run has no phase to give up into (the notice stays, and
 	// the live-looking ones are exactly what it must not reach), so the fetch
@@ -172,8 +163,8 @@ export default function LoadTestDashboard() {
 	useEffect(() => {
 		if (!currentRunId || !reportFetchable || isLoadingReport || reportAbandonedRef.current)
 			return;
-		// Longer initial delay to allow database writes to complete
-		// This helps avoid "database is locked" issues
+		// A longer first delay lets the run's database writes finish, which avoids "database is
+		// locked".
 		const delay =
 			loadAttemptRef.current === 0
 				? TIMING.REPORT_INITIAL_DELAY_MS
@@ -241,11 +232,9 @@ export default function LoadTestDashboard() {
 		historicalMetrics.length,
 	]);
 
-	// useCallback, not a plain arrow: this is DashboardHeader's onStop prop, and
-	// DashboardHeader is memo'd below - a fresh function identity every tick
-	// would defeat that memo the same way an inline object prop would (#1714).
-	// The stop, its error toast and the retry are `useStopLiveRun`'s, shared with
-	// the Run Collection dialog's Stop (#3381).
+	// useCallback: this is the memo'd DashboardHeader's onStop, and a fresh identity every tick
+	// would defeat the memo as an inline object prop would (#1714). The stop, its error toast and
+	// the retry are `useStopLiveRun`'s, shared with the Run Collection dialog's Stop (#3381).
 	const handleStop = useCallback(async () => {
 		if (currentRunId) await stopLiveRun({ kind: "load", runId: currentRunId, label: null });
 	}, [currentRunId, stopLiveRun]);
@@ -417,11 +406,9 @@ export default function LoadTestDashboard() {
 			/>
 
 			{/*
-			 * Where this screen sits (#1691). The dashboard is reached from a run in
-			 * History or from starting a load test, and nothing on it used to say
-			 * so - the header names the run, not the place. "History" reveals the
-			 * run list rather than toggling it, so a crumb pressed from here always
-			 * shows the list it points at.
+			 * Where this screen sits (#1691): it is reached from a run in History or from starting
+			 * a load test, and its header names the run, not the place. "History" reveals the run
+			 * list rather than toggling it, so the crumb always shows the list it points at.
 			 */}
 			<TabBreadcrumb
 				label="Run location"

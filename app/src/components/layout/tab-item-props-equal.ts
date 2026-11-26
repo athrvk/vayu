@@ -9,19 +9,13 @@ import { shallow } from "zustand/shallow";
 import type { TabItemProps } from "./TabItem";
 
 /**
- * `TabItem`'s `memo` comparator, in its own module rather than exported
- * alongside the component: `TabItem.tsx` exporting a plain function next to
- * its components trips `react-refresh/only-export-components`, and this is
- * also what lets `TabStrip.render-count.test.tsx` build its own counting
- * `memo` with the exact same comparator via a plain import, no `vi.mock`
- * needed for this half.
- *
- * `descriptor` is rebuilt fresh by `useTabDescriptors` on every TabStrip
- * render regardless of whether this tab's own content changed, so reference
- * equality on it would defeat the memo below on every store write. `shallow`
- * (zustand's generic one-level comparator, not `useShallow` - there is no
- * hook here) compares its fields instead, which is what actually decides
- * whether this tab has anything new to draw (#1714).
+ * `TabItem`'s `memo` comparator, in its own module: a plain function exported beside
+ * `TabItem.tsx`'s components trips `react-refresh/only-export-components`, and a plain import lets
+ * `TabStrip.render-count.test.tsx` build its counting `memo` with the same comparator, no `vi.mock`
+ * needed for this half. `useTabDescriptors` rebuilds `descriptor` on every TabStrip render whether
+ * or not this tab's content changed, so reference equality would defeat the memo on every store
+ * write; `shallow` (zustand's one-level comparator, not the `useShallow` hook) compares its fields,
+ * which decides whether this tab has anything new to draw (#1714).
  */
 export function tabItemPropsEqual(prev: TabItemProps, next: TabItemProps): boolean {
 	return (

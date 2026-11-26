@@ -8,18 +8,17 @@
  */
 
 /**
- * @file core/openapi_walk.hpp
- * @brief The one walk over a document's operations, shared by everything that
- *        reads one (issues #853, #865).
+ * The one walk over a document's operations, shared by every reader (#853,
+ * #865).
  *
- * Internal to `src/core` - it hands out pointers into a caller-owned DOM, so it
- * is not a shape the public header should offer. It is a header rather than a
- * static in one translation unit because three answers are derived from the
- * same operations and must not disagree about which ones exist: the `operations`
- * index and the `responseSchemas` index (`openapi_document.cpp`) and the request
- * drafts an import would build (`openapi_drafts.cpp`). Two walks would be two
- * opinions about which of two operations kept a repeated `operationId`, and the
- * failure that produces is silent - a stamp resolving to the wrong operation.
+ * Internal to `src/core`: it hands out pointers into a caller-owned DOM, no
+ * shape for the public header. A header, not a static in one translation unit,
+ * because three answers come from the same operations and must agree on which
+ * exist: the `operations` and `responseSchemas` indexes
+ * (`openapi_document.cpp`) and an import's request drafts
+ * (`openapi_drafts.cpp`). Two walks would be two opinions on which of two
+ * operations kept a repeated `operationId`, and that failure is silent: a stamp
+ * resolving to the wrong operation.
  */
 
 #include "js_json.hpp"
@@ -54,20 +53,18 @@ find_object (const nlohmann::ordered_json& node, const char* key) {
     return &(*found);
 }
 
-/// Which of the two formats Vayu imports a document claims to be. `None` is
-/// not an error - the document may be a perfectly good file that simply is not
-/// a contract, which is `NotASpecError` on the renderer side.
+/// Which of the two formats Vayu imports a document claims to be. `None` is no
+/// error: the document may be a good file that is not a contract
+/// (`NotASpecError` on the renderer side).
 enum class Dialect : std::uint8_t { None, V2, V3 };
 
 /**
- * @brief The dialect @p document declares, by the renderer's detection order.
- *
- * v3 is asked first and v2 second, exactly as `PARSERS` in
- * `app/src/services/importers/factory.ts` orders them - a document carrying
- * both keys is claimed by the same parser on both sides. The parameter and body
- * rules differ between the two (2.0 states a value as `default` and puts the
- * body in a parameter; 3.x has `example`/`examples` and a `requestBody`), so
- * every reader of an operation needs this answer, not just a yes/no.
+ * The dialect @p document declares, in the renderer's detection order: v3
+ * first, then v2, as `PARSERS` in `app/src/services/importers/factory.ts`, so a
+ * document carrying both keys is claimed by the same parser on both sides. The
+ * parameter and body rules differ (2.0 states a value as `default` and puts the
+ * body in a parameter; 3.x has `example` / `examples` and a `requestBody`), so
+ * every reader of an operation needs this answer, not a yes/no.
  */
 inline Dialect spec_dialect (const nlohmann::ordered_json& document) {
     if (!document.is_object ()) {
@@ -90,11 +87,9 @@ inline Dialect spec_dialect (const nlohmann::ordered_json& document) {
 }
 
 /**
- * The `format` string a document's dialect is reported as, distinguishing
- * 3.1 from 3.0 (issue #1444) - @ref spec_dialect folds both into one `V3` for
- * every reader that only needs "is this 3.x", which a document description is
- * not. `None` reports empty, matching every caller's existing convention for
- * "readable, not a contract".
+ * The `format` a document's dialect is reported as, telling 3.1 from 3.0
+ * (#1444); @ref spec_dialect folds both into `V3` for readers needing only "is
+ * this 3.x". `None` reports empty, every caller's "readable, not a contract".
  */
 inline std::string
 dialect_format_name (const nlohmann::ordered_json& document, Dialect dialect) {
@@ -117,13 +112,12 @@ inline bool is_openapi (const nlohmann::ordered_json& document) {
 }
 
 /**
- * A 3.x Server Object's `url` with each `{name}` its `variables` give a
- * scalar `default` for substituted (issue #719), or nothing when @p server
- * names no URL (not an object, no `url`, an empty one).
- *
- * A `{name}` with no usable default is kept as written. Shared by the import,
- * which turns `servers[0]` into `{{baseUrl}}`, and `base_paths_of`, which
- * reads every server's path, so the two cannot disagree about a server.
+ * A 3.x Server Object's `url` with each `{name}` that `variables` gives a
+ * scalar `default` substituted (#719), or nothing when @p server names no URL
+ * (not an object, no or an empty `url`). A `{name}` with no usable default is
+ * kept as written. Shared by the import, which makes `servers[0]`
+ * `{{baseUrl}}`, and `base_paths_of`, which reads every server's path, so the
+ * two cannot disagree.
  */
 inline std::optional<std::string> server_url_with_defaults (
 const nlohmann::ordered_json* server) {
@@ -165,12 +159,10 @@ const nlohmann::ordered_json* server) {
 
 /**
  * A JSON Pointer into the document, for the one `$ref` hop a path item may be.
- *
- * In-document only, exactly as `createRefResolver` is: a ref naming another
- * file has no `#/` to strip, so every segment names a key no document has and
- * the walk lands on nothing. External refs are inlined before a document is
- * stored (the renderer's ref bundler), and one still external by now is one the
- * user has already been told about.
+ * In-document only, as `createRefResolver` is: a ref naming another file has no
+ * `#/` to strip, so the walk lands on nothing. External refs are inlined before
+ * storage (the renderer's ref bundler), and one still external has already been
+ * reported to the user.
  */
 inline const nlohmann::ordered_json*
 resolve_ref (const nlohmann::ordered_json& document, const std::string& ref) {
@@ -216,16 +208,16 @@ resolve_ref (const nlohmann::ordered_json& document, const std::string& ref) {
 
 /**
  * A node that may be `{"$ref": ...}` standing in for the real one, resolved one
- * hop. `nullptr` when there is nothing behind it, which drops what was being
- * read rather than walking a `$ref` node as though it were the thing it names.
+ * hop; `nullptr` when nothing is behind it, which drops what was being read
+ * rather than walk a `$ref` node as the thing it names.
  *
- * Both places a document writes this shape: a Path Item Object hoisted into
- * `components.pathItems` by a bundler, whose absence drops every operation under
- * that path, and a Response Object hoisted into `components.responses` (issue
- * #714) - the form GitHub's public spec uses for nearly every response.
+ * Both places a document writes this: a Path Item Object a bundler hoisted into
+ * `components.pathItems` (whose absence drops every operation under that path),
+ * and a Response Object hoisted into `components.responses` (#714), the form
+ * GitHub's public spec uses for nearly every response.
  *
- * Single-hop, like every ref the import parsers follow: a ref to a ref is not a
- * shape generators emit, and chasing one needs a cycle guard.
+ * Single-hop, like every ref the import parsers follow: generators emit no ref
+ * to a ref, and chasing one needs a cycle guard.
  */
 inline const nlohmann::ordered_json* resolve_single_hop (const nlohmann::ordered_json& document,
 const nlohmann::ordered_json& item) {
@@ -241,19 +233,19 @@ const nlohmann::ordered_json& item) {
     return resolved != nullptr && resolved->is_object () ? resolved : nullptr;
 }
 
-/// Whether a key of an operation's `responses` map names a status. Every key
-/// does except an empty one and a specification extension (`x-` prefix, the
-/// Responses Object's one non-status member). This is deliberately not a digit
-/// test: `default`, `2XX` and a hand-written pattern are statuses the walk keeps
-/// verbatim (#3084). Every reader of `responses` asks it, so the indexes agree.
+/// Whether a key of an operation's `responses` map names a status: every key
+/// but an empty one and a specification extension (`x-`, the Responses Object's
+/// one non-status member). Not a digit test: `default`, `2XX` and a
+/// hand-written pattern are statuses kept verbatim (#3084). Every reader of
+/// `responses` asks it, so the indexes agree.
 inline bool is_declared_status_key (const std::string& key) {
     return !key.empty () && !key.starts_with ("x-");
 }
 
-/// The status patterns an operation's `responses` map declares, verbatim and in
-/// document order. A `$ref`-ed response object still writes its status *key*
-/// here, so nothing needs resolving to read them. A specification extension is
-/// not a status (`is_declared_status_key`).
+/// The status patterns an operation's `responses` declares, verbatim, in
+/// document order. A `$ref`-ed response still writes its status key here, so
+/// nothing needs resolving. Extensions are not statuses
+/// (`is_declared_status_key`).
 inline std::vector<std::string> declared_responses_of (const nlohmann::ordered_json& operation) {
     std::vector<std::string> patterns;
     const nlohmann::ordered_json* responses = find_object (operation, "responses");
@@ -269,12 +261,10 @@ inline std::vector<std::string> declared_responses_of (const nlohmann::ordered_j
 }
 
 /**
- * What a walk stepped over on the way to the operations (issue #877).
- *
- * Counts, not positions: an import reports these as `meta.skipped` counters and
- * nothing reads where in the document they were. Filled only when a caller asks
- * for it - the three index readers do not, because a malformed member does not
- * change what the document declares.
+ * What a walk stepped over on the way to the operations (#877). Counts, not
+ * positions: an import reports them as `meta.skipped` counters. Filled only
+ * when a caller asks; the three index readers do not, as a malformed member
+ * does not change what the document declares.
  */
 struct WalkNotes {
     /// A `paths` entry that is not a readable Path Item Object, and a
@@ -284,58 +274,51 @@ struct WalkNotes {
     /// A 3.x path item's `trace`, the one method Vayu has no verb for.
     int unsupported_method = 0;
     /**
-     * An `operationId` a previous operation already claimed (issue #715).
-     *
-     * The operation imports whole - only the repeated id is dropped from its
-     * identity - and it is counted because a sync follows the identity a
-     * request records, so which request kept the id is not a detail the user
-     * should have to discover from a diff.
+     * An `operationId` a previous operation already claimed (#715). The
+     * operation imports whole, only the repeated id dropped from its identity;
+     * it is counted because a sync follows the identity a request records, so
+     * which request kept the id must not be found out from a diff.
      */
     int duplicate_operation_id = 0;
     /**
-     * A 3.1 top-level `webhooks` entry's own operation (issue #1444's
-     * "OpenAPI should be fully compliant" bar). A webhook describes what the
-     * API sends *to* a callback URL the user registers elsewhere, not a
-     * request Vayu can send, so it is counted rather than walked into a
-     * (nonsensical) sendable request the way a `paths` operation is.
+     * A 3.1 top-level `webhooks` entry's operation (#1444). A webhook describes
+     * what the API sends to a callback URL the user registers elsewhere, not a
+     * request Vayu can send, so it is counted, not walked into a sendable
+     * request.
      */
     int webhook_operations = 0;
 };
 
-/// One operation the document declares, as every reader of one sees it: the
-/// identity the operation index stores, the node the schema index reads, and
-/// the Path Item Object it hangs off - which the request drafts need for the
-/// `parameters` a path declares once for all of its operations. Produced by one
-/// walk so no two readers can disagree about which operations exist, which of
-/// them owns an `operationId`, or which statuses one declares.
+/// One declared operation as every reader sees it: the identity the operation
+/// index stores, the node the schema index reads, and its Path Item Object (the
+/// drafts need the `parameters` a path declares once for its operations). One
+/// walk produces them, so no two readers disagree about which operations exist,
+/// which owns an `operationId`, or which statuses one declares.
 struct WalkedOperation {
     DeclaredOperation identity;
     const nlohmann::ordered_json* node;
     /// Never null; the walk resolves the single `$ref` hop a path item may be.
     const nlohmann::ordered_json* path_item;
     /**
-     * Whether the `paths` key this hangs off is a path at all.
+     * Whether the `paths` key this hangs off is a path at all. A key not
+     * starting with `/` is a malformed entry, and @ref identity says nothing an
+     * index or a sync may follow, so every reader of identities skips these
+     * rows. The import does not (#877): the renderer's parsers build and count
+     * a request for such an operation, stamped with no `specOperation`, and
+     * dropping it would lose a request the user sees in their file.
      *
-     * A key that does not start with `/` is a malformed `paths` entry, and
-     * @ref identity says nothing an index or a sync may follow - so every
-     * reader of *identities* skips these rows. The **import** does not (issue
-     * #877): the renderer's parsers build a request for such an operation and
-     * count it, they simply stamp it with no `specOperation`, and an import
-     * that dropped it would lose a request the user can see in their file.
-     *
-     * Carried on the walk rather than re-derived by each reader, because it is
-     * the same question `identity` was already answered by: an id is not
-     * claimed for one of these either, so which of two operations keeps a
-     * repeated `operationId` stays one walk's answer.
+     * Carried on the walk, not re-derived per reader, because `identity`
+     * already answered it: no id is claimed for one of these either, so which
+     * of two operations keeps a repeated `operationId` stays one walk's answer.
      */
     bool identified = true;
 };
 
-/// The skipped members one path item hides from the walk (issue #877), counted
-/// once per item, before its methods - the position the renderer's parsers
-/// count these from. A `parameters` member that is not an array is the missing
-/// `-` in hand-written YAML; `trace` is a Path Item Object member in 3.x only,
-/// and only a present *object* is an operation that was dropped.
+/// The skipped members one path item hides from the walk (#877), counted once
+/// per item before its methods, where the renderer's parsers count them. A
+/// non-array `parameters` is the missing `-` in hand-written YAML; `trace` is a
+/// Path Item Object member in 3.x only, and only a present object is a dropped
+/// operation.
 inline void note_skipped_members (Dialect dialect,
 const nlohmann::ordered_json& item,
 WalkNotes& notes) {
@@ -351,12 +334,11 @@ WalkNotes& notes) {
     }
 }
 
-/// The `operationId` @p operation keeps: its declared id, or "" - the no-id
-/// spelling `DeclaredOperation` documents - when it declares none, declares it
-/// as something other than a non-empty string, or repeats one a previous
-/// operation already claimed (issue #715). Only the repeat is counted on
-/// @p notes: a sync follows the identity a request records, so which request
-/// kept the id is not a detail the user should have to discover from a diff.
+/// The `operationId` @p operation keeps: its declared id, or ""
+/// (`DeclaredOperation`'s no-id spelling) when it declares none, a non-string
+/// or empty one, or one a previous operation claimed (#715). Only the repeat is
+/// counted on @p notes, for the reason `WalkNotes::duplicate_operation_id`
+/// gives.
 inline std::string claim_operation_id (const nlohmann::ordered_json& operation,
 std::unordered_set<std::string>& claimed_ids,
 WalkNotes* notes) {
@@ -378,18 +360,17 @@ WalkNotes* notes) {
 }
 
 /// Every operation one resolved Path Item Object declares, appended to
-/// @p walked in `HTTP_METHODS` order. Takes `claimed_ids` because the claim is
-/// document-wide: which of two operations keeps a repeated `operationId` spans
-/// path items, so the set outlives each call.
+/// @p walked in `HTTP_METHODS` order. `claimed_ids` is document-wide (a
+/// repeated `operationId` spans path items), so the set outlives each call.
 inline void walk_path_item (const std::string& path,
 const nlohmann::ordered_json& item,
 std::unordered_set<std::string>& claimed_ids,
 WalkNotes* notes,
 std::vector<WalkedOperation>& walked) {
-    // A `paths` key that is not a path declares no operation - see
-    // `WalkedOperation::identified`. The row is still walked, because
-    // the import builds a request for it; no `operationId` is claimed
-    // off it, since the identity it would sit on does not exist.
+    // A `paths` key that is not a path declares no operation
+    // (`WalkedOperation::identified`). The row is still walked, since the
+    // import builds a request for it, but claims no `operationId`: the identity
+    // it would sit on does not exist.
     const bool identified = !path.empty () && path[0] == '/';
     for (const char* method : HTTP_METHODS) {
         const nlohmann::ordered_json* operation = find_object (item, method);

@@ -6,31 +6,19 @@
  */
 
 /**
- * History Module
- *
- * Components for displaying run history and details.
- *
- * Structure:
- * - sidebar/     - Components displayed in the sidebar (HistoryList)
- * - main/        - Components displayed in main content area (HistoryDetail, LoadTestDetail, DesignRunView)
- * - types.ts     - Shared types for history module
- *
- * Usage:
- * - Sidebar: Import from "@/modules/history/sidebar" or use "@/modules/history" and access via sidebar namespace
- * - Main: Import from "@/modules/history/main" or use "@/modules/history" and access via main namespace
+ * The History module: `sidebar/` (the run list, `HistoryList`), `main/` (the run views:
+ * `HistoryDetail`, `LoadTestDetail`, `DesignRunView`) and `types.ts`, the module's shared types.
+ * Import from `@/modules/history/sidebar` or `@/modules/history/main`, or from here through the
+ * `sidebar` / `main` namespaces; the four views are also re-exported flat.
  */
 
-// Sidebar components (displayed in left sidebar)
 export * as sidebar from "./sidebar";
 
-// Main content components (displayed in main content area)
 export * as main from "./main";
 
-// Re-export commonly used components for convenience
 export { default as HistoryList } from "./sidebar/HistoryList";
 export { default as HistoryDetail } from "./main/HistoryDetail";
 export { default as LoadTestDetail } from "./main/LoadTestDetail";
 export { default as DesignRunView } from "./main/DesignRunView";
 
-// Shared types
 export * from "./types";

@@ -1,0 +1,258 @@
+{
+  "reference_pages": [
+    "docs/engine/api-reference/*.md",
+    "docs/engine/db-schema/*.md"
+  ],
+  "pages": {
+    "docs/app/COMPONENTS/app-shell.md": {
+      "max_line": 7483,
+      "long_lines": 65
+    },
+    "docs/app/COMPONENTS/collections.md": {
+      "max_line": 1031,
+      "long_lines": 12
+    },
+    "docs/app/COMPONENTS/dashboard.md": {
+      "max_line": 12166,
+      "long_lines": 9
+    },
+    "docs/app/COMPONENTS/graphql-library.md": {
+      "max_line": 1180,
+      "long_lines": 8
+    },
+    "docs/app/COMPONENTS/history.md": {
+      "max_line": 5745,
+      "long_lines": 56
+    },
+    "docs/app/COMPONENTS/logs-and-console.md": {
+      "max_line": 3378,
+      "long_lines": 15
+    },
+    "docs/app/COMPONENTS/request-builder.md": {
+      "max_line": 9113,
+      "long_lines": 48
+    },
+    "docs/app/COMPONENTS/shared-key-value-editor.md": {
+      "max_line": 1474,
+      "long_lines": 2
+    },
+    "docs/app/COMPONENTS/shared-response-viewer.md": {
+      "max_line": 3503,
+      "long_lines": 18
+    },
+    "docs/app/COMPONENTS/shared-run-status.md": {
+      "max_line": 504,
+      "long_lines": 1
+    },
+    "docs/app/COMPONENTS/ui-primitives.md": {
+      "max_line": 892,
+      "long_lines": 2
+    },
+    "docs/app/COMPONENTS/variables-and-settings.md": {
+      "max_line": 6509,
+      "long_lines": 29
+    },
+    "docs/app/COMPONENTS/welcome.md": {
+      "max_line": 631,
+      "long_lines": 2
+    },
+    "docs/app/architecture.md": {
+      "max_line": 2047,
+      "long_lines": 25
+    },
+    "docs/app/building.md": {
+      "lines": 654
+    },
+    "docs/app/data-driven-runs.md": {
+      "lines": 693
+    },
+    "docs/app/import-collections/README.md": {
+      "lines": 748,
+      "max_cell": 234
+    },
+    "docs/app/import-collections/insomnia-v4.md": {
+      "max_line": 1085,
+      "long_lines": 17,
+      "max_cell": 838
+    },
+    "docs/app/import-collections/insomnia-v5.md": {
+      "max_line": 600,
+      "long_lines": 3
+    },
+    "docs/app/import-collections/jmeter.md": {
+      "max_line": 2111,
+      "long_lines": 25,
+      "max_cell": 2004
+    },
+    "docs/app/import-collections/openapi-v2.md": {
+      "max_line": 1815,
+      "long_lines": 23,
+      "max_cell": 564
+    },
+    "docs/app/import-collections/openapi-v3.md": {
+      "max_line": 1411,
+      "long_lines": 40,
+      "max_cell": 672
+    },
+    "docs/app/import-collections/postman-environment.md": {
+      "max_line": 835,
+      "long_lines": 5,
+      "max_cell": 249
+    },
+    "docs/app/import-collections/postman.md": {
+      "lines": 664,
+      "max_line": 2911,
+      "long_lines": 31,
+      "max_cell": 1130
+    },
+    "docs/app/openapi.md": {
+      "lines": 1106,
+      "max_cell": 233
+    },
+    "docs/app/pm-api-compatibility.md": {
+      "lines": 2385,
+      "max_line": 840,
+      "long_lines": 3,
+      "max_cell": 814
+    },
+    "docs/app/variable-resolution.md": {
+      "lines": 1405
+    },
+    "docs/architecture.md": {
+      "lines": 982
+    },
+    "docs/building.md": {
+      "max_cell": 313
+    },
+    "docs/engine/api-reference/authentication.md": {
+      "max_cell": 372
+    },
+    "docs/engine/api-reference/changes.md": {
+      "max_cell": 263
+    },
+    "docs/engine/api-reference/collection-runs.md": {
+      "max_cell": 262
+    },
+    "docs/engine/api-reference/collections.md": {
+      "max_cell": 325
+    },
+    "docs/engine/api-reference/cookies-and-certificates.md": {
+      "max_line": 698,
+      "long_lines": 2,
+      "max_cell": 680
+    },
+    "docs/engine/api-reference/execute.md": {
+      "max_cell": 294
+    },
+    "docs/engine/api-reference/export.md": {
+      "max_line": 726,
+      "long_lines": 3,
+      "max_cell": 707
+    },
+    "docs/engine/api-reference/health-config.md": {
+      "max_line": 890,
+      "long_lines": 17,
+      "max_cell": 832
+    },
+    "docs/engine/api-reference/import.md": {
+      "max_line": 504,
+      "long_lines": 1,
+      "max_cell": 464
+    },
+    "docs/engine/api-reference/inbox.md": {
+      "max_line": 422,
+      "long_lines": 1,
+      "max_cell": 399
+    },
+    "docs/engine/api-reference/live-metrics.md": {
+      "max_line": 1082,
+      "long_lines": 12,
+      "max_cell": 1067
+    },
+    "docs/engine/api-reference/load-runs.md": {
+      "max_line": 754,
+      "long_lines": 2,
+      "max_cell": 659
+    },
+    "docs/engine/api-reference/metrics.md": {
+      "max_cell": 244
+    },
+    "docs/engine/api-reference/runs.md": {
+      "max_line": 416,
+      "long_lines": 1,
+      "max_cell": 358
+    },
+    "docs/engine/api-reference/scenario-load.md": {
+      "max_line": 989,
+      "long_lines": 4,
+      "max_cell": 953
+    },
+    "docs/engine/api-reference/scenario-runs.md": {
+      "max_line": 529,
+      "long_lines": 2,
+      "max_cell": 369
+    },
+    "docs/engine/architecture.md": {
+      "lines": 2268
+    },
+    "docs/engine/benchmarks.md": {
+      "lines": 1242,
+      "max_line": 401,
+      "long_lines": 1,
+      "max_cell": 366
+    },
+    "docs/engine/building.md": {
+      "lines": 1937,
+      "max_line": 1688,
+      "long_lines": 8,
+      "max_cell": 1677
+    },
+    "docs/engine/cli.md": {
+      "max_cell": 284
+    },
+    "docs/engine/elements.md": {
+      "lines": 894
+    },
+    "docs/engine/logging.md": {
+      "max_cell": 277
+    },
+    "docs/engine/mcp/conventions.md": {
+      "max_line": 692,
+      "long_lines": 3,
+      "max_cell": 520
+    },
+    "docs/engine/mcp/internals.md": {
+      "max_line": 867,
+      "long_lines": 7,
+      "max_cell": 842
+    },
+    "docs/engine/mcp/request-composition.md": {
+      "max_line": 450,
+      "long_lines": 1
+    },
+    "docs/engine/mcp/resources-and-prompts.md": {
+      "max_line": 421,
+      "long_lines": 1,
+      "max_cell": 364
+    },
+    "docs/engine/mcp/runs-and-reports.md": {
+      "max_line": 605,
+      "long_lines": 3,
+      "max_cell": 569
+    },
+    "docs/engine/mcp/saved-data.md": {
+      "max_line": 461,
+      "long_lines": 1
+    },
+    "docs/engine/mcp/secrets.md": {
+      "max_line": 1973,
+      "long_lines": 11,
+      "max_cell": 1307
+    },
+    "docs/ux-writing.md": {
+      "max_line": 1352,
+      "long_lines": 8,
+      "max_cell": 1129
+    }
+  }
+}

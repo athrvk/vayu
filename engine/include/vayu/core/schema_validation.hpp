@@ -8,35 +8,33 @@
  */
 
 /**
- * @file core/schema_validation.hpp
  * @brief Checking a response body against the schema its contract declares
- *        (issue #628, phase 3 of #625).
+ *        (#628, phase 3 of #625).
  *
  * **This file parses no OpenAPI**, and it is not the one that does - the engine
- * reads a document in exactly one place (`core/openapi_document.hpp`, issue
- * #853), and the schema index is one of the two things read there (issue #860).
- * What arrives here is already JSON Schema: `response_schemas_of` extracts each
- * operation's declared responses as the document is stored, normalises
- * the OpenAPI-only spellings (3.0's `nullable`, its draft-04 boolean
- * `exclusiveMinimum`, `discriminator`) into the dialect a validator can read,
- * and the write stores the result in `spec_documents.response_schemas`. This
- * file matches a response to one of those schemas and validates it.
+ * reads a document in exactly one place (`core/openapi_document.hpp`, #853),
+ * and the schema index is one of the two things read there (#860). What arrives
+ * here is already JSON Schema: `response_schemas_of` extracts each operation's
+ * declared responses as the document is stored, normalises the OpenAPI-only
+ * spellings (3.0's `nullable`, its draft-04 boolean `exclusiveMinimum`,
+ * `discriminator`) into the dialect a validator can read, and the write stores
+ * the result in `spec_documents.response_schemas`. This file matches a response
+ * to one of those schemas and validates it.
  *
- * A stored index is therefore the engine's own work, not a client's claim -
- * which is why nothing here validates one on the way in any more. What
- * `ResponseSchemaIndex::parse` still guards is a *stored* row: one written
- * before the index existed, or by a client back when the field was accepted,
- * and every shape it cannot read is `NoIndex` rather than a body reported clean.
+ * A stored index is therefore the engine's own work, not a client's claim, so
+ * nothing here validates one on the way in. What `ResponseSchemaIndex::parse`
+ * still guards is a *stored* row - one written before the index existed, or by
+ * a client while the field was accepted - and every shape it cannot read is
+ * `NoIndex` rather than a body reported clean.
  *
  * ### Why the schemas are a column of their own
  *
  * `spec_documents.operations` (#629) already lists every operation and the
- * status *patterns* it declares, and folding the schemas into it would have
- * saved a column. It would also have made every scenario run pay for them: that
- * index is parsed when a plan resolves and held for the life of the run, while
- * schemas are read only when a response comes back with a body to check. They
- * are also two orders of magnitude larger. Two columns, each read by whoever
- * needs it.
+ * status *patterns* it declares, and folding the schemas into it would save a
+ * column but make every scenario run pay for them: that index is parsed when a
+ * plan resolves and held for the life of the run, while schemas are read only
+ * when a response comes back with a body to check. They are also two orders of
+ * magnitude larger. Two columns, each read by whoever needs it.
  *
  * ### Why schemas are stored as written, beside one shared ref root
  *
@@ -46,29 +44,26 @@
  * the two into one root document, so an in-document pointer resolves against
  * the real target.
  *
- * The alternative was to dereference app-side and store each schema whole. It
- * duplicates a shared `Error` schema into every operation that names it, and a
- * recursive schema (a tree node whose child is itself) has no finite expansion
- * at all - it would have needed a cycle guard that reintroduces `$ref` anyway.
- * One shared root costs one copy of the components per *document*, and a
- * recursive schema is simply a pointer that resolves.
+ * Dereferencing app-side and storing each schema whole would duplicate a shared
+ * `Error` schema into every operation that names it, and a recursive schema (a
+ * tree node whose child is itself) has no finite expansion at all - it would
+ * need a cycle guard that reintroduces `$ref` anyway. One shared root costs one
+ * copy of the components per *document*, and a recursive schema is simply a
+ * pointer that resolves.
  *
  * ### Which validator, and why not the one the issue named
  *
- * `valijson` (BSD-2; the version is `engine/vcpkg.json`'s baseline to pin, not
- * this comment's - it named v1.1.0 and went stale the first time the baseline
- * moved), not `json-schema-validator` (pboettch) which
- * #625/#628 named first and #628 recorded valijson as the fallback for. The
- * fallback was taken, and the reason is not taste: pboettch's `set_root_schema`
- * **segfaults on a recursive schema** - a `Node` whose `child` is a `Node`,
- * which is what a tree, a comment thread or a nested category is in every real
- * document that has one. It is reproducible in six lines against v2.4.0 and it
- * takes the daemon's whole process with it, which is a worse outcome than
- * having no validation at all. valijson validates the same schemas, reports a
- * location and a description per failure, and collects every failure in one
- * pass rather than throwing at the first.
- *
- * ### A schema that loops without reaching a value
+ * `valijson` (BSD-2; its version is whatever `engine/vcpkg.json`'s baseline
+ * pins, never this comment), not `json-schema-validator` (pboettch), which
+ * #625/#628 named first and for which #628 named valijson as the fallback. The
+ * reason is not taste: pboettch's `set_root_schema` **segfaults on a recursive
+ * schema** - a `Node` whose `child` is a `Node`, which is what a tree, a
+ * comment thread or a nested category is in every real document that has one.
+ * It is reproducible in six lines against v2.4.0 and it takes the daemon's
+ * whole process with it, which is a worse outcome than having no validation at
+ * all. valijson validates the same schemas, reports a location and a
+ * description per failure, and collects every failure in one pass rather than
+ * throwing at the first. ### A schema that loops without reaching a value
  *
  * A recursive schema is a pointer that resolves, but a loop through `$ref` and
  * the keywords that apply to the same value (`allOf`, `anyOf`, `oneOf`, `not`,
@@ -89,10 +84,10 @@
  * disclosure discipline applied to a dialect gap: nothing here ever reports a
  * body as clean when part of its contract went unread.
  *
- * `propertyNames` is the one draft-07 keyword in that list, and only where it is
- * nested (#2729). valijson builds a `propertyNames` subschema from its parent's
- * node path rather than the keyword's own, so it judges the root's and passes
- * every body for one inside `properties`, `patternProperties`,
+ * `propertyNames` is the one draft-07 keyword in that list, and only where it
+ * is nested (#2729). valijson builds a `propertyNames` subschema from its
+ * parent's node path rather than the keyword's own, so it judges the root's and
+ * passes every body for one inside `properties`, `patternProperties`,
  * `additionalProperties`, a `dependencies` schema, an `allOf`/`anyOf`/`oneOf`/
  * `not` member, `items` or a `$ref` target, a `$ref` back to `#` included. The
  * root keyword stays validated (#2719). The verdict's `valid` covers only what
@@ -102,8 +97,8 @@
  * ### Formats
  *
  * `format` is an assertion here for the names valijson checks and those in
- * `schema_format.hpp`; any other name is an annotation, which the
- * specification allows and which is not a dialect gap to disclose.
+ * `schema_format.hpp`; any other name is an annotation, which the specification
+ * allows and which is not a dialect gap to disclose.
  */
 
 #include <cstddef>
@@ -121,7 +116,7 @@ namespace vayu::core {
 /**
  * Why a response was not checked. A code rather than a sentence: the app owns
  * the wording it shows a user, and a sentence built here would be a second
- * place to change it. `docs/engine/api-reference.md` lists them all.
+ * place to change it. `docs/engine/api-reference/execute.md` lists them all.
  *
  * Absent-vs-`checked:false` is the distinction that matters and it is decided
  * by the caller, not here: a collection bound to no document produces **no
@@ -400,7 +395,7 @@ const SampledValidationTotals& totals);
  *
  * Split out of `ResponseSchemaIndex::check` so the validator integration is
  * testable without an index around it, and so the load and collection-run hooks
- * that follow this phase call the same code rather than a second copy.
+ * call the same code rather than a second copy.
  *
  * @param ref_roots Merged into @p schema to form the validation root; pass an
  *        empty object for a self-contained schema.

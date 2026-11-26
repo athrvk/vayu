@@ -8,7 +8,6 @@
  */
 
 /**
- * @file load_pacing.hpp
  * @brief Pure cores for load-generation pacing: how long a run lasts, how many
  *        requests it owes right now, how much of that a stalled tick still
  *        sends, and what its concurrency target is on a ramp. Each is a total
@@ -50,15 +49,14 @@ namespace detail {
 } // namespace detail
 
 /**
- * @brief Parse a duration string ("500ms", "30s", "5m", "2h") into milliseconds.
+ * @brief Parse a duration string ("500ms", "30s", "5m", "2h") into
+ *        milliseconds.
  *
  * Units are matched as a whole suffix, so "500ms" is half a second rather than
- * 500 of anything else. A bare number is seconds ("60" == "60s"), which is what
- * the MCP duration cap already assumes of the same field. Case and surrounding
- * whitespace are ignored; the number may carry a fraction ("1.5s").
- *
- * Replaces `stoll(str.substr(0, len - 1)) * 1000`, which stripped one character
- * and always multiplied by 1000: "5m" ran for 5 seconds and "500ms" for 500.
+ * 500 of anything else, and "5m" five minutes. A bare number is seconds ("60"
+ * == "60s"), which is what the MCP duration cap already assumes of the same
+ * field. Case and surrounding whitespace are ignored; the number may carry a
+ * fraction ("1.5s").
  *
  * @return milliseconds, or `nullopt` when the value is empty, negative, not a
  *         plain decimal number, carries an unknown unit, or overflows. Callers
@@ -138,15 +136,15 @@ inline constexpr int64_t CONTROLLER_TICK_MS = 50;
  * A run whose `duration` equals its ramp never samples at or past @p ramp_ms:
  * its last sample is the controller's final refill at `duration - 1`
  * (`maintain_concurrency`'s `run_end_ms`). A target owed only from @p ramp_ms
- * on is never asked for (1 -> 50 over 20s peaked at 49, #2913); treating the
- * last tick of the ramp as its end covers that sample, and never answers past
- * @p target.
+ * on is never asked for (1 -> 50 over 20s would peak at 49, #2913); treating
+ * the last tick of the ramp as its end covers that sample, and never answers
+ * past @p target.
  *
  * The interpolation is done in `double`, which is signed: `start > target` is a
- * legitimate profile (ramp down), and computing `target - start` in `size_t`
- * underflowed to ~1.8e19, so the closed-loop controller tried to hold an
- * astronomical in-flight count for the whole ramp - an unbounded flood instead
- * of a descending ramp.
+ * legitimate profile (ramp down), and `target - start` in `size_t` underflows
+ * to ~1.8e19, so the closed-loop controller would try to hold an astronomical
+ * in-flight count for the whole ramp - an unbounded flood instead of a
+ * descending ramp.
  */
 [[nodiscard]] inline size_t
 ramp_target_concurrency (size_t start, size_t target, int64_t ramp_ms, int64_t elapsed_ms) {
@@ -169,15 +167,15 @@ ramp_target_concurrency (size_t start, size_t target, int64_t ramp_ms, int64_t e
 }
 
 /**
- * @brief Open-loop pacing: the whole requests a constant @p target_rps has
- *        owed by @p elapsed into the run, `floor(target_rps x elapsed)`.
+ * @brief Open-loop pacing: the whole requests a constant @p target_rps has owed
+ *        by @p elapsed into the run, `floor(target_rps x elapsed)`.
  *
- * Request k (counting from 1) is owed at `k / target_rps`, so a run of length
- * D owes `floor(target_rps x D)` in all. The pacer asks this of the absolute
- * time since the run started and submits the difference from what it has
- * already taken (#2910): a per-tick delta lost its sub-microsecond remainder
- * every tick, and a run sent one request short. A run's `requests_expected`
- * is this same call at its duration, so the final accrual, clamped to the
+ * Request k (counting from 1) is owed at `k / target_rps`, so a run of length D
+ * owes `floor(target_rps x D)` in all. The pacer asks this of the absolute time
+ * since the run started and submits the difference from what it has already
+ * taken (#2910): a per-tick delta would lose its sub-microsecond remainder
+ * every tick and send a run one request short. A run's `requests_expected` is
+ * this same call at its duration, so the final accrual, clamped to the
  * deadline, owes exactly that count whatever the rounding.
  *
  * A rate and a duration written in decimal can multiply to a whole number that
@@ -201,7 +199,7 @@ requests_owed_by (double target_rps, std::chrono::nanoseconds elapsed) {
 
     const double seconds = std::chrono::duration<double> (elapsed).count ();
     const double owed = std::floor (target_rps * seconds * (1.0 + kProductSlack));
-    return static_cast<size_t> (std::min (owed, kMaxOwed));
+    return static_cast<size_t> ((std::min)(owed, kMaxOwed));
 }
 
 /**
@@ -243,8 +241,8 @@ split_tick_backlog (double target_rps, size_t owed, size_t taken, std::chrono::n
         return {};
     }
     const size_t catch_up_limit =
-    std::max (requests_owed_by (target_rps, scheduled + MAX_CATCH_UP_BACKLOG), taken);
-    const size_t to_submit = std::min (owed, catch_up_limit) - taken;
+    (std::max)(requests_owed_by (target_rps, scheduled + MAX_CATCH_UP_BACKLOG), taken);
+    const size_t to_submit = (std::min)(owed, catch_up_limit) - taken;
     return { to_submit, owed - taken - to_submit };
 }
 

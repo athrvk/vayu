@@ -227,7 +227,7 @@ struct AuthRefreshTuning {
 /**
  * @brief Read the `oauth2Refresh*` settings, falling back to their defaults.
  *
- * One reader for the four keys, so the run and any future caller cannot
+ * One reader for the five keys, so the run and any future caller cannot
  * disagree about which key names or defaults are in force.
  */
 [[nodiscard]] AuthRefreshTuning read_auth_refresh_tuning (vayu::db::Database& db);
@@ -253,8 +253,8 @@ uint64_t& seen_generation);
  *
  * Floored at `tuning.min_interval_ms` rather than at zero: a token whose whole
  * lifetime is shorter than the lead is always inside its refresh window, and an
- * unfloored schedule would re-acquire in a tight loop. Extracted from the
- * watchdog so the schedule is testable without a clock.
+ * unfloored schedule would re-acquire in a tight loop. Kept out of the watchdog
+ * so the schedule is testable without a clock.
  */
 [[nodiscard]] int64_t auth_refresh_delay_ms (int64_t expires_at_ms,
 int64_t now_ms,

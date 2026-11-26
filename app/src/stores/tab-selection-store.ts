@@ -6,23 +6,18 @@
  */
 
 /**
- * Tab Selection Store
+ * Each surface's active sub-tab, and which element rows are expanded, per entity id, so they
+ * survive:
+ * - `Shell.tsx` unmounting the whole surface when its workspace tab is not the one on screen (one
+ *   tab's surface is mounted at a time);
+ * - switching between two open request/collection tabs of one type, which reuses the component
+ *   instance rather than remounting it, as `response-store.ts` does for response data.
  *
- * Remembers each surface's active sub-tab, and which element rows are
- * expanded, per entity id, so they survive:
- * - `Shell.tsx` unmounting the whole surface when its workspace tab is not
- *   the one on screen (one tab's surface is mounted at a time)
- * - Switching between two open request/collection tabs of the same type,
- *   which reuses the component instance rather than remounting it, exactly
- *   as `response-store.ts` does for response data
- *
- * In memory only, like `response-store.ts` - a sub-tab pick is not worth
- * persisting to disk, and neither is which cards are open. Unlike that store,
- * this one carries no LRU cap: an entry here is one enum value or a handful of
- * element ids rather than a response body, so even a long session's worth of
- * distinct entities costs nothing worth bounding. Entries
- * are dropped only when their entity is (`clearEntity`, wired at the same
- * delete seams `response-store` uses).
+ * In memory only, like `response-store.ts`: neither a sub-tab pick nor which cards are open is
+ * worth persisting. Unlike that store, no LRU cap: an entry is one enum value or a handful of
+ * element ids, not a response body, so even a long session's distinct entities cost nothing worth
+ * bounding. Entries drop only when their entity does (`clearEntity`, wired at the same delete seams
+ * `response-store` uses).
  */
 
 import { create } from "zustand";

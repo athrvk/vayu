@@ -6,21 +6,20 @@
  */
 
 /**
- * @file pm_legacy.cpp
- * @brief Postman's pre-`pm.*` globals (#2577): the `postman` object and the
- *        values Postman binds beside it.
+ * Postman's pre-`pm.*` globals (#2577): the `postman` object and the values
+ * Postman binds beside it, shaped as postman-sandbox's
+ * `lib/sandbox/postman-legacy-interface.js` shapes them.
  *
- * The shape follows postman-sandbox's `lib/sandbox/postman-legacy-interface.js`.
- *
- * Each `postman` method is an alias of the `pm` member Postman itself names as
- * its replacement (`LEGACY_GLOBS_ALTERNATIVES`), so a legacy call and its
- * `pm.*` spelling cannot answer differently: every method passes on exactly the
+ * Each `postman` method but `getResponseCookie` (Postman's `cookies.one`, which
+ * `pm.cookies` has no member for) aliases the `pm` member Postman names as its
+ * replacement (`LEGACY_GLOBS_ALTERNATIVES`), so a legacy call and its `pm.*`
+ * spelling cannot answer differently: every method passes on exactly the
  * arguments Postman's does, the two setters stringify their value first, and
  * the two response readers exist only where there is a response.
  *
- * The values are read once, when the script starts, as Postman reads them, and
- * from the `pm` member that replaces each wherever there is one. `environment`
- * and `globals` are snapshots: writing to one changes no variable, and only the
+ * The values are read once, when the script starts, as Postman reads them, from
+ * the `pm` member that replaces each wherever there is one. `environment` and
+ * `globals` are snapshots: writing to one changes no variable, and only the
  * legacy `postman` setters write through to them. `tests` is read back once the
  * script has finished (`record_legacy_tests`). The `response*` values exist
  * only where there is a response.

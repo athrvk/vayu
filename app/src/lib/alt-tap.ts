@@ -6,19 +6,17 @@
  */
 
 /**
- * A tap of Alt on its own - pressed and released with nothing in between.
+ * A tap of Alt on its own: pressed and released with nothing in between. Windows and most Linux
+ * desktops open the window's menu on that gesture, which is why the title bar's application menu
+ * answers it (#1361). Not a `Chord`: `matchesChord` reads the key that arrives *with* a modifier,
+ * and this has no key of its own (Alt is both the modifier and the key, and the gesture is a menu
+ * request only if the press ends without one). Alt+Tab, Alt+← (Go back) and a click with Alt held
+ * all pass through the same keydown, so the watcher is a two-event state machine rather than a
+ * predicate.
  *
- * Windows and most Linux desktops open the window's menu on that gesture, which
- * is why the title bar's application menu answers it (#1361). It is not a
- * `Chord`: `matchesChord` reads the key that arrives *with* a modifier, and
- * this has no key of its own - Alt is both the modifier and the key, and the
- * gesture is only a menu request if the press ends without one. Alt+Tab, Alt+←
- * (Go back) and a click with Alt held all pass through the same keydown, so the
- * watcher is a two-event state machine rather than a predicate.
- *
- * Cancelling is the half that matters: Alt+Tab moves focus away before the
- * keyup ever arrives, so the window's `blur` disarms it, and a release that
- * lands back in the window later does not open a menu the user did not ask for.
+ * Cancelling is the half that matters: Alt+Tab moves focus away before the keyup arrives, so the
+ * window's `blur` disarms it, and a release that lands back in the window later does not open a
+ * menu the user did not ask for.
  */
 export interface AltTapWatcher {
 	keydown(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "shiftKey">): void;

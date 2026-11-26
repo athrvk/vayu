@@ -8,14 +8,13 @@
  */
 
 /**
- * @file utils/stop_signal.hpp
  * @brief A one-way stop request a waiting thread wakes on (#3345).
  *
  * A handler that paces its own answer (a mock's latency, an inbox's canned
- * delay, an issuer's slow mode) used to `sleep_for` the whole delay, so the join
- * that stops its listener waited it out. `wait_for` is the same pause, ended
- * early by `request`; `flag` is the same request for a libcurl transfer to
- * watch (an OAuth callback's token exchange).
+ * delay, an issuer's slow mode) would otherwise `sleep_for` the whole delay,
+ * and the join that stops its listener would wait it out. `wait_for` is the
+ * same pause, ended early by `request`; `flag` is the same request for a
+ * libcurl transfer to watch (an OAuth callback's token exchange).
  */
 
 #include <atomic>

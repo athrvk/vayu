@@ -5,12 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file db_runs.cpp
- * @brief Runs and every run-scoped artifact: metric ticks, monitor samples,
- * results and their captured bodies, and the webhook inbox's captures
- * (issue #480) (issue #1614).
- */
+/// Runs and every run-scoped artifact: metric ticks, monitor samples, results
+/// and their captured bodies, and the webhook inbox's captures (#480) (#1614).
 
 #include "database_impl.hpp"
 
@@ -100,12 +96,12 @@ int64_t end_time_after (const Run& run, RunStatus to) {
     return run.end_time > run.start_time ? run.end_time : now_epoch_ms ();
 }
 
-// `runs.outcome` from the status, type and summary @p run is about to be
-// stored with (#3547). Called by every write of either - a terminal move, a
-// summary landing on a terminal row (a Stop's status can land first), the
-// startup reconcile - so the column cannot describe a status or summary the
-// row no longer holds. A move to an in-flight status clears it; a move to
-// Failed stamps `failed` with no summary at all (#3643).
+// `runs.outcome` from the status, type and summary @p run is about to be stored
+// with (#3547). Every write of either calls it (a terminal move, a summary
+// landing on a terminal row, since a Stop's status can land first, the startup
+// reconcile), so the column cannot describe a status or summary the row no
+// longer holds. A move to an in-flight status clears it; a move to Failed
+// stamps `failed` with no summary at all (#3643).
 void stamp_run_outcome (Run& run) {
     const auto outcome = vayu::core::stored_run_outcome (run);
     run.outcome =
@@ -166,34 +162,30 @@ std::vector<Run> Database::get_all_runs () {
 
 namespace {
 // `CASE WHEN <unset> THEN 1 ELSE <test> END`: true for every row when the
-// filter is unset, and <test> is never evaluated then, because SQLite
-// evaluates only the CASE branch it selects (#2548). That matters for more
-// than the snapshot's LIKE and JSON parse: `origin` sits past config_snapshot
-// in the stored row, so reading it walks the snapshot's overflow pages. An
-// `OR` with the bound flag would leave which operand runs first to the
-// planner, which is not ours to depend on.
+// filter is unset, with <test> never evaluated then, as SQLite evaluates only
+// the selected branch (#2548). That saves more than the snapshot's LIKE and
+// JSON parse: `origin` sits past config_snapshot in the stored row, so reading
+// it walks the snapshot's overflow pages. An `OR` with the bound flag would
+// leave operand order to the planner, which is not ours to depend on.
 template <class Test> auto unless_unset (bool unset, Test test) {
     return c (case_<bool> ().when (unset, then (true)).else_ (std::move (test)).end ());
 }
 
-// Compose the sqlite_orm condition for a RunFilter, one `unless_unset` term per
-// optional filter, so the same compiled expression serves every filter
-// combination (no per-combination branching). `q` is a substring LIKE over
-// config_snapshot (see RunFilter's contract).
+// The sqlite_orm condition for a RunFilter, one `unless_unset` term per
+// optional filter, so one compiled expression serves every combination. `q` is
+// a substring LIKE over config_snapshot (RunFilter's contract).
 //
-// `collection_id` reads the snapshot as JSON instead. `json_extract` raises a
-// SQL error - not NULL - on text that is not JSON, and `sanitize_config_snapshot`
-// stores an unparseable body verbatim, so handing it the column directly would
-// turn one malformed row into a 500 for the whole page. The inner CASE is the
-// guard, on the same only-the-selected-branch rule: `json_extract` is never
-// applied to anything but valid JSON. A boolean `json_valid(...) AND ...` guard
-// would rely on the planner's evaluation order for the same protection.
+// `collection_id` reads the snapshot as JSON. `json_extract` raises a SQL
+// error, not NULL, on text that is not JSON, and `sanitize_config_snapshot`
+// stores an unparseable body verbatim, so one malformed row would be a 500 for
+// the whole page. The inner CASE guards it on the same selected-branch rule; a
+// `json_valid(...) AND ...` guard would rely on the planner's order.
 //
-// A missing `$.scenario.collectionId` extracts as SQL NULL, and NULL equals no
-// id, so single-request design and load runs (and a scenario run stored before
-// the snapshot carried the key) fall out of the result rather than erroring. A
-// load run over a collection carries the key, so it matches; a caller that wants
-// only those adds the `type` term (#3544).
+// A missing `$.scenario.collectionId` extracts as SQL NULL, which equals no id,
+// so single-request design and load runs (and a scenario run stored before the
+// snapshot carried the key) drop out rather than error. A load run over a
+// collection carries the key and matches; a caller wanting only those adds the
+// `type` term (#3544).
 auto run_filter_condition (const RunFilter& filter) {
     const bool no_type       = !filter.type.has_value ();
     const bool no_status     = !filter.status.has_value ();
@@ -239,8 +231,8 @@ auto run_filter_where (const RunFilter& filter) {
 }
 
 // The list order. `id` makes it total: with `start_time` alone, rows sharing a
-// millisecond come back in whatever order the scan meets them, and a page
-// boundary inside such a tie repeats one row and skips another (#2978).
+// millisecond come back in scan order, and a page boundary inside such a tie
+// repeats one row and skips another (#2978).
 auto newest_first () {
     return multi_order_by (
     order_by (&Run::start_time).desc (), order_by (&Run::id).desc ());
@@ -254,11 +246,11 @@ Database::get_runs_paginated (const RunFilter& filter, int64_t limit, int64_t of
     newest_first (), sqlite_orm::limit (offset, limit));
 }
 
-// The row-value comparison is what lets idx_runs_start_time seek: SQLite
-// searches the index for `start_time <= ?` and reads the tie on the cursor's
-// own millisecond through `id`, so a deep page costs about `limit` rows rather
-// than every row before it. No composite (start_time, id) index: the planner
-// sorts only the rows that share one start_time, which the LIMIT bounds.
+// The row-value comparison lets idx_runs_start_time seek: SQLite searches the
+// index for `start_time <= ?` and reads the cursor's own millisecond tie
+// through `id`, so a deep page costs about `limit` rows, not every row before
+// it. No composite (start_time, id) index: the planner sorts only the rows
+// sharing one start_time, which the LIMIT bounds.
 std::vector<Run>
 Database::get_runs_before (const RunFilter& filter, const RunCursor& before, int64_t limit) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
@@ -275,18 +267,16 @@ int64_t Database::count_runs (const RunFilter& filter) {
 }
 
 // The run cascade in one place: every child table a run owns, deleted before
-// the run row itself. delete_run and remove_unexempt_runs both go through this,
-// so a new child table cannot be added to one and forgotten in another
-// (metric_ticks was added to both by editing only this function). Caller holds
-// the mutex.
+// the run row. delete_run and remove_unexempt_runs both use it, so a new child
+// table cannot reach one and miss the other. Caller holds the mutex.
 void Database::remove_run_cascade_locked (const std::string& id) {
     impl_->storage.remove_all<MetricTick> (where (c (&MetricTick::run_id) == id));
     impl_->storage.remove_all<MonitorSample> (where (c (&MonitorSample::run_id) == id));
-    // Captured bodies before the results they hang off, so a delete interrupted
-    // between the two leaves results without bodies rather than body rows
-    // pointing at nothing. `maxRunsRetained` doubles as the expiry for anything
-    // credential-shaped a capture picked up, which is what makes this cascade
-    // load-bearing rather than housekeeping.
+    // Captured bodies before their results, so an interrupted delete leaves
+    // results without bodies rather than body rows pointing at nothing.
+    // `maxRunsRetained` is also the expiry of anything credential-shaped a
+    // capture picked up, which makes this cascade load-bearing, not
+    // housekeeping.
     impl_->storage.remove_all<ResultBody> (where (c (&ResultBody::run_id) == id));
     impl_->storage.remove_all<BodyBlob> (where (c (&BodyBlob::run_id) == id));
     impl_->storage.remove_all<Result> (where (c (&Result::run_id) == id));
@@ -299,12 +289,12 @@ void Database::delete_run (const std::string& id) {
     remove_run_cascade_locked (id);
 }
 
-// Retried like every other write here, and for a sharper reason: this row is
-// the *only* record of a run's whole-run aggregates, and a lock lost here is
-// not a lost tick - it is a report that falls back to the sampled results and
-// renders the run's whole-run figures wrong, permanently. The read-modify-write
-// runs inside the retried callback so a retry re-reads the row rather than
-// replaying a stale copy over a status the worker updated in between.
+// Retried like every write here, for a sharper reason: this row is the *only*
+// record of a run's whole-run aggregates, and losing it is no lost tick but a
+// report that falls back to sampled results and shows the run's figures wrong,
+// permanently. The read-modify-write runs inside the retried callback, so a
+// retry re-reads the row rather than replaying a stale copy over a status the
+// worker updated.
 void Database::update_run_summary (const std::string& id, const std::string& summary) {
     retry_on_busy ("store run summary", 5, std::chrono::milliseconds (100), [&] {
         auto run = get_run (id);
@@ -314,10 +304,9 @@ void Database::update_run_summary (const std::string& id, const std::string& sum
             return;
         }
         run->summary = summary;
-        // Derived here, from the same bytes about to be stored, rather than
-        // taken as a second parameter every caller would have to keep in sync
-        // by hand (issue #1527). A summary that fails to parse or carries no
-        // `warnings` array leaves the flag false.
+        // Derived from the bytes about to be stored, not a second parameter
+        // every caller would keep in sync by hand (#1527). A summary that fails
+        // to parse or has no `warnings` array leaves the flag false.
         const auto parsed =
         nlohmann::json::parse (summary, nullptr, /*allow_exceptions=*/false);
         run->has_warnings = parsed.is_object () && parsed.contains ("warnings") &&
@@ -327,11 +316,10 @@ void Database::update_run_summary (const std::string& id, const std::string& sum
     });
 }
 
-// Pin or unpin a run as a baseline. Retried like every other write here, and
-// the read-modify-write sits inside the retried callback so a retry re-reads
-// the row rather than replaying a stale copy over a summary or a status a
-// worker wrote in between. Returns the stored row, or nullopt when there is no
-// such run - which is what lets the route answer 404 instead of inventing one.
+// Pins or unpins a run as a baseline, retried, the read-modify-write inside the
+// retried callback so a retry re-reads the row rather than replaying a stale
+// copy over a summary or status a worker wrote. Returns the stored row, or
+// nullopt for no such run, so the route answers 404 instead of inventing one.
 std::optional<Run> Database::set_run_baseline (const std::string& id, bool baseline) {
     std::optional<Run> updated;
     retry_on_busy ("set run baseline", 5, std::chrono::milliseconds (100), [&] {
@@ -355,9 +343,9 @@ bool exempt_from_retention (const Run& run) {
     return run.baseline || is_in_flight (run.status);
 }
 
-// One count cap and how many runs it has kept so far. Retention keeps one per
-// kind (#2429): a design Send is cheap and frequent, and counted with the load
-// and collection runs it evicted them within an afternoon.
+// One count cap and how many runs it has kept. One per kind (#2429): a design
+// Send is cheap and frequent, and counted with load and collection runs it
+// evicted them within an afternoon.
 struct CountCap {
     int limit = 0; // 0 = unlimited
     int kept  = 0;
@@ -375,9 +363,8 @@ CountCap design,
 int64_t age_cutoff) {
     std::vector<std::string> victims;
     for (const auto& run : newest_first) {
-        // Skipped rather than merely spared: counting an exempt run toward
-        // the cap would let a handful of pins evict the recent history the
-        // cap exists to keep.
+        // Skipped, not merely spared: counting an exempt run toward the cap
+        // would let a few pins evict the recent history the cap keeps.
         if (exempt_from_retention (run)) {
             continue;
         }
@@ -441,10 +428,10 @@ int max_design_runs) {
 }
 
 // Batched so a huge backlog does not hold the DB mutex for seconds: the lock is
-// re-taken per batch and released between them, letting /health, SSE and the
-// runs poll interleave. Each id is re-read under its batch's lock (#1906): a
-// run pinned since the caller chose it (`set_run_baseline`) answered its
-// caller 200, and the caller's copy of the row no longer says so.
+// re-taken per batch, letting /health, SSE and the runs poll interleave. Each
+// id is re-read under its batch's lock (#1906): a run pinned since the caller
+// chose it (`set_run_baseline`) answered 200, and the caller's copy no longer
+// says so.
 std::vector<std::string> Database::remove_unexempt_runs (
 const std::vector<std::string>& ids) {
     constexpr size_t BATCH_SIZE = 100;
@@ -485,11 +472,11 @@ RunHistoryCleared Database::clear_runs () {
 }
 
 namespace {
-// Tick keys whose value is the run's total since load start, by the summary
-// key `build_run_summary_payload` stores the same figure under. Everything
-// else a tick holds (`current_rps`, the latency percentiles, the `window_*`
-// means, `current_concurrency`) describes its last second only and would be
-// misread as the run's.
+// Tick keys whose value is the run's total since load start, by the summary key
+// `build_run_summary_payload` stores the figure under. Everything else in a
+// tick (`current_rps`, the latency percentiles, the `window_*` means,
+// `current_concurrency`) describes its last second and would be misread as the
+// run's.
 constexpr auto CUMULATIVE_TICK_KEYS =
 std::to_array<std::pair<const char*, const char*>> ({
 { "requests_completed", "total_requests" },
@@ -504,10 +491,9 @@ std::to_array<std::pair<const char*, const char*>> ({
 { "bytes_received", "bytes_received" },
 });
 
-// The summary a run that died mid-flight is stored with (#2895): its last
-// tick's totals, flagged partial. Nothing when the payload carries no
-// completion count, since a summary without totals reports nothing truer than
-// no summary does.
+// The summary of a run that died mid-flight (#2895): its last tick's totals,
+// flagged partial. Nothing when the payload has no completion count, since a
+// summary without totals says nothing truer than none.
 std::optional<std::string> partial_summary_from_tick (const std::string& payload) {
     const auto tick = nlohmann::json::parse (payload, nullptr, /*allow_exceptions=*/false);
     if (!tick.is_object () || !tick.contains ("requests_completed") ||
@@ -562,10 +548,10 @@ size_t Database::reconcile_orphaned_runs () {
         return 0;
     }
 
-    // Not the restart time: when the process died is unknowable now, and the
+    // Not the restart time: when the process died is unknowable, and the
     // restart would invent a duration spanning the downtime. A recorded
-    // end_time (update_run_end_time's) is kept; a row with none, which is what
-    // a move to Running leaves, ends where it started.
+    // end_time (update_run_end_time's) is kept; a row with none, as a move to
+    // Running leaves, ends where it started.
     size_t summarised = 0;
     impl_->storage.transaction ([&] {
         for (auto& run : orphans) {
@@ -598,11 +584,10 @@ void Database::prune_runs_configured () {
     const int max_age_days    = get_config_int (
     "runRetentionDays", vayu::core::constants::database::RUN_RETENTION_DAYS);
     prune_runs (max_runs, max_age_days, nullptr, max_design_runs);
-    // A run that has just been pruned may have been the last thing naming an
-    // OpenAPI document (issue #718). Retention is where that reference is
-    // released, so it is where the release is noticed - and this is what puts
-    // the sweep on both a startup and the end of every run without a schedule
-    // of its own. Never throws; see the declaration.
+    // A pruned run may have been the last thing naming an OpenAPI document
+    // (#718). Retention releases that reference, so it notices the release,
+    // which puts the sweep on startup and the end of every run without a
+    // schedule of its own. Never throws; see the declaration.
     sweep_orphaned_spec_documents ();
 }
 
@@ -683,9 +668,9 @@ int Database::add_inbox_request (const InboxRequest& capture, int64_t max_captur
                 const int64_t stored = impl_->storage.count<InboxRequest> (
                 where (c (&InboxRequest::inbox_id) == capture.inbox_id));
                 if (stored > max_captures) {
-                    // Delete by id rather than "everything older than the Nth
-                    // received_at": two captures can share a millisecond, and a
-                    // timestamp cutoff would then evict both or neither.
+                    // By id, not "older than the Nth received_at": two captures
+                    // can share a millisecond, and a timestamp cutoff would
+                    // evict both or neither.
                     auto victims = impl_->storage.select (&InboxRequest::id,
                     where (c (&InboxRequest::inbox_id) == capture.inbox_id),
                     order_by (&InboxRequest::id),
@@ -777,12 +762,11 @@ namespace {
 using BlobIds = std::map<std::string, int>;
 
 /// How long add_results_batch stays off the DB mutex between chunks. The mutex
-/// is not fair: a writer that re-locks at once, or after `yield ()`, takes it
-/// back before the reader it woke is scheduled: with `yield ()` a reader
-/// waited out a whole 10,000-row flush (520 ms in a Debug build). Sleeping lets
-/// the woken reader in, and it then waited at most one chunk. 1 ms rather than
-/// less leaves room for a busy machine; it adds 4 ms per 1,000 rows to the
-/// ~27 ms writing them takes in a Release build.
+/// is not fair: a writer re-locking at once, or after `yield ()`, takes it back
+/// before the woken reader is scheduled (with `yield ()` a reader waited out a
+/// whole 10,000-row flush, 520 ms in a Debug build). Sleeping lets it in, after
+/// at most one chunk. 1 ms rather than less leaves room for a busy machine, and
+/// adds 4 ms per 1,000 rows to the ~27 ms writing them takes in Release.
 constexpr auto CHUNK_HANDOFF_PAUSE = std::chrono::milliseconds (1);
 
 /// `bodies` grouped by the chunk their result is written in. An index with no
@@ -862,8 +846,8 @@ BlobIds& fresh_blob_ids) {
 } // namespace
 
 // One transaction and one mutex acquisition per RESULTS_WRITE_CHUNK_ROWS rows
-// (#2548): a whole flush in one held the mutex for 240-400 ms, and every other
-// DB caller, the live report poll included, waited behind it.
+// (#2548): a whole flush in one held the mutex for 240-400 ms, with every other
+// DB caller, the live report poll included, behind it.
 void Database::add_results_batch (const std::vector<Result>& results,
 const std::vector<PendingResultBody>& bodies) {
     if (results.empty ()) {
@@ -934,10 +918,10 @@ Database::get_design_result_outcomes (const std::vector<std::string>& run_ids) {
     }
 
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    // The design-run subquery is inside the statement on purpose: it is what
-    // makes "a load run's results are never read" a property of the query
-    // rather than of every caller passing the right ids. Three columns, so a
-    // page of rows costs no trace_data.
+    // The design-run subquery is inside the statement on purpose, making "a
+    // load run's results are never read" a property of the query, not of every
+    // caller passing the right ids. Three columns, so a page costs no
+    // trace_data.
     auto rows = impl_->storage.select (
     columns (&Result::run_id, &Result::status_code, &Result::latency_ms),
     where (in (&Result::run_id, run_ids) &&
@@ -969,9 +953,9 @@ std::string Database::get_body_blob_content (int blob_id) {
         return {}; // No stored body: binary, absent, or dropped for budget.
     }
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    // get_all + where rather than a by-primary-key lookup, matching every other
-    // single-row read in this file (get_run, get_request, ...) - one idiom, and
-    // a missing row is an empty vector rather than a throw or a null to handle.
+    // get_all + where, not a primary-key lookup, like every single-row read in
+    // this file: one idiom, and a missing row is an empty vector rather than a
+    // throw or a null.
     auto blobs = impl_->storage.get_all<BodyBlob> (where (c (&BodyBlob::id) == blob_id));
     return blobs.empty () ? std::string{} : blobs.front ().content;
 }

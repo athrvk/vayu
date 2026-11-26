@@ -6,20 +6,13 @@
  */
 
 /**
- * The request builder's contribution to the command registry: "start a load
- * test for what is on screen right now".
- *
- * A component rather than a hook call in `RequestBuilder`, because the handler
- * it publishes lives *inside* `RequestBuilderProvider` - `startLoadTest` closes
- * over the live draft, and the builder's own component sits outside the
- * provider it renders. Mounting a child that reads the context is how anything
- * else here reaches the draft too.
- *
- * It renders nothing, and it is mounted from `modules/request-builder/index.tsx`
- * alone. `DesignRunView` also mounts a `RequestBuilderProvider` - a detached
- * copy of a past run, deliberately without an `onStartLoadTest` handler - and
- * simply does not render this, so "exactly one contributor" holds by
- * construction rather than by a runtime guard.
+ * The builder's command-registry entry: "start a load test for what is on screen". A component, not
+ * a hook in `RequestBuilder`, because the handler lives *inside* `RequestBuilderProvider`
+ * (`startLoadTest` closes over the live draft) and the builder's own component sits outside the
+ * provider it renders. Renders nothing; mounted only from `modules/request-builder/index.tsx`.
+ * `DesignRunView` also mounts a provider (a detached copy of a past run, with no `onStartLoadTest`)
+ * and does not render this, so "exactly one contributor" holds by construction, not a runtime
+ * guard.
  */
 
 import { useRegisterLoadTestSurface } from "@/lib/commands";

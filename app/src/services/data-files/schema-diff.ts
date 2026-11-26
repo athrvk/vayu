@@ -6,24 +6,21 @@
  */
 
 /**
- * A file against the contract its collection declares (issue #599).
+ * A file against the contract its collection declares (#599).
  *
- * The declared columns are what the builder will eventually validate
- * `{{data.*}}` against, so a file that does not match them is the one thing a
- * user has to know *before* starting a run - a missing column is an engine-side
- * bind error at iteration 1, and today that is the first anyone hears of it.
+ * A file that does not match the declared columns is the one thing a user has to know *before*
+ * starting a run: a missing column is an engine-side bind error at iteration 1.
  *
  * Both directions are worth saying and only one of them blocks anything:
  *
- * - **Declared but absent** is the one that breaks a run. Every `{{data.x}}`
- *   written against that column reaches the wire unbound.
- * - **Present but undeclared** breaks nothing at all - the row simply carries a
- *   column nobody references. It is reported because it is almost always the
- *   sign of the *other* thing: a contract that has drifted from the file, or a
- *   file that is not the one the contract was declared from.
+ * - **Declared but absent** is the one that breaks a run: every step that binds `{{data.x}}`
+ *   against that column ends at iteration 1 without being sent.
+ * - **Present but undeclared** breaks nothing: the row carries a column nobody references. It is
+ *   reported because it is almost always the sign of the *other* thing, a contract that has drifted
+ *   from the file, or a file that is not the one the contract was declared from.
  *
- * Warnings, never errors: the tab and the dialog both render these beside the
- * preview, and a run with a mismatched file is still the user's to start.
+ * Warnings, never errors: the tab and the dialog both render these beside the preview, and a run
+ * with a mismatched file is still the user's to start.
  */
 
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -59,12 +56,10 @@ function list(columns: readonly string[]): string {
 }
 
 /**
- * The diff as the sentences shown beside a preview, or an empty array when the
- * file matches (or when there is no contract to match).
- *
- * Prose rather than a rendered table because these sit in the picker's existing
- * warnings slot, next to the parser's own - one voice for "here is what is odd
- * about this file", whichever layer noticed.
+ * The diff as the sentences shown beside a preview, or an empty array when the file matches (or
+ * there is no contract to match). Prose rather than a table because these sit in the picker's
+ * existing warnings slot, beside the parser's own: one voice for "here is what is odd about this
+ * file", whichever layer noticed.
  */
 export function describeDataSchemaDiff(declared: string[], actual: string[]): string[] {
 	const { missing, undeclared } = diffDataSchema(declared, actual);
@@ -84,13 +79,11 @@ export function describeDataSchemaDiff(declared: string[], actual: string[]): st
 
 /**
  * The columns the run's requests reference and the picked file lacks
- * (`auditDataColumns(file.parsed.columns, ...).undeclared`, issue #2050), as the
- * sentence the run dialogs show beside the preview.
- *
- * The file-versus-contract diff above cannot answer this once a pick declares:
- * the contract becomes the file, and the diff goes empty while a request still
- * names a column the file never had. The engine ends every step that binds one
- * before sending it, so this is the failure the run would meet at iteration 1.
+ * (`auditDataColumns(file.parsed.columns, ...).undeclared`, #2050), as the sentence the run dialogs
+ * show beside the preview. The file-versus-contract diff above cannot answer this once a pick
+ * declares: the contract becomes the file, and the diff goes empty while a request still names a
+ * column the file never had. The engine ends every step that binds one before sending it, so this
+ * is the failure the run would meet at iteration 1.
  */
 export function describeUnboundReferences(missing: readonly string[]): string[] {
 	if (missing.length === 0) return [];

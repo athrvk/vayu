@@ -6,56 +6,34 @@
  */
 
 /**
- * Choosing GraphQL on a brand-new request changes its method, and leaving
- * GraphQL puts the method back (issue #1228).
+ * Choosing GraphQL on a new request changes its method, and leaving GraphQL puts it back (#1228). A
+ * new request is a `GET`, and GraphQL-over-HTTP differs there: the document goes as query
+ * parameters, not the JSON envelope, and a mutation may not be sent at all. An envelope body on a
+ * `GET` is undefined by the specification (the endpoint answered an unexplained `400`). The engine
+ * sends a GraphQL `GET` the specification's way (`engine/src/http/graphql_body.cpp`); this half
+ * keeps the mode from handing the user a transport they did not want.
  *
- * A new request is a `GET`, and GraphQL-over-HTTP means something different on
- * one: the document travels as query parameters rather than as the JSON
- * envelope, and a mutation may not be sent that way at all. Vayu sent the
- * envelope as a body on the `GET` regardless, which that specification leaves
- * undefined - the endpoint answered `400 Bad Request`, eleven bytes, and
- * nothing on screen connected the two. The engine now sends a GraphQL `GET`
- * the way the specification says (`engine/src/http/graphql_body.cpp`); this is
- * the other half, which is that the mode a user picks should not quietly hand
- * them the transport they did not want.
- *
- * So the mode moves the method the way it already moves a header - the
- * reversible side effect of `utils/auto-header.ts`, applied to the one field
- * that is not a header row. Only from `GET`, only to `POST`, and only back to
- * what it replaced: a method the user chose is never overridden, and a method
- * they have chosen *since* is never reverted, which is the same rule
- * `switchAutoHeader` states as "a row edited by hand is no longer ours".
- *
- * Ownership used to live in a ref the provider held, keyed by request id -
- * which meant nothing survived a reload, and a stale `POST` was then
- * indistinguishable from one the user picked (issue #1505, the same gap
- * #1481 closed for the Content-Type and Accept rows). `Request.methodSource`
- * is the fix, on the row itself rather than beside it: `MethodSelector`
- * clears it the moment the user picks a method by hand, the same way retyping
- * a marked header row clears `KeyValueEntry.source`.
- *
- * The rule lives here rather than in the click handler for the reason
- * `content-type.ts` gives: the only way to exercise a rule inside that handler
- * is to drive a Radix `Select` through jsdom, which does not commit a value
- * there.
+ * The mode moves the method as it moves a header (`utils/auto-header.ts`'s reversible side effect,
+ * on the one field that is not a header row): only from `GET`, only to `POST`, only back to what it
+ * replaced. A user-chosen method is never overridden and one chosen *since* never reverted,
+ * `switchAutoHeader`'s "a row edited by hand is no longer ours". Ownership is
+ * `Request.methodSource` (#1505, the gap #1481 closed for Content-Type and Accept), on the row so
+ * it survives a reload; `MethodSelector` clears it on a hand pick, as retyping a marked header
+ * clears `KeyValueEntry.source`. Not in the click handler, for `content-type.ts`'s jsdom reason.
  */
 
 import type { HttpMethod, MethodSource } from "@/types";
 import type { BodyMode } from "../../../../types";
 
 /**
- * The method a GraphQL body is sent with when the app picks one.
- *
- * `POST` is what every other client creates a GraphQL request as, and the one
- * method the specification allows a mutation on.
+ * The method the app picks for a GraphQL body: what every other client creates one as, and the only
+ * one a mutation may use.
  */
 export const GRAPHQL_METHOD: HttpMethod = "POST";
 
 /**
- * The method this side effect is willing to replace.
- *
- * Only the default. Any other method is one someone chose - `PUT` on a GraphQL
- * endpoint is unusual, and that is exactly why it must survive a mode change.
+ * The one method this side effect replaces, the default: any other was chosen, and `PUT` on GraphQL
+ * is unusual, which is why it must survive.
  */
 const REPLACEABLE_METHOD: HttpMethod = "GET";
 
@@ -73,9 +51,8 @@ export interface GraphQLMethodSwitch {
  * @param method       The request's current method.
  * @param methodSource The request's current marker.
  *
- * Staying inside GraphQL (a re-selection of the same mode) keeps the marker
- * rather than re-deriving it, so the method the user has since chosen is not
- * overwritten by a second visit to the mode they are already in.
+ * Re-selecting GraphQL keeps the marker rather than re-deriving it, so a method chosen since is not
+ * overwritten by a second visit.
  */
 export function switchGraphQLMethod(
 	mode: BodyMode,
@@ -90,29 +67,20 @@ export function switchGraphQLMethod(
 		return { method: GRAPHQL_METHOD, methodSource: "graphql" };
 	}
 
-	// Leaving GraphQL. The revert is conditional on the method still being the
-	// one the marker wrote: a user who has picked `PUT` since means it, and
-	// handing them back `GET` would be the silent rewrite this rule exists to
-	// avoid - in the other direction. `MethodSelector` already clears the
-	// marker the moment a method is picked by hand, so this second check only
-	// matters for a marker something other than this file wrote - MCP, import -
-	// which must not be trusted past what it actually wrote.
+	// Leaving GraphQL: revert only if the method is still the one the marker wrote, since a user
+	// who picked `PUT` since means it. `MethodSelector` clears the marker on a hand pick, so this
+	// check matters for a marker something else wrote (MCP, import), not trusted past what it
+	// wrote.
 	if (!ours) return { method };
 	if (method !== GRAPHQL_METHOD) return { method };
 	return { method: REPLACEABLE_METHOD };
 }
 
 /**
- * Whether a GraphQL body sent with this method travels in the URL.
- *
- * True only for the case the Query header's notice describes: a `GET` the user
- * chose themselves, or one an import wrote. The mode switch above makes it
- * unreachable for a request built in the app from a fresh `GET`, which is why
- * the notice explains a transport rather than reporting an error - `GET` is a
- * legitimate way to send a query, and the wrong one for a mutation.
- *
- * The mode is not a parameter because the one caller renders only for the
- * GraphQL mode; the fact this answers is about the method alone.
+ * Whether a GraphQL body on this method travels in the URL: only for a `GET` the user chose or an
+ * import wrote, since the mode switch moves a fresh `GET` away. So the Query header's notice
+ * explains a transport, not an error (`GET` suits a query, not a mutation). No mode parameter: the
+ * one caller renders only in GraphQL mode.
  */
 export function sendsGraphQLInTheUrl(method: HttpMethod): boolean {
 	return method === REPLACEABLE_METHOD;

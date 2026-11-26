@@ -6,42 +6,24 @@
  */
 
 /**
- * The drag handle for the drawer, the context bar and the bottom panel.
+ * The drag handle for the drawer, the context bar and the bottom panel: one component, so the
+ * copies cannot drift, and a window splitter, so the panels framing the app resize and reset from
+ * the keyboard, where this tool's users work. Arrows nudge, Page keys jump, Home and End go to the
+ * bounds, and Enter or Space resets to the default, as double-click does.
  *
- * Both panels had their own copy - the context bar's carried a comment saying
- * it "mirrors the Drawer's right-edge handle", which is the usual sign that one
- * of them will drift. Both were also mouse-only: a bare `<div>` with
- * `onPointerDown` and `onDoubleClick`, no role, no tabindex, no keys. So the two
- * panels framing the entire app could not be resized or reset from the
- * keyboard, on a tool whose users work from the keyboard.
+ * `side` sets direction, not just placement, which is the reason for sharing: the drawer's handle
+ * is on its right edge, so ArrowRight widens it; the context bar's is on its left, so ArrowLeft
+ * widens. `side: "top"` is the bottom panel's: a horizontal separator moved on the vertical axis,
+ * where pointer up grows the panel and so do ArrowUp and PageUp. The measure there is height, hence
+ * `size`, not `width`. `side` governs the *spatial* keys only: Home and End name a point in the
+ * value model the handle announces, the same bound from either side.
  *
- * It is a window splitter now: focusable, arrows nudge, Page keys jump, Home and
- * End go to the bounds, and Enter or Space resets to the default - the keyboard
- * equivalent of the double-click that was already there.
- *
- * `side` matters for direction, not just placement. The drawer's handle sits on
- * its right edge, so ArrowRight widens it; the context bar's sits on its left,
- * so ArrowLeft widens. Getting this from the prop rather than a second component
- * is the whole reason for sharing.
- *
- * `side: "top"` is the bottom panel's: a handle on the panel's top edge, drawn
- * as a horizontal separator, dragged and nudged on the vertical axis. Pointer up
- * grows the panel, so ArrowUp and PageUp do too - the keys follow the edge, as
- * the horizontal pair does. The measure it resizes is the panel's height there,
- * which is why the props say `size` and not `width`.
- *
- * It governs the *spatial* keys only. Home and End name a point in the value
- * model the handle announces, so they land on the same bound from either side.
- *
- * The drag and keyboard-repeat mechanics are `useResizeGesture`'s (issue
- * #1715, generalized in #1738 rather than left as this component's own copy
- * once `ScriptElementForm` needed the identical shape for a vertical drag):
- * a pointer drag paints the panel's `style.width` (`style.height` for a top
- * handle) - through the handle's own `parentElement`, since every panel renders
- * this handle as the direct child of the element whose size it controls - once
- * per animation frame and writes the store exactly once, on release. The
- * double-click reset and a single keyboard press still write immediately;
- * only a held key's repeat coalesces, the same way the drag's paint does.
+ * The drag and key-repeat mechanics are `useResizeGesture`'s (#1715, shared with
+ * `ScriptElementForm`'s vertical drag in #1738): a drag paints the panel's `style.width`
+ * (`style.height` for a top handle) through the handle's `parentElement`, since every panel renders
+ * this handle as the direct child of the element it sizes, once per frame, and writes the store
+ * once, on release. The double-click reset and a single key press write at once; only a held key's
+ * repeat coalesces, like the drag's paint.
  */
 
 import { useRef } from "react";
@@ -70,9 +52,8 @@ export interface PanelResizeHandleProps {
 }
 
 /**
- * What each key moves the edge by, in the direction the key points: a positive
- * step is right or down. Page keys follow their arrow axis, so on the vertical
- * axis PageUp moves the edge up.
+ * Each key's edge move, in the direction it points: positive is right or down. Page keys follow
+ * their arrow axis, so on y PageUp moves the edge up.
  */
 const SPATIAL_STEPS = {
 	x: new Map([
@@ -113,9 +94,8 @@ export function PanelResizeHandle({
 	max = PANEL_MAX_WIDTH,
 }: PanelResizeHandleProps) {
 	const axis = side === "top" ? "y" : "x";
-	// A handle on the left or top edge grows its panel as the pointer moves
-	// away from the panel's body (left, up), so the delta is inverted relative
-	// to one on the right edge.
+	// A left or top handle grows its panel as the pointer moves away from the body (left, up), so
+	// its delta is inverted from a right-edge handle's.
 	const grow = side === "right" ? 1 : -1;
 
 	const handleRef = useRef<HTMLDivElement | null>(null);
@@ -133,17 +113,17 @@ export function PanelResizeHandle({
 	});
 
 	const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-		// Arrows and Page keys are spatial: the direction they move the pointer is
-		// the direction the edge travels, so they follow `grow`.
+		// Arrows and Page keys are spatial: the edge travels the way they point, so they follow
+		// `grow`.
 		const nudge = (delta: number) => {
 			e.preventDefault();
 			gesture.applyKey(e, gesture.currentValue() + delta * grow);
 		};
 
 		// Home and End are absolute against the value model this handle declares
-		// (`aria-valuemin`/`max`), so they must NOT follow `grow` - on the context
-		// bar's left-side handle that inverted them, and a screen reader hearing
-		// "min 220, max 480" announced Home as the minimum while it jumped to 480.
+		// (`aria-valuemin`/`max`), so they must NOT follow `grow`: on the context bar's left-side
+		// handle that inverts them, and a screen reader hearing "min 220, max 480" would announce
+		// Home as the minimum while it jumps to 480.
 		const jumpTo = (target: number) => {
 			e.preventDefault();
 			gesture.applyKey(e, target);
@@ -159,8 +139,8 @@ export function PanelResizeHandle({
 				return jumpTo(max);
 			case "Enter":
 			case " ":
-				// The keyboard equivalent of the double-click reset, which was
-				// otherwise the one affordance with no non-mouse route to it.
+				// The keyboard equivalent of the double-click reset, otherwise the one affordance
+				// with no non-mouse route.
 				e.preventDefault();
 				gesture.applyKey(e, defaultSize);
 				return;
@@ -174,9 +154,8 @@ export function PanelResizeHandle({
 		<div
 			ref={handleRef}
 			role="separator"
-			// A separator's orientation is the line's own, not the drag's: the side
-			// handles are vertical lines dragged along x, the top one a horizontal
-			// line dragged along y.
+			// A separator's orientation is its line's, not the drag's: the side handles are
+			// vertical lines dragged along x, the top one a horizontal line dragged along y.
 			aria-orientation={axis === "y" ? "horizontal" : "vertical"}
 			aria-label={label}
 			aria-valuenow={Math.round(size)}
@@ -190,8 +169,8 @@ export function PanelResizeHandle({
 			onBlur={gesture.flushKey}
 			className={cn(
 				"absolute transition-colors hover:bg-accent/20",
-				// The handle is a 8px strip with no content, so the focus state is
-				// the only thing that makes it findable by keyboard.
+				// An 8px strip with no content: the focus state is all that makes it findable by
+				// keyboard.
 				"focus-visible:bg-accent/40",
 				HANDLE_STRIP[side]
 			)}

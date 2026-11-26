@@ -5,8 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-// Collections UI State Store
-// Server state (collections, requests) is now managed by TanStack Query
+// UI state of the collections tree; server state (collections, requests) is TanStack Query's.
 
 import { create } from "zustand";
 
@@ -17,13 +16,8 @@ interface CollectionsUIState {
 	// Actions
 	toggleCollectionExpanded: (collectionId: string) => void;
 	/**
-	 * Expand one collection, idempotently.
-	 *
-	 * The tree used to hand-roll `if (!expanded.has(id)) toggle(id)` at three
-	 * sites while this sat here with no callers - a toggle guarded by a read of
-	 * the set it toggles, which is this action with an extra dependency on
-	 * `expandedCollectionIds` bolted on. That dependency is why the ⋯ menu's
-	 * actions had to be rebuilt on every expand.
+	 * Expand one collection, idempotently. A toggle guarded by a read of the set it toggles would
+	 * depend on `expandedCollectionIds` and rebuild the ⋯ menu's actions on every expand.
 	 */
 	expandCollection: (collectionId: string) => void;
 	expandCollections: (collectionIds: string[]) => void;

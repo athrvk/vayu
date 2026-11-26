@@ -6,40 +6,29 @@
  */
 
 /**
- * @file http/routes/spec_sync.cpp
- * @brief `POST /specs/sync` - apply an OpenAPI diff to a bound collection, whole
- *        or not at all (issue #655, the write half of #627).
+ * `POST /specs/sync`: applies an OpenAPI diff to a bound collection, whole or
+ * not at all (#655, the write half of #627). The comparison is the engine's
+ * (`POST /specs/diff`, #854) and the caller picks which of it to apply; this
+ * owns every rule a client must not be trusted with:
  *
- * The comparison is the engine's (`POST /specs/diff`, #854) and the caller
- * decides which of it to apply; this applies exactly that. What it owns is every
- * rule a client must not be trusted with:
+ * - **One transaction.** The new document, the binding moving to it, the
+ *   created, updated and deleted requests and the examples land together or not
+ *   at all: a half-applied sync leaves a collection bound to a document its
+ *   requests do not reflect, the state binding exists to make impossible.
+ * - **Nothing outside the bound subtree.** Every request updated or deleted,
+ *   and every collection an added operation lands in, lives beneath the synced
+ *   collection; honouring a payload naming another request would make this
+ *   route a way to delete arbitrary rows.
+ * - **The engine mints every id** (#97), as `POST /import/apply` does: new rows
+ *   are named by `tempId` and translated through the returned `idMap`.
+ * - **The examples written are the stored document's** (#869). The payload
+ *   carries a decision per updated request (refresh its imported examples, or
+ *   leave them) and the rows come off the document this call stores.
  *
- * - **The whole thing is one transaction.** The new document, the binding that
- *   moves to it, the created, updated and deleted requests, and the examples
- *   land together or not at all. A half-applied sync leaves a collection bound
- *   to a document its requests do not reflect - the one state binding exists to
- *   make impossible - so it is refused structurally rather than apologised for.
- * - **Nothing outside the bound subtree is touched.** Every request updated or
- *   deleted, and every collection an added operation lands in, must live
- *   beneath the collection being synced. A sync is an operation on one
- *   collection's contract; a payload naming a request elsewhere is a client bug,
- *   and honouring it would make this route a way to delete arbitrary rows.
- * - **The engine mints every id** (#97), as `POST /import/apply` does, and for
- *   the same reason - so new rows are named by `tempId` and translated through
- *   the returned `idMap`.
- * - **The examples written are the ones the stored document documents** (issue
- *   #869). The payload carries a decision per updated request - refresh this
- *   request's imported examples, or leave them - and the rows come off the
- *   document this call is storing. A caller used to send the rows themselves,
- *   having read them out of the diff two calls earlier, which made it possible
- *   to write examples for responses the document does not describe.
- *
- * Deliberately **not** an extension of `/import/apply`: that route creates, and
- * only creates, which is what lets it assign every id and validate a payload
- * with nothing stored behind it. A sync updates and deletes rows that already
- * exist, against a subtree it must first prove it owns. Folding the two
- * together would put "POST creates" - the rule the whole resource API is built
- * on (#95) - inside a conditional.
+ * Not an extension of `/import/apply`, which only creates and so can assign
+ * every id and validate with nothing stored behind it. A sync updates and
+ * deletes existing rows in a subtree it must first prove it owns; folding the
+ * two would put "POST creates" (#95) inside a conditional.
  */
 
 #include "vayu/core/constants.hpp"
@@ -64,21 +53,17 @@
 namespace vayu::http::routes {
 
 /**
- * Every collection at or beneath @p root, from one read of the table.
+ * Every collection at or beneath @p root, from one read of the table: a walk,
+ * not repeated `parent_id` queries, since every payload item needs the answer
+ * and the collections table is the small one (`get_collections_bound_to_spec`
+ * scans for the same reason). `seen` gates the descent, so a stored cycle
+ * cannot loop it. It backs `spec_contract_subtree_ids` (routes.hpp), the spec
+ * routes' answer: a spec-bound root usually owns no requests directly, so a
+ * collection's contract means its subtree.
  *
- * A walk rather than a repeated `parent_id` query because the answer is needed
- * for every item in the payload and the collections table is the small,
- * sidebar-sized one - the same reasoning `get_collections_bound_to_spec`
- * scans on. A cycle among stored rows cannot loop it: `seen` gates the descent.
- *
- * The walk behind `spec_contract_subtree_ids`, which is what the spec routes
- * call (declared in routes.hpp): a spec-bound root usually owns no requests
- * directly, so anything that answers for a collection's contract has to mean
- * the subtree by "the collection".
- *
- * @p descend_into is where a contract stops early - at a collection bound to a
- * *different* document (issues #721, #3034). The child it refuses takes its own
- * descendants with it, which is what makes it a boundary rather than a filter.
+ * @p descend_into is where a contract stops early, at a collection bound to a
+ * different document (#721, #3034); the child it refuses takes its descendants
+ * with it, a boundary rather than a filter.
  */
 std::unordered_set<std::string> collection_subtree_ids (
 const std::vector<vayu::db::Collection>& all,
@@ -117,18 +102,14 @@ const std::function<bool (const vayu::db::Collection&)>& descend_into) {
 }
 
 /**
- * Every request stored beneath @p subtree, in the order the collections table
- * lists their collections and each collection lists its own.
+ * Every request beneath @p subtree, in the order the collections table lists
+ * their collections and each collection its own. The order is the contract:
+ * `POST /specs/match` answers with indices into this list and
+ * `POST /specs/bind` matches the same set again to decide what to stamp, so one
+ * walk keeps a preview from describing a pairing the bind does not make.
  *
- * The order is the contract, not a convenience: `POST /specs/match` reports its
- * answer as indices into this list and `POST /specs/bind` matches the same set
- * again to decide what to stamp, so the two must walk the requests the same way
- * or a preview would describe a pairing the bind then did not make. One walk
- * rather than two is what makes that impossible rather than merely true today.
- *
- * @param all The collections table, already read - both callers need it for the
- *        subtree walk itself, and reading it twice under one lock would only
- *        add a scan.
+ * @param all The collections table, already read: both callers need it for the
+ *        subtree walk, and a second read under one lock would add a scan.
  */
 std::vector<vayu::db::Request> collection_subtree_requests (vayu::db::Database& db,
 const std::vector<vayu::db::Collection>& all,
@@ -147,17 +128,12 @@ const std::unordered_set<std::string>& subtree) {
 
 /**
  * The `specId` a collection's own binding names, or "" when it binds nothing.
- *
- * The collection's *own* column, deliberately not `nearest_spec_binding`'s walk
- * up the ancestry: a sync and a diff write to and describe the collection they
- * were given, and answering for a document only its parent binds would report
- * an inherited contract as this collection's own. Shared with
- * `POST /specs/diff` (declared in routes.hpp) so the route that says what would
- * change and the route that changes it cannot come to disagree about which
- * collections are syncable at all.
- *
- * An unparseable or non-object column binds nothing, the reading every other
- * reader of it gives.
+ * Its own column, not `nearest_spec_binding`'s walk up: a sync and a diff write
+ * to and describe the collection given, and answering for a parent's document
+ * would report an inherited contract as its own. Shared with `POST /specs/diff`
+ * (routes.hpp) so the route that says what would change and the one that
+ * changes it agree on what is syncable. An unparseable or non-object column
+ * binds nothing, as for every reader.
  */
 std::string bound_spec_id (const std::string& openapi) {
     try {
@@ -267,11 +243,10 @@ RouteError body_error (const std::string& message) {
 }
 
 /**
- * An error that names the offending item, in the same place `/import/apply`
- * puts it (inside the error object, next to the code and message) so a client
- * reads one shape for both bulk endpoints. The name is a `tempId` for a row
- * being created and the real id for one being updated or deleted - in both
- * cases the only handle the caller has on it.
+ * An error naming the offending item where `/import/apply` puts it (inside the
+ * error object, beside the code and message), one shape for both bulk
+ * endpoints. The name is a `tempId` for a row being created and the real id
+ * otherwise: the caller's only handle either way.
  */
 RouteError item_error (int status, const std::string& message, const std::string& item) {
     auto body             = error_body (status, message);
@@ -346,20 +321,16 @@ std::string& temp_id_out) {
 }
 
 /**
- * The example rows a request's documented responses become, through the same
- * applier every other example write uses.
- *
- * @p examples is the engine's own answer since issue #869 - the rows
- * `draft_example_rows` builds from the document being stored - rather than a
- * list the caller sent. `origin` is fixed to `import` here for the reason it
- * always was: a sync writes what the document says, and a row claiming `user`
- * would be one the *next* sync then refuses to replace.
+ * The example rows a request's documented responses become, through the applier
+ * every example write uses. @p examples is the engine's own answer (#869), the
+ * rows `draft_example_rows` builds from the document being stored, not a
+ * caller's list. `origin` is fixed to `import`: a sync writes what the document
+ * says, and a `user` row is one the next sync would refuse to replace.
  *
  * @param suppressed_statuses the statuses this request holds a tombstone for
- * (issue #722) - the document's example for one of them is validated like any
- * other and then dropped, because the user deleted it and a sync that wrote it
- * back would make that delete a suggestion. Empty on the create path: a
- * request being created now has nothing behind it to have deleted.
+ *        (#722): the document's example for one is validated, then dropped, or
+ *        the user's delete would be a suggestion. Empty when creating: nothing
+ *        is behind a new request.
  */
 RouteResult build_example_rows (const nlohmann::json& examples,
 const std::string& request_id,
@@ -381,10 +352,9 @@ const std::unordered_set<int>& suppressed_statuses = {}) {
         x.created_at = now;
         x.updated_at = now;
 
-        // Through the applier every other example write goes through, although
-        // these rows are the engine's own: a field the applier learns - the way
-        // `origin` and `suppressed` were learned - must reach a sync's rows too,
-        // and a second construction here is how it would not.
+        // Through the shared applier although these rows are the engine's own:
+        // a field the applier learns (as it learned `origin` and `suppressed`)
+        // must reach a sync's rows too.
         if (auto outcome = apply_item_fields (
             [&] {
                 return apply_request_example_fields (x, example, /*is_create=*/true);
@@ -415,24 +385,17 @@ const std::unordered_set<int>& suppressed_statuses = {}) {
 }
 
 /**
- * What the document being stored documents, per operation (issue #869).
+ * What the stored document documents, per operation (#869): the payload carries
+ * the decision (refresh this request's imported examples, or not) and the rows
+ * come from here.
  *
- * A sync writes the examples the document describes rather than rows the caller
- * states: the payload carries the *decision* - refresh this request's imported
- * examples, or leave them - and the rows come from here. Before that, a client
- * could write example rows the document does not describe, and the responses it
- * was echoing back had come from the engine on the diff two calls earlier.
- *
- * **Read on the first request that needs it, then reused.** A sync that ticks no
- * examples - a binding move, a rename with the examples left alone - pays
- * nothing for it, while a sync of a 4000-operation document reads once however
- * many requests refresh. The DOM comes from the index derivation, so the whole
- * route is still one read of the stored bytes.
- *
- * Identity resolution is `core::OperationIndex` - the coverage rule, by
- * `operationId` first and method-and-path second - so the operation whose
- * responses are written here is the operation a run will later credit the
- * request with.
+ * **Read on first need, then reused.** A sync refreshing no examples (a binding
+ * move, a rename) pays nothing, and a 4000-operation document is read once
+ * however many requests refresh; the DOM comes from the index derivation, so
+ * the route still reads the stored bytes once. Identity is
+ * `core::OperationIndex`'s coverage rule (`operationId`, then method and path),
+ * so the operation whose responses are written is the one a run later credits
+ * the request with.
  */
 class DocumentedExamples {
     public:
@@ -479,32 +442,26 @@ class DocumentedExamples {
 };
 
 /**
- * What an example refresh replaces, and where the replacements sit.
+ * What an example refresh replaces, and where the replacements sit. A mock
+ * server answers with the first example, so order is a contract: **a sync never
+ * moves a row a person saved, nor promotes an imported row past one ahead of
+ * it.** The imported rows are dropped and the new ones take a consecutive block
+ * from where the lowest of them sat; with only user-saved examples, the block
+ * goes after the last.
  *
- * The rule, stated once because a mock server answers with the *first* example
- * and so the order is a contract rather than a display choice: **a sync never
- * moves a row a person saved, and never promotes an imported row past one that
- * was already ahead of it.** The imported rows are dropped and the new ones
- * take a consecutive block starting where the lowest of them sat; a request
- * whose examples were all user-saved gets the block after the last of them.
- *
- * **A deleted imported example is not written back** (issue #722). Deleting one
- * leaves a tombstone rather than nothing, and the statuses those name are the
- * one thing a refresh must not restore - otherwise any later sync of any field
- * re-creates what the user removed, and the delete meant nothing.
+ * **A deleted imported example is not written back** (#722): its tombstone's
+ * status is what a refresh must not restore, or any later sync re-creates what
+ * the user removed.
  */
 struct ExampleRefresh {
     std::vector<std::string> replaced; ///< Imported row ids, to delete.
     int base_order   = 0;              ///< Where the replacement block starts.
     size_t surviving = 0; ///< User rows, which stay exactly as they are.
     /**
-     * Statuses the user deleted, from this request's tombstones.
-     *
-     * The status is the identity, not the name: an imported example is the
-     * document's account of one response code, while its name carries the
-     * response *description* (`"404 - Not found"`) and moves whenever the
-     * document rewords it - so a name-keyed tombstone would resurrect the
-     * example on the first reworded description, which is the defect itself.
+     * Statuses the user deleted, from this request's tombstones. The status is
+     * the identity, not the name: the name carries the response description
+     * (`"404 - Not found"`), which moves whenever the document rewords it, so a
+     * name-keyed tombstone would resurrect the example on the first rewording.
      */
     std::unordered_set<int> suppressed_statuses;
 };
@@ -532,15 +489,12 @@ const std::vector<vayu::db::RequestExample>& tombstones) {
 }
 
 /**
- * Where an added operation's request goes, and which folders that needs.
- *
- * An import files its operations under one sub-collection per tag, so a sync
- * that added them to the bound collection itself would reshape a collection
- * every time it caught up with its contract. A folder is matched by name among
- * the bound collection's **direct children** - a same-named folder deeper down
- * is somebody else's - and created at most once per payload however many
- * operations name it, because two folders called `pets` would both land and the
- * next sync would have to choose between them.
+ * Where an added operation's request goes, and the folders that needs. An
+ * import files operations under one sub-collection per tag, so adding them to
+ * the bound collection itself would reshape it on every catch-up. A folder is
+ * matched by name among the bound collection's **direct children** (a deeper
+ * namesake is somebody else's) and created at most once per payload, or two
+ * `pets` folders would land and the next sync would have to choose.
  */
 class FolderResolver {
     public:
@@ -586,33 +540,25 @@ class FolderResolver {
 
 /**
  * The rows a `"safe"` sync writes, as the payload an explicit one would send
- * (issue #871).
+ * (#871). The decision is `core::safe_spec_apply`, shared with the marks
+ * `POST /specs/diff` reports, so ticking nothing and ticking exactly what the
+ * diff called safe send the same write. Only the translation is here: a
+ * payload, not a second write path, so id minting, subtree bounds, the example
+ * refresh and the transaction are one code path for both callers.
  *
- * The *decision* is `core::safe_spec_apply`, shared with the marks
- * `POST /specs/diff` reports, so a caller that ticks nothing and a caller that
- * ticks exactly what the diff called safe send the same write. What is here is
- * only the translation into payload rows - which is deliberate: building the
- * payload rather than a second write path means everything below (the id
- * minting, the subtree bounds, the example refresh, the transaction itself) is
- * the one code path both kinds of caller go through.
+ * Two rules ride the translation, being about what a write looks like:
  *
- * Two rules ride in this translation rather than in the policy, because they are
- * about what a *write* looks like rather than about what is safe to write:
- *
- * - **The identity travels with every applied change**, ticked fields or not. An
- *   operation is its method and path template, so a request left carrying the
- *   old identity after the document renamed it would be compared against the
- *   wrong operation on the next sync.
+ * - **The identity travels with every applied change**, ticked fields or not:
+ *   an operation is its method and path template, and a request left with the
+ *   old identity would be compared against the wrong operation next sync.
  * - **An applied change refreshes that request's imported examples.** The
- *   comparison does not cover examples, so the rule is stated rather than
- *   derived: the rows come off the document being stored (issue #869), a saved
- *   example is never touched, and a status the user deleted is never written
- *   back.
+ *   comparison does not cover examples, so this is stated, not derived: rows
+ *   from the stored document (#869), saved examples untouched, a deleted status
+ *   never written back.
  *
- * The `skipped` key rides back with the rows and is **not** a section: it is
- * what the policy declined, counted. A sync that reported only what it wrote
- * would read as "applied the drift" to a caller that cannot see the ticks, and
- * the whole reason there are ticks is that some of a drift must not be applied.
+ * `skipped` rides back with the rows and is no section: what the policy
+ * declined, counted. Reporting only what was written would read as "applied the
+ * drift" to a caller that cannot see the ticks, the reason ticks exist.
  */
 nlohmann::json safe_sync_payload (const std::string& root_id,
 const std::vector<vayu::db::Collection>& collections,
@@ -624,12 +570,10 @@ const SpecComparison& comparison) {
     nlohmann::json create   = nlohmann::json::array ();
     const auto create_draft = [&] (size_t draft) {
         const vayu::core::SpecRequestDraft& entry = comparison.fetched[draft];
-        // The same builder the diff reports its `draft` with, so the request an
-        // apply creates is the one the preview described. `auth` and the two
-        // scripts are left unset, taking the plain create default (`inherit`,
-        // empty scripts) - a sync never reads an operation's own `security`
-        // the way an import does (issue #1444), because the diff this payload
-        // comes from carries no such field to compare or apply.
+        // The diff's `draft` builder, so the created request is the one the
+        // preview described. `auth` and the scripts take the create defaults
+        // (`inherit`, empty): a sync never reads an operation's `security` as
+        // an import does (#1444), since the diff carries no such field.
         nlohmann::json item = draft_request_fields_json (entry.draft);
         item["tempId"]      = "tmp_req_" + std::to_string (create.size ());
         // Derived here because the engine never derives it from `body`.
@@ -676,9 +620,8 @@ const SpecComparison& comparison) {
         update.push_back (std::move (item));
     }
 
-    // Read from the policy rather than written as an empty list: "a safe apply
-    // deletes nothing" is a rule with one author, and a route that spelled it
-    // here would be a second one.
+    // From the policy, not an empty list: "a safe apply deletes nothing" has
+    // one author.
     nlohmann::json remove = nlohmann::json::array ();
     size_t kept           = 0;
     for (size_t i = 0; i < diff.removed.size (); ++i) {
@@ -711,11 +654,8 @@ const SpecComparison& comparison) {
 }
 
 /**
- * One payload's temp-id namespace.
- *
- * Flat across the two sections that claim into it, for `/import/apply`'s
- * reason: the response's `idMap` is one map, so a `tempId` reused between a
- * folder and a request would make it ambiguous.
+ * One payload's temp-id namespace, flat across both claiming sections for
+ * `/import/apply`'s reason: `idMap` is one map.
  */
 struct ClaimedIds {
     std::unordered_map<std::string, std::string> real; ///< tempId -> engine id.
@@ -762,20 +702,14 @@ struct SyncPlan {
 };
 
 /**
- * The `policy` field, and the rule that it excludes the row sections.
- *
- * `policy` is the alternative to stating rows (issue #871): the caller says
- * *apply the safe ticks* and the engine works out which they are, from the
- * same `core::safe_spec_apply` whose answer `POST /specs/diff` reports per
- * entry. It exists because those rules - never overwrite a field somebody
- * edited, never delete, leave a request nothing can be told apart about
- * alone - used to live in the renderer alone, which put every apply out of
- * reach of anything that is not the Spec tab and made any second caller a
- * second opinion about which of a user's fields a sync may destroy.
- *
- * Mutually exclusive with the row sections rather than merged with them: a
- * payload that stated both would be two answers to one question, and there
- * is no reading of "the safe ticks, plus these" that is not a guess.
+ * The `policy` field, and its exclusion of the row sections. `policy` is the
+ * alternative to stating rows (#871): the caller says "apply the safe ticks"
+ * and the engine works them out from `core::safe_spec_apply`, whose answer
+ * `POST /specs/diff` reports per entry. The rules (never overwrite an edited
+ * field, never delete, leave an indistinguishable request alone) live in the
+ * engine so every caller, not only the Spec tab, gets one answer on which
+ * fields a sync may destroy. Exclusive, not merged: "the safe ticks, plus
+ * these" has no reading that is not a guess.
  */
 RouteResult read_sync_policy (const nlohmann::json& body, std::string& policy) {
     const auto stated_policy = body.find ("policy");
@@ -857,13 +791,11 @@ RouteResult read_sync_request (const nlohmann::json& body, SyncRequest& out) {
         return outcome;
     }
 
-    // The rows the payload asks for. The example rows a refresh writes are the
-    // engine's own now (issue #869) and are counted against the same limit once
-    // they exist, below - refusing here on a number the caller stated would let a
-    // payload understate what it is about to write.
-    // Recomputed inside the lock for a policy sync, whose rows are not known
-    // until the comparison is made - this early check is the one that keeps a
-    // caller's own oversized payload from being parsed row by row first.
+    // The rows the payload asks for. Refresh rows are the engine's (#869) and
+    // are counted against the limit once they exist, below: refusing on a
+    // caller's number would let a payload understate its write. A policy sync's
+    // rows are recounted inside the lock; this early check keeps an oversized
+    // stated payload from being parsed row by row first.
     out.stated = out.new_collections->size () + out.creates->size () +
     out.updates->size () + out.deletes->size ();
     if (out.stated > MAX_SYNC_ITEMS) {
@@ -875,11 +807,8 @@ RouteResult read_sync_request (const nlohmann::json& body, SyncRequest& out) {
 }
 
 /**
- * The subtree, the binding and the size limit this payload is applied against.
- *
- * Read here rather than by the caller because all of it comes out of the
- * database and so has to be inside the lock: a subtree gathered outside it
- * could have moved before the batch is written.
+ * The subtree, binding and size limit this payload is applied against, read
+ * inside the lock: a subtree gathered outside it could move before the write.
  */
 RouteResult
 resolve_sync_scope (vayu::db::Database& db, const SyncRequest& request, SyncScope& out) {
@@ -910,11 +839,9 @@ resolve_sync_scope (vayu::db::Database& db, const SyncRequest& request, SyncScop
 }
 
 /**
- * The document row this sync stores, and the parsed document behind it.
- *
- * The document itself comes back with the indexes, because a refresh writes the
- * responses *these* bytes document (issue #869) and reading them a second time
- * would be a second answer about them.
+ * The document row this sync stores, and the parsed document behind it,
+ * returned with the indexes: a refresh writes what these bytes document (#869),
+ * and a second read would be a second answer.
  */
 RouteResult read_sync_document (const SyncRequest& request,
 const SyncScope& scope,
@@ -942,13 +869,11 @@ nlohmann::ordered_json& document) {
 }
 
 /**
- * What a policy sync writes, for the caller that stated no rows.
- *
- * Inside the lock because the answer is read out of the database: the bound
- * document, the subtree's requests and this collection's folders are all part
- * of it, and a comparison made outside the lock could be applied against a tree
- * that has since moved. @p policy_rows owns the arrays @p request then points
- * into, so it has to outlive the sections below.
+ * What a policy sync writes for a caller that stated no rows, inside the lock:
+ * the bound document, the subtree's requests and this collection's folders are
+ * read from the database, and a comparison made outside could apply to a moved
+ * tree. @p policy_rows owns the arrays @p request points into, so it must
+ * outlive the sections below.
  */
 RouteResult plan_policy_rows (vayu::db::Database& db,
 const SyncScope& scope,
@@ -1087,13 +1012,10 @@ std::string& owner) {
 }
 
 /**
- * A created request's example rows.
- *
- * A created request is the request an import of this document would build,
- * examples included, so its rows are read off the document rather than sent
- * (issue #869) - and there is no decision to make, the way there is on an
- * update: nothing exists behind it to leave alone. A request the payload creates
- * with no identity is not an operation of anything and documents nothing.
+ * A created request's example rows, read off the document (#869): a created
+ * request is what an import of this document would build, and nothing exists
+ * behind it to leave alone, so there is no decision. One with no identity is no
+ * operation and documents nothing.
  */
 RouteResult plan_created_examples (const vayu::db::Request& row,
 const std::string& temp,
@@ -1173,15 +1095,10 @@ SyncPlan& plan) {
 }
 
 /**
- * Whether an updated request's imported examples are refreshed from the
- * document being stored.
- *
- * `examples` is a decision, not a list (issue #869): true refreshes this
- * request's imported examples from the document being stored, and absent - or
- * false - leaves every one of them alone. Absence is the default because it is
- * the state that touches nothing: a caller that forgets the key leaves a user's
- * rows where they are, where a forgotten list used to mean "the document
- * documents nothing".
+ * Whether an updated request's imported examples are refreshed from the stored
+ * document. `examples` is a decision, not a list (#869): true refreshes; absent
+ * or false touches nothing, the default so a caller that forgets the key leaves
+ * a user's rows alone.
  */
 RouteResult
 read_examples_decision (const nlohmann::json& item, const std::string& id, bool& refresh) {
@@ -1394,12 +1311,9 @@ SyncPlan& plan) {
 }
 
 /**
- * The whole write, under the lock its caller holds.
- *
- * Read-decide-write in one scope, on `delete_spec_document`'s rule (#386): the
- * subtree this payload is allowed to touch, the rows it says exist and the write
- * itself have to be one scope, or a concurrent delete lands between the check
- * and the commit and the batch writes against a tree that has moved.
+ * The whole write, under the caller's lock: read-decide-write in one scope
+ * (`delete_spec_document`'s rule, #386), or a concurrent delete between check
+ * and commit makes the batch write against a moved tree.
  */
 std::pair<int, nlohmann::json>
 apply_sync_locked (vayu::db::Database& db, SyncRequest& request) {
@@ -1426,11 +1340,9 @@ apply_sync_locked (vayu::db::Database& db, SyncRequest& request) {
     }
     plan_taken_back_declines (db, request.collection_id, documented, plan);
 
-    // The same limit as the payload check before the lock, applied to what will
-    // actually be written: the example rows are derived rather than sent (issue
-    // #869), so this is where their number is finally known, and a cap that
-    // stopped counting them would bound a smaller transaction than the one it
-    // was written for.
+    // The pre-lock limit, on what will be written: refresh rows are derived
+    // (#869), so their number is known only here, and a cap ignoring them would
+    // bound a smaller transaction than the real one.
     if (const size_t writing = request.stated + plan.batch.examples.size ();
     writing > MAX_SYNC_ITEMS) {
         return as_response (body_error ("Sync too large: " + std::to_string (writing) +
@@ -1462,9 +1374,7 @@ apply_sync_locked (vayu::db::Database& db, SyncRequest& request) {
 
 } // namespace
 
-/**
- * Testable core of `POST /specs/sync`, returning {http_status, json_body}.
- */
+/** Testable core of `POST /specs/sync`, {http_status, json_body}. */
 std::pair<int, nlohmann::json>
 spec_sync_response (vayu::db::Database& db, const nlohmann::json& body) {
     SyncRequest request;

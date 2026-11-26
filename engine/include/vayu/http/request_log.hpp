@@ -14,17 +14,15 @@
 #include <string>
 
 /**
- * @file request_log.hpp
- * @brief One request line per HTTP call, from one place (issue #1510).
+ * @brief One request line per HTTP call, from one place (#1510).
  *
- * Before this, a route's request line was hand-written per handler - about
- * half the routes had none at all, so an absent line was never evidence a
- * route did not run. `install_request_logger` replaces every one of those
- * with a single hook on the `httplib::Server` itself: a `set_pre_routing_handler`
- * stamps the start time onto `Response::user_data` (the mechanism cpp-httplib
- * gives a pre-routing handler to hand a route handler data; a post-response
- * logger reads it the same way, since both run on the connection's own thread
- * for the same request), and `set_logger` reads it back to emit one line.
+ * `install_request_logger` puts a single hook on the `httplib::Server` itself,
+ * so every route gets a line and an absent line is evidence a route did not
+ * run. A `set_pre_routing_handler` stamps the start time onto
+ * `Response::user_data` (the mechanism cpp-httplib gives a pre-routing handler
+ * to hand a route handler data; a post-response logger reads it the same way,
+ * since both run on the connection's own thread for the same request), and
+ * `set_logger` reads it back to emit one line.
  *
  * The line never carries the query string, headers or body - any of the three
  * can hold a token, an OAuth code, or a credential - only method, path, status,

@@ -6,13 +6,11 @@
  */
 
 /**
- * Narrowing helpers for the foreign documents the importers walk.
- *
- * An imported file is untrusted JSON: any node can be missing, `null`, a scalar
- * where an object was promised, or an object where an array was. The parsers
- * already check before they read - these give that checking a type, so a walk
- * states what it expects at each hop instead of `any` making every access look
- * safe. One copy, because all four parsers walk the same kind of document.
+ * Narrowing helpers for the foreign documents the importers walk. An imported file is untrusted
+ * JSON: any node can be missing, `null`, a scalar where an object was promised, or an object where
+ * an array was. These give the parsers' checks a type, so a walk states what it expects at each hop
+ * instead of `any` making every access look safe. One copy, because all four parsers walk the same
+ * kind of document.
  */
 
 /** A JSON object node. Every property is `unknown` until it is narrowed. */

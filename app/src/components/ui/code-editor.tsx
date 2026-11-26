@@ -6,19 +6,12 @@
  */
 
 /**
- * CodeEditor
- *
- * Single wrapper around the Monaco editor. All shared editor configuration
- * (default options, theme, font size) lives here so it only has to change in
- * one place. Consumers pass only what varies (language, value, height, etc.).
- *
- * **This is also where Monaco is loaded.** `ensureMonaco()` pulls the editor
- * and its language services in on the first mount rather than at startup
- * (#1146), and nothing renders `<Editor>` until that resolves - mounting it
- * earlier would call `loader.init()` before `loader.config({ monaco })` and
- * send @monaco-editor/react to the jsdelivr CDN for a copy the app already
- * ships. A skeleton stands in meanwhile; a failed load says so rather than
- * leaving a placeholder that never resolves.
+ * The one wrapper around Monaco: shared configuration (default options, theme, font size) lives
+ * here, and consumers pass what varies. **It also loads Monaco**: `ensureMonaco()` pulls the editor
+ * and language services in on first mount, not at startup (#1146), and nothing renders `<Editor>`
+ * until it resolves, as mounting earlier calls `loader.init()` before `loader.config({ monaco })`
+ * and sends @monaco-editor/react to the jsdelivr CDN for a copy the app ships. A skeleton stands in
+ * meanwhile; a failed load says so.
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -28,9 +21,8 @@ import { selectMonoStack } from "@/stores/client-settings-store";
 import { registerEditorChords } from "@/lib/editor-chords";
 import { ensureMonaco, useLoadedMonaco } from "@/lib/monaco-loader";
 import { useMonacoTheme } from "@/hooks/useMonacoTheme";
-// The hook's own module, not the barrel beside it: the barrel also exports the
-// provider, which reaches into the request builder for its writer, and a
-// `components/ui` primitive must not drag a module tree in behind it.
+// The hook's module, not the barrel: the barrel exports the provider, which reaches into the
+// request builder, and a `components/ui` primitive must not drag a module tree in.
 import { useEditorVariableTokens } from "@/components/shared/EditorVariableTokens/useEditorVariableTokens";
 import { TimeTokenCard } from "@/components/shared/EditorVariableTokens/TimeTokenCard";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -44,18 +36,10 @@ import { cn } from "@/lib/utils";
 type EditorOptions = NonNullable<EditorProps["options"]>;
 
 /**
- * The app's scrollbar thickness, in px, as declared by `::-webkit-scrollbar` in
- * `index.css`.
- *
- * Monaco renders its own scrollbars as DOM inside the editor, so no stylesheet
- * rule reaches them and this is the only way to size them. It shipped at
- * Monaco's defaults - 14px vertical, 12px horizontal - which passed unnoticed
- * beside a 10px native bar and would be 2.3x one at 6px. An editor sits
- * directly beside plain scroll panes in the body and script panels, so the two
- * are read together.
- *
- * `scroll-area.test.ts` reads the number back out of the CSS and asserts it
- * matches this one, which is what keeps a third system from drifting again.
+ * The app's scrollbar thickness in px, as `::-webkit-scrollbar` in `index.css` declares it. Monaco
+ * draws its scrollbars as DOM no stylesheet reaches, so this is the only way to size them, and an
+ * editor sits beside plain scroll panes in the body and script panels, so the two are read
+ * together. `scroll-area.test.ts` reads the CSS number back and asserts it matches.
  */
 const SCROLLBAR_SIZE = 6;
 
@@ -66,32 +50,25 @@ const DEFAULT_OPTIONS = {
 	scrollBeyondLastLine: false,
 	wordWrap: "on",
 	tabSize: 2,
-	// Honor the user's configured tab width instead of inferring it from file
-	// content (Monaco defaults this on, which would override the preference).
+	// Honour the configured tab width rather than inferring it from content (Monaco's default would
+	// override the preference).
 	detectIndentation: false,
 	automaticLayout: true,
 	scrollbar: {
 		/*
-		 * Monaco defaults this to true, meaning it calls preventDefault() on every
-		 * wheel event over the editor - including when it has nothing to scroll.
-		 * An editor embedded in a scrollable panel therefore swallows the wheel
-		 * and the panel underneath cannot be scrolled past it.
-		 *
-		 * It shows up as "scrolling stops working after resizing", because before
-		 * the resize the panel fits and nothing needs to scroll; enlarge the
-		 * editor and it both creates the overflow and covers the area you would
-		 * otherwise put the cursor to scroll.
-		 *
-		 * false = consume the wheel only when the editor can actually act on it,
-		 * and let it bubble otherwise.
+		 * Monaco defaults this on, calling preventDefault() on every wheel event over the editor,
+		 * even with nothing to scroll, so an editor in a scrollable panel blocks scrolling the
+		 * panel past it. It reads as "scrolling stops after resizing": enlarging the editor creates
+		 * the overflow and covers where the cursor would scroll. false consumes the wheel only when
+		 * the editor can act on it.
 		 */
 		alwaysConsumeMouseWheel: false,
 
 		verticalScrollbarSize: SCROLLBAR_SIZE,
 		horizontalScrollbarSize: SCROLLBAR_SIZE,
 	},
-	// Render suggestion/hover/context-menu widgets in a body-level overlay so they
-	// are not clipped by editor containers with `overflow: hidden` + fixed height.
+	// Suggestion, hover and context-menu widgets in a body-level overlay, so `overflow: hidden`
+	// fixed-height containers cannot clip them.
 	fixedOverflowWidgets: true,
 	autoIndent: "full",
 	autoClosingBrackets: "always",
@@ -100,32 +77,16 @@ const DEFAULT_OPTIONS = {
 } satisfies EditorOptions;
 
 /**
- * The way out of the Tab trap, beside the editor that has one.
- *
- * Only while the editor holds focus: a keyboard user is told the chord at the
- * moment they need it, and the dozen editors in the app do not each carry a
- * standing badge over their content. Read-only editors never show it - they run
- * with `tabFocusMode` on, so Tab already leaves them and there is no trap to
- * advertise a way out of.
- *
- * Caps come from `chordKeys` and the `Kbd` primitive, like every other chord
- * this app puts on screen: a hand-rolled badge here would be a second spelling
- * of a modifier `lib/platform.ts` already spells per platform.
- *
- * Not `UrlBar`'s `Hint`, which is the app's other chord-on-focus pattern: that
- * one is a Radix `Tooltip` around a `TooltipTrigger asChild`, and Monaco's
- * `<Editor>` is not a ref-forwarding child a trigger can attach to. The shape
- * here is instead the floating-surface one every popover uses - `bg-popover`,
- * a border, a shadow.
- *
- * The border is not decoration and not `border-rule`. This chip is the one
- * surface in the app that floats over *Monaco's* canvas rather than over a
- * declared app surface, so there is no `--rule` to inherit and it would fall
- * back to the invisible default. The fill cannot be relied on to separate it
- * either: the canvas is painted from `--background` now, which `--popover`
- * sits a step above in dark and is 96% against white in light (#1321).
- * `border-border-strong` is the edge that reads on both, and it is the token
- * `Kbd` itself is built from.
+ * The way out of the Tab trap, beside the editor that has one. Only while the editor has focus, so
+ * the chord is told when needed and a dozen editors carry no standing badge; read-only editors
+ * never show it, as `tabFocusMode` lets Tab leave them. Caps come from `chordKeys` and `Kbd`, like
+ * every chord on screen, not a second spelling of `lib/platform.ts`'s modifiers. Not `UrlBar`'s
+ * `Hint` (a Radix `Tooltip` on a `TooltipTrigger asChild`): Monaco's `<Editor>` forwards no ref a
+ * trigger can attach to, so this takes the popover shape (`bg-popover`, a border, a shadow). The
+ * border is not `border-rule`: this is the one surface floating over Monaco's canvas rather than a
+ * declared app surface, so there is no `--rule` to inherit, and the fill cannot separate it (the
+ * canvas is `--background`, which `--popover` sits a step above in dark and is 96% against white in
+ * light, #1321). `border-border-strong` reads on both, and `Kbd` is built from it.
  */
 function LeaveEditorHint() {
 	return (
@@ -144,27 +105,19 @@ export interface CodeEditorProps {
 	value: string;
 	language: string;
 	/**
-	 * What this editor is, for a screen reader - "Request body", "Post-request script".
-	 *
-	 * Required rather than optional, and per call site rather than derived from
-	 * `language`: two editors can share a language and never the same job (the
-	 * GraphQL variables pane and the request body are both `json`), and a dozen
-	 * panes all announcing Monaco's default "Editor content" is the same as none
-	 * of them announcing anything. `code-editor.aria-label.test.tsx` holds the
-	 * labels distinct; the type holds them present.
+	 * What this editor is, for a screen reader ("Request body", "Post-request script"). Required
+	 * and per call site, not derived from `language`: two editors share a language and never a job
+	 * (GraphQL variables and the body are both `json`), and a dozen "Editor content" announcements
+	 * are none. `code-editor.aria-label.test.tsx` holds the labels distinct; the type holds them
+	 * present.
 	 */
 	ariaLabel: string;
 	/**
-	 * The URI of the Monaco model this editor shows, and with it the undo stack,
-	 * cursor and scroll that belong to it. Give one when a single editor serves
-	 * several documents (the request builder's, across request tabs): a changed
-	 * `value` is applied to the model in hand as an undoable edit, so without a
-	 * path of its own per document, undo in one restores another's text.
-	 *
-	 * The library never disposes a model on a path change, only the one the
-	 * editor holds at unmount: the caller that picks paths owns ending the rest
-	 * (`useRequestModelLifecycle`). Omitted, the editor keeps its one anonymous
-	 * model.
+	 * The Monaco model's URI, and with it its undo stack, cursor and scroll. Give one when an
+	 * editor serves several documents (the request builder's, across tabs): a changed `value` is
+	 * applied as an undoable edit, so without a path per document undo restores another's text. The
+	 * library disposes only the model held at unmount, so the caller picking paths ends the rest
+	 * (`useRequestModelLifecycle`). Omitted, the editor keeps one anonymous model.
 	 */
 	path?: string;
 	/** Coalesces Monaco's `string | undefined` to a plain string. */
@@ -199,10 +152,9 @@ export function CodeEditor({
 	const [loadFailed, setLoadFailed] = useState(false);
 	const [hasFocus, setHasFocus] = useState(false);
 	/*
-	 * `{{variable}}` colouring, hover and the edit chord (#1220), inert unless a
-	 * provider is above an editable editor; and the time underline (#1786), in
-	 * every editor whose language has a time matcher. The time card is drawn
-	 * here, below, because most read-only editors have no provider to draw it.
+	 * `{{variable}}` colouring, hover and edit chord (#1220), inert unless a provider is above an
+	 * editable editor; and the time underline (#1786) wherever the language has a time matcher. The
+	 * time card is drawn here, as most read-only editors have no provider to draw it.
 	 */
 	const { onMount: mountEditorTokens, timeHover } = useEditorVariableTokens({
 		language,
@@ -212,8 +164,7 @@ export function CodeEditor({
 	useEffect(() => {
 		let active = true;
 		void ensureMonaco().catch((error: unknown) => {
-			// Loud, not silent: without this the skeleton below would sit there
-			// forever looking like a slow load.
+			// Loud, not silent: otherwise the skeleton would sit forever looking like a slow load.
 			console.error("Monaco failed to load", error);
 			if (active) setLoadFailed(true);
 		});
@@ -223,10 +174,9 @@ export function CodeEditor({
 	}, []);
 
 	/*
-	 * Every editor gets the window chords Monaco would otherwise eat, here
-	 * rather than at each call site: it is the wrapper's job to make an editor
-	 * behave like the rest of the app, and there are a dozen of them (#938).
-	 * The caller's own `onMount` still runs.
+	 * Every editor gets the window chords Monaco would eat, here, not per call site: making an
+	 * editor behave like the app is the wrapper's job, and there are a dozen (#938). The caller's
+	 * `onMount` still runs.
 	 */
 	const handleMount = useCallback<OnMount>(
 		(instance, monaco) => {
@@ -237,9 +187,8 @@ export function CodeEditor({
 		[onMount, mountEditorTokens]
 	);
 
-	// User editor preferences override the shared defaults; an explicit
-	// `fontSize` prop still wins over the preference, and per-call `options`
-	// win over everything.
+	// User preferences override the shared defaults; an explicit `fontSize` prop beats the
+	// preference, and per-call `options` beat everything.
 	const prefOptions: EditorOptions = {
 		fontSize: fontSize ?? editor.fontSize,
 		fontFamily: monoStack,
@@ -276,23 +225,20 @@ export function CodeEditor({
 
 	return (
 		/*
-		 * The wrapper exists for the hint, which has to be positioned against the
-		 * editor's own box. `className` and `height` stay on it rather than on
-		 * `<Editor>` so every call site's layout reads exactly as it did - and so
-		 * the two states above, which already render their own box, keep the same
-		 * shape as this one.
+		 * The wrapper positions the hint against the editor's box. `className` and `height` stay on
+		 * it, not on `<Editor>`, so call sites lay out as before and the two states above, which
+		 * render their own box, keep its shape.
 		 */
 		<div
-			// Monaco carries its own context menu, so the app's must not open a
-			// second one over it (#1359). Marked rather than detected: an editor
-			// that stops the event before it bubbles still gets one menu, not two.
+			// Monaco has its own context menu, so the app's must not open over it (#1359). Marked,
+			// not detected: an editor stopping the event before it bubbles still gets one menu.
 			{...contextProps("monaco")}
 			className={cn("relative", className)}
 			style={{ height }}
 			onFocus={() => setHasFocus(true)}
 			onBlur={(e) => {
-				// Monaco moves focus between its own nodes (the hidden textarea, the
-				// find widget); only focus leaving the editor entirely counts.
+				// Monaco moves focus among its own nodes (the hidden textarea, the find widget);
+				// only focus leaving the editor counts.
 				if (!e.currentTarget.contains(e.relatedTarget)) setHasFocus(false);
 			}}
 		>
@@ -310,25 +256,21 @@ export function CodeEditor({
 					readOnly,
 					ariaLabel,
 					/*
-					 * Tab moves focus in an editor nobody can type into: there is no
-					 * indentation to insert, so Monaco's default is a keyboard trap
-					 * (WCAG 2.1.2) with nothing on the other side of it. The editable
-					 * editors keep Tab and get `LEAVE_EDITOR_CHORD` plus the hint above.
+					 * Tab moves focus in an editor nobody types into: with no indentation to
+					 * insert, Monaco's default is a keyboard trap (WCAG 2.1.2). Editable editors
+					 * keep Tab and get `LEAVE_EDITOR_CHORD` plus the hint.
 					 */
 					tabFocusMode: readOnly,
 					/*
-					 * Monaco stops painting a line after 10,000 columns (the rest is
-					 * simply not drawn) which, in a viewer, hides part of the one thing
-					 * the user opened it to read: a minified response is a single line.
-					 * -1 draws all of it. An editable model keeps the default, since
-					 * painting a very long line while typing in it is the cost the
-					 * limit exists to cap. `options` below can still override either.
+					 * Monaco stops painting a line after 10,000 columns, which in a viewer hides
+					 * part of a minified response (one line); -1 draws it all. An editable model
+					 * keeps the default, as painting a very long line while typing is the cost it
+					 * caps. `options` can override either.
 					 */
 					stopRenderingLineAfter: readOnly ? -1 : undefined,
 					...options,
-					// `scrollbar` is a nested object, so a caller passing one of its keys
-					// would otherwise replace the whole thing and silently drop the
-					// wheel-propagation default above. Merge it a level deeper.
+					// `scrollbar` is nested, so a caller's key would replace the object and drop
+					// the wheel default above; merged a level deeper.
 					scrollbar: { ...DEFAULT_OPTIONS.scrollbar, ...options?.scrollbar },
 				}}
 			/>

@@ -6,33 +6,26 @@
  */
 
 /**
- * Theme store
- *
- * Light/dark mode, the accent colour scheme and the "match system accent"
- * preference - and the single place the document is told about them.
- * `useElectronTheme` is the React face; the Electron `theme:changed` /
- * `accent:changed` subscriptions and the localStorage writes live here and are
+ * Light/dark mode, the accent colour scheme and the "match system accent" preference, and the one
+ * place the document is told about them. `useElectronTheme` is the React face; the Electron
+ * `theme:changed` / `accent:changed` subscriptions and the localStorage writes live here and are
  * registered once, by `attach`.
  *
- * Why a store rather than `useState` inside the hook (#1855): the hook is
- * mounted three times (the app shell, the Appearance panel, the command
- * palette). Each instance held its own copy of the scheme and re-applied it to
- * `<html>` on every `theme:changed`, so an instance that had not seen the
- * panel's pick wrote the stale scheme back over it. Here the DOM is always
- * derived from the store's current fields (`writeDocument`), so there is no
- * copy to go stale.
+ * A store rather than `useState` inside the hook (#1855) because the hook is mounted three times
+ * (the app shell, the Appearance panel, the command palette): an instance holding its own copy of
+ * the scheme re-applied it to `<html>` on every `theme:changed`, so one that had not seen the
+ * panel's pick wrote the stale scheme back over it. Here the DOM always derives from the store's
+ * current fields (`writeDocument`), so there is no copy to go stale.
  *
- * Two fields carry the accent, and neither overwrites the other (#1861):
- * `colorScheme` is the user's manual pick and `systemAccent` is the last scheme
- * the OS reported. The scheme on screen is derived from them
- * (`effectiveColorScheme`), so turning "match system accent" off returns to the
- * manual pick instead of to whatever the OS last said.
+ * Two fields carry the accent, and neither overwrites the other (#1861): `colorScheme` is the
+ * user's manual pick and `systemAccent` the last scheme the OS reported. The scheme on screen
+ * derives from both (`effectiveColorScheme`), so turning "match system accent" off returns to the
+ * manual pick, not to whatever the OS last said.
  *
- * Persistence is one localStorage key per preference, written by the action
- * rather than zustand's `persist`: the pre-paint script in index.html reads
- * the theme-source, colour-scheme, match-flag and system-accent keys before
- * React mounts, and `SETTINGS_STORAGE_KEYS` clears all four on "Reset app
- * settings".
+ * Persistence is one localStorage key per preference, written by the action, not zustand's
+ * `persist`: the pre-paint script in index.html reads the theme-source, colour-scheme, match-flag
+ * and system-accent keys before React mounts, and `SETTINGS_STORAGE_KEYS` clears all four on "Reset
+ * app settings".
  */
 
 import { create } from "zustand";
@@ -91,9 +84,8 @@ const INITIAL_STATE = {
 } as const satisfies Partial<ThemeState>;
 
 /**
- * The scheme on screen: the OS accent while matching it and the OS has reported
- * one, the manual pick otherwise. index.html's pre-paint script applies the same
- * rule to the stored keys.
+ * The scheme on screen: the OS accent while matching it and the OS has reported one, the manual
+ * pick otherwise. index.html's pre-paint script applies the same rule to the stored keys.
  */
 export function effectiveColorScheme(
 	state: Pick<ThemeState, "colorScheme" | "systemAccent" | "matchSystemAccent">
@@ -130,13 +122,12 @@ async function resolveFromElectron(
 	api: NonNullable<typeof window.electronAPI>,
 	savedSource: string | null
 ): Promise<Resolved> {
-	// Both asked at once: neither answer depends on the other, and in sequence
-	// the second round trip to the main process waited out the first while the
-	// window was painting its first frame.
+	// Both asked at once: neither answer depends on the other, and in sequence the second round
+	// trip to the main process would wait out the first while the window paints its first frame.
 	//
-	// The main process answers `accent:get` on every platform, but only resolves
-	// a scheme on Windows/macOS - Linux has no OS accent colour, so accentScheme
-	// comes back null there and the toggle must not appear at all.
+	// The main process answers `accent:get` on every platform but resolves a scheme only on
+	// Windows/macOS: Linux has no OS accent colour, so accentScheme comes back null there and the
+	// toggle must not appear at all.
 	let [theme, accentInfo] = await Promise.all([api.getTheme(), api.getAccentScheme()]);
 	// `nativeTheme.themeSource` is process state that starts at "system" on every
 	// launch, so `theme` above is the default, not the user's choice. Push the
@@ -171,9 +162,8 @@ export const useThemeStore = create<ThemeState>((set, get) => {
 	};
 
 	/**
-	 * Remember what the OS reported, whether or not it is being matched: the
-	 * pre-paint script and a later toggle both need the latest one. The document
-	 * only changes if matching is on.
+	 * Remember what the OS reported, matched or not: the pre-paint script and a later toggle both
+	 * need the latest one. The document changes only if matching is on.
 	 */
 	const recordSystemAccent = (accent: ColorScheme): void => {
 		localStorage.setItem(STORAGE_KEYS.SYSTEM_ACCENT, accent);

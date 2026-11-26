@@ -6,12 +6,9 @@
  */
 
 /**
- * @file http/routes/mock_issuer.cpp
- * @brief The local OAuth 2.0 mock issuer - manager, spawned listener, and the
- *        `/mock-issuer` lifecycle routes.
- *
- * Lives with the routes for the same reason `oauth_authorize.cpp` does: the
- * spawned listener needs httplib, which is linked into the engine and the test
+ * The local OAuth 2.0 mock issuer: manager, spawned listener and the
+ * `/mock-issuer` lifecycle routes. With the routes, as `oauth_authorize.cpp`
+ * is, because the listener needs httplib, linked into the engine and the test
  * binary but not into `vayu_core`.
  */
 
@@ -698,11 +695,10 @@ std::string& scope) {
 }
 
 /**
- * Spends a refresh token. Rotation: the presented token is spent here, and
- * `mint_token_response` issues its replacement - so a client that keeps the old
- * one fails, which is exactly the path worth being able to exercise locally.
- *
- * Called with `issuer.state_mutex` held.
+ * Spends a refresh token. Rotation: the presented token is spent here and
+ * `mint_token_response` issues its replacement, so a client keeping the old one
+ * fails, the path worth exercising locally. Called with `issuer.state_mutex`
+ * held.
  */
 bool redeem_refresh_token (Issuer& issuer,
 const ClientAuth& auth,

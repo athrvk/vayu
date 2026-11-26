@@ -8,49 +8,48 @@
  */
 
 /**
- * @file http/curl_options.hpp
- * @brief The typed seam over libcurl's three variadic entry points - issue
- *        #1023's answer to `cppcoreguidelines-pro-type-vararg`.
+ * @brief The typed seam over libcurl's three variadic entry points, #1023's
+ *        answer to `cppcoreguidelines-pro-type-vararg`.
  *
  * `curl_easy_setopt`, `curl_multi_setopt` and `curl_easy_getinfo` are
- * `(handle, constant, ...)`. The variadic argument is read back as whatever
- * the constant says it should be, and nothing checks that the caller passed
- * that: `curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, 30000)` compiles, and
- * libcurl then reads a `long` out of an `int`'s promotion slot. Passing an
- * `int*` where `CURLINFO_RESPONSE_CODE` writes a `long` is the same defect
- * pointing the other way, and that one corrupts the stack.
+ * `(handle, constant, ...)`. The variadic argument is read back as whatever the
+ * constant says it should be, and nothing checks that the caller passed that:
+ * `curl_easy_setopt (curl, CURLOPT_TIMEOUT_MS, 30000)` compiles, and libcurl
+ * then reads a `long` out of an `int`'s promotion slot. Passing an `int*` where
+ * `CURLINFO_RESPONSE_CODE` writes a `long` is the same defect pointing the
+ * other way, and that one corrupts the stack.
  *
  * Every option and info constant carries its own argument type. An option is
- * `CURLOPTTYPE_<category> + index`, the categories a decade apart
- * (`LONG` 0, `OBJECTPOINT` 10000, `FUNCTIONPOINT` 20000, `OFF_T` 30000,
- * `BLOB` 40000), and `CURLoption` and `CURLMoption` use the same encoding -
- * which is what lets one name serve both handle kinds. An info constant packs
- * its category into the high nibbles under `CURLINFO_TYPEMASK`. So the
- * constant, taken as a template argument, is enough to say what the call has
- * to be given, and to say it at compile time.
+ * `CURLOPTTYPE_<category> + index`, the categories a decade apart (`LONG` 0,
+ * `OBJECTPOINT` 10000, `FUNCTIONPOINT` 20000, `OFF_T` 30000, `BLOB` 40000), and
+ * `CURLoption` and `CURLMoption` use the same encoding - which is what lets one
+ * name serve both handle kinds. An info constant packs its category into the
+ * high nibbles under `CURLINFO_TYPEMASK`. So the constant, taken as a template
+ * argument, is enough to say what the call has to be given, and to say it at
+ * compile time.
  *
- * That is what these wrappers do, and the vararg call each of them makes is
- * the only one left in the engine. The `NOLINT` lives here, once, on the
+ * That is what these wrappers do, and the vararg call each of them makes is the
+ * only one left in the engine. The `NOLINT` lives here, once, on the
  * `curl_error_buffer.hpp` pattern: a primitive owning a rule, rather than the
  * ~120 per-site suppressions the alternative reading of that check is.
  *
- * **Why only the Windows leg ever reported this.** libcurl 8.21 wraps all
- * three names in macros - but not the type-checking ones, whose guard reads
+ * **Why only the Windows leg ever reported this.** libcurl 8.21 wraps all three
+ * names in macros - but not the type-checking ones, whose guard reads
  * `!defined(__cplusplus)` ("the typechecker does not work in C++ (yet)"). What
- * C++ gets is `curl_exactly_three_arguments`, an arity check, and it is
- * defined only `#if defined(__STDC__) && (__STDC__ >= 1)`. GCC and Clang
- * define `__STDC__`; MSVC does not, absent `/Za`. So on Linux the call sits
- * inside a macro from a system header and clang-tidy attributes the finding
- * there and drops it, while on Windows the very same source is a plain call
- * the check reports - the ~85 findings #1022 surfaced the first time this leg
- * ran whole-file. A local run reproduces the Windows reading exactly by
- * knocking that macro out: `clang-tidy --extra-arg=-U__STDC__`.
+ * C++ gets is `curl_exactly_three_arguments`, an arity check, and it is defined
+ * only `#if defined(__STDC__) && (__STDC__ >= 1)`. GCC and Clang define
+ * `__STDC__`; MSVC does not, absent `/Za`. So on Linux the call sits inside a
+ * macro from a system header and clang-tidy attributes the finding there and
+ * drops it, while on Windows the very same source is a plain call the check
+ * reports - the ~85 findings #1022 surfaced the first time this leg ran
+ * whole-file. A local run reproduces the Windows reading exactly by knocking
+ * that macro out: `clang-tidy --extra-arg=-U__STDC__`.
  *
  * **Cost.** None. Each wrapper is a header-inline forward to the same libcurl
  * call with the same arguments; the `if constexpr` picks one branch at compile
- * time and the casts are on constants the site already spelled. The load
- * path's per-transfer setup (`curl_utils.cpp`) emits the instructions it
- * emitted before.
+ * time and the casts are on constants the site already spelled. The load path's
+ * per-transfer setup (`curl_utils.cpp`) emits the same instructions as the bare
+ * calls.
  */
 
 #include <curl/curl.h>

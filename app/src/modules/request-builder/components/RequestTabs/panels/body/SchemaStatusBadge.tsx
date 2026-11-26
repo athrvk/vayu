@@ -6,19 +6,10 @@
  */
 
 /**
- * What the GraphQL body says about the schema in one line, and the text tier the
- * body's other badges are built from.
- *
- * Its own module because it once had two renderers - the schema explorer's
- * header and the Query pane's chip - and a second copy in one of them would be a
- * copy that does not receive the other's fixes; the two used to say the same
- * thing in different words from different panes, which is the split #455 was
- * filed about. The badge now renders once, in the Query header's schema control,
- * in the same place whether the explorer is open or shut (#1224). `BadgeText`,
- * the tier under it, still has other callers in the body.
- *
- * The sentence itself lives in `lib/graphql/schema-status.ts`, pure and beside
- * the store it reads.
+ * The GraphQL body's one-line schema status, and the text tier the body's other badges build on. A
+ * module of its own so no copy misses its fixes (#455). It renders once, in the Query header's
+ * schema control, wherever the explorer is (#1224); `BadgeText` has other callers. The sentence is
+ * `lib/graphql/schema-status.ts`, pure, beside the store it reads.
  */
 
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
@@ -51,11 +42,8 @@ export function BadgeText({
 }
 
 /**
- * Every word this badge can say.
- *
- * The finite set is what makes the width reservation below correct, and there
- * being a finite set at all is why `LabelSwap` fits here and does not fit a
- * `TabCount` - see the `LabelSwap` paragraph in `docs/design-system.md`.
+ * Every word the badge can say. A finite set is what makes the width reservation below correct, and
+ * why `LabelSwap` fits here but not `TabCount` (see `docs/design-system/motion.md`, `LabelSwap`).
  */
 const SCHEMA_WORDS = ["Schema", "Schema stale", "No schema", "Load schema"] as const;
 
@@ -69,14 +57,14 @@ type SchemaBadgeFace = {
 function schemaBadgeFace(entry: SchemaEntry | null, awaitingLoad: boolean): SchemaBadgeFace {
 	const status = entry?.status ?? "idle";
 
-	// The action is the face while nothing has loaded and the cache is holding
-	// off; once an entry says anything else, what it says is the truth.
+	// The action is the face while nothing loaded and the cache is holding off; once an entry says
+	// anything else, that is the truth.
 	if (awaitingLoad && status === "idle") {
 		return { tone: "text-muted-foreground", word: "Load schema", glyph: null };
 	}
 
-	// No status has been established yet, and inventing one reads as a claim -
-	// so this is the one face with no glyph and the neutral word.
+	// No status yet, and inventing one reads as a claim: the one face with no glyph and a neutral
+	// word.
 	if (status === "idle") return { tone: "text-muted-foreground", word: "Schema", glyph: null };
 
 	if (status === "loading") {
@@ -96,9 +84,8 @@ function schemaBadgeFace(entry: SchemaEntry | null, awaitingLoad: boolean): Sche
 	}
 
 	/*
-	 * A refresh that failed over a schema that loaded earlier is not "no schema":
-	 * the editors still complete against the last good one, so the badge says it
-	 * is stale rather than claiming there is nothing.
+	 * A failed refresh over an earlier schema is not "no schema": the editors still complete
+	 * against the last good one, so the badge says stale.
 	 */
 	if (entry?.schema) {
 		return {
@@ -116,37 +103,18 @@ function schemaBadgeFace(entry: SchemaEntry | null, awaitingLoad: boolean): Sche
 }
 
 /**
- * What the schema is doing, in a badge that is always exactly as wide.
+ * The schema's state, in a badge of constant width. `SchemaControls` puts the explorer toggle, this
+ * badge and Refresh in one row, Refresh *after* the badge, so any width change moves Refresh: the
+ * idle face had no glyph, "Schema stale" and "No schema" are longer than "Schema", and a refresh
+ * walks idle/ready -> loading -> ready, sliding the button from under the pointer, so a second
+ * press hits the toggle. This is what makes `SchemaControls`' "one row that does not move" true.
  *
- * **It used to change width four ways, and it is not alone in its row.**
- * `SchemaControls` puts the explorer toggle, this badge and Refresh in one
- * `flex` row - Refresh *after* the badge - and the row itself leads the Query
- * pane's header, with the pane title after it. So every state this badge took
- * moved the Refresh button: the idle face carried no glyph at all (`size-icon-sm`
- * plus the row's `gap-1`), and "Schema stale" and "No schema" are longer words
- * than "Schema". Pressing Refresh walks the badge idle/ready -> loading ->
- * ready, which is two width changes in a row, both of them sliding the button
- * out from under the pointer that just pressed it - and a user pressing it
- * twice hits the toggle beside it instead. `SchemaControls`' own doc comment
- * opens with "one row that does not move"; this is what makes that true.
- *
- * Two reservations, because there are two things that change - and both are
- * genuinely reserved, not animated, unlike `TabCount`'s `MARK_TRACK` or the
- * Dock's `SaveStatusLine`. Those cost width only for what they measure
- * (nothing to count, nothing to save); this badge sits *before* a button a
- * user has just pressed, so a track that grows into place would still slide
- * Refresh out from under a second click while it animates, which is the exact
- * hazard this component exists to remove. A fixed slot has no such window.
- * The glyph gets a fixed box (`size-icon-sm`) that is always there and empty
- * for `idle`, since a glyph is a mark that mounts. The word goes through
- * `LabelSwap`, which sizes its cell to the widest of `SCHEMA_WORDS` - the
- * `TabLabel` trick, and the right one here precisely because the set is three
- * known strings rather than a number.
- *
- * **Rendered unconditionally**, the contract `TabCount` states for the same
- * reason: it no longer returns `null` for `idle`, so no call site has to
- * remember a fallback, and the fallback the Query header used to hand-roll for
- * that case (a plain `Schema` label) is now this component's `idle` face.
+ * Two genuine reservations, not animations (unlike `TabCount`'s `MARK_TRACK` or the Dock's
+ * `SaveStatusLine`): a track growing into place would still slide Refresh under a second click. The
+ * glyph has a fixed `size-icon-sm` box, empty for `idle`; the word goes through `LabelSwap`, sized
+ * to the widest of `SCHEMA_WORDS` (the `TabLabel` trick), right here because the set is four known
+ * strings, not a number. **Rendered unconditionally**, `TabCount`'s contract: never `null` for
+ * `idle`, so no call site needs a fallback.
  */
 export function SchemaStatusBadge({
 	entry,
@@ -155,10 +123,9 @@ export function SchemaStatusBadge({
 }: {
 	entry: SchemaEntry | null;
 	/**
-	 * The cache declined to load this schema on its own (the endpoint is not
-	 * one the user has contacted). The badge then says **Load schema** as a
-	 * button running `onLoad`, which is the one place the badge is a target - the
-	 * Refresh beside it stays unconditional and is the other way to ask.
+	 * The cache declined to load this schema itself (an endpoint the user has not contacted): the
+	 * badge says **Load schema** as a button running `onLoad`, its one target state; Refresh beside
+	 * it stays the other way to ask.
 	 */
 	awaitingLoad?: boolean;
 	onLoad?: () => void;

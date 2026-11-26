@@ -6,9 +6,8 @@
  */
 
 /**
- * @file core/spec_coverage.cpp
- * @brief Implementation of contract coverage (issue #629). See the header for
- *        why the operation index is supplied rather than parsed here.
+ * Contract coverage (#629); the header says why the operation index is supplied
+ * rather than parsed here.
  */
 
 #include "vayu/core/spec_coverage.hpp"
@@ -37,12 +36,10 @@ bool all_digits (const std::string& value) {
 }
 
 /**
- * Whether @p pattern names @p status *exactly* - `"200"` for 200.
- *
- * Range and `default` patterns are deliberately not folded in here: matching is
- * layered most-specific-first below, which is the precedence OpenAPI itself
- * gives the three kinds. Folding them together would let a `2XX` declaration
- * count as hit by a status the operation's own `200` row already answered.
+ * Whether @p pattern names @p status exactly (`"200"` for 200). Ranges and
+ * `default` stay out: matching is layered most-specific-first below, OpenAPI's
+ * own precedence, and folding them in would count a `2XX` as hit by a status
+ * the operation's `200` already answered.
  */
 bool matches_exact (const std::string& pattern, int status) {
     return pattern.size () == 3 && all_digits (pattern) && std::stoi (pattern) == status;
@@ -61,12 +58,11 @@ bool matches_range (const std::string& pattern, int status) {
     return status >= hundreds * 100 && status < (hundreds + 1) * 100;
 }
 
-/// Serialize at most `MAX_STATUSES_PER_OPERATION` codes, ascending. Every code
-/// it emits joins @p shown, which is what lets the row name the distinct
-/// statuses it hides rather than the entries the two lists dropped between them
-/// (issue #786): `undeclaredSeen` is a subset of `statusesSeen`, so a counter
-/// shared by the two calls counts a code past both caps twice, and a code the
-/// undeclared list still carries is not hidden at all.
+/// At most `MAX_STATUSES_PER_OPERATION` codes, ascending. Every emitted code
+/// joins @p shown, so the row can name the distinct statuses it hides rather
+/// than the entries the two lists dropped (#786): `undeclaredSeen` is a subset
+/// of `statusesSeen`, so a counter shared by both calls would count a code past
+/// both caps twice, and a code the undeclared list still carries is not hidden.
 nlohmann::json capped_statuses (const std::set<int>& codes, std::set<int>& shown) {
     nlohmann::json out = nlohmann::json::array ();
     for (const int code : codes) {
@@ -227,10 +223,10 @@ const std::optional<std::string>& stored) {
 
 OperationIndex::OperationIndex (const std::vector<DeclaredOperation>& declared) {
     for (size_t i = 0; i < declared.size (); ++i) {
-        // First writer wins in both maps. A document that declares one
-        // `operationId` (or one `METHOD path`) twice is malformed, and resolving
-        // to whichever row was seen last would make coverage depend on the order
-        // the index happened to be written in.
+        // First writer wins in both maps. A document declaring one
+        // `operationId` (or `METHOD path`) twice is malformed, and taking the
+        // last row seen would make coverage depend on the order the index was
+        // written in.
         if (!declared[i].operation_id.empty ()) {
             by_operation_id_.emplace (declared[i].operation_id, i);
         }
@@ -455,7 +451,7 @@ size_t undeclared_operation_requests) {
 
     // The three plain numbers a CLI gate would threshold on sit at the top
     // level, shaped like `thresholdValidation`'s counts, so #473 can adopt them
-    // without reshaping the block (documented, not implemented).
+    // unchanged (documented, not implemented).
     nlohmann::json coverage{ { "operationsTotal", declared.size () },
         { "operationsCovered", totals.operations_covered },
         { "declaredResponsesTotal", totals.declared_total },

@@ -6,11 +6,10 @@
  */
 
 /**
- * @file prompts.ts
  * @brief MCP prompts - server-provided, parameterized starting points the user
  *        picks from their client (e.g. a slash menu). Each builds a ready-to-run
  *        message, embedding the relevant engine data (run report / comparison)
- *        so the agent has the context inline. See docs/engine/mcp.md.
+ *        so the agent has the context inline. See docs/engine/mcp/resources-and-prompts.md.
  */
 
 import { z } from "zod";

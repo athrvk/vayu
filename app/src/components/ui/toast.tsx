@@ -6,33 +6,21 @@
  */
 
 /**
- * Toast primitive
+ * The shadcn/Radix toast in Vayu tokens. `stores/toast-store.ts` decides *what* shows; this and the
+ * primitive own *when* and *how*: the dismiss timer, pausing on hover, focus and window blur,
+ * swipe-to-dismiss, and the `data-state` the exit animation keys off.
  *
- * The shadcn/Radix toast, wearing Vayu tokens. The store in
- * `stores/toast-store.ts` decides *what* is shown; this file and the primitive
- * underneath it own *when* and *how* - the dismiss timer, pausing on hover,
- * focus and window blur, swipe-to-dismiss, and the `data-state` the exit
- * animation keys off.
+ * Variant colour lives here, not at the call site, carried by an icon plus a left rail, never
+ * colour alone: a 40%-alpha border alone made a dark error and info toast near-indistinguishable
+ * (`--destructive` is `0 62.8% 30.6%` there, little left at 40% over `--popover`'s `240 6% 11%`).
  *
- * Variant colour lives here rather than at the call site, and it is carried by
- * an icon plus a left rail, never by colour alone. The hand-rolled version this
- * replaces signalled variant with a 40%-alpha border and nothing else, which in
- * dark mode made an error and an info toast near-indistinguishable:
- * `--destructive` is `0 62.8% 30.6%` there, and at 40% over `--popover`
- * (`240 6% 11%`) there is almost nothing left to see.
+ * One token family, not one tier: `--status-*` for a rule, `--status-*-text` where the colour is
+ * text, `--status-*-fill` only under a white label. So the rail takes `--status-*` and the glyph,
+ * painted with `text-`, takes `--status-*-text`.
  *
- * One token family for all four variants, but not one tier. Per the design
- * system the three status tokens are not interchangeable: `--status-*` for a
- * rule, `--status-*-text` where the colour *is* the text, `--status-*-fill` only
- * under a white label. So the rail takes the bare `--status-*` and the glyph -
- * painted with a `text-` utility - takes `--status-*-text`. `border-destructive`
- * is gone.
- *
- * The outer edge stays `border-border`. That edge faces the canvas, which is
- * the case the design system calls correct for `border-border`; it is
- * deliberately not `border-rule`, because no `surface-popover` class is
- * declared and `border-rule` under no declared surface silently falls back to
- * the invisible default.
+ * The outer edge is `border-border`: it faces the canvas, the case the design system names for it.
+ * Not `border-rule`, as no `surface-popover` is declared and `border-rule` would fall back to the
+ * invisible default.
  */
 
 import * as React from "react";
@@ -54,38 +42,22 @@ function ToastViewport({
 			data-slot="toast-viewport"
 			className={cn(
 				/*
-				 * z-[100] against the dialogs' z-50, but the number is not what
-				 * settles it: a dialog portals to `document.body` while this
-				 * viewport lives inside `#root`, so they are sibling subtrees and a
-				 * stacking context on any ancestor would scope this z-index inside
-				 * it and let DOM order win instead. It matters because
-				 * `SaveRunToRequestDialog` reports its failure while still open -
-				 * the one path where losing would make a failure invisible.
-				 *
-				 * So it was hit-tested rather than reasoned about:
-				 * `elementFromPoint` at the toast's centre, with an overlay and
-				 * panel mounted at z-50, returns the toast's own content.
-				 *
-				 * The edge offset clears app chrome rather than being a round
-				 * number. `fixed` anchors to the window, not to the layout, so a
-				 * plain `bottom-4` put the stack 16px off the window floor - inside
-				 * the Dock's 32px band, covering its lower half including
-				 * "Connected" and the version string. Measured: viewport bottom at
-				 * 704px against a Dock top of 688px. The same trap waits at the top
-				 * edge, where the tab strip lives.
-				 *
-				 * `w-xs` (20rem, Tailwind's container scale) rather than `w-80`: the
-				 * width is a text measure, not rhythm, and `w-80` rides `--spacing`,
-				 * which made the stack 240px at the Default density.
+				 * z-[100] against the dialogs' z-50, but DOM structure settles it: a dialog portals
+				 * to `document.body` while this viewport is inside `#root`, sibling subtrees, so a
+				 * stacking context on an ancestor would scope this z-index and let DOM order win.
+				 * It matters because `SaveRunToRequestDialog` reports its failure while open, where
+				 * losing hides the failure. Hit-tested: `elementFromPoint` at the toast's centre,
+				 * with an overlay and panel at z-50, returns the toast. `w-xs` (20rem, Tailwind's
+				 * container scale), not `w-80`: a text measure, and `w-80` rides `--spacing` (240px
+				 * at Default).
 				 */
 				"fixed z-[100] flex max-h-screen w-xs max-w-[calc(100vw-2rem)] flex-col gap-2 outline-none",
 				/*
-				 * The edge offsets are no longer here: the stack is user-positioned
-				 * (Settings -> Notifications), so which corner it anchors to and
-				 * which chrome it has to clear both come from
-				 * `TOAST_POSITIONS[].className` in constants/toast.ts. Every entry
-				 * there still goes through --dock-height or --titlebar-height for
-				 * the same reason the single hardcoded corner did.
+				 * The edge offsets are the user's corner (Settings -> Notifications), from
+				 * `TOAST_POSITIONS[].className` in constants/toast.ts. Each clears app chrome
+				 * through `--dock-height` or `--titlebar-height`: `fixed` anchors to the window, so
+				 * a bare `bottom-4` sat inside the Dock's 32px band, over "Connected" and the
+				 * version.
 				 */
 				className
 			)}
@@ -105,13 +77,9 @@ function Toast({
 		<ToastPrimitives.Root
 			data-slot="toast"
 			/*
-			 * "background", always, including errors - Radix's word for polite.
-			 *
-			 * Inherited unchanged from the component this replaces, where it was
-			 * argued out: a toast dismisses itself on a timer, and every toast in
-			 * this app reports the outcome of something the user just did, so
-			 * they are already waiting for the answer. Interrupting whatever they
-			 * are reading is the wrong trade. "foreground" would make it
+			 * "background", always, errors included (Radix's word for polite): a toast dismisses on
+			 * a timer and reports the outcome of something the user just did, so they are waiting
+			 * for it, and interrupting what they read is the wrong trade. "foreground" is
 			 * assertive.
 			 */
 			type="background"
@@ -129,10 +97,9 @@ const VARIANT_ICON: Record<ToastVariantName, React.ComponentType<{ className?: s
 };
 
 /**
- * `-text`, not the bare `--status-*`, because these are painted with a `text-`
- * utility onto the popover surface. The rail above is a rule and correctly takes
- * the bare token; a glyph is foreground and takes the tier tuned to be read
- * against a background. Enforced repo-wide by `status-color-tokens.test.ts`.
+ * `-text`, not the bare `--status-*`: painted with `text-` on the popover, a glyph is foreground
+ * and takes the tier tuned to be read; the rail is a rule and takes the bare token. Enforced by
+ * `status-color-tokens.test.ts`.
  */
 const VARIANT_ICON_CLASS: Record<ToastVariantName, string> = {
 	info: "text-muted-foreground",
@@ -142,9 +109,8 @@ const VARIANT_ICON_CLASS: Record<ToastVariantName, string> = {
 };
 
 /**
- * The redundant half of the signal. Colour alone fails anyone who cannot
- * separate the hues, and it failed everyone in dark mode; the glyph carries the
- * meaning on its own.
+ * The redundant half of the signal: colour alone fails anyone who cannot separate hues, and failed
+ * everyone in dark; the glyph carries the meaning alone.
  */
 function ToastIcon({ variant }: { variant: ToastVariantName }) {
 	const Icon = VARIANT_ICON[variant];
@@ -183,8 +149,7 @@ function ToastAction({ className, ...props }: React.ComponentProps<typeof ToastP
 	return (
 		<ToastPrimitives.Action
 			data-slot="toast-action"
-			// `h-control-sm` (issue #1679, 24px - was `h-7`/21px, under the WCAG
-			// 2.2 SC 2.5.8 floor).
+			// `h-control-sm` (#1679, 24px): `h-7` was 21px, under WCAG 2.2 SC 2.5.8.
 			className={cn(
 				"mt-1.5 inline-flex h-control-sm shrink-0 items-center self-start rounded-md border border-border px-2.5",
 				"text-xs font-medium transition-colors hover:bg-muted",
@@ -200,9 +165,8 @@ function ToastClose({ className, ...props }: React.ComponentProps<typeof ToastPr
 	return (
 		<ToastPrimitives.Close
 			data-slot="toast-close"
-			// `size-target` (issue #1679, 24px), replacing the padding-derived
-			// ~22px box: the icon shrinks to `size-icon-sm` (12px) inside it
-			// rather than growing the target past the floor it needs to clear.
+			// `size-target` (#1679, 24px), not a padding-derived ~22px box; the icon shrinks to
+			// `size-icon-sm` (12px) inside rather than growing the target.
 			className={cn(
 				"flex size-target shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors",
 				"hover:bg-muted hover:text-foreground",

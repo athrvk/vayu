@@ -32,6 +32,17 @@ add_executable(vayu_tests
     ordered_json_parse_test.cpp
     invariant_test.cpp
     optional_assert_test.cpp
+    script_engine_async_test.cpp
+    script_engine_encoding_test.cpp
+    script_engine_execution_test.cpp
+    script_engine_expect_chai_test.cpp
+    script_engine_expect_test.cpp
+    script_engine_legacy_test.cpp
+    script_engine_request_test.cpp
+    script_engine_require_assertions_test.cpp
+    script_engine_require_test.cpp
+    script_engine_response_test.cpp
+    script_engine_variables_test.cpp
     script_engine_test.cpp
     script_expect_message_test.cpp
     script_response_assertions_test.cpp
@@ -42,6 +53,11 @@ add_executable(vayu_tests
     script_completions_test.cpp
     script_types_test.cpp
     event_loop_test.cpp
+    db_migration_repair_test.cpp
+    db_migration_test.cpp
+    db_migration_versions_test.cpp
+    db_run_retention_test.cpp
+    db_run_summary_test.cpp
     db_test.cpp
     db_layout_test.cpp
     config_seed_test.cpp
@@ -65,6 +81,9 @@ add_executable(vayu_tests
     sse_frame_counter_test.cpp
     sse_load_stream_test.cpp
     load_stream_events_test.cpp
+    sse_stream_execute_body_test.cpp
+    sse_stream_execute_test.cpp
+    sse_stream_relay_test.cpp
     sse_stream_test.cpp
     change_feed_test.cpp
     server_bind_test.cpp
@@ -90,7 +109,12 @@ add_executable(vayu_tests
     requests_route_test.cpp
     examples_route_test.cpp
     specs_route_test.cpp
+    runs_route_report_sections_test.cpp
+    runs_route_report_summary_test.cpp
+    runs_route_report_test.cpp
+    runs_route_rows_test.cpp
     runs_route_test.cpp
+    runs_route_write_test.cpp
     collections_route_test.cpp
     resource_write_route_test.cpp
     error_shape_route_test.cpp
@@ -123,6 +147,9 @@ add_executable(vayu_tests
     live_metrics_route_test.cpp
     execution_timeout_test.cpp
     execution_http_version_test.cpp
+    load_strategy_capacity_test.cpp
+    load_strategy_elements_test.cpp
+    load_strategy_pacing_test.cpp
     load_strategy_test.cpp
     load_data_test.cpp
     load_identity_test.cpp
@@ -137,6 +164,9 @@ add_executable(vayu_tests
     threshold_eval_test.cpp
     capacity_controller_test.cpp
     monitor_test.cpp
+    run_manager_live_frames_test.cpp
+    run_manager_load_clock_test.cpp
+    run_manager_summary_test.cpp
     run_manager_test.cpp
     run_route_test.cpp
     run_stop_test.cpp
@@ -161,6 +191,7 @@ add_executable(vayu_tests
     if_match_route_test.cpp
     entity_tag_test.cpp
     request_body_parse_scan_test.cpp
+    header_min_max_scan_test.cpp
     user_error_wording_scan_test.cpp
     execute_auth_provenance_test.cpp
     execute_binary_body_test.cpp
@@ -198,8 +229,14 @@ add_executable(vayu_tests
     inline_collection_scope_test.cpp
     target_policy_test.cpp
     scenario_data_test.cpp
+    scenario_load_breakdown_test.cpp
+    scenario_load_rows_test.cpp
     scenario_load_test.cpp
+    scenario_load_variables_test.cpp
     scenario_plan_test.cpp
+    scenario_runner_data_test.cpp
+    scenario_runner_events_test.cpp
+    scenario_runner_flow_test.cpp
     scenario_runner_test.cpp
     script_levels_test.cpp
     tree_order_test.cpp
@@ -220,6 +257,10 @@ add_executable(vayu_tests
     idn_host_test.cpp
     url_scheme_test.cpp
     openapi_document_test.cpp
+    import_parse_insomnia_test.cpp
+    import_parse_openapi_test.cpp
+    import_parse_postman_body_test.cpp
+    import_parse_postman_test.cpp
     import_parse_test.cpp
     script_api_scan_test.cpp
     jmeter_import_test.cpp
@@ -385,15 +426,6 @@ endif()
 # its own executables with. It is address space reserved, committed lazily.
 if(MSVC)
     target_link_options(vayu_tests PRIVATE /STACK:8388608)
-    # `NOMINMAX` is PRIVATE to `vayu_core` (`engine/CMakeLists.txt`), so a test
-    # translation unit that reaches `windows.h` through `curl.h` or `httplib.h`
-    # ahead of an engine header sees `min` and `max` as macros, and every
-    # unparenthesized `std::min` or `numeric_limits<T>::max ()` in a header
-    # fails with C2589. Defining it here covers the whole target; the
-    # per-file `#ifndef NOMINMAX` guards stay valid beside it. This target
-    # builds no PCH on MSVC, so the macro-parity check that keeps the define
-    # off `vayu_core`'s consumers does not apply.
-    target_compile_definitions(vayu_tests PRIVATE NOMINMAX)
 endif()
 
 # The test binary needs the manifest for two reasons: any test that opens a
@@ -488,6 +520,11 @@ set(vayu_scratch_database_suites
     LoadScriptScopesTest
     LoadTemplateScopesRunTest
     LoadFailureDedupTest
+    LoadClock
+    LoadDrain
+    LoadRunTimeoutTest
+    LoadRunToTerminalTest
+    LoadStream
     LoadStrategyTest
     MetricsCollectorFlushTest
     MidRunRefreshTest

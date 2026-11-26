@@ -6,31 +6,28 @@
  */
 
 /**
- * Is this document one a collection is already bound to? (issue #680)
+ * Is this document one a collection is already bound to? (#680)
  *
- * Re-importing a bound spec used to make a second collection from scratch: none
- * of the first one's operation identities, none of its saved examples, none of
- * its coverage history - and no line anywhere saying the first one exists. The
- * two then diverge with nothing marking which is real. Sync is the documented
- * path for a document that moved, so an import that is really a re-import has to
- * be able to say so *before* it writes anything.
+ * Re-importing a bound spec otherwise makes a second collection from scratch: none of the first
+ * one's operation identities, none of its saved examples, none of its coverage history, and no line
+ * anywhere saying the first one exists. The two then diverge with nothing marking which is real.
+ * Sync is the documented path for a document that moved, so an import that is really a re-import
+ * has to be able to say so *before* it writes anything.
  *
- * Nothing here infers. `spec_documents` records where a document came from and
- * holds the bytes that were stored, and a collection's binding names the
- * document, so "is this already bound" is a lookup over two keys.
+ * Nothing here infers. `spec_documents` records where a document came from and holds the bytes that
+ * were stored, and a collection's binding names the document, so "is this already bound" is a
+ * lookup over two keys.
  *
  * **Both keys, because they catch different cases.**
  *
- * - `sourceUrl` catches the case Sync exists for - the same URL re-fetched,
- *   whose bytes have moved since. Comparing content cannot see that one at all:
- *   the bytes are precisely what changed.
- * - The bytes catch a document with no URL to match on - a file picked twice, or
- *   the same text pasted again.
+ * - `sourceUrl` catches the case Sync exists for: the same URL re-fetched, whose bytes have moved
+ *   since. Comparing content cannot see that one at all: the bytes are what changed.
+ * - The bytes catch a document with no URL to match on: a file picked twice, or the same text
+ *   pasted again.
  *
- * The bytes rather than a hash of them, for the reason `SpecSync` compares
- * bytes: the engine hashes what it stores, `GET /specs/:id` hands back exactly
- * those bytes, and a SHA-256 in the renderer would be a second implementation of
- * that rule with its own way of being wrong.
+ * The bytes rather than a hash of them, for the reason `SpecSync` compares bytes: the engine hashes
+ * what it stores, `GET /specs/:id` hands back exactly those bytes, and a SHA-256 in the renderer
+ * would be a second implementation of that rule with its own way of being wrong.
  */
 
 import { hasSpecBinding, type Collection } from "@/types";
@@ -91,12 +88,10 @@ export function boundCollections(collections: readonly Collection[]): BoundColle
 }
 
 /**
- * The documents a batch is about to store, one per entry that carries one.
- *
- * Only the root of a parsed tree carries a spec (a tag sub-collection is part of
- * the same document, not one of its own), and the OpenAPI parsers produce a
- * single root - so this reads the first root that has one rather than inventing
- * a rule for a shape no parser makes.
+ * The documents a batch is about to store, one per entry that carries one. Only the root of a
+ * parsed tree carries a spec (a tag sub-collection is part of the same document, not one of its
+ * own), and the OpenAPI parsers produce a single root, so this reads the first root that has one
+ * rather than inventing a rule for a shape no parser makes.
  */
 export function specCandidates(entries: readonly BatchEntry[]): SpecCandidate[] {
 	return entries.flatMap((entry) => {
@@ -116,18 +111,15 @@ export function specCandidates(entries: readonly BatchEntry[]): SpecCandidate[] 
 /**
  * The bound collection each candidate is a re-import of, where there is one.
  *
- * At most one match per candidate: the question the dialog asks is "sync this
- * instead", and several collections may bind one document, so the first bound
- * collection wins - listing every collection that shares a document would ask
- * the user to choose between answers that are all the same document.
+ * At most one match per candidate: the dialog asks "sync this instead", and several collections may
+ * bind one document, so the first bound collection wins; listing every collection that shares a
+ * document would ask the user to choose between answers that are all the same document. URL before
+ * bytes, because a URL match is the more specific statement: the same address, whether or not what
+ * it serves has changed since, exactly the case a re-import is trying to do the hard way.
  *
- * URL before bytes, because a URL match is the more specific statement: it is
- * the same address, whether or not what it serves has changed since, and that is
- * exactly the case a re-import is trying to do the hard way.
- *
- * A URL is compared as written. A trailing slash, a different case in the path
- * or an added query is a different address, and deciding which differences do
- * not matter is the inference this lookup exists to avoid.
+ * A URL is compared as written. A trailing slash, a different case in the path or an added query is
+ * a different address, and deciding which differences do not matter is the inference this lookup
+ * exists to avoid.
  */
 export function matchBoundSpecs(
 	candidates: readonly SpecCandidate[],

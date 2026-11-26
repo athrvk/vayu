@@ -6,21 +6,16 @@
  */
 
 /**
- * What a captured load-run response is *not*, said out loud.
+ * What a captured load-run response is *not*, said aloud. A load run captures failures, slow
+ * outliers and a few exemplars per status code, within a per-body cap and a whole-run budget, and
+ * each limit can show something other than what the server sent, invisibly in the bytes:
  *
- * A load run captures its failures, its slow outliers and a few exemplars of
- * each status code, within a per-body cap and a whole-run budget. All three
- * limits can leave a reader looking at something that is not the response the
- * server sent, and the difference is invisible in the bytes:
+ * - a truncated body ends mid-JSON and looks malformed;
+ * - a body dropped for budget looks empty;
+ * - a binary body has no text, and its bytes as text would be mojibake that reads as real.
  *
- * - a truncated body ends mid-JSON and looks like a malformed response;
- * - a body dropped for budget looks like an empty response;
- * - a binary body has no text at all, and rendering the bytes as text would
- *   produce a mojibake that reads like a real one.
- *
- * Both surfaces that show captured samples (the dashboard's Sampled Requests
- * and the history Samples tab) render this, so the wording exists once instead
- * of twice and drifting.
+ * The dashboard's Sampled Requests and the history Samples tab both render it, so the wording lives
+ * once.
  */
 
 import { Callout } from "../Callout";

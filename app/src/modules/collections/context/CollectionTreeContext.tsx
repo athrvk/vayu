@@ -6,36 +6,27 @@
  */
 
 /**
- * Collection tree context
+ * Every value a tree row needs that is not the row itself. Thirty-odd values are the same for every
+ * row; as props each would be re-listed at every site between the tree and the row, so one new
+ * value (a drag id, a drop target) would cost several edits before it did anything. What stays a
+ * prop is what differs per row: the entity, its depth, and its position in the sibling set.
  *
- * Every value a tree row needs that is not the row itself. Thirty-odd values
- * are the same for every row, and as props each had to be re-listed at every
- * site between the tree and the row, so a single new value (a drag id, a drop
- * target) cost several edits before it did anything.
+ * **Three contexts, by how often the value changes** (#2543). Every consumer of a context
+ * re-renders when its value changes, so one value holding a per-keystroke string and a
+ * per-pointer-move drop target would rebuild every mounted row for each. A row subscribes to the
+ * narrowest of the three that answers its question:
  *
- * The context carries exactly that shared slice. What stays a prop is what
- * genuinely differs per row: the entity, its depth, and its position in the
- * sibling set.
+ * - `CollectionTreeHandlersContext`: functions whose identity holds across a keystroke and a
+ *   pointer move, changing only when the data a render-time function reads does
+ *   (`getCollectionActions` over the loaded collections).
+ * - `CollectionTreeStateContext`: the tree's data and the rename / delete state; it changes when
+ *   the tree does.
+ * - `CollectionTreeFolderDraftContext`: the half-typed new-folder name, read by the one form that
+ *   edits it and by nothing else.
  *
- * **Three contexts, by how often the value changes** (#2543). Every consumer of
- * a context re-renders when its value changes, so one value holding a
- * per-keystroke string and a per-pointer-move drop target rebuilt every mounted
- * row for each of them. A row subscribes to the narrowest of the three that
- * answers its question:
- *
- * - `CollectionTreeHandlersContext`: functions, with an identity that holds
- *   across a keystroke and a pointer move. It changes only when the data a
- *   render-time function reads does (`getCollectionActions` over the loaded
- *   collections).
- * - `CollectionTreeStateContext`: the tree's data and the rename / delete
- *   state. It changes when the tree does.
- * - `CollectionTreeFolderDraftContext`: the half-typed new-folder name, read by
- *   the one form that edits it and by nothing else.
- *
- * The drag indicator is not a context at all: it changes on every row the
- * pointer crosses, so it lives in a store a row subscribes to with a selector
- * (`CollectionTreeDnd.dragState`), and only the rows whose answer changed
- * render.
+ * The drag indicator is not a context at all: it changes on every row the pointer crosses, so it
+ * lives in a store a row subscribes to with a selector (`CollectionTreeDnd.dragState`), and only
+ * the rows whose answer changed render.
  */
 
 import { createContext, useContext } from "react";
@@ -69,14 +60,10 @@ export interface CollectionTreeDragState {
 }
 
 /**
- * The drag-and-drop slice, phase 3 of #364 (#367). It arrives through the
- * context rather than as props because it is the same for every row.
- *
- * Every member keeps one identity for the life of the tree (#2543): the volatile
- * part of a drag is `dragState`, subscribed to, never read off this object.
- *
- * `null` means no drag machinery is mounted, which is what a test rendering a
- * single row in isolation gets - the rows must stay usable without it.
+ * The drag-and-drop slice (#364 phase 3, #367), through the context as it is the same for every
+ * row. Every member keeps one identity for the life of the tree (#2543): a drag's volatile part is
+ * `dragState`, subscribed to, never read off this object. `null` means no drag machinery is
+ * mounted, as in a test rendering one row alone; the rows must stay usable without it.
  */
 export interface CollectionTreeDnd {
 	dragState: StoreApi<CollectionTreeDragState>;
@@ -87,10 +74,9 @@ export interface CollectionTreeDnd {
 	isDropBlocked: (dragged: TreeEntity, entity: TreeEntity) => boolean;
 	moveByKeyboard: (entity: TreeEntity, direction: TreeMoveDirection) => void;
 	/**
-	 * The row menu's move entries - Move up, Move down, "Move to…" - the
-	 * discoverable path that needs no chords (#1690). A factory rather than
-	 * handlers so both row types get one list, worded, iconed and gated once,
-	 * instead of two copies that drift.
+	 * The row menu's move entries (Move up, Move down, "Move to…"), the discoverable path that
+	 * needs no chords (#1690). A factory rather than handlers, so both row types get one list,
+	 * worded, iconed and gated once, not two copies that drift.
 	 */
 	moveActions: (entity: TreeEntity) => RowAction[];
 }
@@ -128,10 +114,9 @@ export interface CollectionTreeCrudHandlers {
 	getCollectionActions: (collection: Collection) => RowAction[];
 
 	/**
-	 * The draft name lives in the row's `useInlineRename`, not here: the field is
-	 * mounted by exactly one row at a time, and a second copy of it up here was
-	 * a value two layers could disagree about. Submit therefore carries the
-	 * trimmed name the hook already holds.
+	 * The draft name lives in the row's `useInlineRename`, not here: exactly one row mounts the
+	 * field at a time, and a second copy up here would be a value two layers could disagree about.
+	 * Submit carries the trimmed name the hook already holds.
 	 */
 	onRenameSubmit: (collectionId: string, name: string) => void;
 	onRenameCancel: () => void;

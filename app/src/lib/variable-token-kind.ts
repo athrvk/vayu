@@ -6,29 +6,25 @@
  */
 
 /**
- * What a `{{token}}` *is*, decided in the order `resolveTemplate` decides it.
+ * What a `{{token}}` *is*, decided in the order `resolveTemplate` decides it: the reserved
+ * namespaces first (`data.*`, then `$vu` / `$iteration`), then a bare name a bound row answers,
+ * then the generator table, then the scopes. A name the engine defers past a pre-request script
+ * (#2741) comes right after the reserved namespaces, ahead of the scopes: its stored value is not
+ * what is sent. The order is load-bearing and documented in
+ * `docs/app/COMPONENTS/shared-variable-input.md`: a scope that defines `$guid` wins and takes the
+ * editable token, while a variable someone named `data.email` or `$vu` answers for neither the
+ * column nor the identity and must not paint as though it had.
  *
- * The reserved namespaces first (`data.*`, then `$vu` / `$iteration`), then a
- * bare name a bound row answers, then the generator table, then the scopes.
- * A name the engine defers past a pre-request script (#2741) comes right after
- * the reserved namespaces, ahead of the scopes: its stored value is not what is
- * sent. The order is load-bearing and documented in `docs/app/COMPONENTS.md`:
- * a scope that defines `$guid` wins and takes the editable token, while a
- * variable someone named `data.email` or `$vu` answers for neither the column
- * nor the identity and must not paint as though it had.
+ * The decision lives here, apart from any paint, because two surfaces make it: `VariableInput`'s
+ * overlay strip, which owns the DOM tokens over a single-line field, and the Monaco editors, which
+ * have no DOM to hang a token on and paint through decorations instead (#1220). A second copy of
+ * this ladder is the drift this codebase keeps finding: the two would answer "what is this token"
+ * differently, and the same `{{name}}` would read as a column in a URL and an undefined variable in
+ * the body beneath it.
  *
- * The decision lives here, apart from any paint, because two surfaces now make
- * it: `VariableInput`'s overlay strip - which owns the DOM tokens over a
- * single-line field - and the Monaco editors, which have no DOM to hang a token
- * on and paint through decorations instead (issue #1220). A second copy of this
- * ladder is exactly the drift this codebase keeps finding: the two would answer
- * "what is this token" differently, and the same `{{name}}` would read as a
- * column in a URL and an undefined variable in the body beneath it.
- *
- * `VariableInput` adopted this module in #1239 (split the decision from the
- * paint), and the ladder now exists only here: its overlay classifies each
- * token before painting it, which is also how its roving strip counts its own
- * stops without reading back the DOM it has just rendered.
+ * The ladder exists only here (#1239 split the decision from the paint): `VariableInput`'s overlay
+ * classifies each token before painting it, which is also how its roving strip counts its own stops
+ * without reading back the DOM it has just rendered.
  */
 
 import { DYNAMIC_VARIABLES } from "./dynamic-variables";
@@ -68,15 +64,13 @@ export interface RuntimeToken {
 }
 
 /**
- * A token that addresses the scopes: a stored variable, or a name nothing
- * defines. `info` is the winning definition, `null` when the name resolves to
- * nothing - which is what separates the two paints and what decides whether the
- * popover edits or offers to create.
+ * A token that addresses the scopes: a stored variable, or a name nothing defines. `info` is the
+ * winning definition, `null` when the name resolves to nothing, which separates the two paints and
+ * decides whether the popover edits or offers to create.
  *
- * `deferred` is a stored variable whose value a pre-request script may replace
- * before the send (#2521, #2741): `info` is still the stored definition - the
- * popover edits it - but it is not what will be sent, so it is neither
- * `resolved` nor `empty`. The engine decides which names; see
+ * `deferred` is a stored variable whose value a pre-request script may replace before the send
+ * (#2521, #2741): `info` is still the stored definition (the popover edits it), but it is not what
+ * will be sent, so it is neither `resolved` nor `empty`. The engine decides which names; see
  * {@link VariableTokenContext.deferredVariables}.
  */
 export interface ScopedVariableToken {
@@ -101,45 +95,39 @@ export interface VariableTokenContext {
 	 */
 	getVariableOrigins?: (name: string) => VariableOrigin[];
 	/**
-	 * The names `POST /compose` left written because a pre-request script runs
-	 * before the send (`deferredVariables`, #2521). Only ever the engine's
-	 * answer: whether a request is scripted is its rule, and this module holds
-	 * no copy of it. Absent or empty paints every token as it always did.
+	 * The names `POST /compose` left written because a pre-request script runs before the send
+	 * (`deferredVariables`, #2521). Only ever the engine's answer: whether a request is scripted is
+	 * its rule, and this module holds no copy of it. Absent or empty, no token paints as deferred.
 	 */
 	deferredVariables?: readonly string[];
 }
 
 /**
- * How a script's mention of a name should be classified, when that differs
- * from the merged ladder `classifyVariableToken` answers by default.
+ * How a script's mention of a name should be classified, when that differs from the merged ladder
+ * `classifyVariableToken` answers by default. A script reaches a variable through a
+ * `pm.<accessor>.get(...)` call, and each accessor reads a different slice of what a body-language
+ * `{{name}}` reads in full (#1063's vocabulary, `PM_ACCESSORS` in `referenced-variables.ts`):
  *
- * A script reaches a variable through a `pm.<accessor>.get(...)` call, and
- * each accessor reads a different slice of what a body-language `{{name}}`
- * reads in full (issue #1063's vocabulary, `PM_ACCESSORS` in
- * `referenced-variables.ts`):
+ * - `"scope"`: one scope's own answer (`pm.environment.get`, `pm.globals.get`,
+ *   `pm.collectionVariables.get`, and the `replaceIn(...)` template of each), independent of
+ *   whether a higher scope also defines the name. `template` marks a `{{name}}` inside that
+ *   `replaceIn`: the scope is still asked first, but a name it does not define falls through to
+ *   what the engine resolves outside the scopes (the bound row's columns, the `$` generators, the
+ *   iteration identity, `data.*`). A `get` never carries it, because `get` reads the scope and
+ *   nothing else.
+ * - `"row"`: the bound data row and nothing else (`pm.iterationData.get`), so the answer is a
+ *   column state, never a scope's.
+ * - `"merged"`: the whole ladder, as a body-language token reads it (`pm.variables.get`, a
+ *   `pm.variables.replaceIn(...)` template), except that a name the engine defers is not deferred
+ *   here: the pre-request script is the thing that sets it, and a post-request script reads it
+ *   after that has run.
+ * - `"bare"`: not a read at all: a `{{name}}` written into a script outside any
+ *   `pm.<accessor>.replaceIn(...)` call, which the engine sends verbatim (D16,
+ *   `docs/engine/scripting/variables.md`). Muted and informational regardless of what the name
+ *   would otherwise resolve to.
  *
- * - `"scope"` - one scope's own answer (`pm.environment.get`,
- *   `pm.globals.get`, `pm.collectionVariables.get`, and the `replaceIn(...)`
- *   template of each), independent of whether a higher scope also defines the
- *   name. `template` marks a `{{name}}` inside that `replaceIn`: the scope is
- *   still asked first, but a name it does not define falls through to what the
- *   engine resolves outside the scopes - the bound row's columns, the `$`
- *   generators, the iteration identity, `data.*`. A `get` never carries it,
- *   because `get` reads the scope and nothing else.
- * - `"row"` - the bound data row and nothing else (`pm.iterationData.get`),
- *   so the answer is a column state, never a scope's.
- * - `"merged"` - the whole ladder, as a body-language token reads it
- *   (`pm.variables.get`, a `pm.variables.replaceIn(...)` template), except
- *   that a name the engine defers is not deferred here: the pre-request script
- *   is the thing that sets it, and a post-request script reads it after that
- *   has run.
- * - `"bare"` - not a read at all: a `{{name}}` written into a script outside
- *   any `pm.<accessor>.replaceIn(...)` call, which the engine sends verbatim
- *   (D16, `docs/engine/scripting.md`). Muted and informational regardless of
- *   what the name would otherwise resolve to.
- *
- * Every span a script editor finds carries one, so a caller with no hint is
- * a body-language token and nothing else.
+ * Every span a script editor finds carries one, so a caller with no hint is a body-language token
+ * and nothing else.
  */
 export type ScriptTokenHint =
 	| { via: "scope"; scope: VariableScope; template?: true }
@@ -148,10 +136,9 @@ export type ScriptTokenHint =
 	| { via: "bare" };
 
 /**
- * The muted, no-edit answer for a script's bare `{{name}}` (issue #1220 script
- * support). One constant because the wording is the chip row's own
- * `TEMPLATE_IN_SCRIPT_NOTE` (issue #1553) - a second copy here is exactly the
- * drift that string's own comment warns about.
+ * The muted, no-edit answer for a script's bare `{{name}}` (#1220 script support). One constant
+ * because the wording is the chip row's own `TEMPLATE_IN_SCRIPT_NOTE` (#1553); a second copy here
+ * is the drift that string's own comment warns about.
  */
 const BARE_SCRIPT_TEMPLATE_KIND: RuntimeToken = {
 	state: "runtime",
@@ -161,11 +148,10 @@ const BARE_SCRIPT_TEMPLATE_KIND: RuntimeToken = {
 };
 
 /**
- * A `ScopeVariableOrigin` as the value a reader gets - the same shape
- * `useVariableResolver`'s private `resolvedFrom` builds from the ladder's
- * winner, rebuilt here for one scope's own answer instead. Kept local rather
- * than imported: that helper is not exported, and a `lib/` module reaching
- * into a `hooks/` one would invert the layering the two already have.
+ * A `ScopeVariableOrigin` as the value a reader gets: the shape `useVariableResolver`'s private
+ * `resolvedFrom` builds from the ladder's winner, rebuilt here for one scope's own answer instead.
+ * Local rather than imported: that helper is not exported, and a `lib/` module reaching into a
+ * `hooks/` one would invert the layering the two already have.
  */
 function resolvedFromOrigin(origin: ScopeVariableOrigin): ResolvedVariable {
 	return {
@@ -185,20 +171,19 @@ function isResolvedOutsideScopes(name: string): boolean {
 }
 
 /**
- * A scoped `replaceIn` template name its scope does not define: what the
- * engine resolves beside the scopes (`js_pm_scope_replace_in`). The merged
- * classification with no scope variables in it is exactly that - the reserved
- * namespaces, then the bound row's columns, then a `$` generator - and a name
- * none of them answers is left written, which paints as undefined.
+ * A scoped `replaceIn` template name its scope does not define: what the engine resolves beside the
+ * scopes (`js_pm_scope_replace_in`). The merged classification with no scope variables in it is
+ * exactly that (the reserved namespaces, then the bound row's columns, then a `$` generator), and a
+ * name none of them answers is left written, which paints as undefined.
  */
 function classifyOutsideScopes(name: string, context: VariableTokenContext): VariableTokenKind {
 	return classifyVariableToken(name, { ...context, variables: {}, deferredVariables: undefined });
 }
 
 /**
- * `classifyVariableToken`, plus the script-only answers a `ScriptTokenHint`
- * asks for. Every editor's `classify` call goes through this; a caller with no
- * hint (every body-language token) gets exactly what it always got.
+ * `classifyVariableToken`, plus the script-only answers a `ScriptTokenHint` asks for. Every
+ * editor's `classify` call goes through this; a caller with no hint (every body-language token)
+ * gets `classifyVariableToken`'s answer unchanged.
  */
 export function classifyScriptToken(
 	name: string,

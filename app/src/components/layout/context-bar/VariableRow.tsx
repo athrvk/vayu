@@ -6,14 +6,11 @@
  */
 
 /**
- * One editable variable in the context bar: its name, a marker beside it, and
- * the input its edits are typed into.
- *
- * Shared by the request tab's resolved list and the collection tab's own
- * definitions. The two differ only in the marker - a scope badge on one, an
- * "off" note on the other - and in where the commit lands; everything subtle
- * here (the remount key, the Escape restore, the uncontrolled input a rejected
- * save relies on) is the same act on both, so it is written once.
+ * One editable variable in the context bar: its name, a marker beside it, and the input its edits
+ * are typed into. Shared by the request tab's resolved list and the collection tab's own
+ * definitions, which differ only in the marker (a scope badge, or an "off" note) and in where the
+ * commit lands; the subtle parts (the remount key, the Escape restore, the uncontrolled input a
+ * rejected save relies on) are one act on both, so written once.
  */
 
 import { Input, SecretInput } from "@/components/ui";
@@ -45,15 +42,14 @@ export function VariableRow({ name, resolved, marker, onCommit }: VariableRowPro
 			</div>
 			{resolved.secret ? (
 				/*
-				 * The shared masked field with its eye toggle, not a hand-rolled
-				 * `••••••` that can never be looked at (#1308) - a hand-rolled copy of
-				 * a primitive does not receive the primitive's fixes. Read-only here:
-				 * the request tab shows what resolved, and a secret's edit lands on
-				 * the Variables page, so revealing is the whole of what this row adds.
-				 * Reveal state lives inside `SecretInput`, so it is keyed by the
-				 * definition's identity (name:scope:source, not its value) - an
-				 * environment or tab switch remounts it and re-masks, the defect #621
-				 * names when reveal is keyed by position.
+				 * The shared masked field with its eye toggle, not a hand-rolled `••••••` that can
+				 * never be looked at (#1308): a hand-rolled copy of a primitive does not receive
+				 * the primitive's fixes. Read-only here: the request tab shows what resolved and a
+				 * secret's edit lands on the Variables page, so revealing is all this row adds.
+				 * Reveal state lives inside `SecretInput`, so it is keyed by the definition's
+				 * identity (name:scope:source, not its value): an environment or tab switch
+				 * remounts and re-masks it, where a reveal keyed by position is the defect #621
+				 * names.
 				 */
 				<SecretInput
 					size="sm"
@@ -68,14 +64,11 @@ export function VariableRow({ name, resolved, marker, onCommit }: VariableRowPro
 				<Input
 					size="sm"
 					/*
-					 * Scope and source belong in the key, not just the
-					 * value. On the value alone, an environment switch
-					 * or a Ctrl+N tab switch mid-edit that happens to
-					 * resolve the same string kept the DOM node alive
-					 * and let the blur write into the *newly* resolved
-					 * definition. Including the source remounts the
-					 * node instead, so an abandoned edit is dropped -
-					 * the lesser outcome, and never a mistargeted one.
+					 * Scope and source belong in the key, not just the value. On the value alone,
+					 * an environment switch or a Ctrl+N tab switch mid-edit that resolves the same
+					 * string keeps the DOM node, and the blur writes into the *newly* resolved
+					 * definition. With the source in it the node remounts, and an abandoned edit is
+					 * dropped: the lesser outcome, and never a mistargeted one.
 					 */
 					key={`${name}:${resolved.scope}:${resolved.sourceId}:${resolved.value}`}
 					defaultValue={resolved.value}

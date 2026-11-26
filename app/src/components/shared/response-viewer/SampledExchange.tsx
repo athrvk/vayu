@@ -6,38 +6,18 @@
  */
 
 /**
- * One sampled HTTP exchange: a summary row you can expand into the detail.
- *
- * Two views showed this - the dashboard's live sample list and the history
- * detail's stored one - and they were two separate components (#76); the
- * dashboard's went with #2220, when it began rendering History's report. #60 had
- * already given them the same per-concern primitives (`StatusCodeBadge`,
- * `HeadersViewer`, `ResponseBody`), so the drift moved up a level and lived in
- * the shells: each owned its own summary row, its own expansion chrome, its own
- * section order. A spacing or empty-state fix to one still did not reach the
- * other, and by the time this was written the rows had diverged in almost every
- * detail that is not data - one opened with a chevron and the other with a
- * hand-drawn CSS triangle, one used AlertCircle/Clock/CheckCircle2 and the
- * other XCircle/CheckCircle, one printed `HH:MM:SS.mmm` and the other a full
- * locale date, and only one had a slow-request state at all.
- *
- * **Presentational, over already-shaped data.** It takes a status code, a
- * latency and a pre-resolved phase list; it does not know whether they arrived
- * over SSE a moment ago or came out of SQLite. Expansion is the parent's state -
- * the history detail holds one open index - and does not belong in here.
- * That is the same split `LoadTestDetail` uses to reuse the dashboard's derived
- * components.
- *
- * **What a caller adds stays a slot, not a flag.** The history card's expanded
- * sections - the trace details (error type, data row, per-test failures, the
- * slow-request warning) and the request and response - arrive as `details`
- * (before the timing tiles) and `children` (after). The
- * alternative was a component driven by booleans, which is what the response
- * viewers were deliberately not merged into.
- *
- * The `timestamp` is a `ReactNode` the caller formats: a stored row is dating a
- * run and wants the day, where a row placing a sample within a run seconds old
- * would want milliseconds.
+ * One sampled HTTP exchange: a summary row expanding into the detail. One shell, as the dashboard's
+ * and History's two copies (#76) drifted in almost every detail but data despite sharing
+ * per-concern primitives (#60); the dashboard now renders History's report (#2220).
+ * **Presentational, over already-shaped data**: a status code, a latency and a pre-resolved phase
+ * list, whether from SSE or SQLite. Expansion is the parent's state (the history detail holds one
+ * open index), the split `LoadTestDetail` uses to reuse the dashboard's derived components. **What
+ * a caller adds stays a slot, not a flag**: the history card's sections (trace details: error type,
+ * data row, per-test failures, the slow-request warning; then request and response) arrive as
+ * `details` (before the timing tiles) and `children` (after), not booleans, which the response
+ * viewers were deliberately not merged into. The `timestamp` is a caller-formatted `ReactNode`: a
+ * stored row dates a run and wants the day; a sample within a seconds-old run would want
+ * milliseconds.
  */
 
 import { type ReactNode } from "react";
@@ -63,15 +43,11 @@ import type { ResolvedTimingPhase } from "./timing-phases";
 import { isReportedMs } from "./utils";
 
 /**
- * How the row reads at a glance - the icon and the colour it carries.
- *
- * Normally derived from the exchange itself, which is all a load-run sample
- * has to go on. A collection run's step knows better: `failed` there is a test
- * assertion that did not hold over a perfectly good `200`, and `skipped` is a
- * step that never ran at all. Deriving either from the status code would make
- * the first read as a success and the second as a connection failure, so a
- * caller that knows the outcome states it instead. A `stopped` step was cut
- * short by the run's Stop (#3397): its cancelled transfer is no failure either.
+ * How the row reads at a glance: its icon and colour, normally derived from the exchange, all a
+ * load-run sample has. A collection run's step knows better: `failed` is a test assertion that did
+ * not hold over a good `200`, `skipped` a step that never ran, and derivation would read the first
+ * as success and the second as a connection failure, so such a caller states the outcome. A
+ * `stopped` step was cut by the run's Stop (#3397); its cancelled transfer is no failure either.
  */
 export type ExchangeState = "success" | "error" | "slow" | "skipped" | "stopped";
 
@@ -92,12 +68,11 @@ const STATE_TINT: Record<ExchangeState, string> = {
 };
 
 /**
- * The summary row's tracks: chevron, state icon, label, the flexible lead (name
- * and error), then from `@3xl` a status, a latency and a time. The status track
- * is as wide as "503 Service Unavailable" so a list's status chips share a
- * column; every row of a list is a grid of its own, so only fixed tracks line
- * up. `@3xl` is a *container* variant, resolved against the row's own
- * `@container` root: a viewport variant does not know the context bar is open.
+ * The summary row's tracks: chevron, state icon, label, the flexible lead (name and error), then
+ * from `@3xl` status, latency and time. The status track fits "503 Service Unavailable" so a list's
+ * chips share a column; each row is its own grid, so only fixed tracks line up. `@3xl` is a
+ * *container* variant against the row's `@container`: a viewport variant does not know the context
+ * bar is open.
  */
 const ROW_GRID =
 	"grid grid-cols-[auto_auto_3.5rem_minmax(0,1fr)] @3xl:grid-cols-[auto_auto_3.5rem_minmax(0,1fr)_12rem_4.5rem_auto]";
@@ -106,19 +81,18 @@ export interface SampledExchangeProps {
 	/** Printed as `#{label}`. The dashboard prefers the engine's request number. */
 	label: ReactNode;
 	/**
-	 * Named beside the label - a collection run's step name. Load-run samples
-	 * have nothing to put here (one request, repeated), so it stays absent.
+	 * Named beside the label (a collection run's step name); load-run samples (one request,
+	 * repeated) leave it absent.
 	 */
 	title?: ReactNode;
 	/**
-	 * Overrides the state derived from `error` / `isSlow` / `statusCode`. Pass
-	 * it only when the caller genuinely knows something the exchange does not.
+	 * Overrides the state derived from `error` / `isSlow` / `statusCode`; only for a caller knowing
+	 * something the exchange does not.
 	 */
 	state?: ExchangeState;
 	/**
-	 * Absent for an exchange that never reached the wire (a skipped step): the
-	 * row then draws no badge, where `0` would draw "ERR" for a request that
-	 * was never sent.
+	 * Absent for an exchange that never reached the wire (a skipped step), drawing no badge, where
+	 * `0` would draw "ERR" for an unsent request.
 	 */
 	statusCode?: number;
 	statusText?: string;
@@ -132,20 +106,17 @@ export interface SampledExchangeProps {
 	/** From `phasesFromTrace()`. Empty hides the breakdown unless `scriptMs` is reported. */
 	phases?: readonly ResolvedTimingPhase[];
 	/**
-	 * The exchange's script time (`trace.scriptMs`, #3739), drawn as a "Scripts"
-	 * tile in the breakdown. Unlike an empty `phases`, a reported `0` still opens
-	 * the section; absent, NaN or negative draws nothing.
+	 * The exchange's script time (`trace.scriptMs`, #3739), a "Scripts" tile in the breakdown;
+	 * unlike an empty `phases`, a `0` still opens the section, and absent, NaN or negative draws
+	 * nothing.
 	 */
 	scriptMs?: number;
 	isExpanded: boolean;
 	onToggle: () => void;
 	/**
-	 * Controls beside the summary, outside the toggle - a step's link back to
-	 * its request (issue #730) is the first.
-	 *
-	 * Outside because the summary is one `<button>`: a control nested inside it
-	 * would be invalid markup and would fire the toggle on its way out. A caller
-	 * that passes nothing gets exactly the row it had, one button wide.
+	 * Controls beside the summary, outside the toggle (a step's link to its request, #730).
+	 * Outside, as the summary is one `<button>`: a nested control is invalid and would fire the
+	 * toggle. With none, the row is one button wide.
 	 */
 	actions?: ReactNode;
 	/** Expanded sections between the error block and the timing tiles. */
@@ -174,10 +145,9 @@ export function SampledExchange({
 	children,
 	className,
 }: SampledExchangeProps) {
-	// A status outside 200-399 is an error by the engine's definition (#2124), so
-	// a 500 or a 429 does not wear the success tick. A connection failure
-	// (status 0) has no code to show, so the icon is the only thing that says
-	// "this one did not come back".
+	// A status outside 200-399 is an error by the engine's definition (#2124), so a 500 or 429
+	// wears no tick; a connection failure (status 0) has no code, so the icon alone says it did not
+	// come back.
 	const badStatus = statusCode !== undefined && isErrorStatus(statusCode);
 	const derived: ExchangeState = error || badStatus ? "error" : isSlow ? "slow" : "success";
 	const resolved = state ?? derived;
@@ -185,26 +155,26 @@ export function SampledExchange({
 	const StatusIcon = STATE_ICON[resolved];
 	const Chevron = isExpanded ? ChevronDown : ChevronRight;
 
-	// The first clause only - the full message is one click away, and a
-	// multi-line curl error would push the row to three lines.
+	// The first clause only: the full message is a click away, and a multi-line curl error would
+	// make the row three lines.
 	const errorPreview = isError && error ? error.split(":")[0] : "";
 	const hasLead = Boolean(title) || errorPreview !== "";
 
 	return (
 		<div className={cn("@container overflow-hidden", className)}>
 			<Collapsible open={isExpanded} onOpenChange={onToggle}>
-				{/* The summary and its actions share a row without sharing a button.
-			    With no actions this is one full-width button, exactly as before. */}
+				{/*
+				 * The summary and its actions share a row, not a button; without actions it is one
+				 * full-width button.
+				 */}
 				<div className="flex items-stretch">
 					<Button
 						type="button"
 						variant="listRow"
 						onClick={onToggle}
 						aria-expanded={isExpanded}
-						// `rounded-none` overrides the base's `rounded-md`: every caller of
-						// this component renders it as a full-bleed, edge-to-edge row (a
-						// `divide-y` list, or a `border-b` strip), never an inset one, so a
-						// rounded hover fill floats oddly inside the row's own square edges.
+						// `rounded-none` over `rounded-md`: every caller renders this full-bleed (a
+						// `divide-y` list, a `border-b` strip), where a rounded hover would float.
 						className={cn(
 							ROW_GRID,
 							"flex-1 min-w-0 items-center gap-x-3 gap-y-1 rounded-none px-4 py-3 hover:bg-muted/50"
@@ -219,10 +189,9 @@ export function SampledExchange({
 						</span>
 
 						{hasLead && (
-							// The step's name and the error's first clause share the one
-							// flexible track. The caller's `title` is a node of its own
-							// shape, so this is the box that is allowed to shrink (`min-w-0`)
-							// around it.
+							// The step's name and the error's first clause share the flexible
+							// track; the caller's `title` has its own shape, so this box shrinks
+							// (`min-w-0`) around it.
 							<span className="col-start-4 row-start-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 @3xl:flex-nowrap">
 								{title && <span className="min-w-0 max-w-full">{title}</span>}
 								{errorPreview !== "" && (
@@ -233,10 +202,11 @@ export function SampledExchange({
 							</span>
 						)}
 
-						{/* Below @3xl the status, latency and time are one wrapping group
-						    under the name; from @3xl the group dissolves (`contents`) and
-						    each is a cell of the row's own tracks, so the rows of a list
-						    line up. A missing cell leaves its track empty. */}
+						{/*
+						 * Below @3xl status, latency and time are one wrapping group under the
+						 * name; from @3xl the group dissolves (`contents`) into the row's tracks,
+						 * so a list's rows line up. A missing cell leaves its track empty.
+						 */}
 						<span
 							className={cn(
 								"flex flex-wrap items-center gap-x-3 gap-y-1 @3xl:contents",

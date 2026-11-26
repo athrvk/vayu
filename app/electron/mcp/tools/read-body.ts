@@ -6,15 +6,12 @@
  */
 
 /**
- * @file read-body.ts
- * @brief `read_body` (#3704): which stored body a call names, how it is
- *        fetched, and the page of it one result carries - a byte window, the
- *        matches of a search, or a JSON pointer's subtree.
+ * @brief `read_body` (#3704): which stored body a call names, how it is fetched, and the page of it
+ *        one result carries: a byte window, the matches of a search, or a JSON pointer's subtree.
  *
- * Everything here after the fetch reads the record *as masked*: the caller
- * masks the whole record first (`callEngineForRunOutput`), so a secret that
- * straddles a page boundary is already `<redacted>` in both pages, and every
- * offset and size counts the masked bytes.
+ * Everything after the fetch reads the record *as masked*: the caller masks the whole record first
+ * (`callEngineForRunOutput`), so a secret that straddles a page boundary is already `<redacted>` in
+ * both pages, and every offset and size counts the masked bytes.
  */
 
 import type { EngineClient } from "../engine-client.js";

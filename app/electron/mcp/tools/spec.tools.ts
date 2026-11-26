@@ -6,7 +6,6 @@
  */
 
 /**
- * @file spec.tools.ts
  * @brief OpenAPI and import/export tools: reading, diffing, syncing, binding and
  *        exporting a collection's spec, plus document import and Postman export.
  */
@@ -106,13 +105,12 @@ export const SPEC_TOOLS: McpTool[] = [
 			}
 			const includeContent = args.includeContent === true;
 
-			// Assigned on the first two arms below - by the binding the collection
-			// resolves to, or by the argument - so it is a string by the time it is
-			// read. The "neither was passed" case is the third arm rather than a
-			// guard above it: as a guard, proving the `else` still holds an id is a
-			// step across two conditions that `strict` control flow does not make in
-			// either compiler, and the assertion it would take is the kind that stops
-			// being true when someone edits the guard.
+			// Assigned on the first two arms below (by the binding the collection resolves to, or
+			// by the argument), so it is a string by the time it is read. The "neither was passed"
+			// case is the third arm rather than a guard above it: as a guard, proving the `else`
+			// still holds an id is a step across two conditions that `strict` control flow does not
+			// make in either compiler, and the assertion it would take stops being true when
+			// someone edits the guard.
 			let specId: string;
 			let binding: SpecBinding | null = null;
 			if (collectionId) {
@@ -207,12 +205,11 @@ export const SPEC_TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
 			const content = requireStr(args, "content");
-			// The requests and the bound document are deliberately not sent: the
-			// engine walks the subtree and reads the binding itself, so a caller
-			// cannot make its own stale copy the "previous" side of a three-way
-			// comparison. Nothing is worked out here for the same reason
-			// `bind_spec` works nothing out - the comparison is the engine's
-			// (`core::diff_spec`), off the bytes handed to it.
+			// The requests and the bound document are deliberately not sent: the engine walks the
+			// subtree and reads the binding itself, so a caller cannot make its own stale copy the
+			// "previous" side of a three-way comparison. Nothing is worked out here, as in
+			// `bind_spec`: the comparison is the engine's (`core::diff_spec`), off the bytes handed
+			// to it.
 			let answer: unknown;
 			try {
 				answer = await ctx.client.diffSpec({ collectionId, spec: { content } }, signal);
@@ -294,12 +291,11 @@ export const SPEC_TOOLS: McpTool[] = [
 		annotations: {
 			title: "Apply OpenAPI spec drift",
 			readOnlyHint: false,
-			// Nothing a person authored is written: the policy skips every
-			// hand-edited field, deletes nothing, and leaves a request it cannot
-			// reason about alone. What it does write is what the last import
-			// wrote and the document has since moved - which is the document's,
-			// not the user's. That is precisely what makes the safe half of a
-			// sync the half an agent may have.
+			// Nothing a person authored is written: the policy skips every hand-edited field,
+			// deletes nothing, and leaves a request it cannot reason about alone. What it writes is
+			// what the last import wrote and the document has since moved, which is the document's,
+			// not the user's: that is what makes the safe half of a sync the half an agent may
+			// have.
 			destructiveHint: false,
 			// The engine mints a new `spec_documents` row per call, as a bind
 			// does, so syncing the same bytes twice is not the same call twice.
@@ -330,12 +326,11 @@ export const SPEC_TOOLS: McpTool[] = [
 			const collectionId = requireStr(args, "collectionId");
 			const content = requireStr(args, "content");
 			const sourceUrl = str(args, "sourceUrl");
-			// `policy` rather than rows, and no argument offering an alternative:
-			// which of a drift is safe to write is `core::safe_spec_apply`, the
-			// same function whose answer `diff_spec` reports per entry. A tool
-			// that let an agent name rows would be a second opinion about which
-			// of a person's fields a sync may overwrite - the one judgement this
-			// side must never make (issue #871).
+			// `policy` rather than rows, and no argument offering an alternative: which of a drift
+			// is safe to write is `core::safe_spec_apply`, the function whose answer `diff_spec`
+			// reports per entry. A tool that let an agent name rows would be a second opinion about
+			// which of a person's fields a sync may overwrite, the one judgement this side must
+			// never make (issue #871).
 			let outcome: unknown;
 			try {
 				outcome = await ctx.client.syncSpec(

@@ -6,14 +6,11 @@
  */
 
 /**
- * @file http/request_exchange.cpp
- * @brief The `POST /execute` handler's body, extracted (issue #353).
+ * The `POST /execute` handler's body, extracted (issue #353).
  *
- * Every function here was inlined in `http/routes/execution.cpp` until the
- * scenario runner needed the same sequence per step. It moved rather than being
- * copied, and it moved into `vayu_core` because the runner lives there - a
- * second copy in `core/scenario_runner.cpp` would be a copy that never receives
- * this one's fixes.
+ * It lives in `vayu_core` because the scenario runner does: a second copy in
+ * `core/scenario_runner.cpp` would be a copy that never receives this one's
+ * fixes.
  */
 
 #include "vayu/http/request_exchange.hpp"
@@ -243,7 +240,7 @@ nlohmann::json response_trace_node (const vayu::Response& response) {
     // before this field would otherwise be indistinguishable from one whose
     // body was cut, and absent is what those rows mean - not capped.
     //
-    // `bodyTruncated` on this same node is a different cut, added later by
+    // `bodyTruncated` on this same node is a different cut, made by
     // `cap_trace_bodies`: that one is this body being shortened for
     // storage, which re-sending recovers from.
     if (response.body_truncated) {
@@ -283,62 +280,62 @@ const vayu::Response& response) {
 
     // The *sent* record, beside the composed map (issue #664). `headers` above
     // is what the request was composed with; `response.request_headers` is what
-    // `build_request_header_list` appended - that set minus the suppressed
-    // (a `form-data` Content-Type libcurl writes itself) and a blank
+    // `build_request_header_list` appended: that set minus the suppressed (a
+    // `form-data` Content-Type libcurl writes itself) and a blank
     // `Content-Type` or `Cookie` row (#3220), plus the two the engine derives
     // at send time, the body-implied `Content-Type` and the default
-    // `User-Agent`. The response
-    // pane's "request headers sent" disclosure means the second, and rebuilding
-    // it from the first named headers the wire never carried and hid the two it
-    // did - so the same exchange read differently live and after a reload.
+    // `User-Agent`. The response pane's "request headers sent" disclosure means
+    // the second; rebuilt from the first it would name headers the wire never
+    // carried and hide the two it did, so the same exchange would read
+    // differently live and after a reload.
     //
     // Both maps are stored because both are read: `design-run-seed.ts` reseeds
     // a request tab from the composed one, and reseeding from the sent record
     // would write the engine's derived headers back into the user's request as
     // if a person had typed them.
     //
-    // `sentHeaderLines` is the same record unfolded, one entry per wire line
-    // in wire order (issue #2466); `sentHeaders` keeps one value per name for
-    // the readers written against it.
+    // `sentHeaderLines` is the same record unfolded, one entry per wire line in
+    // wire order (issue #2466); `sentHeaders` keeps one value per name for the
+    // readers written against it.
     //
     // Omitted rather than stored empty when nothing was recorded, on the same
     // reasoning as `rawRequest` below: the reader prefers this key when it is
-    // there, so an empty object would suppress the composed-map fallback that
-    // is the right answer for a step that sent nothing and for every row
-    // written before this field. The load path records no sent headers at all -
-    // `build_request_header_list` takes nullptr there, to keep an allocation
-    // off the hot path - so a sampled capture keeps replaying from the composed
-    // map, unchanged by this.
+    // there, so an empty object would suppress the composed-map fallback, the
+    // right answer for a step that sent nothing and for every row written
+    // before this field. The load path records no sent headers
+    // (`build_request_header_list` takes nullptr there, keeping an allocation
+    // off the hot path), so a sampled capture replays from the composed map.
     if (!response.request_headers.empty ()) {
         trace["request"]["sentHeaders"] = response.request_headers.folded ();
         trace["request"]["sentHeaderLines"] =
         vayu::json::serialize_header_lines (response.request_headers.lines ());
     }
 
-    // What the wire carried, so a restored raw-request view says the same thing
-    // the live one did (issue #348). `headers` above is the *composed* map and
-    // has no `Cookie` line - libcurl attaches those itself from the jar - so
-    // rebuilding the view from it client-side showed a session-less request
-    // after a reload and the real one immediately after a send.
+    // What the wire carried, so a restored raw-request view says what the live
+    // one did (issue #348). `headers` above is the *composed* map and has no
+    // `Cookie` line (libcurl attaches those from the jar), so a view rebuilt
+    // from it client-side would show a session-less request after a reload and
+    // the real one right after a send.
     //
     // Omitted rather than stored empty when there was no transfer at all (a
     // `pm.execution.skipRequest()` step hands this a default `Response`): the
     // reader's fallback synthesis is the right answer there, and "" would
-    // suppress it. A transfer that failed before sending still has a value -
-    // `Client::send` synthesizes one from the composed request - and storing
-    // that is what keeps an unreachable host showing the request it attempted.
+    // suppress it. A transfer that failed before sending still has a value
+    // (`Client::send` synthesizes one from the composed request), which keeps
+    // an unreachable host showing the request it attempted.
     //
     // This is credential-grade material and deliberately not redacted, matching
-    // the live field's documented contract: the `Cookie` line lands in the same
-    // node that already stores the resolved `Authorization` header beside it.
-    // The stored trace stays raw by decision (History and every engine read are
-    // unchanged); the MCP server masks it on the way to an agent instead
-    // (#1809), and `authQueryParam` / `authHeaders` below are what it masks by:
-    // the URL cannot say which query parameter auth wrote (#1835). Additive
-    // metadata, omitted when auth wrote none; the stored values stay raw (#1845
-    // puts the same keys on the live answer).
+    // the live field's documented contract: the `Cookie` line lands in the node
+    // that already stores the resolved `Authorization` header. The stored trace
+    // stays raw by decision (History and every engine read are unchanged); the
+    // MCP server masks it on the way to an agent instead (#1809), by
+    // `authQueryParam` / `authHeaders` below, because the URL cannot say which
+    // query parameter auth wrote (#1835). Additive metadata, omitted when auth
+    // wrote none; the stored values stay raw (#1845 puts the same keys on the
+    // live answer).
+    //
     // The redaction that does apply to run rows is `sanitize_config_snapshot`,
-    // which guards `runs.config_snapshot` - the request as *composed, with its
+    // which guards `runs.config_snapshot`, the request as *composed, with its
     // credentials withheld* (#1803). A trace is the record of what was *sent*,
     // and one that hid what was sent would have no reason to exist. See
     // docs/engine/architecture.md (Security).
@@ -886,8 +883,8 @@ resolve_header_values (vayu::HeaderList& headers, const ResidualLookup& lookup) 
  * A name that resolves to *nothing* is refused here too (#1084), in that rule's
  * one wording: it is the same shape of quiet wrong request, a `": value"` line
  * no name owns, and this pass is the layer composition cannot stand in for -
- * the name a script has just defined is one composition never saw. Since #1095
- * that rule reaches a name which arrives *already* empty as well, holding no
+ * the name a script has just defined is one composition never saw. That rule
+ * also reaches a name which arrives *already* empty (#1095), holding no
  * token for the gate to find - see `a_header_name_needs_reading` for why this
  * rule widened there and the collision rule did not.
  *
@@ -996,12 +993,11 @@ resolve_residuals (vayu::Request& request, const ResidualLookup& lookup) {
         *text, lookup.vars, lookup.bound_columns, lookup.dynamic);
     }
     // Last: it rebuilds the header lines. The refusal already carries the
-    // pre-send gate's shape, because this is a refusal of the same send and
-    // the drivers already render that one: an
-    // `InternalError` a buffered caller turns into a status-0 response rather
-    // than a transfer (see `validate_transferable` in
-    // `event_loop/curl_utils.cpp`), beside the code a streaming caller answers
-    // its still-open route with.
+    // pre-send gate's shape, because this is a refusal of the same send and the
+    // drivers already render that one: an `InternalError` a buffered caller
+    // turns into a status-0 response rather than a transfer
+    // (`validate_transferable`), beside the code a streaming caller answers its
+    // still-open route with.
     if (auto refusal = resolve_header_names (request.headers, lookup)) {
         return refusal;
     }

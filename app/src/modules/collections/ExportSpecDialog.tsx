@@ -6,44 +6,33 @@
  */
 
 /**
- * ExportSpecDialog - a collection back out as an OpenAPI document (issue #630,
- * assembled engine-side since #855).
+ * A collection back out as an OpenAPI document (issue #630, assembled engine-side, #855).
  *
- * The dialog exists because the export is not the same act in both directions,
- * and the user has to know which one they are about to perform *before* the file
- * lands in their downloads folder. A bound collection updates its own document;
- * a free-form one gets a skeleton, which is a starting point and not a contract.
- * Both statements are on screen, and so is what the export could not carry
- * that a user would miss - a new request left out, a secret written empty.
+ * The dialog exists because the export is not the same act in both directions, and the user must
+ * know which one they are performing *before* the file lands in their downloads folder. A bound
+ * collection updates its own document; a free-form one gets a skeleton, a starting point and not a
+ * contract. Both are stated on screen, with what the export could not carry that a user would miss
+ * (a new request left out, a secret written empty).
  *
- * **The assembly is the engine's** (`POST /specs/export`). It used to be three
- * reads and ~900 lines here: the subtree's requests, every request's examples,
- * the stored document, then a parse and a patch on the render thread - seconds
- * of synchronous work on a 12MB spec, which #721 had to move off the render into
- * a scheduled task behind a pending line. All of that is one request now, and
- * what is left here is the choice, the summary and the download.
+ * **The assembly is the engine's** (`POST /specs/export`): here it would be seconds of synchronous
+ * render-thread work for a 12MB spec (#721). What is left here is the choice, the summary and the
+ * download. Delivery is the repo's one file-to-disk path, `downloadTextFile` (as in
+ * `ResponseActions`), which reports what became of the file (#3246): the dialog closes once it is
+ * written, stays open on a cancelled save dialog, and says why a write failed.
  *
- * Delivery is the repo's one file-to-disk path, `downloadTextFile`, the same
- * one `ResponseActions` uses. It answers what became of the file (#3246), so
- * the dialog closes once the file is written, stays open on a cancelled save
- * dialog, and says why a write failed.
+ * **A bound collection also asks how much to write.** Its document is usually somebody's contract,
+ * so the default, "Values only", writes examples and parameter values and leaves its structure
+ * alone; "All edits" writes every edit the collection holds into it, new requests included. A
+ * free-form collection has no contract to keep and is not asked.
  *
- * **A bound collection also asks how much to write.** Its document is usually
- * somebody's contract, so the default, "Values only", writes examples and
- * parameter values and leaves its structure alone; "All edits" puts every edit
- * the collection holds into it, new requests included. A free-form collection
- * has no contract to keep and is not asked.
+ * Mounted only while open, like `RunCollectionDialog`: the mount is the reset, and a dialog nobody
+ * opened reads nothing.
  *
- * Mounted only while open, like `RunCollectionDialog`: the mount is the reset,
- * and the read costs nothing for a dialog nobody opened.
- *
- * **Nothing here is torn down to fetch something else** (issue #1311). The
- * summary states properties of the collection, not of the serialisation - the
- * counts are the same in JSON and YAML, and only the text and the file name
- * differ - so a format switch keeps the card and says it is working beside the
- * toggle, and the first read holds the card's footprint instead of collapsing
- * to a line. A dialog that centres on itself moves both of its edges for every
- * block that comes and goes.
+ * **Nothing is torn down to fetch something else** (issue #1311). The summary states properties of
+ * the collection, not of the serialisation (JSON and YAML share the counts; only the text and the
+ * file name differ), so a format switch keeps the card and shows its work beside the toggle, and
+ * the first read holds the card's footprint instead of collapsing to a line. A dialog centred on
+ * itself moves both edges for every block that comes and goes.
  */
 
 import { useState } from "react";
@@ -81,10 +70,9 @@ export interface ExportSpecDialogProps {
 	collection: Collection;
 	onOpenChange: (open: boolean) => void;
 	/**
-	 * Where focus goes when the dialog closes. Radix restores it to whatever held
-	 * it before the dialog opened, which for a dialog opened from a row's menu is
-	 * a menu item that is gone: focus lands on `<body>` (#3443). A caller that
-	 * knows the row calls `preventDefault` and focuses it.
+	 * Where focus goes on close. Radix restores it to whatever held it before the dialog opened,
+	 * which for a dialog opened from a row's menu is a menu item that is gone, so focus lands on
+	 * `<body>` (#3443). A caller that knows the row calls `preventDefault` and focuses it.
 	 */
 	onCloseAutoFocus?: (event: Event) => void;
 }
@@ -105,12 +93,10 @@ export default function ExportSpecDialog({
 
 	const result = exported.data;
 	/**
-	 * One in-flight indicator at a time, and it never takes the card's place
-	 * (issue #1311). The first read has nothing to keep on screen, so it holds
-	 * the card's footprint; a format switch keeps the previous answer - the
-	 * counts in it are the same either way - and says so beside the toggle
-	 * instead. Both carry the same accessible name, so "is a document being
-	 * assembled" is one question with one answer.
+	 * One in-flight indicator at a time, never in the card's place (issue #1311). The first read
+	 * has nothing to keep, so it holds the card's footprint; a format switch keeps the previous
+	 * answer (its counts are the same either way) and says so beside the toggle. Both carry the
+	 * same accessible name, so "is a document being assembled" is one question with one answer.
 	 */
 	const firstRead = exported.isPending;
 	const reassembling = exported.isFetching && !firstRead;
@@ -152,11 +138,9 @@ export default function ExportSpecDialog({
 								<ToggleGroupItem value="yaml">YAML</ToggleGroupItem>
 							</ToggleGroup>
 							{/*
-							 * A large spec spends real time being read and patched, and a
-							 * dialog that showed nothing would read as one that had
-							 * finished with nothing to say. Beside the toggle, because the
-							 * toggle is what set it going and the card below stays where
-							 * it is.
+							 * A large spec spends real time being read and patched, and a blank
+							 * would read as finished with nothing to say. Beside the toggle, which
+							 * set it going, while the card below stays put.
 							 */}
 							{reassembling && (
 								<span
@@ -214,10 +198,9 @@ export default function ExportSpecDialog({
 				<DialogFooter>
 					<DialogCancelButton onClick={() => onOpenChange(false)} />
 					{/*
-					 * Disabled while a format assembles, not only while there is
-					 * nothing: what is held is the *previous* format's text, and a
-					 * click in that window would copy JSON out from under a YAML
-					 * toggle. The window is one engine round trip.
+					 * Disabled while a format assembles, not only while empty: the held text is the
+					 * *previous* format's, so a click in that window (one engine round trip) would
+					 * copy JSON under a YAML toggle.
 					 */}
 					<Button
 						variant="outline"
@@ -241,12 +224,9 @@ export default function ExportSpecDialog({
 }
 
 /**
- * Why there is no document.
- *
- * The engine's sentence, when it sent one: a bound document it could not read,
- * or a binding naming a spec that is not stored, are answers a user can act on -
- * they name the document and say what to do about it. Anything else is the
- * transport, and says so rather than being dressed up as a spec problem.
+ * Why there is no document: the engine's sentence when it sent one (a bound document it could not
+ * read, a binding naming a spec that is not stored), which names the document and the remedy; else
+ * the transport's, said as such rather than dressed up as a spec problem.
  */
 function errorText(error: unknown): string {
 	const message = error instanceof Error ? error.message : String(error);
@@ -254,20 +234,14 @@ function errorText(error: unknown): string {
 }
 
 /**
- * `ExportSummary`'s footprint, held while the first read is in flight (issue
- * #1311).
+ * `ExportSummary`'s footprint, held while the first read is in flight (issue #1311). A placeholder
+ * in the summary's own box, not a line of text, for `DetailSkeleton`'s and `ListSkeleton`'s reason
+ * (a spinner says the app is busy, this says what is about to appear), and it opens the dialog at
+ * about the height it keeps. That matters more here than in a pane: `DialogContent` is centred on
+ * itself, so a block appearing under the toggle moves the top edge as well as the bottom.
  *
- * A placeholder in the summary's own box rather than a line of text, for the
- * reason `DetailSkeleton` and `ListSkeleton` give: a spinner says the app is
- * busy, this says what is about to appear, and it opens the dialog at roughly
- * the height it will keep. That matters more here than in a pane, because
- * `DialogContent` is centred on itself - a block appearing under the toggle
- * moves the top edge as well as the bottom, and the whole window reads as
- * flickering.
- *
- * The summary lists only the counts that are not zero, so its height varies;
- * the placeholder holds a typical answer - a heading, a sentence and a few
- * lines - rather than the longest one, which almost no export reaches.
+ * The summary lists only non-zero counts, so its height varies; the placeholder holds a typical
+ * answer (a heading, a sentence and a few lines), not the longest, which almost no export reaches.
  */
 const PLACEHOLDER_ROWS = 4;
 
@@ -310,12 +284,10 @@ function describe(notes: ExportNotes): { title: string; body?: string } {
 }
 
 /**
- * What the export is about to write, and what it could not carry.
- *
- * Only the counts a user can act on or would miss, and only when they are not
- * zero; the headline count is always shown, because "0 requests exported" is
- * the one zero that is news. The engine's notes carry more (shared `$ref`
- * parameters, schema-sampled examples), which the MCP tool still reports.
+ * What the export is about to write, and what it could not carry: only counts a user can act on or
+ * would miss, and only when not zero, except the headline count, as "0 requests exported" is the
+ * one zero that is news. The engine's notes carry more (shared `$ref` parameters, schema-sampled
+ * examples), which the MCP tool still reports.
  */
 function ExportSummary({ notes }: { notes: ExportNotes }) {
 	const bound = notes.direction === "document";

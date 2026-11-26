@@ -6,14 +6,11 @@
  */
 
 /**
- * How each pass/fail budget reads on screen, keyed by the engine's metric name,
- * which travels verbatim from `POST /runs` through the stored summary to the
- * report. A metric this build has no row for (a `custom.<name>.<stat>` budget, or
- * one a newer sidecar judges) renders under its raw key rather than vanishing
- * from a verdict whose counts include it - see {@link budgetName}.
- *
- * `label` heads a row in the budgets card; `short` is the one-word form a
- * sentence can list ("2 of 4 budgets missed: p95, throughput").
+ * How each pass/fail budget reads, keyed by the engine's metric name, which travels verbatim from
+ * `POST /runs` through the stored summary to the report. A metric with no row here (a
+ * `custom.<name>.<stat>` budget, one a newer sidecar judges) renders under its raw key rather than
+ * vanishing from a verdict counting it ({@link budgetName}). `label` heads a budgets-card row;
+ * `short` is the one-word form a sentence lists ("2 of 4 budgets missed: p95, throughput").
  */
 export interface ThresholdMetricMeta {
 	label: string;

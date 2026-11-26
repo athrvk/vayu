@@ -6,14 +6,10 @@
  */
 
 /**
- * CollectionPicker
- *
- * Shown only when a new request can't be placed unambiguously - no remembered
- * collection and more than one to choose from. After the first pick the choice
- * is remembered, so in practice this appears about once per workspace.
- *
- * A nested collection carries its parent path under the name: two "Users"
- * folders under different parents are otherwise the same row twice (#1881).
+ * Shown only when a new request cannot be placed unambiguously: no remembered collection and more
+ * than one to choose from. The pick is remembered, so in practice this appears about once per
+ * workspace. A nested collection carries its parent path under the name, or two "Users" folders
+ * under different parents are the same row twice (#1881).
  */
 
 import { useMemo } from "react";

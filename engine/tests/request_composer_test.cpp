@@ -1956,7 +1956,7 @@ TEST_F (RequestComposerTest, TheCollisionIsRefusedWhicheverNameResolvedFirst) {
 // Two names the author typed alike are two lines they can see side by side, and
 // both are sent, each in its own spelling (issue #2466). Only a collision
 // resolution *made* is invisible, which is the whole distinction (the same one
-// the bind-time rule draws in `docs/engine/api-reference.md`).
+// the bind-time rule draws in `docs/engine/api-reference/compose.md`).
 TEST_F (RequestComposerTest, TwoNamesTheAuthorTypedAreNotThisRefusal) {
     seed_environment ("env_1", R"({"ok":{"value":"fine","enabled":true}})");
     const json body = { { "request",

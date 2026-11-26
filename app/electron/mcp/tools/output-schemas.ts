@@ -6,7 +6,6 @@
  */
 
 /**
- * @file output-schemas.ts
  * @brief The structured output schemas, and the readers that fill them: run
  *        comparison, engine health, the smoke matrix and the config update,
  *        plus the loose schemas of the other object-rooted reads.
@@ -77,13 +76,10 @@ const paginationSchema = z.looseObject({
 });
 
 /**
- * The `{data, pagination}` envelope a paged read answers (`pagedRead`), with
- * @p rowSchema for each row.
- *
- * Loose throughout, every field optional: the SDK turns a result its declared
- * schema rejects into a protocol error that hides the whole answer, so this
- * names what an agent can rely on without refusing a field the engine adds. A
- * non-object answer arrives wrapped as `{ raw }`.
+ * The `{data, pagination}` envelope a paged read answers (`pagedRead`), with @p rowSchema for each
+ * row. Loose throughout, every field optional: the SDK turns a result its declared schema rejects
+ * into a protocol error that hides the whole answer, so this names what an agent can rely on
+ * without refusing a field the engine adds. A non-object answer arrives wrapped as `{ raw }`.
  */
 export function pagedEnvelopeSchema(rowSchema: z.ZodType = z.record(z.string(), z.unknown())) {
 	return z.looseObject({
@@ -190,12 +186,10 @@ const reportTraceSchema = z
 	.optional();
 
 /**
- * `get_run_report`: what each field an agent acts on means, so the tool
- * description carries only the rules (#3749). Loose and
- * all-optional: an older engine omits some, and nothing returned today may be
- * refused. `summary.partial` and `summary.summaryMissing` are a different
- * statement from the top-level `partial`, made of a failed run whose counts the
- * engine could not fully record (#2895).
+ * `get_run_report`: what each field an agent acts on means, so the tool description carries only
+ * the rules (#3749). Loose and all-optional: an older engine omits some, and nothing returned today
+ * may be refused. `summary.partial` and `summary.summaryMissing` are a different statement from the
+ * top-level `partial`, made of a failed run whose counts the engine could not fully record (#2895).
  */
 export const runReportSchema = z.looseObject({
 	metadata: z
@@ -582,11 +576,10 @@ export const smokeResultSchema = z.object({
 				})
 				.optional(),
 			/*
-			 * What the collection's bound OpenAPI document says about this
-			 * response (issue #681). Absent for a collection bound to nothing -
-			 * a response nobody judged against a contract did not fail one - and
-			 * declared here because a field returned but not declared is
-			 * rejected by the SDK before an agent ever sees it.
+			 * What the collection's bound OpenAPI document says about this response (issue #681).
+			 * Absent for a collection bound to nothing (a response nobody judged against a contract
+			 * did not fail one), and declared here because a field returned but not declared is
+			 * rejected by the SDK before an agent sees it.
 			 */
 			schema: z
 				.object({
@@ -598,12 +591,11 @@ export const smokeResultSchema = z.object({
 				})
 				.optional(),
 			/*
-			 * What this request's own post-request script asserted (issue #733).
-			 * A schema verdict explains itself on the row; a test failure did
-			 * not - `ok:false` beside `statusCode: 200` named no reason at all,
-			 * while the detail sat in the `/execute` body this tool had just
-			 * read. Absent when the response carried no test results, which is
-			 * not the same as every assertion passing.
+			 * What this request's own post-request script asserted (issue #733). A schema verdict
+			 * explains itself on the row; a test failure did not: `ok:false` beside
+			 * `statusCode: 200` named no reason while the detail sat in the `/execute` body this
+			 * tool had just read. Absent when the response carried no test results, which is not
+			 * the same as every assertion passing.
 			 */
 			tests: z
 				.object({
@@ -617,13 +609,11 @@ export const smokeResultSchema = z.object({
 });
 
 /**
- * How many failed-test names one smoke row carries.
- *
- * Ten, the number the engine caps a schema verdict's `failures` at
- * (`constants::schema_validation::MAX_FAILURES`), because the two lists ride
- * the same row and are read the same way. Nothing caps `testResults` upstream -
- * a script may write as many assertions as it likes - so the cap has to be
- * here, and `failed` stays the true total so a cut list is visible as one.
+ * How many failed-test names one smoke row carries. Ten, the number the engine caps a schema
+ * verdict's `failures` at (`constants::schema_validation::MAX_FAILURES`), because the two lists
+ * ride the same row and are read the same way. Nothing caps `testResults` upstream (a script may
+ * write as many assertions as it likes), so the cap is here, and `failed` stays the true total so a
+ * cut list is visible as one.
  */
 const MAX_TEST_FAILURES_PER_ROW = 10;
 
@@ -633,24 +623,20 @@ function inheritedLevelMarker(scope: unknown): string {
 }
 
 /**
- * Both scripts' assertions, flattened for a tool result (#733).
+ * Both scripts' assertions, flattened for a tool result (#733). Rendered `name: message` for the
+ * reason the schema failures are: an agent reads this as text. `undefined` means the response
+ * carried no test results at all, the one state that must not become `{total: 0, failed: 0}`, which
+ * would say the script asserted nothing and everything held when no script ran.
  *
- * Rendered `name: message` for the reason the schema failures are: an agent
- * reads this as text. `undefined` means the response carried no test results at
- * all - the one state that must not become `{total: 0, failed: 0}`, which would
- * say the script asserted nothing and everything held, when no script ran.
+ * A pre-request assertion is labelled (issue #810): the engine lists both scripts' assertions, and
+ * one made before the request went out fails for different reasons than one about the response, so
+ * an agent told only the name would read every failure as the latter. Nothing labels the
+ * post-request ones.
  *
- * A pre-request assertion is labelled (issue #810). The engine lists both
- * scripts' assertions now, and an assertion made before the request went out
- * fails for different reasons than one about the response - an agent told only
- * the name would read every failure as the latter. Nothing labels the
- * post-request ones: they are what this list has always been.
- *
- * An assertion from an inherited level is labelled too (issue #2522): a request
- * runs its collection's and its folders' scripts, and an agent told only the
- * name would look for the failing assertion in the request's own script. The
- * level marker leads the source one; the request's own assertion and an entry
- * with no `scope` (a trace stored before the field) carry none.
+ * An assertion from an inherited level is labelled too (issue #2522): a request runs its
+ * collection's and its folders' scripts, and an agent told only the name would look for the failing
+ * assertion in the request's own script. The level marker leads the source one; the request's own
+ * assertion and an entry with no `scope` (a trace stored before the field) carry none.
  */
 export function readTestVerdict(
 	resp: Record<string, unknown>
@@ -679,14 +665,11 @@ export function readTestVerdict(
 }
 
 /**
- * The schema verdict a `POST /execute` body carries, flattened for a tool
- * result (issue #681).
- *
- * The failures are rendered `path: message` rather than passed through as
- * objects: an agent reads this as text, and the engine has already capped the
- * list. `undefined` means the engine wrote no verdict at all, which is the one
- * state that must not become `{checked: false}` - that would say the contract
- * could not judge this response, when there was no contract.
+ * The schema verdict a `POST /execute` body carries, flattened for a tool result (issue #681). The
+ * failures are rendered `path: message` rather than passed through as objects: an agent reads this
+ * as text, and the engine has already capped the list. `undefined` means the engine wrote no
+ * verdict at all, the one state that must not become `{checked: false}`, which would say the
+ * contract could not judge this response when there was no contract.
  */
 export function readSchemaVerdict(
 	resp: Record<string, unknown>
@@ -725,21 +708,11 @@ export const configUpdateSchema = z
 	.passthrough();
 
 /**
- * Of the changed config keys, which require an engine restart to take effect.
- *
- * The engine says so in a typed `requiresRestart` field on each entry
- * (`engine/src/http/routes/config.cpp`), read here and in `SettingsMain.tsx`.
- * It replaced a "… (Requires Restart)" substring in the entry's `label` that
- * both consumers regex-matched out of the prose - so a label that fell out of
- * step with the mechanism (the `workers` case, #197) misinformed an agent and
- * the settings screen at once, and no rewording of the copy could be made
- * without minding this parser.
- *
- * Strictly `=== true`: this decides whether the tool result tells an agent its
- * change is live, and a payload that omits the field (an engine older than the
- * app it is paired with) has not said that it does not need one.
- *
- * `update_config`'s `restartRequired` result shape is unchanged.
+ * Of the changed config keys, which require an engine restart to take effect. The engine says so in
+ * a typed `requiresRestart` field on each entry (`engine/src/http/routes/config.cpp`), read here
+ * and in `SettingsMain.tsx`. Strictly `=== true`: this decides whether the tool result tells an
+ * agent its change is live, and a payload that omits the field (an engine older than the app it is
+ * paired with) has not said that it does not need one.
  */
 export function restartRequiredAmong(configResponse: unknown, changedKeys: string[]): string[] {
 	const raw = Array.isArray(configResponse)
@@ -764,16 +737,12 @@ export function smokeRowUrl(ctx: ToolContext, url: unknown, auth: unknown): stri
 }
 
 /**
- * The direct sub-collections of `collectionId`, by name.
- *
- * `GET /requests?collectionId=` returns a collection's *direct* requests only
- * (the DB filters on `collection_id ==`), while collections nest via `parentId`
- * - so a smoke run on a parent leaves every descendant folder untested. This
- * names them so the result can say so.
- *
- * Returns `null` when the collection list could not be read: the caller
- * discloses "could not check" rather than the absence of children, since the
- * two are not the same claim.
+ * The direct sub-collections of `collectionId`, by name. `GET /requests?collectionId=` returns a
+ * collection's *direct* requests only (the DB filters on `collection_id ==`), while collections
+ * nest via `parentId`, so a smoke run on a parent leaves every descendant folder untested; this
+ * names them so the result can say so. Returns `null` when the collection list could not be read:
+ * the caller discloses "could not check" rather than the absence of children, since the two are not
+ * the same claim.
  */
 export async function childCollectionNames(
 	client: EngineClient,
@@ -813,12 +782,10 @@ export interface SmokePage {
 }
 
 /**
- * The paging fields of a smoke result, in the result itself: a page cut that
- * only the caller's arithmetic reveals reads as the whole collection passing.
- *
- * `note` is absent when the call ran everything in scope, so it only appears
- * when there is something to act on. A cancelled call's row in flight is not
- * among the rows, and `next.offset` points at it: it may have reached the API
+ * The paging fields of a smoke result, in the result itself: a page cut that only the caller's
+ * arithmetic reveals reads as the whole collection passing. `note` is absent when the call ran
+ * everything in scope, so it appears only when there is something to act on. A cancelled call's row
+ * in flight is not among the rows, and `next.offset` points at it: it may have reached the API
  * before the cancellation did, and the resume sends it again.
  */
 export function smokePageFields(page: SmokePage): Record<string, unknown> {

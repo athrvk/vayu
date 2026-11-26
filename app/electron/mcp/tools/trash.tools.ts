@@ -6,7 +6,6 @@
  */
 
 /**
- * @file trash.tools.ts
  * @brief The trash: listing, restoring and purging deleted collections, requests,
  *        environments, saved examples and client certificates.
  */

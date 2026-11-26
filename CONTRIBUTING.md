@@ -313,6 +313,40 @@ a Ctrl-C during one of `build.py`'s slow toolchain probes is eaten instead of
 aborting the build. Catch what the call can actually raise - for a subprocess
 probe that is `(OSError, subprocess.SubprocessError)`.
 
+### Source comments
+
+Comments state the constraint in the present tense (`CLAUDE.md`, "Comments").
+Two Python scripts hold that line, and neither needs an install:
+
+```bash
+python3 scripts/comment-lint.py                     # history phrasing in comments
+python3 scripts/comment-lint.py --measure           # the ceilings file this tree needs
+python3 scripts/comment-diff-check.py --base <sha>  # proves a change touched comments only
+```
+
+`comment-lint.py` counts `used to`, `until #N`, `since #N`, `#N added|changed|...`,
+`formerly` and `previously` in the comment lines of non-test source under
+`engine/include`, `engine/src`, `app/src` and `app/electron`. A file that has
+some holds a ceiling in `scripts/comment-lint-ceilings.json`, and the file may
+only shrink: CI compares it with the base branch's copy, a ceiling whose file
+has no phrase left fails as stale (delete it), and a split or rename may hand a
+retired entry's count to the new files, between them and no more. Lowering one
+after a cleanup is `--measure`. There is no inline marker to silence a line; a
+file with a legitimate use takes a ceiling. It runs on a pull request as
+`Source comment lint`, and prints nothing when it passes. A trailing comment
+(code, then `// ...`) is not scanned.
+
+`comment-diff-check.py` is for a pull request that claims to change comments
+only. It strips the comments from every touched source file at the merge-base
+and at `HEAD` (`--head` names another end), requires the two token streams to be
+identical and the counts of `NOLINT`, `eslint-disable`, `@ts-expect-error`,
+`@deliberate`, `clang-format off|on` and the other directives to be equal, and
+exits non-zero naming the file and the first differing token. Strings, template
+literals, regex literals and C++ raw strings are read as such, so a `//` inside
+one is not taken for a comment. Paste its output into the pull request
+description. It is not a CI step; commit the change first, since it compares
+commits.
+
 ## Testing
 
 ### Engine (C++)
@@ -397,6 +431,32 @@ Conventions for writing app tests - the default `node` environment, when to ask
 for `jsdom`, and the timeout rule for render-heavy cases - are in
 `app/CLAUDE.md`.
 
+### Test file size
+
+A test file is capped at **1,500 lines**, engine and app alike (`*.test.ts(x)`,
+`*.testkit.ts(x)`, `*_test.cpp`). A file that grew past it is split by suite or
+by source module, with its shared setup moved to a testkit or a header, not
+listed. One script holds the line and needs no install:
+
+```bash
+python3 scripts/test-size-lint.py            # test files over the cap
+python3 scripts/test-size-lint.py --measure  # the exceptions file this tree needs
+```
+
+The files that were over the cap when it was set are listed in
+`scripts/test-size-exceptions.json` with the size each had. The list may only
+shrink: a file over its recorded size fails, a file now within the cap fails
+as stale (delete the entry), and CI compares the list with the base branch's
+copy, so an entry cannot be added or raised to make room. Splitting a file
+and lowering its entry is `--measure`. It runs on a pull request as `Test file
+size` and prints nothing when it passes.
+
+A test that holds a number to a **ceiling** (`CEILING`, a `*_CEILING`, a
+`maxBytes:` row) keeps the number in the constant and the measured value in the
+failure message. The docblock above it states the rule and carries no value and
+no history of raises; `app/src/test/ceiling-docblock.guard.test.ts` fails one
+that does.
+
 ## Documentation
 
 Everything in `docs/` is published to **[athrvk.github.io/vayu](https://athrvk.github.io/vayu/)**
@@ -408,6 +468,7 @@ from `.github/mkdocs.yml`.
 pip install -r requirements-docs.txt
 mkdocs serve -f .github/mkdocs.yml            # live preview
 mkdocs build --strict -f .github/mkdocs.yml   # exactly what CI runs
+python3 scripts/docs-lint.py                  # page size and shape; no install needed
 ```
 
 `-f` is not optional: the config lives in `.github/`, so bare `mkdocs serve`
@@ -417,7 +478,7 @@ a project page served from a subdirectory, and `/` redirects to it.
 
 Site-only styling lives in `docs/stylesheets/extra.css` (accent, header, headings,
 landing page). It styles the documentation site, **not** the product - the token
-rules in [Design System](docs/design-system.md) do not apply to it, and it must
+rules in [Design System](docs/design-system/index.md) do not apply to it, and it must
 never be used as a reference for app CSS.
 
 The site's favicon and header logo are **not** files under `docs/`.
@@ -440,6 +501,27 @@ Two rules when you add or change a doc:
   `## Shared Auth Fields (components/shared/AuthFields/)` slugifies to
   `#shared-auth-fields-componentssharedauthfields` - the parenthetical is part of
   the anchor.
+
+Pages have a size and shape budget, held by `scripts/docs-lint.py` in the same
+`Docs site` run: 600 lines a page (1,000 for a reference page), 400 characters
+a line, 200 characters a table cell, a front-matter `description:`, and no
+history narration (`used to`, `until #N`, `since #N landed`, `formerly`,
+`previously`, `was renamed|moved|removed|replaced`, an issue number in a
+heading). A page that is over a budget today has a ceiling in
+`scripts/docs-lint-ceilings.json`; a ceiling can be lowered and never raised,
+and one whose page is now within budget fails as stale, so delete it. A page
+split into several is the one way a ceiling is added: the new pages may hold,
+between them, what the old page's entry held (counts summed, each maximum no
+higher). A change that retires a page also re-aims links and rewraps text, so
+in that change a maximum may rise by 32 characters and the new pages' `history`
+may total a tenth more. The lint prints nothing when it passes. `python3 scripts/docs-lint.py --measure` prints
+the ceilings file the current tree needs, for lowering it after a cleanup.
+
+The three `CLAUDE.md` guides (the root, `app/` and `engine/`) are held to one
+budget in the same run: 400 lines each. A guide holds rules a session reads
+first; reference goes on a page under `docs/` that the guide links. A guide
+over the budget would have a ceiling in the same file, with the same rules. The
+pull-request run starts when a guide changes.
 
 Links out of `docs/` (to `SECURITY.md`, `LICENSE`, `CONTRIBUTING.md`) must be
 absolute `https://github.com/athrvk/vayu/blob/master/...` URLs: those files are

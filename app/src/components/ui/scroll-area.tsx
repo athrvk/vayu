@@ -33,19 +33,11 @@ function ScrollArea({
 }
 
 /**
- * The overlay scrollbar, sized and coloured to match the native one.
- *
- * A `ScrollArea` sits beside plain `overflow-auto` panes all over the app, so
- * its bar is read against theirs: this is `w-2`/`h-2` because `::-webkit-scrollbar`
- * in `index.css` is too (2 spacing units, 6px at the default density), and it
- * carries the same `muted-foreground/30` thumb for the same reason. It shipped
- * at shadcn's 10px with a `bg-border` thumb, which
- * is both thicker than the baseline and - since `--border` matches `--card` in
- * dark - invisible on the surface this component is usually laid over.
- *
- * The 1px padding and transparent edge border shadcn insets the thumb with are
- * gone with the width: they were a 30% inset on a 10px bar and would be a 50%
- * one here, leaving a 3px thumb inside a 6px gutter.
+ * The overlay scrollbar, matching the native one it sits beside in plain `overflow-auto` panes:
+ * `w-2`/`h-2`, as `index.css`'s `::-webkit-scrollbar` is (2 spacing units, 6px at default density),
+ * with the same `muted-foreground/30` thumb. Shadcn's `bg-border` thumb would be invisible in dark,
+ * where `--border` matches `--card`. Its 1px padding and transparent inset border are dropped too:
+ * a 50% inset on this width, a 3px thumb in a 6px gutter.
  */
 function ScrollBar({
 	className,
@@ -64,8 +56,10 @@ function ScrollBar({
 			)}
 			{...props}
 		>
-			{/* `transition-colors` lives here, not just on the scrollbar track above -
-			    the hover fill this class animates is on the thumb itself. */}
+			{/*
+			 * `transition-colors` here, not only on the track: the hover fill it animates is the
+			 * thumb's.
+			 */}
 			<ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/50" />
 		</ScrollAreaPrimitive.ScrollAreaScrollbar>
 	);

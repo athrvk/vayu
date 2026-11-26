@@ -6,15 +6,11 @@
  */
 
 /**
- * A run's custom trends, counters and rates (`metric.record` / `pm.metrics`),
- * charted on the run's own timeline (issue #1579) - the live/history sibling of
- * `CustomMetricsSummary`, which shows the same numbers as a static end-of-run
- * card rather than a series.
- *
- * One generic chart, not one card per metric type - `ServerVitalsChart` already
- * answers this exact question (a run names its own metrics, there is no
- * semantic mapping to make) and this follows it: a small categorical palette
- * cycled across whatever names the run declares.
+ * A run's custom trends, counters and rates (`metric.record` / `pm.metrics`) on the run's own
+ * timeline (issue #1579), the live/history sibling of `CustomMetricsSummary`'s static end-of-run
+ * card. One generic chart, not one card per metric type, as `ServerVitalsChart` answers the same
+ * question (a run names its own metrics, with no semantic mapping to make): a small categorical
+ * palette cycled across the declared names.
  */
 
 import { useMemo } from "react";
@@ -29,11 +25,9 @@ import { describeChart } from "./chartLabel";
 import { fmtVitals, axisVitals } from "./formatters";
 
 /**
- * The categorical hues legible as a line on both grounds, in the order series
- * are assigned - same set and same rationale `ServerVitalsChart` cycles
- * through: a run names its own metrics, so a series gets a colour by position,
- * and up to 32 declared names means the cycle repeats well past four (the
- * tooltip names every series, which is what keeps a repeated hue readable).
+ * The categorical hues legible as a line on both grounds, in assignment order, the set and reason
+ * `ServerVitalsChart` cycles: a series gets a colour by position, and up to 32 declared names
+ * repeat the cycle well past four, which the tooltip keeps readable by naming every series.
  */
 const CUSTOM_METRIC_ROLES: UPlotSeriesSpec["role"][] = [
 	"categorical",

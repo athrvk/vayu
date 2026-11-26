@@ -6,19 +6,18 @@
  */
 
 /**
- * The main process's writes to file trust (#2356): the four engine routes that
- * decide which files a request body may send - `POST`/`DELETE /file-grants` and
- * `POST`/`DELETE /file-roots` - and the reads of the grants and the allowed folders beside them.
+ * The main process's writes to file trust (#2356): the four engine routes that decide which files a
+ * request body may send (`POST`/`DELETE /file-grants` and `POST`/`DELETE /file-roots`), and the
+ * reads of the grants and the allowed folders beside them.
  *
- * The engine refuses those writes without the grant secret the sidecar spawned
- * it with, and this module is the one holder of that secret and the one place
- * that sends it. Nothing here is reachable from the renderer: the IPC channels
- * that end up here take a path main minted (a picked file, a chosen folder) or
- * a row id, never a path the renderer names.
+ * The engine refuses those writes without the grant secret the sidecar spawned it with, and this
+ * module is the one holder of that secret and the one place that sends it. Nothing here is
+ * reachable from the renderer: the IPC channels that end up here take a path main minted (a picked
+ * file, a chosen folder) or a row id, never a path the renderer names.
  *
- * Every call answers an {@link EngineWrite} and never throws, because each
- * caller is an IPC handler or a background record that has a reply to give
- * either way. Electron-free, so it is tested with a stub `fetch`.
+ * Every call answers an {@link EngineWrite} and never throws, because each caller is an IPC handler
+ * or a background record with a reply to give either way. Electron-free, so it is tested with a
+ * stub `fetch`.
  */
 
 import { ENGINE_GRANT_SECRET_HEADER } from "./constants.js";
@@ -58,9 +57,8 @@ export interface FileTrustClient {
 }
 
 /**
- * An id the engine minted (`froot_...`, `fgrant_...`). Checked before it is
- * spliced into a URL: an id holding `/` or `..` would aim the secret at another
- * route.
+ * An id the engine minted (`froot_...`, `fgrant_...`), checked before it is spliced into a URL: an
+ * id holding `/` or `..` would aim the secret at another route.
  */
 const ROW_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -68,7 +66,7 @@ export function isRowId(id: unknown): id is string {
 	return typeof id === "string" && ROW_ID.test(id);
 }
 
-/** `{"error": {"code", "message"}}`, the one shape the engine refuses with since #173. */
+/** `{"error": {"code", "message"}}`, the one shape the engine refuses with (#173). */
 async function readRefusal(response: Response): Promise<EngineWrite<never>> {
 	const body = (await response.json().catch(() => null)) as {
 		error?: { code?: unknown; message?: unknown };

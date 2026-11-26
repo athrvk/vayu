@@ -6,12 +6,9 @@
  */
 
 /**
- * Which of the dialog's budgets the user did not type this time (issue #2194).
- *
- * The budgets are one global memo plus a p99 seed from Settings, so a field can
- * open filled with a number the user never saw on this request. These helpers
- * say which fields those are and where each came from, for the notice that
- * names them. Pure, so the rules are tested without rendering.
+ * Which of the dialog's budgets the user did not type this time (#2194). The budgets are one global
+ * memo plus a Settings p99 seed, so a field can open with a number the user never saw on this
+ * request; these say which fields and from where, for the notice. Pure, to test without rendering.
  */
 
 import type { LoadTestConfig } from "@/types";
@@ -50,13 +47,10 @@ const isBlank = (value: string | undefined) => (value ?? "").trim() === "";
 export const SLO_SEEDED_KEY = "latencyP99Ms" satisfies BudgetKey;
 
 /**
- * Whether the Settings p99 seed is dormant for this run. A capacity search
- * climbs past the limit on purpose, and the engine judges `latencyP99Ms` over
- * the run's pooled histogram, every over-budget level included, so a verdict on
- * the seed would read how far the search climbed (issue #2816). A stream's
- * latency is its whole duration, which the dashboard's per-request threshold
- * was never set against (issue #3772). A p99 the user typed, or the memo
- * carried, is theirs and still travels.
+ * Whether the Settings p99 seed is dormant for this run. A capacity search climbs past the limit on
+ * purpose and `latencyP99Ms` is judged over every level, so a verdict on the seed would read how
+ * far the search climbed (#2816). A stream's latency is its whole duration, which the per-request
+ * threshold was never set against (#3772). A typed or memo-carried p99 is the user's and travels.
  */
 export function isUnsentSeed(
 	mode: LoadTestConfig["mode"],
@@ -67,11 +61,9 @@ export function isUnsentSeed(
 }
 
 /**
- * The carried set restricted to the fields this run can declare. The memo is
- * one global record, so a stream budget remembered from a streaming request
- * comes back on a request that does not stream, where the field is not shown
- * and the value is not sent: it is not carried into that run, and the notice
- * must not name a budget the run will not judge.
+ * The carried set limited to fields this run can declare. The memo is global, so a stream budget
+ * from a streaming request returns on one that does not stream, where it is neither shown nor sent;
+ * it is not carried, and the notice must not name a budget the run will not judge.
  */
 export function carriedForRun(carried: CarriedBudgets, streaming: boolean): CarriedBudgets {
 	const fixed: CarriedBudgets["fixed"] = {};
@@ -105,9 +97,8 @@ export function budgetsToSend(
 }
 
 /**
- * The budgets the memo keeps. A dormant seed is left out rather than written:
- * a written p99 restores as the user's own (`memo`), so the next capacity or
- * stream run would send the number this one withheld.
+ * The budgets the memo keeps, without a dormant seed: a written p99 restores as the user's own
+ * (`memo`), so the next capacity or stream run would send what this one withheld.
  */
 export function budgetsToRemember(
 	budgets: BudgetDraft,
@@ -121,9 +112,8 @@ export function budgetsToRemember(
 }
 
 /**
- * The fields the restore filled from somewhere other than the user: a non-blank
- * memo value is `memo`; a p99 the memo never recorded is the `slo` seed. A blank
- * memo value is a declined budget, not a carried one.
+ * The fields the restore filled from somewhere other than the user: a non-blank memo value is
+ * `memo`; a p99 the memo never recorded is the `slo` seed. A blank memo value is a declined budget.
  */
 export function findCarriedBudgets(
 	saved: Partial<BudgetDraft> | undefined,
@@ -141,11 +131,7 @@ export function findCarriedBudgets(
 	};
 }
 
-/**
- * The carried fields the user has not touched since the dialog opened. Editing a
- * field makes it theirs, so the notice stops claiming it; clearing it counts as
- * editing it.
- */
+/** Carried fields untouched since opening; an edit (clearing included) makes a field the user's. */
 export function stillCarried(
 	carried: CarriedBudgets,
 	initial: { budgets: BudgetDraft; customBudgets: readonly CustomBudgetDraft[] },
@@ -172,10 +158,9 @@ function sameCustomRow(a: CustomBudgetDraft, b: CustomBudgetDraft | undefined): 
 }
 
 /**
- * The `thresholds` keys of the carried fields, as they travel on `POST /runs`
- * (issue #2195). Both sources count: the user typed neither a memo value nor
- * the SLO seed for this run. A key is named whether or not it ends up in
- * `thresholds`; `buildLoadTestConfig` drops the ones that do not.
+ * The carried fields' `thresholds` keys for `POST /runs` (#2195). Both sources count: the user
+ * typed neither for this run. A key is named whether or not it reaches `thresholds`;
+ * `buildLoadTestConfig` drops those that do not.
  */
 export function carriedThresholdKeys(
 	carried: CarriedBudgets,
@@ -225,9 +210,8 @@ export const UNNAMED_ORIGIN = "your last load test";
 export const SLO_SOURCE_NOTE = "(from Settings › Dashboard › p99 threshold)";
 
 /**
- * The notice's sentence, or null when nothing carried is left. A memo value is
- * attributed to the request that set it; a lone SLO seed is not "carried over"
- * from any run, so it says what it is instead.
+ * The notice's sentence, or null when nothing carried is left. A memo value names the request that
+ * set it; a lone SLO seed is carried from no run, so it says what it is.
  */
 export function describeCarried(
 	carried: CarriedBudgets,

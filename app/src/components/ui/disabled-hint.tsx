@@ -6,38 +6,22 @@
  */
 
 /**
- * DisabledHint - why this control is off (issue #1690).
+ * Why this control is off (#1690). A `Tooltip` around a disabled `Button` cannot work: the baseline
+ * `disabled:pointer-events-none` starves the trigger of pointer events, and a disabled button is
+ * not focusable, so both paths to the tooltip are gone when there is something to explain. So the
+ * trigger is a wrapper *around* the control: a `span` keeping its own pointer events and tab stop,
+ * the disabled child inert inside. The reason arrives on hover and on Tab, and the child is
+ * unchanged: its `disabled` prop still refuses the click.
  *
- * The app carries 163 `disabled=` props and, before this, not one of the
- * controls behind them said why. The obvious fix does not work: `Button`'s
- * baseline sets `disabled:pointer-events-none`, so a `Tooltip` wrapped around a
- * disabled button never receives the pointer events its trigger listens for,
- * and a disabled button is not focusable either - both paths to the tooltip are
- * gone at exactly the moment there is something to explain. Every attempt to
- * explain a gate therefore ended up as prose beside the control, which only the
- * surfaces with room for a sentence could afford.
+ * `reason` is also the switch: falsy renders the children alone, so a caller passes one expression
+ * instead of an enabled and a disabled copy of a button, which is how a hover state, icon or
+ * `aria-label` ends up on only one. Crossing the gate replaces the child's DOM node (the wrapper
+ * exists on one side only); nothing visible depends on it, as a disabled control has no focus to
+ * lose, but a test holding a reference across the flip must re-query.
  *
- * So the trigger is a wrapper *around* the control rather than the control
- * itself: a `span` that keeps its own pointer events and its own tab stop, with
- * the disabled child inert inside it. The reason arrives on hover like any
- * tooltip and on Tab for a keyboard user, and nothing about the child changes -
- * the gate stays the child's `disabled` prop, which is still what refuses the
- * click.
- *
- * `reason` doubles as the switch: falsy renders the children alone, so a caller
- * passes one expression rather than branching its JSX around an enabled and a
- * disabled copy of the same button. The two copies are how a hover state, an
- * icon or an `aria-label` ends up on one of them and not the other.
- *
- * Crossing the gate replaces the child's DOM node, because the wrapper is there
- * on one side of it and not the other. Nothing user-visible depends on that - a
- * disabled control is not focusable, so there is no focus to lose - but a test
- * holding a reference across the flip has to re-query it.
- *
- * A disabled *menu item* is the one gated control this does not wrap:
- * `RowAction`'s `disabledReason` puts the reason on the item itself, because a
- * tooltip inside a menu's focus trap competes with the menu for the keyboard.
- * See `components/shared/row-actions.ts`.
+ * A disabled *menu item* is not wrapped: `RowAction`'s `disabledReason` puts the reason on the
+ * item, as a tooltip in a menu's focus trap competes with the menu for the keyboard
+ * (`components/shared/row-actions.ts`).
  */
 
 import * as React from "react";
@@ -45,8 +29,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 export interface DisabledHintProps {
 	/**
-	 * Why the control is off, e.g. "No captures to clear". Falsy means the
-	 * control is not gated and the children render on their own.
+	 * Why the control is off ("No captures to clear"); falsy means not gated, and the children
+	 * render alone.
 	 */
 	reason?: string | false | null;
 	/** Tooltip placement. Defaults to top, matching `TooltipIconButton`. */
@@ -55,14 +39,11 @@ export interface DisabledHintProps {
 }
 
 /**
- * `pointer-events-auto` is the load-bearing class here, not decoration: this
- * span is often a child of the disabled control's own container, and it has to
- * keep receiving hover after `disabled:pointer-events-none` has taken it off the
- * button inside. `inline-flex` so the span is the child's exact box and adds no
- * line-height of its own; the ring is the span's, because the focus is.
- *
- * A constant rather than an inline string so the `tabIndex` below fits on the
- * opening line the `eslint-disable-next-line` above it covers.
+ * `pointer-events-auto` is load-bearing: this span is often inside the disabled control's container
+ * and must keep hover after `disabled:pointer-events-none` takes it off the button. `inline-flex`
+ * so the span is the child's box with no line-height of its own; the ring is the span's, as the
+ * focus is. A constant so the `tabIndex` below fits on the line its `eslint-disable-next-line`
+ * covers.
  */
 const WRAPPER_CLASS =
 	"pointer-events-auto inline-flex rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";

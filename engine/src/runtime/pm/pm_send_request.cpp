@@ -6,9 +6,8 @@
  */
 
 /**
- * @file pm_send_request.cpp
- * @brief `pm.sendRequest`, and the auth block reader it shares with
- *        `pm.request.auth` (`pm_auth.hpp`).
+ * `pm.sendRequest`, and the auth block reader it shares with `pm.request.auth`
+ * (`pm_auth.hpp`).
  */
 
 #include "pm_auth.hpp"
@@ -175,19 +174,17 @@ AuthParameters& out) {
     return std::nullopt;
 }
 
-// Postman writes an auth block in two shapes and a script may hand over either:
-// `[{ key, value }]` as an exported collection carries it, or `{ name: value }`
-// as a script hand-writes it. Both are read, for the same reason the header
-// option reads both spellings - a parameter silently vanishing is a request
-// sent with the wrong credential.
+// Postman writes an auth block two ways and a script may hand over either:
+// `[{ key, value }]` as an exported collection carries it, `{ name: value }` as
+// a script hand-writes it. Both are read, as both header spellings are: a
+// parameter silently vanishing sends the wrong credential.
 std::optional<std::string> read_auth_parameters (JSContext* ctx,
 JSValueConst block,
 const AuthTypeParameters& spec,
 const std::string& where,
 AuthParameters& out) {
-    // A scalar the block's own value: `{ type: 'bearer', bearer: 'tok' }` is
-    // not a shape Postman writes, and reading it as a token would guess which
-    // parameter was meant.
+    // A scalar is no block: `{ type: 'bearer', bearer: 'tok' }` is no shape
+    // Postman writes, and reading it as a token would guess the parameter.
     if (!JS_IsObject (block) || JS_IsFunction (ctx, block)) {
         return where + " must be an object or an array of { key, value } entries, got " +
         std::string (js_type_name (ctx, block));
@@ -222,12 +219,11 @@ vayu::http::Auth& out) {
 } // namespace
 
 // The three types the engine can compose become its typed `Auth`, applied by
-// `vayu::http::apply_auth` - the same function every other send here composes
-// credentials with, because a second copy of "Basic " + base64 in the script
-// layer would not receive that one's fixes. Every other type is refused by
-// name: dropping the block sends an unauthenticated request that looks like
-// the script's own mistake, which is the silent wrong request the body modes
-// are refused to prevent.
+// `vayu::http::apply_auth`, as for every other send here: a second "Basic " +
+// base64 in the script layer would miss its fixes. Every other type is refused
+// by name: dropping the block sends an unauthenticated request that looks like
+// the script's own mistake, the silent wrong request the body modes are refused
+// to prevent.
 std::optional<std::string> read_script_auth (JSContext* ctx,
 JSValueConst value,
 const ScriptAuthSlot& slot,
@@ -256,10 +252,9 @@ vayu::http::Auth& out) {
     }
     const AuthTypeParameters* spec = composable_auth_type (type);
     if (spec == nullptr) {
-        // oauth2 included, and deliberately: acquiring a token needs the
-        // database this path does not have, so composing it here would either
-        // reach for state the sandbox has no business holding or send the
-        // request with no token at all.
+        // oauth2 included, deliberately: acquiring a token needs the database
+        // this path lacks, so composing it would reach for state the sandbox
+        // has no business holding, or send no token at all.
         return label + " type \"" + type +
         "\" is not supported - the sandbox composes basic, bearer and apikey. "
         "Build the credential yourself and set the header.";
@@ -267,9 +262,9 @@ vayu::http::Auth& out) {
 
     ScopedValue block (ctx, JS_GetPropertyStr (ctx, value, type.c_str ()));
     if (JS_IsUndefined (block.get ()) || JS_IsNull (block.get ())) {
-        // A type naming a block that is not there - `{ type: 'basic' }`, or the
-        // key misspelled - is refused naming the block, which says more than
-        // the missing credential the per-type reads below would report.
+        // A type naming an absent block (`{ type: 'basic' }`, or a misspelled
+        // key) is refused naming the block, which says more than the missing
+        // credential the per-type reads would report.
         return label + " names type \"" + type + "\" but carries no " +
         std::string (slot.path) + "." + type + " block to read it from";
     }
@@ -292,8 +287,8 @@ vayu::http::Auth& out) {
         out = vayu::http::BearerAuth{ std::move (token->second) };
         return std::nullopt;
     }
-    // Basic. Either half may be empty - Postman sends it as the empty string -
-    // but not both: `Basic Og==` carries no credential at all.
+    // Basic: either half may be empty (Postman sends ""), not both:
+    // `Basic Og==` carries no credential.
     std::string username = params["username"];
     std::string password = params["password"];
     if (username.empty () && password.empty ()) {
@@ -359,11 +354,10 @@ read_header_pair (JSContext* ctx, JSValueConst entry, Headers& out) {
     return std::nullopt;
 }
 
-// pm.sendRequest's headers, in either shape Postman accepts: an array of
-// { key, value } or a plain object. Both, because the array is what a Postman
-// script carries over and the object is what `pm.request.headers` reads as in
-// this same sandbox - a user copying from one to the other should not have a
-// header silently vanish.
+// pm.sendRequest's headers in either Postman shape: an array of
+// `{ key, value }`, what a Postman script carries over, or a plain object, what
+// `pm.request.headers` reads as here, so a header copied between them does not
+// vanish.
 std::optional<std::string>
 read_send_request_headers (JSContext* ctx, JSValueConst value, Headers& out) {
     if (JS_IsArray (value)) {
@@ -396,9 +390,9 @@ read_form_text (JSContext* ctx, JSValueConst value, const std::string& what, std
 }
 
 // One `{ key, value, disabled?, contentType? }` row of a form body's array
-// form. A file part (`type: 'file'`, carrying a `src` and no value) is refused
-// by name: the sandbox has no grant to read a file from disk with, and sending
-// the part without its file is the silent wrong request.
+// form. A file part (`type: 'file'`, a `src` and no value) is refused by name:
+// the sandbox has no grant to read a file with, and the part sent without its
+// file is the silent wrong request.
 std::optional<std::string>
 read_form_entry (JSContext* ctx, JSValueConst entry, const std::string& where, FormField& out) {
     if (!JS_IsObject (entry) || JS_IsArray (entry) || JS_IsFunction (ctx, entry)) {
@@ -433,12 +427,11 @@ read_form_entry (JSContext* ctx, JSValueConst entry, const std::string& where, F
     return std::nullopt;
 }
 
-// A form body's rows, in either shape Postman accepts: an array of
-// `{ key, value, disabled? }` as an exported collection carries it, or a plain
-// `{ name: value }` object as a script hand-writes it. Both, for the reason the
-// header option reads both - a row silently vanishing is a request sent short.
-// A disabled row is validated and then left out, which is what disabled means
-// on the wire (`enabled_fields`).
+// A form body's rows in either Postman shape, an array of
+// `{ key, value, disabled? }` (exported) or a `{ name: value }` object
+// (hand-written), for the headers' reason: a vanishing row sends a request
+// short. A disabled row is validated, then left out, what disabled means on the
+// wire (`enabled_fields`).
 std::optional<std::string> read_form_fields (JSContext* ctx,
 JSValueConst list,
 const std::string& where,
@@ -480,11 +473,11 @@ std::vector<FormField>& out) {
     return std::nullopt;
 }
 
-// `{ mode: 'urlencoded', urlencoded: [...] }` or the `formdata` pair. The rows
-// become the body's fields and the send path's own encoders do the rest
+// `{ mode: 'urlencoded', urlencoded: [...] }` or the `formdata` pair: the rows
+// become the body's fields and the send path's encoders do the rest
 // (`encode_urlencoded`, libcurl's multipart), with the Content-Type they imply
-// unless the script's headers name one. Serialising here instead would copy the
-// encoders and miss the multipart boundary.
+// unless the script names one. Serialising here would copy the encoders and
+// miss the multipart boundary.
 std::optional<std::string>
 read_form_body (JSContext* ctx, JSValueConst value, BodyMode mode, Body& out) {
     const char* member = mode == BodyMode::Form ? "urlencoded" : "formdata";
@@ -502,13 +495,10 @@ read_form_body (JSContext* ctx, JSValueConst value, BodyMode mode, Body& out) {
 }
 
 // pm.sendRequest's body: a raw string, or Postman's `{ mode, <mode>: ... }` for
-// the modes `raw`, `urlencoded` and `formdata`.
-//
-// A raw body is read as Text, which the send path sends as `text/plain` unless
-// the script's headers name a Content-Type (issue #2464); a named one always
-// wins. Every other Postman mode (`file`, `graphql`) is refused by name rather
-// than sent as an empty body: a request that goes out without the payload the
-// script wrote is worse than one that does not go out.
+// `raw`, `urlencoded` and `formdata`. A raw body is Text, sent as `text/plain`
+// unless the script names a Content-Type (#2464), which always wins. Other
+// Postman modes (`file`, `graphql`) are refused by name, not sent empty: a
+// request without the payload the script wrote is worse than none.
 std::optional<std::string>
 read_send_request_body (JSContext* ctx, JSValueConst value, Body& out) {
     if (JS_IsUndefined (value) || JS_IsNull (value)) {
@@ -565,20 +555,15 @@ resolve_send_request_text (JSContext* ctx, std::string& text, const std::string&
 }
 
 /**
- * Every header of the call, name and value both resolved, into lines rebuilt
- * rather than edited in place - a resolved name is a different name.
- *
- * The collision that rebuild can produce is `http/header_names.hpp`'s, refused
- * in its words rather than in words of this layer's own: composition and the
- * residual pass both answer a resolved name landing on a name the request
- * already carries by refusing the send, and a third answer invented here is how
- * the three would drift. The options are read single-valued, so two names the
- * script wrote itself are one line by the time this reads them, and every
- * collision left is one resolution produced - `{{h}}` resolving to
- * `authorization` beside an `Authorization` the script wrote.
- *
- * Nothing is written back until every name is in, so a refused call leaves the
- * request as the script wrote it rather than half rebuilt.
+ * Every header of the call, name and value resolved, into rebuilt lines (a
+ * resolved name is a different name). The collision a rebuild can produce is
+ * `http/header_names.hpp`'s, refused in its words: composition and the residual
+ * pass both refuse a resolved name landing on one the request carries, and a
+ * third answer here is how the three would drift. The options are read
+ * single-valued, so two names the script wrote are one line already, and every
+ * collision left is one resolution produced (`{{h}}` resolving to
+ * `authorization` beside a written `Authorization`). Nothing is written back
+ * until every name is in, so a refused call leaves the request as written.
  */
 std::optional<std::string> resolve_send_request_headers (JSContext* ctx, HeaderList& headers) {
     HeaderList resolved;
@@ -593,13 +578,12 @@ std::optional<std::string> resolve_send_request_headers (JSContext* ctx, HeaderL
         resolved_name =
         std::string (vayu::http::trim_optional_whitespace (resolved_name));
         if (resolved_name.empty ()) {
-            // A name written empty is refused as the headers are read; one
-            // *resolved* empty reaches nothing that would notice - the pre-send
-            // gate reads header text for the bytes that break a line, and
-            // libcurl writes what is left as `": value"` and sends it. Since
-            // #1084 composition and the residual pass refuse it too, so the
-            // wording is `http/header_names.hpp`'s rather than this layer's -
-            // the same move the collision beside it already made.
+            // A name written empty is refused as headers are read; one resolved
+            // empty reaches nothing that notices (the pre-send gate reads
+            // header text for line-breaking bytes, and libcurl sends
+            // `": value"`). Composition and the residual pass refuse it too
+            // (#1084), so the wording is `http/header_names.hpp`'s, as for the
+            // collision beside it.
             return "pm.sendRequest: " + vayu::http::describe_empty_header_name (name);
         }
         if (auto invalid = vayu::http::invalid_header_name_refusal (
@@ -642,16 +626,12 @@ resolve_send_request_fields (JSContext* ctx, std::vector<FormField>& fields) {
 
 // Every string pm.sendRequest was handed, resolved once against the scopes the
 // script can see: the URL, each header name and value, a raw body, a form
-// body's field names and values, and each credential of an auth block. Postman
-// resolves these, and until #1001 Vayu
-// sent them as written - so `pm.sendRequest("{{baseUrl}}/token", cb)` was a
-// wrong request sent silently rather than a refusal. Resolving here rather than
-// at parse time is what gives it Postman's mid-script visibility: a value the
-// same script set two lines earlier is in the scopes this reads.
-//
-// Header names were the half #1001 left written as they stood, because the
-// collision two resolved names can make was undecided; #1051 decided it, so
-// #1067 resolves them under that rule - see `resolve_send_request_headers`.
+// body's names and values, each credential of an auth block. Postman resolves
+// these (#1001), so `pm.sendRequest("{{baseUrl}}/token", cb)` is no silently
+// wrong request. Resolving here, not at parse time, gives Postman's mid-script
+// visibility: a value set two lines earlier is in the scopes. Header names
+// resolve under `http/header_names.hpp`'s collision rule (#1051, #1067;
+// `resolve_send_request_headers`).
 std::optional<std::string>
 interpolate_send_request (JSContext* ctx, Request& request, vayu::http::Auth& auth) {
     if (auto reason = resolve_send_request_text (ctx, request.url, "options.url")) {
@@ -674,14 +654,13 @@ interpolate_send_request (JSContext* ctx, Request& request, vayu::http::Auth& au
     return resolve_script_auth (ctx, auth, SEND_REQUEST_AUTH.label);
 }
 
-// Translate pm.sendRequest's first argument into a Request.
+// pm.sendRequest's first argument as a Request.
 // @return why it was rejected, or nullopt when `out` is filled.
 std::optional<std::string>
 build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::Auth& auth) {
-    // A Url object here is `pm.sendRequest(pm.request.url, cb)`, which #991
-    // made the natural spelling of "send this request again" - it has to be
-    // read before the options-object branch, or the Url object falls into it
-    // and is refused for having no `url` member.
+    // A Url object is `pm.sendRequest(pm.request.url, cb)`, the natural "send
+    // this again" (#991), read before the options-object branch, which would
+    // refuse it for having no `url` member.
     if (auto direct = script_url_text (ctx, arg)) {
         out.url = std::move (*direct);
         if (out.url.empty ()) {
@@ -699,8 +678,8 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::
     ScopedValue js_url (ctx, JS_GetPropertyStr (ctx, arg, "url"));
     auto options_url = script_url_text (ctx, js_url.get ());
     if (!options_url) {
-        // Postman's *literal* URL-object form - a `{host: [...], path: [...]}`
-        // built by hand - is still not accepted; pm.request.url is.
+        // Postman's literal URL-object form (a hand-built
+        // `{host: [...], path: [...]}`) is not accepted; pm.request.url is.
         return "pm.sendRequest options.url must be a string or pm.request.url, "
                "got " +
         std::string (js_type_name (ctx, js_url.get ()));
@@ -717,8 +696,8 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::
             std::string (js_type_name (ctx, js_method.get ()));
         }
         std::string method_text = js_to_string (ctx, js_method.get ());
-        // Same normalisation pm.request's write-back applies: 'post' clearly
-        // means POST, while an unrecognised verb below still fails loudly.
+        // pm.request's write-back normalisation: 'post' means POST, while an
+        // unrecognised verb still fails loudly.
         method_text = vayu::utils::ascii_upper (method_text);
         if (auto parsed = parse_method (method_text)) {
             out.method = *parsed;
@@ -730,10 +709,9 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::
         }
     }
 
-    // `header` is Postman's spelling, `headers` is the one pm.request uses.
-    // Both are read, neither is preferred: given both there is no way to know
-    // which the script meant, and dropping either would send a request missing
-    // headers the script wrote.
+    // `header` is Postman's spelling, `headers` pm.request's; both are read,
+    // neither preferred: given both, which the script meant is unknowable, and
+    // dropping either would send a request missing headers it wrote.
     ScopedValue js_header (ctx, JS_GetPropertyStr (ctx, arg, "header"));
     ScopedValue js_headers (ctx, JS_GetPropertyStr (ctx, arg, "headers"));
     const auto present = [] (JSValueConst v) {
@@ -748,7 +726,7 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::
         JSValueConst chosen =
         present (js_header.get ()) ? js_header.get () : js_headers.get ();
         // Single-valued, as `pm.request.headers` is: a repeated key is the
-        // last one, the rule this option has always had.
+        // last.
         Headers headers;
         if (auto reason = read_send_request_headers (ctx, chosen, headers)) {
             return reason;
@@ -784,16 +762,13 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::
     return read_script_auth (ctx, js_auth.get (), SEND_REQUEST_AUTH, auth);
 }
 
-// The response a pm.sendRequest callback receives.
-//
-// A deliberate subset of pm.response: code, status, responseTime, headers,
-// json() and text(). `status` is the reason phrase, as it is on pm.response -
-// which is Postman's contract and, since the two spellings moved together in
-// #1000, still leaves no room for two objects called a response inside one
-// sandbox to disagree about what `status` means. The phrase comes from the
-// same `response_reason_phrase` pm.response and `to.have.status` read, and
-// the body readers are the same two functions pm.response installs, so
-// neither answer can drift from its sibling.
+// The response a pm.sendRequest callback receives, a deliberate subset of
+// pm.response: code, status, responseTime, headers, json() and text(). `status`
+// is the reason phrase, as on pm.response (Postman's contract; #1000), so two
+// objects called a response in one sandbox agree on it. The phrase is
+// `response_reason_phrase`'s, read by pm.response and `to.have.status` too, and
+// the body readers are pm.response's two functions, so neither can drift from
+// its sibling.
 JSValue build_send_response (JSContext* ctx, const Response& response) {
     JSValue result = JS_NewObject (ctx);
 
@@ -850,12 +825,11 @@ JSValue settled_send_promise (JSContext* ctx, JSValue err, JSValue res) {
     return promise;
 }
 
-// The exchange @p request and @p response made, as the record a trace stores
-// (#3633): `build_result_trace`'s node, masked where it is built, so every
-// reader of the stored trace reads the masked one. `rawRequest` is left out:
-// it repeats the header block as text the mask does not parse, and a reader
-// synthesizes it from the header lines. A urlencoded body is held as fields,
-// which the trace does not write, so the record adds the bytes that went out.
+// The exchange as the record a trace stores (#3633): `build_result_trace`'s
+// node, masked where built, so every reader of the stored trace reads it
+// masked. `rawRequest` is left out (it repeats the header block as text the
+// mask does not parse; a reader synthesizes it); a urlencoded body is held as
+// fields the trace does not write, so the record adds the bytes sent.
 nlohmann::json send_record (const Request& request, const Response& response, int64_t started_at_ms) {
     nlohmann::json record = vayu::http::routes::build_result_trace (request, response);
     auto& sent_request = record["request"];
@@ -873,11 +847,11 @@ nlohmann::json send_record (const Request& request, const Response& response, in
     return record;
 }
 
-// Records the exchange when the caller asked for records
+// Records the exchange when the caller asked
 // (`ScriptConfig::record_send_requests`) and answers its index. Independent of
-// the console: a record is trace, not console output. `Client::send` reports
-// a transport failure on a status-0 `Response`; an `Error` it might answer
-// instead is recorded the same way.
+// the console: a record is trace, not output. `Client::send` reports a
+// transport failure on a status-0 `Response`; an `Error` it might answer
+// instead is recorded alike.
 std::optional<std::size_t> record_send_exchange (ContextData& data,
 const Request& request,
 const Result<Response>& sent,
@@ -898,22 +872,18 @@ int64_t started_at_ms) {
 }
 
 // The one Console line a script-issued request leaves, so the Console lists
-// what a script sent - without it a failed token fetch is invisible (#3462).
-// Info level whatever the outcome: the script's own callback decides whether a
-// failure matters. Written before the callback runs, so a line the callback
-// logs follows the line for the call that produced it. A kept line carries
-// @p record, the index of the call's record, so a reader can draw the two as
-// one row; a line the console cap dropped links nothing.
+// what a script sent; without it a failed token fetch is invisible (#3462).
+// Info level whatever the outcome (the callback decides whether a failure
+// matters), written before the callback so its own lines follow. A kept line
+// carries @p record, the call's record index, so a reader draws both as one
+// row; a line the console cap dropped links nothing.
 //
-// @p script_url is the URL as the script gave it, before auth is composed: an
-// api key `apply_auth` appends to the query is not the script's text. It goes
-// through the same credential blanking an export uses (userinfo password and
-// secret-named query values, written as `<redacted>` like the record's), which
-// keeps the rest of the query - the part that says which call this was.
-//
-// Nothing is built when the console is off (`scriptEnableConsole`, which a load
-// test is advised to turn off), so a run that has asked for no console output
-// formats no line.
+// @p script_url is the URL as given, before auth composes (an api key
+// `apply_auth` appends is not the script's text), through an export's
+// credential blanking (userinfo password and secret-named query values, as
+// `<redacted>`), keeping the rest of the query, which says which call it was.
+// Nothing is built with the console off (`scriptEnableConsole`, advised off for
+// a load test).
 void log_send_request (ContextData& data,
 HttpMethod method,
 const std::string& script_url,
@@ -940,12 +910,12 @@ std::optional<std::size_t> record) {
     }
 }
 
-// One record in the log file for how the call ended (#3677): a warning for a
-// failed send, a debug line otherwise. Unlike the console line above it is
-// written whatever `scriptEnableConsole` says, since the file is where a failed
-// token fetch has to be found when a load test turned the console off, and a
-// cancelled send (the enclosing exchange ended) is a debug line, not a failure.
-// A load run (`record_send_requests` off) writes none, as it records none. No `runId`: the script context does not carry one.
+// One log-file record of how the call ended (#3677): a warning for a failed
+// send, else debug. Written whatever `scriptEnableConsole` says, since the file
+// is where a failed token fetch is found when a load test turned the console
+// off; a cancelled send (the exchange ended) is debug, not a failure. A load
+// run (`record_send_requests` off) writes none; no `runId`, which the script
+// context does not carry.
 void log_send_outcome (HttpMethod method,
 const std::string& script_url,
 const Result<Response>& sent,
@@ -975,21 +945,16 @@ std::chrono::milliseconds elapsed) {
 } // namespace
 
 /**
- * pm.sendRequest(urlOrOptions, callback?)
- *
- * Synchronous by construction in both of Postman's forms: the send blocks,
- * then callback(err, res) runs inline, or, called without a callback, a
- * promise comes back already settled - rejected with `err`, or resolved with
- * `res` (#2577). Nothing is left in flight, so `await pm.sendRequest(...)` has
- * the answer by the next promise job.
- *
- * Four things are refused by throwing rather than by calling the callback or
- * rejecting, because they are the script's mistakes and not the network's: the
- * feature being off, the per-script request cap, an unusable argument, and a
- * URL naming Vayu's own engine or MCP port (`http/loopback_guard.hpp`).
- * Transport failures - refused, DNS, timeout - are the network's answer and
- * reach the callback as an error, which is where a Postman script looks for
- * them.
+ * pm.sendRequest(urlOrOptions, callback?), synchronous in both Postman forms:
+ * the send blocks, then callback(err, res) runs inline or, without a callback,
+ * a promise returns already settled (rejected with `err` or resolved with
+ * `res`, #2577), so `await pm.sendRequest(...)` has the answer by the next
+ * promise job. Four things throw rather than reach the callback, being the
+ * script's mistakes, not the network's: the feature off, the per-script request
+ * cap, an unusable argument, and a URL naming Vayu's own engine or MCP port
+ * (`http/loopback_guard.hpp`). Transport failures (refused, DNS, timeout) are
+ * the network's answer and reach the callback as an error, where a Postman
+ * script looks.
  */
 JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
@@ -1005,7 +970,8 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
         "checked by the MCP server before it calls the engine, so a request "
         "issued from inside a script would bypass a control you configured in "
         "Settings; script-issued requests are refused unless the caller asks "
-        "for them, and the MCP server never does. See docs/engine/mcp.md.");
+        "for them, and the MCP server never does. See "
+        "docs/engine/mcp/resources-and-prompts.md.");
     }
 
     if (argc < 1) {
@@ -1036,21 +1002,18 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     if (auto reason = interpolate_send_request (ctx, request, auth)) {
         return JS_ThrowTypeError (ctx, "%s", reason->c_str ());
     }
-    // Postman builds this call's Item with `protocolProfileBehavior` of its
-    // own (`disableBodyPruning` alone, `event.command.js`) and no parent, so
-    // neither the enclosing request's `disableUrlEncoding` nor anything the
-    // script passes turns this off.
-    //
-    // `wire_url` writes the same line again (the encoder is idempotent); it
-    // is written here too so the reserved-port check below reads the host the
-    // transfer will dial, leading whitespace dropped and lowercased (#2465).
+    // Postman builds this call's Item with its own `protocolProfileBehavior`
+    // (`disableBodyPruning` alone, `event.command.js`) and no parent, so
+    // neither the enclosing request's `disableUrlEncoding` nor the script turns
+    // this off. `wire_url` writes it again (the encoder is idempotent); written
+    // here so the reserved-port check reads the host the transfer dials,
+    // leading whitespace dropped and lowercased (#2465).
     request.url = vayu::core::encode_url_as_postman (request.url);
     const std::string script_url = request.url;
-    // The engine's own composition rather than a second copy of it: a header
-    // the script set still wins, and an api key sent as a query parameter is
-    // percent-encoded onto the URL exactly as every other send does it. `db` is
-    // null because the three types this path accepts need none - oauth2, the
-    // one that would, is refused by name while the options are read.
+    // The engine's composition, not a copy: a header the script set still wins,
+    // and a query api key is percent-encoded onto the URL as on every send.
+    // `db` is null because the three accepted types need none; oauth2, which
+    // would, is refused while the options are read.
     if (const auto applied = vayu::http::apply_auth (request, auth, nullptr);
     !applied.ok) {
         return JS_ThrowPlainError (ctx,
@@ -1066,11 +1029,10 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
         vayu::http::reserved_target_refusal (*port).c_str ());
     }
 
-    // The script's wall-clock budget is enforced by a QuickJS interrupt handler
-    // that only runs *between bytecode operations*, so a blocking C function
-    // never yields to it: without this clamp a 5s script could hold its thread
-    // for the whole request timeout, many times the budget the user set, with
-    // no error and no way to interrupt it.
+    // The script budget's interrupt handler runs only between bytecode
+    // operations, so a blocking C function never yields to it: without this
+    // clamp a 5s script could hold its thread for the whole request timeout,
+    // many times the user's budget, with no error and no interrupt.
     if (auto remaining = remaining_script_budget_ms (ctx)) {
         if (*remaining <= 0) {
             return JS_ThrowPlainError (ctx,
@@ -1081,39 +1043,35 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
         std::min (static_cast<int64_t> (request.timeout_ms), *remaining));
     }
 
-    // Counted before the send, so a request that fails still spends budget -
-    // otherwise a loop against a refusing host would never reach the cap.
+    // Counted before the send, so a failed request still spends budget, or a
+    // loop against a refusing host never reaches the cap.
     data->send_request_count++;
     if (auto host = vayu::http::cookie_scope_host (request.url)) {
         data->addressed_hosts.push_back (std::move (*host));
     }
 
-    // Shares the enclosing execute's jar - see ScriptContext::cookie_jar for
-    // why sharing rather than isolating is the right default. Null jar (a load
-    // run) leaves the client cookie-less, which is what it was before #301.
+    // Shares the enclosing execute's jar (`ScriptContext::cookie_jar` says
+    // why); a null jar (a load run) leaves the client cookie-less, as it was
+    // before the jar existed (#301).
     vayu::http::ClientConfig client_config;
     client_config.cookie_jar   = data->cookie_jar;
     client_config.cookie_scope = data->cookie_scope;
-    // The same route out of the machine the enclosing exchange's own send
-    // takes (issue #705). A script that authenticates through sendRequest and
-    // then lets the real request carry the session needs both to reach the
-    // network the same way.
+    // The enclosing exchange's own route out (#705): a script authenticating
+    // through sendRequest and letting the real request carry the session needs
+    // both to reach the network alike.
     client_config.transport       = data->transport;
     client_config.default_headers = data->default_headers;
-    // The bound the enclosing execution resolved for its own read (issue
-    // #1188), so a script's fetch is not the one read with no byte bound left.
-    // `truncate_over_limit` stays false: a script parses what it is handed, and
-    // there is no property on this response object that could tell it the body
-    // was cut - so the honest answer to an oversized body is the error the
-    // callback can catch, not a prefix.
+    // The enclosing execution's resolved bound (#1188), so a script's fetch is
+    // no unbounded read. `truncate_over_limit` stays false: a script parses
+    // what it gets and nothing on this response could say the body was cut, so
+    // an oversized body is the error the callback catches, not a prefix.
     client_config.max_response_bytes = data->max_response_bytes;
     // Ends with the enclosing exchange's own send (issue #2683).
     client_config.cancel = data->cancel;
-    // Staged jar writes ride the next transfer of this execution, and this is
-    // it - so a script that sets a cookie and then sends through
-    // pm.sendRequest carries it. Drained rather than copied: this transfer's
-    // capture persists them, and applying them a second time afterwards would
-    // undo whatever its response changed.
+    // Staged jar writes ride this execution's next transfer, this one, so a
+    // script that sets a cookie and then sends carries it. Drained, not copied:
+    // this transfer's capture persists them, and reapplying would undo what its
+    // response changed.
     if (data->cookie_writes) {
         client_config.cookie_writes = std::move (*data->cookie_writes);
         data->cookie_writes->clear ();

@@ -6,16 +6,12 @@
  */
 
 /**
- * A single-request load run's own step-level element outcomes (issues
- * #1594, #1641) - extractors, assertions, timers tallied across every
- * submission. The engine already wrote this into the report; nothing
- * rendered it until this component existed.
- *
- * Beside {@link ScriptLifecycleSummary} and {@link CustomMetricsSummary} on
- * the same terms: **silent when the run declared no `requestElements`, or a
- * scenario run reports none here at all** (its own per-step tallies live in
- * the Steps tab instead, `ScenarioStepsTab.tsx`) - an absent `elements` is a
- * different claim from "declared elements and none of them ran".
+ * A single-request load run's step-level element outcomes (#1594, #1641): extractors, assertions
+ * and timers tallied across every submission, as the report carries them. Beside
+ * {@link ScriptLifecycleSummary} and {@link CustomMetricsSummary} on their terms: **silent when the
+ * run declared no `requestElements`, and for a scenario run**, whose per-step tallies are in the
+ * Steps tab (`ScenarioStepsTab.tsx`). An absent `elements` claims something other than "declared,
+ * and none ran".
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";

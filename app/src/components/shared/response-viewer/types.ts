@@ -5,12 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * Shared Response Viewer Types
- *
- * Common types for response display components used across the application.
- */
-
 import type { HeaderLine, RunResultStreamEvents } from "@/types/domain";
 import type { HeaderLine as WireHeaderLine } from "./wire-headers";
 import type { ResponseBytes } from "@/modules/request-builder/utils/response-bytes";
@@ -61,8 +55,8 @@ export interface ResponseBodyProps {
 	body: string;
 	bodyRaw?: string; // Raw response body from server (used for raw view mode)
 	/**
-	 * `ResponseState.rawBytes`. Its `isText` is the funnel's verdict, and this
-	 * component takes it rather than sniffing one of its own.
+	 * `ResponseState.rawBytes`; its `isText` is the funnel's verdict, taken rather than sniffed
+	 * again.
 	 */
 	rawBytes?: ResponseBytes;
 	headers: Record<string, string>;
@@ -74,10 +68,9 @@ export interface HeadersViewerProps {
 	/** A map, or the lines in order when a name may repeat (`WireHeaderLine`). */
 	headers: Record<string, string> | readonly WireHeaderLine[];
 	/**
-	 * The lines as received (issue #2460): repeats kept, names in the server's
-	 * case. Read only beside a map `headers`; absent or empty, the table is built
-	 * from the map, one row per name - which is all a load-run sample, an inbox
-	 * capture and a request's own headers have.
+	 * The lines as received (#2460): repeats kept, names in the server's case. Read only beside a
+	 * map `headers`; absent or empty, the table is built from the map, one row per name, all a
+	 * load-run sample, an inbox capture and a request's own headers have.
 	 */
 	headerLines?: HeaderLine[];
 	title?: string;
@@ -91,13 +84,10 @@ export interface UnifiedResponseViewerProps {
 	response?: ResponseData | null;
 	request?: RequestData | null;
 	/**
-	 * The stream this exchange received, when it was one (issue #657). Present
-	 * turns on the Events tab; absent leaves the viewer with the two tabs it has
-	 * always had, because a non-streaming sample has no timeline and an empty
-	 * "Events" tab would suggest it did.
-	 *
-	 * Shaped as the engine serves it on `GET /runs/:id/samples` - a load sample
-	 * carries no `endReason`, so this asks for none.
+	 * The stream this exchange received, when it was one (#657): present turns on the Events tab;
+	 * absent leaves the viewer's two tabs, as a non-streaming sample has no timeline and an empty
+	 * "Events" would suggest one. Shaped as `GET /runs/:id/samples` serves it: a load sample
+	 * carries no `endReason`.
 	 */
 	events?: Omit<RunResultStreamEvents, "endReason" | "startedAt"> | null;
 	className?: string;

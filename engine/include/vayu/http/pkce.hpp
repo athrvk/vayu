@@ -7,9 +7,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// PKCE (RFC 7636) helpers plus a small CSPRNG-ish token generator for `state`
-// and the code verifier. Localhost dev-tool context: std::random_device is an
-// acceptable entropy source here.
+// PKCE (RFC 7636) helpers and a random token generator for `state` and the code
+// verifier. For a localhost dev tool, std::random_device is an acceptable
+// entropy source.
 
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/sha256.hpp"

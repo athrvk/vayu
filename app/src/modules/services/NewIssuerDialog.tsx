@@ -6,31 +6,24 @@
  */
 
 /**
- * NewIssuerDialog (issue #502)
+ * The start form for a mock OAuth 2.0 issuer (#502). Every field is optional engine-side, so the
+ * dialog opens ready to submit: a bare start is the common "I just need a token" case, and the
+ * three fields change what the tokens *are* (how long they live, what they claim, how the issuer
+ * misbehaves).
  *
- * The start form for a mock OAuth 2.0 issuer. Everything here is optional
- * engine-side, so the dialog opens ready to submit: a bare start is the common
- * "I just need a token" case, and the three fields are the ones that change
- * what the tokens *are* - how long they live, what they claim, and how the
- * issuer misbehaves.
+ * The resource scope is not validated here: the engine applies RFC 6749's scope-token grammar and
+ * its `400` names the break, which the callout shows beside the field rather than a second copy of
+ * the grammar drifting from it.
  *
- * The resource scope is the one field not validated here: the engine's rule is
- * RFC 6749's scope-token grammar, and its `400` names the break, which the
- * callout below shows beside the field rather than a second copy of the grammar
- * drifting from it.
+ * Not offered: the port (an issuer binds an ephemeral loopback port, an explicit one another
+ * listener holds is a `500`, and its URLs are copied, not typed) and clients (with none configured
+ * any client id is accepted, which a test needs; the MCP tools and the API can still supply a
+ * list).
  *
- * The port is not offered. An issuer binds an ephemeral loopback port by
- * default, an explicit one that another listener holds is a `500`, and nothing
- * about a mock issuer wants a memorable port - its URLs are copied, not typed.
- * Clients are not offered either: with none configured any client id is
- * accepted, which is what a test needs; a real client list is a fixture the MCP
- * tools and the API can still supply.
- *
- * Every value is validated here before it is sent, because the engine refuses a
- * bad one with a `400 mock_issuer_invalid_config` rather than falling back to a
- * default - and an issuer running with an expiry other than the one asked for
- * would defeat the point of asking. The claims box is the one that needs it
- * most: a JSON typo is invisible until a token comes back without the claim.
+ * Every other value is validated before it is sent: the engine refuses a bad one with
+ * `400 mock_issuer_invalid_config` rather than falling back to a default, and an issuer running
+ * with an expiry other than the one asked for defeats the asking. The claims box needs it most: a
+ * JSON typo is invisible until a token comes back without the claim.
  */
 
 import { useState } from "react";
@@ -68,9 +61,8 @@ import {
 
 export interface NewIssuerDialogProps {
 	/**
-	 * Mounted only while open, like `RunCollectionDialog`: the mount *is* the
-	 * reset, so the fields and any engine error start clean every time rather
-	 * than carrying the last attempt over or needing an effect to clear it.
+	 * Mounted only while open, like `RunCollectionDialog`: the mount is the reset, so the fields
+	 * and any engine error start clean with no effect to clear them.
 	 */
 	onOpenChange: (open: boolean) => void;
 	/** Called with the new issuer's id, so the drawer can expand its row. */
@@ -129,9 +121,8 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 			{
 				expiresInSeconds: expiresInValue,
 				failureMode,
-				// Only when it means something: `slowMs` outside `slow` mode is a
-				// value the issuer never reads, and sending it would put a number
-				// in the row summary that nothing acts on.
+				// Only in `slow` mode: elsewhere the issuer never reads `slowMs`, and sending it
+				// would put a number in the row summary that nothing acts on.
 				...(failureMode === "slow" ? { slowMs: slowMsValue } : {}),
 				...(claims.claims ? { claims: claims.claims } : {}),
 				...(resourceScope.trim() ? { resourceScope: resourceScope.trim() } : {}),
@@ -166,12 +157,11 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 				</DialogHeader>
 
 				<DialogBody className="space-y-4 py-2">
-					{/* The bound in words, not only in `aria-invalid` and a disabled
-					    button. A field that reddens while Start greys out states
-					    that something is wrong and never which field or why - and
-					    `aria-invalid` alone announces "invalid" with no correction.
-					    The claims box below already did this; the two numbers did
-					    not. */}
+					{/*
+					 * The bound in words, not only in `aria-invalid` and a disabled button: a field
+					 * that reddens while Start greys out never says which field or why, and
+					 * `aria-invalid` alone announces "invalid" with no correction.
+					 */}
 					<div className="space-y-1">
 						<div className="flex items-center justify-between gap-4">
 							<Label htmlFor="new-issuer-expiry" className="leading-snug">

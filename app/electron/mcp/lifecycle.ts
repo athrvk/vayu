@@ -6,26 +6,22 @@
  */
 
 /**
- * @file lifecycle.ts
- * @brief The one owner of the MCP server's running state: whether the port is
- *        bound, the service behind it, and why the last start failed.
+ * @brief The one owner of the MCP server's running state: whether the port is bound, the service
+ *        behind it, and why the last start failed.
  *
- *        The state is a single value, `off | starting | listening | failed`,
- *        and every start and stop takes a new generation. An async step (the
- *        bind, the lazy service load) carries the generation it began under and
- *        publishes nothing once a stop has moved past it: a stop that lands
- *        mid-start waits for the start and closes what it bound, and a service
- *        whose load outlives its listener is never built (#3337).
+ * The state is a single value, `off | starting | listening | failed`, and every start and stop
+ * takes a new generation. An async step (the bind, the lazy service load) carries the generation it
+ * began under and publishes nothing once a stop has moved past it: a stop that lands mid-start
+ * waits for the start and closes what it bound, and a service whose load outlives its listener is
+ * never built (#3337).
  *
- *        The listener only ever holds the port the engine guards (#3580): a
- *        spawn that will guard another port first takes it down
- *        (`releaseForSpawn`), and `followEndpoint` binds it again once the
- *        engine is up. A released server is off, not disabled: it is the one
- *        state `followEndpoint` starts from.
+ * The listener only ever holds the port the engine guards (#3580): a spawn that will guard another
+ * port first takes it down (`releaseForSpawn`), and `followEndpoint` binds it again once the engine
+ * is up. A released server is off, not disabled: it is the one state `followEndpoint` starts from.
  *
- *        Electron-free and SDK-free on purpose: `main.ts` imports it eagerly
- *        (`startup-import-graph.test.ts`), and the SDK arrives through
- *        `loadServiceFactory` on the first request.
+ * Electron-free and SDK-free on purpose: `main.ts` imports it eagerly
+ * (`startup-import-graph.test.ts`), and the SDK arrives through `loadServiceFactory` on the first
+ * request.
  */
 
 import type { LogFields } from "../log.js";

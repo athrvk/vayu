@@ -6,11 +6,9 @@
  */
 
 /**
- * @file log-ipc.ts
- * @brief The two IPC channels #1558 adds: `log:record` (renderer -> main,
- *        one-way - the `runs:progress` / `icon:signal` shape - forwarding a
- *        `error-logger.ts` record onto the app's `"renderer"` logger) and
- *        `app:openLogsFolder` (Settings, General's "Open logs folder"
+ * @brief The two IPC channels #1558 adds: `log:record` (renderer to main, one-way like
+ *        `runs:progress` / `icon:signal`, forwarding an `error-logger.ts` record onto the app's
+ *        `"renderer"` logger) and `app:openLogsFolder` (Settings, General's "Open logs folder"
  *        button). Reading the files back is `log-reader-ipc.ts`.
  */
 
@@ -55,9 +53,8 @@ function truncate(text: string, maxChars: number): string {
 }
 
 /**
- * URLs in the text lose their secrets first, then the text is cut: cutting
- * first could leave the front half of a credential that has no `@` after it
- * for the stripper to find.
+ * URLs in the text lose their secrets first, then the text is cut: cutting first could leave the
+ * front half of a credential with no `@` after it for the stripper to find.
  */
 function boundedText(text: string, maxChars: number): string {
 	return truncate(stripUrlSecretsInText(text), maxChars);
@@ -99,11 +96,10 @@ function isWithinSerialisedBudget(fields: LogFields): boolean {
 }
 
 /**
- * The renderer's payload as a record the logger can take, or `null` when its
- * level or category is not one the schema allows. Anything else a renderer
- * sends is bounded or dropped rather than trusted: a hostile or runaway page
- * must not choose how large a line is, which field names it owns, or what
- * credentials in a URL reach the file.
+ * The renderer's payload as a record the logger can take, or `null` when its level or category is
+ * not one the schema allows. Anything else a renderer sends is bounded or dropped rather than
+ * trusted: a hostile or runaway page must not choose how large a line is, which field names it
+ * owns, or what credentials in a URL reach the file.
  */
 function readRendererLogRecord(value: unknown): RendererLogRecord | null {
 	if (!isPlainObject(value)) return null;
@@ -127,12 +123,10 @@ export class RateLimiter {
 	constructor(private readonly now: () => number = Date.now) {}
 
 	/**
-	 * Registers one record for @p senderId. Returns `"under"` (deliver it),
-	 * `"first-over"` (the 21st in this window - drop it and warn once) or
-	 * `"over"` (already warned this window - drop it silently). Distinguishing
-	 * the last two is the whole point of the cap: warning on every one of a
-	 * loop's thousands of drops would itself fill the disk exactly as fast as
-	 * the loop would have.
+	 * Registers one record for @p senderId: `"under"` (deliver it), `"first-over"` (the 21st in
+	 * this window: drop it and warn once) or `"over"` (already warned this window: drop it
+	 * silently). The last two differ because warning on every one of a loop's thousands of drops
+	 * would fill the disk exactly as fast as the loop would have.
 	 */
 	check(senderId: number): "under" | "first-over" | "over" {
 		const now = this.now();
@@ -180,9 +174,8 @@ export function registerLogIpc(
 		const status = limiter.check(senderId);
 		if (status === "over") return;
 		if (status === "first-over") {
-			// The 21st record in the window is where this fires, once - every
-			// later drop in the same window is silent, or the warning itself
-			// would fill the disk exactly as fast as the loop being capped would.
+			// The 21st record in the window warns, once; `RateLimiter.check` says why later drops
+			// are silent.
 			deps.appLog.warn("ipc", "Dropping renderer log records over the per-second cap", {
 				senderId,
 			});

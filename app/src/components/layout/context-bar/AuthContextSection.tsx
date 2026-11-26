@@ -6,19 +6,15 @@
  */
 
 /**
- * Which auth this request sends, and where it came from.
+ * Which auth this request sends, and where it came from. The "where from" half is the point: a
+ * request set to Inherit sends whatever the nearest configured ancestor holds, and not knowing
+ * which ancestor is the usual way to spend an afternoon on a 401. The walk is `resolveAuthSource`,
+ * the function the Auth tab's banner and both send paths use, so this cannot claim one source while
+ * execution uses another.
  *
- * The "where from" half is the point: a request set to Inherit sends whatever
- * the nearest configured ancestor holds, and the most common way to spend an
- * afternoon on a 401 is not knowing which ancestor that was. The walk is
- * `resolveAuthSource` - the same function the Auth tab's banner and both send
- * paths use, so this cannot claim one source while execution uses another.
- *
- * For OAuth 2.0 the section embeds `TokenStatusRow`, the same control the Auth
- * tab shows: whether a token is cached, whether it has expired, and the buttons
- * to fetch or clear it. A second copy of that row would be a second copy of the
- * cache-key derivation and the interactive-authorize flow, which is exactly the
- * trap the repo keeps hitting.
+ * For OAuth 2.0 it embeds `TokenStatusRow`, the Auth tab's own control: whether a token is cached,
+ * whether it has expired, and the buttons to fetch or clear it. A second copy of that row would be
+ * a second copy of the cache-key derivation and the interactive-authorize flow.
  */
 
 import { useMemo } from "react";
@@ -40,12 +36,11 @@ import type { OAuth2Config, RequestAuth } from "@/types";
 const trimCredential = (text: string) => text.replace(/^[ \t]+|[ \t]+$/g, "");
 
 /**
- * Why a bearer token or API key is a no-op, judged on the value the send will
- * carry. The engine writes no header for an empty token or a nameless key and
- * says so in `authNotice` - after the send. This is the same verdict from the
- * stored configuration before there is a send, so a script that sets the
- * variable at send time is outside it ("as configured"). Null when a credential
- * would go out (#3203).
+ * Why a bearer token or API key is a no-op, judged on the value the send will carry. The engine
+ * writes no header for an empty token or a nameless key and says so in `authNotice`, after the
+ * send; this is the same verdict from the stored configuration before there is one, so a variable a
+ * script sets at send time is outside it ("as configured"). Null when a credential would go out
+ * (#3203).
  */
 function emptyCredentialReason(
 	auth: RequestAuth | undefined,
@@ -71,12 +66,10 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 	const own = request?.auth;
 
 	/**
-	 * The auth that will actually be sent, and the sentence explaining why.
-	 *
-	 * `inherit` is the only mode whose answer is not the request's own: it walks
-	 * the chain, and an ancestor set to No Auth *terminates* that walk rather
-	 * than being stepped over - a different answer from "nobody configured any",
-	 * and one worth wording differently.
+	 * The auth that will be sent, and the sentence explaining why. `inherit` is the only mode whose
+	 * answer is not the request's own: it walks the chain, and an ancestor set to No Auth
+	 * *terminates* the walk rather than being stepped over, an answer worded apart from "nobody
+	 * configured any".
 	 */
 	const effective: { auth: RequestAuth | undefined; origin: string } = useMemo(() => {
 		if (!own) return { auth: undefined, origin: "" };
@@ -97,26 +90,17 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 	}, [own, inherited.source, inherited.blockedBy]);
 
 	/*
-	 * Memoised on the config's *text*, not on its object identity.
+	 * Memoised on the config's *text*, not its object identity. A `{{$guid}}` in the access-token
+	 * URL or the client id resolves to something new on every call (`lib/dynamic-variables.ts`'s
+	 * contract), so resolving per render gives `TokenStatusRow` a new string cache key each time: a
+	 * refetch loop that also re-hides a revealed token.
 	 *
-	 * This used to resolve on every render, on the grounds that a new object
-	 * identity only costs `TokenStatusRow` one cheap re-derivation of the string
-	 * cache key it queries on. That holds for a `{{scope variable}}` and fails
-	 * for a dynamic one: `{{$guid}}` in the access-token URL or the client id
-	 * resolves to something new on every call (`lib/dynamic-variables.ts`'s own
-	 * contract), so the *string* key changed too - a new query key every render,
-	 * which is a refetch loop rather than a re-derivation, and it re-hid a
-	 * revealed token each time round.
-	 *
-	 * Serialised rather than compared by identity because a resolved config is
-	 * rebuilt whenever the ancestor walk re-runs, and `resolveObject` is in the
-	 * deps because its identity is what changes on an environment switch or a
-	 * variable edit - the events that *should* produce a new value.
-	 *
-	 * A `useMemo` and not `lib/dynamic-variable-cache.ts`'s module-scope cache,
-	 * for the reason `useHostCookies` (see `relevance.ts`) keeps one: this
-	 * component creates its own resolver, so a remount brings a fresh
-	 * `resolveObject` that would miss that cache anyway.
+	 * Serialised rather than compared by identity because a resolved config is rebuilt whenever the
+	 * ancestor walk re-runs; `resolveObject` is in the deps because its identity changes on an
+	 * environment switch or a variable edit, the events that *should* produce a new value. A
+	 * `useMemo`, not `lib/dynamic-variable-cache.ts`'s module-scope cache, for the reason
+	 * `useHostCookies` (see `relevance.ts`) keeps one: this component creates its own resolver, so
+	 * a remount brings a fresh `resolveObject` that would miss that cache anyway.
 	 */
 	const configText =
 		effective.auth?.mode === "oauth2" ? JSON.stringify(effective.auth.config) : null;

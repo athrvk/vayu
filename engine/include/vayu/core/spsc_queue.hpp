@@ -19,10 +19,9 @@
 namespace vayu::core {
 
 /**
- * @brief High-performance Single-Producer Single-Consumer Lock-Free Queue
- *
- * Designed for passing ownership of objects (like std::unique_ptr) between threads
- * with minimal overhead. Uses a ring buffer with atomic head/tail indices.
+ * @brief A lock-free single-producer, single-consumer ring buffer with atomic
+ *        head and tail indices, for handing ownership (a std::unique_ptr, say)
+ *        between two threads.
  *
  * @tparam T Type of elements (must be movable)
  */
@@ -31,7 +30,6 @@ template <typename T> class SPSCQueue {
     explicit SPSCQueue (size_t capacity) : capacity_ (capacity) {
         // Ensure capacity is power of 2 for fast bitwise masking
         if (capacity_ < 2 || (capacity_ & (capacity_ - 1)) != 0) {
-            // Find next power of 2
             size_t next_pow2 = 1;
             while (next_pow2 < capacity_)
                 next_pow2 <<= 1;

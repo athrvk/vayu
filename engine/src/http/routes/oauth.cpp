@@ -6,12 +6,14 @@
  */
 
 /**
- * @file http/routes/oauth.cpp
- * @brief OAuth 2.0 token endpoints - acquisition, cache status, cache clear.
+ * OAuth 2.0 token and authorization endpoints:
  *
  * POST   /oauth2/token          {config, force?, interactive?, environmentId?,
  *                                collectionId?} → token | error
  * POST   /oauth2/authorize/start {config, mode?} → attempt | error
+ * POST   /oauth2/authorize/complete {attemptId, callbackUrl?} → status
+ * GET    /oauth2/authorize/:id  → status
+ * DELETE /oauth2/authorize/:id  → {cancelled}
  * POST   /oauth2/step-up        {wwwAuthenticate, scope?} → classification | error
  * GET    /oauth2/token?key=K    → {found, expired?, token?}
  * DELETE /oauth2/token?key=K    → {deleted}
@@ -287,10 +289,10 @@ nlohmann::json authorize_status_json (const AuthorizeStatus& st) {
 } // namespace
 
 void register_oauth_routes (RouteContext& ctx) {
-    // The authorization manager is owned by the Server (ctx.authorize_manager,
-    // see server.hpp) so its dtor stops any live loopback listeners while the
-    // Database is still alive - no process-lifetime static. Handlers reach it
-    // through the captured ctx (a stable heap object), never a local reference.
+    // The authorization manager is the Server's (`ctx.authorize_manager`,
+    // server.hpp), not a process-lifetime static, so its destructor stops live
+    // loopback listeners while the Database lives. Handlers reach it through
+    // the captured, heap-stable ctx, never a local reference.
 
     ctx.server.Post ("/oauth2/token",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

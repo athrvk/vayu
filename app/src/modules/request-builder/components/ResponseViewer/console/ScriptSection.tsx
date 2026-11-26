@@ -6,25 +6,13 @@
  */
 
 /**
- * One script's console output, and one script's error.
- *
- * `ConsoleOutput` was 212 lines and roughly 120 of them were two pairs of
- * near-identical blocks: the pre/post error cards, and the pre/test log
- * sections. Each pair differed in a status token, a heading, and nothing else -
- * the same shape as the script panels and the chain cards earlier in this
- * series, and with the same consequence, that a fix reaches one copy.
- *
- * The status colours are per-section rather than per-severity: pre-request logs
- * are `--status-running`, test logs `--status-success`. That is identity
- * colouring - which script spoke - not state, and it is why both take the
- * `-text` token for text and the bare token for tints, per the three-token rule.
- *
- * A *line* carries the other axis - which `console.*` method wrote it - and that
- * one is state, so it takes the status tokens for real. See `LEVEL_TONE` in
- * `components/shared/console-level.ts`.
- *
- * A row may also be a script request (#3633, `console-rows.ts`), drawn as the
- * expandable `ScriptRequestRow` inside the same window as the lines.
+ * One script's console output and one script's error, each rendered per script, so a fix reaches
+ * both. Section colours are per script, not per severity: pre-request logs `--status-running`, test
+ * logs `--status-success`. That is identity (which script spoke), not state, hence the `-text`
+ * token for text and the bare one for tints (the three-token rule). A *line*'s colour is the other
+ * axis, the `console.*` method, which is state and takes the status tokens for real (`LEVEL_TONE`,
+ * `components/shared/console-level.ts`). A row may be a script request (#3633, `console-rows.ts`),
+ * drawn as the expandable `ScriptRequestRow` in the same window.
  */
 
 import { useState } from "react";
@@ -42,10 +30,8 @@ import { SCRIPT_SECTIONS, type ScriptKey } from "./script-sections";
 import ScopeTag from "../ScopeTag";
 
 /**
- * A script error.
- *
- * A `blocking` Callout rather than the section's own tone: an error is state,
- * not identity, and it has to read as a failure whichever script raised it.
+ * A script error, as a `blocking` Callout, not the section's tone: an error is state and must read
+ * as failure whichever script raised it.
  */
 export function ScriptError({ which, message }: { which: ScriptKey; message: string }) {
 	return (
@@ -80,12 +66,10 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ConsoleRow
 		<Collapsible open={open} onOpenChange={setOpen}>
 			<CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
 				{/*
-				 * The tone tokens are interpolated into the class name, which is safe
-				 * only because both values are literals in `SCRIPT_SECTIONS` - Tailwind
-				 * scans source text, so a class assembled from a runtime string would
-				 * generate nothing. That trap has bitten this codebase before
-				 * (`bg-current/15`, `data-[state=on]:surface-card`), so the full class
-				 * names are written out rather than built.
+				 * The tone tokens are interpolated into the class name, safe only because both are
+				 * literals in `SCRIPT_SECTIONS`: Tailwind scans source text, so a class built from
+				 * a runtime string generates nothing (this bit before: `bg-current/15`,
+				 * `data-[state=on]:surface-card`). So full class names are written out.
 				 */}
 				<div
 					className={cn(
@@ -115,11 +99,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ConsoleRow
 						/>
 					)}
 				</div>
-				{/*
-				 * No count badge. It restated what the section below shows, and on a
-				 * short console - two lines, one per script - the row was mostly
-				 * numbers about very little. The slab itself is the count.
-				 */}
+				{/* No count badge: it restated the section, and the slab is the count. */}
 				{/* The level is the host's: the response pane, a run's step in History. */}
 				<Heading
 					outside="h3"
@@ -134,16 +114,10 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ConsoleRow
 			<CollapsibleContent className="mt-2">
 				<div className="surface-sunken p-3 rounded-md border border-rule font-mono text-xs">
 					{/*
-					 * No per-line icon. Every line in this slab came from the script
-					 * named in the heading directly above it, so a marker on each one
-					 * repeated what the section already said - the same redundancy that
-					 * took the icon off the Console tab trigger.
-					 *
-					 * It was also the dominant per-row cost: a lucide icon is a
-					 * multi-element SVG, and console output is unbounded, so a script
-					 * that logs in a loop was asking the pane to build one SVG per
-					 * line. Removing it is worth more here than anywhere else in the
-					 * pane.
+					 * No per-line icon: every line came from the script in the heading above, so it
+					 * repeated the section. It was also the dominant per-row cost: a lucide icon is
+					 * a multi-element SVG and console output is unbounded, so a script logging in a
+					 * loop built one SVG per line.
 					 */}
 					{logs.slice(0, visible).map((log, i) => {
 						if (isScriptRequestRow(log)) return <ScriptRequestLine key={i} row={log} />;
@@ -165,9 +139,8 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ConsoleRow
 					})}
 					{hasMore && (
 						/*
-						 * The sentinel. Reaching it renders the next slice - nothing is
-						 * withheld, it just arrives when you get there. The count is
-						 * stated rather than left to be inferred from a scrollbar.
+						 * The sentinel: reaching it renders the next slice (nothing withheld, it
+						 * arrives when reached). The count is stated, not left to a scrollbar.
 						 */
 						<div
 							ref={sentinelRef}

@@ -8,8 +8,7 @@
  */
 
 /**
- * @file uuid_glue.hpp
- * @brief The factory around the vendored `uuid` (engine/vendor/uuid, #2650).
+ * The factory around the vendored `uuid` (engine/vendor/uuid, #2650).
  *
  * `UUID_GLUE_OPEN + UUID_JS + UUID_GLUE_CLOSE` is the source the shelf
  * evaluates. The library is npm's UMD build, unchanged; the glue gives it what

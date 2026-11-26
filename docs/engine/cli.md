@@ -30,8 +30,8 @@ The CLI automatically detects whether the JSON file contains a single request or
 
 A request body that names a file on disk (a `binary` body or a `form-data` file
 part) is sent only when the file lies under an
-[allowed folder](api-reference.md#allowed-folders-file-roots) or was picked in
-the app ([trust rule](api-reference.md#file-references-binary-bodies-and-file-parts)).
+[allowed folder](api-reference/file-access.md#allowed-folders-file-roots) or was picked in
+the app ([trust rule](api-reference/request-body.md#file-references-binary-bodies-and-file-parts)).
 An engine you start yourself has no grant secret, so neither the CLI nor any
 other caller can allow a folder or pick a file through it; allow the folder in
 the app's Settings once, and every engine on that workspace honours it.
@@ -84,7 +84,7 @@ is a manual copy with the engine stopped, described in
 | Option | Description |
 |--------|-------------|
 | `-h, --help` | Show help message |
-| `-v, --verbose [LEVEL]` | Enable verbose output. LEVEL is 0 (warn/error), 1 (info) or 2 (debug); `-v`/`--verbose` on its own means 1. A level outside 0-2, or one that is not a whole number, is refused with exit code 1. `vayu-cli` reads `-v` the same way `vayu-engine` has always read it; `-v` used to mean `--version` here and no longer does. |
+| `-v, --verbose [LEVEL]` | Enable verbose output. LEVEL is 0 (warn/error), 1 (info) or 2 (debug); `-v`/`--verbose` on its own means 1. A level outside 0-2, or one that is not a whole number, is refused with exit code 1. `vayu-cli` reads `-v` the same way `vayu-engine` does; `-v` does not mean `--version` here. |
 | `--version` | Show version information (long form only - `-v` is `--verbose`) |
 | *(anything else)* | Refused, naming the argument, with exit code 1 |
 | `--no-color` | Disable colored output |
@@ -227,7 +227,7 @@ one, and `--daemon` to point the CLI at it. It also exits **1** when its
 database cannot be opened safely - one written by a newer Vayu, or one it cannot
 examine because another program holds it or the disk is full or read-only -
 naming the database on stderr and changing nothing
-([db-schema.md](db-schema.md#startup-validation-backup-and-recovery)). An
+([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#startup-validation-backup-and-recovery)). An
 ordinary shutdown exits **0**.
 
 Its arguments are checked before anything starts, and one that cannot be acted
@@ -242,7 +242,7 @@ on is refused on stderr with exit code **1** rather than dropped:
 
 `--mcp-port` names the port the app's MCP server listens on. The engine never
 sends a request to it on this machine, as it never sends one to its own port
-([Reserved local ports](api-reference.md#reserved-local-ports)): given the
+([Reserved local ports](api-reference/compose.md#reserved-local-ports)): given the
 flag, that port is the reserved one and 9877 is an ordinary port; without it,
 9877 is reserved. The app passes the flag to the engine it starts; a daemon
 you start yourself beside an app whose MCP port was changed in Settings needs
@@ -294,15 +294,15 @@ vayu-engine: unknown argument "--prot" - run vayu-engine --help for the argument
 Three rules behind those, and both binaries follow them:
 
 - **A flag that takes a value is refused when nothing follows it.** It never
-  falls back to the default silently, which is how a flag that was typed used
-  to have no effect and leave no trace.
+  falls back to the default silently, which would leave a typed flag with no
+  effect and no trace.
 - **A value beginning with `-` is refused**, because it is far more often the
-  next flag than a value. `vayu-engine --data-dir --port 9999` used to create a
+  next flag than a value. `vayu-engine --data-dir --port 9999` would create a
   data directory literally named `--port`, database and lock file inside, and
   then listen on the default port. A path that genuinely starts with `-` is
   reachable as `./-name`.
 - **An argument matching no flag is refused**, naming it and pointing at
-  `--help`. A mistyped flag used to be indistinguishable from passing none.
+  `--help`. A mistyped flag would otherwise be indistinguishable from passing none.
 
 `--verbose` is exempt from the first rule alone: its level is optional, so
 `-v` with nothing after it is verbosity 1, as it has always been.

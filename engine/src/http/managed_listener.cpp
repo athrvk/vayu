@@ -6,10 +6,9 @@
  */
 
 /**
- * @file managed_listener.cpp
- * @brief The one copy of the on-demand listener lifecycle (issue #505). The
- *        OAuth callback, mock issuer, webhook inbox and mock server managers
- *        all run on it, through `ListenerRegistry`.
+ * The one copy of the on-demand listener lifecycle (issue #505). The OAuth
+ * callback, mock issuer, webhook inbox and mock server managers all run on it,
+ * through `ListenerRegistry`.
  */
 
 #include "vayu/http/managed_listener.hpp"

@@ -6,47 +6,37 @@
  */
 
 /**
- * Copy a stored run's values back onto the request it came from.
- *
- * Pure on purpose - no hooks, no queries. The dialog shows what
- * {@link buildChangeset} returns and sends what {@link applyRunToRequest}
- * builds, so the rule about what may be written is testable without rendering
- * anything.
- * {@link createFieldsFromRun} is the same rule for a run with no saved request
- * (an agent's, issue #1817): one definition of what may be written, two writers.
+ * Copy a stored run's values back onto the request it came from. Pure (no hooks, no queries): the
+ * dialog shows what {@link buildChangeset} returns and sends what {@link applyRunToRequest} builds,
+ * so the rule about what may be written is testable without rendering. {@link createFieldsFromRun}
+ * is the same rule for a run with no saved request (an agent's, #1817): one definition, two
+ * writers.
  *
  * ## What is deliberately not written
  *
- * **Auth, always.** `sanitize_config_snapshot` (engine, `utils/json.cpp`)
- * strips a stored run's auth down to `{"mode": ...}` before saving, so the run
- * knows the *mode* and nothing else. Writing that back would replace the live
- * request's real credentials with a bare mode - and credentials exist nowhere
- * else, so nothing could recover them.
+ * **Auth, always.** `sanitize_config_snapshot` (engine, `utils/json.cpp`) strips a stored run's
+ * auth to `{"mode": ...}`, so the run knows the *mode* only. Writing it back would replace the live
+ * request's real credentials with a bare mode, and they exist nowhere else to recover.
  *
- * **Whatever the engine withheld from the snapshot** (#1803). A credential
- * header's value, and a secret variable's value inside the url, params, headers
- * or body, are stored as `<redacted>`. That is not what the request holds, so
- * writing it back would overwrite a good value with the marker: a header keeps
- * the request's own (the seed never carries the withheld row), and a url,
- * params or body holding the marker is left off the patch like a truncated body.
+ * **Whatever the engine withheld from the snapshot** (#1803). A credential header's value, and a
+ * secret variable's value inside the url, params, headers or body, are stored as `<redacted>`,
+ * which is not what the request holds, so writing it back would overwrite a good value with the
+ * marker. A header keeps the request's own (the seed never carries the withheld row); a url, params
+ * or body holding the marker is left off the patch like a truncated body.
  *
- * **Scripts, for a run stored before script parts existed.** Those runs hold
- * one string glued from the collection chain's scripts plus the request's own,
- * with nothing marking the boundaries. The request's own part cannot be
- * recovered from it, and writing the whole string would bury the collection's
- * script inside the request permanently - the next send would glue it on again
- * and run it twice.
+ * **Scripts, for a run stored before script parts existed.** Such a run holds one string glued from
+ * the collection chain's scripts and the request's own, with no boundaries. The request's own part
+ * cannot be recovered, and writing the whole string would bury the collection's script in the
+ * request permanently: the next send would glue it on again and run it twice.
  *
- * **Body, for a run whose stored request body was truncated.** The engine caps
- * a stored trace body, and the config snapshot's own body, at `maxTraceBodyBytes`,
- * so such a run holds only a slice of what was sent; writing that slice back
- * would corrupt the saved body. When `seed.requestBodyTruncated` is set the
- * body is left off the patch. The same goes for a `binary` body whose
- * snapshot recorded no path: writing it would point the request at no file.
+ * **Body, for a run whose stored request body was truncated.** The engine caps a stored trace body,
+ * and the config snapshot's own body, at `maxTraceBodyBytes`, so such a run holds a slice of what
+ * was sent, and writing it back would corrupt the saved body; with `seed.requestBodyTruncated` set
+ * the body is left off the patch. So is a `binary` body whose snapshot recorded no path: writing it
+ * would point the request at no file.
  *
- * None is silent: {@link buildChangeset} emits each as a `kept` row, in the
- * same list as every change, with the reason inline. That is what makes "an
- * older run saves fewer fields" visible rather than surprising.
+ * None is silent: {@link buildChangeset} emits each as a `kept` row, in the list with every change
+ * and its reason inline, so "an older run saves fewer fields" is visible rather than surprising.
  */
 
 import type {
@@ -110,10 +100,9 @@ export interface ChangesetEntry {
 }
 
 /**
- * One row of the confirmation, whatever its field. The dialog shows every field
- * the same way - there is no separate "unchanged" section - so a scalar change,
- * a key/value change, and a kept field are all `ChangesetItem`s, told apart by
- * `state` and by which of the optional carriers is set.
+ * One confirmation row, whatever its field. The dialog shows every field the same way (no separate
+ * "unchanged" section), so a scalar change, a key/value change and a kept field are all
+ * `ChangesetItem`s, told apart by `state` and by which optional carrier is set.
  */
 export interface ChangesetItem {
 	field: string;
@@ -136,12 +125,11 @@ export interface ChangesetItem {
 }
 
 /**
- * A minimal value diff: the shared prefix and suffix stay, and the middle that
- * differs becomes one removed run and one added run. It covers the common
- * single-edit case - a changed URL tail, a header value, a one-spot script edit -
- * with no dependency. A multi-part edit collapses to a single del+add span,
- * which still reads as "this middle changed"; swap in a real word-differ (jsdiff)
- * if finer hunks are ever wanted.
+ * A minimal value diff: the shared prefix and suffix stay, and the differing middle becomes one
+ * removed and one added run. It covers the common single edit (a URL tail, a header value, a
+ * one-spot script edit) with no dependency; a multi-part edit collapses to one del+add span, which
+ * still reads as "this middle changed". A real word-differ (jsdiff) is the swap if finer hunks are
+ * wanted.
  */
 export function diffSegments(from: string, to: string): DiffSeg[] {
 	if (from === to) return [{ text: from, kind: "same" }];
@@ -164,18 +152,14 @@ export function diffSegments(from: string, to: string): DiffSeg[] {
 }
 
 /**
- * The rows a pre-#1229 Vayu client added to a send, dropped from both the diff
- * and the write.
+ * The rows a pre-#1229 Vayu client added to a send, dropped from both the diff and the write. No
+ * client writes them now (the engine adds its defaults at send time and nothing is stored), but a
+ * run *trace* captured before that still carries them, and this reads traces; writing one back
+ * would pin a stale version, or one frozen correlation id, onto the saved request.
  *
- * No client writes them any more - the engine adds its defaults at send time and
- * nothing is stored - but a run *trace* captured before that change still
- * carries them, and this reads traces. Writing one back would pin a stale
- * version, or a single frozen correlation id, onto the saved request.
- *
- * The rule comes from `isLegacyManagedHeader` rather than a key list of its own,
- * so a browser `User-Agent` or a hand-typed `X-Request-ID` the run really did
- * send is saved like any other header. One definition, two readers - it drifting
- * from the loader's copy is how the two sides came to disagree before.
+ * The rule is `isLegacyManagedHeader`'s, not a key list of its own, so a browser `User-Agent` or a
+ * hand-typed `X-Request-ID` the run really sent is saved like any other header. One definition, two
+ * readers, so this and the loader cannot disagree.
  */
 function userEntries(entries: KeyValueEntry[]): KeyValueEntry[] {
 	return entries.filter((e) => !isLegacyManagedHeader(e.key, e.value));
@@ -192,18 +176,16 @@ function entryMap(entries: KeyValueEntry[]): Map<string, string> {
 }
 
 /**
- * Params rows keyed for the diff: a path row (#1764) as `:name`, the way the
- * URL writes it, so it neither collides with nor reads as a same-named query
- * parameter.
+ * Params rows keyed for the diff: a path row (#1764) as `:name`, as the URL writes it, so it
+ * neither collides with nor reads as a same-named query parameter.
  */
 function paramsForDiff(entries: KeyValueEntry[]): KeyValueEntry[] {
 	return entries.map((e) => (isPathRow(e) ? { ...e, key: `:${e.key}` } : e));
 }
 
 /**
- * A per-key diff of two key/value lists. Added and changed keys come first in
- * the new list's order, removed keys after - so the result reads as "here is
- * what the request will have", with the losses noted at the end.
+ * A per-key diff of two key/value lists: added and changed keys first, in the new list's order,
+ * removed keys after, so it reads as "what the request will have", losses at the end.
  */
 function diffEntries(from: KeyValueEntry[], to: KeyValueEntry[]): EntryChange[] {
 	const before = entryMap(from);
@@ -236,10 +218,9 @@ function items(value: KeyValueItem[] | undefined): FormFieldEntry[] {
 }
 
 /**
- * Build the stored body shape from the seed's flat editor fields.
- *
- * `savedMcpTool` is the tool the saved request holds: a run records an `mcp`
- * body's content and not its tool, so a write that carried none would clear it.
+ * The stored body shape from the seed's flat editor fields. `savedMcpTool` is the saved request's
+ * tool: a run records an `mcp` body's content, not its tool, so a write carrying none would clear
+ * it.
  */
 function bodyFromSeed(request: Partial<RequestState>, savedMcpTool?: McpTool): RequestBody {
 	const mode = request.bodyMode ?? "none";
@@ -352,14 +333,11 @@ function changedLineLabel(from: string, to: string): string {
 }
 
 /**
- * The Auth row - always kept, since a run stores the mode only.
- *
- * Drift is shown only when it is a real comparison. A request set to `inherit`
- * is resolved to a concrete mode at send time, so the run records that resolved
- * result, not `inherit` - comparing the two (`inherit -> none`) is apples to
- * oranges and reads as a change that is not one. So an `inherit` request just
- * shows its mode, kept. Two concrete modes that differ (request `bearer`, run
- * `basic`) are genuine drift and worth surfacing.
+ * The Auth row, always kept, as a run stores the mode only. Drift is shown only when it is a real
+ * comparison: an `inherit` request resolves to a concrete mode at send time, so the run records
+ * that result, and `inherit -> none` would read as a change that is not one. So an `inherit`
+ * request just shows its mode, kept; two differing concrete modes (request `bearer`, run `basic`)
+ * are genuine drift.
  */
 function authItem(seed: DesignRunSeed, live: Request): ChangesetItem {
 	const liveMode = live.auth?.mode || "none";
@@ -386,13 +364,13 @@ function authItem(seed: DesignRunSeed, live: Request): ChangesetItem {
 }
 
 /**
- * The whole confirmation as one list. Every field a Save touches is a row, in
- * the order the request stores them, plus Auth (always kept) and - for a run
- * stored before per-part scripts - Scripts (kept). Fields that already match the
- * run are left out, so an unchanged save shows only the two kept rows.
+ * The whole confirmation as one list: every field a Save touches is a row, in the order the request
+ * stores them, plus Auth (always kept) and, for a run stored before per-part scripts, Scripts
+ * (kept). Fields that already match the run are left out, so an unchanged save shows only the kept
+ * rows.
  *
- * System headers are stripped from the patch and from the comparison, so the
- * app's own `X-Vayu-Version` / `X-Request-ID` never appear as changes.
+ * The rows a pre-#1229 client added (`userEntries`) are stripped from the patch and the comparison,
+ * so a stale `X-Vayu-Version` / `X-Request-ID` never appears as a change.
  */
 export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetItem[] {
 	const patch = applyRunToRequest(seed, live);
@@ -497,10 +475,9 @@ export function buildChangeset(seed: DesignRunSeed, live: Request): ChangesetIte
 }
 
 /**
- * What the run's values say for the fields it can write, when the seed has
- * none of its own: the saved request's current values for an update, the
- * defaults for a new request. `body` is the saved request's, for what a run
- * does not record of it.
+ * What the run's values fall back to for the fields it can write when the seed has none of its own:
+ * the saved request's current values for an update, the defaults for a new request. `body` is the
+ * saved request's, for what a run does not record of it.
  */
 type WriteFallback = Pick<
 	Request,
@@ -548,12 +525,11 @@ type RunWritable = Pick<
 > & { method: string };
 
 /**
- * The elements a save writes: the run's own, merged into the saved request's
- * order, plus every saved element the run does not hold. A run stores only what
- * its send ran, and a send leaves out a disabled element and one that is
- * incomplete, so writing the run's list alone would delete them from a request
- * the user never touched. An id the run also holds is the run's version, in the
- * saved element's place; a run-only element goes last.
+ * The elements a save writes: the run's own, merged into the saved request's order, plus every
+ * saved element the run does not hold. A run stores only what its send ran, and a send leaves out
+ * disabled and incomplete elements, so writing the run's list alone would delete them from a
+ * request the user never touched. An id the run also holds is the run's version, in the saved
+ * element's place; a run-only element goes last.
  */
 function elementsToWrite(own: ElementDef[], saved: ElementDef[] | undefined): ElementDef[] {
 	const ran = new Map(own.map((e) => [e.id, e]));
@@ -563,18 +539,16 @@ function elementsToWrite(own: ElementDef[], saved: ElementDef[] | undefined): El
 }
 
 /**
- * The fields a run may write, with everything {@link applyRunToRequest}'s rules
- * leave out already left out - one definition for the update and for a request
- * created from the run, so the two cannot disagree about what is safe to write.
- * No `auth` key at all - not `auth: undefined`, which some callers would still
- * serialise.
+ * The fields a run may write, with everything {@link applyRunToRequest}'s rules exclude already
+ * excluded: one definition for the update and for a request created from the run, so the two cannot
+ * disagree on what is safe. No `auth` key at all, not `auth: undefined`, which some callers would
+ * still serialise.
  */
 function writableFields(seed: DesignRunSeed, fallback: WriteFallback): RunWritable {
-	// `timeout` is deliberately not among them (issue #2937). It is the one
-	// stored setting whose absence is meaningful - "use the `defaultTimeout`
-	// setting" - and a run replays the number a send used, which can be an
-	// ad-hoc override from a script or an MCP client rather than the request's
-	// own. Writing it would pin that number onto a request that states none.
+	// `timeout` is deliberately not among them (#2937): the one stored setting whose absence means
+	// something ("use the `defaultTimeout` setting"), and a run replays the number a send used,
+	// which can be an ad-hoc override from a script or an MCP client. Writing it would pin that
+	// number onto a request that states none.
 	const request = seed.request;
 	const body = bodyFromSeed(
 		request,
@@ -583,9 +557,9 @@ function writableFields(seed: DesignRunSeed, fallback: WriteFallback): RunWritab
 
 	const patch: RunWritable = {
 		method: request.method ?? fallback.method,
-		// System headers are dropped, not persisted: the builder re-injects them
-		// with current values on load, so writing a run's stale X-Vayu-Version /
-		// X-Request-ID would pin an old version onto the request.
+		// The rows a pre-#1229 client added are dropped, not persisted: the engine adds those
+		// headers at send time, and writing a run's stale X-Vayu-Version / X-Request-ID back would
+		// pin an old version onto the request.
 		headers: userEntries(items(request.headers)),
 		followRedirects: request.followRedirects ?? fallback.followRedirects,
 		maxRedirects: request.maxRedirects ?? fallback.maxRedirects,
@@ -601,11 +575,10 @@ function writableFields(seed: DesignRunSeed, fallback: WriteFallback): RunWritab
 	if (!seed.withheld.url) patch.url = request.url ?? fallback.url;
 	if (!seed.withheld.params) patch.params = items(request.params);
 
-	// The body is only written when the run's stored request body was not
-	// truncated. A truncated run holds only a slice of what was sent, and writing
-	// that slice back would silently corrupt the saved request - so the body (and
-	// bodyType) are left off the patch entirely, the same way auth never is. Note
-	// there is no `body: undefined`, which some serialisers would still send.
+	// The body is written only when the run's stored request body was not truncated: a slice
+	// written back would silently corrupt the saved request, so the body (and bodyType) are left
+	// off the patch entirely, as auth always is. No `body: undefined` either, which some
+	// serialisers would still send.
 	if (!unwritableBodyNote(seed)) {
 		patch.body = body;
 		patch.bodyType = body.mode;
@@ -624,10 +597,9 @@ export function applyRunToRequest(seed: DesignRunSeed, live: Request): UpdateReq
 }
 
 /**
- * The fields of a request created from a run that has no saved request: what
- * {@link applyRunToRequest} would write, minus the destination and the name,
- * which the caller supplies. A url the engine withheld becomes an empty one -
- * a new request has no stored value for it to keep.
+ * The fields of a request created from a run with no saved request: what {@link applyRunToRequest}
+ * would write, minus the destination and the name, which the caller supplies. A url the engine
+ * withheld becomes an empty one, as a new request has no stored value to keep.
  */
 export function createFieldsFromRun(
 	seed: DesignRunSeed

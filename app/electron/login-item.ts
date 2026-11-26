@@ -6,34 +6,29 @@
  */
 
 /**
- * Whether Vayu starts when the user logs in (issue #2098).
+ * Whether Vayu starts when the user logs in (#2098).
  *
- * The answer lives in the OS, never in the app's own settings: the user can
- * remove a login item from Windows' Task Manager, macOS' Login Items pane or a
- * desktop environment's startup list, and a stored copy of the flag would go on
- * claiming it is on. So the switch is read from the OS every time and written
- * through to it, and nothing about it is persisted here.
+ * The answer lives in the OS, never in the app's own settings: the user can remove a login item
+ * from Windows' Task Manager, macOS' Login Items pane or a desktop environment's startup list, and
+ * a stored copy of the flag would go on claiming it is on. So the switch is read from the OS every
+ * time and written through to it, and nothing about it is persisted here.
  *
- * Windows and macOS have an API for it (`app.setLoginItemSettings`). Linux has
- * none - Electron's call is a no-op there - so the XDG autostart entry is
- * written by hand, and read back the same way. An entry whose `Exec` names a
- * different binary than the one running (the AppImage was moved, or this is a
- * second copy) reads as off: the entry exists but would not launch this app, and
- * turning the switch on rewrites it to point here. So does an entry a desktop
- * environment has disabled in place (`Hidden=true`, or
- * `X-GNOME-Autostart-enabled=false`): it keeps its `Exec` and no longer starts.
+ * Windows and macOS have an API for it (`app.setLoginItemSettings`). Linux has none (Electron's
+ * call is a no-op there), so the XDG autostart entry is written by hand and read back the same way.
+ * An entry reads as off when its `Exec` names a different binary than the one running (the AppImage
+ * was moved, or this is a second copy) or when a desktop environment has disabled it in place
+ * (`Hidden=true`, or `X-GNOME-Autostart-enabled=false`): it exists but would not launch this app,
+ * and turning the switch on rewrites it to point here.
  *
- * Only a packaged build registers anything. A dev run's `process.execPath` is
- * Electron's own binary, and a login item pointing at it would launch a bare
- * Electron shell with no app.
+ * Only a packaged build registers anything. A dev run's `process.execPath` is Electron's own
+ * binary, and a login item pointing at it would launch a bare Electron shell with no app.
  *
- * Launching at login is an ordinary launch: the window opens and the
- * single-instance lock is taken like any other (`docs/architecture.md`).
+ * Launching at login is an ordinary launch: the window opens and the single-instance lock is taken
+ * like any other (`docs/architecture.md`).
  *
- * Kept out of main.ts so it can be tested - main.ts creates windows and starts
- * the engine at import time, which no unit test can do. The Electron surfaces it
- * needs arrive as arguments for the same reason; the autostart file is real
- * filesystem I/O, which a test points at a scratch directory through
+ * Kept out of main.ts so it can be tested: main.ts creates windows and starts the engine at import
+ * time, which no unit test can do. The Electron surfaces it needs arrive as arguments for the same
+ * reason, and a test points the real autostart file I/O at a scratch directory through
  * `configHome`.
  */
 
@@ -96,10 +91,9 @@ function quotedExec(binaryPath: string): string {
 }
 
 /**
- * The `Key=Value` pairs of the `[Desktop Entry]` group; other groups (an
- * `[Desktop Action ...]` with an `Exec` of its own) are ignored. Lines are
- * trimmed so the CRLF endings or trailing blanks a rewriting tool leaves do not
- * change what a value reads as.
+ * The `Key=Value` pairs of the `[Desktop Entry]` group; other groups (an `[Desktop Action ...]`
+ * with an `Exec` of its own) are ignored. Lines are trimmed so the CRLF endings or trailing blanks
+ * a rewriting tool leaves do not change what a value reads as.
  */
 function desktopEntryFields(text: string): Map<string, string> {
 	const fields = new Map<string, string>();

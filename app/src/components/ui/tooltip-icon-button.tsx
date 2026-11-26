@@ -6,23 +6,12 @@
  */
 
 /**
- * TooltipIconButton
- *
- * An icon-only button that is named and described from a single `label`: the
- * label becomes the accessible name (`aria-label`) and the visible tooltip.
- *
- * Icon buttons need both, and the two used to be supplied separately - or, more
- * often, only `title` was set, which is a weak substitute: a `title` tooltip
- * does not appear on keyboard focus, does not work on touch, cannot be styled,
- * and its screen-reader handling is inconsistent. Several buttons relied on it
- * and so had no proper name at all.
- *
- * This is the same Button-inside-Tooltip pattern the Dock, the collection-tree
- * header, and the response viewer already use; collapsing it into one component
- * means a new icon button gets a name and a real tooltip from a single prop
- * instead of re-assembling three elements each time (and forgetting one).
- *
- * Relies on the app-level `TooltipProvider` in `main.tsx`; no local provider.
+ * An icon-only button named and described by one `label`: the accessible name (`aria-label`) and
+ * the visible tooltip. `title` is a weak substitute: it does not show on keyboard focus or touch,
+ * cannot be styled, and screen readers handle it inconsistently. The Button-inside-Tooltip pattern
+ * the Dock, collection-tree header and response viewer use, in one component so a new icon button
+ * gets both from one prop instead of reassembling three elements. Relies on `main.tsx`'s
+ * `TooltipProvider`.
  */
 
 import * as React from "react";
@@ -33,14 +22,15 @@ export interface TooltipIconButtonProps extends Omit<ButtonProps, "aria-label" |
 	/** Names the button (aria-label) and, unless `tooltip` says otherwise, fills the tooltip. Required. */
 	label: string;
 	/**
-	 * The tooltip's text when it should say something other than the name: a row
-	 * button is named for its row ("Restore Login") and its tooltip is the verb
-	 * alone, or a toggle's name is short and its tooltip explains the effect.
+	 * The tooltip when it should differ from the name: a row button named for its row ("Restore
+	 * Login") with the bare verb as tooltip, or a short toggle name with its effect explained.
 	 * Defaults to `label`.
 	 */
 	tooltip?: string;
-	/** The icon. Kept as `icon` rather than children so the label can't be
-	 *  mistaken for the visible content. */
+	/**
+	 * The icon, as `icon` rather than children so the label is not mistaken for the visible
+	 * content.
+	 */
 	icon: React.ReactNode;
 	/** Tooltip placement. Defaults to top, matching the Dock. */
 	tooltipSide?: React.ComponentProps<typeof TooltipContent>["side"];

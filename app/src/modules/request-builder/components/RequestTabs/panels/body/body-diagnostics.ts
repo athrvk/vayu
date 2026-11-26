@@ -6,23 +6,18 @@
  */
 
 /**
- * The request body editor's JSON diagnostics (#3137).
+ * The request body editor's JSON diagnostics (#3137). A `{{variable}}` outside a string is not
+ * JSON, and the engine resolves it before sending, so Monaco's JSON worker must neither mark it nor
+ * stop at it, which hides every real error after it. The masked twin in
+ * `lib/graphql/variables-diagnostics.ts` gives the worker a document it can read.
  *
- * A `{{variable}}` outside a string is not JSON, and the engine resolves it
- * before the body is sent, so Monaco's JSON worker must not mark it - and must
- * not stop at it, which hides every real error after it. The masked twin in
- * `lib/graphql/variables-diagnostics.ts` is what gives the worker a document it
- * can read.
- *
- * **The twin follows the model's language, not the body mode.** Every
- * non-GraphQL body mode shares one model path per request, so choosing XML
- * changes the language of the model the JSON worker was validating. A twin kept
- * across that would publish JSON-owner markers onto an XML document. The twin is
- * therefore attached while the editor's model is JSON (the `json` and `jsonrpc`
- * modes), dropped when it is not, and re-decided on each of the three events that
- * can change the answer: mount, a request switch (`setModel`), and a language
- * change. `@monaco-editor/react` applies a path change before a language change
- * when both land in one render, so the final state is the right one either way.
+ * **The twin follows the model's language, not the body mode.** Every non-GraphQL mode shares one
+ * model path per request, so choosing XML changes the language of the model the JSON worker
+ * validated, and a twin kept across it would publish JSON markers onto XML. So it is attached while
+ * the model is JSON (`json`, `jsonrpc`), dropped otherwise, and re-decided on the three events that
+ * change the answer: mount, a request switch (`setModel`), a language change.
+ * `@monaco-editor/react` applies a path change before a language change in one render, so the end
+ * state is right either way.
  */
 
 import type { OnMount } from "@monaco-editor/react";
@@ -31,10 +26,9 @@ import { attachVariablesDiagnostics } from "@/lib/graphql/variables-diagnostics"
 const JSON_LANGUAGE_ID = "json";
 
 /**
- * `CodeEditor`'s `onMount` for the body editor. The twin belongs to the editor
- * instance, which `CodeEditor` tears down when the Source / Resolved swap hides
- * it and when the panel unmounts, so its lifetime is held in this closure and
- * ended by the editor's own disposal.
+ * `CodeEditor`'s `onMount` for the body editor. The twin belongs to the editor instance, which
+ * `CodeEditor` disposes when the Source / Resolved swap hides it or the panel unmounts, so its
+ * lifetime is held in this closure and ended by the editor's disposal.
  */
 export const mountBodyDiagnostics: OnMount = (editor, monaco) => {
 	let twin: { dispose: () => void } | null = null;

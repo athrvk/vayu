@@ -6,9 +6,8 @@
  */
 
 /**
- * ModeStatsRow - the mode-adaptive Row 4 router. The stat cards swap on d.mode.
- * This table is the authority for which cards a mode shows - add a mode here,
- * beside the branch that renders it:
+ * The mode-adaptive Row 4 router; the stat cards swap on d.mode. This table is the authority for
+ * which cards a mode shows; add a mode here, beside the branch that renders it:
  *
  *   constant_rps         Duration · Total requests · Peak in-flight requests
  *   constant_concurrency Duration · Total requests · Throughput per virtual user
@@ -16,13 +15,11 @@
  *   ramp_up              Peak virtual users · Breakpoint · p99 at peak · Total requests
  *   capacity             Peak virtual users · Breakpoint · p99 at peak · Total requests
  *
- * The three throughput-led modes show three cards: their p99 sits in the hero
- * row's latency card (`LatencyPercentilesCard`, beside p95, over the run so
- * far), so it is not drawn twice. ramp_up and capacity keep p99 here, as p99
- * at peak. Shared cards (Duration / Total / Peak) live here; the mode-only
- * cards live in
- * ModeStatCards.tsx. Consumes {@link DashboardDerived}; never re-derives from
- * raw metrics. All InfoChip copy via TOOLTIPS.
+ * The three throughput-led modes show three cards: their p99 sits in the hero row's latency card
+ * (`LatencyPercentilesCard`, beside p95, over the run so far), so it is not drawn twice; ramp_up
+ * and capacity keep p99 here, as p99 at peak. Shared cards (Duration / Total / Peak) live here, the
+ * mode-only ones in ModeStatCards.tsx. Consumes {@link DashboardDerived}, never re-deriving from
+ * raw metrics; all InfoChip copy via TOOLTIPS.
  */
 
 import { cn } from "@/lib/utils";

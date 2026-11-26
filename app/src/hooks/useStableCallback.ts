@@ -8,19 +8,15 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
 
 /**
- * A function with one identity for the component's whole life that always runs
- * the `fn` of the latest committed render.
+ * A function with one identity for the component's whole life that always runs the latest committed
+ * render's `fn`. For a handler that reads state but is only ever *called* from an event, never
+ * during render: listing that state in a `useCallback` makes the handler a new function whenever
+ * the state changes, and a new function in a context value re-renders every consumer; reading
+ * through the latest render keeps the identity fixed and the behaviour current (#2543).
  *
- * For a handler that reads state but is only ever *called* from an event, never
- * during render. Listing that state in a `useCallback` makes the handler a new
- * function whenever the state changes, and a new function in a context value
- * re-renders every consumer; reading it through the latest render instead keeps
- * the identity fixed and the behaviour current (#2543).
- *
- * **Do not call the result while rendering.** The ref is written in a layout
- * effect, so a call made during render sees the previous commit's `fn`. A
- * function a row calls to build its menu belongs in `useCallback` with its
- * real dependencies, so that it changes exactly when its answer does.
+ * **Do not call the result while rendering.** The ref is written in a layout effect, so a call made
+ * during render sees the previous commit's `fn`. A function a row calls to build its menu belongs
+ * in `useCallback` with its real dependencies, so it changes exactly when its answer does.
  */
 export function useStableCallback<A extends unknown[], R>(
 	fn: (...args: A) => R

@@ -6,31 +6,25 @@
  */
 
 /**
- * The drag machinery behind the collection tree - phase 3 of #364.
+ * The drag machinery behind the collection tree (#364, phase 3). Everything decidable without a DOM
+ * lives elsewhere: `lib/drag/drag-gesture.ts` owns press-versus-drag and the trailing click,
+ * `drop-position.ts` the zones and where a drop lands, `tree-children.ts` a parent's one sibling
+ * list, `reorder-math.ts` which rows a move rewrites, and `useReorderMutation` the one atomic
+ * write. Left here is what needs the browser: pointer capture, hit testing, spring-loading,
+ * auto-scroll, and putting focus back on the row that moved.
  *
- * Everything decidable without a DOM already lives elsewhere: `lib/drag/drag-gesture.ts`
- * owns press-versus-drag and the trailing click, `drop-position.ts` owns the
- * zones and where a drop lands, `tree-children.ts` owns the one sibling list a
- * parent has, `reorder-math.ts` owns which rows a move rewrites, and
- * `useReorderMutation` owns the one atomic write. What is
- * left here is the part that genuinely needs the browser: pointer capture, hit
- * testing, spring-loading, auto-scroll, and putting focus back on the row that
- * moved.
+ * **Pointer events, not HTML5 drag-and-drop.** Capture keeps the event stream on the tree wherever
+ * the pointer goes, which is what makes auto-scroll and an Escape cancel possible at all, and
+ * leaves the click semantics the hit-area rules depend on untouched below the movement threshold.
  *
- * **Pointer events, not HTML5 drag-and-drop.** Capture keeps the event stream
- * on the tree wherever the pointer goes, which is what makes auto-scroll and an
- * Escape cancel possible at all, and it leaves the click semantics the hit-area
- * rules depend on untouched below the movement threshold.
+ * **One set of handlers, on the tree** (#2543): the tree spreads `treeHandlers` onto its
+ * `role="tree"` element and a press resolves its row from the rows model (`entityAt`), so no row
+ * carries a handler and none has to stay mounted for the gesture to survive: the capture is the
+ * tree's.
  *
- * **One set of handlers, on the tree** (#2543). The tree spreads `treeHandlers`
- * onto its `role="tree"` element and a press resolves its row from the rows
- * model (`entityAt`), so no row carries a handler and none has to stay mounted
- * for the gesture to survive: the capture is the tree's.
- *
- * **One move goes through one function.** A drop, an Alt+Arrow, a "Move to…"
- * and an Undo all end in `applyPlacement`, so the optimistic write, the
- * announcement, the reveal and the undo offer cannot drift between the four
- * ways a row can move.
+ * **One move goes through one function.** A drop, an Alt+Arrow, a "Move to…" and an Undo all end in
+ * `applyPlacement`, so the optimistic write, the announcement, the reveal and the undo offer cannot
+ * drift between the four ways a row can move.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -222,12 +216,11 @@ export function useTreeDnd({
 	const expandedCollectionIds = useCollectionsStore((s) => s.expandedCollectionIds);
 
 	/*
-	 * The row callbacks that close over per-render values (the rename / delete
-	 * state, the loaded collections, the expanded set) are read through the latest
-	 * render rather than listed as dependencies. Each is only called from a
-	 * pointer or key event, and listing them made every drag handler - and with
-	 * it the context value every row subscribes to - a new function whenever one
-	 * of them changed (#2543).
+	 * The row callbacks closing over per-render values (the rename / delete state, the loaded
+	 * collections, the expanded set) are read through the latest render, not listed as
+	 * dependencies: each is only called from a pointer or key event, and as dependencies they would
+	 * make every drag handler, and with it the context value every row subscribes to, a new
+	 * function whenever one changed (#2543).
 	 */
 	const isRowBusy = useStableCallback(isRowBusyNow);
 	const entityAt = useStableCallback(entityAtNow);
@@ -236,11 +229,10 @@ export function useTreeDnd({
 	const isExpanded = useStableCallback((id: string) => expandedCollectionIds.has(id));
 
 	/*
-	 * The drag indicator's state is a store, not React state: `dropTarget`
-	 * changes on every row the pointer crosses, and as state in this hook it was
-	 * a new context value, which rebuilt every mounted row to move a 2px line.
-	 * Rows subscribe to the one fact each draws (`useRowDnd`); this hook, which
-	 * hosts the whole tree, subscribes only to whether a drag is live.
+	 * The drag indicator's state is a store, not React state: `dropTarget` changes on every row the
+	 * pointer crosses, and as this hook's state it would be a new context value rebuilding every
+	 * mounted row to move a 2px line. Rows subscribe to the one fact each draws (`useRowDnd`); this
+	 * hook, which hosts the whole tree, subscribes only to whether a drag is live.
 	 */
 	const [dragState] = useState(() =>
 		createStore<CollectionTreeDragState>(() => ({ dragging: null, dropTarget: null }))
@@ -250,11 +242,10 @@ export function useTreeDnd({
 	const [moveTarget, setMoveTarget] = useState<TreeEntity | null>(null);
 
 	/*
-	 * The gesture, the pressed row and the resolved destination are refs, not
-	 * state: they change on every `pointermove`, and a render per move would
-	 * rebuild every row in the tree to move a 2px line. What renders - the
-	 * dragged row and the indicator - lives in `dragState`, and only changes when
-	 * the indicator actually moves.
+	 * The gesture, the pressed row and the resolved destination are refs, not state: they change on
+	 * every `pointermove`, and a render per move would rebuild every row in the tree to move a 2px
+	 * line. What renders (the dragged row and the indicator) lives in `dragState`, which changes
+	 * only when the indicator moves.
 	 */
 	const gestureRef = useRef<DragGesture>(IDLE_GESTURE);
 	/** The pressed row, the pointer, and the tree element that captures it. */
@@ -275,9 +266,9 @@ export function useTreeDnd({
 	});
 
 	/*
-	 * The tree data as of the last render, for the callbacks that outlive it -
-	 * an Undo click happens after the move it inverts, and must plan against
-	 * where things are *then*, not where they were when the toast was raised.
+	 * The tree data as of the last render, for the callbacks that outlive it: an Undo click comes
+	 * after the move it inverts, and must plan against where things are *then*, not where they were
+	 * when the toast was raised.
 	 */
 	const dataRef = useRef({ collections, getRequestsByCollection });
 	useEffect(() => {
@@ -311,13 +302,10 @@ export function useTreeDnd({
 	}, []);
 
 	/**
-	 * The one write path. Every way a row can move - a drop, Alt+Arrow, the
-	 * "Move to…" dialog, an Undo - lands here, so the batch, the announcement
-	 * and the reveal are the same three steps in the same order whichever
-	 * gesture started it.
-	 *
-	 * Returns where the row came from and what it now is, which is exactly what
-	 * an Undo needs: the same call, with the two swapped.
+	 * The one write path: a drop, Alt+Arrow, the "Move to…" dialog and an Undo all land here, so
+	 * the batch, the announcement and the reveal are the same three steps in the same order
+	 * whichever gesture started it. Returns where the row came from and what it now is, which is
+	 * what an Undo needs: the same call, with the two swapped.
 	 */
 	const writeMove = useCallback(
 		(
@@ -344,10 +332,9 @@ export function useTreeDnd({
 					toIndex: to.index,
 				});
 			} catch (error) {
-				// The math throws when the row is not where the caller thinks it is -
-				// an Undo clicked after the tree changed under it, or a drop resolved
-				// against a list a refetch has since replaced. Loud, not silent: the
-				// move did not happen and the user has to know that, but it is not a
+				// The math throws when the row is not where the caller thinks (an Undo clicked
+				// after the tree changed under it, or a drop resolved against a list a refetch
+				// replaced). Loud, as the move did not happen and the user has to know, but not a
 				// crash inside a toast's click handler.
 				useToastStore.getState().showToast({
 					message: options.isUndo
@@ -372,13 +359,10 @@ export function useTreeDnd({
 	);
 
 	/**
-	 * A move, plus the offer to take it back.
-	 *
-	 * Only across parents: a misdrop inside one folder is one drag away from
-	 * being fixed, while a row that has landed in a folder the user was not
-	 * looking at is the complaint every tree with drag-and-drop collects. The
-	 * undo itself is offered no undo - toggling a row between two folders with
-	 * a stack of identical toasts is worse than the misdrop.
+	 * A move, plus the offer to take it back, only across parents: a misdrop inside one folder is
+	 * one drag from fixed, while a row that landed in a folder the user was not looking at is the
+	 * complaint every drag-and-drop tree collects. The undo itself offers no undo: toggling a row
+	 * between two folders under a stack of identical toasts is worse than the misdrop.
 	 */
 	const applyPlacement = useCallback(
 		(entity: TreeEntity, to: Placement, options: { undoable: boolean }) => {
@@ -398,11 +382,10 @@ export function useTreeDnd({
 	);
 
 	/**
-	 * The row and edge the indicator draws on, derived from the destination
-	 * rather than from the pointer: a drop into a folder lands after its last
-	 * child, and the line has to be drawn there rather than on the folder row.
-	 * A line after an open folder is the rows model's to place
-	 * (`dropLineBeside`), since only it knows the folder's last visible row.
+	 * The row and edge the indicator draws on, derived from the destination, not the pointer: a
+	 * drop into a folder lands after its last child, so the line is drawn there, not on the folder
+	 * row. A line after an open folder is the rows model's to place (`dropLineBeside`), as only it
+	 * knows the folder's last visible row.
 	 */
 	const indicatorFor = useCallback(
 		(entity: TreeEntity, destination: DropDestination): CollectionTreeDropTarget | null => {
@@ -434,13 +417,12 @@ export function useTreeDnd({
 	/**
 	 * Start the countdown to opening @p target, or cancel one in flight.
 	 *
-	 * @param target The folder the drop would land **inside**, and nothing else
-	 *   (issue #891). Passing whichever row resolved a destination opened folders
-	 *   the drop was only landing *beside*: the edge quarters of a folder row are
-	 *   the reorder bands, so lining a reorder up next to a collapsed folder
-	 *   sprang it open, moved every row below it and left the user aiming at a
-	 *   seam that was no longer there. `null` cancels, which is what makes
-	 *   sliding out of the inside band disarm a spring that has not fired.
+	 * @param target The folder the drop would land **inside**, and nothing else (issue #891):
+	 *        passing any row that resolved a destination would open folders the drop only lands
+	 *        *beside*, as a folder row's edge quarters are the reorder bands, so lining a reorder
+	 *        up next to a collapsed folder would spring it open, move every row below it and leave
+	 *        the user aiming at a seam that is gone. `null` cancels, which is what makes sliding
+	 *        out of the inside band disarm a spring that has not fired.
 	 */
 	const armSpring = useCallback(
 		(target: TreeEntity | null) => {
@@ -484,12 +466,10 @@ export function useTreeDnd({
 	);
 
 	/**
-	 * The drop the pointer at `clientY` over `under` names for `dragged`, and
-	 * the folder a spring would open: only ever the one the drop lands
-	 * *inside*. Tracked beside the destination rather than derived from it,
-	 * because a destination alone cannot answer this - "before Beta" and "into
-	 * Beta" are both drops Beta's row resolved, and only the second is a
-	 * request to see what is in it.
+	 * The drop the pointer at `clientY` over `under` names for `dragged`, and the folder a spring
+	 * would open: only ever the one the drop lands *inside*. Tracked beside the destination, not
+	 * derived from it: "before Beta" and "into Beta" are both drops Beta's row resolved, and only
+	 * the second asks to see what is in it.
 	 */
 	const dropUnder = useCallback(
 		(
@@ -518,10 +498,9 @@ export function useTreeDnd({
 	);
 
 	/**
-	 * Resolve the drop under the drag's last pointer position, and draw it. On
-	 * every move, and after every auto-scroll frame: a scroll brings a different
-	 * row under a pointer that has not moved, and both the indicator and the
-	 * release read what this last found.
+	 * Resolve the drop under the drag's last pointer position, and draw it, on every move and after
+	 * every auto-scroll frame: a scroll brings a different row under a pointer that has not moved,
+	 * and both the indicator and the release read what this last found.
 	 */
 	const hitTestDrop = useCallback(() => {
 		const pressed = pressedRef.current;
@@ -608,11 +587,10 @@ export function useTreeDnd({
 			if (e.button !== 0) return;
 			// An open row menu is a React child of the tree but not a DOM one.
 			if (!isOwnEvent(e)) return;
-			// A new press ends the last gesture wherever it lands. An Escape cancel
-			// arms a click suppression for a click that never arrives when the
-			// release is outside the tree, and a press on a row control returns
-			// below without pressing anything - the suppression would eat that
-			// control's own click.
+			// A new press ends the last gesture wherever it lands: an Escape cancel arms a click
+			// suppression for a click that never arrives when the release is outside the tree, and
+			// a press on a row control returns below without pressing anything, so the suppression
+			// would eat that control's own click.
 			gestureRef.current = IDLE_GESTURE;
 			pressedRef.current = null;
 			if (!(e.target instanceof Element) || e.target.closest(ROW_CONTROLS)) return;
@@ -637,12 +615,11 @@ export function useTreeDnd({
 				gestureRef.current = next;
 				if (next.phase === "dragging") {
 					dragState.setState({ dragging: pressed.entity });
-					// Captured on the tree, not the row: the drawer auto-scrolls
-					// under a drag, and the pressed row can scroll out of the
-					// window. And only now, not at the press - a captured press
-					// clicks the capturing element, and the row's click has to
-					// land on the row's own controls. jsdom has no capture
-					// methods of its own, hence the guards.
+					// Captured on the tree, not the row: the drawer auto-scrolls under a drag, and
+					// the pressed row can scroll out of the window. Only now, not at the press: a
+					// captured press clicks the capturing element, and the row's click has to land
+					// on the row's own controls. jsdom has no capture methods of its own, hence the
+					// guards.
 					pressed.el.setPointerCapture?.(pressed.pointerId);
 				}
 			}
@@ -729,12 +706,9 @@ export function useTreeDnd({
 	/* ── Keyboard move ────────────────────────────────────────────────────── */
 
 	/**
-	 * The siblings this row sits among - its parent's folders and requests as one
-	 * list - and where in it.
-	 *
-	 * Shared by the move itself and by the menu's gating (#1690), so "Move up is
-	 * off" and "Move up announces already first" cannot disagree about which row
-	 * is first.
+	 * The siblings this row sits among (its parent's folders and requests as one list), and where
+	 * in it. Shared by the move and by the menu's gating (#1690), so "Move up is off" and "Move up
+	 * announces already first" cannot disagree about which row is first.
 	 */
 	const siblingPosition = useCallback(
 		(entity: TreeEntity): { siblings: TreeChild[]; at: number } => {
@@ -812,16 +786,11 @@ export function useTreeDnd({
 	);
 
 	/**
-	 * Move up / Move down / Move to…, for a row's `⋯` menu and its right-click
-	 * menu (#1690).
-	 *
-	 * The tree reordered by drag and by Alt+Arrow only, and neither is
-	 * discoverable: a drag needs a pointer, and a chord needs to be known
-	 * already. The element list has had Move up / Move down in its menu all
-	 * along, so the app named one action two ways depending on which list you
-	 * were in. These call the same `moveByKeyboard` the chords do - one move
-	 * still goes through one function - and are off at the ends with the reason
-	 * on the item, since a disabled menu item cannot hold a tooltip.
+	 * Move up / Move down / Move to…, for a row's `⋯` menu and its right-click menu (#1690). A drag
+	 * needs a pointer and Alt+Arrow must already be known, so neither is discoverable, and the
+	 * element list offers Move up / Move down in its menu too. These call the same `moveByKeyboard`
+	 * the chords do (one move, one function) and are off at the ends with the reason on the item,
+	 * as a disabled menu item cannot hold a tooltip.
 	 */
 	const moveActions = useCallback(
 		(entity: TreeEntity): RowAction[] => {
@@ -881,10 +850,9 @@ export function useTreeDnd({
 	const isDropBlocked = useCallback((dragged: TreeEntity, entity: TreeEntity) => {
 		if (entity.id === dragged.id) return true;
 		if (isInOwnSubtree(dragged, entity.id, dataRef.current.collections)) return true;
-		// No band of this row names a destination the dragged row could
-		// take - a request over a root folder's edges. Asked of the same
-		// resolver the drop uses, so what is greyed and what is refused cannot
-		// disagree.
+		// No band of this row names a destination the dragged row could take (a request over a root
+		// folder's edges). Asked of the resolver the drop uses, so what is greyed and what is
+		// refused cannot disagree.
 		return (["before", "inside", "after"] as const).every(
 			(zone) => resolveDrop({ dragged, target: entity, zone }) === null
 		);

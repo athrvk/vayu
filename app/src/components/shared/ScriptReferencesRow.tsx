@@ -6,21 +6,13 @@
  */
 
 /**
- * "Names mentioned:" - which variables a `script.pre`/`script.post` element's
- * script references, and how each resolves (issue #1553).
- *
- * Ported from the pre-#1512 `ScriptPanel`/`ScriptTab`, which each read
- * `referencedVariables` and painted `describeDataToken`/`describeColumnReference`/
- * `describeScopedRead` against `DATA_TOKEN_TONE_CLASS` inline, once per host.
- * `ScriptElementForm`, the bespoke form both hosts now use for a script element,
- * is a primitive under `components/shared/` and cannot depend on either host's
- * own context (`useRequestBuilderContext`, or the collection's
- * `useVariableResolver`/`useDataContract` pair) - so this component takes the
- * resolved answers as props instead, and each host supplies its own context's
- * answers through `ElementList`'s `renderAboveForm`. One implementation, not
- * two copies of the same tone table that can drift apart (the two retired
- * panels already had: the collection tab never painted a plain `pm.*` read
- * destructive when nothing defined it, the request panel always did).
+ * "Names mentioned:": which variables a `script.pre`/`script.post` element's script references, and
+ * how each resolves (#1553). `ScriptElementForm`, the script form both hosts use, is a
+ * `components/shared/` primitive and cannot reach either host's context
+ * (`useRequestBuilderContext`, or the collection's `useVariableResolver`/`useDataContract`), so
+ * this takes the resolved answers as props, each host supplying its own through `ElementList`'s
+ * `renderAboveForm`. One tone table, not two that drift (the pre-#1512 panels' copies disagreed on
+ * painting an undefined `pm.*` read destructive).
  */
 
 import { Badge } from "@/components/ui";
@@ -61,11 +53,9 @@ export function ScriptReferencesRow({
 			{usedVars.slice(0, chipLimit).map((reference) => {
 				const { name, via } = reference;
 
-				// A `data.*` name is not a variable and never becomes one (#604):
-				// the namespace is disjoint from the scopes, so it reads the
-				// contract in scope rather than the resolved/unresolved pair, and a
-				// column this chip calls declared is the one the URL bar calls
-				// declared.
+				// A `data.*` name is never a variable (#604): its namespace is disjoint from the
+				// scopes, so it reads the contract in scope, not resolved/unresolved, and a column
+				// this chip calls declared is the one the URL bar does.
 				if (isDataVariableName(name)) {
 					const data = describeDataToken(name, dataColumns);
 					return (
@@ -87,9 +77,8 @@ export function ScriptReferencesRow({
 					);
 				}
 
-				// A bare name a bound row answers (#1063): the same two states as
-				// the `data.*` chip above, from the same table, since a bound row's
-				// column and a `{{data.*}}` name the same thing.
+				// A bare name a bound row answers (#1063): the `data.*` chip's two states from the
+				// same table, as a row's column and `{{data.*}}` name the same thing.
 				const column = describeColumnReference(reference, dataColumns, (candidate) =>
 					Boolean(allVariables[candidate])
 				);
@@ -109,8 +98,8 @@ export function ScriptReferencesRow({
 					);
 				}
 
-				// A `{{name}}` the script merely contains - never resolved/unresolved,
-				// since the engine never interpolates script text (decision D16).
+				// A `{{name}}` the script merely contains: never resolved/unresolved, as the engine
+				// never interpolates script text (decision D16).
 				if (via === "template") {
 					return (
 						<Badge
@@ -124,9 +113,8 @@ export function ScriptReferencesRow({
 					);
 				}
 
-				// A single-scope read whose own scope answers emptily while another
-				// scope holds the value (#1196) - amber, since the read works and the
-				// name resolves, just not here.
+				// A single-scope read whose own scope answers emptily while another holds the value
+				// (#1196): amber, as the read works and the name resolves, just not here.
 				const scoped = describeScopedRead(reference, getVariableOrigins(name));
 				if (scoped) {
 					return (
@@ -144,8 +132,8 @@ export function ScriptReferencesRow({
 					);
 				}
 
-				// A `pm.*.get()` the script really reads: "defined"/"not defined" are
-				// both meaningful here, so the destructive paint keeps its meaning.
+				// A real `pm.*.get()` read: "defined"/"not defined" both mean something, so the
+				// destructive paint keeps its meaning.
 				return (
 					<Badge
 						key={name}

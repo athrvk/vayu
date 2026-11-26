@@ -6,7 +6,6 @@
  */
 
 /**
- * @file engine-client.ts
  * @brief Thin main-process HTTP client for the Vayu engine REST API
  *        (http://127.0.0.1:9876). The Electron main process cannot import the
  *        renderer's `@/services` client, so this is a minimal standalone
@@ -29,12 +28,10 @@ export class EngineRequestError extends Error {
 }
 
 /**
- * Raised when *this client's* abort budget expired before the engine answered -
- * distinct from the caller cancelling and from an unreachable engine. The
- * engine is still working on the call when this throws, so a caller must not
- * report it as "engine not running" or advise a blind retry: the request may
- * already have been sent and recorded. Carries the budget so the message can
- * name it.
+ * Raised when *this client's* abort budget expired before the engine answered: distinct from the
+ * caller cancelling and from an unreachable engine. The engine is still working on the call when
+ * this throws, so a caller must not report it as "engine not running" or advise a blind retry: the
+ * request may already have been sent and recorded. Carries the budget so the message can name it.
  */
 export class EngineTimeoutError extends Error {
 	constructor(
@@ -79,20 +76,18 @@ export interface LiveMetricsSnapshot {
 }
 
 /**
- * Page size `GET /runs` uses when a caller states none. The engine's own default
- * is 50; 100 is what this client has always asked for and what the `vayu://runs`
- * resource documents, so it stays the default rather than becoming a number that
- * changes underneath a caller that never passed one.
+ * Page size `GET /runs` uses when a caller states none. The engine's own default is 50; 100 is what
+ * this client has always asked for and what the `vayu://runs` resource documents, so it stays the
+ * default rather than becoming a number that changes underneath a caller that never passed one.
  */
 export const DEFAULT_RUN_PAGE_LIMIT = 100;
 
 /**
  * The engine's page cap, shared by `GET /runs` and `GET /runs/:id/samples`
- * (`std::min<int64_t> (limit, 500)` in both) and the paged whole-list routes
- * (`MAX_LIST_LIMIT`, `http/list_page.hpp`). The run routes clamp silently and
- * the list routes answer a 400; the tools refuse either way, so an agent that
- * asked for more is told rather than handed a short page it thinks is the
- * whole answer.
+ * (`std::min<int64_t> (limit, 500)` in both) and the paged whole-list routes (`MAX_LIST_LIMIT`,
+ * `http/list_page.hpp`). The run routes clamp silently and the list routes answer a 400; the tools
+ * refuse either way, so an agent that asked for more is told rather than handed a short page it
+ * thinks is the whole answer.
  */
 export const MAX_ENGINE_PAGE_LIMIT = 500;
 
@@ -257,23 +252,20 @@ export class EngineClient {
 	}
 
 	/**
-	 * Abort budget for a call that proxies a third-party server. Such a call is
-	 * bounded engine-side by the payload's own `timeout` or, absent one, the
-	 * user-configurable `defaultTimeout` setting (`resolve_request_timeout_ms`,
-	 * engine/src/http/routes/execution.cpp) - which reaches 300s, far past the
-	 * engine-local default. Sizing the client budget off that setting is what
-	 * keeps a legitimately slow request from being aborted here while the engine
-	 * completes it there, with the side effects and the run row already real.
+	 * Abort budget for a call that proxies a third-party server. Such a call is bounded engine-side
+	 * by the payload's own `timeout` or, absent one, the user-configurable `defaultTimeout` setting
+	 * (`resolve_request_timeout_ms`, engine/src/http/routes/execution.cpp), which reaches 300s, far
+	 * past the engine-local default. Sizing the client budget off that setting is what keeps a
+	 * legitimately slow request from being aborted here while the engine completes it there, with
+	 * the side effects and the run row already real.
 	 *
-	 * A `POST /execute` also runs its OAuth 2.0 token fetch and its scripts in
-	 * sequence with the transfer, so the budget is a worst case for the payload
-	 * ({@link executeBudgetMs}), not a bare transfer. A payload with neither is
-	 * the timeout plus the grace, as it always was.
+	 * A `POST /execute` also runs its OAuth 2.0 token fetch and its scripts in sequence with the
+	 * transfer, so the budget is a worst case for the payload ({@link executeBudgetMs}), not a bare
+	 * transfer. A payload with neither is the timeout plus the grace.
 	 *
-	 * A payload composed from a stored request carries a `timeout` only when the
-	 * request states one (`payload_from_stored`, issue #2937), so for most sends
-	 * the config read - not the payload - is what does the work; the `max` covers
-	 * a payload whose own timeout is larger than the setting.
+	 * A payload composed from a stored request carries a `timeout` only when the request states one
+	 * (`payload_from_stored`, #2937), so for most sends the config read, not the payload, is what
+	 * does the work; the `max` covers a payload whose own timeout is larger than the setting.
 	 */
 	private async proxiedTimeoutMs(payload: unknown, signal?: AbortSignal): Promise<number> {
 		let settings: BudgetSettings = { defaultTimeoutMs: 0, scriptTimeoutMs: 0 };
@@ -319,11 +311,10 @@ export class EngineClient {
 	}
 
 	/**
-	 * Fetch a single collection by id. There is no `GET /collections/:id` route
-	 * either (see {@link getEnvironment}), and the list already answers each
-	 * collection in full - its variables, auth and scripts included, which is
-	 * what a merge-patch write has to read first. Returns `null` when no
-	 * collection matches.
+	 * Fetch a single collection by id. There is no `GET /collections/:id` route either (see
+	 * {@link getEnvironment}), and the list already answers each collection in full (its variables,
+	 * auth and scripts included, which is what a merge-patch write has to read first). Returns
+	 * `null` when no collection matches.
 	 */
 	async getCollection(id: string, signal?: AbortSignal): Promise<unknown> {
 		const list = await this.request<unknown>("GET", "/collections", undefined, signal);
@@ -412,24 +403,22 @@ export class EngineClient {
 	}
 
 	/**
-	 * Fetch a single saved request by id (`GET /requests/:id`). Used to name what
-	 * a delete is about to destroy before the user is asked to confirm it - a
-	 * confirmation prompt carrying only an opaque id is not one a human can
-	 * answer. A 404 arrives as an {@link EngineRequestError}, which is what the
-	 * caller turns into "no such saved request" rather than deleting blind.
+	 * Fetch a single saved request by id (`GET /requests/:id`). Used to name what a delete is about
+	 * to destroy before the user is asked to confirm it: a confirmation prompt carrying only an
+	 * opaque id is not one a human can answer. A 404 arrives as an {@link EngineRequestError},
+	 * which is what the caller turns into "no such saved request" rather than deleting blind.
 	 */
 	getRequest(id: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", `/requests/${encodeURIComponent(id)}`, undefined, signal);
 	}
 
 	/**
-	 * What a stored OpenAPI document *is* - id, sourceUrl, fetchedAt, hash and
-	 * contentBytes - without the document (`GET /specs/:id/meta`, issue #712).
+	 * What a stored OpenAPI document *is* (id, sourceUrl, fetchedAt, hash and contentBytes) without
+	 * the document (`GET /specs/:id/meta`, #712).
 	 *
-	 * The default read for a spec, on the renderer's reasoning: the fields that
-	 * describe a binding live on the document, and fetching a 12 MB spec to print
-	 * a source line and a date is what this route was added to stop. A 404 arrives
-	 * as an {@link EngineRequestError}.
+	 * The default read for a spec, on the renderer's reasoning: the fields that describe a binding
+	 * live on the document, and fetching a 12 MB spec to print a source line and a date is what
+	 * this route was added to stop. A 404 arrives as an {@link EngineRequestError}.
 	 */
 	getSpecMeta(id: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", `/specs/${encodeURIComponent(id)}/meta`, undefined, signal);
@@ -438,23 +427,21 @@ export class EngineClient {
 	/**
 	 * The whole stored document, `content` included (`GET /specs/:id`).
 	 *
-	 * Only for a caller that asked for the text: the two extracted indexes
-	 * (`operations`, `responseSchemas`) ride along on this route and are as heavy
-	 * as the document, so a reader that only wants metadata takes
-	 * {@link getSpecMeta} instead.
+	 * Only for a caller that asked for the text: the two extracted indexes (`operations`,
+	 * `responseSchemas`) ride along on this route and are as heavy as the document, so a reader
+	 * that only wants metadata takes {@link getSpecMeta} instead.
 	 */
 	getSpec(id: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", `/specs/${encodeURIComponent(id)}`, undefined, signal);
 	}
 
 	/**
-	 * Bind a collection to an OpenAPI document (`POST /specs/bind`, issue #862).
+	 * Bind a collection to an OpenAPI document (`POST /specs/bind`, #862).
 	 *
-	 * One call for the document, the binding and every stamp - written and
-	 * cleared - because they are one state: a collection bound to a contract its
-	 * requests do not name reports no coverage and validates nothing. The
-	 * pairing is the engine's, worked out from the bytes this stores, so nothing
-	 * here has an opinion about what the document declares.
+	 * One call for the document, the binding and every stamp (written and cleared) because they are
+	 * one state: a collection bound to a contract its requests do not name reports no coverage and
+	 * validates nothing. The pairing is the engine's, worked out from the bytes this stores, so
+	 * nothing here has an opinion about what the document declares.
 	 */
 	bindSpec(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/specs/bind", payload, signal);
@@ -481,16 +468,11 @@ export class EngineClient {
 	}
 
 	/**
-	 * Parse an import document and persist it, in one call (`POST /import`,
-	 * issue #877).
+	 * Parse an import document and persist it, in one call (`POST /import`, #877).
 	 *
-	 * The verb that was missing: an agent could bind, describe, diff, sync,
-	 * export and unbind a spec, and could not *import* a document at all,
-	 * because `POST /import/apply` took a tree only the renderer could build.
-	 * Every format the app accepts comes through here - OpenAPI 2.0/3.x, Postman
-	 * v2.0/v2.1, a Postman environment or globals export, Insomnia v4 or v5 - read by
-	 * the engine's one reader, so nothing on this side has an opinion about what
-	 * a document is.
+	 * Every format the app accepts comes through here (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a
+	 * Postman environment or globals export, Insomnia v4 or v5), read by the engine's one reader,
+	 * so nothing on this side has an opinion about what a document is.
 	 */
 	importDocument(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/import", payload, signal);
@@ -507,45 +489,40 @@ export class EngineClient {
 	}
 
 	/**
-	 * What a re-fetched document would change about the collection bound to it
-	 * (`POST /specs/diff`, issue #854).
+	 * What a re-fetched document would change about the collection bound to it (`POST /specs/diff`,
+	 * #854).
 	 *
-	 * A POST that writes nothing: the document is compared, never stored, and
-	 * the collection keeps its binding and its stamps. Neither the requests nor
-	 * the bound document ride in the payload - the engine walks the subtree and
-	 * reads the binding itself, because a caller that could supply the
-	 * "previous" side could turn its own edits into the document's.
+	 * A POST that writes nothing: the document is compared, never stored, and the collection keeps
+	 * its binding and its stamps. Neither the requests nor the bound document ride in the payload:
+	 * the engine walks the subtree and reads the binding itself, because a caller that could supply
+	 * the "previous" side could turn its own edits into the document's.
 	 */
 	diffSpec(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/specs/diff", payload, signal);
 	}
 
 	/**
-	 * Apply a re-fetched document to the collection bound to it
-	 * (`POST /specs/sync`, issue #871).
+	 * Apply a re-fetched document to the collection bound to it (`POST /specs/sync`, #871).
 	 *
-	 * One transaction for the document, the binding that moves to it, and every
-	 * request created, updated and deleted - a half-applied sync leaves a
-	 * collection bound to a contract its requests do not reflect. The rows are
-	 * not stated here: the payload carries `policy: "safe"` and the engine works
-	 * out which of the drift that covers, because deciding which of a user's
-	 * fields an apply may overwrite is exactly the judgement this side must not
-	 * make a second copy of.
+	 * One transaction for the document, the binding that moves to it, and every request created,
+	 * updated and deleted: a half-applied sync leaves a collection bound to a contract its requests
+	 * do not reflect. The rows are not stated here: the payload carries `policy: "safe"` and the
+	 * engine works out which of the drift that covers, because deciding which of a user's fields an
+	 * apply may overwrite is exactly the judgement this side must not make a second copy of.
 	 */
 	syncSpec(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/specs/sync", payload, signal);
 	}
 
 	/**
-	 * A collection back out as an OpenAPI document (`POST /specs/export`, issue
-	 * #855) - its own bound document updated, or a skeleton when it binds none.
+	 * A collection back out as an OpenAPI document (`POST /specs/export`, #855): its own bound
+	 * document updated, or a skeleton when it binds none.
 	 *
-	 * A POST that writes nothing: the body says which collection, which
-	 * serialization and - for a bound one - how much to write (`contract` or
-	 * `full`), and the engine reads the subtree, its examples and the
-	 * stored document itself. A 404 (no such collection) and a 409 (a binding
-	 * whose document it cannot read) both arrive as an
-	 * {@link EngineRequestError} carrying the engine's sentence.
+	 * A POST that writes nothing: the body says which collection, which serialization and, for a
+	 * bound one, how much to write (`contract` or `full`), and the engine reads the subtree, its
+	 * examples and the stored document itself. A 404 (no such collection) and a 409 (a binding
+	 * whose document it cannot read) both arrive as an {@link EngineRequestError} carrying the
+	 * engine's sentence.
 	 */
 	exportSpec(
 		collectionId: string,
@@ -559,10 +536,9 @@ export class EngineClient {
 	/**
 	 * A collection as a Postman Collection v2.1 document (`POST /export/postman`).
 	 *
-	 * A POST that writes nothing, like `exportSpec`. Always asked for with
-	 * secrets omitted - see the `export_postman` tool for why. A 404 (no such
-	 * collection) arrives as an {@link EngineRequestError} carrying the engine's
-	 * sentence.
+	 * A POST that writes nothing, like `exportSpec`. Always asked for with secrets omitted (see the
+	 * `export_postman` tool for why). A 404 (no such collection) arrives as an
+	 * {@link EngineRequestError} carrying the engine's sentence.
 	 */
 	exportPostman(collectionId: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request(
@@ -607,15 +583,13 @@ export class EngineClient {
 	}
 
 	/**
-	 * The runs pinned as baselines for one saved request or one collection,
-	 * newest first. One row is all any caller needs - "the baseline" is the most
-	 * recently started pinned run - so the page is bounded to it rather than to
-	 * the 100 `listRuns` allows.
+	 * The runs pinned as baselines for one saved request or one collection, newest first. One row
+	 * is all any caller needs ("the baseline" is the most recently started pinned run), so the page
+	 * is bounded to it rather than to the 100 `listRuns` allows.
 	 *
-	 * `type: "load"` because a pin is not load-specific (#1509) but a
-	 * comparison is: only a load run has the percentiles and throughput a
-	 * baseline diff needs, so a more-recently-pinned design or scenario run of
-	 * the same request must never shadow the load baseline this resolves.
+	 * `type: "load"` because a pin is not load-specific (#1509) but a comparison is: only a load
+	 * run has the percentiles and throughput a baseline diff needs, so a more-recently-pinned
+	 * design or scenario run of the same request must never shadow the load baseline this resolves.
 	 */
 	listBaselineRuns(identity: RunIdentity, signal?: AbortSignal): Promise<unknown> {
 		return this.listRuns({ baseline: true, type: "load", limit: 1, ...identity }, signal);
@@ -626,11 +600,10 @@ export class EngineClient {
 	}
 
 	/**
-	 * A finished load run as a shareable document (`POST /export/run-report`,
-	 * issue #2127): `{text, fileName, mimeType, notes}`, built by allowlist so
-	 * no trace, sample, header value or body is in it. A POST that writes
-	 * nothing. A missing run or base is a 404, a run still executing a 409 and
-	 * a design or collection-sequence run a 400, each an
+	 * A finished load run as a shareable document (`POST /export/run-report`, #2127):
+	 * `{text, fileName, mimeType, notes}`, built by allowlist so no trace, sample, header value or
+	 * body is in it. A POST that writes nothing. A missing run or base is a 404, a run still
+	 * executing a 409 and a design or collection-sequence run a 400, each an
 	 * {@link EngineRequestError} carrying the engine's sentence.
 	 */
 	exportRunReport(
@@ -743,11 +716,10 @@ export class EngineClient {
 	// --- Script sandbox surface ----------------------------------------------
 
 	/**
-	 * The script sandbox's API surface: every `pm.*` name, global and assertion
-	 * chain the QuickJS runtime installs. Generated engine-side from one table
-	 * and cross-checked against the runtime by `script_completions_test.cpp`,
-	 * which is why both the editor and MCP read it rather than describing the
-	 * sandbox themselves (issue #233).
+	 * The script sandbox's API surface: every `pm.*` name, global and assertion chain the QuickJS
+	 * runtime installs. Generated engine-side from one table and cross-checked against the runtime
+	 * by `script_completions_test.cpp`, which is why both the editor and MCP read it rather than
+	 * describing the sandbox themselves (#233).
 	 */
 	getScriptCompletions(signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", "/scripting/completions", undefined, signal);
@@ -755,11 +727,10 @@ export class EngineClient {
 
 	/**
 	 * The same surface as TypeScript declarations: `GET /scripting/types` answers
-	 * `{version, engine, libUri, typeDefinitions}`, the `.d.ts` text generated
-	 * from the completion table by `script_types.cpp`. The app feeds it to
-	 * Monaco's TypeScript worker; MCP serves it as a resource, because a
-	 * signature an agent can read is what turns a name into a call it gets right
-	 * the first time.
+	 * `{version, engine, libUri, typeDefinitions}`, the `.d.ts` text generated from the completion
+	 * table by `script_types.cpp`. The app feeds it to Monaco's TypeScript worker; MCP serves it as
+	 * a resource, because a signature an agent can read is what turns a name into a call it gets
+	 * right the first time.
 	 */
 	getScriptTypeDefinitions(signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", "/scripting/types", undefined, signal);
@@ -772,12 +743,11 @@ export class EngineClient {
 	// --- Elements --------------------------------------------------------------
 
 	/**
-	 * The element registry's catalogue (issue #1513): every kind's category,
-	 * phases, hot-path class, label, description and config JSON Schema. What
-	 * `create_request` / `update_request` / `create_collection` /
-	 * `update_collection`'s `elements` argument validates against, engine-side;
-	 * served back here as the `vayu://elements/kinds` resource so an agent can
-	 * discover a kind's shape instead of guessing it (issue #1517).
+	 * The element registry's catalogue (#1513): every kind's category, phases, hot-path class,
+	 * label, description and config JSON Schema. What `create_request` / `update_request` /
+	 * `create_collection` / `update_collection`'s `elements` argument validates against,
+	 * engine-side; served back here as the `vayu://elements/kinds` resource so an agent can
+	 * discover a kind's shape instead of guessing it (#1517).
 	 */
 	getElementKinds(signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", "/elements/kinds", undefined, signal);
@@ -878,12 +848,11 @@ export class EngineClient {
 	}
 
 	/**
-	 * Put one deleted root back, with everything its delete took along:
-	 * `POST /trash/:id/restore`. A 404 arrives as an {@link EngineRequestError}
-	 * for an id the trash does not hold; a 409 the same way for a request whose
-	 * collection is itself deleted or gone, with the engine naming the item and
-	 * the Trash root to restore first - callers surface `EngineRequestError.body` rather than
-	 * inventing wording for either.
+	 * Put one deleted root back, with everything its delete took along: `POST /trash/:id/restore`.
+	 * A 404 arrives as an {@link EngineRequestError} for an id the trash does not hold; a 409 the
+	 * same way for a request whose collection is itself deleted or gone, with the engine naming the
+	 * item and the Trash root to restore first. Callers surface `EngineRequestError.body` rather
+	 * than inventing wording for either.
 	 */
 	restoreTrashEntry(id: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", `/trash/${encodeURIComponent(id)}/restore`, undefined, signal);
@@ -899,11 +868,10 @@ export class EngineClient {
 	}
 
 	/*
-	 * Saved example responses. Every path is nested under the owning request
-	 * (issue #481) because one request owns them: the engine checks the owner
-	 * before the example, so an example reached through the wrong request is a
-	 * 404 rather than a cross-request write. That ownership is why these take a
-	 * `requestId` rather than an example id alone.
+	 * Saved example responses. Every path is nested under the owning request (#481) because one
+	 * request owns them: the engine checks the owner before the example, so an example reached
+	 * through the wrong request is a 404 rather than a cross-request write. That ownership is why
+	 * these take a `requestId` rather than an example id alone.
 	 */
 
 	/** A request's saved examples, in stored order: `GET /requests/:id/examples`. */
@@ -971,12 +939,11 @@ export class EngineClient {
 	}
 
 	/**
-	 * Reposition collections and requests in one atomic batch: `POST /reorder`
-	 * (issue #365). The whole batch validates and commits under one acquisition
-	 * of the engine's DB mutex, which is why a move goes through here rather than
-	 * through `PUT /collections/:id`'s own `parentId`: two concurrent reparents
-	 * cannot both pass an acyclicity check neither one's commit was visible to.
-	 * A rejected batch writes nothing at all.
+	 * Reposition collections and requests in one atomic batch: `POST /reorder` (#365). The whole
+	 * batch validates and commits under one acquisition of the engine's DB mutex, which is why a
+	 * move goes through here rather than through `PUT /collections/:id`'s own `parentId`: two
+	 * concurrent reparents cannot both pass an acyclicity check neither one's commit was visible
+	 * to. A rejected batch writes nothing at all.
 	 */
 	reorder(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/reorder", payload, signal);
@@ -985,10 +952,9 @@ export class EngineClient {
 	/**
 	 * Delete a run and everything recorded against it: `DELETE /runs/:id`.
 	 *
-	 * A run still executing is stopped engine-side first and deleted only once
-	 * its worker has settled; a worker that does not settle in time answers 409
-	 * with the run **intact**, which the caller must report as "not deleted,
-	 * retry" rather than as a generic failure.
+	 * A run still executing is stopped engine-side first and deleted only once its worker has
+	 * settled; a worker that does not settle in time answers 409 with the run **intact**, which the
+	 * caller must report as "not deleted, retry" rather than as a generic failure.
 	 */
 	deleteRun(runId: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("DELETE", `/runs/${encodeURIComponent(runId)}`, undefined, signal);
@@ -1045,12 +1011,11 @@ export class EngineClient {
 	/**
 	 * Write the global variables singleton: `POST /globals`.
 	 *
-	 * POST, and a **replace** rather than a merge - globals is one row addressed
-	 * by one id, so the engine has no create/update split for it and saves the
-	 * blob whole (`save_globals_response`). A caller preserving anything must
-	 * read first and send the merged result under @p ifMatch, the version it
-	 * read, which is what `update_globals` does; a 412 means another client
-	 * saved in between, as on {@link updateEnvironment}.
+	 * POST, and a **replace** rather than a merge: globals is one row addressed by one id, so the
+	 * engine has no create/update split for it and saves the blob whole (`save_globals_response`).
+	 * A caller preserving anything must read first and send the merged result under @p ifMatch, the
+	 * version it read, which is what `update_globals` does; a 412 means another client saved in
+	 * between, as on {@link updateEnvironment}.
 	 */
 	saveGlobals(payload: unknown, signal?: AbortSignal, ifMatch?: string): Promise<unknown> {
 		return this.request(
@@ -1067,10 +1032,9 @@ export class EngineClient {
 	 * Clear cookie jars: `DELETE /cookies[?environmentId=]`.
 	 *
 	 * Three cases, spelled the way the engine reads them and the renderer's
-	 * `apiService.clearCookies` already sends them: `undefined` omits the
-	 * parameter and clears every jar, `null` sends it empty and clears the
-	 * no-environment jar, and an id clears that environment's. Passing `null` is
-	 * therefore not the same call as passing nothing.
+	 * `apiService.clearCookies` already sends them: `undefined` omits the parameter and clears
+	 * every jar, `null` sends it empty and clears the no-environment jar, and an id clears that
+	 * environment's. Passing `null` is therefore not the same call as passing nothing.
 	 */
 	clearCookies(environmentId?: string | null, signal?: AbortSignal): Promise<unknown> {
 		const query =
@@ -1083,12 +1047,11 @@ export class EngineClient {
 	// --- Execute -------------------------------------------------------------
 
 	/**
-	 * Compose a request engine-side: `POST /compose` resolves `{{variables}}`
-	 * and `inherit` auth (walking the collection chain) and returns the
-	 * execute-ready payload that {@link executeRequest} / {@link startRun}
-	 * accept unchanged. Pure - it sends nothing and creates no run row, which
-	 * is what lets the allowlist gate read the *resolved* URL before any
-	 * traffic flows. This replaced the MCP-side composition copy (issue #226).
+	 * Compose a request engine-side: `POST /compose` resolves `{{variables}}` and `inherit` auth
+	 * (walking the collection chain) and returns the execute-ready payload that
+	 * {@link executeRequest} / {@link startRun} accept unchanged. Pure: it sends nothing and
+	 * creates no run row, which is what lets the allowlist gate read the *resolved* URL before any
+	 * traffic flows (#226).
 	 */
 	composeRequest(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/compose", payload, signal);
@@ -1114,14 +1077,13 @@ export class EngineClient {
 	}
 
 	/**
-	 * Read a bounded snapshot of live metrics without holding a stream open.
-	 * Connects to the SSE endpoint (which replays the retained tick buffer from
-	 * offset 0), collects `metrics` ticks until the run completes or `budgetMs`
-	 * elapses, and returns the last `limit` ticks. This keeps `tools/call`
-	 * request/response - MCP tools do not stream.
+	 * Read a bounded snapshot of live metrics without holding a stream open. Connects to the SSE
+	 * endpoint (which replays the retained tick buffer from offset 0), collects `metrics` ticks
+	 * until the run completes or `budgetMs` elapses, and returns the last `limit` ticks. This keeps
+	 * `tools/call` request/response: MCP tools do not stream.
 	 *
-	 * `completed` is the relay's own `event: complete`, so a read that ran out of
-	 * budget on a live run is never reported as a finished one (issue #2955).
+	 * `completed` is the relay's own `event: complete`, so a read that ran out of budget on a live
+	 * run is never reported as a finished one (#2955).
 	 */
 	async getLiveMetricsSnapshot(
 		runId: string,
@@ -1191,23 +1153,20 @@ export class EngineClient {
 	}
 
 	/**
-	 * Consume a streaming request's events into a list, under a hard budget
-	 * (issue #575).
+	 * Consume a streaming request's events into a list, under a hard budget (#575).
 	 *
-	 * The same shape as {@link getLiveMetricsSnapshot} and for the same reason:
-	 * `tools/call` is request/response, so an agent cannot be handed a stream -
-	 * it is handed what the stream produced within a stated bound. Both bounds
-	 * are real and both are disclosed by the caller: `maxEvents` caps the list
-	 * and `budgetMs` caps the wait, so a stream that never ends still answers.
+	 * The same shape as {@link getLiveMetricsSnapshot} and for the same reason: `tools/call` is
+	 * request/response, so an agent cannot be handed a stream, only what the stream produced within
+	 * a stated bound. Both bounds are real and both are disclosed by the caller: `maxEvents` caps
+	 * the list and `budgetMs` caps the wait, so a stream that never ends still answers.
 	 *
-	 * `?lastEventId=` is deliberately not used. This connects once, from offset
-	 * zero, and takes what the ring replays plus what arrives while it waits;
-	 * resuming belongs to a live consumer that means to stay, which this is the
-	 * opposite of.
+	 * `?lastEventId=` is deliberately not used. This connects once, from offset zero, and takes
+	 * what the ring replays plus what arrives while it waits; resuming belongs to a live consumer
+	 * that means to stay, which this is the opposite of.
 	 *
-	 * @returns the events it collected and how the read ended. `completed` is
-	 *   the relay's own `event: complete`, so a partial read is never reported
-	 *   as a finished stream - the distinction the disclosure rests on.
+	 * @returns the events it collected and how the read ended. `completed` is the relay's own
+	 *        `event: complete`, so a partial read is never reported as a finished stream, the
+	 *        distinction the disclosure rests on.
 	 */
 	async consumeStreamEvents(
 		runId: string,
@@ -1299,14 +1258,12 @@ export class EngineClient {
 
 	// --- OAuth 2.0 token cache -----------------------------------------------
 	//
-	// The three routes the app's auth tab drives (`engine/src/http/routes/
-	// oauth.cpp`). The engine owns the cache key - `cache_key(config)` over
-	// accessTokenUrl / clientId / credentialsId / grantType / username or
-	// subject, then the extra parameter rows - so callers name a config to
-	// acquire and the returned `cacheKey` to inspect or clear. The
-	// interactive `authorization_code` exchange (`/oauth2/authorize/*`) is
-	// deliberately absent: it needs a browser and a loopback listener the app
-	// owns, and agent-driven browser auth is a non-goal of epic #753.
+	// The three routes the app's auth tab drives (`engine/src/http/routes/oauth.cpp`). The engine
+	// owns the cache key (`cache_key(config)` over accessTokenUrl / clientId / credentialsId /
+	// grantType / username or subject, then the extra parameter rows), so callers name a config to
+	// acquire and the returned `cacheKey` to inspect or clear. The interactive `authorization_code`
+	// exchange (`/oauth2/authorize/*`) is deliberately absent: it needs a browser and a loopback
+	// listener the app owns, and agent-driven browser auth is a non-goal of epic #753.
 
 	/**
 	 * Send one `HEAD` under the transport policy in force and report which hop
@@ -1403,11 +1360,10 @@ export class EngineClient {
 	}
 
 	/**
-	 * Merge-patch a running issuer: `PUT /mock-issuer/:id`. The engine refuses
-	 * `port`, `clients`, `claims` and `issueRefreshTokens` outright on a bound
-	 * listener (`apply_mock_issuer_patch`) - the settings a live issuer can
-	 * change are the timing ones. Answers the updated description; an unknown id
-	 * is a 404, an out-of-range value a `400 mock_issuer_invalid_config`.
+	 * Merge-patch a running issuer: `PUT /mock-issuer/:id`. The engine refuses `port`, `clients`,
+	 * `claims` and `issueRefreshTokens` outright on a bound listener (`apply_mock_issuer_patch`);
+	 * the settings a live issuer can change are the timing ones. Answers the updated description;
+	 * an unknown id is a 404, an out-of-range value a `400 mock_issuer_invalid_config`.
 	 */
 	updateMockIssuer(issuerId: string, patch: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("PUT", `/mock-issuer/${encodeURIComponent(issuerId)}`, patch, signal);
@@ -1421,11 +1377,10 @@ export class EngineClient {
 	// no allowlist check.
 
 	/**
-	 * Start a mock: `POST /mock/start`. `collectionId` is required; the engine
-	 * assigns the id and, for `port: 0`, the port. The reply is the mock record
-	 * (`mockId`, `collectionId`, `collectionName`, `url`, `port`, `latencyMs`,
-	 * `errorRatePct`, `routeCount`, `routesWithoutExample`, `duplicateRoutes`, `createdAt`,
-	 * `allowedOrigins`).
+	 * Start a mock: `POST /mock/start`. `collectionId` is required; the engine assigns the id and,
+	 * for `port: 0`, the port. The reply is the mock record (`mockId`, `collectionId`,
+	 * `collectionName`, `url`, `port`, `latencyMs`, `errorRatePct`, `routeCount`,
+	 * `routesWithoutExample`, `duplicateRoutes`, `createdAt`, `allowedOrigins`).
 	 */
 	startMockServer(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/mock/start", payload, signal);
@@ -1470,12 +1425,10 @@ export class EngineClient {
 
 	// --- Local services: the webhook inbox -----------------------------------
 	//
-	// The inbox routes take a `bind` and a `confirmNonLoopback` flag; nothing
-	// here sends either, so every inbox an MCP call starts listens on the
-	// engine's loopback default. That is a stated non-goal of epic #753 rather
-	// than an omission, and it is enforced by the payload builder in
-	// `tools/webhook-inbox.ts` (`inboxStartPayload`) - this client takes the
-	// payload it is given.
+	// The inbox routes take a `bind` and a `confirmNonLoopback` flag; nothing here sends either, so
+	// every inbox an MCP call starts listens on the engine's loopback default. That is a stated
+	// non-goal of epic #753 rather than an omission, and it is enforced by the payload builder in
+	// `tools/webhook-inbox.ts` (`inboxStartPayload`): this client takes the payload it is given.
 
 	/**
 	 * Start an inbox: `POST /inbox/start`. Every field of the body is optional;
@@ -1578,10 +1531,9 @@ export class EngineClient {
 }
 
 /**
- * The engine's entity tag for a row it answered, `W/"<updatedAt>"` (#2433), or
- * undefined for a row with no integer `updatedAt`. Built from the row because
- * collections and environments are read from their list, which carries no
- * per-row header.
+ * The engine's entity tag for a row it answered, `W/"<updatedAt>"` (#2433), or undefined for a row
+ * with no integer `updatedAt`. Built from the row because collections and environments are read
+ * from their list, which carries no per-row header.
  */
 export function entityTagOf(row: unknown): string | undefined {
 	if (!row || typeof row !== "object") return undefined;

@@ -6,17 +6,14 @@
  */
 
 /**
- * Where the engine listens for this session: the one main-process reader of
- * the port (#2118).
+ * Where the engine listens for this session: the one main-process reader of the port (#2118).
  *
- * The sidecar picks a port from `ENGINE_PORT_CANDIDATES` on its first start and
- * keeps it, and `fixEnginePort` is how that choice reaches everything else. It
- * is fixed once because the renderer is told the port once, as a command-line
- * argument of the window's renderer process, and cannot follow a move. Until it
- * is fixed, the default port is the answer.
+ * The sidecar picks a port from `ENGINE_PORT_CANDIDATES` on its first start and keeps it, and
+ * `fixEnginePort` carries that choice to everything else. Fixed once because the renderer is told
+ * the port once, as a command-line argument of the window's renderer process, and cannot follow a
+ * move. Until it is fixed, the default port is the answer.
  *
- * Kept free of Electron: `renderer-csp.ts` reads the candidate origins from the
- * Vite config.
+ * Kept free of Electron: `renderer-csp.ts` reads the candidate origins from the Vite config.
  */
 
 import { ENGINE_HOST, ENGINE_PORT, ENGINE_PORT_CANDIDATES } from "./constants.js";

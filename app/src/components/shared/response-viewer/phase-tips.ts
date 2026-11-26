@@ -6,14 +6,9 @@
  */
 
 /**
- * Per-phase explanations for the network timing breakdown (DNS -> Connect ->
- * TLS -> TTFB -> Download).
- *
- * These five sentences were copied byte-for-byte between the dashboard's report
- * view and the request-builder's `ResponseTimingTab`, with a
- * comment admitting the manual "keep in sync" obligation that nothing enforced.
- * They live here now so every renderer of the same five numbers reads from one
- * string, the way `formatPhaseDuration` already unified the numbers themselves.
+ * Per-phase explanations for the network timing breakdown (DNS -> Connect -> TLS -> TTFB ->
+ * Download), one string per phase for every renderer of those numbers, as `formatPhaseDuration` is
+ * for the numbers.
  */
 export const PHASE_TIPS = {
 	dns: "Hostname → IP resolution. Usually a few ms once cached; >50ms suggests slow DNS or a fresh lookup.",

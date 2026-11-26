@@ -73,7 +73,6 @@ const vayu::Response& response,
 vayu::ErrorCode code,
 const std::string& message,
 const ResultAnnotations& annotations) {
-    // Build detailed error trace data
     nlohmann::json error_json = { { "error_code", static_cast<int> (code) },
         { "error_type", vayu::error_type_name (code) }, { "message", message },
         { "request_number", context->total_requests () } };
@@ -81,7 +80,6 @@ const ResultAnnotations& annotations) {
 
     annotate (error_json, annotations);
 
-    // Include timing info if available
     if (response.timing.total_ms > 0) {
         error_json["timing"] = { { "totalMs", response.timing.total_ms },
             { "wireMs", response.timing.wire_ms },
@@ -92,16 +90,15 @@ const ResultAnnotations& annotations) {
             { "downloadMs", response.timing.download_ms } };
     }
 
-    // Every error is a capture candidate: a failure is exactly the sample a
-    // user opens the Samples tab for, and errors are already bounded by
-    // `maxStoredErrors`. Passing the response rather than a copy keeps the
-    // body-sized work inside the collector, after it has decided to keep
-    // the record (see MetricsCollector::record_error).
+    // Every error is a capture candidate: a failure is the sample a user opens
+    // the Samples tab for, and errors are already bounded by `maxStoredErrors`.
+    // The response is passed, not copied, so body-sized work happens inside the
+    // collector after it decides to keep the record
+    // (`MetricsCollector::record_error`).
     //
     // A failure whose transfer ran joins the latency population at its own
     // duration (#2384): a timeout is the slowest outcome a request can have,
-    // and percentiles that left it out described only the requests that
-    // answered.
+    // and percentiles without it describe only the requests that answered.
     std::optional<AttemptDuration> attempt;
     if (response.transfer_attempted) {
         attempt = AttemptDuration{ response.timing.total_ms + annotations.script_ms,
@@ -131,21 +128,19 @@ const ResultAnnotations& annotations) {
     const double transfer_ms = response.timing.total_ms;
     const double latency     = transfer_ms + annotations.script_ms;
 
-    // Two independent reasons to keep a trace, and both are decided before
-    // anything is serialised: the 1-in-N sampler (which advances its period
-    // on every completion, so this call is not optional) and the slow
-    // threshold. Building first and sampling afterwards meant 99 of every
-    // 100 traces were constructed and dumped inline in the completion
-    // drain, then thrown away - work that delays socket processing for
-    // every other transfer on the same worker.
+    // Two independent reasons to keep a trace, both decided before anything is
+    // serialised: the 1-in-N sampler (which advances its period on every
+    // completion, so this call is not optional) and the slow threshold.
+    // Building first and sampling after would construct and dump 99 of every
+    // 100 traces inline in the completion drain only to discard them, delaying
+    // socket processing for every other transfer on the worker.
     const bool is_slow = context->slow_threshold_ms > 0 &&
     transfer_ms >= static_cast<double> (context->slow_threshold_ms);
     const bool sampled = context->metrics_collector->should_sample_success ();
-    // Third reason, and the cheapest: one relaxed fetch_add deciding
-    // whether this completion is among the first few of its status code. A
-    // uniform slice of a 30M-request run is a thousand identical 200s;
-    // three of each code is what answers "what does this target's 503
-    // look like".
+    // A third reason, the cheapest: one relaxed fetch_add deciding whether this
+    // completion is among the first few of its status code. A uniform slice of
+    // a 30M-request run is a thousand identical 200s; three of each code
+    // answers "what does this target's 503 look like".
     const bool exemplar =
     context->metrics_collector->claim_status_exemplar (response.status_code);
 
@@ -153,19 +148,17 @@ const ResultAnnotations& annotations) {
     auto trace_reason = SuccessTraceReason::None;
 
     if (sampled || is_slow || exemplar) {
-        // Slow still wins, then sampled: the trace is identical either way,
-        // and charging an outlier to the slow budget leaves the 1-in-N
-        // budget for ordinary traffic.
+        // Slow wins, then sampled: the trace is identical either way, and
+        // charging an outlier to the slow budget leaves the 1-in-N budget for
+        // ordinary traffic.
         //
-        // Exemplar is *last*, and only decides the store for a completion
-        // no other budget wanted. Ranking it first stole outliers from the
-        // slow store - the first few completions of a status code are
-        // usually where a run's outliers are - which is a behaviour change
-        // nobody asked for, on the store whose whole purpose is to hold
-        // what the user asked for. Being retained is still guaranteed:
-        // whichever budget claims it, the record is stored, and the
-        // exemplar's real job (capturing a body for it) is decided
-        // separately below.
+        // Exemplar is last and only picks the store for a completion no other
+        // budget wanted. Ranked first it would steal outliers from the slow
+        // store (the first completions of a status code are usually where a
+        // run's outliers are), the store holding what the user asked for.
+        // Retention is guaranteed either way: whichever budget claims it, the
+        // record is stored, and the exemplar's real job, capturing a body, is
+        // decided below.
         if (is_slow) {
             trace_reason = SuccessTraceReason::Slow;
         } else if (sampled) {
@@ -195,33 +188,28 @@ const ResultAnnotations& annotations) {
         trace_data = timing_json.dump ();
     }
 
-    // Whether a body is captured is decided here, not by which store won
-    // above. Capture is failure-and-outlier-shaped: an outlier or a claimed
-    // exemplar gets one, a plain 1-in-N sample does not - a thousand
-    // identical 200s are not worth a thousand bodies. A completion that is
-    // both sampled and an exemplar is stored in the sampled budget *and*
-    // keeps its body, which is the case the old precedence-based version
-    // could only express by moving the record.
+    // Capture is decided here, not by which store won: an outlier or a claimed
+    // exemplar gets a body, a plain 1-in-N sample does not (a thousand
+    // identical 200s are not worth a thousand bodies). A completion both
+    // sampled and an exemplar is stored in the sampled budget and keeps its
+    // body.
     const bool capture_body = context->capture_response_bodies && (is_slow || exemplar);
-    // The phase breakdown goes in whatever the retention gate above
-    // decided: `trace_data` carries these same five numbers for the ~1% of
-    // completions something retains, and the histograms are how the other
-    // 99% reach the report.
+    // The phase breakdown goes in whatever the gate above decided: `trace_data`
+    // carries the same five numbers for the ~1% of completions something
+    // retains, and the histograms carry the other 99% to the report.
     context->metrics_collector->record_success (response.status_code, latency,
     response.timing.queue_wait_ms, trace_data, trace_reason,
     capture_body ? &response : nullptr, &response.timing);
     context->metrics_collector->record_bytes (
     response.timing.bytes_up, response.timing.bytes_down);
 
-    // Sample the response for the deferred validation passes. What reads a
-    // scenario sample - a step's script, a step's contract - is keyed to
-    // the step, not to the run, so it goes to that step's own reservoir;
-    // the collector refuses the steps nothing will read. A single-request
-    // run keeps the one run-level store it always had.
-    // Who sent it travels with the sample either way, so the deferred script
-    // reads the row it was bound to as `pm.iterationData` (issue #993) and the
-    // iteration and user it ran as through `pm.info` (issue #994) - the same
-    // three facts whichever reservoir kept the response.
+    // Sampled for the deferred validation passes. What reads a scenario sample
+    // (a step's script, a step's contract) is keyed to the step, so it goes to
+    // that step's reservoir, and the collector refuses steps nothing reads; a
+    // single-request run keeps one run-level store. Who sent it travels with
+    // the sample either way, so the deferred script reads its bound row as
+    // `pm.iterationData` (#993) and its iteration and user through `pm.info`
+    // (#994), whichever reservoir kept it.
     const SampleIdentity identity{ annotations.iteration, annotations.vu,
         annotations.data_row_index };
     if (annotations.step_index) {
@@ -257,13 +245,12 @@ void handle_result (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& /* db - unused, kept for API compat */,
 const vayu::Result<vayu::Response>& result,
 const ResultAnnotations& annotations) {
-    // A transfer usually completes as a Response carrying error_code, but a
-    // few paths still produce a real Error: curl-handle creation failure, a
-    // data-binding failure, and the event loop's cancellation. Dropping any of
-    // them would leave requests_sent counted with no completion, permanently
-    // inflating in_flight() and shrinking effective concurrency for the rest
-    // of the run - which is why a Stop's cancellation is still recorded, just
-    // not as an error.
+    // A transfer usually completes as a Response carrying error_code, but a few
+    // paths produce a real Error: curl-handle creation failure, a data-binding
+    // failure and the event loop's cancellation. Dropping one would leave
+    // requests_sent counted with no completion, inflating in_flight() and
+    // shrinking effective concurrency for the rest of the run, which is why a
+    // Stop's cancellation is recorded too, just not as an error.
     if (result.is_error ()) {
         const auto& error = result.error ();
         if (is_stop_cancellation (*context, error)) {
@@ -278,17 +265,15 @@ const ResultAnnotations& annotations) {
         return;
     }
 
-    // Past the early return the result holds a Response, so it is bound once
-    // here rather than re-read per use: every branch below reads the same
-    // object, and a single binding is what says so.
+    // Bound once: past the early return the result holds a Response, and every
+    // branch reads the same object.
     const auto& response = result.value ();
 
-    // Counted for both branches below, before either splits: a transfer that
-    // connected, negotiated HTTP/1.1 against an explicit `http2`, and then
-    // failed still tells the truth about the protocol the run is measuring.
-    // Reading it off the Response (rather than off the request's httpVersion
-    // and a string compare here) keeps the one definition in
-    // http_version_downgraded - see curl_version_map.hpp.
+    // Counted before the success/error split: a transfer that connected,
+    // negotiated HTTP/1.1 against an explicit `http2` and then failed still
+    // tells the truth about the protocol under test. Read off the Response, so
+    // `http_version_downgraded` stays the one definition
+    // (`curl_version_map.hpp`).
     if (response.http_version_downgraded) {
         context->metrics_collector->record_http_version_downgrade ();
     }
@@ -305,12 +290,11 @@ const ResultAnnotations& annotations) {
         response.set_cookie_headers_dropped);
     }
 
-    // Counted here, before the success/error split, for the reason the
-    // downgrade above is: a stream the target killed after 30 events delivered
-    // 30 events, and a throughput figure computed only from the streams that
-    // ended cleanly would read highest on the runs that failed most. Only a
-    // transfer that actually streamed carries the count - see
-    // `Response::stream_events` for why it is optional rather than a zero.
+    // Counted before the split, as the downgrade is: a stream the target killed
+    // after 30 events delivered 30 events, and throughput from only the streams
+    // that ended cleanly would read highest on the runs that failed most. Only
+    // a transfer that streamed carries the count (`Response::stream_events`
+    // says why it is optional, not zero).
     if (const auto completion = stream_completion_of (response)) {
         context->metrics_collector->record_stream_completion (*completion);
     }
@@ -341,9 +325,8 @@ const ResultAnnotations& annotations) {
     }
 }
 
-// Declared in load_strategy.hpp - a JSON number is read as seconds, matching
-// how the MCP duration cap reads the same field. See the header for why every
-// executor goes through this one parser.
+// Declared in load_strategy.hpp, which says why every executor uses this one
+// parser. A JSON number is seconds, as the MCP duration cap reads the field.
 int64_t duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t default_ms) {
     auto it = config.find (key);
     if (it == config.end () || it->is_null ())
@@ -396,11 +379,10 @@ bool is_non_negative_integer (const nlohmann::json& value) {
     return value.is_number_integer () && value.get<int64_t> () >= 0;
 }
 
-/// "asConfigured" | "off" | {fixedMs} | {minMs,maxMs} (issue #1498): every
-/// `timer.*` element left as configured, silenced, or replaced by one fixed
-/// or uniformly random span for the whole run. A plain loop rather than
-/// `std::all_of` with a generic lambda, which needs a `.template get<...>`
-/// disambiguator on a dependent name for no readability gain here.
+/// "asConfigured" | "off" | {fixedMs} | {minMs,maxMs} (#1498): every `timer.*`
+/// element as configured, silenced, or replaced by one fixed or uniformly
+/// random span for the run. A plain loop: `std::all_of` with a generic lambda
+/// needs a `.template get<...>` disambiguator here.
 bool is_valid_elements_timers_shape (const nlohmann::json& timers) {
     if (timers.is_string ()) {
         return timers == "asConfigured" || timers == "off";
@@ -445,11 +427,9 @@ std::optional<std::string> validate_elements_run_override (const nlohmann::json&
         }
     }
 
-    // "Timers"/"Scripts" name the same controls `RunCollectionDialog` and
-    // `LoadTestConfigDialog` show under those labels; `seed` and
-    // `includeScriptTime` have no dialog control of their own (API/MCP only),
-    // so they are named in plain English rather than borrowing a label that
-    // does not exist.
+    // "Timers" / "Scripts" are the labels `RunCollectionDialog` and
+    // `LoadTestConfigDialog` show; `seed` and `includeScriptTime` have no
+    // dialog control (API/MCP only), so they are named in plain English.
     if (auto timers = elements->find ("timers");
     timers != elements->end () && !is_valid_elements_timers_shape (*timers)) {
         return "The Timers override must be 'asConfigured', 'off', "
@@ -496,8 +476,8 @@ const nlohmann::json& config) {
     for (size_t i = 0; i < lifecycle->size (); ++i) {
         const auto& entry = (*lifecycle)[i];
         // A malformed entry (not an object, no string "kind") is left for
-        // `Registry::validate` below to report precisely, rather than folded
-        // into this refusal as an empty kind name.
+        // `Registry::validate` below to report precisely, not folded into this
+        // refusal as an empty kind.
         if (!entry.is_object () || !entry.contains ("kind") || !entry["kind"].is_string ()) {
             continue;
         }
@@ -510,12 +490,11 @@ const nlohmann::json& config) {
         }
     }
 
-    // Validated on a stamped copy, never on `*lifecycle` itself: `Registry::
-    // validate` refuses an id-less entry outright, and this array gets the
-    // same "the engine assigns one when the caller sends none" default every
-    // other `elements` write path gives (`apply_elements_field`,
-    // `routes.hpp`) - a client that names no id must not see a 400 asking it
-    // to invent one itself.
+    // Validated on a stamped copy, never `*lifecycle` itself:
+    // `Registry::validate` refuses an id-less entry, and this array gets the
+    // "engine assigns one when the caller sends none" default every `elements`
+    // write path gives (`apply_elements_field`, `routes.hpp`), so a client
+    // naming no id is not told to invent one.
     nlohmann::json stamped = *lifecycle;
     vayu::core::stamp_default_element_ids (stamped);
     return vayu::core::Registry::instance ().validate (
@@ -525,25 +504,23 @@ const nlohmann::json& config) {
 namespace {
 
 /**
- * The kinds `run_request_elements_step_before` / `_after_submission`
- * actually know how to run (issue #1594's own scope: `extract.*`, `assert.*`,
- * `timer.think`, `script.pre`/`script.post` - the same phase-0 set #1514
- * landed for the design send). Every other kind `Registry::validate` would
- * otherwise accept under `ElementOwner::Request` needs state this run shape
- * never binds - `control.*` needs `controller_state` /
- * `SharedThroughputCounters` (a plan-wide scan neither `RunContext` nor
- * `submit_one_request` ever builds for a lone request), `timer.pacing` /
- * `timer.throughput` need `pacing_state` and the load path's own
- * `scheduled_ready_delay_ms` dispatch (`ScenarioLoadDriver::finish_step`'s
- * job, which has no single-request counterpart). Accepting one of these
- * kinds here would not fail loudly: the pipeline would call `apply` with a
- * null `controller_state`, most kinds no-op or run unconditionally against a
- * null check, and the element would report `"ok"` in `summary["elements"]`
- * for behaviour that never happened - `control.once` running on *every*
- * submission being the sharpest example. Refusing the kind by name is the
- * same "written and read by nothing" guard the single-target `elements`
- * override refusal used before this issue existed; extending the set is a
- * deliberate follow-up, not a schema oversight to work around.
+ * The kinds `run_request_elements_step_before` / `_after_submission` can run
+ * (#1594's scope: `extract.*`, `assert.*`, `timer.think`, `script.pre` /
+ * `script.post`, the phase-0 set #1514 gave the design send). Every other kind
+ * `Registry::validate` accepts under `ElementOwner::Request` needs state this
+ * run shape never binds: `control.*` needs `controller_state` /
+ * `SharedThroughputCounters` (a plan-wide scan a lone request never builds),
+ * and `timer.pacing` / `timer.throughput` need `pacing_state` and the load
+ * path's `scheduled_ready_delay_ms` dispatch
+ * (`ScenarioLoadDriver::finish_step`'s job, with no single-request
+ * counterpart).
+ *
+ * Accepting one would not fail loudly: `apply` would get a null
+ * `controller_state`, most kinds would no-op or run unconditionally past a null
+ * check, and `summary["elements"]` would report `"ok"` for behaviour that never
+ * happened (`control.once` running on every submission is the sharpest case).
+ * Refusing the kind by name is the "written and read by nothing" guard;
+ * widening the set is deliberate follow-up work.
  */
 constexpr std::array<std::string_view, 12> REQUEST_ELEMENTS_SUPPORTED_KINDS{
     "extract.json",
@@ -573,11 +550,11 @@ std::string string_member (const nlohmann::json& object, const char* key) {
     return found->get<std::string> ();
 }
 
-/// Where a refused element was declared, from the `origin` composition
-/// stamps (`emit_level`, `request_composer.cpp`): a collection by name, the
-/// request itself, or - for an entry written straight into the payload, which
-/// carries no origin - its id. A folder reads as "collection": the message
-/// reaches the user, who has no folder (`docs/ux-writing.md`).
+/// Where a refused element was declared, from the `origin` composition stamps
+/// (`emit_level`, `request_composer.cpp`): a collection by name, the request,
+/// or, for an entry written straight into the payload with no origin, its id. A
+/// folder reads as "collection": the message reaches the user, who has no
+/// folder (`docs/ux-writing.md`).
 std::string element_whereabouts (const nlohmann::json& entry) {
     const auto origin = entry.find ("origin");
     if (origin != entry.end () && origin->is_object ()) {
@@ -599,13 +576,12 @@ std::string element_whereabouts (const nlohmann::json& entry) {
     return std::format ("element '{}'", entry.value ("id", ""));
 }
 
-/// The refusal for one entry whose kind has no home on a single-request run,
-/// or nullopt when it is supported or switched off. A disabled element is
-/// skipped by the pipeline before its `apply` runs (`compile_elements`), so
-/// it cannot misbehave and a composed chain carrying one is not a reason to
-/// refuse the run (#3050). The entry is named by its label and origin, not
-/// its position: a composed list interleaves inherited elements with the
-/// request's own, so an index points at nothing the user can see.
+/// The refusal for an entry whose kind has no home on a single-request run, or
+/// nullopt when supported or switched off. A disabled element is skipped before
+/// its `apply` runs (`compile_elements`), so a composed chain carrying one is
+/// no reason to refuse the run (#3050). The entry is named by label and origin,
+/// not position: a composed list interleaves inherited elements with the
+/// request's own, so an index points at nothing the user sees.
 std::optional<std::string> refuse_scenario_only_element (const nlohmann::json& entry) {
     if (!entry.value ("enabled", true)) {
         return std::nullopt;
@@ -640,12 +616,11 @@ std::string level_key (const nlohmann::json& entry) {
     return std::format ("{}/{}/{}", level.kind, level.scope, level.id);
 }
 
-/// @p elements split into one array per level, in the order each level first
-/// appears. An element id is unique only within the list of the level that
-/// declares it, and a duplicated collection or a folder repeated down a chain
-/// repeats ids across levels, so uniqueness cannot be judged over the merged
-/// list (#3101; `validate_execute_elements` makes the same call for
-/// `POST /execute`).
+/// @p elements split into one array per level, in first-appearance order. An id
+/// is unique only within its declaring level's list, and a duplicated
+/// collection or a folder repeated down a chain repeats ids across levels, so
+/// uniqueness cannot be judged over the merged list (#3101;
+/// `validate_execute_elements` does the same for `POST /execute`).
 std::vector<nlohmann::json> split_by_level (const nlohmann::json& elements) {
     std::vector<nlohmann::json> levels;
     std::unordered_map<std::string, size_t> position;
@@ -678,15 +653,14 @@ const nlohmann::json& config) {
         return "'requestElements' must be an array";
     }
 
-    // Stamped the same way `validate_lifecycle_elements_run_override` stamps
-    // its array: a caller that named no id gets one here too, rather than a
-    // 400 asking it to invent one itself.
+    // Stamped as `validate_lifecycle_elements_run_override` stamps its array,
+    // so a caller naming no id gets one.
     nlohmann::json stamped = *elements;
     vayu::core::stamp_default_element_ids (stamped);
-    // Every entry, a disabled one included, so a bad config still fails here
-    // rather than the moment the entry is switched on. Every level is judged
-    // as a request's own list, so a collection-only kind (`script.setup`)
-    // stays refused; the renderer filters those out before sending (#3070).
+    // Every entry, disabled ones included, so a bad config fails here, not when
+    // it is switched on. Each level is judged as a request's own list, so a
+    // collection-only kind (`script.setup`) stays refused; the renderer filters
+    // those out before sending (#3070).
     for (const auto& level : split_by_level (stamped)) {
         if (auto reason = vayu::core::Registry::instance ().validate (
             level, vayu::core::ElementOwner::Request)) {
@@ -723,8 +697,8 @@ const LoadDataSet* data) {
 
 namespace {
 
-// Raise the in-flight high-water mark to the current reading. A CAS-max because
-// the 1 Hz metrics sample in run_manager.cpp writes the same atomic.
+// Raises the in-flight high-water mark. A CAS-max because the 1 Hz metrics
+// sample in run_manager.cpp writes the same atomic.
 inline void update_peak (const std::shared_ptr<RunContext>& context) {
     size_t f    = context->in_flight ();
     size_t prev = context->peak_in_flight.load (std::memory_order_relaxed);
@@ -735,14 +709,14 @@ inline void update_peak (const std::shared_ptr<RunContext>& context) {
 }
 
 // The request every submission copies, plus the credential swap that keeps it
-// current. Owned by the strategy because the strategy thread is the event
-// loop's sole producer and `EventLoop::submit` copies the request wholesale at
-// submit time: a value written here reaches every later transfer and none of
-// the ones already queued, with no lock on the submission path.
+// current. The strategy owns it: its thread is the event loop's sole producer
+// and `EventLoop::submit` copies the request at submit time, so a value written
+// here reaches every later transfer and none already queued, with no lock on
+// the submission path.
 //
 // A single-request run has at most one credential to keep current. A run
-// without mid-run refresh (the common case - see plan_auth_refresh) never
-// enters the swap at all: `current()` is then short-circuited on a null state.
+// without mid-run refresh (the common case, see plan_auth_refresh) never enters
+// the swap: `current()` short-circuits on a null state.
 /**
  * Whether every submission of this run sends the shared request as it stands:
  * nothing to bind (@p bind_template is the run's split), no credential to
@@ -760,11 +734,10 @@ bool sends_the_shared_request (const RunContext& context) {
 }
 
 /**
- * What a run that sends the shared request does to it once, before the first
- * submission. A path value composition left waiting (issue #1764) is answered
- * by a bind or the residual pass, and such a run runs neither: nothing will
- * ever answer its token, so it is written now, exactly as the residual pass
- * would have written it.
+ * What a run sending the shared request does to it once, before the first
+ * submission. A path value composition left waiting (#1764) is answered by a
+ * bind or the residual pass, and such a run runs neither, so it is written now,
+ * as the residual pass would.
  */
 void settle_shared_request (vayu::Request& request) {
     settle_path_variables (request, PathSettle::All);
@@ -792,17 +765,12 @@ class SubmissionRequest {
     }
 
     /**
-     * This submission's 0-based index, claimed off the run-wide cursor.
-     *
-     * It is this run's **iteration** - what `{{$iteration}}` binds and what a
-     * retained record reports to the deferred script (issue #994) - and, taken
-     * modulo the row count, the row this submission claims off the same cursor,
-     * wrapping always (issue #993). One counter rather than two, so the
-     * iteration a script reads and the row it was sent with cannot disagree
-     * about which submission this was.
-     *
-     * The cursor lives here because the strategy thread is the event loop's
-     * sole producer, so the claim needs no atomic and no lock.
+     * This submission's 0-based index, claimed off the run-wide cursor: the
+     * run's iteration (what `{{$iteration}}` binds and a retained record
+     * reports to the deferred script, #994) and, modulo the row count, its data
+     * row, always wrapping (#993). One counter, so the iteration a script reads
+     * and the row it was sent with cannot disagree. No atomic or lock: the
+     * strategy thread is the event loop's sole producer.
      */
     size_t claim_submission () {
         return cursor_++;
@@ -841,12 +809,11 @@ const ResultAnnotations& annotations) {
 }
 
 /**
- * Runs @p context's `requestElements` `step.before` elements against @p
- * request, mutating it in place and writing into @p overlay - a fresh
- * overlay for this submission alone (issue #1594: "the overlay lives on the
- * submission", never shared or persisted across submissions the way a
+ * Runs @p context's `requestElements` `step.before` elements against
+ * @p request, in place, writing into @p overlay: a fresh overlay for this
+ * submission alone (#1594), never shared or kept across submissions as a
  * scenario run's per-VU overlay is, since many submissions run concurrently
- * with nothing to serialise them the way a virtual user does).
+ * with nothing to serialise them.
  */
 void run_request_elements_step_before (const std::shared_ptr<RunContext>& context,
 vayu::Request& request,
@@ -907,18 +874,16 @@ const ResultAnnotations& annotations) {
     [context] (const vayu::core::CompiledElement& element) {
         return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
     });
-    // Tallied here and not only on the completion side: this is the only
-    // phase a `step.before` kind ever reports in, so an outcome dropped here
-    // is one the report can never show - `summary["elements"]` would simply
-    // have no entry for a `script.pre`, whether it ran or was deferred. The
-    // scenario path's `run_step_before` (scenario_load.cpp) records on the
-    // same edge.
+    // Tallied here, not only on completion: this is the only phase a
+    // `step.before` kind reports in, so an outcome dropped here never reaches
+    // `summary["elements"]`, ran or deferred. The scenario path's
+    // `run_step_before` (scenario_load.cpp) records on the same edge.
     for (const auto& outcome : outcomes) {
         context->element_tallies.record (outcome);
     }
-    // `pre_result.tests` is populated only when `script.pre` actually ran
-    // inline (a deferred one never invokes `run_pre_script`), the same inline
-    // half of issue #1497's assertion tally the scenario path folds in.
+    // `pre_result.tests` fills only when `script.pre` ran inline (a deferred
+    // one never calls `run_pre_script`): the inline half of #1497's assertion
+    // tally, as the scenario path folds it.
     for (const auto& test : pre_result.tests) {
         if (test.passed) {
             context->inline_tests_passed.fetch_add (1, std::memory_order_relaxed);
@@ -929,14 +894,13 @@ const ResultAnnotations& annotations) {
 }
 
 /**
- * Runs @p context's `requestElements` `step.after` and `step.between`
- * elements for one completed submission - `step.after` against the response
- * that came back, `step.between` for `timer.think`'s non-blocking wait
- * (issue #1594), returned for the caller to reserve on a closed-loop
- * @p context through `reserve_think_wait` rather than applied to a
- * `VirtualUser::ready_at_ms` there is none of here; an open-loop one skips
- * the timer (#3541). Never blocks: this runs on an event-loop worker thread,
- * inside the curl completion drain.
+ * Runs @p context's `requestElements` `step.after` and `step.between` elements
+ * for one completed submission: `step.after` against the response,
+ * `step.between` for `timer.think`'s non-blocking wait (#1594). The wait is
+ * returned for the caller to reserve on a closed-loop @p context through
+ * `reserve_think_wait`, there being no `VirtualUser::ready_at_ms` here; an
+ * open-loop one skips the timer (#3541). Never blocks: it runs on an event-loop
+ * worker, inside the curl completion drain.
  *
  * @return the think time, in ms, the submission's slot is still owed.
  */
@@ -1026,15 +990,14 @@ const ResultAnnotations& annotations) {
         }
     }
 
-    // `step.between` (issue #1594): `timer.think`'s load-path counterpart to
-    // the sequential run's own dispatch, run here instead of blocking a
-    // worker thread. There is no `VirtualUser::ready_at_ms` to stamp on a
-    // single-request run's anonymous submissions, so the caller reserves the
-    // wait on the run itself instead - see `RunContext::reserve_think_wait`.
-    // An open-loop run skips the timer and reserves nothing (#3541). A fresh
-    // context, on the same terms `scenario_load.cpp`'s own `run_step_between`
-    // builds one: never read or written by a `step.between` kind
-    // (`timer.think`) beyond the request it is bound to for `pm.request`.
+    // `step.between` (#1594): `timer.think`'s load-path counterpart to the
+    // sequential run's dispatch, run here instead of blocking a worker. A
+    // single-request run's anonymous submissions have no
+    // `VirtualUser::ready_at_ms`, so the caller reserves the wait on the run
+    // (`RunContext::reserve_think_wait`); an open-loop run skips the timer and
+    // reserves nothing (#3541). A fresh context, as `scenario_load.cpp`'s
+    // `run_step_between` builds one: a `step.between` kind reads nothing beyond
+    // the request it is bound to for `pm.request`.
     std::vector<vayu::core::ElementOutcome> between_outcomes;
     vayu::ScriptResult between_pre_result;
     vayu::ScriptResult between_post_result;
@@ -1064,14 +1027,14 @@ const ResultAnnotations& annotations) {
     return total_wait_ms;
 }
 
-/// Hand @p request to the event loop and account for it, with @p annotations on
-/// whatever record its completion produces. @p sent_request and @p overlay are
-/// non-null only for a submission whose run carries `requestElements` (issue
-/// #1594); non-null, they run `step.after` / `step.between` against the
-/// response before the shared `handle_result` records it. The slot is held
-/// for the longer of the think time and the response's `Retry-After`
-/// (#3782), reserved before `handle_result` counts the completion, so the
-/// controller never sees the slot free in between.
+/// Hands @p request to the event loop and accounts for it, with @p annotations
+/// on the record its completion produces. @p sent_request and @p overlay are
+/// non-null only for a run carrying `requestElements` (#1594), and then run
+/// `step.after` / `step.between` against the response before the shared
+/// `handle_result` records it. The slot is held for the longer of the think
+/// time and the response's `Retry-After` (#3782), reserved before
+/// `handle_result` counts the completion, so the controller never sees it free
+/// in between.
 void submit_to_loop (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 const vayu::Request& request,
@@ -1100,13 +1063,12 @@ std::shared_ptr<vayu::http::routes::ScopeOverlay> overlay) {
 }
 
 /**
- * Bind this submission's row - where the run has one - and its identity into
+ * Binds this submission's row, when the run has one, and its identity into
  * @p request and its credentials, through the one binder both load paths drive.
- *
- * Reached only for a run carrying a reserved token in its request or its
- * credentials, or auth waiting on its scripts: the caller keeps the token-free
- * path clear of all of this. That last auth is joined into @p late_auth and
- * not applied (issue #2473); the caller owes it to the residual pass.
+ * Reached only for a run with a reserved token in its request or credentials,
+ * or auth waiting on its scripts; the token-free path skips it. That waiting
+ * auth is joined into @p late_auth, not applied (#2473); the caller owes it to
+ * the residual pass.
  */
 DataBindResult bind_submission (vayu::Request& request,
 const RunContext& context,
@@ -1134,22 +1096,17 @@ std::optional<vayu::http::Auth>& late_auth) {
 }
 
 /**
- * One submission of the run's request, with this submission's data row (issue
- * #993) and iteration identity (issue #994) bound into it when the run carries
- * either.
+ * One submission of the run's request, with its data row (#993) and iteration
+ * identity (#994) bound in when the run carries either.
  *
- * Every strategy submits through here rather than each writing its own
- * `submit_one`, so a run's rows reach whichever pacing mode the user picked
- * instead of the one whose lambda remembered them - and so does the
- * mid-run credential swap, which two of the four used to miss.
+ * Every strategy submits through here, so a run's rows and the mid-run
+ * credential swap reach whichever pacing mode the user picked.
  *
- * **A run carrying none of them takes the path it always did**: one null test
- * and two `empty()` tests, then the same submit of the same shared request. No
- * copy and no bind - the throughput guard #992 states, kept structurally rather
- * than by measurement alone. What it does pay is the cursor increment below, which is
- * one unsynchronised `size_t` on the sole producer thread and is what lets
- * every load run - not only the ones spelling a token - tell a deferred script
- * which iteration a sampled response was sent in.
+ * A run carrying none of them pays one null test and two `empty()` tests, then
+ * submits the same shared request: no copy and no bind, the throughput guard
+ * #992 states, kept structurally. It does pay the cursor increment below, one
+ * unsynchronised `size_t` on the sole producer thread, which lets every load
+ * run tell a deferred script which iteration a sampled response was sent in.
  */
 void submit_one_request (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
@@ -1157,8 +1114,8 @@ SubmissionRequest& live) {
     const size_t iteration  = live.claim_submission ();
     const LoadDataSet* data = context->load_data.get ();
     // Every member named: `-Wmissing-field-initializers` is an error in the
-    // release build rather than a suggestion. A single-request run has no step
-    // - which is what `handle_result` reads to tell one shape from the other.
+    // release build. A single-request run has no step, which is how
+    // `handle_result` tells the shapes apart.
     const ResultAnnotations annotations{ data == nullptr ?
         std::nullopt :
         std::optional<size_t> (iteration % data->rows.size ()),
@@ -1167,14 +1124,12 @@ SubmissionRequest& live) {
     const bool has_step_elements =
     context->step_elements && !context->step_elements->empty ();
 
-    // The credentials are tested beside the request's own template because they
-    // are a third thing a submission can have to bind (issue #1055) - a run
-    // whose *only* token sits in a credential has no rows and an empty request
-    // template, and skipping the bind here would send it unauthenticated. Since
-    // issue #1594, a `step.before` kind is a fourth: it may write into the
-    // request itself, which - unlike a `step.after`-only kind, which only ever
-    // reads it back - needs a per-submission copy to isolate concurrent
-    // submissions from each other.
+    // The credentials are tested beside the request template because they are a
+    // third thing to bind (#1055): a run whose only token sits in a credential
+    // has no rows and an empty template, and skipping the bind would send it
+    // unauthenticated. A `step.before` kind (#1594) is a fourth: it may write
+    // into the request, so concurrent submissions each need a copy, where a
+    // `step.after`-only kind only reads it back.
     if (sends_the_shared_request (*context)) {
         if (!context->load_unresolved_tokens.empty ()) {
             context->metrics_collector->record_unresolved_token (context->load_unresolved_tokens);
@@ -1183,19 +1138,18 @@ SubmissionRequest& live) {
             submit_to_loop (context, db, live.current (), annotations, nullptr, nullptr);
             return;
         }
-        // No `step.before` kind to run and nothing to bind, so the request
-        // itself needs no per-submission copy - but `step.after` /
-        // `step.between` still need a stable, isolated request and scope
-        // overlay to run against once the response is back.
+        // Nothing to bind and no `step.before` kind, so no per-submission copy
+        // of the request; `step.after` / `step.between` still need a stable,
+        // isolated request and overlay once the response is back.
         submit_to_loop (context, db, live.current (), annotations,
         std::make_shared<vayu::Request> (live.current ()),
         std::make_shared<vayu::http::routes::ScopeOverlay> ());
         return;
     }
 
-    // Copied per submission because the bind rewrites it, exactly as a scenario
-    // step's request is copied per iteration: the shared one has to stay the
-    // template every later row is bound against.
+    // Copied per submission because the bind rewrites it, as a scenario step's
+    // request is copied per iteration: the shared one stays the template every
+    // later row binds against.
     vayu::Request request = live.current ();
     std::optional<vayu::http::Auth> late_auth;
     auto bound = bind_submission (request, *context, data, annotations, late_auth);
@@ -1205,11 +1159,10 @@ SubmissionRequest& live) {
         bound = fill_bound_files (context->file_plan.get (), live.current (), request);
     }
     if (!bound.ok) {
-        // Nothing goes on the wire, so nothing will ever complete for this
-        // submission: this path owns the whole accounting a completion would
-        // have done. `requests_sent` is incremented beside the error record so
-        // `in_flight()` - sent minus completed - stays honest, which is the
-        // same discipline the scenario executor's bind failure keeps.
+        // Nothing goes on the wire, so nothing completes: this path does the
+        // whole accounting a completion would. `requests_sent` is incremented
+        // beside the error record so `in_flight()` (sent minus completed) stays
+        // honest, as the scenario executor's bind failure does.
         context->requests_sent++;
         context->bind_failures_submitted++;
         handle_result (context, db,
@@ -1225,19 +1178,16 @@ SubmissionRequest& live) {
         run_request_elements_step_before (context, request, *overlay, annotations);
     }
 
-    // Whatever the bind above (and a `step.before` extractor or script, when
-    // one just ran) left unresolved is re-resolved once against this
-    // submission's own overlay (issue #1594's residual pass, mirroring
-    // `scenario_load.cpp`'s `run_step_before` caller) when the run carries
-    // `requestElements`; a run without any still just counts the mistake,
-    // never refusing it (issue #1503), exactly as before this existed. The
-    // token-free fast path above never copies `request` at all (issue #992)
-    // and is not scanned here for that reason - it records
+    // With `requestElements`, whatever the bind and any `step.before` extractor
+    // or script left unresolved is re-resolved once against this submission's
+    // overlay (#1594's residual pass, as `scenario_load.cpp`'s
+    // `run_step_before` caller does); a run without them only counts the
+    // mistake, never refusing it (#1503). The token-free fast path never copies
+    // `request` (#992) and is not scanned here: it records
     // `context->load_unresolved_tokens`, scanned once by `start_run` before
-    // this loop began (issue #1540). Auth that waited on the scripts (issue
-    // #2473) is applied by that pass; only a run declaring `requestElements`
-    // holds any (`LoadAuthPlan::after_scripts`), so the branch below never
-    // has one to drop.
+    // this loop (#1540). Auth that waited on the scripts (#2473) is applied by
+    // that pass; only a run declaring `requestElements` holds any
+    // (`LoadAuthPlan::after_scripts`), so the branch below never drops one.
     if (has_step_elements) {
         vayu::http::VariableValues vars = context->step_base_vars;
         overlay->apply_onto (vars, context->lifecycle_scopes);
@@ -1247,10 +1197,10 @@ SubmissionRequest& live) {
             context->metrics_collector->record_unresolved_token (unresolved);
         }
     } else {
-        // No per-submission residual pass on this run (the start-of-run pass,
-        // #3253, ran once before the split), so the bind above was the last
-        // thing to answer a path value (issue #1764): whatever still waits is
-        // written now, its token verbatim.
+        // No per-submission residual pass here (the start-of-run pass, #3253,
+        // ran once before the split), so the bind was the last to answer a path
+        // value (#1764): whatever still waits is written now, its token
+        // verbatim.
         settle_path_variables (request, PathSettle::All);
         if (auto names = vayu::http::routes::unresolved_token_names (request);
         !names.empty ()) {
@@ -1316,10 +1266,8 @@ std::optional<int64_t> run_end_ms) {
     // is dropped.
     context->closed_loop.store (true, std::memory_order_relaxed);
 
-    // The run's own predicate decides whether anything is owed at all. Seeding
-    // target(0) first meant a 0s duration - or a 0-iteration run - still fired
-    // a full target's worth of requests before the loop's time/quota check was
-    // ever evaluated.
+    // The run's predicate decides whether anything is owed at all, so a 0s
+    // duration or a 0-iteration run sends nothing before the time/quota check.
     if (context->should_stop || !should_continue (0)) {
         return;
     }
@@ -1344,9 +1292,9 @@ std::optional<int64_t> run_end_ms) {
         const size_t sent_before = context->requests_sent.load ();
         const size_t bind_failed_before = context->bind_failures_submitted.load ();
         for (size_t i = 0; i < deficit && !context->should_stop; ++i) {
-            // A false return means the remaining candidates are all deferred
-            // or busy; retrying immediately just re-scans the same VUs for
-            // the same answer; `deferred_wait_ms_fn` picks it up next cycle.
+            // False means the remaining candidates are all deferred or busy;
+            // retrying at once re-scans the same VUs for the same answer, so
+            // `deferred_wait_ms_fn` picks it up next cycle.
             if (!submit_one ()) {
                 break;
             }
@@ -1360,20 +1308,17 @@ std::optional<int64_t> run_end_ms) {
     int64_t el     = 0;
     bool idle_pass = false;
     while (!context->should_stop) {
-        // `deferred_wait_ms_fn` answers only right after a cycle where
-        // `submit_one` returned false because every eligible candidate was
-        // deferred (issue #1596) - not merely because none had budget, which
-        // the plain `in_flight() < target` predicate below already handles by
-        // blocking until a completion raises it. A deferred user is never
-        // in flight, and neither is the work of a pass that sent nothing
-        // (#3540), so in either case that predicate is still true and
-        // `wait_for` would return at once no matter what duration it is
-        // given - the timeout has to come from the wait call itself, and the
-        // predicate has to become something neither already satisfies: a
-        // real completion, tracked here as `in_flight()` changing from its
-        // value when the wait began (the strategy thread is `requests_sent`'s
-        // only writer, so between here and the wait returning it can only
-        // fall, never rise).
+        // `deferred_wait_ms_fn` answers only after a cycle where `submit_one`
+        // returned false because every eligible candidate was deferred (#1596),
+        // not merely without budget, which the `in_flight() < target` predicate
+        // handles by blocking until a completion. A deferred user is never in
+        // flight, and neither is a pass that sent nothing (#3540), so that
+        // predicate is still true and `wait_for` would return at once. The
+        // timeout must come from the wait call, and the predicate must become
+        // one neither already satisfies: a real completion, seen as
+        // `in_flight()` changing from its value when the wait began. The
+        // strategy thread is `requests_sent`'s only writer, so until the wait
+        // returns it can only fall.
         const size_t in_flight_before = context->in_flight ();
         std::optional<int64_t> defer_wait_ms =
         deferred_wait_ms_fn ? deferred_wait_ms_fn () : std::nullopt;
@@ -1404,11 +1349,10 @@ std::optional<int64_t> run_end_ms) {
         idle_pass = refill_toward (last_target, std::numeric_limits<size_t>::max ());
     }
 
-    // Only a run the clock ended: a stop owes nothing more, and a loop that
-    // left before `run_end_ms` ended on its own predicate, not on time. The
-    // refill owes only the target the last wake fell short of (#2913), never
-    // a replacement for what completed during it: the run's time is up
-    // (#3545).
+    // Only a run the clock ended: a stop owes nothing, and a loop that left
+    // before `run_end_ms` ended on its predicate. The refill owes only the
+    // target the last wake fell short of (#2913), never a replacement for what
+    // completed during it, since the run's time is up (#3545).
     if (run_end_ms && !context->should_stop && el >= *run_end_ms) {
         const size_t end_target = target_fn (*run_end_ms - 1);
         refill_toward (end_target, end_target - std::min (end_target, last_target));
@@ -1458,11 +1402,11 @@ class ConstantLoadStrategy : public LoadStrategy {
 
     private:
     /**
-     * Pay out the requests one tick owes, up to the in-flight cap's headroom.
+     * Pays out the requests one tick owes, up to the in-flight cap's headroom.
      * Requests the cap refuses are dropped at the instant they came due, not
-     * deferred. Deferring is what let a saturated run submit its backlog past
-     * the deadline and still report itself on rate. Returns how many were
-     * actually submitted.
+     * deferred: deferring lets a saturated run submit its backlog past the
+     * deadline and still report itself on rate. Returns how many were
+     * submitted.
      */
     static size_t submit_due (const std::shared_ptr<RunContext>& context,
     vayu::db::Database& db,
@@ -1477,9 +1421,8 @@ class ConstantLoadStrategy : public LoadStrategy {
         }
         size_t sent = 0;
         for (size_t i = 0; i < to_submit && !context->should_stop; ++i) {
-            // The same submission every other mode makes, rows and all: this
-            // is the open-loop half of `constant_rps`, and a copy of the submit
-            // here is a copy that stops receiving what that one is given.
+            // The submission every other mode makes, rows and all: a copy here
+            // would stop receiving what that one is given.
             submit_one_request (context, db, live);
             sent++;
         }
@@ -1512,35 +1455,28 @@ class ConstantLoadStrategy : public LoadStrategy {
     }
 
     /**
-     * Wait out the remainder of a tick. Oversleeping is self-correcting in
-     * *rate* - the next tick accrues the extra elapsed time - so a run's
-     * `sendRate` never showed what this function does; only a target
-     * timestamping its arrivals does.
+     * Waits out the remainder of a tick. Oversleeping corrects itself in rate
+     * (the next tick accrues the extra time), so `sendRate` never shows what
+     * this does; only a target timestamping its arrivals does.
      *
-     * Not because of 15.6ms rounding, which is what this said until issue
-     * #1161 read the two mechanisms against each other: this run's event loop
-     * holds `platform::HighResolutionTimerScope` for as long as it exists, so
-     * in-process the resolution is already 1ms while a run is sending, on the
-     * pacing thread as much as in the loop. The spin is for the residual -
-     * even at 1ms, `sleep_for` returns ~0.6-1.8ms late whatever it is asked
-     * for, so an open-loop generator that sleeps a whole remainder lands late
-     * every tick and pays the overshoot back as a double dispatch on the next
-     * one.
+     * Not for 15.6ms rounding (#1161): the run's event loop holds
+     * `platform::HighResolutionTimerScope` while it exists, so the resolution
+     * is 1ms while a run sends, on the pacing thread too. The spin is for the
+     * residual: even at 1ms, `sleep_for` returns ~0.6-1.8ms late, so a
+     * generator that sleeps a whole remainder lands late every tick and pays
+     * the overshoot back as a double dispatch on the next.
      *
-     * So every tick ends on a spin, and only the stretch before it is slept
-     * (issue #1370, extended off Windows by issue #1667's platform-specific
-     * tail): the overshoot lands inside the tail rather than inside the
-     * arrival gap, and the spin is bounded by the tail rather than by the
-     * tick, so its cost does not grow as the target rate falls. A remainder
-     * no longer than the tail is spun whole - which is what every tick from
-     * ~500 RPS up already was, `tick_us` below being 1000us there.
+     * So every tick ends on a spin and only the stretch before it is slept
+     * (#1370, on every platform with #1667's per-platform tail): the overshoot
+     * lands in the tail, not the arrival gap, and the spin is bounded by the
+     * tail, not the tick, so its cost does not grow as the rate falls. A
+     * remainder no longer than the tail is spun whole, which every tick from
+     * ~500 RPS up is (`tick_us` is 1000us there).
      *
-     * The sleep leg is `platform::sleep_until_precise`: Linux and macOS use
-     * an absolute wait (`clock_nanosleep` / `mach_wait_until`) that does not
-     * itself need the spin tail to be accurate, but the tail stays for the
-     * same reason it stays on Windows - a run does not want to trust *any*
-     * platform's wakeup latency for the last stretch of a tick, and the tail
-     * is cheap.
+     * The sleep is `platform::sleep_until_precise`. Linux and macOS wait
+     * absolutely (`clock_nanosleep` / `mach_wait_until`) and would be accurate
+     * without the tail, but it stays as on Windows: no platform's wakeup
+     * latency is trusted for a tick's last stretch, and the tail is cheap.
      */
     static void wait_for_next_tick (const std::shared_ptr<RunContext>& context,
     std::chrono::steady_clock::time_point next_tick) {
@@ -1571,7 +1507,6 @@ class ConstantLoadStrategy : public LoadStrategy {
     SubmissionRequest& live,
     int64_t duration_ms,
     double target_rps) {
-        // Rate-limited mode
         vayu::utils::log_info ("run", "Starting Constant Load Test (Rate-Limited)");
         vayu::utils::log_info ("run", "  Duration: " + std::to_string (duration_ms) + " ms");
         vayu::utils::log_info ("run", "  Target RPS: " + std::to_string (target_rps));
@@ -1582,11 +1517,10 @@ class ConstantLoadStrategy : public LoadStrategy {
         const size_t expected      = requests_owed_by (target_rps, duration);
         context->requests_expected = expected;
 
-        // Tick length: the request interval up to 1000 RPS, 1ms above it
-        // (below 1ms we would busy-spin). How many requests a tick owes is
-        // not the tick's business - requests_owed_by reads it off the time
-        // since the start, so 1500 RPS owes 1 or 2 per 1ms tick and a late
-        // tick owes what the ticks it swallowed would have.
+        // Tick length: the request interval up to 1000 RPS, 1ms above it (below
+        // 1ms would busy-spin). `requests_owed_by` reads how many a tick owes
+        // off the time since the start, so 1500 RPS owes 1 or 2 per 1ms tick
+        // and a late tick owes what the ticks it swallowed would have.
         const int64_t base_interval_us = static_cast<int64_t> (1000000.0 / target_rps);
         const int64_t tick_us = std::max<int64_t> (base_interval_us, 1000);
 
@@ -1607,9 +1541,9 @@ class ConstantLoadStrategy : public LoadStrategy {
         while (!context->should_stop) {
             const auto now = std::chrono::steady_clock::now ();
 
-            // The run is time-bound, not quota-bound: never accrue past the
-            // deadline, so the final tick pays out only the slice of the
-            // window it covers and the loop cannot push a backlog beyond it.
+            // Time-bound, not quota-bound: never accrue past the deadline, so
+            // the final tick pays only its slice of the window and no backlog
+            // reaches past it.
             const auto accrue_to = std::min (now, duration_end);
             const size_t owed = requests_owed_by (target_rps, accrue_to - test_start);
             if (owed > taken) {
@@ -1754,9 +1688,9 @@ bool CapacitySearch::advance (int64_t elapsed_ms) {
     if (stop_reason_ != nullptr) {
         return false;
     }
-    // The deadline lives here rather than in the controller because it is
-    // the one stop condition that is about time rather than about what the
-    // service did, and the controller holds no clock.
+    // The deadline lives here, not in the controller: it is the one stop
+    // condition about time rather than the service, and the controller holds no
+    // clock.
     if (elapsed_ms >= config_.deadline_ms) {
         stop_reason_ = capacity_stop::DEADLINE;
         return false;
@@ -1773,14 +1707,14 @@ bool CapacitySearch::advance (int64_t elapsed_ms) {
     }
     const bool has_latency_or_failure = level_samples_ > 0 || level_failed_ > 0;
     if (!has_latency_or_failure || level_completed_ == 0) {
-        // A level is judged on evidence of both kinds, and stays open until
-        // it has them. No timed completion and no counted failure (#2384: a
-        // timeout is timed) would read as a service that answered instantly;
-        // a refused connection records no latency but is counted, so a level
-        // of only refusals is still judged. No completion counted yet would
-        // read as a 0% error share: the status snapshot the count comes from
-        // can lag the histogram by a tick (#2815). A search that never gets
-        // both ends on its deadline having reported only the levels it judged.
+        // A level is judged on evidence of both kinds and stays open until it
+        // has them. No timed completion and no counted failure (#2384: a
+        // timeout is timed) would read as a service that answered instantly; a
+        // refused connection records no latency but is counted, so a level of
+        // only refusals is still judged. No completion counted yet would read
+        // as a 0% error share: the status snapshot can lag the histogram by a
+        // tick (#2815). A search that never gets both ends on its deadline,
+        // reporting only the levels it judged.
         return true;
     }
 
@@ -1845,9 +1779,9 @@ void CapacitySearch::open_level (size_t level, int64_t now_ms) {
     publish_progress (nullptr, 0);
 }
 
-// The level histogram's reset is requested on the last settle tick rather
-// than when the level opens, so the producer, which knows nothing of
-// SETTLE_TICKS, resets it before sampling the first window this search counts.
+// The level histogram's reset is requested on the last settle tick, not when
+// the level opens, so the producer, which knows nothing of SETTLE_TICKS, resets
+// it before sampling the first window this search counts.
 static_assert (constants::capacity::SETTLE_TICKS > 0,
 "the level reset is requested on the last settle tick");
 
@@ -1906,10 +1840,10 @@ class CapacityLoadStrategy : public LoadStrategy {
         " -> " + std::to_string (capacity_config.max_concurrency));
         vayu::utils::log_info ("run", "  Deadline: " + std::to_string (deadline_ms) + " ms");
 
-        // Through `SubmissionRequest` like every other mode since #993: a
-        // capacity search binds its data rows the same way, and picks up a
-        // credential the refresh watchdog renewed mid-search, which submitting
-        // the built request directly never did.
+        // Through `SubmissionRequest` like every mode (#993): a capacity search
+        // binds data rows the same way and picks up a credential the refresh
+        // watchdog renewed mid-search, which submitting the built request
+        // directly would miss.
         SubmissionRequest live (context, request);
         auto submit_one = [&context, &db, &live] () {
             submit_one_request (context, db, live);
@@ -1923,11 +1857,10 @@ class CapacityLoadStrategy : public LoadStrategy {
         [] () { return std::numeric_limits<size_t>::max (); },
         [&search] (int64_t el) { return search.advance (el); });
 
-        // Written before this frame returns, and read by execute_load_test
-        // after it - same thread, so the summary sees a complete search.
-        // emplace rather than assign: it hands back the summary it stored, so
-        // the log line below reads the engaged optional rather than asking
-        // whether the write it just made took.
+        // Written before this frame returns and read by execute_load_test after
+        // it, on the same thread, so the summary sees a complete search.
+        // `emplace` hands back what it stored, so the log line reads the
+        // engaged optional.
         const CapacitySummary& capacity = context->capacity.emplace (search.finish ());
         vayu::utils::log_info ("run",
         "Capacity search stopped: " + capacity.stop_reason + " (" +

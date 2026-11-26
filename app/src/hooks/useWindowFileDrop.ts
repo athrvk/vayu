@@ -6,16 +6,12 @@
  */
 
 /**
- * A file dropped anywhere on the window opens the Import dialog with it
- * (issue #2252), the way Postman and Insomnia do.
- *
- * Both listeners are bubble-phase on `window`, which is what makes the
- * `defaultPrevented` check mean something: React delegates to the root
- * container, so the dialog's dropzone and `BinaryBodyPanel` have already run
- * and called `preventDefault` by the time the event gets here. A capture
- * listener would see every drop first and steal theirs.
- *
- * Mounted once, in `App`.
+ * A file dropped anywhere on the window opens the Import dialog with it (#2252), as Postman and
+ * Insomnia do. Both listeners are bubble-phase on `window`, which is what makes the
+ * `defaultPrevented` check mean something: React delegates to the root container, so the dialog's
+ * dropzone and `BinaryBodyPanel` have already run and called `preventDefault` by the time the event
+ * gets here; a capture listener would see every drop first and steal theirs. Mounted once, in
+ * `App`.
  */
 
 import { useEffect } from "react";

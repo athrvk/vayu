@@ -583,7 +583,7 @@ class ScenarioIdentityTest : public LoadIdentityTest {
     protected:
     /// A one-step plan hitting @p url, tokenised the way plan resolution
     /// tokenises it - through the real splitter, for the reason
-    /// `scenario_load_test.cpp`'s own helper records.
+    /// `scenario_load_fixture.hpp`'s own helper records.
     static vayu::core::ScenarioExecution plan_over (const std::string& url) {
         vayu::core::ScenarioExecution execution;
         execution.request.source        = "collection";

@@ -6,23 +6,17 @@
  */
 
 /**
- * The load profiles, as a radio group rather than a `<Select>`.
+ * The load profiles as a radio group, not a `<Select>`: they are different strategies with
+ * different forms, and a select shows one label at a time, so options could not be compared. As
+ * cards, all show with a line of description. The list comes from `LOAD_TEST_MODES`, so a new mode
+ * adds a card, unless the caller narrows it with `modes` (the collection run, to the three a
+ * scenario accepts). A caller whose target is not one request may reword a card with `copy`;
+ * `LOAD_TEST_MODES` is not touched, because `loadTestModeLabel` names stored runs on every other
+ * screen.
  *
- * They are different strategies with different forms behind them, and a select
- * shows one label at a time - so choosing meant opening a menu and reading
- * options you could not compare. As cards, all of them are visible with a line
- * of description each, which also retires most of the old "What will happen"
- * prose. The list comes from `LOAD_TEST_MODES`, so adding a mode adds a card -
- * unless the caller narrows it with `modes`, as the collection run does for the
- * three modes a scenario accepts. A caller whose target is not a single request
- * may reword a card with `copy`; `LOAD_TEST_MODES` itself is not touched,
- * because `loadTestModeLabel` names stored runs on every other screen.
- *
- * Keyboard follows the WAI-ARIA radio group pattern, which is stricter than it
- * looks: the whole group is **one** Tab stop, arrows move *and* select (wrapping
- * at the ends), and Space selects the focused option. Roving tabindex is what
- * makes the single stop work - anything else would put one stop per card in the
- * middle of a form.
+ * Keyboard is the WAI-ARIA radio group pattern: the group is **one** Tab stop, arrows move *and*
+ * select (wrapping), and Space selects. Roving tabindex makes the single stop; anything else would
+ * put one stop per card in the middle of a form.
  */
 
 import { useRef } from "react";
@@ -58,8 +52,7 @@ export function ProfilePicker({
 		const index = options.findIndex((p) => p.value === value);
 		const next = options[(index + delta + options.length) % options.length];
 		onChange(next.value);
-		// Focus follows selection, which is the point of the pattern - the user
-		// is choosing as they arrow, not navigating then committing.
+		// Focus follows selection, the point of the pattern: the user chooses as they arrow.
 		groupRef.current?.querySelector<HTMLElement>(`[data-profile="${next.value}"]`)?.focus();
 	};
 

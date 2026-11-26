@@ -219,10 +219,7 @@ export default function KeyValueEditor({
 	return (
 		<div className="space-y-1.5">
 			{/*
-			 * The column headers no longer repeat the placeholders. They used to
-			 * render `keyPlaceholder` verbatim, so an empty Headers table said
-			 * "Header" as a column title and "Header" again inside every field
-			 * below it. The placeholder is the one that has to name the thing,
+			 * The column headers do not repeat the placeholders. The placeholder is the one that has to name the thing,
 			 * because it is the one still visible once you start typing.
 			 */}
 			<div

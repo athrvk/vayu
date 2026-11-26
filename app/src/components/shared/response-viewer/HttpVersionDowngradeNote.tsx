@@ -6,16 +6,11 @@
  */
 
 /**
- * "HTTP/1.1, not HTTP/2": the one line that says an exchange asked for HTTP/2
- * and negotiated something older (issue #215).
- *
- * Shared by the status bar above a response and by a collection run's step
- * card, whose viewer has no status bar (#3262) - a second hand-written line
- * would not receive this one's wording or its hover. Draw it only when the
- * response is flagged: a note on every response is a note nobody reads.
- *
- * Text, not a `Badge`: it paints no background, and the variant="chip" rule in
- * badge-hover.test.tsx exists for the ones that do.
+ * "HTTP/1.1, not HTTP/2": the one line saying an exchange asked for HTTP/2 and negotiated older
+ * (#215), shared by the status bar above a response and a collection run's step card, whose viewer
+ * has no status bar (#3262), so wording and hover live once. Drawn only when flagged: a note on
+ * every response is read by nobody. Text, not a `Badge`: it paints no background, and
+ * badge-hover.test.tsx's variant="chip" rule is for those that do.
  */
 
 import { AlertTriangle } from "lucide-react";
@@ -23,9 +18,8 @@ import { cn } from "@/lib/utils";
 
 export interface HttpVersionDowngradeNoteProps {
 	/**
-	 * What the connection negotiated, as a display string ("HTTP/1.1"). Falls back
-	 * to "HTTP/1.1" in the label and "an older protocol" in the hover when the
-	 * engine recorded none.
+	 * What the connection negotiated, as a display string ("HTTP/1.1"); without one, "HTTP/1.1" in
+	 * the label and "an older protocol" in the hover.
 	 */
 	httpVersion?: string;
 	className?: string;

@@ -34,12 +34,10 @@ export function sloSourceOf(judgedMs: number | null, runOwnMs: number | undefine
 }
 
 /**
- * The capacity breakpoint of a ramp_up or capacity run: the first per-tick
- * moment at which p99 latency crossed the SLO threshold, and the concurrency in
- * flight then.
- * Consumed by the Saturation hero card (A1), the Breakpoint stat (A2), and the
- * Response-time-vs-concurrency scatter's SLO line (A3) - one definition, three
- * call sites.
+ * The capacity breakpoint of a ramp_up or capacity run: the first per-tick moment p99 latency
+ * crossed the SLO threshold, and the concurrency in flight then. One definition for three call
+ * sites: the Saturation hero card (A1), the Breakpoint stat (A2) and the
+ * Response-time-vs-concurrency scatter's SLO line (A3).
  */
 export interface Breakpoint {
 	crossed: boolean;
@@ -83,11 +81,10 @@ export function notCrossed(sloMs: number | null, sloSource: SloSource): Breakpoi
 }
 
 /**
- * The crossed breakpoint `m` sets, or null when it does not cross `thresholdMs`.
- * Judged on the tick's whole-second p99 ({@link secondPercentiles}), so a live
- * frame between gates - a ~100 ms window - never latches a breakpoint a stored
- * run of the same load would not. `firstReading` is whether no earlier tick held
- * such a p99, which the caller knows and a single tick cannot.
+ * The crossed breakpoint `m` sets, or null when it does not cross `thresholdMs`. Judged on the
+ * tick's whole-second p99 ({@link secondPercentiles}), so a live frame between gates (a ~100 ms
+ * window) never latches a breakpoint a stored run of the same load would not. `firstReading` is
+ * whether no earlier tick held such a p99, which the caller knows and a single tick cannot.
  */
 export function breakpointAt(
 	m: LoadTestMetrics,
@@ -109,11 +106,10 @@ export function breakpointAt(
 }
 
 /**
- * Scan per-tick history for the first tick whose p99 exceeds `thresholdMs`.
- * `runOwnMs` is the run's own p99 line, which decides the breakpoint's
- * `sloSource` (the value judged does not change). History is assumed
- * time-ordered (as it arrives over SSE). On a downsampled
- * series a point is a bucket, so `atRunStart` reads "the first bucket".
+ * Scan per-tick history, assumed time-ordered (as it arrives over SSE), for the first tick whose
+ * p99 exceeds `thresholdMs`. `runOwnMs` is the run's own p99 line, which decides the breakpoint's
+ * `sloSource` (the value judged does not change). On a downsampled series a point is a bucket, so
+ * `atRunStart` reads "the first bucket".
  */
 export function computeBreakpoint(
 	history: LoadTestMetrics[],

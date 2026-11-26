@@ -6,19 +6,14 @@
  */
 
 /**
- * useSpecDocumentLimit
+ * The engine cap an imported OpenAPI document, and everything bundled into it (#649), has to fit
+ * inside: `maxSpecDocumentBytes`. Read from the engine rather than restated, by
+ * `useDataFileLimits`' rule: `POST /specs` applies this cap, and a renderer copy could only drift
+ * in the direction that hurts (refusing a spec the user just raised the setting to allow, with no
+ * way to tell which side said no).
  *
- * The engine cap an imported OpenAPI document - and everything bundled into it
- * (issue #649) - has to fit inside: `maxSpecDocumentBytes`.
- *
- * Read from the engine rather than restated, the same rule `useDataFileLimits`
- * follows: `POST /specs` applies this cap, and a renderer copy could only drift
- * in the direction that hurts - refusing a spec the user had just raised the
- * setting to allow, with no way to tell which side said no.
- *
- * Read-only: the setting is edited from the engine settings list. Until the
- * config query resolves the module seed stands, which is the number the engine
- * itself seeds.
+ * Read-only: the setting is edited from the engine settings list. Until the config query resolves
+ * the module seed stands, which is the number the engine itself seeds.
  */
 
 import { useConfigQuery } from "@/queries";

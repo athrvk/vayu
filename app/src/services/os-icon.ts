@@ -45,14 +45,10 @@ function send(signal: OsIconSignal): void {
 }
 
 /**
- * The last `recents` payload sent, so a rebuild that lands on the same list is
- * not resent.
- *
- * `useOsIcon` re-derives the recents list on every navigation and on every
- * collections refetch - far more often than the list a user has actually been
- * in changes - while the menu the OS paints from it is something main redraws
- * on every send. Comparing the fingerprint keeps a no-op re-derive from
- * becoming an IPC message and a repaint.
+ * The last `recents` payload sent, so a rebuild that lands on the same list is not resent.
+ * `useOsIcon` re-derives the list on every navigation and every collections refetch, far more often
+ * than the list a user has been in changes, while main redraws the OS menu on every send; comparing
+ * the fingerprint keeps a no-op re-derive from becoming an IPC message and a repaint.
  */
 let lastRecentsSent: string | null = null;
 
@@ -77,15 +73,14 @@ export const osIcon = {
 	},
 
 	/**
-	 * A run reached a terminal state the user did not ask for, so the taskbar
-	 * button flashes on Windows and Linux until they come back.
+	 * A run reached a terminal state the user did not ask for, so the taskbar button flashes on
+	 * Windows and Linux until they come back.
 	 *
-	 * **Only when the system notifications are off.** This is the quieter
-	 * substitute for the toast, not a second cue beside it - a user who opted in
-	 * to being told already is, and #1364 scoped this cue to exactly that
-	 * condition. The opt-in lives in a localStorage-backed store main cannot
-	 * see, which is why the check is here rather than there, the same split
-	 * `services/notify.ts` makes for the same setting.
+	 * **Only when the system notifications are off.** This is the quieter substitute for the toast,
+	 * not a second cue beside it: a user who opted in to being told already is, and #1364 scoped
+	 * this cue to exactly that condition. The opt-in lives in a localStorage-backed store main
+	 * cannot see, which is why the check is here rather than there, the split `services/notify.ts`
+	 * makes for the same setting.
 	 */
 	runFinished(): void {
 		if (useClientSettingsStore.getState().systemNotifications) return;

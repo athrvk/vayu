@@ -105,11 +105,10 @@ export const axisPct = (v: number): string => `${Math.round(v)}%`;
 export const fmtSeconds = (v: number): string => `${formatFixed(v, 1)}s`;
 
 /**
- * Server-vitals values, whose unit this app does not know: a run may scrape a
- * CPU fraction (0.42), a byte count (1.4e9) and a queue depth (7) onto the same
- * chart, so the formatter has to stay readable across all three rather than
- * assume one. Large values are abbreviated, small ones keep the precision that
- * is the whole signal.
+ * Server-vitals values, whose unit this app does not know: one chart may hold a CPU fraction
+ * (0.42), a byte count (1.4e9) and a queue depth (7), so the formatter stays readable across all
+ * three rather than assume one. Large values are abbreviated; small ones keep the precision that is
+ * the whole signal.
  */
 export const fmtVitals = (v: number | null | undefined): string => {
 	if (v == null) return "-";

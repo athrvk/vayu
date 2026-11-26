@@ -6,14 +6,12 @@
  */
 
 /**
- * What `runReference` reads, from either shape a run arrives in (#2047).
- *
- * A list row (`GET /runs`) carries the compact `summary`; a loaded run
- * (`GET /runs/:id`) carries no summary at all, only the full `configSnapshot`
- * the summary is cut from (`build_run_summary`,
- * `engine/src/http/routes/runs.cpp`). A surface holding a loaded run that read
- * `summary` would name every run by its kind alone, so every such surface maps
- * through here rather than picking fields itself.
+ * What `runReference` reads, from either shape a run arrives in (#2047). A list row (`GET /runs`)
+ * carries the compact `summary`; a loaded run (`GET /runs/:id`) carries no summary at all, only the
+ * full `configSnapshot` the summary is cut from (`build_run_summary`,
+ * `engine/src/http/routes/runs.cpp`). A surface holding a loaded run that read `summary` would name
+ * every run by its kind alone, so every such surface maps through here rather than picking fields
+ * itself.
  */
 
 import { runReference, type RunReferenceInput } from "@/lib/agent-reference";

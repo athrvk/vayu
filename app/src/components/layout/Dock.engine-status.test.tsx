@@ -125,7 +125,7 @@ describe("the engine status indicator", () => {
 	});
 
 	it("paints the connection light from the --status-* family", () => {
-		// #1225. The rule design-system.md states by the word "connection": a
+		// #1225. The rule design-system/accent-and-status.md states by the word "connection": a
 		// connection indicator belongs to the status family, so a reader looking
 		// for every status surface finds this one. Asserted as class membership
 		// rather than a colour, because the family's green and the general

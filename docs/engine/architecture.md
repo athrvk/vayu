@@ -83,11 +83,11 @@ Three shapes, and the difference between them is the point:
   request a caller forgot to check for is then unreachable rather than merely
   unlikely (issues #926, #954).
 
-These used to be `std::optional<std::pair<int, nlohmann::json>>`, where an
-*empty* optional meant success (issue #901). That reads backwards at every call
+These are not `std::optional<std::pair<int, nlohmann::json>>`, where an
+*empty* optional means success (issue #901). That reads backwards at every call
 site - `if (err)` is the failure path, `return std::nullopt` means "fine" - and
-a dropped return value silently means "no error", which is why the two most
-dangerous of them carried `[[nodiscard]]` by hand. `std::expected` puts the
+a dropped return value silently means "no error", which would need
+`[[nodiscard]]` by hand on every one. `std::expected` puts the
 direction in the type: `if (auto outcome = f (...); !outcome) return outcome;`
 propagates, and the response is reachable only through `.error ()`.
 
@@ -178,7 +178,7 @@ poll should wait (a results chunk whose commit runs the automatic WAL
 checkpoint); this read waits for none of it. What it gives up is composing
 with anything: it sees only what was committed before it, never a write in
 flight, and no lock scope can include it. A read that decides a write is
-`get_run` under the DB mutex. [`runs`](db-schema.md#runs) has the connection's
+`get_run` under the DB mutex. [`runs`](db-schema/runs.md#runs) has the connection's
 settings.
 
 ### Listeners
@@ -188,11 +188,11 @@ four more are opened on demand, and the rule that separates them is where each m
 
 | Listener | Bind | Opened by | Serves |
 |----------|------|-----------|--------|
-| Management API | `127.0.0.1:9876` (configurable port) | Daemon startup | Every route in [api-reference.md](api-reference.md) |
+| Management API | `127.0.0.1:9876` (configurable port) | Daemon startup | Every route in [api-reference/index.md](api-reference/index.md) |
 | OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode (at most 16 unsettled) | One `/callback` path, until the attempt settles or its 5-minute TTL expires, polled or not |
-| [Mock OAuth 2.0 issuer](api-reference.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token`, `/authorize`, `/register`, its RFC 8414 metadata and a protected `/resource` with its RFC 9728 metadata, until stopped |
-| [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response; CORS per `allowedOrigins` |
-| [Collection mock server](api-reference.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped; CORS per `allowedOrigins` |
+| [Mock OAuth 2.0 issuer](api-reference/authentication.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token`, `/authorize`, `/register`, its RFC 8414 metadata and a protected `/resource` with its RFC 9728 metadata, until stopped |
+| [Webhook inbox](api-reference/inbox.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response; CORS per `allowedOrigins` |
+| [Collection mock server](api-reference/mock-server.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped; CORS per `allowedOrigins` |
 
 Every management API response also carries `Cache-Control: no-store` (#1507, `server.cpp`): every
 route answers a live read of state that changes under the client, so nothing here is valid to replay
@@ -203,7 +203,7 @@ servers of their own (see the table above) and do not set it.
 CORS header, refuses a `Host` that is not a loopback spelling of its own port (DNS rebinding), and
 refuses any request carrying `Origin`; an `OPTIONS` that passes the Host check is answered `204`
 with nothing else. The Electron shell strips the renderer's `Origin` and supplies the renderer's
-CORS headers itself. See [Who may call the API](api-reference.md#who-may-call-the-api).
+CORS headers itself. See [Who may call the API](api-reference/index.md#who-may-call-the-api).
 
 **A mock server and an inbox do answer browsers**, under a `CorsPolicy` fixed when the listener
 starts (`routes.hpp`, issue #2367). With no `allowedOrigins`, the default, every response is
@@ -317,7 +317,7 @@ printed the listening banner, unwound through the graceful-shutdown path and exi
 
 ### Change feed
 
-`GET /changes` (#3420, [api-reference.md](api-reference.md#get-changes)) tells every client about
+`GET /changes` (#3420, [api-reference/changes.md](api-reference/changes.md#get-changes)) tells every client about
 every committed write of a collection, request, example, environment, the globals or a trash entry,
 so a row one client changed (the stdio MCP server, `vayu-cli`, a script, a second window) does not
 stay stale in another's cache. `Database` owns the feed (`engine/include/vayu/db/change_feed.hpp`)
@@ -603,7 +603,7 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   sample. The percentiles, the max and the mean share this one population (the mean divides
   by the sample count, not by successes). A stored error row (`results.latency_ms`) carries
   the same duration, and `0` where there is none; see
-  [Latency population](api-reference.md#latency-population).
+  [Latency population](api-reference/metrics.md#latency-population).
 - **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
   peak in-flight, and a full per-status-code distribution
 - **Status classes by completion second** (issue #2866, `core/status_seconds.hpp`): beside the
@@ -647,7 +647,7 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   run row, through `get_run_snapshot`, which takes no DB mutex (#2679, [One read that takes no
   lock](#one-read-that-takes-no-lock)). A result and its captured body share a chunk; a
   failure part-way keeps the chunks before it
-  ([`results`](db-schema.md#results))
+  ([`results`](db-schema/run-artifacts.md#results))
 - **Bounded error storage**: Error *counts* and the status-code distribution are exact, but only
   the first `maxStoredErrors` (default 10,000) individual records are kept; the rest are counted by
   `errors_dropped()` and logged once. A fully-failing target produces errors at close to the
@@ -667,7 +667,7 @@ JavaScript execution engine for pre-request and test scripts:
 
 - **Postman-compatible API**: `pm.test()`, `pm.expect()`, `pm.response`, etc.
 - **Mutable request**: a pre-request script's `pm.request` writes are applied to the
-  request before it is sent (see `docs/engine/scripting.md`)
+  request before it is sent (see `docs/engine/scripting/request-mutation.md`)
 - **Signing**: `pm.crypto.sha256` / `.hmacSha256` plus the `btoa` / `atob` globals, so
   a pre-request script can sign the request it just rewrote. Backed by **libsodium**
   through `utils/sha256.hpp` (shared with PKCE) and `utils/encoding.hpp` - the engine
@@ -681,11 +681,10 @@ JavaScript execution engine for pre-request and test scripts:
 
 **Platform Support:** one engine everywhere - **QuickJS-NG** (the actively
 maintained fork), vendored in `engine/vendor/quickjs-ng` and built via its own
-CMake on all three platforms. Until #226's review, Linux/macOS ran Bellard's
-original QuickJS while Windows ran NG (the original does not compile under
-MSVC) - two interpreters behind one `pm.*` surface, so an engine-level
-behaviour difference was a Windows-vs-Unix script divergence. The original
-copy is deleted.
+CMake on all three platforms. Running Bellard's original QuickJS on
+Linux/macOS and NG on Windows (the original does not compile under MSVC) would
+put two interpreters behind one `pm.*` surface, so an engine-level behaviour
+difference would be a Windows-vs-Unix script divergence (#226).
 
 ### Cookie Jar
 
@@ -830,7 +829,7 @@ applied to the outgoing request rather than being left to the UI. This lives in
   `{{$vu}}` / `{{$iteration}}` token are the first case auth is *not* resolved
   into the plan (a credential awaiting a script is the second, below): the value has to be bound before the credential is encoded, so
   the step keeps its typed `Auth` and applies it per iteration
-  (`bind_step_iteration`, see [Scenario runs](api-reference.md#scenario-runs)).
+  (`bind_step_iteration`, see [Scenario runs](api-reference/scenario-runs.md#scenario-runs)).
   **What is deferred is decided by the credentials, not by the run's shape**
   (issue #1055): a build defers because these credentials carry a token, so a
   run with no data set at all still binds `user-{{$vu}}`. An OAuth 2.0 config
@@ -862,7 +861,7 @@ applied to the outgoing request rather than being left to the UI. This lives in
   `privateKey` that is one `{{variable}}` reference or a `privateKeyFile` read
   through file trust, #3632; the reference is resolved only into the config the
   token is acquired with and never stored, composed, logged or exported), the
-  [`oauth_tokens`](db-schema.md#oauth_tokens) cache (expiry skew min(45s, lifetime/2), refresh-token rotation, one refresh
+  [`oauth_tokens`](db-schema/credentials-and-files.md#oauth_tokens) cache (expiry skew min(45s, lifetime/2), refresh-token rotation, one refresh
   in flight per cache key and a compare-before-delete on a refused refresh,
   #3344; only an `invalid_grant` or `invalid_client` refusal clears the row,
   and an unavailable endpoint on a refresh is an `oauth2_network_error`,
@@ -934,7 +933,7 @@ wider and why, is [above](#listeners).
 
 PKCE hashing uses **libsodium** (`crypto_hash_sha256`, and `sodium_bin2base64`'s
 URL-safe unpadded variant for the challenge itself; no OpenSSL). See
-the [API reference](api-reference.md#authentication) for the `/oauth2/*` routes.
+the [API reference](api-reference/authentication.md#authentication) for the `/oauth2/*` routes.
 
 ### Request composition boundary (engine-owned via POST /compose)
 
@@ -1076,7 +1075,7 @@ never a fresh read of the stored rows, and teardown reads the original. Each
 sample's `pm.request` is re-derived from the request the run built and the
 row and identity the sample recorded (`request_as_submitted`,
 `step_request_as_submitted`), so nothing is retained per sample - see
-[scripting.md](scripting.md#load-test-scripts).
+[scripting/execution-context.md](scripting/execution-context.md#load-test-scripts).
 
 ### Database (`SQLite`)
 
@@ -1093,7 +1092,7 @@ Persistent storage using sqlite_orm:
 - `oauth_tokens`: Cached OAuth 2.0 access/refresh tokens (keyed by config identity)
 - `config_entries`: Engine configuration registry (read/written via `/config`)
 
-See [Database Schema](db-schema.md) for the full column list.
+See [Database Schema](db-schema/index.md) for the full column list.
 
 **Startup housekeeping** (`Database::init()`, before the sweeper and HTTP server start):
 
@@ -1107,7 +1106,7 @@ See [Database Schema](db-schema.md) for the full column list.
    restart and the restart time would span the downtime. A load run that stored no summary but wrote metric
    ticks is given one from its last tick in the same transaction, flagged
    `partial` (#2895), so its report shows the totals it reached rather than
-   zeros (see [Database Schema](db-schema.md#runs)).
+   zeros (see [Database Schema](db-schema/runs.md#runs)).
 2. **Pruning**: run history is trimmed per kind - load and collection runs to
    `maxRunsRetained`, design Sends to `maxDesignRunsRetained` (#2429) - and every
    kind to `runRetentionDays`.
@@ -1169,7 +1168,7 @@ immutable, fully composed plan **before the run row exists**, then answers
    here is a 400 and leaves no run row behind
    ↓
 3. Create Run record (type: Scenario). config_snapshot carries the step
-   manifest, never the composed plan (see db-schema.md)
+   manifest, never the composed plan (see db-schema/runs.md)
    ↓
 4. Start worker thread (execute_scenario_run). No event loop, no metrics thread
    ↓
@@ -1376,7 +1375,7 @@ the submit queue's hand-off, and a lock there would sit on the hot submission
 path.
 
 **Auth outlives its token.** A run resolves auth once, before the strategy
-starts, so a run longer than its OAuth 2.0 access token used to turn into a 401
+starts, so a run longer than its OAuth 2.0 access token would turn into a 401
 storm the report never explained. The watchdog closes that: it sleeps until
 `oauth2RefreshLeadMs` (default 60s) before the token expires, re-acquires it with
 a forced refresh, and publishes the new `Authorization` value on its
@@ -1573,14 +1572,7 @@ The two caps are enforced in the two places that can see them:
 Either cap ends the transfer through libcurl's documented abort, and the
 completion path turns that back into a **success** carrying the response's real
 status code. That is the point of the cap - it is the stream's intended end -
-and it is what keeps `handle_result`-exactly-once and the refill loop untouched.
-An `mcp` request's reply is judged only after that, by `attach_mcp_reply` in
-the event loop's `complete_transfer` and in `execute_exchange` after the
-single-request `Client` (`read_mcp_reply` over the live events on the design
-stream), so a stream a cap or the server
-ended before its final JSON-RPC response is a `transport` failure (#3831)
-while the transfer layer stays unaware of MCP: the slot is released the same
-way, and only the tally the completion lands in differs.
+and it is what keeps `handle_result`-exactly-once and the refill loop untouched; an `mcp` request's reply is judged after it ([stream endings](api-reference/load-runs.md#streaming-under-load-stream)).
 `maxResponseBodyBytes` is unchanged and still an error: it is a refusal to
 buffer, not an ending, and the event cap bounds how many events arrive rather
 than how large one is.
@@ -2033,7 +2025,7 @@ left alone. A second backup requested while one is running is refused with
 The engine writes into the same directory on its own, under the same count:
 `vayu-<stamp>-pre-v<N>.db` before an update migrates the workspace from schema
 version `N`, and `vayu-<stamp>-pre-repair.db` before a one-time repair pass
-rewrites stored rows ([db-schema.md](db-schema.md#the-copy-before-a-migration-issue-2426)).
+rewrites stored rows ([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#the-copy-before-a-migration)).
 A start that cannot write the first refuses to migrate rather than migrate
 without it.
 
@@ -2071,7 +2063,7 @@ snapshot with the steps above. Anything written since the update is not in it.
 
 **Putting a quarantined file back.** A start that judged `vayu.db` corrupt
 moved it to `vayu.db.corrupt-<ms>` before restoring `vayu.db.bak` or starting
-fresh ([db-schema.md](db-schema.md#the-quarantine-issue-984)). The `.bak` holds
+fresh ([db-schema/startup-and-recovery.md](db-schema/startup-and-recovery.md#the-quarantine)). The `.bak` holds
 the last clean shutdown at best, and less after a session that ended in a crash
 or one whose final refresh ran out of time, so when the quarantined file was
 healthy after all, it is the newer copy: with the engine stopped, copy `vayu.db.corrupt-<ms>` over
@@ -2165,7 +2157,7 @@ record shape, the category list, the redaction rule and the file layout
   redirect loop refuses a `Location` naming another scheme before making the
   hop (`resolve_redirect_target`). One
   rule for Send, runs, streams, `pm.sendRequest`, import fetch and OAuth. See
-  [api-reference.md](api-reference.md#url-schemes).
+  [api-reference/compose.md](api-reference/compose.md#url-schemes).
 - **Request-body files: one trust rule.** The engine reads a file from this
   machine for exactly two body shapes - a `binary` body's `file` and a
   `form-data` file part - and sends one only when *it lies under a folder the
@@ -2194,9 +2186,9 @@ record shape, the category list, the redaction rule and the file layout
   read from it per transfer (#2416, #2678), so a link re-pointed after the
   check, or between a run's iterations, is not followed (a path a data row
   binds is opened per submission, through the check again);
-  `engine/CLAUDE.md` states what remains. A record
+  what the open does not cover is stated on that page. A record
   of a send keeps `bodyFile {fileName, size, sha256}`, never the bytes or the
-  path. See [api-reference.md](api-reference.md#file-references-binary-bodies-and-file-parts).
+  path. See [api-reference/request-body.md](api-reference/request-body.md#file-references-binary-bodies-and-file-parts).
 - **Single instance**: one engine per data directory, held from before the
   database opens until after it closes (`InstanceLock` in `daemon.cpp`). On
   Linux and macOS it is a `flock` on the data directory plus one on
@@ -2248,7 +2240,7 @@ record shape, the category list, the redaction rule and the file layout
   engine and History keep them raw by decision; the MCP server masks a secret
   variable's value and a credential header's value in them on the way to an
   agent (`<redacted>`, unless the user turned on Reveal secrets to agents,
-  [mcp.md](mcp.md#secret-values), #1809). The trace names what auth wrote so
+  [mcp/secrets.md](mcp/secrets.md#secret-values), #1809). The trace names what auth wrote so
   that masking has something to go on - `request.authQueryParam` (the raw name
   of the query parameter auth appended) and `request.authHeaders`, each absent
   when auth wrote none (#1835); the live `POST /execute` answer carries the

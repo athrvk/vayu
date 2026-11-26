@@ -12,7 +12,10 @@ React UI, communicating over HTTP on port 9876.
   (clang-tidy on the C++ a push changes), `install-git-hooks.sh`, `test/`
   (load-test fixtures + mock server, installer and hook suites), `perf/` (the
   weekly measurement harness), `cxx-feature-probe`, `vendor-js/` (rebuilds a
-  vendored script library from its npm tarballs)
+  vendored script library from its npm tarballs), `docs-split/` (the committed
+  script of a doc split, with its no-loss proof), `docs-lint.py`,
+  `comment-lint.py` and `test-size-lint.py` (the budget lints, each with a
+  ceilings or exceptions file that only goes down)
 
 This file holds only what applies to *every* session. Deeper material loads on
 demand - see [Where the rest lives](#where-the-rest-lives) at the bottom. Every
@@ -190,6 +193,27 @@ test that touches time, threads, sockets or a large render, check these rules:
   `Run engine tests` / `Run frontend tests` step names the case) and fix that
   rule in the same pull request that meets it.
 
+**A test ceiling is a constant the owner sets, and its measured value appears
+only in the failure message.** A ceiling that follows the code is a budget the
+diff sets for itself. The constant (`CEILING`, a `*_CEILING`, a `maxBytes:` row)
+carries a docblock that states the rule - fixed, remove rather than raise - and
+no number and no list of raises: each raise was an edit every open branch
+conflicted on (22 times on one MCP test). The failure prints the measured value
+and the ceiling. `app/src/test/ceiling-docblock.guard.test.ts` fails a docblock
+that carries a digit run of three or more, two issue numbers or a verb that
+narrates a raise. `a11y-suppressions.test.ts` and `tool-list-budget.test.ts`
+are the exemplars.
+
+**A test file is capped at 1,500 lines.** Past that a suite is a conflict
+magnet and a single slow lint unit. Split it by suite (engine, keeping the suite
+names) or by source module (app) and move the shared setup to a header or a
+`*.testkit.ts`. `scripts/test-size-lint.py` runs as `Test file size` on every
+pull request that touches `app/` or `engine/`. The files over the cap when it
+was set are listed in `scripts/test-size-exceptions.json` with the size each
+had, and the list only shrinks: a file over its recorded size fails, a file now
+within the cap fails as stale, and CI compares the list with the base branch's
+so an entry is never added or raised. `CONTRIBUTING.md` has the local command.
+
 ## Repo-wide conventions
 
 - **No em-dashes anywhere in the repo.** Use ` - `.
@@ -197,7 +221,7 @@ test that touches time, threads, sockets or a large render, check these rules:
   to the file and CI keeps it that way (`pnpm format:check`, from `app/` with
   an app-relative glob). Everything outside `app/` is unclean by policy: docs
   prose is hand-wrapped, workflows are written to be read as YAML, and
-  `docs/design-system.md` reflows hundreds of lines on a single pass. The
+  `docs/design-system/` reflows hundreds of lines on a single pass. The
   repo-root `.prettierignore` enforces the boundary mechanically. Never run
   prettier or `eslint --fix` repo-wide; format only files you touched that were
   clean before.
@@ -225,31 +249,15 @@ test that touches time, threads, sockets or a large render, check these rules:
 - Labels separate WHERE a change lands (`component:*`) from WHAT kind it is
   (`type:*`). See `.github/LABELING.md`; auto-labeling is `.github/labeler.yml`.
 
-## Comments - keep the constraint, cut the narration
+## Comments - the constraint, in the present tense
 
-A comment earns its place by carrying something the code and git history do
-not: a non-obvious constraint, an invariant, a platform or compiler quirk
-that isn't obvious from the code alone. It does not earn its place by
-narrating what an issue already tracks - a paragraph retelling what #928's
-backlog paydown did duplicates information a link already carries for free.
-**The issue number stays, the retelling of the issue does not.**
+A comment states what the code cannot: a constraint, an invariant, a unit, who owns or locks what, a platform or compiler quirk, a measurement, why not the obvious way. It says what is, not what was: the history is the issue's, so the comment keeps `(#NNNN)` and one sentence of constraint. `scripts/comment-lint.py` counts history phrasing (`used to`, `until #N`, `since #N`, `#N added ...`) in non-test source against per-file ceilings that only go down.
 
-A suppression's reason comment (`eslint-disable`, `NOLINT` and their kin) is
-a separate category from either of the above and is never trimmed: at least
-one is mechanically load-bearing, not just for a human reader -
-`app/src/components/a11y-suppressions.test.ts` parses the reason on the line
-above every a11y suppression, so what looks like narration to a skimming
-human can be the thing a test actually asserts on. Check for a
-source-scanning guard before trimming a suppression comment elsewhere.
+A comment that restates the name or the next line is deleted. A `file:line` in a comment is written as a symbol, because the line moves.
 
-Editing or removing an older comment in a file you are already touching is
-in scope for that change, not a drive-by edit that needs its own PR - a
-comment-only deletion cannot change runtime behaviour, so a reviewer
-verifies it by reading the diff once, unlike a code refactor bundled in for
-the same reason. It can still break a source-scanning guard (the a11y one
-above, or one like it), so run the tests a touched file's comments could
-affect before relying on that. This happens incrementally, as files are
-touched in the normal course of work, not as a standing bulk pass.
+Suppression reasons and directives are never trimmed: `NOLINT`, `eslint-disable`, `@ts-expect-error`, `@deliberate` (clang-tidy reads it in an empty catch), license headers. `a11y-suppressions.test.ts` parses the reason itself.
+
+A comment-only change proves itself: the comment-stripped files are identical before and after, the directive counts are unchanged, and the suites that read source text pass. Before deleting a whole block, `rg` for comments and docs that cite it.
 
 ## Docs - keep them in step with the code
 
@@ -268,6 +276,60 @@ Repo-level docs:
 | `docs/request-storage-design.md` | How requests are stored |
 | `CONTRIBUTING.md` | PR process or style rules |
 | `docs/compare/*.md` | Any capability claim a comparison page makes: timers, correlation, controllers, import formats, scripting |
+
+**A doc page stays within a size and shape budget.** 600 lines a page (1,000
+for a reference page), 400 characters a line, 200 a table cell, a front-matter
+`description:`. `scripts/docs-lint.py` holds it in the `Docs site` workflow. A
+page already over a budget has a ceiling in `scripts/docs-lint-ceilings.json`
+that may only be lowered: CI compares the file with the base branch's copy, and
+a ceiling whose page is now within budget fails as stale. Split or trim the
+page instead of raising a ceiling; pages split out of one that is gone may
+together hold its ceilings and no more. `CONTRIBUTING.md` has the local
+command.
+
+**A doc states what is, not what was.** `used to`, `until #N`, `since #N
+landed`, `formerly`, `previously`, `was renamed|moved|removed|replaced` and an
+issue number in a heading are counted per page by the same lint, against a
+ceiling that only goes down; every page is at zero now. Rationale is allowed: the
+constraint that explains why stays, the story of the change goes to git.
+
+**One fact has one home, and every other page links it.** Two pages that state
+the same thing drift, and the reader trusts the one they opened. The home of
+each kind of fact:
+
+| A fact about | Its home |
+|--------------|----------|
+| An HTTP route, payload or status code | `docs/engine/api-reference/` |
+| A table, a migration, stored JSON | `docs/engine/db-schema/` |
+| A script global, hook or sandbox limit | `docs/engine/scripting/` |
+| An MCP tool, resource or prompt | `docs/engine/mcp/` (the tool table is generated) |
+| A token, a color or type rule, a UI pattern | `docs/design-system/` |
+| A renderer store, query key or hook | `docs/app/state-management/` |
+| What the renderer sends the engine | `docs/app/api-integration/` |
+| What a component does | `docs/app/COMPONENTS/` |
+| A rule for how to work, and what holds it | the nearest `CLAUDE.md`, as a rule and a link |
+
+The mechanism is the pair of guards that read a page against its owner (a token
+value against `index.css`, a tool count against the registry; the list is
+`DOC_READING_GUARDS` in `app/src/lib/routed-inputs.testkit.ts`) and the line
+budget on the guides below, which is what stops a guide from restating a page.
+
+**A table or count derived from a registry is generated, never kept by hand.**
+The MCP tool table and the one line that states how many tools, resources and
+prompts exist are rendered from the registries into
+`docs/engine/mcp/tools.md`. `tools-doc.fresh.test.ts` fails when the committed
+page differs from the render and names the command that rewrites it
+(`pnpm docs:mcp-tools`, from `app/`); `tool-count-docs.test.ts` fails any other
+page that states a count. A new tool changes its `*.tools.ts` file and the
+generated page, and no prose page.
+
+**A `CLAUDE.md` holds rules, not reference.** A rule, the mechanism that holds
+it, and a link to the page with the detail; a payload, a column list or an
+argument table is a page under `docs/` (the home table above). Each of the three
+guides (this file, `app/CLAUDE.md`, `engine/CLAUDE.md`) is held to 400 lines by
+`scripts/docs-lint.py`, with the same ceilings file and the same rule that a
+ceiling only goes down. A guide at the limit takes a rule by moving a
+contract it restates to a page and linking it.
 
 **Deferred work is filed as a GitHub issue in the same commit that defers it.**
 There is no backlog file; the tracker is the only backlog. A comment saying
@@ -326,7 +388,7 @@ when the task comes up, or on request by name.
 | Load | Covers |
 |------|--------|
 | `app/CLAUDE.md` | TypeScript/React conventions, the UI rules enforced by tests, design-system and border/surface rules, renderer doc map |
-| `engine/CLAUDE.md` | C++ conventions, the engine HTTP API contract, request composition (`POST /compose`), engine doc map |
+| `engine/CLAUDE.md` | C++ conventions, the rules to design the HTTP API and `POST /compose` around (each links its page under `docs/engine/api-reference/`), engine doc map |
 | `releasing` skill | Version bump, release notes, tagging, `install.sh`, winget publishing |
 | `docs-site` skill | MkDocs publishing rules, nav, anchors, analytics, local preview |
 | `pr-description` skill | Writing this repo's PR titles/descriptions - lead with why, scale to diff size, flag risk vs. safe-to-skip, the screenshot-commit-then-drop workflow for visual changes |

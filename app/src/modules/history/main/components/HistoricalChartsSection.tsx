@@ -6,11 +6,9 @@
  */
 
 /**
- * HistoricalChartsSection - time-series charts for a completed run.
- *
- * Uses the centralized uPlot charts (same components the live dashboard renders),
- * all wired to one `syncKey` so hovering any chart moves the cursor across all of
- * them - read RPS, concurrency and status composition at the same instant.
+ * Time-series charts for a completed run: the live dashboard's uPlot charts, on one `syncKey`, so
+ * hovering any chart moves the cursor across all of them (RPS, concurrency and status composition
+ * at the same instant).
  */
 
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
@@ -73,10 +71,9 @@ interface HistoricalChartsSectionProps {
 const SYNC_KEY = CHART_SYNC.history;
 
 /**
- * What a point is on a downsampled series, and what that does to the events
- * judged over it (#2547; the fold rules are the engine's, the detector's
- * reading of them is spelled out in `LoadTestDetail`). Stored ticks are one a
- * second, so a bucket of N ticks is N seconds.
+ * What a point is on a downsampled series, and what that does to the events judged over it (#2547;
+ * the fold rules are the engine's, the detector's reading of them is in `LoadTestDetail`). Stored
+ * ticks are one a second, so a bucket of N ticks is N seconds.
  */
 function BucketNote({ ticksPerBucket }: { ticksPerBucket: number }) {
 	return (
@@ -92,10 +89,9 @@ function BucketNote({ ticksPerBucket }: { ticksPerBucket: number }) {
 }
 
 /**
- * What a point is on a downsampled vitals series (#2611). Only drawn for a
- * bucketed one, so there are always at least two scrapes in a point. The engine
- * keeps each series' max over the bucket, so a one-scrape spike in a gauge
- * survives.
+ * What a point is on a downsampled vitals series (#2611). Drawn only for a bucketed one, so a point
+ * always holds at least two scrapes. The engine keeps each series' max over the bucket, so a
+ * one-scrape spike in a gauge survives.
  */
 function VitalsBucketNote({ scrapesPerBucket }: { scrapesPerBucket: number }) {
 	return (

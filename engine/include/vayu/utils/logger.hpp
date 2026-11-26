@@ -56,7 +56,7 @@ class Logger {
     Logger (Logger&&)                 = delete;
     Logger& operator= (Logger&&)      = delete;
 
-    /// @p source is `"engine"` or `"cli"` (issue #1557): both the value every
+    /// @p source is `"engine"` or `"cli"` (#1557): both the value every
     /// record's `src` field carries and the file name prefix
     /// (`engine_<stamp>.log` / `cli_<stamp>.log`), so the two binaries' files
     /// sort apart under one directory without a second `logDir` to configure.
@@ -85,16 +85,15 @@ class Logger {
         return verbosity_level_.load (std::memory_order_relaxed);
     }
 
-    // Force flush log file
     void flush ();
 
-    /// @brief The one entry point (issue #1557).
+    /// @brief The one entry point (#1557).
     ///
-    /// Every `log_debug`/`log_info`/`log_warning`/`log_error` call below
-    /// builds a `LogRecord` and calls this. Adds `ts` (UTC), `pid`, `tid` and
-    /// `src`, redacts `record.fields` in place (`utils/log_redact.hpp`), then
-    /// renders the result to whichever sink is enabled for the level: a JSON
-    /// line to the file, one text line to the console.
+    /// Every `log_debug`/`log_info`/`log_warning`/`log_error` call below builds
+    /// a `LogRecord` and calls this. Adds `ts` (UTC), `pid`, `tid` and `src`,
+    /// redacts `record.fields` in place (`utils/log_redact.hpp`), then renders
+    /// the result to whichever sink is enabled for the level: a JSON line to
+    /// the file, one text line to the console.
     void write (LogRecord&& record);
 
     private:
@@ -135,10 +134,10 @@ class Logger {
 };
 
 /**
- * @brief One log call's whole payload (issue #1557).
+ * @brief One log call's whole payload (#1557).
  *
- * `cat` is a `string_view` because every call site passes a string literal
- * from its source-scanned category list (`tests/log_category_scan_test.cpp`);
+ * `cat` is a `string_view` because every call site passes a string literal from
+ * its source-scanned category list (`tests/log_category_scan_test.cpp`);
  * `fields` defaults to an empty object rather than nlohmann's default `null`,
  * so `Logger::write` can merge it into a record unconditionally.
  */
@@ -189,10 +188,9 @@ prune_old_logs (const std::string& log_dir, std::string_view file_prefix, std::s
  */
 std::size_t remove_legacy_log_files (const std::string& log_dir, std::string_view legacy_prefix);
 
-// Convenience functions - the only way to log (issue #1557): `Logger::write`
-// is the one entry point these all route through, so a category is never
-// optional and a bad-value redaction path is not something a call site can
-// route around.
+// Convenience functions - the only way to log (#1557): `Logger::write` is the
+// one entry point these all route through, so a category is never optional and
+// a bad-value redaction path is not something a call site can route around.
 inline void log_debug (std::string_view cat,
 std::string msg,
 nlohmann::json fields = nlohmann::json::object ()) {

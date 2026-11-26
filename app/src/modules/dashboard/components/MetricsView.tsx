@@ -95,23 +95,18 @@ function MetricsView({
 }: MetricsViewProps) {
 	const loadMode = useMode(mode);
 
-	// All time-series charts render the full retained live buffer. The store trims
-	// it to the user's configurable time window (constants/live-window.ts; default
-	// 5 min) plus a hard safety cap, so this array already reflects the chosen
-	// window. They share this one array so their x-axes cover identical spans (the
-	// throughput chart and the ramp overlay share an x-axis). The old extra
-	// slice(-2400) chart-level cap existed only to bound SVG/recharts DOM nodes -
-	// uPlot (Canvas) renders the whole buffer cheaply, so it's gone.
+	// Every time-series chart renders the full retained live buffer, which the store trims to the
+	// user's time window (constants/live-window.ts; default 5 min) plus a hard safety cap, so this
+	// array is the chosen window. They share this one array so their x-axes cover identical spans
+	// (the throughput chart and the ramp overlay share an x-axis); uPlot (Canvas) renders the whole
+	// buffer cheaply, so there is no chart-level cap.
 	const chartWindow = historicalMetrics;
 
-	// Which chart cards are worth rendering. Each chart builds its own series
-	// from `chartWindow` (it also needs the user's bucket width, which only it
-	// reads), so these gates ask the cheap question - is there more than one
-	// bucket to plot - rather than building the series a second time here
-	// and throwing it away (#1152).
-	// The latency chart plots the ticks that hold a window mean (an idle window
-	// and a run stored before the window existed hold none), so it is gated on
-	// those, not on every tick.
+	// Which chart cards are worth rendering. Each chart builds its own series from `chartWindow`
+	// (it also needs the user's bucket width, which only it reads), so these gates ask the cheap
+	// question, is there more than one bucket to plot, rather than build the series a second time
+	// and throw it away (#1152). The latency chart plots only ticks holding a window mean (an idle
+	// window and a run stored before the window existed hold none), so it is gated on those.
 	const hasLatencyPoints = useMemo(
 		() => spansMultipleBuckets(chartWindow, hasWindowLatency),
 		[chartWindow]
@@ -127,10 +122,9 @@ function MetricsView({
 		[chartWindow]
 	);
 	const hasStatusData = useMemo(() => hasStatusSeries(chartWindow), [chartWindow]);
-	// Presence, not "spans multiple buckets" - mirrors `ServerVitalsChart`'s own
-	// gate below (`monitorSamples.length > 0 && chartWindow.length > 1`) rather
-	// than `hasStatusData`'s bucket-count question, since a custom metric's tick
-	// cadence is whatever the script chose to record at, not the engine's.
+	// Presence, not "spans multiple buckets", like `ServerVitalsChart`'s own gate below
+	// (`monitorSamples.length > 0 && chartWindow.length > 1`): a custom metric's cadence is
+	// whatever the script recorded at, not the engine's.
 	const hasCustomMetricsData = useMemo(() => chartWindow.some(hasCustomMetrics), [chartWindow]);
 	const liveReceiveRate = useMemo(() => {
 		const bytesPerSecond = latestReceiveBytesPerSecond(chartWindow);
@@ -143,34 +137,30 @@ function MetricsView({
 	);
 
 	/*
-	 * Degradation windows, derived here beside the other series transforms rather
-	 * than inside `derived` below: that bundle deliberately depends on the latest
-	 * tick and not on the whole history array, so folding a history-wide scan into
-	 * it would rebuild it at 10 Hz and defeat the React.memo on HeroRow /
-	 * ModeStatsRow. The charts are the consumers, and they take it directly.
+	 * Degradation windows, derived here beside the other series transforms rather than inside
+	 * `derived` below: that bundle depends on the latest tick, not the whole history array, and
+	 * folding a history-wide scan into it would rebuild it at 10 Hz and defeat the React.memo on
+	 * HeroRow / ModeStatsRow. The charts consume it directly.
 	 *
-	 * The detector is held across commits rather than re-run from scratch on each
-	 * one. `chartWindow`'s identity changes every time the store appends a batch,
-	 * so a pure derivation re-derived the whole retained buffer twice a second -
-	 * a trailing-median sort per tick per series, ~9,000 of them at the default
-	 * window (#1151). Handed the same buffer again it takes only what arrived.
-	 * It answers exactly what the one-shot `detectAnomalies` would, including for
-	 * a buffer that is not a continuation (a second run, a remount), which it
-	 * starts over on - so nothing here depends on the instance surviving. Held in
-	 * `useState` rather than a ref because the state initialiser is the one hook
-	 * that runs exactly once without reading anything during render.
+	 * The detector is held across commits rather than re-run on each: `chartWindow`'s identity
+	 * changes every time the store appends a batch, so a pure derivation would re-derive the whole
+	 * retained buffer twice a second, a trailing-median sort per tick per series, ~9,000 at the
+	 * default window (#1151). Handed the same buffer again it takes only what arrived. It answers
+	 * exactly as the one-shot `detectAnomalies` would, including for a buffer that is no
+	 * continuation (a second run, a remount), which it starts over on, so nothing depends on the
+	 * instance surviving. `useState`, not a ref: the state initialiser is the one hook that runs
+	 * exactly once without reading anything during render.
 	 *
-	 * It reads the gate frames only, one a second like History's stored ticks,
-	 * since its rules count ticks (#2589). Filtered in a memo of its own so a
-	 * second render of one buffer still reaches the detector's memo.
+	 * It reads the gate frames only, one a second like History's stored ticks, as its rules count
+	 * ticks (#2589); filtered in a memo of its own so a second render of one buffer still reaches
+	 * the detector's memo.
 	 */
 	const [detector] = useState(createAnomalyDetector);
 	const detectorSeries = useMemo(() => wholeSecondTicks(chartWindow), [chartWindow]);
 	const anomalies = useMemo(() => detector.detect(detectorSeries), [detector, detectorSeries]);
 
-	// Read the monotonic aggregates from the store - they are folded into running
-	// values on each tick in addMetricsBatch, so this is O(1) per render instead
-	// of an O(n) scan over the full historicalMetrics buffer.
+	// The monotonic aggregates, folded into running values per tick in addMetricsBatch, so this is
+	// O(1) per render rather than an O(n) scan of the historicalMetrics buffer.
 	const peakConcurrency = useDashboardStore((s) => s.peakConcurrency);
 	const breakpoint = useDashboardStore((s) => s.breakpoint);
 	// The line drawn is the run's own, as in History (#2939): not `breakpoint.sloMs`,
@@ -450,10 +440,8 @@ function MetricsView({
 							<InfoChip tip={TOOLTIPS.statusCodesOverTime} />
 						</h2>
 						{/*
-						    Driven by `constants/http-status`, not a literal list. These
-						    five were hardcoded `hsl(var(--success))` strings, so when the
-						    chart moved onto the status token family every swatch silently
-						    became a different colour from the band it labels.
+						 * Driven by `constants/http-status`, not a literal list, so each swatch
+						 * stays the colour of the band it labels.
 						 */}
 						<div className="flex items-center gap-3.5 text-label font-mono text-muted-foreground">
 							{STATUS_CLASS_SERIES.map(({ label, cls }) => ({

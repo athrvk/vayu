@@ -27,12 +27,10 @@ bool breaches (const CapacityConfig& config, const CapacityWindow& window) {
 }
 
 /**
- * The history with each level represented once, by its *last* window.
- *
- * A held level appears twice - the window that breached and the re-measure
- * that cleared it - and the plateau check compares throughput across step-ups,
- * so counting a hold as a step would compare a level against itself and call
- * every re-measure a plateau.
+ * The history with each level once, by its last window. A held level appears
+ * twice (the breaching window and the clearing re-measure), and the plateau
+ * check compares throughput across step-ups, so counting a hold as a step would
+ * compare a level with itself and call every re-measure a plateau.
  */
 std::vector<CapacityWindow> per_level (const std::vector<CapacityWindow>& history) {
     std::vector<CapacityWindow> levels;
@@ -66,12 +64,12 @@ bool plateaued (const CapacityConfig& config, const std::vector<CapacityWindow>&
     return gain_pct < config.plateau_gain_pct;
 }
 
-/// The lowest healthy level that already delivered the plateau's throughput:
-/// the first whose rps the best healthy level exceeds by less than
-/// `plateau_gain_pct`. The gain is measured against the lower level, as
-/// `plateaued` measures it, so "plateaued" and "saturated here" agree. The
-/// levels past it add concurrency and latency, not throughput. A level with no
-/// positive rps has no percentage and cannot be the answer.
+/// The lowest healthy level already delivering the plateau's throughput: the
+/// first whose rps the best healthy level beats by less than
+/// `plateau_gain_pct`, measured against the lower level as `plateaued` measures
+/// it, so "plateaued" and "saturated here" agree. Levels past it add
+/// concurrency and latency, not throughput. A level with no positive rps has no
+/// percentage and cannot be the answer.
 std::optional<CapacityWindow> saturation_level (const CapacityConfig& config,
 const std::vector<CapacityWindow>& history) {
     const auto levels = per_level (history);
@@ -132,10 +130,9 @@ const std::vector<CapacityWindow>& history) {
         return { CapacityAction::Hold, last.concurrency, nullptr };
     }
 
-    // Plateau is checked before the cap because it says something about the
-    // *service* - it stopped converting concurrency into work - while the cap
-    // only says the search ran out of room the caller gave it. When both hold,
-    // the first is the more useful answer.
+    // Plateau before the cap: it says the service stopped converting
+    // concurrency into work, while the cap only says the search ran out of the
+    // room it was given. When both hold, the first is the more useful answer.
     if (plateaued (config, per_level (history))) {
         return { CapacityAction::Stop, last.concurrency, capacity_stop::PLATEAU };
     }
@@ -164,10 +161,10 @@ const char* stop_reason) {
         }
     }
 
-    // A knee is only ever reported for the stops that observed one. A run that
-    // ended at its cap, its deadline, or on a plateau inside the budget never
-    // saw the service give out, and naming its last level "the knee" would
-    // claim a limit nothing measured.
+    // A knee is reported only for stops that observed one. A run ending at its
+    // cap, its deadline, or on a plateau inside the budget never saw the
+    // service give out, and calling its last level "the knee" would claim a
+    // limit nothing measured.
     const bool gave_out = summary.stop_reason == capacity_stop::SLO_EXCEEDED ||
     summary.stop_reason == capacity_stop::ERRORS_EXCEEDED;
     if (gave_out && !history.empty ()) {
@@ -230,9 +227,9 @@ int64_t deadline_ms) {
     out.slo_breach_windows = defaults::SLO_BREACH_WINDOWS;
     out.max_error_pct      = defaults::ERROR_RATE_PCT;
 
-    // Read through an explicit type check rather than `json::value`, which
-    // *throws* on a key holding the wrong type. The route rejects those, but
-    // this also reads stored config snapshots, which no route ever saw.
+    // An explicit type check, not `json::value`, which throws on a wrong type.
+    // The route rejects those, but this also reads stored config snapshots no
+    // route saw.
     auto number = [&config] (const char* key, double fallback) {
         if (!config.is_object () || !config.contains (key) || !config[key].is_number ()) {
             return fallback;
@@ -243,13 +240,12 @@ int64_t deadline_ms) {
 
     out.slo_ms = number ("sloMs", static_cast<double> (defaults::SLO_MS));
 
-    // Clamped to the route's own connection guard *before* the cast, not after.
-    // Narrowing a double past `SIZE_MAX` to `size_t` is undefined behaviour, and
-    // finite-and-positive is not enough to rule it out: a hand-edited snapshot
-    // carrying `1e30` clears both checks and then converts to 0 or to some
-    // arbitrary huge value depending on the platform, so the search would run at
-    // a garbage level. The route rejects such a value with a 400, but this
-    // function is documented total over stored snapshots no route ever saw.
+    // Clamped to the route's connection guard before the cast: narrowing a
+    // double past `SIZE_MAX` to `size_t` is undefined behaviour, and
+    // finite-and-positive does not rule it out (a hand-edited snapshot's `1e30`
+    // passes both and converts to 0 or a garbage level, per platform). The
+    // route rejects such a value with a 400, but this function is documented
+    // total over stored snapshots no route saw.
     auto concurrency_level = [&number] (const char* key, double fallback) -> size_t {
         constexpr double kGuard =
         static_cast<double> (constants::run_config::MAX_CONCURRENCY);

@@ -6,28 +6,25 @@
  */
 
 /**
- * The renderer half of the system notifications (issue #1358).
+ * The renderer half of the system notifications (#1358).
  *
- * `electron/notify.ts` decides whether a notification can and should be shown -
- * the window's focus, the platform's support. This side decides what is worth
- * saying, and reads the one thing main cannot: the opt-in, which lives in a
- * localStorage-backed store the main process has no access to.
+ * `electron/notify.ts` decides whether a notification can and should be shown (the window's focus,
+ * the platform's support). This side decides what is worth saying, and reads the one thing main
+ * cannot: the opt-in, which lives in a localStorage-backed store the main process has no access to.
  *
- * The rule for what belongs here is in the issue, and it is about *when* the
- * user learns something, not how important it is. An event qualifies when it is
- * asynchronous, terminal, and may land while the user is in another
- * application: a run finishing, the engine dropping out, an update becoming
- * ready, a sign-in completing in the system browser. Everything else - copied,
- * saved, moved, switched - is immediate feedback for something the user just
- * did in a focused window, and the toast is the whole of it.
+ * The rule for what belongs here is on #1358, and it is about *when* the user learns something, not
+ * how important it is. An event qualifies when it is asynchronous, terminal, and may land while the
+ * user is in another application: a run finishing, the engine dropping out, an update becoming
+ * ready, a sign-in completing in the system browser. Everything else (copied, saved, moved,
+ * switched) is immediate feedback for something the user just did in a focused window, and the
+ * toast is the whole of it.
  *
- * `post` is fire-and-forget by design: no call site may await the OS to get on
- * with ending a run. A notification is never the only place an event is told:
- * each also shows in the window, so a build that cannot notify (see
- * `notify.ts` on what macOS authorizes) loses only the reach outside it. Most
- * are not toasts - a run ends in its own view and `RunAnnouncer`, the engine
- * on the Dock's dot, an update on its banner, a capture in its inbox - and only
- * a completed sign-in and a failed engine restart raise one.
+ * `post` is fire-and-forget by design: no call site may await the OS to get on with ending a run. A
+ * notification is never the only place an event is told: each also shows in the window, so a build
+ * that cannot notify (see `notify.ts` on what macOS authorizes) loses only the reach outside it.
+ * Most are not toasts (a run ends in its own view and `RunAnnouncer`, the engine on the Dock's dot,
+ * an update on its banner, a capture in its inbox); only a completed sign-in and a failed engine
+ * restart raise one.
  */
 
 import { useClientSettingsStore } from "@/stores";
@@ -86,13 +83,10 @@ function bridge(): Bridge | undefined {
 
 export const systemNotify = {
 	/**
-	 * Tell the user something happened, if they asked to hear about it while
-	 * they are elsewhere.
-	 *
-	 * The preference is read here rather than watched: it only has to be right
-	 * at the moment the event happens, and every caller is a service, a query
-	 * callback or an event handler with no hook to hang a subscription on -
-	 * the same reason `showToast` reads its own settings this way.
+	 * Tell the user something happened, if they asked to hear about it while they are elsewhere.
+	 * The preference is read here rather than watched: it only has to be right at the moment the
+	 * event happens, and every caller is a service, a query callback or an event handler with no
+	 * hook to hang a subscription on, the reason `showToast` reads its own settings this way too.
 	 */
 	post(request: NotifyRequest): void {
 		const api = bridge();
@@ -115,13 +109,10 @@ export const systemNotify = {
 	},
 
 	/**
-	 * Show one on purpose, because the user asked to see what these look like.
-	 *
-	 * Gated on the opt-in exactly like `post`: the panel already disables the
-	 * button while the setting is off, but that is a UI courtesy, not the
-	 * guarantee - a caller that reaches this directly must not be able to post
-	 * past a setting the user turned off. `null` outside Electron or with the
-	 * setting off.
+	 * Show one on purpose, because the user asked to see what these look like. Gated on the opt-in
+	 * exactly like `post`: the panel disables the button while the setting is off, but that is a UI
+	 * courtesy, not the guarantee; a caller that reaches this directly must not be able to post
+	 * past a setting the user turned off. `null` outside Electron or with the setting off.
 	 */
 	async sendTest(): Promise<SystemNotificationOutcome | null> {
 		if (!useClientSettingsStore.getState().systemNotifications) return null;

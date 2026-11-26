@@ -8,17 +8,15 @@
  */
 
 /**
- * @file http/transport_policy.hpp
- * @brief How an outbound transfer reaches the network (issue #705).
+ * @brief How an outbound transfer reaches the network (#705).
  *
  * One policy, resolved from settings at the point of use, applied by one
  * function (`detail::apply_transport_policy`). Every driver - the
  * single-request client, the load event loop and the SSE consumer - reads the
- * same struct, which is the whole point: building transport config per-driver
- * is how the SSE path came to have no proxy option at all while the other two
- * did. Phase 2 (#706) added the CA bundle to it and touched no driver, which
- * is the plumbing working as designed; phase 3's client certificates arrive
- * the same way.
+ * same struct, which is the whole point: transport config built per driver lets
+ * one driver lack an option the others have. A setting added here (the CA
+ * bundle, #706; the client certificates) reaches every driver with no driver
+ * change.
  */
 
 #include <array>
@@ -42,14 +40,14 @@ namespace vayu::http {
 enum class ProxyMode : std::uint8_t {
     /**
      * libcurl's own `http_proxy` / `https_proxy` / `no_proxy` environment
-     * pickup - the default, because it is the behaviour every shell and CI
-     * user already gets today by accident. Making it a named mode changes
-     * nothing for them and gives the other two something to be distinct from.
+     * pickup - the default, because it is what every shell and CI user gets
+     * from libcurl unasked. Naming it changes nothing for them and gives the
+     * other modes something to be distinct from.
      */
     Environment,
     /**
      * The proxy the operating system would use, as the app resolved it into
-     * `proxySystemUrl` (issue #708).
+     * `proxySystemUrl` (#708).
      *
      * The engine cannot resolve this itself: the OS answer lives behind
      * Chromium's network stack (and, on Windows and macOS, behind APIs the
@@ -105,8 +103,9 @@ std::optional<ProxyMode> proxy_mode_from_string (std::string_view value);
  * *name* the proxy a transfer went through. It says what libcurl would pick,
  * not whether it did: `no_proxy` is not consulted, and the caller pairs it with
  * `CURLINFO_USED_PROXY`. The variables and their order are libcurl's:
- * `https_proxy` for `https://`, `http_proxy` for `http://` (never the
- * uppercase spelling on POSIX; Windows names are case-insensitive), each then `all_proxy`; an empty value is unset.
+ * `https_proxy` for `https://`, `http_proxy` for `http://` (never the uppercase
+ * spelling on POSIX; Windows names are case-insensitive), each then
+ * `all_proxy`; an empty value is unset.
  */
 std::string environment_proxy_url (std::string_view target_url);
 
@@ -142,7 +141,7 @@ std::optional<std::string> proxy_url_rejection (std::string_view url);
 std::optional<std::string> proxy_bypass_rejection (std::string_view list);
 
 /**
- * @brief The shape a stored client identity is in (issue #833).
+ * @brief The shape a stored client identity is in (#833).
  *
  * A property of the *row*, not of the transfer: the applier runs on every
  * handle of every load run, so sniffing the file per send would pay for the
@@ -153,9 +152,9 @@ enum class ClientCertFormat : std::uint8_t {
     /// A PEM certificate with its key in a second file - libcurl's default.
     Pem,
     /// A PKCS#12 file carrying certificate *and* key, which libcurl reads only
-    /// when told `CURLOPT_SSLCERTTYPE` is `P12`. An OpenSSL-backed build - every
-    /// leg since #851 - reads both shapes; Schannel read only this one, which
-    /// is why the format is a stored column rather than an assumption.
+    /// when told `CURLOPT_SSLCERTTYPE` is `P12`. An OpenSSL-backed build (every
+    /// leg, #851) reads both shapes; Schannel reads only this one, which is why
+    /// the format is a stored column rather than an assumption.
     Pkcs12
 };
 
@@ -191,7 +190,7 @@ std::optional<ClientCertFormat> client_cert_format_from_string (std::string_view
 std::optional<ClientCertFormat> sniff_client_cert_format (std::string_view path);
 
 /**
- * @brief One registry row: the certificate a host is called with (issue #707).
+ * @brief One registry row: the certificate a host is called with (#707).
  *
  * A certificate is a property of *where you are calling*, not of one request -
  * which is why this is a registry keyed by host rather than a request field.
@@ -199,11 +198,11 @@ std::optional<ClientCertFormat> sniff_client_cert_format (std::string_view path)
  * fetch, a redirect, a script's `pm.sendRequest`), and none of those are places
  * a user can attach anything.
  *
- * **Paths, never contents.** The private key stays on disk where the user's
- * own tooling put it; the database holds the way to find it. That is the
- * strongest storage decision available without a keystore, and it is the one
- * asymmetry worth stating out loud: `passphrase` below *is* stored, in
- * plaintext, on the repo's existing credential precedent (#704 decision 6).
+ * **Paths, never contents.** The private key stays on disk where the user's own
+ * tooling put it; the database holds the way to find it. That is the strongest
+ * storage decision available without a keystore, with one asymmetry:
+ * `passphrase` below *is* stored, in plaintext, on the repo's existing
+ * credential precedent (#704 decision 6).
  */
 struct ClientCertRule {
     /// Engine-assigned id of the `client_certificates` row this came from.
@@ -216,12 +215,12 @@ struct ClientCertRule {
      * without its brackets, again because that is the form the parser yields,
      * and a non-ASCII name in its punycode form, for the same reason.
      *
-     * **Or one wildcard** (issue #803), written `*.example.com` and read as a
-     * label suffix: it answers for `api.example.com` and `a.b.example.com`,
-     * never for `example.com` itself and never for `notexample.com`. That is
-     * the whole syntax - a `*` anywhere else is refused at write time rather
-     * than stored as a hostname no transfer can equal. A wildcard never answers
-     * for an address literal, which only an exact entry matches.
+     * **Or one wildcard** (#803), written `*.example.com` and read as a label
+     * suffix: it answers for `api.example.com` and `a.b.example.com`, never for
+     * `example.com` itself and never for `notexample.com`. That is the whole
+     * syntax - a `*` anywhere else is refused at write time rather than stored
+     * as a hostname no transfer can equal. A wildcard never answers for an
+     * address literal, which only an exact entry matches.
      */
     std::string host;
 
@@ -241,12 +240,11 @@ struct ClientCertRule {
     std::string key_path;
 
     /// What `cert_path` holds, and so what `CURLOPT_SSLCERTTYPE` says (#833).
-    /// Defaulted to `Pem` because that is what every row written before the
-    /// field existed is - the same value the column backfills to.
+    /// Defaults to `Pem`, the value the column backfills older rows to.
     ClientCertFormat format = ClientCertFormat::Pem;
 
     /// The key's passphrase, empty when it has none. Stored plaintext - see the
-    /// struct comment and `docs/engine/db-schema.md`.
+    /// struct comment and `docs/engine/db-schema/credentials-and-files.md`.
     std::string passphrase;
 };
 
@@ -269,9 +267,8 @@ std::string client_cert_label (std::string_view host, const std::optional<int>& 
  * can never work - a host carrying a scheme, a port outside 1..65535, a
  * certificate or key file this process cannot open - because every one of those
  * surfaces at handshake time as a TLS error that names the endpoint rather than
- * the setting, which is the shape this epic exists to stop. A `*` that is not
- * the `*.example.com` form is refused for the same reason (#803): it would
- * store as a hostname no transfer can ever equal.
+ * the setting. A `*` that is not the `*.example.com` form is refused for the
+ * same reason (#803): it would store as a hostname no transfer can ever equal.
  *
  * @p format decides what a *complete* entry is (#833): a `Pem` row needs its
  * key file and a `Pkcs12` row must not name one, because the bundle carries the
@@ -333,7 +330,7 @@ struct TransportPolicy {
 
     /**
      * The materialized CA bundle `CURLOPT_CAINFO` points at, empty when the
-     * user has added no certificate of their own (issue #706).
+     * user has added no certificate of their own (#706).
      *
      * A *path*, because that is the only shape libcurl takes - but what the
      * user stores is the PEM *content* (`customCaCertificates`), and this file
@@ -348,15 +345,15 @@ struct TransportPolicy {
     std::string ca_bundle_path;
 
     /**
-     * The client-certificate registry as it stood when this policy was
-     * resolved (issue #707), empty when the user has registered none.
+     * The client-certificate registry as it stood when this policy was resolved
+     * (#707), empty when the user has registered none.
      *
-     * The *whole* registry travels with the policy rather than one
-     * pre-selected certificate, because one policy serves many hosts: a load
-     * run has one target but a scenario run walks a collection, a script's
-     * `pm.sendRequest` dials wherever it likes, and a redirect can leave the
-     * host the run started on. Matching therefore happens per transfer, and
-     * per redirect hop on a design send, which follows one transfer per hop
+     * The *whole* registry travels with the policy rather than one pre-selected
+     * certificate, because one policy serves many hosts: a load run has one
+     * target but a scenario run walks a collection, a script's `pm.sendRequest`
+     * dials wherever it likes, and a redirect can leave the host the run
+     * started on. Matching therefore happens per transfer, and per redirect hop
+     * on a design send, which follows one transfer per hop
      * (`match_client_certificate`) while the *reading* happens once - which is
      * the load path's rule from #704 decision 3 kept without giving the hot
      * path a database.
@@ -367,7 +364,7 @@ struct TransportPolicy {
 /**
  * @brief The registry entry that answers for @p host on @p port, or null.
  *
- * Most specific wins, in three tiers (issue #803): the closest *host* first -
+ * Most specific wins, in three tiers (#803): the closest *host* first -
  * an exact entry beats every wildcard, and a longer wildcard beats a shorter
  * one - then the port, where an entry naming this exact port beats one that
  * answers for the host on any port.
@@ -375,8 +372,8 @@ struct TransportPolicy {
  * That order is total, so the answer never depends on the order the rows come
  * back in: two rules that rank equally would have to name the same host and the
  * same port, and `reject_duplicate_target` answers the second such write with a
- * 409. There is deliberately no tie-break beyond it - a rule nobody could
- * predict from the card is the thing this ranking replaces, not adds.
+ * 409. There is deliberately no tie-break beyond it: a rule nobody could
+ * predict from the card is what the ranking exists to rule out.
  *
  * @param host Lower-cased hostname, as `parse_authority` yields it.
  * @param port The port the transfer dials, scheme default included - never 0,
@@ -414,22 +411,21 @@ std::optional<std::string> ca_pem_rejection (std::string_view pem);
 std::optional<std::string> ca_pem_parse_rejection (std::string_view pem);
 
 /**
- * @brief The trust anchors this platform verifies with today, as PEM text.
+ * @brief The trust anchors this platform verifies with, as PEM text.
  *
  * Empty when they cannot be read as a file - which is the normal case on
- * Windows, which ships its anchors in a certificate store and no PEM bundle
- * for anything to read. Every leg is OpenSSL-backed since #851 - macOS
- * included, which this comment denied until #818 - so Linux and macOS return
- * *content* and the merge in `resolve_transport_policy` does real work there
- * rather than the no-op that reading implied, while on Windows the anchors
+ * Windows, which ships its anchors in a certificate store and no PEM bundle for
+ * anything to read. Every leg is OpenSSL-backed (#851), macOS included (#818),
+ * so Linux and macOS return *content* and the merge in
+ * `resolve_transport_policy` does real work there, while on Windows the anchors
  * reach libcurl through `CURLSSLOPT_NATIVE_CA` instead and the materialized
  * bundle carries the user's paste alone. macOS also sets that flag on every
  * handle, so the Keychain backs the file whether or not anything is pasted.
  * `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts each of those on
- * the leg it applies to, because a build that finds nothing here *and* does
- * not load the store would narrow the user's trust to their own paste.
- * Exposed for the tests and for the per-platform disclosure in the docs;
- * production code reaches it through `resolve_transport_policy`.
+ * the leg it applies to, because a build that finds nothing here *and* does not
+ * load the store would narrow the user's trust to their own paste. Exposed for
+ * the tests and for the per-platform disclosure in the docs; production code
+ * reaches it through `resolve_transport_policy`.
  */
 std::string system_ca_bundle_pem ();
 
@@ -440,9 +436,8 @@ std::string system_ca_bundle_pem ();
  * `read_sse_limits` is, so a settings change applies to the next transfer
  * without a restart. A value no `POST /config` would have accepted can still
  * reach here from a hand-edited row; each one is logged and replaced with the
- * default rather than trusted, because a malformed `proxyUrl` silently
- * becomes "no proxy" and that is the failure this whole issue exists to stop
- * being invisible.
+ * default rather than trusted, because a malformed `proxyUrl` would silently
+ * become "no proxy", the invisible failure this policy exists to end.
  */
 TransportPolicy resolve_transport_policy (vayu::db::Database& db);
 

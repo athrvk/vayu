@@ -14,15 +14,13 @@
 const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
 
 /**
- * `ipcRenderer.invoke` wraps a handler's rejection in its own sentence -
- * `Error invoking remote method '<channel>': Error: <message>` - which is
- * Electron's doing, not this preload's. `readDataFile`, `hashDataFile` (for a
- * refused request), `readSpecFile` and `saveFile` throw already-clean, user-facing
- * messages on the main-process side (`data-file.ts`, `spec-file.ts` - a
- * missing file, an over-cap document, a refused extension), so callers on the
- * renderer side (`read-declared.ts`, `ImportModal.tsx`) can show them as-is.
- * Left wrapped, that promise breaks: this strips Electron's own prefix back
- * off so the message a caller sees is the one the handler actually threw.
+ * `ipcRenderer.invoke` wraps a handler's rejection in its own sentence,
+ * `Error invoking remote method '<channel>': Error: <message>`, which is Electron's doing, not this
+ * preload's. `readDataFile`, `hashDataFile` (for a refused request), `readSpecFile` and `saveFile`
+ * throw clean, user-facing messages on the main-process side (`data-file.ts`, `spec-file.ts`: a
+ * missing file, an over-cap document, a refused extension), so renderer callers
+ * (`read-declared.ts`, `ImportModal.tsx`) can show them as-is. Left wrapped, that promise breaks,
+ * so this strips Electron's own prefix back off.
  */
 function unwrapIpcError(error: unknown): Error {
 	const message = error instanceof Error ? error.message : String(error);
@@ -31,9 +29,8 @@ function unwrapIpcError(error: unknown): Error {
 }
 
 /**
- * What the renderer's before-quit flush reports. Mirrors `FlushResult` in
- * electron/save-flush.ts, inlined because this file is a CommonJS script and
- * must not grow imports.
+ * What the renderer's before-quit flush reports. Mirrors `FlushResult` in electron/save-flush.ts,
+ * inlined because this file is a CommonJS script and must not grow imports.
  */
 interface FlushResult {
 	saved: number;
@@ -147,22 +144,19 @@ type EngineLifecyclePayload =
 	  };
 
 /**
- * The channel a picked file's path is reported to main on (#2356). Main's
- * spelling is `FILE_PICKED_CHANNEL` in electron/file-grants.ts, which this
- * CommonJS script cannot import; `preload-grant-channel.test.ts` holds the two
- * together.
+ * The channel a picked file's path is reported to main on (#2356). Main's spelling is
+ * `FILE_PICKED_CHANNEL` in electron/file-grants.ts, which this CommonJS script cannot import;
+ * `preload-grant-channel.test.ts` holds the two together.
  */
 const FILE_PICKED_CHANNEL = "file:picked";
 
 /**
- * The path `webUtils` gives a `File`, reported to main as one a person picked.
- *
- * The report is what makes the engine send the file (main records it with
- * `POST /file-grants`), so it must carry only a path Chromium vouches for: a
- * `File` reaches the page only through a file chooser or a drop, and
- * `getPathForFile` answers "" for one the page built itself. The channel is
- * therefore sent from here and nowhere else, never with a string a caller
- * passed in; `preload-grant-channel.test.ts` fails if any other send appears.
+ * The path `webUtils` gives a `File`, reported to main as one a person picked. The report is what
+ * makes the engine send the file (main records it with `POST /file-grants`), so it must carry only
+ * a path Chromium vouches for: a `File` reaches the page only through a file chooser or a drop, and
+ * `getPathForFile` answers "" for one the page built itself. So the channel is sent from here and
+ * nowhere else, never with a string a caller passed in; `preload-grant-channel.test.ts` fails if
+ * any other send appears.
  */
 function pathOfPickedFile(file: File): string {
 	let picked: string;
@@ -188,17 +182,16 @@ function enginePortFromArgv(argv: readonly string[]): number | null {
 }
 
 /**
- * Writes what a `file:` build persisted into this origin, once, before any
- * page script reads it (#2380). Main appends the flag only while it holds the
- * entries; it filtered them to `vayu*` keys. A key this origin already has is
- * overwritten: 0.46.0 shipped without this hand-off, and what it wrote since is
- * almost all first-launch defaults (#3021). The report is what tells main the hand-off is complete.
+ * Writes what a `file:` build persisted into this origin, once, before any page script reads it
+ * (#2380). Main appends the flag only while it holds the entries, already filtered to `vayu*` keys.
+ * A key this origin already has is overwritten: 0.46.0 shipped without this hand-off, and what it
+ * wrote since is almost all first-launch defaults (#3021). The report is what tells main the
+ * hand-off is complete.
  *
- * The flag and both channels mirror `LEGACY_STORAGE_ARG`,
- * `LEGACY_STORAGE_TAKE_CHANNEL` and `LEGACY_STORAGE_TAKEN_CHANNEL` in
- * electron/legacy-storage-migration.ts, inlined because this file is a
- * CommonJS script and must not grow imports; that module's test holds them
- * together. Retired with that module.
+ * The flag and both channels mirror `LEGACY_STORAGE_ARG`, `LEGACY_STORAGE_TAKE_CHANNEL` and
+ * `LEGACY_STORAGE_TAKEN_CHANNEL` in electron/legacy-storage-migration.ts, inlined because this file
+ * is a CommonJS script and must not grow imports; that module's test holds them together. Retired
+ * with that module.
  */
 function adoptLegacyStorage(argv: readonly string[]): void {
 	if (!argv.includes("--vayu-legacy-storage")) return;
@@ -219,8 +212,7 @@ function adoptLegacyStorage(argv: readonly string[]): void {
 
 adoptLegacyStorage(process.argv);
 
-// Expose protected methods that allow the renderer process to use
-// ipcRenderer without exposing the entire object
+// What the renderer may call: named methods over `ipcRenderer`, never the object itself.
 contextBridge.exposeInMainWorld("electronAPI", {
 	// Engine management
 	enginePort: enginePortFromArgv(process.argv),
@@ -349,16 +341,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("window:maximized", handler);
 	},
 
-	// Context menu (#1359). The main process composes it from Chromium's own
-	// editing state; these two carry the half only the renderer knows.
+	// Context menu (#1359): the main process composes it from Chromium's own editing state, and
+	// these two carry the half only the renderer knows.
 	//
-	// Synchronous, and the only `sendSync` a page can reach (the preload's
-	// other is `adoptLegacyStorage`, once, at load): this is called from a
-	// `contextmenu` listener, and blocking there until the main
-	// process has the announcement is what pairs it with the `context-menu`
-	// event that follows. The shape mirrors `ContextTarget` in
-	// electron/context-menu.ts, inlined because this file is a CommonJS script
-	// and must not grow imports.
+	// Synchronous, and the only `sendSync` a page can reach (the preload's other is
+	// `adoptLegacyStorage`, once, at load): it is called from a `contextmenu` listener, and
+	// blocking there until the main process has the announcement is what pairs it with the
+	// `context-menu` event that follows. The shape mirrors `ContextTarget` in
+	// electron/context-menu.ts, inlined because this file is a CommonJS script and must not grow
+	// imports.
 	setContextTarget: (target: {
 		kind: "url-bar" | "monaco" | null;
 		variable: string | null;
@@ -434,11 +425,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// Interface scale - real page zoom (reflows the viewport).
 	setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
 
-	// View → Zoom In / Zoom Out / Actual Size. The menu items carry no zoom of
-	// their own: they ask the renderer to move its persisted interface-scale
-	// setting, which is what then applies the zoom. Without that indirection the
-	// accelerators compounded Chromium zoom on top of the setting and were lost
-	// on the next launch.
+	// View → Zoom In / Zoom Out / Actual Size. The menu items carry no zoom of their own: they ask
+	// the renderer to move its persisted interface-scale setting, which then applies the zoom, so
+	// the accelerators neither compound Chromium zoom on top of the setting nor lose it on the next
+	// launch.
 	onZoomCommand: (callback: (command: "in" | "out" | "reset") => void) => {
 		const handler = (_event: unknown, command: "in" | "out" | "reset") => callback(command);
 		ipcRenderer.on("menu:zoom", handler);
@@ -463,12 +453,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		key: "docs" | "scripting" | "mcp" | "pmApiCompatibility" | "issues"
 	): Promise<void> => ipcRenderer.invoke("shell:openAppLink", key),
 
-	// Open an arbitrary http(s) URL in the system browser. The main handler
-	// validates the scheme and refuses everything else, so this does not hand the
-	// web layer a general "launch any protocol handler" capability.
-	//
-	// Used by the OAuth authorize flow and by links inside rendered markdown -
-	// the latter being why it is no longer named after OAuth.
+	// Open an arbitrary http(s) URL in the system browser, for the OAuth authorize flow and links
+	// inside rendered markdown. The main handler validates the scheme and refuses everything else,
+	// so this does not hand the web layer a general "launch any protocol handler" capability.
 	openExternalUrl: (url: string): Promise<void> =>
 		ipcRenderer.invoke("shell:openExternalUrl", url),
 
@@ -505,12 +492,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		fields?: Record<string, unknown>;
 	}): void => ipcRenderer.send("log:record", record),
 
-	// The Logs tab's reader over `<data-dir>/logs/` (#3635). Nothing here names a
-	// path: `read` takes a filter, a limit and a cursor an earlier read returned.
-	// Every call rejects, with the message main threw, when the sender is not the
-	// app window or the payload is malformed. `tailStart` replaces this window's
-	// tail; the records it follows arrive on `onRecords`, which returns its own
-	// unsubscribe. The shapes mirror `log-reader.ts` and `log-reader-ipc.ts`,
+	// The Logs tab's reader over `<data-dir>/logs/` (#3635). Nothing here names a path: `read`
+	// takes a filter, a limit and a cursor an earlier read returned. Every call rejects, with the
+	// message main threw, when the sender is not the app window or the payload is malformed.
+	// `tailStart` replaces this window's tail; the records it follows arrive on `onRecords`, which
+	// returns its own unsubscribe. The shapes mirror `log-reader.ts` and `log-reader-ipc.ts`,
 	// inlined because this file is a CommonJS script and must not grow imports.
 	logs: {
 		list: (): Promise<LogFileInfoShape[]> =>
@@ -536,22 +522,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		},
 	},
 
-	// The absolute path of a `File` the user picked or dropped, for a body file:
-	// the engine opens the file itself, so the renderer needs its path and never
-	// its bytes. Empty when the object is not a real file (a drag-and-drop of
-	// remote content), which the caller reports rather than sending a phantom
-	// path. A path is also reported to main as picked (#2356) - see
-	// `pathOfPickedFile` above for why that cannot be used to name one.
+	// The absolute path of a `File` the user picked or dropped, for a body file: the engine opens
+	// the file itself, so the renderer needs its path and never its bytes. Empty when the object is
+	// not a real file (a drag-and-drop of remote content), which the caller reports rather than
+	// sending a phantom path. The path is also reported to main as picked (#2356);
+	// `pathOfPickedFile` says why that cannot be used to name one.
 	getFilePath: (file: File): string => pathOfPickedFile(file),
 
-	// The system folder picker, for Settings > Files, the body editor's "Allow
-	// folder..." and the import preview. Main allows the chosen folder itself
-	// (`POST /file-roots` with the grant secret, #2356) and answers what the
-	// engine said, so the renderer never names a folder to allow. It names the
-	// dialog by key too, not its title or starting folder (#2378). The key and
-	// the shape mirror `FolderDialogKey` and `AllowFolderReply` in
-	// electron/file-ipc.ts, inlined because this file is a CommonJS script and
-	// must not grow imports.
+	// The system folder picker, for Settings > Files, the body editor's "Allow folder..." and the
+	// import preview. Main allows the chosen folder itself (`POST /file-roots` with the grant
+	// secret, #2356) and answers what the engine said, so the renderer never names a folder to
+	// allow, nor the dialog's title or starting folder: it names the dialog by key (#2378). The key
+	// and the shape mirror `FolderDialogKey` and `AllowFolderReply` in electron/file-ipc.ts,
+	// inlined because this file is a CommonJS script and must not grow imports.
 	allowFolder: (
 		key: "allow-folder"
 	): Promise<
@@ -581,14 +564,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	statFile: (path: string): Promise<{ size: number; mtimeMs: number } | null> =>
 		ipcRenderer.invoke("file:stat", path),
 
-	// Write an export to the path the user picks in the system save dialog, and
-	// say whether it was written (#3246). The renderer suggests a file name and
-	// main keeps only its last segment; the dialog opens in Downloads. A reply
-	// names the file the user chose, not the suggestion (#3607). Rejects,
-	// before any dialog, when the sender is not the app window or the arguments
-	// are not text-or-bytes and a name. The shape mirrors `SaveFileReply` in
-	// electron/save-file-ipc.ts, inlined because this file is a CommonJS script
-	// and must not grow imports.
+	// Write an export to the path the user picks in the system save dialog, and say whether it was
+	// written (#3246). The renderer suggests a file name and main keeps only its last segment; the
+	// dialog opens in Downloads. A reply names the file the user chose, not the suggestion (#3607).
+	// Rejects, before any dialog, when the sender is not the app window or the arguments are not
+	// text-or-bytes and a name. The shape mirrors `SaveFileReply` in electron/save-file-ipc.ts,
+	// inlined because this file is a CommonJS script and must not grow imports.
 	saveFile: (
 		contents: string | Uint8Array,
 		suggestedName: string
@@ -601,27 +582,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
 			throw unwrapIpcError(e);
 		}),
 
-	// Re-read a collection's declared data file by path (issue #599) - a channel
-	// on which the renderer names a path, because the Run dialog has to re-open a
-	// file the user picked in an earlier session and the `File` is long gone.
-	// Gated in the main process: an extension allowlist, the grant registry (the
-	// file must have been picked, dropped or opened through the app, #2357; a
-	// refusal rejects with a "pick the file again" message) and the engine's
-	// fetched byte cap; see electron/data-file.ts. Bytes, not text: the renderer
-	// decodes with the same module the picker uses, so the two paths cannot
-	// disagree about a file.
-	// `hash` is the SHA-256 of those bytes (issue #2051), what a run records.
+	// Re-read a collection's declared data file by path (#599): a channel on which the renderer
+	// names a path, because the Run dialog has to re-open a file the user picked in an earlier
+	// session and the `File` is long gone. Gated in the main process by an extension allowlist, the
+	// grant registry (the file must have been picked, dropped or opened through the app, #2357; a
+	// refusal rejects with a "pick the file again" message) and the engine's fetched byte cap; see
+	// electron/data-file.ts. Bytes, not text: the renderer decodes with the module the picker uses,
+	// so the two paths cannot disagree about a file. `hash` is the SHA-256 of those bytes (#2051),
+	// what a run records.
 	readDataFile: (path: string): Promise<{ bytes: Uint8Array; fileName: string; hash: string }> =>
 		ipcRenderer.invoke("dataFile:read", path).catch((e: unknown) => {
 			throw unwrapIpcError(e);
 		}),
 
-	// The same file's SHA-256 as it is now, without carrying its bytes (issue
-	// #2051): what a run's `dataFileHash` is compared against. Same gates. A file
-	// that is no longer at the path, or was never granted, resolves
-	// `{ status: "missing" }` (#2057) and does not reject: an IPC rejection
-	// arrives as a bare message (see `unwrapIpcError`), so the renderer could not
-	// tell "gone" from "refused".
+	// The same file's SHA-256 as it is now, without carrying its bytes (#2051): what a run's
+	// `dataFileHash` is compared against. Same gates. A file no longer at the path, or never
+	// granted, resolves `{ status: "missing" }` (#2057) rather than rejecting: an IPC rejection
+	// arrives as a bare message (see `unwrapIpcError`), so the renderer could not tell "gone" from
+	// "refused".
 	hashDataFile: (
 		path: string
 	): Promise<{ status: "found"; hash: string } | { status: "missing" }> =>
@@ -640,15 +618,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// (#2045). One-way; the main process rebuilds the payload (app-focus.ts).
 	publishAppFocus: (focus: unknown): void => ipcRenderer.send("app:focus", focus),
 
-	// Read a file an imported OpenAPI document references (issue #649). Two
-	// arguments and not a composed path: the renderer holds the document's path
-	// and the ref's text, and the main process resolves one against the other, so
-	// this channel reads files a *document* named rather than paths the web layer
-	// built. The document itself must be a file the user picked, dropped or
-	// opened (#2357); an ungranted one rejects with a "pick the file again"
-	// message. Also gated by the extension allowlist and the engine's fetched
-	// `maxSpecDocumentBytes`; bytes, not text, for the same reason `readDataFile`
-	// returns bytes.
+	// Read a file an imported OpenAPI document references (#649). Two arguments, not a composed
+	// path: the renderer holds the document's path and the ref's text, and the main process
+	// resolves one against the other, so this channel reads files a *document* named rather than
+	// paths the web layer built. The document itself must be a file the user picked, dropped or
+	// opened (#2357); an ungranted one rejects with a "pick the file again" message. Also gated by
+	// the extension allowlist and the engine's fetched `maxSpecDocumentBytes`; bytes, not text, for
+	// the reason `readDataFile` returns bytes.
 	readSpecFile: (
 		specPath: string,
 		refPath: string
@@ -657,19 +633,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
 			throw unwrapIpcError(e);
 		}),
 
-	// Re-resolve the operating system's proxy and push it to the engine (#708).
-	// The renderer asks for this when it has reason to think the answer moved -
-	// the browser's own `online` event, or a user arriving at the network
-	// settings - and the main process, which owns the only Chromium session
-	// that can answer, does the resolving. Resolves to the proxy URL now in
-	// force, "" for a direct configuration, or null when it could not be asked.
+	// Re-resolve the operating system's proxy and push it to the engine (#708). The renderer asks
+	// when it has reason to think the answer moved (the browser's own `online` event, or a user
+	// arriving at the network settings), and the main process, which owns the only Chromium session
+	// that can answer, does the resolving. Resolves to the proxy URL now in force, "" for a direct
+	// configuration, or null when it could not be asked.
 	refreshSystemProxy: (): Promise<string | null> => ipcRenderer.invoke("proxy:refreshSystem"),
 
-	// System wake lock, held while a run streams (#1357). Token-based: the main
-	// process ref-counts the holds and only the token taken here releases one, so
-	// two overlapping runs cannot drop each other's lock. Main also drops a
-	// renderer's holds when it goes away or reloads, which is the case a token
-	// cannot cover.
+	// System wake lock, held while a run streams (#1357). Token-based: the main process ref-counts
+	// the holds and only the token taken here releases one, so two overlapping runs cannot drop
+	// each other's lock. Main also drops a renderer's holds when it goes away or reloads, the case
+	// a token cannot cover.
 	holdWakeLock: (reason: string): Promise<string> => ipcRenderer.invoke("power:hold", reason),
 	releaseWakeLock: (token: string): Promise<boolean> =>
 		ipcRenderer.invoke("power:release", token),
@@ -688,24 +662,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("power:resumed", handler);
 	},
 
-	// A run's progress on the taskbar button and the Dock icon (#1362). One-way
-	// and unacknowledged: this is painted at most twice a second off the metrics
-	// flush, an answer would tell the renderer nothing it acts on, and a run must
-	// never wait on the OS to draw. `value` is null for a run with no
-	// denominator; main decides what each platform makes of that.
+	// A run's progress on the taskbar button and the Dock icon (#1362). One-way and unacknowledged:
+	// it is painted at most twice a second off the metrics flush, an answer would tell the renderer
+	// nothing it acts on, and a run must never wait on the OS to draw. `value` is null for a run
+	// with no denominator; main decides what each platform makes of that.
 	setRunProgress: (update: {
 		state: "running" | "failed" | "idle";
 		value?: number | null;
 	}): void => ipcRenderer.send("runs:progress", update),
 
-	// What the Dock and taskbar icon carries, and what its menu offers (#1364).
-	// One-way for the same reason as the progress bar: nothing the OS answers
-	// would change what the renderer does. The renderer reports what happened -
-	// a capture landed, the Inbox was opened, a run failed, these are the
-	// collections it has been in - and main decides whether the user is looking
-	// and what this platform can show. The shapes mirror `OsIconSignal` in
-	// `electron/os-icon.ts`, inlined because this file is a CommonJS script and
-	// must not grow imports.
+	// What the Dock and taskbar icon carries, and what its menu offers (#1364). One-way for the
+	// progress bar's reason: nothing the OS answers would change what the renderer does. The
+	// renderer reports what happened (a capture landed, the Inbox was opened, a run failed, these
+	// are the collections it has been in), and main decides whether the user is looking and what
+	// this platform can show. The shapes mirror `OsIconSignal` in `electron/os-icon.ts`, inlined
+	// because this file is a CommonJS script and must not grow imports.
 	setOsIconSignal: (
 		signal:
 			| { kind: "captured" }
@@ -738,11 +709,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("intent:open", handler);
 	},
 
-	// What the engine is holding for this window - inboxes, mock servers, mock
-	// issuers (#1363). Sent on every change so the close that would stop them can
-	// name them without asking anything while the user waits; the shape mirrors
-	// `RunningService` in `electron/service-stop-guard.ts`, inlined because this
-	// file is a CommonJS script and must not grow imports.
+	// What the engine is holding for this window (inboxes, mock servers, mock issuers, #1363), sent
+	// on every change so the close that would stop them can name them without asking anything while
+	// the user waits. The shape mirrors `RunningService` in `electron/service-stop-guard.ts`,
+	// inlined because this file is a CommonJS script and must not grow imports.
 	setRunningServices: (
 		services: Array<{
 			kind: "inbox" | "mock-server" | "issuer";
@@ -757,13 +727,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	setLiveRun: (run: { kind: "load" | "collection"; label: string | null } | null): void =>
 		ipcRenderer.send("runs:live", run),
 
-	// System notifications for what finishes while the user is elsewhere
-	// (#1358). The renderer sends what happened; main decides whether to post
-	// it - the window's focus and the platform's support are its to answer -
-	// and resolves with what became of it. `notificationAvailability` is what
-	// the settings row asks before saying the toggle works on this build: a
-	// macOS bundle the OS will not authorize cannot show one, and says so after
-	// the first try.
+	// System notifications for what finishes while the user is elsewhere (#1358). The renderer
+	// sends what happened; main decides whether to post it (the window's focus and the platform's
+	// support are its to answer) and resolves with what became of it. `notificationAvailability` is
+	// what the settings row asks before saying the toggle works on this build: a macOS bundle the
+	// OS will not authorize cannot show one, and says so after the first try.
 	showNotification: (request: {
 		kind: string;
 		title: string;
@@ -776,11 +744,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	}): Promise<string> => ipcRenderer.invoke("notify:show", request),
 	notificationAvailability: (): Promise<{ available: boolean; reason: string | null }> =>
 		ipcRenderer.invoke("notify:availability"),
-	// Post one on purpose, from the settings row. Unlike every other path this
-	// one ignores both the focus check and the opt-in - the user is looking at
-	// the panel when they press it, and a test is how they decide whether to
-	// turn the setting on. Resolves with what the OS did, not with what was
-	// attempted: a refusal arrives after the call and is what this waits for.
+	// Post one on purpose, from the settings row. Unlike every other path it ignores both the focus
+	// check and the opt-in: the user is looking at the panel when they press it, and a test is how
+	// they decide whether to turn the setting on. Resolves with what the OS did, not what was
+	// attempted; a refusal arrives after the call and is what this waits for.
 	sendTestNotification: (): Promise<string> => ipcRenderer.invoke("notify:test"),
 	// A notification was clicked. Carries what it was about, so the renderer can
 	// open it - main has no opinion about the app's own surfaces.
@@ -809,10 +776,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		return () => ipcRenderer.removeListener("notify:activated", handler);
 	},
 
-	// Before quit flush handler. ACKs main once the callback settles, with the
-	// outcome the callback reports, so quit can resume immediately instead of
-	// waiting out the fallback timeout - and so a failed or incomplete flush is
-	// not read as a clean one (#1489). The flush id main sent is echoed back
+	// Before-quit flush handler. ACKs main once the callback settles, with the outcome the callback
+	// reports, so quit can resume at once instead of waiting out the fallback timeout, and a failed
+	// or incomplete flush is not read as a clean one (#1489). The flush id main sent is echoed back
 	// untouched: main drops an ACK whose id is not the flush in flight (#3335).
 	onBeforeQuit: (callback: () => Promise<FlushResult>) => {
 		const handler = async (_event: unknown, flushId: unknown) => {

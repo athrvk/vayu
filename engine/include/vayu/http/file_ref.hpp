@@ -8,7 +8,6 @@
  */
 
 /**
- * @file file_ref.hpp
  * @brief Whether a file a request body names may be sent, and what it holds.
  *
  * Two body shapes name a file on this machine: a `binary` body (`Body::file`)

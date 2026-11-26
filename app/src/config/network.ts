@@ -6,14 +6,11 @@
  */
 
 /**
- * UI-to-Engine Network Configuration
- *
- * The engine sidecar listens on 9876 unless another program holds it, in which
- * case the main process picks a fallback and tells the renderer once, as
- * `electronAPI.enginePort` (#2118; the candidate list is
- * app/electron/constants.ts, which the main process owns because it cannot
- * import renderer modules). The preload sets that value before any renderer
- * script runs, so resolving it at module load is complete.
+ * The engine sidecar listens on 9876 unless another program holds it; then the main process picks a
+ * fallback and tells the renderer once, as `electronAPI.enginePort` (#2118; the candidate list is
+ * app/electron/constants.ts, which the main process owns because it cannot import renderer
+ * modules). The preload sets that value before any renderer script runs, so resolving it at module
+ * load is complete.
  */
 
 /** The engine's default port, and the answer wherever there is no preload. */
@@ -41,20 +38,17 @@ export const ENGINE_BASE_URL = `http://${ENGINE_HOST}:${ENGINE_PORT}`;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
- * Calls that proxy a remote server (/execute, /oauth2/token) are bounded by
- * the engine's user-configurable `defaultTimeout` setting, not this client.
- * The UI timeout for those calls is derived as engine timeout + grace so the
- * engine's own TIMEOUT error (with proper error code) always arrives before
+ * Calls that proxy a remote server (/execute, /oauth2/token) are bounded by the engine's
+ * user-configurable `defaultTimeout` setting, not by this client: their UI timeout is engine
+ * timeout + grace, so the engine's own TIMEOUT error (with its error code) always arrives before
  * the UI aborts. `/import/fetch` is bounded by the engine's fixed stall
- * (`IMPORT_FETCH_STALL_TIMEOUT_MS`), not the setting, and takes the same grace
- * on top of that.
+ * (`IMPORT_FETCH_STALL_TIMEOUT_MS`), not the setting, and takes the same grace on top.
  */
 export const PROXIED_TIMEOUT_GRACE_MS = 10_000;
 
 /**
  * Upper bound of the engine's `defaultTimeout` setting (see
- * engine/src/db/database.cpp seed_default_config). Used as a safe fallback
- * when the config cache is cold.
+ * engine/src/db/config_seeds/network.cpp), the safe fallback while the config cache is cold.
  */
 export const ENGINE_MAX_DEFAULT_TIMEOUT_MS = 300_000;
 
@@ -62,20 +56,18 @@ export const ENGINE_MAX_DEFAULT_TIMEOUT_MS = 300_000;
 export const STATS_PAGE_LIMIT = 5000;
 
 /**
- * How many points the History view asks `GET /runs/:id/metrics?maxPoints=` for
- * (#2547). A run with at most this many ticks (about 33 minutes at the engine's
- * one tick a second) comes back raw; a longer one comes back folded into this
- * many buckets, so a 24 h soak is one response of about 2,000 ticks instead of
- * 18 pages of 5,000. Two or more, so a bucketed series always has the two
- * points a chart needs. The same budget is the `maxPoints` of the run's
- * server-vitals read (`GET /runs/:id/monitor`, #2611).
+ * How many points the History view asks `GET /runs/:id/metrics?maxPoints=` for (#2547). A run with
+ * at most this many ticks (about 33 minutes at the engine's one tick a second) comes back raw; a
+ * longer one comes back folded into this many buckets, so a 24 h soak is one response of about
+ * 2,000 ticks instead of 18 pages of 5,000. Two or more, so a bucketed series always has the two
+ * points a chart needs. The same budget is the `maxPoints` of the run's server-vitals read
+ * (`GET /runs/:id/monitor`, #2611).
  */
 export const HISTORY_SERIES_MAX_POINTS = 2000;
 
 /**
- * Page size for `GET /runs/:id/samples`. The report itself serialises at most
- * 100 result rows, so one page covers every sample a surface can show; the
- * engine caps a page at 500 either way.
+ * Page size for `GET /runs/:id/samples`. The report serialises at most 100 result rows, so one page
+ * covers every sample a surface can show; the engine caps a page at 500 either way.
  */
 export const RUN_SAMPLES_PAGE_LIMIT = 100;
 

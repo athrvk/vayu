@@ -6,13 +6,12 @@
  */
 
 /**
- * @file db_maintenance.cpp
- * @brief Startup: schema migration, corruption recovery, `init ()`'s repair
- * passes, workspace backup and the startup page-reclamation pass (issue
- * #1614). `migrate_before_sync`, `has_sqlite_header`, `copy_db_files` and
+ * Startup: schema migration, corruption recovery, `init ()`'s repair passes,
+ * workspace backup and the startup page-reclamation pass (#1614).
+ * `migrate_before_sync`, `has_sqlite_header`, `copy_db_files` and
  * `recover_database` are declared in `database_impl.hpp` because
- * `Database::Database`'s constructor (`database.cpp`) calls them directly;
- * everything else here is this file's own.
+ * `Database::Database` (`database.cpp`) calls them; everything else is this
+ * file's own.
  */
 
 #include "database_impl.hpp"
@@ -61,26 +60,20 @@ namespace vayu::db {
 
 namespace {
 
-/**
- * Move a corrupt file set aside instead of deleting it, returning where it
- * went, or `nullopt` when it could not be moved (issue #984).
- *
- * SQLite's own `.recover` can usually pull most rows out of a damaged
- * file - but only while the file exists, and the previous behaviour deleted
- * it at the exact moment it was the last copy of anything. The sidecars go
- * with it because a `-wal` holds committed transactions the main file does
- * not.
- */
+/// Moves a corrupt file set aside instead of deleting it, returning where it
+/// went, or `nullopt` when it could not be moved (#984). SQLite's `.recover`
+/// can usually pull most rows out of a damaged file, but only while the file
+/// exists. The sidecars go with it because a `-wal` holds committed
+/// transactions the main file does not.
 std::optional<fs::path> quarantine_db_files (const fs::path& original) {
     std::error_code ec;
     if (!fs::exists (original, ec)) {
         return std::nullopt;
     }
 
-    // A stamped name rather than a fixed one, so a second corruption does
-    // not overwrite the evidence from the first. The loop is for the
-    // pathological case of two runs landing in the same millisecond: a
-    // taken name is stepped over, never written through.
+    // A stamped name, not a fixed one, so a second corruption does not
+    // overwrite the first's evidence; a name taken by two runs in one
+    // millisecond is stepped over, never written through.
     int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
                     .count ();
@@ -118,24 +111,22 @@ std::optional<fs::path> quarantine_db_files (const fs::path& original) {
 }
 
 /**
- * Open a second connection on the workspace database at @p path.
- *
- * The backup's `VACUUM INTO` runs on one of these rather than on the
- * connection every write is serialized on, so a large copy does not hold that
- * connection (and the DB mutex) for its length; the flags are decided here
- * once rather than per caller. The busy timeout is the caller's: the
- * constructor's migration waits as long as its probe does (issue #2420).
+ * Opens a second connection on the workspace database at @p path. The backup's
+ * `VACUUM INTO` runs on one, not on the connection every write is serialized
+ * on, so a large copy does not hold that connection (and the DB mutex) for its
+ * length; the flags are decided here once. The busy timeout is the caller's:
+ * the constructor's migration waits as long as its probe does (#2420).
  *
  * @return the connection, or `nullptr` with @p error set to what SQLite
- *         refused. The caller owns what it gets and closes it.
+ *         refused. The caller owns and closes it.
  */
 sqlite3* open_workspace_connection (const std::string& path,
 std::chrono::milliseconds busy_timeout,
 std::string& error) {
     sqlite3* connection = nullptr;
-    // Read-write rather than read-only: under WAL a reader still writes the
-    // `-shm` index, and a read-only open of a database whose WAL has not been
-    // checkpointed fails outright on a directory it cannot write.
+    // Read-write, not read-only: under WAL a reader still writes the `-shm`
+    // index, and a read-only open of an uncheckpointed WAL database fails
+    // outright in a directory it cannot write.
     if (sqlite3_open_v2 (path.c_str (), &connection, SQLITE_OPEN_READWRITE, nullptr) != SQLITE_OK) {
         error = connection != nullptr ?
         std::string (sqlite3_errmsg (connection)) :
@@ -154,25 +145,24 @@ struct ReclaimOutcome {
     bool ran = false;
     /// The size of the database file before the pass, in bytes.
     int64_t before_bytes = 0;
-    /// Its size after - equal to `before_bytes` when nothing ran, and negative
-    /// when the rewrite ran and the file could not be measured afterwards. The
-    /// three are different facts and the log says which one it is reporting.
+    /// Its size after: equal to `before_bytes` when nothing ran, negative when
+    /// the rewrite ran and the file could not be measured. Three different
+    /// facts, and the log says which.
     int64_t after_bytes = 0;
     /// What SQLite or the filesystem refused, or empty on success.
     std::string error;
 };
 
 /**
- * Read a PRAGMA that answers with one integer.
+ * Reads a PRAGMA that answers with one integer.
  *
- * @return the value, or nothing if SQLite would not answer - which is what
- *         separates "this database has no free pages" from "we never found out",
- *         and the two must not both read as zero.
+ * @return the value, or nothing if SQLite would not answer, so "no free pages"
+ *         and "never found out" do not both read as zero.
  *
- * A refusal is written to @p error *here*, and only if it is still empty, so
- * the message belongs to the read that failed and to the first one. Read back
- * at the call site instead, `sqlite3_errmsg` would describe whichever statement
- * ran last - which, after a later read succeeded, is "not an error".
+ * A refusal is written to @p error here, and only if it is still empty, so the
+ * message is the failed read's and the first one's; read at the call site,
+ * `sqlite3_errmsg` would describe whichever statement ran last, after a later
+ * success "not an error".
  */
 std::optional<int64_t>
 read_pragma_int (sqlite3* connection, const char* pragma, std::string& error) {
@@ -196,13 +186,9 @@ read_pragma_int (sqlite3* connection, const char* pragma, std::string& error) {
     return value;
 }
 
-/**
- * Whether a database of @p pages pages of @p page_size bytes, @p freelist of
- * them free, holds enough dead weight to be worth rewriting.
- *
- * Both thresholds must be crossed - see the two constants for why either alone
- * is the wrong rule.
- */
+/// Whether a database of @p pages pages of @p page_size bytes, @p freelist of
+/// them free, holds enough dead weight to rewrite. Both thresholds must be
+/// crossed; the two constants say why either alone is wrong.
 bool worth_reclaiming (int64_t freelist, int64_t pages, int64_t page_size) {
     if (freelist <= 0 || pages <= 0 || page_size <= 0) {
         return false;
@@ -213,11 +199,8 @@ bool worth_reclaiming (int64_t freelist, int64_t pages, int64_t page_size) {
     return freelist * page_size >= vayu::core::constants::database::VACUUM_MIN_RECLAIMABLE_BYTES;
 }
 
-/**
- * The decision and the rewrite, on an already-open @p connection.
- *
- * Split from the function below, which measures the file first.
- */
+/// The decision and the rewrite on an already-open @p connection; the function
+/// below measures the file first.
 ReclaimOutcome
 reclaim_on_connection (sqlite3* connection, const std::string& path, int64_t before_bytes) {
     ReclaimOutcome outcome;
@@ -247,11 +230,11 @@ reclaim_on_connection (sqlite3* connection, const std::string& path, int64_t bef
         return outcome;
     }
 
-    // Under WAL the rewritten image lands in the `-wal` file and the database
-    // itself is not resized until a checkpoint copies it back, so without this
-    // the pass would free every page it set out to and leave the file exactly
-    // as large as it found it. Best-effort: a checkpoint that cannot truncate
-    // has still committed the rewrite, and the next one returns the space.
+    // Under WAL the rewritten image lands in the `-wal` and the database is not
+    // resized until a checkpoint copies it back, so without this the pass would
+    // free every page and leave the file as large as it was. Best-effort: a
+    // checkpoint that cannot truncate has still committed the rewrite, and the
+    // next one returns the space.
     sqlite3_exec (connection, "PRAGMA wal_checkpoint(TRUNCATE)", nullptr, nullptr, nullptr);
 
     outcome.ran = true;
@@ -262,16 +245,14 @@ reclaim_on_connection (sqlite3* connection, const std::string& path, int64_t bef
 }
 
 /**
- * Return the database's freed pages to the filesystem, if it holds enough of
- * them to be worth the rewrite (issue #990).
- *
- * On @p connection, the one the storage holds open (`open_forever`). The
- * checkpoint that shrinks the file has to truncate it, and Windows refuses to
- * truncate a file any connection has mapped, so no connection maps it:
- * `mmap_size` is 0 on this one and on the run-row reader (#2433). A mapping
+ * Returns the database's freed pages to the filesystem when enough of them make
+ * the rewrite worthwhile (#990), on @p connection, the one the storage holds
+ * open (`open_forever`). The shrinking checkpoint must truncate the file, and
+ * Windows refuses to truncate a file any connection has mapped, so none maps
+ * it: `mmap_size` is 0 here and on the run-row reader (#2433), and a mapping
  * reintroduced on either leaves the rewrite committed and the file at its old
- * size. The caller holds the DB mutex, so nothing else is using that
- * connection meanwhile.
+ * size. The caller holds the DB mutex, so nothing else uses the connection
+ * meanwhile.
  */
 ReclaimOutcome reclaim_freed_pages (sqlite3* connection, const std::string& path) {
     ReclaimOutcome outcome;
@@ -326,10 +307,9 @@ void log_reclaim_outcome (const ReclaimOutcome& outcome) {
     " to schema version " + std::to_string (SCHEMA_VERSION) + ": " + detail);
 }
 
-/// Runs one statement of the migration and throws when SQLite refuses it. A
-/// step whose result is dropped leaves the file half migrated with the version
-/// unmoved, and `sync_schema ()` then drops the columns the rows were to be
-/// folded out of.
+/// Runs one migration statement, throwing when SQLite refuses it: a dropped
+/// result leaves the file half migrated with the version unmoved, and
+/// `sync_schema ()` then drops the columns the rows were to be folded out of.
 void exec_or_throw (sqlite3* connection, const std::string& sql, const std::string& path) {
     if (sqlite3_exec (connection, sql.c_str (), nullptr, nullptr, nullptr) == SQLITE_OK) {
         return;
@@ -346,9 +326,8 @@ void stamp_schema_version (sqlite3* connection, const std::string& path) {
     "PRAGMA user_version = " + std::to_string (SCHEMA_VERSION) + ";", path);
 }
 
-/// @p table's current column names, read fresh so a caller never assumes a
-/// shape a genuinely pre-cutover database (older than #1513, no `elements`
-/// column at all) does not have.
+/// @p table's current column names, read fresh so no caller assumes a shape a
+/// database older than #1513 (no `elements` column) lacks.
 std::vector<std::string> table_columns (sqlite3* connection, const char* table) {
     const std::string sql   = std::string ("PRAGMA table_info(") + table + ");";
     sqlite3_stmt* statement = nullptr;
@@ -370,24 +349,21 @@ bool has_column (const std::vector<std::string>& columns, std::string_view name)
     return std::find (columns.begin (), columns.end (), name) != columns.end ();
 }
 
-/// Whether @p table's schema still carries `pre_request_script` or
-/// `post_request_script` (issue #1514's cut-over target) - either alone is
-/// enough to need the fold below, since a row can carry just one. False for a
-/// fresh install (the table does not exist yet) and for a database this or an
-/// earlier engine build already migrated by some other means.
+/// Whether @p table still carries `pre_request_script` or `post_request_script`
+/// (#1514): either alone needs the fold below, as a row can carry just one.
+/// False for a fresh install (no table yet) and for a database already migrated
+/// another way.
 bool table_has_script_columns (sqlite3* connection, const char* table) {
     const auto columns = table_columns (connection, table);
     return has_column (columns, "pre_request_script") ||
     has_column (columns, "post_request_script");
 }
 
-/**
- * A row's `elements` with a `script.pre` / `script.post` entry appended for
- * each of @p pre / @p post that is non-blank and not already represented -
- * the "already folded" case a database that ran #1513's additive repair pass
- * before upgrading to this engine can carry. `std::nullopt` when nothing
- * needs adding, so the caller can skip the row's `UPDATE` entirely.
- */
+/// A row's `elements` with a `script.pre` / `script.post` entry appended for
+/// each of @p pre / @p post that is non-blank and not already represented (a
+/// database that ran #1513's additive repair before upgrading can carry one).
+/// `std::nullopt` when nothing needs adding, so the caller skips the row's
+/// `UPDATE`.
 std::optional<std::string> fold_row_scripts_if_missing (const std::string& existing_elements,
 const std::string& pre,
 const std::string& post) {
@@ -422,19 +398,16 @@ const std::string& post) {
 }
 
 /**
- * Fold @p table's `pre_request_script` / `post_request_script` into
- * `elements`, row by row, on the still-open @p connection. Returns false on
- * the first SQLite error (message left in @p error), which aborts the whole
- * migration (the caller rolls the transaction back) rather than leaving some
- * rows folded and others not.
+ * Folds @p table's `pre_request_script` / `post_request_script` into
+ * `elements`, row by row, on the open @p connection. False on the first SQLite
+ * error (message in @p error), which aborts the whole migration (the caller
+ * rolls back) rather than leaving some rows folded.
  *
- * A genuinely pre-cutover database (older than #1513) has neither the
- * `elements` column nor, on some rows, both script columns - only the
- * migration this function runs ever adds `elements` for such a file, and it
- * runs ahead of `sync_schema ()`. So the column set is read fresh here rather
- * than assumed: a missing `elements` column is added first (the same shape
- * `sync_schema` would create), and a missing script column reads as `''`
- * instead of failing to prepare.
+ * A database older than #1513 has no `elements` column and, on some rows, not
+ * both script columns; only this migration adds `elements` for such a file,
+ * ahead of `sync_schema ()`. So the columns are read fresh: a missing
+ * `elements` is added first (the shape `sync_schema` would create), and a
+ * missing script column reads as `''` instead of failing to prepare.
  */
 bool fold_table_scripts_into_elements (sqlite3* connection, const char* table, std::string& error) {
     const auto columns  = table_columns (connection, table);
@@ -554,16 +527,16 @@ struct FileTrustPlan {
     }
 };
 
-/// `file_grants` exactly as `make_vayu_storage` maps it. Created here because
+/// `file_grants` exactly as `make_vayu_storage` maps it, created here because
 /// the grants are read out of the bodies before `sync_schema ()` runs; any
-/// difference from the mapping makes `sync_schema ()` rebuild the table empty.
+/// difference makes `sync_schema ()` rebuild the table empty.
 constexpr const char* FILE_GRANTS_DDL =
 "CREATE TABLE IF NOT EXISTS \"file_grants\" (\"id\" TEXT PRIMARY KEY NOT NULL, "
 "\"path\" TEXT UNIQUE NOT NULL, \"created_at\" INTEGER NOT NULL);";
 
-/// Whether @p ref was chosen in the editor, as the database stored it: an
-/// explicit `false`, or no key at all on a database older than version 4,
-/// whose writes left the key out exactly when the editor wrote the path.
+/// Whether @p ref was chosen in the editor, as stored: an explicit `false`, or
+/// no key at all below version 4, whose writes left the key out exactly when
+/// the editor wrote the path.
 bool stored_as_chosen (const nlohmann::json& ref, bool absent_means_chosen) {
     const auto found = ref.find ("unresolved");
     if (found == ref.end ()) {
@@ -573,9 +546,9 @@ bool stored_as_chosen (const nlohmann::json& ref, bool absent_means_chosen) {
 }
 
 /// Grants the chosen @p src when it still names a regular file
-/// (`grantable_file_path`), and otherwise adds it to @p ungranted. An empty or
-/// templated `src` is neither: it named no file to carry over, and a send
-/// refuses a `{{` whatever the trust.
+/// (`grantable_file_path`), else adds it to @p ungranted. An empty or templated
+/// `src` is neither: it named no file, and a send refuses a `{{` whatever the
+/// trust.
 void settle_choice (const std::string& src,
 std::set<std::string>& grants,
 std::vector<std::string>& ungranted) {
@@ -609,14 +582,14 @@ std::vector<std::string>& ungranted) {
 /**
  * Plans the file-trust step over @p table's @p column (#2356): every stored
  * file reference loses `unresolved`, and one a person chose becomes a grant
- * (`settle_body_trust`). The engine derives trust from roots and grants from
- * here on, so nothing stored may still claim it.
+ * (`settle_body_trust`). Trust comes from roots and grants from here on, so
+ * nothing stored may still claim it.
  *
  * @p in_snapshot reads the body at the value's `body` member (a run's
- * `config_snapshot`, the payload a history entry is re-opened from) rather
- * than the value itself (`requests.body`). A value that is not JSON is left
- * byte-identical and logged, never dropped. Only values with `"file"` in their
- * text are parsed at all.
+ * `config_snapshot`, the payload a history entry reopens from) rather than the
+ * value itself (`requests.body`). A value that is not JSON is left
+ * byte-identical and logged, never dropped; only values containing `"file"` are
+ * parsed.
  */
 void plan_trust_removal (sqlite3* connection,
 const char* table,
@@ -665,13 +638,11 @@ FileTrustPlan& plan) {
     sqlite3_finalize (statement);
 }
 
-/**
- * The allowed folders `refused_root_reason` now refuses: a filesystem or drive
- * root, the home folder, or a folder containing it. `POST /file-roots`
- * refuses them from schema version 4 on; this removes the ones stored before,
- * so `FileAccessPolicy::from_database` reads only rows the route would accept
- * and carries no second check of its own.
- */
+/// The allowed folders `refused_root_reason` refuses: a filesystem or drive
+/// root, the home folder, or a folder containing it. `POST /file-roots` refuses
+/// them from schema version 4 on; this removes older ones, so
+/// `FileAccessPolicy::from_database` reads only rows the route would accept and
+/// needs no second check.
 void plan_refused_roots (sqlite3* connection, std::vector<RefusedRoot>& out) {
     if (!has_column (table_columns (connection, "file_roots"), "path")) {
         return;
@@ -705,13 +676,13 @@ constexpr int64_t DERIVED_FILE_TRUST_VERSION = 6;
 
 /**
  * The file-trust step for a database stamped @p version, empty from version 6
- * on: a version-6 database already holds only what the step leaves, and
- * re-running `plan_refused_roots` against a rule that has since moved would
- * delete folders the user allowed under it. Requests (the trash included,
- * which is the same table) and run snapshots are the two places a body
- * `FilePlan` sends is stored. `request_examples.body` is a response's text and
- * `inbox_requests.body` the bytes a listener received: neither is ever parsed
- * as a request body, so neither is visited.
+ * on: a version-6 database holds only what the step leaves, and re-running
+ * `plan_refused_roots` against a rule that has since moved would delete folders
+ * the user allowed under it. Requests (the trash included, the same table) and
+ * run snapshots are where a body `FilePlan` sends is stored;
+ * `request_examples.body` (a response's text) and `inbox_requests.body` (bytes
+ * a listener received) are never parsed as request bodies, so neither is
+ * visited.
  */
 FileTrustPlan plan_file_trust_migration (sqlite3* connection, int64_t version) {
     FileTrustPlan plan;
@@ -794,10 +765,10 @@ bool apply_file_trust_plan (sqlite3* connection, const FileTrustPlan& plan, std:
     return insert_grants (connection, plan.grants, error);
 }
 
-/// Says, once the step has committed or stamped, which allowed folders are
-/// gone and why, so a user who finds one missing from Settings › Files can see
-/// it; how many picked files the stored bodies were turned into grants for;
-/// and which chosen files were not found and must be picked again.
+/// Says, once the step has committed or stamped, which allowed folders are gone
+/// and why (so a user missing one from Settings › Files can see it), how many
+/// picked files became grants, and which chosen files were not found and must
+/// be picked again.
 void log_file_trust_plan (const FileTrustPlan& plan) {
     for (const auto& root : plan.refused_roots) {
         vayu::utils::log_warning ("db",
@@ -840,17 +811,17 @@ struct SiblingOrderShift {
 };
 
 /**
- * Plans the shared-sibling-order step for a database stamped @p version.
- * Before it, a collection's sub-folders and its requests were each numbered
- * from 0 and displayed as two blocks, folders first. Each collection's
- * requests (trashed ones included) move up by one more than its highest
- * sub-folder `order`, trashed folders included so a restore cannot land on a
- * request, and further by its lowest request `order` when that is negative,
- * so every request sorts strictly after every folder and the display stays
- * as it was. A collection with no sub-folder plans nothing.
+ * Plans the shared-sibling-order step for a database stamped @p version. Below
+ * it, a collection's sub-folders and requests were each numbered from 0 and
+ * shown as two blocks, folders first. Each collection's requests (trashed
+ * included) move up by one more than its highest sub-folder `order` (trashed
+ * folders included, so a restore cannot land on a request), and further by its
+ * lowest request `order` when negative, so every request sorts after every
+ * folder and the display is unchanged. A collection with no sub-folder plans
+ * nothing.
  *
- * @throws std::runtime_error when both tables are there and the read fails:
- *         an empty plan is stamped as done, and the step never runs again.
+ * @throws std::runtime_error when both tables exist and the read fails: an
+ *         empty plan is stamped as done, and the step never runs again.
  */
 std::vector<SiblingOrderShift>
 plan_sibling_order_shift (sqlite3* connection, int64_t version, const std::string& path) {
@@ -911,17 +882,13 @@ std::string& error) {
 } // namespace
 
 /**
- * Whether `file` could be a SQLite database at all, answered without
- * opening it.
- *
- * Asking SQLite instead *destroys evidence*: an open that fails with "file
- * is not a database" deletes the `-wal` and `-shm` beside the file first
- * (measured, not assumed), and a `-wal` holds committed transactions the
- * main file does not - so by the time the recovery branch below moved the
- * set aside there was nothing left to move but the main file. Sixteen bytes
- * answer the question, so a file SQLite would refuse outright never reaches
- * it. A file it *recognises* and then fails on is still its to recover, WAL
- * included; this covers the case where it would not even try.
+ * Whether `file` could be a SQLite database at all, answered without opening
+ * it. Asking SQLite *destroys evidence*: an open failing with "file is not a
+ * database" first deletes the `-wal` and `-shm` beside the file (measured), and
+ * a `-wal` holds committed transactions the main file does not, so the recovery
+ * branch would find only the main file to move. Sixteen bytes answer it, so a
+ * file SQLite would refuse outright never reaches it; one it recognises and
+ * then fails on is still its to recover, WAL included.
  */
 bool has_sqlite_header (const fs::path& file) {
     std::error_code ec;
@@ -946,7 +913,6 @@ bool copy_db_files (const fs::path& src, const fs::path& dst) {
     if (!fs::exists (src, ec))
         return false;
 
-    // Copy main file
     fs::copy_file (src, dst, fs::copy_options::overwrite_existing, ec);
     if (ec) {
         vayu::utils::log_warning ("db", "Backup copy failed: " + ec.message ());
@@ -969,15 +935,14 @@ bool copy_db_files (const fs::path& src, const fs::path& dst) {
 }
 
 /**
- * What a start does when the database it found is corrupt.
+ * What a start does when the database it found is corrupt. The backup is
+ * validated *before* the corrupt original is touched, so a start finding both
+ * broken still has both afterwards.
  *
- * The backup is validated *before* the corrupt original is touched, so a start
- * that finds both files broken still has both of them afterwards.
- *
- * @param probe what a database at a path is - the constructor's own, because
- *        only it can name `Impl`.
- * @throws std::runtime_error when the backup cannot be examined (issue
- *         #2420): whether it would restore is unknown, so nothing is moved.
+ * @param probe what a database at a path is; the constructor's own, since only
+ *        it can name `Impl`.
+ * @throws std::runtime_error when the backup cannot be examined (#2420):
+ *         whether it would restore is unknown, so nothing is moved.
  */
 void recover_database (const fs::path& db_file,
 const fs::path& backup_file,
@@ -1008,10 +973,9 @@ const std::function<ProbeResult (const std::string&)>& probe) {
             quarantined_path = quarantined->string ();
             prune_quarantined_databases (db_path, QUARANTINE_SETS_KEPT);
         } else {
-            // Quarantining is what this branch exists to do, but a rename
-            // that fails must not become a daemon that will not start: the
-            // corrupt files are removed as before, and the marker says so
-            // rather than claiming a copy the user could go and look for.
+            // A rename that fails must not become a daemon that will not start:
+            // the corrupt files are removed, and the marker says so rather than
+            // claiming a copy the user could look for.
             std::error_code ec;
             fs::remove (db_file, ec);
             fs::remove (db_file.string () + "-wal", ec);
@@ -1031,12 +995,10 @@ const std::function<ProbeResult (const std::string&)>& probe) {
             outcome = RecoveryOutcome::BackupAlsoCorrupt;
         }
 
-        // The marker is what tells the user what happened to their data
-        // (issue #922). It has to be written by this branch rather than
-        // inferred later from an empty database, which is exactly what a
-        // genuine first run also looks like. It is written *after* the
-        // files have been moved so a marker never claims an outcome that
-        // did not happen.
+        // The marker tells the user what happened to their data (#922). This
+        // branch writes it because an empty database, the alternative to
+        // inferring from, is also what a first run looks like; written *after*
+        // the files moved, so it never claims an outcome that did not happen.
         write_recovery_marker (db_path, outcome, quarantined_path);
     }
 }
@@ -1048,15 +1010,15 @@ const std::function<ProbeResult (const std::string&)>& probe) {
 
 namespace {
 
-/// The two halves of a snapshot's file name. Retention only ever removes a file
-/// carrying both, so anything else that has found its way into `backups/` -
-/// including a copy the user made themselves - is left where it is.
+/// The two halves of a snapshot's file name. Retention removes only a file
+/// carrying both, so anything else in `backups/`, a copy the user made
+/// included, stays.
 constexpr std::string_view BACKUP_PREFIX    = "vayu-";
 constexpr std::string_view BACKUP_EXTENSION = ".db";
 
-/// Bound on the collision walk below. A thousand snapshots inside one
-/// millisecond is not a case that happens; the loop is finite so that a
-/// filesystem answering `exists` wrongly cannot hang a request.
+/// Bound on the collision walk below: a thousand snapshots in one millisecond
+/// does not happen, and a finite loop means a filesystem answering `exists`
+/// wrongly cannot hang a request.
 constexpr int BACKUP_NAME_ATTEMPTS = 1000;
 
 /// The config row retention reads, here and in `backup_workspace`.
@@ -1068,15 +1030,12 @@ fs::path backups_directory_for (const std::string& db_path) {
 }
 
 /**
- * A snapshot's file name for the instant @p stamp_ms, or an empty string for an
- * instant that cannot be converted.
- *
- * `vayu-YYYYMMDD-HHMMSS-mmm.db`, or `vayu-YYYYMMDD-HHMMSS-mmm-<label>.db` for
- * one a start took on its own (`pre-v4`). UTC rather than local time, so a
- * machine that changes timezone does not reorder its own backups, and the stamp
- * is fixed-width and first so the names sort chronologically as *text* - which
- * is what lets retention pick the oldest without asking the filesystem for an
- * mtime it may round, or may not have preserved across a copy.
+ * A snapshot's file name for the instant @p stamp_ms, or empty for an instant
+ * that cannot be converted: `vayu-YYYYMMDD-HHMMSS-mmm.db`, or
+ * `vayu-YYYYMMDD-HHMMSS-mmm-<label>.db` for one a start took itself (`pre-v4`).
+ * UTC, so a timezone change does not reorder backups; fixed-width and first, so
+ * names sort chronologically as *text*, letting retention pick the oldest
+ * without an mtime the filesystem may round or a copy may not keep.
  */
 std::string backup_file_name (int64_t stamp_ms, std::string_view label) {
     const auto seconds = static_cast<std::time_t> (stamp_ms / 1000);
@@ -1096,26 +1055,20 @@ bool is_backup_file_name (const std::string& name) {
 }
 
 /**
- * Copy the database at @p source into @p destination with `VACUUM INTO`.
+ * Copies the database at @p source into @p destination with `VACUUM INTO`, on a
+ * connection of its own (`open_workspace_connection` says why): a large
+ * workspace's `VACUUM INTO` occupies its connection for the whole copy, which
+ * on the shared one is every other endpoint waiting behind a button. Under WAL
+ * a second reader sees every committed transaction and blocks no writer, so the
+ * snapshot is consistent and costs the running engine only disk bandwidth. The
+ * destination is *bound*, not concatenated: a path is user data, and a quote in
+ * a directory name would be SQL.
  *
+ * @param on_connection told the connection once it is open, and `nullptr` just
+ *        before it closes, so a caller on another thread can
+ *        `sqlite3_interrupt` the copy; answering false refuses the copy before
+ *        it starts. Empty for a caller with nothing to interrupt.
  * @return an empty string on success, or what SQLite refused.
- *
- * On a connection of its own rather than the one every write is serialized
- * through - `open_workspace_connection` says why: a `VACUUM INTO` of a large
- * workspace occupies its connection for as
- * long as the copy takes, and on the shared one that is every other endpoint
- * waiting behind a button someone pressed. Under WAL a second reader sees every
- * committed transaction and blocks no writer, so the snapshot is consistent and
- * costs the running engine nothing but disk bandwidth.
- *
- * The destination is *bound*, not concatenated: a path is user data on every
- * platform and a quote in a directory name would otherwise be a SQL fragment.
- */
-/**
- * @param on_connection told the connection once it is open, and `nullptr`
- *        just before it closes, so a caller on another thread can
- *        `sqlite3_interrupt` the copy; answering false refuses the copy
- *        before it starts. Empty for a caller with nothing to interrupt.
  */
 std::string vacuum_into (const std::string& source,
 const std::string& destination,
@@ -1139,8 +1092,8 @@ const std::function<bool (sqlite3*)>& on_connection = {}) {
         return message;
     }
     // SQLITE_TRANSIENT: sqlite copies the text, so `destination` need not
-    // outlive the bind - which it does anyway, said here so a later refactor
-    // cannot quietly make the lifetime load-bearing.
+    // outlive the bind (it does anyway; said so a refactor cannot quietly make
+    // the lifetime load-bearing).
     sqlite3_bind_text (statement, 1, destination.c_str (), -1, SQLITE_TRANSIENT);
 
     if (sqlite3_step (statement) != SQLITE_DONE) {
@@ -1154,12 +1107,9 @@ const std::function<bool (sqlite3*)>& on_connection = {}) {
     return message;
 }
 
-/**
- * Remove all but the newest @p keep snapshots from @p directory.
- *
- * @return how many files were removed. @p keep of 0 or less is unlimited, which
- *         is what the `maxBackupsRetained` entry documents.
- */
+/// Removes all but the newest @p keep snapshots from @p directory.
+/// @return how many files were removed. @p keep of 0 or less is unlimited, as
+///         `maxBackupsRetained` documents.
 int64_t prune_backup_files (const fs::path& directory, int keep) {
     if (keep <= 0) {
         return 0;
@@ -1182,18 +1132,18 @@ int64_t prune_backup_files (const fs::path& directory, int keep) {
     int64_t removed        = 0;
     const size_t to_remove = snapshots.size () - static_cast<size_t> (keep);
     for (size_t i = 0; i < to_remove; ++i) {
-        // `.at` rather than a subscript: the index is computed above, and one
-        // predictable compare turns a wrong bound into a throw the route
-        // reports instead of a read past the end that deletes something else.
+        // `.at`: the index is computed above, and one predictable compare turns
+        // a wrong bound into a throw the route reports instead of a read past
+        // the end that deletes something else.
         const fs::path& oldest = snapshots.at (i);
         std::error_code remove_ec;
         if (fs::remove (oldest, remove_ec)) {
             ++removed;
         } else {
             // Best-effort: a snapshot that will not delete is a file the user
-            // still has, which is the safe direction for this feature to fail
-            // in. It is said out loud rather than swallowed, because a
-            // retention setting that silently stops applying grows a disk.
+            // still has, the safe direction to fail. Said, not swallowed,
+            // because a retention setting that silently stops applying grows a
+            // disk.
             vayu::utils::log_warning ("db",
             "Could not prune the backup " + oldest.string () + ": " + remove_ec.message ());
         }
@@ -1213,9 +1163,9 @@ void warn_unless_flushed (bool flushed, std::string_view what, const fs::path& p
     { { "path", path.string () } });
 }
 
-/// Removes a database file and the `-wal` / `-shm` beside it, reporting nothing:
-/// every caller is clearing a path it is about to write, or one it has just
-/// decided is not a snapshot, and a leftover is the next attempt's to clear.
+/// Removes a database file and its `-wal` / `-shm`, reporting nothing: every
+/// caller is clearing a path it is about to write or has just decided is no
+/// snapshot, and a leftover is the next attempt's to clear.
 void remove_db_file_set (const fs::path& file) {
     std::error_code ec;
     fs::remove (file, ec);
@@ -1230,16 +1180,14 @@ struct WrittenSnapshot {
 };
 
 /**
- * `VACUUM INTO` the database at @p db_path into a new file in `backups/`
- * beside it, named for @p stamp_ms and @p label, then flush it.
+ * `VACUUM INTO`s the database at @p db_path into a new file in `backups/`
+ * beside it, named for @p stamp_ms and @p label, then flushes it. A taken name
+ * is stepped over, not written through, as the corruption quarantine does,
+ * which also suits SQLite: `VACUUM INTO` refuses an existing destination.
  *
- * A taken name is stepped over rather than written through, exactly as the
- * corruption quarantine does - and that is also what keeps SQLite happy, since
- * `VACUUM INTO` refuses a destination that already exists.
- *
- * @return the snapshot, or why there is none. A copy that failed leaves no
- *         file under a snapshot's name: retention would count it and a
- *         restore would reach for it.
+ * @return the snapshot, or why there is none. A failed copy leaves no file
+ *         under a snapshot's name: retention would count it and a restore would
+ *         reach for it.
  */
 std::expected<WrittenSnapshot, std::string>
 write_snapshot (const std::string& db_path, int64_t stamp_ms, std::string_view label) {
@@ -1287,8 +1235,8 @@ write_snapshot (const std::string& db_path, int64_t stamp_ms, std::string_view l
 }
 
 /// `maxBackupsRetained` as the workspace at @p connection stores it, read
-/// before any `Database` exists to ask; the default when there is no row yet
-/// or it does not parse, as `get_config_int` answers.
+/// before any `Database` exists; the default when there is no row or it does
+/// not parse, as `get_config_int` answers.
 int configured_backup_retention (sqlite3* connection) {
     constexpr int fallback = vayu::core::constants::database::MAX_BACKUPS_RETAINED;
     sqlite3_stmt* statement = nullptr;
@@ -1308,9 +1256,9 @@ int configured_backup_retention (sqlite3* connection) {
     return configured.value_or (fallback);
 }
 
-/// Whether the database at @p connection holds any table. A file that holds
-/// none has nothing to copy. A schema SQLite will not read counts as holding
-/// tables, so the copy is attempted and its failure is the one reported.
+/// Whether the database at @p connection holds any table; one with none has
+/// nothing to copy. A schema SQLite will not read counts as holding tables, so
+/// the copy is attempted and its failure reported.
 bool holds_tables (sqlite3* connection) {
     sqlite3_stmt* statement = nullptr;
     if (sqlite3_prepare_v2 (connection, "SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1;",
@@ -1322,14 +1270,11 @@ bool holds_tables (sqlite3* connection) {
     return rc != SQLITE_DONE;
 }
 
-/**
- * The copy a start takes before it rewrites stored rows (issue #2426): one
- * `backups/` snapshot labelled @p label, then retention to @p keep, the same
- * cap a workspace backup is held to.
- *
- * @return the snapshot's path, or why there is none; the caller decides what
- *         a rewrite without a copy means for it.
- */
+/// The copy a start takes before it rewrites stored rows (#2426): one
+/// `backups/` snapshot labelled @p label, then retention to @p keep, a
+/// workspace backup's cap.
+/// @return the snapshot's path, or why there is none; the caller decides what a
+///         rewrite without a copy means for it.
 std::expected<fs::path, std::string>
 snapshot_before_rewrite (const std::string& db_path, std::string_view label, int keep) {
     const auto written = write_snapshot (db_path, config_seeds::now_ms (), label);
@@ -1342,12 +1287,10 @@ snapshot_before_rewrite (const std::string& db_path, std::string_view label, int
     return written->path;
 }
 
-/**
- * Removes the safety copies engines before issue #2426 wrote beside the
- * database at @p db_file and never removed - `.pre-migration.bak` and
- * `.pre-upgrade.bak`, with their `-wal` and `-shm` - when written before
- * @p written_before, so a copy this process made is never the one removed.
- */
+/// Removes the safety copies engines before #2426 wrote beside the database at
+/// @p db_file and never removed (`.pre-migration.bak` and `.pre-upgrade.bak`,
+/// with their `-wal` and `-shm`), when written before @p written_before, so a
+/// copy this process made is never removed.
 void remove_legacy_safety_copies (const fs::path& db_file, fs::file_time_type written_before) {
     for (const char* suffix : { ".pre-migration.bak", ".pre-upgrade.bak" }) {
         const fs::path copy = db_file.string () + suffix;
@@ -1370,10 +1313,10 @@ namespace {
 /**
  * `migrate_before_sync`'s copy of a workspace it is about to raise from
  * @p from_version: `backups/vayu-<stamp>-pre-v<from_version>.db`, held to the
- * workspace's own `maxBackupsRetained`. A file with no table is not copied.
+ * workspace's `maxBackupsRetained`. A file with no table is not copied.
  *
- * @throws std::runtime_error, the migration's own refusal, when the copy
- *         cannot be written: a migration is not run without one.
+ * @throws std::runtime_error, the migration's refusal, when the copy cannot be
+ *         written: no migration runs without one.
  */
 void snapshot_before_migration (sqlite3* connection, const std::string& path, int64_t from_version) {
     if (!holds_tables (connection)) {
@@ -1417,46 +1360,41 @@ const std::vector<SiblingOrderShift>& order_shifts) {
 } // namespace
 
 /**
- * The one-shot migration issue #1514's cut-over describes, run on the raw
- * file with its own `sqlite3` connection, strictly ahead of the constructor's
- * `sync_schema ()` calls (`Impl`'s constructor already opens a connection and
- * sets `journal_mode`, so this must run *before* any `Impl` exists on
- * @p path, never after - see `engine/CLAUDE.md`'s "Removing a column" rule).
+ * The one-shot migration of #1514, on the raw file with its own `sqlite3`
+ * connection, strictly before the constructor's `sync_schema ()` calls:
+ * `Impl`'s constructor opens a connection and sets `journal_mode`, so this runs
+ * *before* any `Impl` exists on @p path (`engine/CLAUDE.md`'s "Removing a
+ * column" rule).
  *
- * `PRAGMA user_version` is the marker: 0 means pre-cutover (folds any
- * unrepresented script into `elements`, then stamps it with `SCHEMA_VERSION`);
- * 1 and 2 are stamped without a fold; below 6 the file-trust step
- * (`plan_file_trust_migration`, the rules of versions 4 and 6) and below 7 the
- * sibling-order shift (`plan_sibling_order_shift`) run in the same
- * transaction; already at `SCHEMA_VERSION` is a fast no-op; newer
- * than `SCHEMA_VERSION` refuses to start rather than silently serving - and
- * possibly writing - settings this build does not understand.
+ * `PRAGMA user_version` is the marker: 0 is pre-cutover (folds any
+ * unrepresented script into `elements`, then stamps `SCHEMA_VERSION`); 1 and 2
+ * are stamped without a fold; below 6 the file-trust step
+ * (`plan_file_trust_migration`, versions 4 and 6) and below 7 the sibling-order
+ * shift (`plan_sibling_order_shift`) run in the same transaction;
+ * `SCHEMA_VERSION` is a fast no-op; newer refuses to start rather than serve,
+ * and possibly write, settings this build does not understand.
  *
- * Once this returns having bumped the version, `sync_schema ()` sees a
- * mapping with no `pre_request_script` / `post_request_script` columns and
- * `DROP COLUMN`s them; that is what makes the fold's timing load-bearing
- * rather than cosmetic.
+ * Once this has bumped the version, `sync_schema ()` sees a mapping without
+ * `pre_request_script` / `post_request_script` and `DROP COLUMN`s them, which
+ * makes the fold's timing load-bearing.
  *
  * Before anything raises the version, @p snapshot `Take` writes
  * `backups/vayu-<stamp>-pre-v<N>.db` (`snapshot_before_rewrite`): the copy an
- * engine at version N can still open, which nothing else keeps once
- * `<db>.bak` is refreshed from the migrated file (issue #2426). A file with no
- * table is not copied.
+ * engine at version N can still open, which nothing else keeps once `<db>.bak`
+ * is refreshed from the migrated file (#2426). A file with no table is not
+ * copied.
  *
  * @param snapshot `Skip` only for the probe, whose candidates (a `.bak`, the
- *        refresh's own snapshot) are not the workspace a person will go back to.
- * @param on_connection told the connection once it is open, before anything
- *        is read from it; a test installs a `sqlite3_commit_hook` here. Empty
- *        in production.
- *
+ *        refresh's own snapshot) are not the workspace a person returns to.
+ * @param on_connection told the connection once open, before anything is read;
+ *        a test installs a `sqlite3_commit_hook` here. Empty in production.
  * @return whether @p path was already at `SCHEMA_VERSION`, so nothing was
  *         written; false also for a file this pass did not open.
- *
- * @throws std::runtime_error naming both versions if @p path was written by
- *         a newer engine, or if a step of the migration failed - the snapshot,
- *         a row of the fold, the `BEGIN`, the stamp or the `COMMIT` (the
- *         transaction is rolled back first, so a throw here never leaves a
- *         half-migrated file and the next start runs the migration again).
+ * @throws std::runtime_error naming both versions if @p path was written by a
+ *         newer engine, or if a step failed (the snapshot, a fold row, the
+ *         `BEGIN`, the stamp or the `COMMIT`); the transaction is rolled back
+ *         first, so a throw never leaves a half-migrated file and the next
+ *         start runs the migration again.
  */
 bool migrate_before_sync (const std::string& path,
 std::chrono::milliseconds busy_timeout,
@@ -1465,14 +1403,12 @@ const std::function<void (sqlite3*)>& on_connection) {
     if (!fs::exists (path)) {
         return false; // A fresh install: sync_schema creates the new mapping outright.
     }
-    // `has_sqlite_header`'s own comment measured this: opening a file SQLite
-    // does not even recognise deletes the `-wal` / `-shm` beside it before
-    // the open call reports failure - destroying exactly the evidence
-    // `quarantine_db_files` (below, in `recover_database`) exists to
-    // preserve. This function runs *ahead* of that recovery path (it is the
-    // constructor's very first statement), so it must not be the thing that
-    // opens a corrupt file first; a file with no valid header is corruption's
-    // question, not a migration's, so it is left untouched here.
+    // Opening a file SQLite does not recognise deletes its `-wal` / `-shm`
+    // before failing (`has_sqlite_header` measured it), destroying the evidence
+    // `quarantine_db_files` (in `recover_database`) preserves. This runs ahead
+    // of that recovery, as the constructor's first statement, so it must not
+    // open a corrupt file first: a file with no valid header is corruption's
+    // question, left untouched here.
     if (!has_sqlite_header (path)) {
         return false;
     }
@@ -1510,31 +1446,27 @@ const std::function<void (sqlite3*)>& on_connection) {
     const bool requests_need_fold = table_has_script_columns (connection.get (), "requests");
     const bool collections_need_fold =
     table_has_script_columns (connection.get (), "collections");
-    // 5 -> 6 (every earlier version passes through it too, 6 itself does
-    // not): grant the files a person chose, take the trust key out of every
-    // stored body, and drop the allowed folders the root rule refuses (4) -
-    // see `plan_trust_removal` and `plan_refused_roots`.
+    // 5 -> 6 (every earlier version passes through it, 6 itself does not):
+    // grant the files a person chose, take the trust key out of every stored
+    // body, and drop the allowed folders the root rule refuses (4); see
+    // `plan_trust_removal` and `plan_refused_roots`.
     const FileTrustPlan trust_plan =
     plan_file_trust_migration (connection.get (), *version);
     // 6 -> 7: requests move past their sub-folders into one sibling order.
     const auto order_shifts = plan_sibling_order_shift (connection.get (), *version, path);
     if (!requests_need_fold && !collections_need_fold && trust_plan.empty () &&
     order_shifts.empty ()) {
-        // Nothing to fold or rewrite - a fresh schema with no rows yet, a
-        // database some other path already brought to this shape, or one
-        // with no file reference to settle and no request beside a
-        // sub-folder. The other steps only stamp:
-        // 1 -> 2 is
-        // `request_examples.postman_response` and the four `requests`
-        // protocol-setting columns of #1765, nullable or NOT NULL with a
-        // default, which `sync_schema ()` adds by itself; 2 -> 3 is the new
-        // `file_roots` table and 5 -> 6 the new `file_grants`, which
-        // `sync_schema ()` creates outright; 7 -> 8 is `collections.spec_file`
-        // and `data_file`, NOT NULL with a default, which it adds and
-        // backfills to `{}`; 9 -> 10 is the new `spec_declined_operations`,
-        // which it creates outright; 10 -> 11 is `runs.outcome`, nullable,
-        // which it adds and leaves NULL (#3547). A chosen file that is gone
-        // changes nothing stored, but is still reported.
+        // Nothing to fold or rewrite (a fresh schema, a database already in
+        // this shape, or one with no file reference to settle and no request
+        // beside a sub-folder). The other steps only stamp: 1 -> 2 is
+        // `request_examples.postman_response` and #1765's four `requests`
+        // protocol-setting columns, nullable or NOT NULL with a default, which
+        // `sync_schema ()` adds; 2 -> 3 the new `file_roots` and 5 -> 6 the new
+        // `file_grants`, which it creates; 7 -> 8 `collections.spec_file` and
+        // `data_file`, NOT NULL with a default, added and backfilled to `{}`; 9
+        // -> 10 the new `spec_declined_operations`, created; 10 -> 11
+        // `runs.outcome`, nullable, added as NULL (#3547). A chosen file that
+        // is gone changes nothing stored, but is still reported.
         stamp_schema_version (connection.get (), path);
         log_file_trust_plan (trust_plan);
         return false;
@@ -1571,33 +1503,29 @@ void Database::init () {
     // Ensure schema is synced (idempotent)
     impl_->storage.sync_schema ();
 
-    // Shed the legacy EAV `metrics` table (issue #177). sync_schema only syncs
-    // the tables the storage still declares - it does not drop the ones that
-    // were removed from it - so a database written by an engine before this
-    // version keeps the table and its rows (~20/sec of load run) forever
-    // otherwise. The pages return to SQLite's freelist for reuse rather than
-    // shrinking the file; what returns them to the filesystem is the guarded
-    // reclamation at the end of this function (issue #990), which is where the
-    // cost of a rewrite is decided rather than paid on every start.
-    // Idempotent, so this stays rather than needing a one-shot migration flag.
+    // Sheds the legacy EAV `metrics` table (#177). sync_schema syncs only the
+    // tables the storage declares and drops none it removed, so an older
+    // database keeps the table and its rows (~20/sec of load run) forever
+    // otherwise. The pages go to SQLite's freelist, not the filesystem; the
+    // guarded reclamation at the end of this function returns them (#990),
+    // deciding a rewrite's cost there rather than paying it every start.
+    // Idempotent, so it needs no one-shot migration flag.
     impl_->storage.drop_table_if_exists ("metrics");
 
-    // WAL mode and the default `synchronous` are set by `Impl`'s constructor,
-    // before the first `sync_schema` - see the note there. They are deliberately
-    // not repeated here: two statements of one fact drift, and this one used to
-    // read as though the connection had been on a rollback journal until now.
+    // WAL mode and the default `synchronous` are set by `Impl`'s constructor
+    // before the first `sync_schema` (the note there); not repeated here, since
+    // two statements of one fact drift.
 
     // Seed default configuration values if empty (must be before reading config)
     seed_default_config ();
 
-    // Apply the three configurable database PRAGMAs. All are read once, here,
-    // so a later write to any of them reaches the engine on the next start -
-    // which is what their restart-required flag promises.
+    // The three configurable database PRAGMAs, read once here, so a later write
+    // reaches the engine on the next start, as their restart-required flag
+    // promises.
     //
-    // `cache_size` is per-connection state, so it cannot be applied once like
-    // the other two: it is handed to the open callback, which applies it to
-    // every connection sqlite_orm opens - and applied here too, to the one the
-    // storage holds open, which was opened before this row could be read.
+    // `cache_size` is per connection, so it goes to the open callback, which
+    // applies it to every connection sqlite_orm opens, and is applied here too,
+    // to the storage's held connection, opened before this row could be read.
     impl_->cache_size_bytes.store (get_config_int (
     "dbCacheSize", vayu::core::constants::database::CACHE_SIZE_BYTES));
     if (impl_->connection != nullptr) {
@@ -1609,23 +1537,22 @@ void Database::init () {
     get_config_int ("dbSynchronous", vayu::core::constants::database::SYNCHRONOUS);
     impl_->storage.pragma.synchronous (synchronous);
 
-    // Get busy timeout in milliseconds
     const int busy_timeout_ms =
     get_config_int ("dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS);
     impl_->storage.pragma.busy_timeout (busy_timeout_ms);
     impl_->busy_timeout_ms.store (busy_timeout_ms);
 
-    // All three are read back from the connection rather than echoed from the
-    // config rows: what the engine asked for and what SQLite holds are two
-    // different statements, and only the second one is worth logging.
+    // Read back from the connection, not echoed from the config rows: what the
+    // engine asked for and what SQLite holds differ, and only the second is
+    // worth logging.
     vayu::utils::log_debug ("db", "Database initialized with WAL mode",
     { { "cacheKb", applied_cache_size_bytes () / 1024 },
     { "busyTimeoutMs", applied_busy_timeout_ms () },
     { "synchronous", applied_synchronous () } });
 
-    // Close out runs abandoned by a previous process before pruning, so an
-    // orphan becomes a terminal (and therefore prunable) row in the same
-    // startup. Best-effort: neither pass may block a successful startup.
+    // Runs abandoned by a previous process are closed out before pruning, so an
+    // orphan becomes a terminal, prunable row in the same startup. Best-effort:
+    // neither pass may block a startup.
     try {
         reconcile_orphaned_runs ();
     } catch (const std::exception& e) {
@@ -1633,11 +1560,11 @@ void Database::init () {
         "db", "Startup run reconciliation failed: " + std::string (e.what ()));
     }
 
-    // Bindings written before the engine stamped them (issue #709) name a
-    // document and no version of it, which reads to every contract check as a
-    // document that has moved - so an imported collection was measured against
-    // nothing. Best-effort, like the passes around it: a repair that fails must
-    // not cost the user their engine.
+    // Bindings written before the engine stamped them (#709) name a document
+    // and no version, which every contract check reads as a moved document, so
+    // an imported collection was measured against nothing. Best-effort, like
+    // the passes around it: a failed repair must not cost the user their
+    // engine.
     try {
         if (const int64_t stamped = stamp_hashless_spec_bindings (); stamped > 0) {
             vayu::utils::log_info ("db",
@@ -1650,8 +1577,7 @@ void Database::init () {
     }
 
     // The headers a pre-#1229 client saved into the request document itself
-    // (issue #1229). Best-effort, like the passes around it: a repair that
-    // fails must not cost the user their engine.
+    // (#1229). Best-effort, like the passes around it.
     try {
         if (const int64_t stripped = strip_stored_managed_headers (); stripped > 0) {
             vayu::utils::log_info ("db",
@@ -1675,9 +1601,9 @@ void Database::init () {
         "db", "Startup empty-parent repair failed: " + std::string (e.what ()));
     }
 
-    // No webhook inbox survives the process that opened it, so any capture row
-    // still here belongs to an inbox nothing can list. Best-effort, like the
-    // two passes around it.
+    // No webhook inbox outlives the process that opened it, so any capture row
+    // left belongs to an inbox nothing can list. Best-effort, like the passes
+    // around it.
     try {
         if (const int64_t dropped = clear_inbox_requests_all (); dropped > 0) {
             vayu::utils::log_info ("db",
@@ -1688,9 +1614,8 @@ void Database::init () {
         "Startup inbox capture cleanup failed: " + std::string (e.what ()));
     }
 
-    // Trim accumulated run history on startup (design-mode clicks and load runs
-    // are otherwise append-only). Best-effort: a prune failure must not block a
-    // successful startup.
+    // Trims run history (design-mode clicks and load runs are otherwise
+    // append-only). Best-effort: a failed prune must not block a startup.
     try {
         prune_runs_configured ();
     } catch (const std::exception& e) {
@@ -1698,11 +1623,10 @@ void Database::init () {
         "db", "Startup run pruning failed: " + std::string (e.what ()));
     }
 
-    // Destroy what has sat in the trash past its retention (issue #988). Here
-    // rather than on every delete, on the same reasoning as run pruning: this
-    // is a sweep over rows nobody is looking at, and a startup is when the
-    // engine can afford one. Best-effort for the same reason too - a failed
-    // sweep must not be a daemon that will not start.
+    // Destroys what has sat in the trash past its retention (#988), here rather
+    // than on every delete, as run pruning is: a sweep over rows nobody is
+    // looking at, which a startup can afford. Best-effort for the same reason:
+    // a failed sweep must not be a daemon that will not start.
     try {
         purge_expired_trash_configured ();
     } catch (const std::exception& e) {
@@ -1710,22 +1634,19 @@ void Database::init () {
         "db", "Startup trash purge failed: " + std::string (e.what ()));
     }
 
-    // Give the pages the sweeps above freed back to the filesystem (issue
-    // #990). Last of the startup passes, so it sees what every one of them
-    // freed rather than only the run prune's share, and guarded, because a
-    // rewrite of the whole database is not something to do on every start: a
-    // quarter of the file has to be free pages holding at least 10 MiB before
-    // this runs at all.
+    // Gives the pages the sweeps above freed back to the filesystem (#990).
+    // Last of the startup passes, so it sees what all of them freed, and
+    // guarded, because rewriting the whole database is not for every start: a
+    // quarter of the file must be free pages holding at least 10 MiB.
     //
-    // The write lock it takes is the one the `metrics` drop above declines to
-    // pay, and what makes it payable here is that there is nothing waiting on
-    // it: `daemon.cpp` runs `init` before it starts the HTTP listener, and the
-    // lock file has already refused a second engine. The DB mutex this function
-    // holds throughout is held over the rewrite too, and for the same reason
-    // that costs nothing - there is no second caller yet to block. What it does
-    // cost is startup latency, which is why the outcome is logged: the app
-    // gives the engine 45 seconds to answer `/health`. Best-effort like the
-    // passes above - reclaiming disk must not be a daemon that will not start.
+    // It takes the write lock the `metrics` drop above declines to pay, payable
+    // here because nothing waits on it: `daemon.cpp` runs `init` before the
+    // HTTP listener starts, and the lock file has refused a second engine. The
+    // DB mutex this function holds covers the rewrite too, costing nothing for
+    // the same reason. What it costs is startup latency, hence the logged
+    // outcome: the app gives the engine 45 seconds to answer `/health`.
+    // Best-effort like the passes above: reclaiming disk must not be a daemon
+    // that will not start.
     try {
         log_reclaim_outcome (reclaim_freed_pages (impl_->connection, impl_->opened_file));
     } catch (const std::exception& e) {
@@ -1741,16 +1662,15 @@ void Database::init () {
 int64_t Database::stamp_hashless_spec_bindings () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     int64_t stamped = 0;
-    // Deleted rows are backfilled too (issue #988). This repairs what a row
-    // always meant rather than answering a question a user asked, and a
-    // collection restored after this pass ran would otherwise carry an
-    // unstamped binding forever - the pass is a startup one, not a schedule.
-    // `replace` writes the whole struct, so `deleted_at` survives it.
+    // Deleted rows are backfilled too (#988): this repairs what a row always
+    // meant, and a collection restored after this startup pass would otherwise
+    // carry an unstamped binding forever. `replace` writes the whole struct, so
+    // `deleted_at` survives.
     for (auto& col : impl_->storage.get_all<Collection> ()) {
-        // `fetched_at`, not now: every row this pass can reach was written by an
-        // import that stored the document in the same transaction, so that is
-        // when the collection was bound to it. Stamping them all with the
-        // current time would tell the user they synced today.
+        // `fetched_at`, not now: every row this pass reaches was written by an
+        // import that stored the document in the same transaction, which is
+        // when the collection was bound. The current time would tell the user
+        // they synced today.
         auto rewritten = vayu::core::stamp_spec_binding (col.openapi,
         [&] (const std::string& spec_id) -> std::optional<vayu::core::SpecStamp> {
             auto document = get_spec_document (spec_id);
@@ -1773,9 +1693,9 @@ int64_t Database::stamp_hashless_spec_bindings () {
 
 namespace {
 // A repair that runs once is a migration and gets a migration's bookkeeping
-// (issue #1487). #1492 will give this kind of marker a proper home; until
-// then a `config_entries` row - `advanced`, no everyday user story - is where
-// this file's other internal-only flags already live.
+// (#1487). The marker is a `config_entries` row (`advanced`, no everyday user
+// story), where this file's other internal flags live; #1492 tracks a proper
+// home for such markers.
 constexpr std::string_view MANAGED_HEADERS_STRIPPED_KEY =
 "managedHeadersStripped";
 } // namespace
@@ -1787,17 +1707,16 @@ int64_t Database::strip_stored_managed_headers () {
         return 0;
     }
 
-    // Only rows whose `headers` text could contain one of the three legacy
-    // names are worth loading and JSON-parsing. `LIKE` is ASCII
-    // case-insensitive by default, the same fold `legacy_managed_row` applies
-    // to a matched key, so a workspace with nothing left to strip costs one
-    // scan of this column rather than a materialisation of every request's
-    // body and script (issue #1487).
-    // Trash is left alone (issue #1491): a restored row runs through the same
-    // disable pass on the way back, in `restore_request_locked` /
-    // `restore_collection_locked`, so a request in the trash stays
-    // byte-identical until then rather than being rewritten while nobody can
-    // see or undo it.
+    // Only rows whose `headers` text could hold one of the three legacy names
+    // are loaded and parsed. `LIKE` is ASCII case-insensitive by default, the
+    // fold `legacy_managed_row` applies to a matched key, so a workspace with
+    // nothing left to strip costs one column scan, not a materialisation of
+    // every request's body and script (#1487).
+    //
+    // Trash is left alone (#1491): a restored row runs through the same disable
+    // pass on the way back (`restore_request_locked` /
+    // `restore_collection_locked`), so a trashed request stays byte-identical
+    // until then rather than being rewritten while nobody can see or undo it.
     auto candidates =
     impl_->storage.get_all<Request> (where (is_null (&Request::deleted_at) &&
     (like (&Request::headers, "%x-vayu-version%") or like (&Request::headers, "%x-request-id%") or
@@ -1834,10 +1753,10 @@ int64_t Database::strip_stored_managed_headers () {
         return 0;
     }
 
-    // The pre-strip rows survive in a `backups/` snapshot, not in `<db>.bak`,
-    // which this same start refreshes from the rewritten file (issue #1487).
-    // Without that copy the pass does not run and stays unmarked, so the next
-    // start tries again (issue #2426).
+    // The pre-strip rows survive in a `backups/` snapshot, not `<db>.bak`,
+    // which this same start refreshes from the rewritten file (#1487). Without
+    // the copy the pass does not run and stays unmarked, so the next start
+    // retries (#2426).
     const auto copy = snapshot_before_rewrite (impl_->opened_file, "pre-repair",
     get_config_int (std::string (MAX_BACKUPS_RETAINED_KEY),
     vayu::core::constants::database::MAX_BACKUPS_RETAINED));
@@ -1846,10 +1765,10 @@ int64_t Database::strip_stored_managed_headers () {
         "no copy of the workspace could be saved before rewriting it: " + copy.error ());
     }
 
-    // One transaction for the whole rewrite, not one implicit commit per row -
-    // the same shape `seed_default_config` uses and for the same reason:
-    // `/health` cannot answer until `init ()` returns, and a workspace with
-    // thousands of candidate rows made every one of them its own commit.
+    // One transaction for the whole rewrite, not an implicit commit per row, as
+    // `seed_default_config` does and for its reason: `/health` cannot answer
+    // until `init ()` returns, and thousands of candidate rows would be
+    // thousands of commits.
     auto strip_transaction = impl_->storage.transaction_guard ();
 
     int64_t stripped = 0;
@@ -1860,9 +1779,9 @@ int64_t Database::strip_stored_managed_headers () {
         }
         request.headers = std::move (*rewritten);
         // `updated_at` is left alone, as the spec-binding repair leaves it:
-        // this disables what the app wrote on its own behalf, not an edit
-        // anybody made, and touching the timestamp would sort every request a
-        // user owns to the top of "recently changed" on one upgrade.
+        // this disables what the app wrote on its own behalf, not anybody's
+        // edit, and touching it would sort every request to the top of
+        // "recently changed" on one upgrade.
         impl_->storage.replace (request);
         ++stripped;
     }
@@ -1906,29 +1825,24 @@ Database::BackupSlot::~BackupSlot () {
     }
 }
 
-// Whether the database at `path` opens and carries this build's schema.
-//
-// The same probe answers for the main file and for the `.bak` beside it
-// (issue #984): the backup used to be restored on the strength of its
-// existence alone - "we assume the backup itself is valid" - so a torn copy
-// was written over the only other copy of the user's data. An
-// `integrity_check` pragma would answer a narrower question (pages, not
-// schema) and would not answer the one that matters here, which is whether
-// *this engine* can open the file it is about to commit to. The refresh of
-// that `.bak` asks it of its own snapshot too, before the snapshot replaces
-// the backup it would otherwise have to be trusted over.
+// Whether the database at `path` opens and carries this build's schema; the
+// same probe answers for the main file and the `.bak` beside it (#984), since a
+// backup restored on the strength of existing would overwrite the only other
+// copy with a torn one. `integrity_check` answers a narrower question (pages,
+// not schema) and not this one: whether *this engine* can open the file it is
+// about to commit to. The `.bak` refresh asks it of its own snapshot too,
+// before that snapshot replaces the backup.
 //
 // Only `SQLITE_CORRUPT` and `SQLITE_NOTADB` say the file is bad
-// (`classify_probe_failure`); a lock, a full disk or a read-only directory
-// says nothing about it and must never send it to the quarantine (#2420).
+// (`classify_probe_failure`); a lock, a full disk or a read-only directory says
+// nothing about it and never sends it to the quarantine (#2420).
 ProbeResult Database::probe_database (const std::string& path,
 std::chrono::milliseconds busy_timeout) {
     try {
-        // Ahead of `Impl`'s own construction, never after: `Impl`'s
-        // constructor already opens a connection and sets
-        // `journal_mode`, and `sync_schema ()` below is what would
-        // `DROP COLUMN` the pre-cutover script columns before this
-        // migration ever got to read them (issue #1514).
+        // Before `Impl` is constructed, never after: its constructor opens a
+        // connection and sets `journal_mode`, and `sync_schema ()` below would
+        // `DROP COLUMN` the pre-cutover script columns before this migration
+        // could read them (#1514).
         migrate_before_sync (path, busy_timeout, PreMigrationSnapshot::Skip);
         Impl probe (path, busy_timeout);
         probe.storage.sync_schema ();
@@ -1953,9 +1867,9 @@ constexpr std::string_view NOT_VALIDATED_REFUSAL =
 constexpr int DEADLINE_CHECK_INSTRUCTIONS = 1000;
 
 /// A `sqlite3_progress_handler`: non-zero stops the running statement with
-/// `SQLITE_INTERRUPT`. A handler rather than `sqlite3_interrupt` from a
-/// watchdog thread, because an interrupt that lands before `sqlite3_step`
-/// starts is cleared by SQLite and the copy would then run unbounded.
+/// `SQLITE_INTERRUPT`. A handler, not `sqlite3_interrupt` from a watchdog
+/// thread, because SQLite clears an interrupt landing before `sqlite3_step`
+/// starts, and the copy would run unbounded.
 int past_deadline (void* deadline) {
     const auto& until = *static_cast<std::chrono::steady_clock::time_point*> (deadline);
     return std::chrono::steady_clock::now () >= until ? 1 : 0;
@@ -2078,9 +1992,9 @@ std::chrono::steady_clock::time_point validate_by) {
                          "not validated"));
         }
         // Either way the previous backup stands. The snapshot is this call's
-        // own scratch file, not a copy anyone else has, so it goes whatever
-        // stopped the probe; the reason says which, because "did not
-        // validate" for a full disk would read as a damaged workspace.
+        // scratch file, so it goes whatever stopped the probe; the reason says
+        // which, because "did not validate" for a full disk would read as a
+        // damaged workspace.
         const ProbeResult checked = probe_database (snapshot.string (),
         std::chrono::milliseconds (vayu::core::constants::database::BUSY_TIMEOUT_MS));
         if (checked.verdict != ProbeResult::Verdict::Valid) {
@@ -2091,10 +2005,10 @@ std::chrono::steady_clock::time_point validate_by) {
             return std::unexpected (why + checked.reason);
         }
 
-        // A `-wal` beside the backup belongs to the copy being replaced: the
-        // file-copy backup this supersedes carried its sidecars along, and
-        // `recover_database` copies a `.bak-wal` back with the `.bak`. Left in
-        // place it would be replayed over a snapshot it was never written for.
+        // A `-wal` beside the backup belongs to the copy being replaced (the
+        // file-copy backup this supersedes carried its sidecars, and
+        // `recover_database` copies a `.bak-wal` back with the `.bak`); left,
+        // it would be replayed over a snapshot it was never written for.
         std::error_code ec;
         fs::remove (fs::path (backup.string () + "-wal"), ec);
         fs::remove (fs::path (backup.string () + "-shm"), ec);
@@ -2184,10 +2098,9 @@ std::expected<BackupRecord, BackupFailure> Database::backup_workspace (int64_t n
     }
 
     if (now <= 0) {
-        // A snapshot is named for the instant it was taken, so an instant that
-        // is not one has no name. Refused rather than defaulted to "now": a
-        // caller with a broken clock would otherwise get a file whose name says
-        // something untrue about when its contents are from.
+        // A snapshot is named for its instant, so an invalid instant has no
+        // name. Refused, not defaulted to "now": a broken clock would get a
+        // file whose name lies about when its contents are from.
         return std::unexpected (BackupFailure{ false,
         "Invalid backup timestamp " + std::to_string (now) +
         ": a snapshot is named for the instant it was taken" });
@@ -2206,11 +2119,10 @@ std::expected<BackupRecord, BackupFailure> Database::backup_workspace (int64_t n
     record.path       = destination.string ();
     record.size_bytes = size_ec ? 0 : static_cast<int64_t> (size);
     record.created_at = written->stamp_ms;
-    // Retention runs *after* the snapshot exists, and a failure here must not
-    // turn a backup that succeeded into a reported failure - the user has the
-    // file they asked for, and the worst this leaves behind is one snapshot too
-    // many. This is also what makes the declared "never throws" true: it is the
-    // one step that reads the database.
+    // Retention runs *after* the snapshot exists, and its failure must not turn
+    // a successful backup into a reported failure: the user has their file, and
+    // the worst left is one snapshot too many. This also keeps the declared
+    // "never throws" true, as the one step that reads the database.
     try {
         record.pruned = prune_backup_files (destination.parent_path (),
         get_config_int (std::string (MAX_BACKUPS_RETAINED_KEY),

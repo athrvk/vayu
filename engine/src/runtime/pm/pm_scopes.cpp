@@ -6,9 +6,8 @@
  */
 
 /**
- * @file pm_scopes.cpp
- * @brief `pm.environment`, `pm.globals`, `pm.collectionVariables`, `pm.variables`
- *        and `pm.iterationData`.
+ * `pm.environment`, `pm.globals`, `pm.collectionVariables`, `pm.variables` and
+ * `pm.iterationData`.
  */
 
 #include "pm_internal.hpp"
@@ -38,7 +37,7 @@ JSValue parse_json_or_text (JSContext* ctx, const std::string& json, const std::
     JSValue parsed = JS_ParseJSON (ctx, json.c_str (), json.size (), "<variable>");
     if (JS_IsException (parsed)) {
         JS_FreeValue (ctx, parsed);
-        // Clear the pending exception so it doesn't leak into the script
+        // The parse error must not leak into the script.
         JSValue err = JS_GetException (ctx);
         JS_FreeValue (ctx, err);
         return JS_NewString (ctx, text.c_str ());
@@ -59,13 +58,12 @@ JSValue carried_to_jsvalue (JSContext* ctx, const Variable& var) {
     return JS_NewString (ctx, var.value.c_str ());
 }
 
-// Convert a Variable into the JSValue a script reads. A value a script set this
-// run answers as itself, but only on a row of the default type: Vayu's
-// "string" stands for Postman's `any` as well as a declared string, and
-// Postman passes an `any` value through while casting a declared type (#2529).
-// Otherwise the stored text is cast by the declared type, mirroring the
-// frontend's castByType (app/src/lib/variable-cast.ts) so a loaded row reads
-// the same in both runtimes.
+// A Variable as the JSValue a script reads. A value a script set this run
+// answers as itself, but only on a default-type row: Vayu's "string" stands for
+// Postman's `any` as well as a declared string, and Postman passes `any`
+// through while casting a declared type (#2529). Otherwise the stored text is
+// cast by type, as the app's `castByType` (app/src/lib/variable-cast.ts) does,
+// so a loaded row reads alike in both runtimes.
 JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
     const std::string& type = var.type.empty () ? std::string{ "string" } : var.type;
 
@@ -79,8 +77,8 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
         try {
             size_t idx = 0;
             double num = std::stod (var.value, &idx);
-            // If the whole string didn't parse, surface NaN to match the
-            // frontend's Number(value) behavior on partial garbage.
+            // A string that did not parse whole is NaN, as the app's
+            // `Number(value)` reads partial garbage.
             if (idx != var.value.size ())
                 return JS_NewFloat64 (ctx, std::numeric_limits<double>::quiet_NaN ());
             return JS_NewFloat64 (ctx, num);
@@ -104,7 +102,7 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
             return JS_NewBool (ctx, 1);
         if (lowered == "false" || lowered == "0" || lowered == "no" || lowered.empty ())
             return JS_NewBool (ctx, 0);
-        // Non-canonical truthy string: matches Boolean("foo") → true
+        // A non-canonical truthy string is true, as `Boolean("foo")` is.
         return JS_NewBool (ctx, 1);
     }
 
@@ -120,13 +118,11 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
 // Variable scopes: pm.environment / pm.globals / pm.collectionVariables
 // ============================================================================
 
-// Which of the run's variable maps a binding reads and writes. The value is the
-// `magic` argument QuickJS hands back, so one implementation serves every
-// scope. They were three hand-written copies of get/set; seven methods each
-// would have tripled that, and a copy is exactly what stops a fix landing
-// everywhere it belongs. `SCOPE_LOCAL` is the run-local scope behind
-// `pm.variables.set` / `unset` / `clear` (#2564); it has no accessor of its own
-// on `pm`, so it is not in the binding table below.
+// Which of the run's variable maps a binding reads and writes: the `magic`
+// QuickJS hands back, so one implementation serves every scope (a copy per
+// method is what stops a fix landing everywhere). `SCOPE_LOCAL` is the
+// run-local scope behind `pm.variables.set` / `unset` / `clear` (#2564), with
+// no accessor of its own on `pm`, so not in the binding table.
 enum VariableScope : int {
     SCOPE_ENVIRONMENT,
     SCOPE_GLOBALS,
@@ -145,21 +141,18 @@ constexpr VariableScopeBinding variable_scope_bindings[] = {
     { "collectionVariables", SCOPE_COLLECTION_VARIABLES },
 };
 
-// Postman resolves an unqualified name local -> data -> environment ->
-// collection -> global. Vayu's data tier is not a map of variables but the
-// bound row itself, so this is the chain *below* the row: `pm.variables` reads
-// the local scope, then the row (issue #1007, `iteration_cell`), then walks
-// these - the same order `{{name}}` resolution uses app-side
-// (docs/app/variable-resolution.md), which is what keeps a script's reading of
-// a name identical to the URL's.
+// Postman resolves an unqualified name local, data, environment, collection,
+// global. Vayu's data tier is the bound row, not a map, so this is the chain
+// below the row: `pm.variables` reads the local scope, then the row (#1007,
+// `iteration_cell`), then these, the order `{{name}}` resolution uses app-side
+// (docs/app/variable-resolution.md), so a script reads a name as the URL does.
 constexpr VariableScope variables_precedence[] = { SCOPE_ENVIRONMENT,
     SCOPE_COLLECTION_VARIABLES, SCOPE_GLOBALS };
 
-// The map behind a scope, or nullptr when the run carries no such scope (a
-// design run with no active environment, say). Every binding below reads that
-// as an empty scope rather than an error: a script cannot see which scopes a
-// run was given, so throwing would fail it for a reason its author has no way
-// to inspect.
+// The map behind a scope, or nullptr when the run has none (a design run with
+// no active environment). Every binding reads that as an empty scope, not an
+// error: a script cannot see which scopes a run was given, so a throw would
+// fail it for a reason its author cannot inspect.
 Environment* scope_variables (JSContext* ctx, int magic) {
     auto* data = get_context_data (ctx);
     if (!data) {
@@ -174,17 +167,13 @@ Environment* scope_variables (JSContext* ctx, int magic) {
     }
 }
 
-// Every map a *read* of `magic` may see, weakest first. Only the collection
-// scope has more than one: its ancestor collections stack underneath it, root
-// weakest, so an inherited name resolves for a script the way `{{name}}`
-// already resolves it in the URL (issue #234). A write never consults this -
-// `scope_variables` alone is the write target, which is what keeps ancestors
-// read-only and the copy-down hazard impossible.
-//
-// One order for the whole file: the lookups below reverse it to stop at the
-// nearest definition and the snapshots fold along it so a nearer definition
-// overwrites a farther one. Deriving both from one list is what stops `get`
-// and `toObject` answering the same name two ways.
+// Every map a read of `magic` may see, weakest first. Only the collection scope
+// has more than one: its ancestors stack under it, root weakest, so an
+// inherited name resolves as `{{name}}` does in the URL (#234). A write never
+// consults this: `scope_variables` alone is the target, keeping ancestors
+// read-only and the copy-down hazard impossible. One order for the file: the
+// lookups reverse it to stop at the nearest definition and the snapshots fold
+// along it, so `get` and `toObject` cannot answer one name two ways.
 std::vector<const Environment*> scope_maps (JSContext* ctx, int magic) {
     std::vector<const Environment*> maps;
     auto* data = get_context_data (ctx);
@@ -200,11 +189,10 @@ std::vector<const Environment*> scope_maps (JSContext* ctx, int magic) {
     return maps;
 }
 
-// The definition of `key` a read of `magic` finds, or null when the walk ends
-// without one. A disabled row is looked *past* rather than stopped at, so a
-// leaf collection that unticks an inherited name falls through to the
-// ancestor's value - the same rule that already makes a disabled variable
-// invisible within a single scope.
+// The definition of `key` a read of `magic` finds, or null. A disabled row is
+// looked past, not stopped at, so a leaf unticking an inherited name falls
+// through to the ancestor's value, the rule that already hides a disabled
+// variable within one scope.
 const Variable* lookup_variable (JSContext* ctx, int magic, const std::string& key) {
     const auto maps = scope_maps (ctx, magic);
     for (auto it = maps.rbegin (); it != maps.rend (); ++it) {
@@ -216,9 +204,8 @@ const Variable* lookup_variable (JSContext* ctx, int magic, const std::string& k
     return nullptr;
 }
 
-// Hand every enabled variable a read of `magic` can see to `emit`, weakest
-// scope first, so a caller merging them lands on the same value
-// `lookup_variable` would have answered for that name.
+// Every enabled variable a read of `magic` can see, to `emit`, weakest scope
+// first, so a merging caller lands on the value `lookup_variable` would answer.
 template <typename Emit>
 void merge_visible_variables (JSContext* ctx, int magic, Emit&& emit) {
     for (const Environment* map : scope_maps (ctx, magic)) {
@@ -230,10 +217,9 @@ void merge_visible_variables (JSContext* ctx, int magic, Emit&& emit) {
     }
 }
 
-// A disabled variable is a row the user unticked in the variables editor, so
-// `get`, `has` and `toObject` all look straight past it - reading it would
-// resurrect a value that was switched off. `unset` and `clear` still remove it:
-// those are asked to delete a key, not to read one.
+// A disabled variable is a row the user unticked, so `get`, `has` and
+// `toObject` look past it (reading it would resurrect a switched-off value);
+// `unset` and `clear` still remove it, being asked to delete, not read.
 JSValue
 js_pm_scope_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
@@ -257,23 +243,20 @@ struct SetOptions {
     std::optional<bool> secret;
 };
 
-// Update a variable's value while preserving an existing key's secret and type
-// fields, unless `options` names one; a brand-new key gets the current
-// defaults plus whatever `options` names. Shared by every scope's set(),
-// `pm.variables.set` included, so a script that re-sets an existing (e.g.
-// secret) variable does not silently strip its flag or reset its type.
+// Updates a variable's value, keeping an existing key's secret and type unless
+// `options` names one; a new key gets the defaults plus what `options` names.
+// Shared by every scope's set(), `pm.variables.set` included, so re-setting a
+// secret variable does not strip its flag or reset its type.
 //
-// `enabled` is the one field a set deliberately turns on (#2479). A set is a
-// write of a value the script intends to use, so leaving the row unticked would
-// make the script's own get/has/replaceIn and the execute-time residual pass
-// look past it and send `{{name}}` literally, and the row would be persisted
-// unticked.
+// `enabled` is the one field a set turns on (#2479): a set writes a value the
+// script means to use, and an unticked row would make its own get / has /
+// replaceIn and the execute-time residual pass look past it, sending `{{name}}`
+// literally, and persist it unticked.
 //
-// A brand-new key is also stamped with its creation time, the app's ordering
-// key for the variables editor (issue #135). This is the one place the engine
-// may invent a `created_at`, because it is the only place the engine creates a
-// variable - stamping an existing one would sort it below rows the user added
-// after it.
+// A new key is stamped with its creation time, the variables editor's ordering
+// key (#135); the one place the engine invents a `created_at`, being the only
+// place it creates a variable; stamping an existing one would sort it below
+// rows added after it.
 void set_variable_preserving (Environment& map,
 const std::string& key,
 std::string value,
@@ -349,9 +332,9 @@ std::optional<std::string> declared_type_for (const std::string& name) {
     return std::nullopt;
 }
 
-// A type name `set` was given. `"secret"` is not a Postman type; it is the
-// importer's reading of `type: "secret"` (`import_document.cpp`), so a script
-// can say it the same way: the flag is set and the declared type is left alone.
+// A type name `set` was given. `"secret"` is no Postman type but the importer's
+// reading of `type: "secret"` (`import_document.cpp`), so a script says it
+// alike: the flag is set and the declared type left alone.
 void apply_type_name (SetOptions& options, const std::string& name) {
     if (name == "secret") {
         options.secret = true;
@@ -360,9 +343,9 @@ void apply_type_name (SetOptions& options, const std::string& name) {
     options.type = declared_type_for (name);
 }
 
-// `name` of the options object, or undefined when reading it throws: a getter
-// that throws is an options object that names nothing, and the exception must
-// not stay pending behind a `set` that returns normally.
+// `name` of the options object, or undefined when reading it throws: a throwing
+// getter names nothing, and the exception must not stay pending behind a `set`
+// returning normally.
 JSValue read_option_property (JSContext* ctx, JSValueConst options, const char* name) {
     JSValue value = JS_GetPropertyStr (ctx, options, name);
     if (JS_IsException (value)) {
@@ -372,10 +355,9 @@ JSValue read_option_property (JSContext* ctx, JSValueConst options, const char* 
     return value;
 }
 
-// Postman's rules for the third argument: a string is a type; an object
-// contributes `type` when it is a string and `secret` when it is a boolean
-// (an explicit `secret` beats a `type: "secret"` beside it); anything else is
-// ignored.
+// Postman's rules for the third argument: a string is a type; an object gives
+// `type` when a string and `secret` when a boolean (an explicit `secret` beats
+// a `type: "secret"` beside it); anything else is ignored.
 SetOptions read_set_options (JSContext* ctx, JSValueConst arg) {
     SetOptions options;
     if (JS_IsString (arg)) {
@@ -400,16 +382,14 @@ SetOptions read_set_options (JSContext* ctx, JSValueConst arg) {
     return options;
 }
 
-// The text a set stores. It is Postman's `Variable#toString`: JavaScript's
-// string conversion, except that `undefined` is "" rather than "undefined". So
-// `{{name}}`, the wire and storage read what Postman's would.
-//
-// A row declared `json` stores an object or an array as its JSON text instead:
-// the string conversion is "[object Object]", which the row's own read cannot
-// parse back, and `{{name}}` should substitute the document (#2568). Only the
-// declared type decides this, so a default-type row keeps Postman's text. The
-// declared type is the one this set leaves behind, not the one the row had, so
-// `set(name, {...}, 'json')` stores the document it declares.
+// The text a set stores: Postman's `Variable#toString`, JavaScript's string
+// conversion except that `undefined` is "", so `{{name}}`, the wire and storage
+// read what Postman's would. A row declared `json` stores an object or array as
+// its JSON text instead: "[object Object]" cannot be parsed back by the row's
+// own read, and `{{name}}` should substitute the document (#2568). Only the
+// declared type decides, so a default-type row keeps Postman's text; it is the
+// type this set leaves, so `set(name, {...}, 'json')` stores the document it
+// declares.
 std::string
 stored_text (JSContext* ctx, JSValueConst value, const ScriptValue& carried, bool declared_json) {
     if (JS_IsUndefined (value)) {
@@ -432,16 +412,14 @@ std::string scope_api (int magic) {
     return "pm.variables";
 }
 
-// The value itself rides beside the text for the run's own reads (#2529).
-//
-// The third argument is read for every scope, `pm.variables.set` included. The
-// local scope (#2564) is never persisted and `secret_variable_values` never
-// reads it, so a flag set there has no effect beyond the run's own variable.
-//
-// A name no `{{name}}` can read back, and the write API and the extractors
-// refuse, is a TypeError and stores nothing (#3461). `unset` does not check, so
-// a bad name already stored stays removable. The legacy `postman.set*Variable`
-// calls reach this function too, so one throw covers them.
+// The value itself rides beside the text for the run's own reads (#2529). The
+// third argument is read for every scope, `pm.variables.set` included; the
+// local scope (#2564) is never persisted nor read by `secret_variable_values`,
+// so a flag there affects only the run's own variable. A name no `{{name}}` can
+// read back, which the write API and the extractors refuse, is a TypeError
+// storing nothing (#3461); `unset` does not check, so a stored bad name stays
+// removable. The legacy `postman.set*Variable` calls reach this function, so
+// one throw covers them.
 JSValue
 js_pm_scope_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
@@ -482,16 +460,13 @@ js_pm_scope_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
     lookup_variable (ctx, magic, js_to_string (ctx, argv[0])) != nullptr ? 1 : 0);
 }
 
-// The method with no workaround: setting a variable to "" leaves an enabled
-// empty variable behind, which is not the same thing to `{{template}}`
-// resolution as the variable being gone. persist_script_variables carries the
-// removal to disk as a name the run loaded and no longer holds (#1878).
-//
-// Like `set` and `clear`, this erases from the scope's own map only. On the
-// collection scope that is the request's immediate parent: unsetting a name
-// the leaf shadowed makes an ancestor's definition visible again rather than
-// deleting it. Inheritance can be shadowed from below, never deleted from
-// below (issue #234).
+// The method with no workaround: setting "" leaves an enabled empty variable,
+// not the same to `{{template}}` resolution as a gone one;
+// `persist_script_variables` carries the removal to disk as a name the run
+// loaded and no longer holds (#1878). Like `set` and `clear`, it erases from
+// the scope's own map only: on the collection scope, the request's immediate
+// parent, so unsetting a name the leaf shadowed reveals the ancestor's
+// definition. Inheritance can be shadowed from below, never deleted (#234).
 JSValue
 js_pm_scope_unset (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
@@ -572,8 +547,8 @@ void setup_pm_variable_scope (JSContext* ctx, JSValue pm, const VariableScopeBin
 
 } // namespace
 
-// pm.environment, pm.globals and pm.collectionVariables - one installer over
-// the binding table, so the table and its enum stay in this file.
+// pm.environment, pm.globals and pm.collectionVariables, one installer over the
+// binding table, keeping the table and its enum in this file.
 void setup_pm_variable_scopes (JSContext* ctx, JSValue pm) {
     for (const auto& binding : variable_scope_bindings) {
         setup_pm_variable_scope (ctx, pm, binding);
@@ -586,22 +561,18 @@ namespace {
 // pm.variables - the merged reader, and the writer of the run-local scope
 // ============================================================================
 
-// Defined with `pm.iterationData` below, which is what it was written for: a
-// row's cell reaches a script as the JSON it is, through one converter, so the
-// merged reader here and the row's own accessor cannot type a column
-// differently.
+// Defined with `pm.iterationData` below, for which it was written: a row's cell
+// reaches a script as the JSON it is through one converter, so this merged
+// reader and the row's accessor cannot type a column differently.
 JSValue js_from_json (JSContext* ctx, const nlohmann::json& value, const char* label);
 
-// The cell a bound row holds for `key`, or null - for a run with no row, a row
-// that is not an object, or a name it does not carry (issue #1007).
-//
-// This is the data tier Postman resolves an unqualified name through, and it
-// sits above every scope below: an imported collection writes its columns bare,
-// so `pm.variables.get("username")` has to read this iteration's row rather
-// than an environment variable that happens to share the name. `pm.iterationData`
-// remains the accessor that reads *only* the row; this one is the merged view,
-// so it answers from the row and falls through to the scopes when the row is
-// silent - which is what lets one script run with and without a data file.
+// The cell a bound row holds for `key`, or null for no row, a non-object row or
+// a name it lacks (#1007). This is the data tier Postman resolves an
+// unqualified name through, above every scope: an imported collection writes
+// its columns bare, so `pm.variables.get("username")` must read this
+// iteration's row, not a same-named environment variable. `pm.iterationData`
+// reads only the row; this merged view falls through to the scopes when the row
+// is silent, so one script runs with and without a data file.
 const nlohmann::json* iteration_cell (JSContext* ctx, const std::string& key) {
     auto* data = get_context_data (ctx);
     if (data == nullptr || data->iteration_data == nullptr ||
@@ -622,8 +593,8 @@ JSValue js_pm_variables_get (JSContext* ctx, JSValueConst this_val, int argc, JS
     if (const Variable* found = lookup_variable (ctx, SCOPE_LOCAL, key)) {
         return cast_variable_to_jsvalue (ctx, *found);
     }
-    // Then the row, typed exactly as `pm.iterationData.get` hands it back - a
-    // number column reads as a number through either accessor.
+    // Then the row, typed as `pm.iterationData.get` hands it back: a number
+    // column reads as a number either way.
     if (const nlohmann::json* cell = iteration_cell (ctx, key)) {
         return js_from_json (ctx, *cell, key.c_str ());
     }
@@ -678,8 +649,8 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
             cast_variable_to_jsvalue (ctx, variable));
         });
     }
-    // Then the bound row (issue #1007) and the local scope, the two strongest
-    // tiers - the same reason the loop above runs weakest first.
+    // Then the bound row (#1007) and the local scope, the two strongest tiers,
+    // for the reason the loop above runs weakest first.
     auto* data = get_context_data (ctx);
     if (data != nullptr && data->iteration_data != nullptr &&
     data->iteration_data->is_object ()) {
@@ -697,10 +668,9 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
     return snapshot;
 }
 
-/// The row's columns, in payload order, for the "columns: ..." half of the
-/// refusal above. Mirrors `core/scenario_data.cpp`'s `describe_columns`, whose
-/// wording a bind-time failure already uses - the same mistake should read the
-/// same way whether it was the URL or a script that reached the column.
+/// The row's columns in payload order, for the refusal's "columns: ..." half,
+/// worded as `core/scenario_data.cpp`'s `describe_columns` words a bind-time
+/// failure, so one mistake reads alike from the URL or a script.
 std::string describe_iteration_columns (const nlohmann::json& row) {
     std::string out;
     for (const auto& [key, value] : row.items ()) {
@@ -722,11 +692,10 @@ vayu::http::VariableValues scope_variable_values (JSContext* ctx, int magic) {
     return values;
 }
 
-// Every name a script can see, folded weakest scope first so a stronger one
-// overwrites - the same walk toObject() does, and the same answer get() would
-// give per name. Read at call time rather than at bind time, which is what
-// makes a write earlier in the same script visible here. The bound row is not
-// in it: `resolve_against` hands the row to the resolver beside it.
+// Every name a script can see, folded weakest first so a stronger scope
+// overwrites, as toObject() walks and get() answers. Read at call time, so an
+// earlier write in the same script is visible; the bound row is not in it, as
+// `resolve_against` hands the row to the resolver beside it.
 vayu::http::VariableValues visible_variable_values (JSContext* ctx) {
     vayu::http::VariableValues values;
     for (auto it = std::rbegin (variables_precedence);
@@ -742,24 +711,19 @@ vayu::http::VariableValues visible_variable_values (JSContext* ctx) {
     return values;
 }
 
-// Which iteration this script is running beside, as the resolver takes it.
+// Which iteration this script runs beside, as the resolver takes it: always an
+// answer, since every send is an iteration of a run. The run's numbers where a
+// run set them (a load run's user and pass, a design run's pass), else the run
+// of one a plain Send is, `1` and `0`: this struct's own defaults, the ones
+// `POST /execute` binds into the request this script was handed (#994,
+// `execution.cpp`). That is why `replaceIn` may resolve what composition may
+// not: leaving the token written would make script and wire disagree about one
+// send.
 //
-// Always an answer, never absent, because every send is an iteration of a run:
-// the run's own numbers wherever a run set them - a load run's user and pass, a
-// design run's pass - and otherwise the run of one a plain Send is, `1` and `0`.
-// Those two are not a second default chosen here: they are this struct's own,
-// the same ones `POST /execute` binds into the request this script was handed
-// (issue #994, `execution.cpp`), which is what the move of `IterationIdentity`
-// down beside the names bought. That
-// is the whole of why `replaceIn` may resolve what composition may not: it runs
-// beside a request already bound with these two numbers, so leaving the token
-// written would make the script and the wire disagree about one send.
-//
-// It is deliberately *not* `pm.info`, which reads `undefined` on that same
-// plain Send: `pm.info` answers "which iteration of which run am I", and there
-// is no run to be an iteration of, while a token answers "what does this
-// resolve to here" - and here it resolves to what the request beside it carried
-// (issue #1057).
+// Not `pm.info`, which reads `undefined` on that plain Send: `pm.info` answers
+// "which iteration of which run am I", with no run to be one of, while a token
+// answers "what does this resolve to here", what the request beside it carried
+// (#1057).
 vayu::http::IterationIdentity script_identity (const ContextData* data) {
     vayu::http::IterationIdentity identity; // the run of one
     if (data == nullptr) {
@@ -775,32 +739,26 @@ vayu::http::IterationIdentity script_identity (const ContextData* data) {
 }
 
 // Full `{{template}}` resolution of a string a script opts in, at call time,
-// against @p values: the one resolver behind every `replaceIn`.
+// against @p values: the one resolver behind every `replaceIn`, the sanctioned
+// way to `{{...}}` in a script. Script text is never interpolated (#226, D16: a
+// rewrite cannot tell code from a string literal, and splicing values into
+// source is an injection); replaceIn keeps values as data, through POST
+// /compose's `resolve_template`, so the semantics match: the `{{$vu}}` /
+// `{{$iteration}}` identity answers ahead of every scope (#1088), @p local
+// beats a bound row's column (#2564), which beats @p values (#1007), which beat
+// generators; a dynamic `{{$guid}}` generates per occurrence, and a name
+// nothing answers keeps its braces, unknown `$name` included (#1009). A
+// substituted value carrying tokens resolves through them, bounded by
+// `MAX_NESTED_RESOLUTIONS` (`request_composer.cpp`) and a cycle rule leaving a
+// name already being expanded as written.
 //
-// This is the sanctioned way to `{{...}}` inside a script. Script *text* is
-// never interpolated (issue #226, D16: a rewrite cannot tell code from a
-// string literal, and splicing variable values into source is an injection);
-// replaceIn keeps values as data - the same resolver the engine's POST
-// /compose uses (`resolve_template`), so the semantics are identical: the
-// `{{$vu}}`/`{{$iteration}}` identity answers ahead of every scope (issue
-// #1088), @p local wins over a bound row's column (#2564), which wins over
-// @p values (issue #1007), @p values win over generators, a dynamic
-// `{{$guid}}` generates per occurrence, and a name nothing answers keeps its
-// braces - an unknown `$name` and an ordinary unknown name alike (issue
-// #1009). A substituted value that carries tokens of its own is resolved
-// through them in turn, bounded by `MAX_NESTED_RESOLUTIONS`
-// (`request_composer.cpp`) and by a cycle rule that leaves a name already
-// being expanded written as it stands.
-//
-// Two deliberate differences from compose-time resolution, both consequences
-// of *when* this runs:
+// Two differences from compose time, both from when this runs:
 //  - The maps are built at call time from the script's scopes, so a variable
-//    set earlier in the same script resolves here at once; the request's own
-//    `{{}}` waits for the pre-request script to end (#2521).
-//  - The collection scope is the script context's - the request's collection
-//    chain, leaf shadowing ancestor (issue #234). The raw stored string
-//    substitutes, never the typed value - matching `{{}}`, not
-//    pm.variables.get.
+//    set earlier in the script resolves at once; the request's own `{{}}` waits
+//    for the pre-request script to end (#2521).
+//  - The collection scope is the script context's, the request's chain, leaf
+//    shadowing ancestor (#234). The raw stored string substitutes, never the
+//    typed value, as `{{}}` does, unlike pm.variables.get.
 //
 // @param local the run-local scope's values, the one tier above a bound row.
 // @param missing_column receives the {{data.column}} name the bound row does
@@ -815,15 +773,12 @@ std::string& missing_column) {
     const vayu::http::IterationIdentity identity = script_identity (data);
     if (data == nullptr || data->iteration_data == nullptr ||
     !data->iteration_data->is_object ()) {
-        // No row to resolve against, so *that* namespace stays written as it
-        // stands - what composition does, and what lets one script run in both
-        // a data-driven run and a plain send. The identity is not that case:
-        // it needs no row behind it, so it answers here too.
-        //
-        // `Generate` said rather than defaulted: a script renders its own
-        // `{{$guid}}` here and now (issue #995 defers the family only for a
-        // payload a *run* will repeat), and it does that while resolving the
-        // identity it was sent as - the two questions compose.
+        // No row, so that namespace stays written as it stands, as composition
+        // does, which lets one script run in a data-driven run and a plain
+        // send. The identity needs no row, so it answers here too. `Generate`
+        // is said, not defaulted: a script renders its own `{{$guid}}` now
+        // (#995 defers the family only for a payload a run will repeat), while
+        // also resolving the identity it was sent as.
         return vayu::http::resolve_template (
         input, values, {}, vayu::http::DynamicResolution::Generate, identity);
     }
@@ -846,12 +801,11 @@ std::string& missing_column) {
 
 } // namespace
 
-// One resolution of `input` against everything the script can see: the four
-// scopes as they stand now, the iteration identity this script is running as,
-// plus the bound data row's columns when the run has one.
-// `pm.variables.replaceIn` and `pm.sendRequest` both resolve through this,
-// so a script cannot get one answer from the template it renders and another
-// from the request it sends. The resolution rules are `resolve_against`'s.
+// One resolution of `input` against all a script can see (the four scopes as
+// they stand, the iteration identity, the bound row's columns when present).
+// `pm.variables.replaceIn` and `pm.sendRequest` both use it, so a script gets
+// one answer from the template it renders and the request it sends; the rules
+// are `resolve_against`'s.
 std::optional<std::string> resolve_script_template (JSContext* ctx,
 const std::string& input,
 std::string& missing_column) {
@@ -859,10 +813,10 @@ std::string& missing_column) {
     scope_variable_values (ctx, SCOPE_LOCAL), missing_column);
 }
 
-// The bind-time rule, in the shape a script can catch: naming the token and the
-// columns the row does carry, because the mistake is almost always a spelling
-// and the answer is in the second half. One message for both callers, since
-// they resolve through one function and so must fail the same way.
+// The bind-time rule in a shape a script can catch, naming the token and the
+// row's columns, as the mistake is almost always a spelling and the answer is
+// in the second half; one message for both callers, which resolve through one
+// function and so fail alike.
 std::string
 missing_column_message (JSContext* ctx, const std::string& what, const std::string& column) {
     auto* data = get_context_data (ctx);
@@ -876,11 +830,10 @@ missing_column_message (JSContext* ctx, const std::string& what, const std::stri
 
 namespace {
 
-// The argument check and the answer of every `replaceIn`; @p resolve is the one
-// part that differs, the values the template resolves against. @p api names the
-// call in both refusals. Strict about the argument: a non-string is a
-// TypeError rather than a coerced "undefined" - the caller almost certainly
-// holds a bug.
+// The argument check and answer of every `replaceIn`; @p resolve, the values
+// resolved against, is the one difference, and @p api names the call in both
+// refusals. A non-string is a TypeError, not a coerced "undefined": the caller
+// almost certainly holds a bug.
 template <typename Resolve>
 JSValue
 replace_in (JSContext* ctx, int argc, JSValueConst* argv, const std::string& api, Resolve&& resolve) {
@@ -907,10 +860,9 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
 }
 
 // `pm.environment.replaceIn` and its siblings: Postman resolves against that
-// scope alone, so a name only another scope defines stays written as it stands.
-// What is not a scope - the `$` names, the iteration identity, the bound row -
-// answers as it does for `pm.variables.replaceIn`, and the run-local scope
-// sits out because it is a scope of its own.
+// scope alone, so a name only another scope defines stays written. What is no
+// scope (the `$` names, the identity, the bound row) answers as for
+// `pm.variables.replaceIn`; the run-local scope, a scope of its own, sits out.
 JSValue
 js_pm_scope_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
@@ -923,9 +875,9 @@ js_pm_scope_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 
 } // namespace
 
-// The reads merge every tier; the writes are Postman's local scope (#2564):
-// the scope binding's own set/unset/clear over `SCOPE_LOCAL`, so the value a
-// set carries (#2529) and the keep-the-flags rule are the same code.
+// Reads merge every tier; writes are Postman's local scope (#2564), the scope
+// binding's own set / unset / clear over `SCOPE_LOCAL`, so the carried value
+// (#2529) and the keep-the-flags rule are the same code.
 void setup_pm_variables (JSContext* ctx, JSValue pm) {
     JSValue variables = JS_NewObject (ctx);
 
@@ -955,22 +907,20 @@ namespace {
 // pm.iterationData - the data row bound to this iteration (issue #356)
 // ============================================================================
 
-// Turn one JSON value from the row into a JS value.
-//
-// Dump-and-parse rather than a hand-written walk: a data row is arbitrary JSON,
-// and QuickJS's own parser already accepts exactly that - nested objects,
-// arrays, `null`, numbers no double-only converter would keep. A second
-// implementation here would be a copy that stops receiving the parser's fixes.
-// `replace` on the dump because a row is user data: a lone UTF-8 continuation
-// byte must become U+FFFD, not throw out of a getter.
+// One JSON value from the row as a JS value. Dump-and-parse, not a hand walk: a
+// row is arbitrary JSON, which QuickJS's parser already accepts (nested
+// objects, arrays, `null`, numbers a double-only converter would not keep), and
+// a second implementation would stop receiving the parser's fixes. `replace` on
+// the dump because a row is user data: a lone continuation byte becomes U+FFFD
+// rather than throwing out of a getter.
 JSValue js_from_json (JSContext* ctx, const nlohmann::json& value, const char* label) {
     const std::string dumped =
     value.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
     JSValue parsed = JS_ParseJSON (ctx, dumped.c_str (), dumped.size (), "<iterationData>");
     if (JS_IsException (parsed)) {
         JS_FreeValue (ctx, parsed);
-        // Clear QuickJS's own exception before replacing it with one that says
-        // which value failed - the raw parse error names only a column.
+        // QuickJS's exception is replaced with one naming the failed value; the
+        // raw parse error names only a column.
         JSValue pending = JS_GetException (ctx);
         JS_FreeValue (ctx, pending);
         return JS_ThrowPlainError (ctx,
@@ -981,19 +931,16 @@ JSValue js_from_json (JSContext* ctx, const nlohmann::json& value, const char* l
     return parsed;
 }
 
-// The row this script is bound to, or null with a TypeError already thrown.
-//
-// `pm.iterationData` is only an object when a row exists, so the ordinary way
-// to reach these functions already implies one. The check is defence in depth:
-// a context is rebuilt after every script (#1782), so a stashed reference no
-// longer reaches a later one, and a call with no row bound must still say so
-// rather than answer about a run that has finished.
-//
-// The message names every surface that binds a row, not just the collection run
-// #356 shipped with: #402 made a send-with-row one, and #599, #993 and #3124
-// made every script of a load run given rows another, so a message naming only
-// collection runs steers a user who stashed the object during one of those to
-// look for a mistake that is not there.
+// The row this script is bound to, or null with a TypeError thrown.
+// `pm.iterationData` is an object only when a row exists, so the ordinary way
+// here implies one; the check is defence in depth: a context is rebuilt after
+// every script (#1782), and a stashed reference reaching a later call with no
+// row must say so, not answer about a finished run. The message names every
+// surface binding a row, not just the collection run (#356): a send-with-row
+// (#402) and every script of a load run given rows (#599, #993, #3124) bind one
+// too. It ends at the scripting directory, not a page: with the longest member
+// name the text already fills QuickJS's 256-byte formatting buffer
+// (`JS_MakeError`).
 ContextData* iteration_data_context (JSContext* ctx, const char* member) {
     auto* data = get_context_data (ctx);
     if (!data || !data->iteration_data) {
@@ -1002,18 +949,16 @@ ContextData* iteration_data_context (JSContext* ctx, const char* member) {
         "row "
         "bound. A row is bound by an iteration of a collection run with a data "
         "set, by a send-with-row, and by a load run's scripts when the run has "
-        "a data set. See docs/engine/scripting.md.",
+        "a data set. See docs/engine/scripting/.",
         member);
         return nullptr;
     }
     return data;
 }
 
-// pm.iterationData.get(key) - the row's value for `key`, or `undefined`.
-//
-// An unknown key is `undefined`, matching every other `pm` scope reader; the
-// argument is coerced the way `pm.variables.get` coerces it, so the two scopes
-// answer a non-string key identically.
+// pm.iterationData.get(key): the row's value, or `undefined` for an unknown
+// key, as every pm scope reader answers; the argument is coerced as
+// `pm.variables.get` coerces it, so the two answer a non-string key alike.
 JSValue js_iteration_data_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     auto* data = iteration_data_context (ctx, "get");
@@ -1032,17 +977,12 @@ JSValue js_iteration_data_get (JSContext* ctx, JSValueConst this_val, int argc, 
     return js_from_json (ctx, *found, key.c_str ());
 }
 
-// pm.iterationData.has(key) - whether the row carries that column.
-//
-// Every other scope reader in the pm surface answers `has` - pm.environment,
-// pm.globals, pm.collectionVariables, pm.variables and pm.cookies all do - and
-// Postman's pm.iterationData is a VariableScope, which has one too. Absent, the
-// question has to be asked as `get(key) !== undefined`, which is both indirect
-// and easy to write wrongly for a column whose value is JSON `null`.
-//
-// A column that is present and null is `true` here: the row carries it. That is
-// the one answer `get` cannot phrase as a presence check without the reader
-// knowing that a null column comes back as JS `null` rather than `undefined`.
+// pm.iterationData.has(key): whether the row carries that column. Every other
+// pm scope reader has `has`, and Postman's pm.iterationData is a VariableScope
+// with one; without it the question is `get(key) !== undefined`, indirect and
+// easily wrong for a JSON `null` column. A present null column is `true`: the
+// row carries it, an answer `get` cannot phrase without the reader knowing a
+// null comes back as `null`, not `undefined`.
 JSValue js_iteration_data_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     auto* data = iteration_data_context (ctx, "has");
@@ -1070,14 +1010,11 @@ JSValue js_iteration_data_to_object (JSContext* ctx, JSValueConst this_val, int 
     return js_from_json (ctx, *data->iteration_data, "this row");
 }
 
-// pm.iterationData.set / unset / clear - refused, loudly.
-//
-// The rows are a run *input*, not a scope: there is no destination a write
-// could land in, no persistence story for one, and the next iteration binds a
-// different row regardless. Accepting the call and dropping the value is
-// exactly #188's false success, so the write is bound and throws rather than
-// being absent and answering "not a function" - which reads as a gap in the
-// engine rather than as a decision.
+// pm.iterationData.set / unset / clear: refused, loudly. The rows are a run
+// input, not a scope: no destination, no persistence, and the next iteration
+// binds another row. Accepting and dropping the value is #188's false success,
+// so the write is bound and throws rather than being absent, where "not a
+// function" reads as an engine gap rather than a decision.
 JSValue js_iteration_data_write (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     (void)argc;
@@ -1091,15 +1028,12 @@ JSValue js_iteration_data_write (JSContext* ctx, JSValueConst this_val, int argc
 
 } // namespace
 
-// pm.iterationData - the row, or `undefined` when the run has no data set.
-//
-// Rebuilt per execution beside pm.info, and cleared rather than left standing
-// when there is no row: contexts are pooled, so the previous step's object
-// would otherwise answer a single send with the last collection run's data.
-//
-// Absence is `undefined` and not an empty scope - see
-// `ScriptContext::iteration_data` for why this one binding differs from
-// pm.execution and pm.cookies.
+// pm.iterationData: the row, or `undefined` with no data set. Rebuilt per
+// execution beside pm.info and cleared when there is no row: contexts are
+// pooled, so the previous step's object would answer a single send with the
+// last collection run's data. Absence is `undefined`, not an empty scope
+// (`ScriptContext::iteration_data` says why this binding differs from
+// pm.execution and pm.cookies).
 void setup_pm_iteration_data (JSContext* ctx, JSValue pm) {
     auto* data = get_context_data (ctx);
 

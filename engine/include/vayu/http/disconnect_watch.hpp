@@ -8,7 +8,6 @@
  */
 
 /**
- * @file http/disconnect_watch.hpp
  * @brief Ends a buffered handler's outbound work once its caller hangs up
  *        (#3383).
  *

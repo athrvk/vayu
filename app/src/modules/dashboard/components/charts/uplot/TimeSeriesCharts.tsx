@@ -303,12 +303,10 @@ export function RequestRateChart({
 		if (send) spec.push({ label: sendRate.label, role: sendRate.role, format: fmtRate });
 		const columns: Sample[][] = [...cols];
 
-		// Decided from the run's own config (rampOverlay is non-null only for a
-		// ramp_up run with a target concurrency, both known at run start), not
-		// from how many buckets history has accumulated - `points.length` grows
-		// from the caller's history one tick at a time, so gating on it here
-		// flipped the series set (and the `key` below) partway through every
-		// ramp-up run and force-remounted the chart (#1717).
+		// From the run's own config (rampOverlay is non-null only for a ramp_up run with a target
+		// concurrency, both known at run start), not from how many buckets history holds:
+		// `points.length` grows a tick at a time, so gating on it would flip the series set (and
+		// the `key` below) partway through every ramp-up run and force-remount the chart (#1717).
 		const ramp = rampOverlay != null;
 		if (ramp) {
 			const byTime = new Map<number, RampOverlay["points"][number]>(
@@ -474,17 +472,12 @@ const VITALS_ROLES: UPlotSeriesSpec["role"][] = [
 ];
 
 /**
- * Server vitals scraped from the target during the run, on the run's own
- * timeline.
- *
- * Not bucketed like the charts above: those average a metric the engine emits
- * every tick, while these are point readings on the user's scrape cadence -
- * averaging two of them into a bucket would report a number the target never
- * exported. The resampling onto the tick x axis (and the gaps where a scrape
- * failed) is `joinMonitorToTimeline`'s, so this component only paints.
- *
- * Renders nothing when the run scraped nothing, which is what keeps the row out
- * of a dashboard for a run that configured no monitor.
+ * Server vitals scraped from the target during the run, on the run's own timeline. Not bucketed
+ * like the charts above, which average a metric the engine emits every tick: these are point
+ * readings on the user's scrape cadence, and averaging two into a bucket would report a number the
+ * target never exported. The resampling onto the tick x axis (and the gaps where a scrape failed)
+ * is `joinMonitorToTimeline`'s, so this component only paints. Renders nothing when the run scraped
+ * nothing, which keeps the row off a dashboard for a run with no monitor.
  */
 export function ServerVitalsChart({
 	history,

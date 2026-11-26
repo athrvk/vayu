@@ -54,22 +54,22 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     // the event cap. Decided before the byte cap below because the two mean
     // opposite things: reaching the event cap is this transfer's intended end
     // and completes it *successfully*, while exceeding the byte cap is a
-    // refusal to buffer and stays an error. Deciding it after would report a
-    // stream that ended exactly as asked as a failed one whenever its final
-    // chunk also crossed the byte cap.
+    // refusal to buffer and stays an error. Decided after, a stream that ended
+    // exactly as asked would read as failed whenever its final chunk also
+    // crossed the byte cap.
     const bool stream_cap_hit = data->stream.active () &&
     data->stream.feed (std::string_view (ptr, total_size), data->response.headers);
 
-    // Bounded buffering. Without this a large or streaming response grows the
-    // buffer as concurrency x body-size until allocation fails - and a
-    // std::bad_alloc thrown here would have to unwind through libcurl's C
-    // frame, which is undefined behaviour. Returning short of total_size is
-    // libcurl's documented way to abort a transfer (CURLE_WRITE_ERROR), so the
-    // overrun surfaces as an ordinary error completion instead.
+    // Bounded buffering. Without it a large or streaming response grows the
+    // buffer as concurrency x body-size until allocation fails, and a
+    // std::bad_alloc thrown here would unwind through libcurl's C frame, which
+    // is undefined behaviour. Returning short of total_size is libcurl's
+    // documented abort (CURLE_WRITE_ERROR), so the overrun surfaces as an
+    // ordinary error completion.
     //
-    // It still applies to a stream: the event cap bounds how many events are
-    // delivered, not how large one of them is, so without this a single
-    // unbounded event would be the hole the cap was supposed to close.
+    // It applies to a stream too: the event cap bounds how many events are
+    // delivered, not how large one is, so a single unbounded event would be the
+    // hole the cap was meant to close.
     if (data->max_response_bytes > 0) {
         const size_t buffered = data->response_body.size ();
         const size_t remaining =
@@ -117,7 +117,6 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
 
     std::string line (buffer, total_size);
 
-    // Remove trailing \r\n
     while (!line.empty () && (line.back () == '\r' || line.back () == '\n')) {
         line.pop_back ();
     }
@@ -131,11 +130,10 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
         return total_size;
     }
 
-    // Status line: "HTTP/<version> <code> [<reason phrase>]"
-    // Capture the wire reason phrase so we can preserve server-custom
-    // text (e.g. "422 Unprocessable Entity", "404 Object Not Found").
-    // HTTP/2+ status lines have no phrase - leave status_text empty and
-    // let the caller fall back to a code→phrase lookup.
+    // Status line: "HTTP/<version> <code> [<reason phrase>]". The wire reason
+    // phrase is kept so server-custom text survives (e.g. "422 Unprocessable
+    // Entity", "404 Object Not Found"). HTTP/2+ status lines have none:
+    // status_text stays empty and the caller falls back to the code's phrase.
     if (line.starts_with ("HTTP/")) {
         data->block_status = 0;
         auto first_space   = line.find (' ');
@@ -183,18 +181,18 @@ curl_off_t /*ulnow*/) {
         static_cast<size_t> (dltotal));
     }
 
-    // The duration half of a bounded stream (issue #576). It lives here rather
-    // than in write_callback because this is the callback libcurl runs on a
-    // stream that has gone *quiet* - a server holding a connection open and
-    // sending nothing delivers no writes at all, which is exactly the case the
-    // duration cap exists for. libcurl calls it at least once a second, so the
-    // cap is honoured within about that of its expiry.
+    // The duration half of a bounded stream (issue #576). Here rather than in
+    // write_callback because libcurl runs this callback on a stream gone
+    // *quiet*: a server holding a connection open and sending nothing delivers
+    // no writes at all, which is the case the duration cap exists for. libcurl
+    // calls it at least once a second, so the cap holds within about that of
+    // its expiry.
     //
     // A non-zero return is the documented abort (CURLE_ABORTED_BY_CALLBACK);
-    // the tally's `cap_reached` is what makes the completion read it as the
-    // stream's intended end rather than as a failure. It fires whatever the
-    // reply is, because it is the transfer's bound, but only a reply that
-    // announced an event stream ends as a success (#3771).
+    // the tally's `cap_reached` makes the completion read it as the stream's
+    // intended end rather than a failure. It fires whatever the reply is, as
+    // the transfer's bound, but only a reply that announced an event stream
+    // ends as a success (#3771).
     if (data->stream.active () &&
     data->stream.deadline_passed (std::chrono::steady_clock::now ())) {
         data->stream.mark_cap_reached ();

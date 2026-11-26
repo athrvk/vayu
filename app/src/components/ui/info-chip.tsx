@@ -6,32 +6,16 @@
  */
 
 /**
- * The tiny "i" affordance with a Radix tooltip, used beside a label that needs
- * a sentence of explanation - timing phases, chart axes, the wire/queue/total
- * summary.
- *
- * It existed twice: `modules/dashboard/components/shared.tsx` (reachable only
- * by the dashboard, since a module importing from another module is the wrong
- * direction) and a hand-rolled `InfoTip` inside the request-builder's
- * `ResponseTimingTab`. The copy is what this file is here to end - a
- * hand-rolled copy of a primitive does not receive the primitive's fixes, and
- * this one proves it: the builder's copy carries a `border-rule` fix, with a
- * comment explaining that on a card `--border` is the same colour as `--card`
- * in dark so the dot had no outline, and the dashboard's copy never got it.
- *
- * The dot is 12px and the hit box is 24px: the `after:` square states the
- * target floor (`size-target`, 28px at Comfortable) without moving the row,
- * the way `TabItem`'s close button grows its hit area behind a 12px glyph.
- *
- * The border stays a caller decision rather than being unified, because it is
- * genuinely one: `border-rule` inherits from the declared surface and falls
- * back to the invisible default under none, so it is right inside a
- * `surface-card` pane and wrong on a surface that declares nothing. The default
- * is `border-border`; pass `className="border-rule"` on a declared surface.
- *
- * No `TooltipProvider` of its own - the delay is set once at the app root
- * (`main.tsx`), and one here would only re-declare what it inherits. It matters
- * more than it sounds: a five-phase timing tab would otherwise mount five.
+ * The tiny "i" with a Radix tooltip, beside a label needing a sentence of explanation (timing
+ * phases, chart axes, the wire/queue/total summary). One primitive, as the dashboard's and the
+ * request builder's copies had drifted: only one got the `border-rule` fix. The dot is 12px and the
+ * hit box 24px: the `after:` square states the target floor (`size-target`, 28px at Comfortable)
+ * without moving the row, as `TabItem`'s close button does behind a 12px glyph. The border stays
+ * the caller's, a real choice: `border-rule` inherits from the declared surface and falls back to
+ * the invisible default under none, so it is right in a `surface-card` pane and wrong elsewhere.
+ * The default is `border-border`; pass `className="border-rule"` on a declared surface. No
+ * `TooltipProvider` of its own: the delay is set once at the root (`main.tsx`), and a five-phase
+ * timing tab would otherwise mount five.
  */
 
 import { type ReactNode } from "react";

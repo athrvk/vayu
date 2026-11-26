@@ -6,17 +6,14 @@
  */
 
 /**
- * Settings Store
- *
- * Manages settings UI state:
- * - Selected category for the sidebar
+ * The settings UI's state: the selected category, the search box and the entry a result asked to
+ * reveal.
  */
 
 import { create } from "zustand";
 import type { SettingsCategory } from "@/types";
 
 interface SettingsState {
-	// Selected category in sidebar
 	selectedCategory: SettingsCategory | null;
 
 	/**
@@ -36,7 +33,6 @@ interface SettingsState {
 	 */
 	searchQuery: string;
 
-	// Actions
 	setSelectedCategory: (category: SettingsCategory | null, highlightedKey?: string) => void;
 	clearHighlight: () => void;
 	setSearchQuery: (query: string) => void;

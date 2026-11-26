@@ -19,7 +19,7 @@
  * token) and the executor (what actually leaves on the wire, per submission).
  * The wire is what the second half asserts on - a bind that produced the right
  * string and then lost it downstream is still a request nobody meant to send,
- * which is the reasoning `scenario_load_test.cpp` records for its own listener.
+ * which is the reasoning `scenario_load_fixture.hpp` records for its own listener.
  *
  * The **rows-off** path is asserted here too, and deliberately: it is the
  * throughput guard #992 states, and a guard nothing tests is a guard that
@@ -180,7 +180,7 @@ class LoadDataTest : public ::testing::Test {
      * it.
      *
      * Every step goes through production's own function rather than a
-     * hand-built equivalent, for the reason `scenario_load_test`'s `with_data`
+     * hand-built equivalent, for the reason `scenario_load_fixture.hpp`'s `with_data`
      * records: a test that built its own template would pass against a splitter
      * the engine never runs.
      */

@@ -6,29 +6,13 @@
  */
 
 /**
- * The headers family - three variants, one file.
- *
- * `HeadersViewer` is the collapsible table, used for request and response
- * headers alike. `CompactHeadersViewer` is the same content on a sunken slab,
- * for panes with no room for a table. `ResponseHeadersPanel` is the Headers
- * *tab* - request collapsed above response open - and lived in its own file
- * until #76 folded it in here, which is where the other two already were.
- *
- * Displays HTTP headers in a collapsible table format.
- * Used for both request and response headers.
- *
- * The rules are `border-rule`, so their colour comes from whichever surface
- * encloses this table rather than from a token picked here. Rendered in the
- * response pane that is a `surface-card`, they resolve to 1.304 light / 1.278
- * dark; the compact variant below sits on a `surface-sunken` and its rows
- * resolve to 1.356 / 1.343 without saying anything different.
- *
- * They were `border-border/50` on a card: 1.138 in light, **1.002** in dark -
- * the same colour as the card. Obvious in light, entirely absent in dark, which
- * is how it was reported.
- *
- * The rows are not held a step lighter than the header: at this surface a step
- * lighter lands back at invisible.
+ * The headers family: `HeadersViewer` is the collapsible table for request and response headers;
+ * `CompactHeadersViewer` the same content on a sunken slab, for panes without room for a table;
+ * `ResponseHeadersPanel` the Headers *tab*, request collapsed above response open. The rules are
+ * `border-rule`, coloured by the enclosing surface: in the response pane's `surface-card` they
+ * resolve to 1.304 light / 1.278 dark, and the compact variant's rows on `surface-sunken` to 1.356
+ * / 1.343 (`border-border/50` on a card measured 1.002 in dark, the card's own colour). The rows
+ * are not a step lighter than the header: here a step lighter is invisible.
  */
 
 import { useState, type ReactNode } from "react";
@@ -58,12 +42,11 @@ import type { HeadersViewerProps } from "./types";
 import type { HeaderLine as WireHeaderLine } from "./wire-headers";
 
 /**
- * A header value with each time in it carrying the time card (#1786), the text
- * otherwise exactly as received. Runs rather than the whole value, because a
- * `Set-Cookie` holds its `Expires=` date among other attributes; they are the
- * Raw tab's own runs (`proseTimeRuns`), so the table and the raw exchange mark
- * the same times. Exported for the Cookies tab, which shows each `Set-Cookie`
- * attribute on its own and so needs the same `Expires=` treatment.
+ * A header value with each time in it carrying the time card (#1786), the text otherwise as
+ * received. Runs, not the whole value, as a `Set-Cookie` holds its `Expires=` among other
+ * attributes; they are the Raw tab's runs (`proseTimeRuns`), so table and raw exchange mark the
+ * same times. Exported for the Cookies tab, which shows each `Set-Cookie` attribute alone and needs
+ * the same `Expires=` handling.
  */
 export function HeaderValue({ value }: { value: string }) {
 	const parts: ReactNode[] = [];
@@ -79,10 +62,9 @@ export function HeaderValue({ value }: { value: string }) {
 }
 
 /**
- * A header name is one token and never wraps: "Content-" over "Type" reads as
- * two names (#3495). Past this many characters (the longest registered names
- * are about 35) it ellipses, with the full name on hover, so a pathological
- * name cannot take the value's column.
+ * A header name is one token and never wraps ("Content-" over "Type" reads as two names, #3495);
+ * past this many characters (the longest registered names are about 35) it ellipses with the full
+ * name on hover, so a pathological name cannot take the value's column.
  */
 const HEADER_NAME_MAX = "max-w-[40ch]";
 
@@ -114,27 +96,12 @@ export default function HeadersViewer({
 		return null;
 	}
 
-	// Header names are body text on `bg-card`, so they need 4.5. The raw palette
-	// values these used were 2.22 (green-500) and 3.76 (blue-500) in light mode -
-	// and being raw palette, they were theme-blind, so the light failure could
-	// not be fixed without breaking dark. The `-text` tokens are per-theme and
-	// measure 5.68/8.80 and 5.98/6.76.
 	/*
-	 * Header keys carry no colour.
-	 *
-	 * They used to: response keys were `text-status-success-text` and request
-	 * keys `text-status-running-text` - the *status* vocabulary, green and blue,
-	 * spent on a name that is neither succeeding nor running. In this pane
-	 * especially that is a real cost, because the status bar and the status-code
-	 * badge sit directly above and are where green and red have to mean
-	 * something. Painting every response header green teaches the eye to ignore
-	 * it there.
-	 *
-	 * The request/response split is already carried by the section each table
-	 * sits under, so the hue was decoration paid for out of the semantic budget.
-	 * Key and value are told apart the way a devtools panel does it - the value
-	 * is the payload and takes `--foreground`, the key is the lookup label and
-	 * sits one tier back.
+	 * Header keys carry no colour. Green and blue keys spent the *status* vocabulary on names that
+	 * are neither succeeding nor running, right under the status bar and code badge where green and
+	 * red must mean something; painting every response header green teaches the eye to ignore it.
+	 * The section a table sits under already says request or response. Key and value split as in
+	 * devtools: the value is the payload on `--foreground`, the key the lookup label a tier back.
 	 */
 
 	return (
@@ -183,9 +150,7 @@ export default function HeadersViewer({
 	);
 }
 
-/**
- * Compact headers display for smaller views
- */
+/** The headers on a sunken slab, for panes without room for the table. */
 export function CompactHeadersViewer({
 	headers,
 	headerLines,
@@ -213,13 +178,11 @@ export function CompactHeadersViewer({
 			)}
 			<div className="surface-sunken p-3 rounded-md space-y-1">
 				{lines.map(({ name, value }, i) => (
-					// Same `border-rule` as the table above, resolving differently
-					// because `surface-sunken` re-declares it. That slab is `--muted`,
-					// the one surface where no border token works in both themes:
-					// `--border-strong` is the *weaker* of the two in dark, since
-					// `--muted` sits between them, and the pair inverts in light. The
-					// surface class supplies an alpha of `--foreground` instead, which
-					// flips with the theme - 1.356 light / 1.343 dark.
+					// The table's `border-rule`, resolving differently as `surface-sunken`
+					// re-declares it. The slab is `--muted`, where no border token works in both
+					// themes (`--border-strong` is the *weaker* in dark, `--muted` sitting between,
+					// and the pair inverts in light), so the surface supplies a `--foreground`
+					// alpha that flips with the theme: 1.356 light / 1.343 dark.
 					<div
 						key={`${i}:${name}`}
 						className="flex gap-2 py-1 border-b border-rule last:border-0"
@@ -246,16 +209,14 @@ export interface ResponseHeadersPanelProps {
 	/** Headers that were sent. Collapsed by default - usually not the question. */
 	requestHeaders?: Record<string, string>;
 	/**
-	 * The request's own lines as sent (`ResponseState.requestHeaderLines`, issue
-	 * #2466): a repeated name is a row each, in the spelling typed. Listed in
-	 * place of `requestHeaders`, which folds them, whenever there is no wire
-	 * frame to list instead.
+	 * The request's lines as sent (`ResponseState.requestHeaderLines`, #2466), a repeated name a
+	 * row each in its typed spelling; listed instead of the folding `requestHeaders` whenever there
+	 * is no wire frame.
 	 */
 	requestHeaderLines?: HeaderLine[];
 	/**
-	 * The request as it went out, line by line (`ResponseState.wireRequestHeaders`).
-	 * Listed in place of the other two when present: the sent record lacks the
-	 * lines the transport wrote itself.
+	 * The request as it went out, line by line (`ResponseState.wireRequestHeaders`), listed instead
+	 * of the other two when present, as the sent record lacks the transport's own lines.
 	 */
 	wireRequestHeaders?: readonly WireHeaderLine[];
 	/** Headers that came back. Open by default. */
@@ -265,33 +226,16 @@ export interface ResponseHeadersPanelProps {
 }
 
 /**
- * The Headers tab: request headers collapsed, response headers open.
- *
- * `ResponseHeadersTab` in the request builder and an inline block in
- * `UnifiedResponseViewer` were the same panel, reached through differently
- * shaped data - one read `response.requestHeaders`, the other a separate
- * `effectiveRequest`. The prop shape is the normalised one: two header maps,
- * neither of which the caller has to nest inside a response object.
- *
- * **Only the request builder's tab renders this today.** The stored viewer's
- * Headers tab went back to a pair of `CompactHeadersViewer`s when it became
- * compact-only (#75), so the "two callers" this was extracted for is now one -
- * which is why #76 called folding it in here hygiene rather than deduplication.
- * The two treatments are a deliberate difference, not drift: a table needs
- * width the compact pane does not have.
- *
- * The request section is one list. It shows the request as it went out
- * (`wireRequestHeaders`, issue #2464) when the engine recorded one; otherwise
- * the request's own lines (`requestHeaderLines`, issue #2466), a repeated name
- * a row each; and only for an answer that predates both, the folded sent
- * record. So a failed send, or a stored row from before the frame was kept,
- * still lists every header row the request carried. A display, never an input:
- * nothing here reaches a send.
- *
- * The empty-state fallback is the one piece of behaviour that is this panel's
- * own. `HeadersViewer` renders `null` with no entries, so without it a response
- * carrying no headers showed a blank pane with nothing explaining why - which is
- * exactly what the history copy did before the extraction.
+ * The Headers tab: request headers collapsed, response open. The props are normalised to two header
+ * maps, neither nested in a response object. **Only the request builder's tab renders it**: the
+ * stored viewer's Headers tab is a pair of `CompactHeadersViewer`s since going compact-only (#75,
+ * #76), a deliberate difference, as a table needs width the compact pane lacks. The request section
+ * is one list: the request as it went out (`wireRequestHeaders`, #2464) when recorded, else its own
+ * lines (`requestHeaderLines`, #2466), and only for an answer predating both, the folded sent
+ * record, so a failed send or a row stored before the frame was kept still lists every header the
+ * request carried. A display, never an input: nothing here reaches a send. The empty-state fallback
+ * is this panel's own: `HeadersViewer` renders `null` with no entries, which would leave a
+ * header-less response as an unexplained blank pane.
  */
 export function ResponseHeadersPanel({
 	requestHeaders,
@@ -302,9 +246,8 @@ export function ResponseHeadersPanel({
 }: ResponseHeadersPanelProps) {
 	const response = responseHeaders ?? {};
 	const responseLineCount = resolveHeaderLines(response, responseHeaderLines).length;
-	// `HeadersViewer` reads `headerLines` only for a map, so the wire list needs
-	// no special case: it is the request when there is one, and the lines
-	// stand in front of the folded map otherwise.
+	// `HeadersViewer` reads `headerLines` only for a map, so the wire list needs no special case:
+	// it is the request when present, and the lines front the folded map otherwise.
 	const request = wireRequestHeaders?.length ? wireRequestHeaders : (requestHeaders ?? {});
 
 	return (

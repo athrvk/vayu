@@ -6,18 +6,15 @@
  */
 
 /**
- * The drag state a tree row draws, in one place for both row types.
+ * The drag state a tree row draws, in one place for both row types. `CollectionItem` and
+ * `RequestItem` share one drag contract (the same indicator, the same four hidden Alt+Arrow
+ * controls), and a second copy would stop receiving the first one's fixes, so the shared half lives
+ * here and each row keeps only what differs: its indent and its entity. The pointer handlers are
+ * not a row's at all: the tree takes every press on its own element and resolves the row from it
+ * (`useTreeDnd`).
  *
- * `CollectionItem` and `RequestItem` are different components with the same
- * drag contract - the same indicator, the same four hidden Alt+Arrow controls -
- * and a second copy of any of it would be a copy that stops receiving the first
- * one's fixes. That is this repo's most repeated defect, so the shared half
- * lives here and each row keeps only what differs: its own indent and its own
- * entity. The pointer handlers are not a row's at all: the tree takes every
- * press on its own element and resolves the row from it (`useTreeDnd`).
- *
- * Everything degrades to nothing when no drag machinery is mounted (`dnd` is
- * `null`), which is what a test rendering one row in isolation gets.
+ * Everything degrades to nothing when no drag machinery is mounted (`dnd` is `null`), which is what
+ * a test rendering one row in isolation gets.
  */
 
 import { useMemo } from "react";
@@ -132,12 +129,10 @@ export function rowDndClasses(row: RowDnd): string {
 }
 
 /**
- * The key of the row being dragged, which stays mounted while the drawer
- * auto-scrolls away from it (#2543), so the source keeps its place and its
- * dimmed state for the whole gesture rather than remounting as the drawer
- * passes it. The gesture itself does not depend on it: the pointer is captured
- * on the tree. A string, so the list re-renders when a drag starts or ends and
- * not on every pointer move.
+ * The key of the row being dragged, kept mounted while the drawer auto-scrolls away from it
+ * (#2543), so the source keeps its place and dimmed state for the whole gesture rather than
+ * remounting as the drawer passes it. The gesture does not depend on it: the pointer is captured on
+ * the tree. A string, so the list re-renders when a drag starts or ends, not on every pointer move.
  */
 export function useDraggingRowKey(): string | null {
 	const { dnd } = useCollectionTreeHandlers();

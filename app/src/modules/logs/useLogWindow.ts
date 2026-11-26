@@ -6,35 +6,30 @@
  */
 
 /**
- * The Logs list's window (#3670): the rows mounted out of everything held, at
- * most `LOG_WINDOW_MAX_ROWS` of them whatever the store holds (up to 10,000).
+ * The Logs list's window (#3670): the rows mounted out of everything held, at most
+ * `LOG_WINDOW_MAX_ROWS` of them whatever the store holds (up to 10,000).
  *
- * **Two ends, anchored on the reader's rows.** While following, the window is
- * the newest lines. Otherwise it starts at the line it starts at, held as the
- * entry itself, never as an index: the store drops the oldest lines, which
- * moves every index under the window. Lines appended below sit past the lower
- * end and mount only when the reader scrolls to them, so a tail batch or a page
- * newer costs nothing until it is read. A sentinel at each end grows the window
- * by a step towards it, and past the cap the far end gives the rows up.
+ * **Two ends, anchored on the reader's rows.** While following, the window is the newest lines.
+ * Otherwise its first line is held as the entry itself, never as an index: the store drops the
+ * oldest lines, which moves every index under the window. Lines appended below sit past the lower
+ * end and mount only when the reader scrolls to them, so a tail batch or a page newer costs nothing
+ * until it is read. A sentinel at each end grows the window by a step towards it, and past the cap
+ * the far end gives the rows up.
  *
- * Growing a plain list rather than measuring rows is `useGrowingWindow`'s
- * argument (an opened row is a block of JSON): `content-visibility` on the rows
- * skips layout for those off screen. Rows mounted above the reader are held in
- * place by the caller (`useHoldPlace`, #3675), which the top sentinel's growth
- * asks for just before it happens: the browser does not anchor at `scrollTop` 0,
- * and without it the sentinel stays in view and the window stops at one step.
- * Only that growth moves the scroller; the follow pin, the bottom sentinel and
- * a new generation do not.
+ * Growing a plain list rather than measuring rows is `useGrowingWindow`'s argument (an opened row
+ * is a block of JSON): `content-visibility` on the rows skips layout for those off screen. Rows
+ * mounted above the reader are held in place by the caller (`useHoldPlace`, #3675), which the top
+ * sentinel's growth asks for just before it happens: the browser does not anchor at `scrollTop` 0,
+ * and without it the sentinel stays in view and the window stops at one step. Only that growth
+ * moves the scroller; the follow pin, the bottom sentinel and a new generation do not.
  *
- * **A jump opens the window on its time** (`jumpTarget`, #3674), not on the
- * newest rows: a few rows before the first line at or after it, so the line the
- * reader asked for is mounted whatever is newer. While the jump's first page
- * newer is being read (`jumpPaging`) the window is unsettled: it shows the time
- * where a line at or after it is held and the newest rows where not, but holds
- * no first row and neither sentinel grows it, so the page's arrival opens it on
- * the time whatever it carries and wherever the reader had reached. Once the
- * page has landed the window is anchored on that line, or on the newest rows
- * when none is held.
+ * **A jump opens the window on its time** (`jumpTarget`, #3674), not on the newest rows: a few rows
+ * before the first line at or after it, so the line the reader asked for is mounted whatever is
+ * newer. While the jump's first page newer is read (`jumpPaging`) the window is unsettled: it shows
+ * the time where a line at or after it is held and the newest rows where not, but holds no first
+ * row and neither sentinel grows it, so the page's arrival opens it on the time whatever it carries
+ * and wherever the reader had reached. Once the page has landed the window is anchored on that
+ * line, or on the newest rows when none is held.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";

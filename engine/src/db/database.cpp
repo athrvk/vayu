@@ -5,14 +5,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * @file database.cpp
- * @brief Database construction, recovery-branch dispatch, locking and
- * transaction retry - the members `db_maintenance.cpp`'s repair passes and
- * the eight table-family units do not each need their own copy of (issue
- * #1614). Every other `Database::` member is defined in the family file
- * `database.hpp`'s section comments name.
- */
+/// Database construction, recovery-branch dispatch, locking and transaction
+/// retry: what `db_maintenance.cpp`'s repair passes and the eight table-family
+/// units would otherwise each copy (#1614). Every other `Database::` member is
+/// defined in the family file `database.hpp`'s section comments name.
 
 #include "database_impl.hpp"
 
@@ -43,15 +39,13 @@ Database::Database (const std::string& db_path)
 
 Database::Database (const std::string& db_path, std::chrono::milliseconds startup_busy_timeout) {
     const auto opened_at = fs::file_time_type::clock::now ();
-    // Refused outright, before anything else - a database written by a newer
-    // engine is not corrupt, and letting it fall into the recovery branch
-    // below would quarantine a perfectly good (newer) file and silently start
-    // a fresh, empty one in its place: exactly the data loss issue #1514's
-    // version gate exists to prevent. This call is deliberately not inside
-    // `probe_database`'s try/catch: the exception must reach the daemon's own
-    // startup failure path, naming both versions, rather than being read here
-    // as corruption and handed to recovery. It is the one call that copies
-    // the workspace into `backups/` before migrating it (issue #2426).
+    // Refused outright, before anything else: a database written by a newer
+    // engine is not corrupt, and the recovery branch below would quarantine the
+    // good newer file and silently start an empty one, the data loss #1514's
+    // version gate prevents. Deliberately outside `probe_database`'s try/catch,
+    // so the exception reaches the daemon's startup failure path naming both
+    // versions instead of being read as corruption. The one call that copies
+    // the workspace into `backups/` before migrating it (#2426).
     const bool opened_at_current_schema =
     migrate_before_sync (db_path, startup_busy_timeout, PreMigrationSnapshot::Take);
 
@@ -76,26 +70,24 @@ Database::Database (const std::string& db_path, std::chrono::milliseconds startu
     const bool validated = found.verdict == ProbeResult::Verdict::Valid;
     if (validated) {
         // 2. The database is valid, so the backup for *next* time may be
-        // refreshed from it - only ever from a database that validated, so a
-        // bad one cannot overwrite a good backup. Not here, though: the copy is
-        // O(database size) and this runs before the engine listens, so it was
-        // the one step of a clean start that grew with the user's data
-        // (measured: 177 ms warm and 1.1 s cold on a 280 MB workspace, every
-        // start). `start_recovery_backup_refresh` takes it once the listener is
-        // up, as a consistent snapshot rather than a file copy, and
-        // `refresh_recovery_backup_on_shutdown` again at a clean stop.
+        //    refreshed from it, only ever from a validated database, so a bad
+        //    one cannot overwrite a good backup. Not here, though: the copy is
+        //    O(database size) and this runs before the engine listens
+        //    (measured: 177 ms warm, 1.1 s cold on a 280 MB workspace, every
+        //    start). `start_recovery_backup_refresh` takes it once the listener
+        //    is up, as a consistent snapshot rather than a file copy, and
+        //    `refresh_recovery_backup_on_shutdown` again at a clean stop.
         vayu::utils::log_debug ("db", "Database validation successful");
     } else {
         recover_database (db_file, backup_file, db_path, probe);
     }
 
-    // 3. Final Initialization
-    // At this point, we either have a valid original, a restored backup, or a fresh/corrupted file we must attempt to use.
-    // Idempotent by this point in every reachable case (the branch above
-    // already migrated whichever file `db_path` now holds), kept here too as
-    // the same defence in depth every `sync_schema ()` call gets. No copy:
-    // the one file this can still stamp is the empty schema a first start's
-    // probe just created.
+    // 3. Final initialization: a valid original, a restored backup, or a fresh
+    //    or corrupted file we must attempt to use. Idempotent by now in every
+    //    reachable case (the branch above migrated whichever file `db_path`
+    //    holds), kept as the defence in depth every `sync_schema ()` call gets.
+    //    No copy: the one file it can still stamp is the empty schema a first
+    //    start's probe created.
     migrate_before_sync (db_path, startup_busy_timeout, PreMigrationSnapshot::Skip);
     impl_ = std::make_unique<Impl> (db_path, startup_busy_timeout);
     // sync_schema might throw if restore failed or backup was also bad
@@ -104,10 +96,10 @@ Database::Database (const std::string& db_path, std::chrono::milliseconds startu
     impl_->opened_at_current_schema = opened_at_current_schema;
     impl_->opened_at                = opened_at;
 
-    // 4. The recovery record this process reports. Read from the file rather
-    // than kept from the branch above, so a marker written by an *earlier*
-    // engine run that nothing polled still reaches a client - that survival is
-    // the whole reason the fact is on disk instead of in a member.
+    // 4. The recovery record this process reports, read from the file, not kept
+    //    from the branch above, so a marker an *earlier* run wrote that nothing
+    //    polled still reaches a client: the reason the fact is on disk, not in
+    //    a member.
     recovery_ = read_recovery_marker (db_path);
 }
 
@@ -130,9 +122,9 @@ bool Database::owner_is_absent_locked (const std::optional<std::string>& owner_i
     return owners.empty () || owners.front ().deleted_at.has_value ();
 }
 
-// The one place a caller can scope the DB mutex around more than a single call.
-// Deliberately `std::function` rather than a template: the mutex lives behind
-// the pImpl, and a header-inlined template would have to expose it.
+// The one place a caller can scope the DB mutex around more than one call.
+// `std::function`, not a template: the mutex is behind the pImpl, and a
+// header-inlined template would expose it.
 void Database::with_lock (const std::function<void ()>& fn) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     fn ();
@@ -154,9 +146,9 @@ bool is_busy_error (const std::string& message) {
     message.find ("SQLITE_BUSY") != std::string::npos;
 }
 
-// Debug while a bounded retry or an unbounded one's backoff is still growing;
-// a warning per retry once an unbounded one has waited out the growth, since
-// a write still busy after that is one an operator should hear about.
+// Debug while a bounded retry, or an unbounded one's backoff, is still growing;
+// a warning per retry once an unbounded one has waited out the growth, since a
+// write still busy then is one an operator should hear about.
 void log_busy_retry (const char* what,
 int64_t attempt,
 int attempts,
@@ -197,9 +189,9 @@ const std::function<void ()>& fn) {
                 throw;
             }
         }
-        // The lock_guard scope above has ended: we sleep *without* holding the
-        // mutex so a busy retry never stalls other endpoints (/health, SSE,
-        // the runs poll) that serialize on the same lock.
+        // The lock_guard scope has ended: the sleep holds no mutex, so a busy
+        // retry never stalls the endpoints (/health, SSE, the runs poll)
+        // serialized on the same lock.
         const auto delay = base * std::min (attempt, MAX_BACKOFF_STEPS);
         log_busy_retry (what, attempt, attempts, delay, unbounded);
         std::this_thread::sleep_for (delay);

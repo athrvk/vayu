@@ -8,12 +8,10 @@
 import type { ElementOrigin } from "@/types/domain";
 
 /**
- * Where an element row came from, for the one case worth saying (issue #3051):
- * a collection's element running on a request that does not own it. A
- * request's own element needs no line - it is the step's - and the engine
- * names a folder's level by the same `collection` kind, which the UI calls a
- * collection throughout (`docs/ux-writing.md`). `undefined` means print
- * nothing, for an inline send with no origin as well.
+ * Where an element row came from, for the one case worth saying (#3051): a collection's element on
+ * a request not owning it. A request's own element needs no line (it is the step's), and the engine
+ * names a folder's level with the `collection` kind, which the UI calls a collection throughout
+ * (`docs/ux-writing.md`). `undefined` prints nothing, as for an inline send with no origin.
  */
 export function elementOriginLabel(origin: ElementOrigin | undefined): string | undefined {
 	if (origin?.kind !== "collection") return undefined;
@@ -21,11 +19,10 @@ export function elementOriginLabel(origin: ElementOrigin | undefined): string | 
 }
 
 /**
- * The React key of one element tally row. An id is unique only within the
- * level that declares it (#3101), so a report can hold one id twice, once per
- * level; the row's origin joins the id, as the engine tells the rows apart. A
- * row with no origin falls back to its position: a report stored before rows
- * carried one can repeat an id with nothing else to tell the rows apart.
+ * One element tally row's React key. An id is unique only within its level (#3101), so a report can
+ * hold one id twice, once per level; the origin joins the id, as the engine tells the rows apart. A
+ * row with no origin falls back to its position: a report predating origins can repeat an id with
+ * nothing else to separate them.
  */
 export function elementRowKey(
 	element: { id: string; origin?: ElementOrigin },

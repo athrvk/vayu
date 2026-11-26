@@ -6,26 +6,21 @@
  */
 
 /**
- * @file tools.ts
- * @brief The MCP tool registry. Each tool maps to engine capabilities, applies
- *        the safety guards (allowlist / caps / confirmation), and returns a
- *        result. Schemas are Zod (the SDK validates arguments and generates the
- *        JSON Schema for `tools/list`); tools carry MCP annotations (readOnly /
- *        destructive hints + a display title); every read tool declares an
+ * @brief The MCP tool registry. Each tool maps to engine capabilities, applies the safety guards
+ *        (allowlist / caps / confirmation), and returns a result. Schemas are Zod (the SDK
+ *        validates arguments and generates the JSON Schema for `tools/list`); tools carry MCP
+ *        annotations (readOnly / destructive hints + a display title); every read tool declares an
  *        output schema for structured results, bar the bare-array reads
- *        (`output-schema.conformance.test.ts`). Transport-agnostic - the same
- *        registry backs both the Streamable HTTP server (Electron) and the
- *        stdio CLI.
+ *        (`output-schema.conformance.test.ts`). Transport-agnostic: the same registry backs both
+ *        the Streamable HTTP server (Electron) and the stdio CLI.
  *
- * The definitions live under `tools/` (#1918), one `<domain>.tools.ts` per
- * contiguous run of the registry, and `TOOLS` concatenates them in registry
- * order: that order is what `tools/list` and the Settings catalog show, so a
- * new tool goes into the file whose run it extends, or a new file spliced in
- * at its place. `tools/contract.ts` holds the types, `kit.ts` the result,
- * argument and gate helpers, and one file per topic the rest. Imports run one
- * way - nothing under `tools/` imports this file - and `./tools.js` stays
- * the registry's public surface, so what callers import from it is
- * re-exported here.
+ * The definitions live under `tools/` (#1918), one `<domain>.tools.ts` per contiguous run of the
+ * registry, and `TOOLS` concatenates them in registry order: that order is what `tools/list` and
+ * the Settings catalog show, so a new tool goes into the file whose run it extends, or a new file
+ * spliced in at its place. `tools/contract.ts` holds the types, `kit.ts` the result, argument and
+ * gate helpers, and one file per topic the rest. Imports run one way (nothing under `tools/`
+ * imports this file) and `./tools.js` stays the registry's public surface, so what callers import
+ * from it is re-exported here.
  */
 
 import { resolveRemedyTokens, settingRemedy } from "./remedy.js";
@@ -119,16 +114,14 @@ export { MAX_INTROSPECTION_BYTES, MAX_SCHEMA_SDL_BYTES } from "./tools/graphql-s
 export { MAX_SPEC_DIFF_ENTRIES } from "./tools/spec-bindings.js";
 
 /**
- * Whether a session under @p config lists @p tool. One predicate for the two
- * readers that must agree: registration (`server.ts`) and the check that tells
- * clients the list changed when Settings do (`index.ts`, via
- * {@link toolListSignature}).
+ * Whether a session under @p config lists @p tool. One predicate for the two readers that must
+ * agree: registration (`server.ts`) and the check that tells clients the list changed when Settings
+ * do (`index.ts`, via {@link toolListSignature}).
  *
- * A write tool that cannot succeed does not ship its schema (#1429): writes are
- * off by default, and on a default install those tools were 66,077 of the
- * 181,447 bytes (36%) of a `tools/list` an agent could do nothing with. The
- * handler check stays (`writesDisabled`), so a client holding a list from a
- * session where writes were on still gets the actionable error.
+ * A write tool that cannot succeed does not ship its schema (#1429): writes are off by default, and
+ * on a default install those tools were over a third of a `tools/list` an agent could do nothing
+ * with. The handler check stays (`writesDisabled`), so a client holding a list from a session where
+ * writes were on still gets the actionable error.
  */
 export function isListed(tool: McpTool, config: ToolContext["config"]): boolean {
 	if (config.disabledTools.includes(tool.name)) return false;
@@ -219,13 +212,12 @@ export function toolCatalog(): McpToolInfo[] {
 /**
  * The error result @p result stands for, as the client receives it: the text
  * {@link describeFailure} writes for its failure, and the same failure as
- * `structuredContent.error`, which the SDK does not hold to a tool's
- * `outputSchema` because that schema describes a success.
+ * `structuredContent.error`, which the SDK does not hold to a tool's `outputSchema` because that
+ * schema describes a success.
  *
- * Remedy tokens are resolved here: a refusal shared by several tools
- * (`INLINE_FILE_REFUSAL`, `INSECURE_TLS_REFUSAL`) names its remedy with one,
- * since the constant is built before any host is known. Only an error is
- * resolved; a success carries workspace data, which is never rewritten.
+ * Remedy tokens are resolved here: a refusal shared by several tools (`INLINE_FILE_REFUSAL`,
+ * `INSECURE_TLS_REFUSAL`) names its remedy with one, since the constant is built before any host is
+ * known. Only an error is resolved; a success carries workspace data, which is never rewritten.
  */
 function failureAnswer(
 	result: ToolResult,
@@ -292,15 +284,14 @@ function unclassified(result: ToolResult, toolName: string, ctx: ToolContext): F
 }
 
 /**
- * Dispatch a `tools/call`. Converts argument errors into tool errors so the
- * agent gets a readable message instead of a protocol failure, and gives every
- * error result its class (#2776) on the way out.
+ * Dispatch a `tools/call`. Converts argument errors into tool errors so the agent gets a readable
+ * message instead of a protocol failure, and gives every error result its class (#2776) on the way
+ * out.
  *
- * The single dispatch path: `server.ts` routes every registered tool callback
- * through here, so the disabled-tool rejection below is the same code the tests
- * exercise. (The SDK validates arguments against the Zod `inputSchema` first,
- * and registration already skips disabled tools - this rejection is what
- * answers a client that calls one anyway.)
+ * The single dispatch path: `server.ts` routes every registered tool callback through here, so the
+ * disabled-tool rejection below is the same code the tests exercise. (The SDK validates arguments
+ * against the Zod `inputSchema` first, and registration already skips disabled tools; this
+ * rejection is what answers a client that calls one anyway.)
  */
 export async function dispatchTool(
 	name: string,
@@ -357,15 +348,14 @@ async function serveCall(
 }
 
 /**
- * Tell the renderer what a successful call changed, one event per declared
- * entity. The scope hints come from the call's own arguments: every tool in the
- * registry spells these two the same way, so reading them here is what keeps a
- * new write tool from having to remember an emit of its own.
+ * Tell the renderer what a successful call changed, one event per declared entity. The scope hints
+ * come from the call's own arguments: every tool in the registry spells these two the same way, so
+ * reading them here is what keeps a new write tool from having to remember an emit of its own.
  *
- * Notification failure must not fail a write the engine has already applied -
- * the same rule `update_engine_config`'s best-effort read-back follows - so a
- * throwing listener is logged and swallowed rather than turned into a tool
- * error the agent would read as "the write did not happen".
+ * Notification failure must not fail a write the engine has already applied (the same rule
+ * `update_engine_config`'s best-effort read-back follows), so a throwing listener is logged and
+ * swallowed rather than turned into a tool error the agent would read as "the write did not
+ * happen".
  */
 function notifyDataChanged(
 	tool: McpTool,

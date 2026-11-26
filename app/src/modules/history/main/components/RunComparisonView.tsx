@@ -6,20 +6,15 @@
  */
 
 /**
- * RunComparisonView
+ * The open load run against any other finished load run of the same request or collection: every
+ * latency percentile, both throughput measures, the reliability rows and the status-code merge, and
+ * for MCP runs that both counted them the failure classes, under the comparability warnings. It is
+ * the full diff behind the report's vs-baseline strip, and replaces the report's tabs in the same
+ * pane rather than opening a tab (#2164).
  *
- * The open load run against any other finished load run of the same request or
- * collection:
- * every latency percentile, both throughput measures, the reliability rows and
- * the status-code merge and, for MCP runs that both counted them, the failure
- * classes, under the comparability warnings. It is the full diff
- * behind the report's vs-baseline strip, and it replaces the report's
- * tabs in the same pane rather than opening a tab of its own (#2164).
- *
- * The compared run defaults to the pinned baseline when there is one and it is
- * not the open run, else the newest other run. The compared run is the base and
- * the open run the target, as in `BaselineComparison`: a delta reads "this run
- * against that one".
+ * The compared run defaults to the pinned baseline when there is one and it is not the open run,
+ * else the newest other run. The compared run is the base and the open run the target, as in
+ * `BaselineComparison`: a delta reads "this run against that one".
  */
 
 import { useMemo, useState, type ReactNode } from "react";

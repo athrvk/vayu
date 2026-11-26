@@ -14,9 +14,9 @@ heading anchor, so:
 - **Add a new page to the `nav:` in `.github/mkdocs.yml`** in the same commit.
   Off-nav pages build and are reachable by URL, but never appear in the sidebar.
 - **Do not rename or move a doc file** without checking for readers. Tests read
-  doc paths (`app/src/design-system-doc.test.ts` reads `docs/design-system.md`;
-  `app/src/state-management-doc.test.ts` reads `docs/app/state-management.md`,
-  `architecture.md` and `api-integration.md`, and fails on a `useXxx` or
+  doc paths (`app/src/design-system-doc.test.ts` reads every page of
+  `docs/design-system/`; `app/src/state-management-doc.test.ts` reads the pages of `docs/app/state-management/`,
+  `architecture.md` and the pages of `api-integration/`, and fails on a `useXxx` or
   `SCREAMING_CASE` name they quote that no longer exists in the app source),
   and every relative cross-link is validated by the build.
 - **Anchors follow GitHub's slug rules** (`pymdownx.slugs.slugify` is configured
@@ -44,6 +44,16 @@ heading anchor, so:
   strict build does not check for it - a page without one silently inherits
   `site_description`, which describes the product rather than the page. New
   pages get one in the same commit.
+- **Every page stays within the docs-lint budgets.** `scripts/docs-lint.py` runs
+  in `docs.yml` before the MkDocs build: 600 lines (1,000 for a reference page),
+  400 characters a line, 200 a table cell, no history narration. A page over a
+  budget has a ceiling in `scripts/docs-lint-ceilings.json`, which may only be
+  lowered (a split page's new pages may carry its entry between them, and a change
+  that retires a page may let a maximum rise by 32 characters for the links it
+  re-aims); a ceiling
+  whose page is now within budget fails as stale. A reference
+  page is one matching `reference_pages` in that file, so a new one is added
+  there. `CONTRIBUTING.md` has the rules and the local command.
 - **One social card for the whole site.** `og:image` / `twitter:image` point at
   `docs/images/social-card.png`, a designed 1200x630 asset wired in
   `.github/overrides/main.html`. Its source and the exact regeneration command

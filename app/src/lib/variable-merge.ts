@@ -6,20 +6,17 @@
  */
 
 /**
- * The one merge a variable-map write goes through.
+ * The one merge a variable-map write goes through. A PUT to `/environments/:id`, `/globals` or
+ * `/collections/:id` replaces the whole `variables` map, so any writer holding less than the
+ * freshest map risks sending a stale copy of a key it never touched back over a concurrent write to
+ * that key (an MCP agent's `update_environment`, another tab's context-bar commit, or the variables
+ * editor's own earlier save). The fix is the same everywhere: read the freshest map at write time,
+ * apply only the keys this write actually changed, and send that.
  *
- * A PUT to `/environments/:id`, `/globals` or `/collections/:id` replaces the
- * whole `variables` map, so any writer holding less than the freshest map
- * risks sending a stale copy of a key it never touched back over a
- * concurrent write to that key - an MCP agent's `update_environment`,
- * another tab's context-bar commit, or the variables editor's own earlier
- * save. The fix is the same everywhere: read the freshest map at write time,
- * apply only the keys this write actually changed, and send that. This
- * module is that merge, in one place, so `useVariableCommit` (a single-key
- * commit from the context bar) and `VariableTableEditor` (a multi-row commit
- * from the Variables tab) apply it the same way instead of each re-deriving
- * it - the repo's "hand-rolled copy of a primitive" trap, one level up from
- * the UI primitives it usually names.
+ * This module is that merge, in one place, so `useVariableCommit` (a single-key commit from the
+ * context bar) and `VariableTableEditor` (a multi-row commit from the Variables tab) apply it the
+ * same way instead of each re-deriving it: the repo's "hand-rolled copy of a primitive" trap, one
+ * level up from the UI primitives it usually names.
  */
 
 import type { VariableValue } from "@/types";
@@ -67,11 +64,9 @@ export interface VariableConflict {
 }
 
 /**
- * A key is a conflict when both sides moved it away from `baseline` - the
- * value each side started from - and did not land in the same place. A key
- * only one side touched is not a conflict: it is exactly the case
- * `mergeVariableChanges` already resolves by taking whichever side has an
- * opinion.
+ * A key is a conflict when both sides moved it away from `baseline` (the value each side started
+ * from) and did not land in the same place. A key only one side touched is not a conflict:
+ * `mergeVariableChanges` already resolves it by taking whichever side has an opinion.
  */
 export function findVariableConflicts(
 	baseline: VariableMap,

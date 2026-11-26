@@ -30,38 +30,36 @@ struct RunContext; // Forward declaration
 
 /**
  * @brief The `data` rows a **single-request** load run binds, split once
- *        (issue #993).
+ *        (#993).
  *
- * Before this, `{{data.column}}` bound on the scenario path alone, so the
- * canonical load shape - one request, N users, a row each - was expressible
- * only by wrapping the request in a one-step collection. The rows now ride the
- * run payload's top-level `data`, validated by the same `read_data_rows` the
- * scenario block goes through, and are claimed one per submission off a
- * run-wide cursor that wraps: a run longer than the set repeats it, exactly as
- * a scenario run's iterations do.
+ * The canonical load shape - one request, N users, a row each - needs no
+ * one-step collection around it: `{{data.column}}` binds on this path too. The
+ * rows ride the run payload's top-level `data`, validated by the same
+ * `read_data_rows` the scenario block goes through, and are claimed one per
+ * submission off a run-wide cursor that wraps: a run longer than the set
+ * repeats it, exactly as a scenario run's iterations do.
  *
  * **Null on the context for every run sent without rows**, and that emptiness
  * is the throughput guard made structural: the strategies test one pointer and
- * otherwise submit the shared request they always did - no copy, no claim, no
- * annotation. Nothing here is per-iteration work a token-free run can pay.
+ * otherwise submit the one shared request - no copy, no claim, no annotation.
+ * Nothing here is per-iteration work a token-free run can pay.
  *
  * The request's own bindable fields are **not** here: they are split off the
  * built request onto `RunContext::load_template`, because a run with no rows at
- * all still binds its `{{$vu}}` / `{{$iteration}}` identity (issue #994). Nor
- * are the credentials, for the same reason and since issue #1055 - see
- * @ref LoadAuthPlan. This carries what only a data set has: the rows, and the
- * bare names they answer.
+ * all still binds its `{{$vu}}` / `{{$iteration}}` identity (#994). Nor are the
+ * credentials, for the same reason (#1055) - see @ref LoadAuthPlan. This
+ * carries what only a data set has: the rows, and the bare names they answer.
  */
 struct LoadDataSet {
     /// The validated rows, in payload order. Never empty - a present-but-empty
     /// `data` array is refused by the route, and a run without rows carries no
     /// set at all.
     std::vector<nlohmann::json> rows;
-    /// The bare column names @ref rows can bind (issue #1007), read off the
-    /// rows once by `core::bound_columns_of`. It is what the run's split is
-    /// told, so a bare `{{username}}` this set answers is bound per iteration
-    /// rather than sent as the literal token - and a run without rows carries
-    /// no set at all, so it is told nothing and splits as it always did.
+    /// The bare column names @ref rows can bind (#1007), read off the rows once
+    /// by `core::bound_columns_of`. It is what the run's split is told, so a
+    /// bare `{{username}}` this set answers is bound per iteration rather than
+    /// sent as the literal token - and a run without rows carries no set at
+    /// all, so it is told nothing.
     vayu::http::BoundColumnNames bound_columns;
     /// The file @ref rows came from, as the caller named it (issue #2051,
     /// `core::read_data_file_fields`). Empty when none was named; recorded in
@@ -70,17 +68,17 @@ struct LoadDataSet {
 };
 
 /**
- * How a *single-request* load run resolves its credentials (issue #1055).
+ * How a *single-request* load run resolves its credentials (#1055).
  *
  * Beside @ref LoadDataSet rather than inside it, for the reason
  * `RunContext::load_template` is: a credential carrying `{{$vu}}` defers on a
  * run that has no rows at all, so a set that only exists when rows do cannot be
- * where this lives. That was the whole of the old rule - deferral keyed to the
- * run's shape rather than to what the credentials carry - and it is what made
- * an identity token in a credential go out written as it stood.
+ * where this lives. Deferral is keyed to what the credentials carry, not to the
+ * run's shape; keyed to the shape, an identity token in a credential goes out
+ * written as it stood.
  *
  * Empty credentials and no @ref after_scripts are the ordinary run, whose auth
- * the build resolves once as it always did.
+ * the build resolves once.
  */
 struct LoadAuthPlan {
     /**
@@ -94,18 +92,18 @@ struct LoadAuthPlan {
     StepDataTemplate credentials;
     /**
      * A credential holds a name only the variable scopes answer
-     * (`credentials_await_scripts`, issue #2473) **and** the run declares
+     * (`credentials_await_scripts`, #2473) **and** the run declares
      * `requestElements` (@ref declares_request_elements), whose `step.before`
-     * and residual pass are what can answer it after the build. Each
-     * submission then joins its row into a copy of @ref auth without applying
-     * it and applies it after that pass (`routes::resolve_load_residuals`).
+     * and residual pass are what can answer it after the build. Each submission
+     * then joins its row into a copy of @ref auth without applying it and
+     * applies it after that pass (`routes::resolve_load_residuals`).
      *
      * False on a run without `requestElements`, which keeps sending one shared
      * request: when it names an `environmentId` or `requestId`,
-     * `build_load_request` defers the build itself and resolves and applies
-     * the credentials once, after its start-of-run pass over the stored
-     * scopes (#3288); otherwise nothing answers such a name, and the build
-     * encodes it as written, as it always did.
+     * `build_load_request` defers the build itself and resolves and applies the
+     * credentials once, after its start-of-run pass over the stored scopes
+     * (#3288); otherwise nothing answers such a name, and the build encodes it
+     * as written.
      */
     bool after_scripts = false;
 
@@ -270,10 +268,9 @@ class CapacitySearch {
  *
  * A JSON number is read as seconds. Anything else - an unknown unit, a
  * non-numeric string, a negative - throws `std::invalid_argument`, which the
- * run thread's caller turns into a Failed run naming the value. The old parser
- * silently ran for 60s instead, so a mistyped duration looked like a run that
- * simply took longer; every executor reads durations through here so none can
- * reintroduce that.
+ * run thread's caller turns into a Failed run naming the value, never a silent
+ * 60s run that looks like one that simply took longer. Every executor reads
+ * durations through here, so none can reintroduce that.
  */
 [[nodiscard]] int64_t
 duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t default_ms);
@@ -417,19 +414,19 @@ validate_request_elements_run_override (const nlohmann::json& config);
  * The tick's wait is split because a Windows `sleep_for` overshoots by ~0.6-1.8
  * ms typical whatever it is asked for, so a tick that sleeps its whole
  * remainder always lands late and the next one dispatches two requests at once
- * to catch up - the rate stays exact, the arrival interval does not (issue
- * #1370). Sleeping all but the last `pacing::spin_tail_us (remainder_us)`
- * puts the overshoot inside the spin instead of inside the gap, and bounds
- * the spin at the tail however slow the rate.
+ * to catch up - the rate stays exact, the arrival interval does not (#1370).
+ * Sleeping all but the last `pacing::spin_tail_us (remainder_us)` puts the
+ * overshoot inside the spin instead of inside the gap, and bounds the spin at
+ * the tail however slow the rate.
  *
- * Every platform's `wait_for_next_tick` calls this now (issue #1667 extended
- * the Windows-only #1370 shape to Linux/macOS's own precise-sleep primitive,
+ * Every platform's `wait_for_next_tick` calls this (#1370 on Windows; #1667 on
+ * Linux/macOS, whose precise-sleep primitive is
  * `platform::sleep_until_precise`); only the *tail* size
  * (`constants::pacing::spin_tail_us`) is platform-specific, because each
  * platform's sleep call overshoots by a different amount, and on macOS by a
  * different shape (flat on Windows/Linux, proportional-with-cap on macOS).
- * Declared unconditionally because the arithmetic is the whole of the
- * decision and is worth testing on any host.
+ * Declared unconditionally because the arithmetic is the whole of the decision
+ * and is worth testing on any host.
  */
 [[nodiscard]] constexpr int64_t tick_sleep_leg_us (int64_t remainder_us, int64_t spin_tail_us) {
     return remainder_us > spin_tail_us ? remainder_us - spin_tail_us : 0;
@@ -457,7 +454,7 @@ static_assert (tick_sleep_leg_us (-100, 2000) == 0);
 struct ResultAnnotations {
     /// Absent for a run sent without `data` - the record then carries no
     /// `dataRowIndex` at all rather than a zero that reads like row 0. Carried
-    /// by either shape since issue #993: a single-request run binds rows too.
+    /// by either shape (#993): a single-request run binds rows too.
     std::optional<size_t> data_row_index;
     /**
      * The plan step this completion belongs to. Set by the scenario load
@@ -470,8 +467,8 @@ struct ResultAnnotations {
     /**
      * The iteration this completion ran in, 0-based: a virtual user's own on
      * the scenario path, and the submission index on the single-request one
-     * (issue #994). Set by both load executors now, which is what lets a
-     * deferred script read `pm.info.iteration` whichever shape the run took.
+     * (#994). Set by both load executors, which is what lets a deferred script
+     * read `pm.info.iteration` whichever shape the run took.
      */
     std::optional<size_t> iteration;
     /**
@@ -542,9 +539,6 @@ vayu::db::Database& db,
 const vayu::Result<vayu::Response>& result,
 const ResultAnnotations& annotations = {});
 
-/**
- * @brief Interface for load testing strategies
- */
 class LoadStrategy {
     public:
     LoadStrategy ()          = default;
@@ -558,7 +552,6 @@ class LoadStrategy {
     LoadStrategy& operator= (LoadStrategy&&)      = delete;
 
     /**
-     * @brief Execute the load test strategy
      * @param context The run context
      * @param db Database for storing results
      * @param request The request to execute
@@ -567,9 +560,6 @@ class LoadStrategy {
     vayu::db::Database& db,
     const vayu::Request& request) = 0;
 
-    /**
-     * @brief Create a strategy instance based on configuration
-     */
     static std::unique_ptr<LoadStrategy> create (const nlohmann::json& config);
 };
 

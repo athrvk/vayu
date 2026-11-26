@@ -6,27 +6,21 @@
  */
 
 /**
- * FilesPanel
- *
  * The folders a request-body file may be sent from without a per-file pick.
  *
- * **The rule, in the words the user sees:** Vayu sends a file you chose in
- * the editor, or any file under a folder you allowed here. Everything else -
- * a path an import carried, a curl paste, an AI agent, a `{{var}}` path, a
- * data-file column - is refused at send time by the engine, naming the file
- * and pointing here. This list is the engine's (`GET /file-roots`), it is the
- * one the engine checks, and it applies to design sends, load runs and
- * collection runs alike.
+ * **The rule, in the user's words:** Vayu sends a file you chose in the editor, or any file under a
+ * folder allowed here. Everything else (a path an import carried, a curl paste, an AI agent, a
+ * `{{var}}` path, a data-file column) is refused at send time by the engine, naming the file and
+ * pointing here. The list is the engine's (`GET /file-roots`), the one it checks, for design sends,
+ * load runs and collection runs alike.
  *
- * **The engine owns the path.** A folder is stored canonical (symlinks
- * resolved, no trailing separator), so the row shown is the one the engine
- * returned, not the one picked.
+ * **The engine owns the path.** A folder is stored canonical (symlinks resolved, no trailing
+ * separator), so the row shown is the one the engine returned, not the one picked.
  *
- * **A folder is added only through the system picker** (#2356). Allowing one
- * widens what every request may read, so the main process opens the picker
- * and makes the write itself; there is no field to type a path into, because
- * a path the renderer names is exactly what the rule does not trust. Outside
- * Electron there is no picker, and the list is read-only.
+ * **A folder is added only through the system picker** (#2356). Allowing one widens what every
+ * request may read, so the main process opens the picker and makes the write itself; there is no
+ * path field, because a path the renderer names is exactly what the rule does not trust. Outside
+ * Electron there is no picker and the list is read-only.
  */
 
 import { FolderLock, FolderOpen, Loader2, Trash2 } from "lucide-react";

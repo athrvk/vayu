@@ -72,12 +72,9 @@ function groupRank(group: string) {
 }
 
 /**
- * The templates for one script kind, grouped and ordered. `"both"` is the
- * set for a script that runs outside any request.
- *
- * Entries keep the table's own order inside a group, which is the order
- * `sortText` already gives the completion popup - so a snippet sits in the same
- * place in both surfaces.
+ * The templates for one script kind, grouped and ordered; `"both"` is the set for a script that
+ * runs outside any request. Entries keep the table's own order inside a group, the order `sortText`
+ * already gives the completion popup, so a snippet sits in the same place in both surfaces.
  */
 export function snippetsForContext(
 	completions: ScriptCompletion[] | undefined,
