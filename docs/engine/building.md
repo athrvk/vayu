@@ -1176,15 +1176,15 @@ performance statement, not a correctness one** - `ctest -j` is safe on any
 platform through the scratch directories alone, so a suite missing from it
 contends rather than breaks.
 
-Measured locally on a 4-core box (Debug, 2070 tests, green in all four runs):
-299.6s serial, 84.8s at `-j4`, 58.6s at `-j8`, and 243.7s at `-j4` with the lock
-forced on - the last being the model Windows runs. That ratio was the honest
-ceiling of this approach: the locked group is 817 of the 2070 tests but **81% of
-the serial wall**, because the route and load fixtures that dominate the suite's
-duration all open a database. The six fixtures the earlier analysis measured on
-Windows (197 tests, 57.2s, 19% of the wall here - within a point of the Windows
-figures, which is what makes this box a usable proxy for the *shape* of the
-suite) are only the visible tip of that group.
+Measured on a 4-core Linux box (Debug, 7,993 tests, #3852), with the lock
+forced on as Windows runs it and `-j8`: 219s unlocked, 613s with the list (best
+of two). The listed suites are 2,754 tests but 636s of the 1,186s serial run
+(54%), because the route and load fixtures that dominate the suite's duration
+all open a database. **The list is not derived from the `temp_database.hpp`
+include**: that set is 371 suites, 4,044 tests and 816s serial, and finished in
+788s, 29% slower. Its 234 extra suites share a file with a database suite but
+open none (`ElementsTimersLoadTest` and `SseConsumer` are timer- and socket-bound),
+and on Windows the locked group is the wall. The `CMakeLists.txt` comment has the method.
 
 With #838's changes the locked group is cheap enough that the hybrid model beats a serial run on
 Windows.

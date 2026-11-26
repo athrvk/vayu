@@ -24,7 +24,6 @@
     "engine/tests/run_config_validation_test.cpp": 1934,
     "engine/tests/run_export_html_test.cpp": 1524,
     "engine/tests/run_export_markdown_test.cpp": 1722,
-    "engine/tests/scenario_plan_test.cpp": 2001,
     "engine/tests/schema_validation_test.cpp": 1795,
     "engine/tests/script_completions_test.cpp": 1762,
     "engine/tests/script_send_request_test.cpp": 2275,

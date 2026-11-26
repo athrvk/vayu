@@ -1572,7 +1572,7 @@ The two caps are enforced in the two places that can see them:
 Either cap ends the transfer through libcurl's documented abort, and the
 completion path turns that back into a **success** carrying the response's real
 status code. That is the point of the cap - it is the stream's intended end -
-and it is what keeps `handle_result`-exactly-once and the refill loop untouched.
+and it is what keeps `handle_result`-exactly-once and the refill loop untouched; an `mcp` request's reply is judged after it ([stream endings](api-reference/load-runs.md#streaming-under-load-stream)).
 `maxResponseBodyBytes` is unchanged and still an error: it is a refusal to
 buffer, not an ending, and the event cap bounds how many events arrive rather
 than how large one is.

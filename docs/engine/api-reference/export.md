@@ -229,7 +229,7 @@ Every member is copied from the report or the run's stored snapshot by name, so 
    Never a header or parameter value, never the body.
 3. Text the engine copied from a script or a response is carried as counts only:
    `schemaValidation` keeps `failuresTotal` and drops `failures[]`, a `lifecycle` outcome drops its `message`, `messages`, `console` and their dropped counts, an element row (a step's or the run's `elements`) drops `messages`, `console` and their dropped counts (#3127), and the report's `auth` section (whose `lastError` is a token endpoint's words) is left out.
-4. Text the user wrote (the request name, the run comment, the data file's display name, step, transaction, metric and series names) is carried as written.
+4. Text the user wrote (the request name, the run comment, the data file's display name, and step, transaction, metric and series names) is carried as written, and so is an `mcp` step's `label`: the method and tool name as literally stored in the request's body, never text a `{{variable}}` resolved to.
 5. Within a section a value is copied only when it is a scalar or a list of scalars; anything deeper is named member by member.
 
 **The document** (`"schema": "vayu.run-report"`, `"schemaVersion": 1`; a breaking change bumps the integer and is noted here):
@@ -354,7 +354,8 @@ The sections, in order:
    The path and operation id are the spec author's text, escaped as every name is.
 9. `## Sequence`, only for a scenario run whose document counts iterations or lists steps: one line (`2,110 iterations started, 2,090 completed, 15 abandoned, 5 cut short` - abandoned and cut short only when above zero, cut short being started less completed less abandoned, as the app derives it), then a table with a row per step in plan order:
    executed, errors, `Assertions` (`2,080 passed, 18 failed`, summed from the step's `assert.*` and `script.*` element tallies, an `error` counted as failed, with each miss of a `required` extractor added to the failed count because it failed the step; `deferred to a post-run replay` for a script the engine only replays afterwards; `-` for a step that asserts nothing) and its p50, p95 and p99.
-   Step names are free text and escaped as every name is.
+   An `mcp` step's name is followed by its call in parentheses (`Search (tools/call search)`, the step's `label`, #3829).
+   Step names and labels are free text and escaped as every name is.
 10. `## Transactions`, only when the run declared any: name, count, errors and p50, p95 and p99 per `report.scenario.transactions[]` entry.
 11. `## Errors`, only when there were any: by status code (`HTTP 503`), then by transport error type.
     A request that got no response is listed once, under its error type: status code 0 counts the same requests, so no row reads `HTTP 0` (issue #2400).

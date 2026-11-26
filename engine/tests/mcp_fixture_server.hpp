@@ -21,12 +21,13 @@
  *
  * `reply_with` chooses how that answer arrives - one JSON object, a
  * request-scoped event stream of two progress notifications and then the
- * response, or that stream cut before the response - and what it says: the
- * result, a tool error, a JSON-RPC error, a `-32022` version refusal, or the
- * plain `400` a legacy-era server answers a modern request with, or a `403`
- * naming the scope the token lacks.
+ * response, that stream cut before the response, or progress notifications
+ * that never end - and what it says: the result, a tool error, a JSON-RPC
+ * error, a `-32022` version refusal, the plain `400` a legacy-era server
+ * answers a modern request with, or a `403` naming the scope the token lacks.
  * `reply_in_turn` gives each call its own outcome from a list, for a run that
- * has to mix them.
+ * has to mix them, and `delay_tool` holds every call of one tool back, for a
+ * run whose tools have to differ in latency.
  *
  * The tool it knows is `execute_sql`, whose `region` argument the schema
  * mirrors as `Mcp-Param-Region` (`execute_sql_tool_json`).
@@ -44,8 +45,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -78,6 +81,9 @@ enum class McpReplyShape : std::uint8_t {
     EventStream,
     /// The two notifications, and the stream ends there.
     EventStreamCut,
+    /// Progress notifications until the client hangs up; the response never
+    /// comes, so only a cap can end the stream (#3831).
+    EventStreamEndless,
 };
 
 /// What the fixture's answer to an accepted call says.
@@ -130,7 +136,10 @@ class McpFixtureServer {
         // than threads.
         svr_.set_keep_alive_max_count (1);
         svr_.Post ("/mcp", [this] (const httplib::Request& req, httplib::Response& res) {
-            const std::size_t call  = requests_++;
+            const std::size_t call = requests_++;
+            if (const auto delay = delay_for (req.body); delay.count () > 0) {
+                std::this_thread::sleep_for (delay);
+            }
             const Settings settings = record (req, call);
             answer (req, res, settings);
         });
@@ -140,6 +149,7 @@ class McpFixtureServer {
     }
 
     ~McpFixtureServer () {
+        stopping_.store (true);
         svr_.stop ();
         if (thread_.joinable ()) {
             thread_.join ();
@@ -220,6 +230,12 @@ class McpFixtureServer {
         settings_.shape      = shape;
         settings_.turns      = std::move (turns);
         settings_.turns_from = requests_.load ();
+    }
+
+    /// Every `tools/call` of @p tool from now on answered @p delay late.
+    void delay_tool (std::string tool, std::chrono::milliseconds delay) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        tool_delays_[std::move (tool)] = delay;
     }
 
     /// Calls answered so far.
@@ -360,6 +376,20 @@ class McpFixtureServer {
         return std::nullopt;
     }
 
+    /// How long `delay_tool` holds back the call @p body makes.
+    std::chrono::milliseconds delay_for (const std::string& body) const {
+        const auto call = nlohmann::json::parse (body, nullptr, false);
+        if (!call.is_object () ||
+        string_at (call, nlohmann::json::json_pointer ("/method")) != "tools/call") {
+            return std::chrono::milliseconds{ 0 };
+        }
+        const auto tool = string_at (call, nlohmann::json::json_pointer ("/params/name"));
+        std::lock_guard<std::mutex> lock (mutex_);
+        const auto found = tool ? tool_delays_.find (*tool) : tool_delays_.end ();
+        return found == tool_delays_.end () ? std::chrono::milliseconds{ 0 } :
+                                              found->second;
+    }
+
     static nlohmann::json response_frame (const nlohmann::json& id, McpReplyOutcome outcome) {
         nlohmann::json frame{ { "jsonrpc", "2.0" }, { "id", id } };
         switch (outcome) {
@@ -390,12 +420,36 @@ class McpFixtureServer {
         return frame;
     }
 
-    static std::string progress_event (int progress) {
+    /// The pause between an endless stream's notifications, which only paces
+    /// the writes; no assertion reads it.
+    static constexpr std::chrono::milliseconds ENDLESS_EVENT_PACE{ 5 };
+
+    /// A progress notification; @p total absent, as on an endless stream.
+    static std::string progress_event (int progress, std::optional<int> total = 2) {
+        nlohmann::json params{ { "progressToken", "p1" }, { "progress", progress } };
+        if (total) {
+            params["total"] = *total;
+        }
         const nlohmann::json note{ { "jsonrpc", "2.0" },
-            { "method", "notifications/progress" },
-            { "params",
-            { { "progressToken", "p1" }, { "progress", progress }, { "total", 2 } } } };
+            { "method", "notifications/progress" }, { "params", params } };
         return "event: message\ndata: " + note.dump () + "\n\n";
+    }
+
+    /// Ends when a write fails, which is the client hanging up, or when the
+    /// fixture stops.
+    void stream_endlessly (httplib::Response& res) const {
+        res.set_chunked_content_provider (
+        "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
+            for (int progress = 1; !stopping_.load (); ++progress) {
+                const std::string note = progress_event (progress, std::nullopt);
+                if (!sink.write (note.data (), note.size ())) {
+                    return false;
+                }
+                std::this_thread::sleep_for (ENDLESS_EVENT_PACE);
+            }
+            sink.done ();
+            return true;
+        });
     }
 
     static void send_frame (httplib::Response& res, const nlohmann::json& frame, McpReplyShape shape) {
@@ -592,8 +646,7 @@ class McpFixtureServer {
         return settings;
     }
 
-    static void
-    answer (const httplib::Request& req, httplib::Response& res, const Settings& settings) {
+    void answer (const httplib::Request& req, httplib::Response& res, const Settings& settings) const {
         if (refuse_before_parsing (res, settings.outcome)) {
             return;
         }
@@ -610,6 +663,10 @@ class McpFixtureServer {
         }
         if (const auto reason = header_mismatch (req, call)) {
             send_error (res, id, 400, -32020, "Header mismatch: " + *reason);
+            return;
+        }
+        if (settings.shape == McpReplyShape::EventStreamEndless) {
+            stream_endlessly (res);
             return;
         }
         if (settings.outcome == McpReplyOutcome::Result) {
@@ -631,7 +688,9 @@ class McpFixtureServer {
     httplib::Headers headers_;
     Settings settings_;
     std::vector<McpRecordedCall> calls_;
+    std::map<std::string, std::chrono::milliseconds> tool_delays_;
     std::atomic<std::size_t> requests_{ 0 };
+    std::atomic<bool> stopping_{ false };
 };
 
 } // namespace vayu::tests

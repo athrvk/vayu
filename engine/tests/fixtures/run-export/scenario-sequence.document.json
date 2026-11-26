@@ -177,6 +177,7 @@
         {
           "index": 2,
           "name": "Pay | confirm <now>",
+          "label": "tools/call charge|<card>",
           "requestId": "req_pay",
           "method": "POST",
           "executed": 2090,

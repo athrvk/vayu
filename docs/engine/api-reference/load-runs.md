@@ -109,7 +109,7 @@ Both caps are always in force - the payload's, or the `sseMaxStreamDurationMs` /
 That is not tidiness: the load loop is completion-driven (`in_flight() = sent - completed`, concurrency refilled per completion), so a transfer that never completes leaks its slot for the rest of the run.
 
 **Reaching a cap is a *successful* completion**, not a timeout and not an error: it is the stream's intended end under load, so it lands in the run's success counts, its latency histogram and its status-code distribution like any other
-200. Three other endings stay exactly what they were:
+200. The endings, side by side:
 
 | Ending | Reported as |
 |--------|-------------|
@@ -118,6 +118,14 @@ That is not tidiness: the load loop is completion-driven (`in_flight() = sent - 
 | The server closing the stream | Success, not counted in `stream.capped` |
 | `maxResponseBodyBytes` exceeded | **Error** - a refusal to buffer, unchanged. The event cap bounds how many events arrive, not how large one is |
 | The whole-transfer timeout | **Error** - it sits a grace period *past* the duration cap, so reaching it means the cap never fired |
+| A cap or the server's close before the final JSON-RPC response, on an `mcp` request (#3831) | **Error** (`mcp_transport`); a cap still counts in `stream.capped` |
+
+An `mcp` request is the one exception to the first and third rows, because its stream is request-scoped.
+A tool call's reply ends with its response, so a stream that ends before the response arrives is a call that did not complete.
+The transfer ends exactly as a plain stream's does, so its slot and its `stream` section are unchanged.
+The [reply reader](request-body.md#the-mcp-reply) then judges the reply `transport`, and the run counts it under `mcp_transport`.
+A plain `stream` request with the same cap or close stays a success.
+A design send (`POST /execute` with `stream: true`) and a sequential collection run's streaming step read the reply by the same rule.
 
 Events are counted on the write path by a frame counter that agrees with the design path's parser about what an event is: a frame carrying no `data` field is not one, so comment-only keep-alives do not inflate the tally.
 

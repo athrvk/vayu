@@ -19,16 +19,19 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 import { MethodBadge } from "./MethodBadge";
 import { TruncatedText } from "./TruncatedText";
 
-/** A step's row header: its position, its method where it has one, and its name. */
+/** A step's row header: its position, its method and engine label where it has them, and its name. */
 export function StepLabelCell({
 	index,
 	method,
 	name,
+	label,
 }: {
 	index: number;
 	/** Absent live, where a frame names the step and not its request. */
 	method?: string;
 	name: string;
+	/** `RunScenarioStepStat.label` (#3829); absent live. */
+	label?: string;
 }) {
 	return (
 		<TableHead scope="row" className="font-normal text-foreground">
@@ -38,6 +41,11 @@ export function StepLabelCell({
 				</span>
 				{method && <MethodBadge method={method} />}
 				<TruncatedText className="text-foreground min-w-0">{name}</TruncatedText>
+				{label && (
+					<TruncatedText className="text-xs text-muted-foreground font-mono min-w-0">
+						{label}
+					</TruncatedText>
+				)}
 			</div>
 		</TableHead>
 	);

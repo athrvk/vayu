@@ -226,6 +226,13 @@ Neither `unresolvedTokens` nor `preRequestScript` ever fails the run by itself; 
 `extractorMisses` (#3053) counts the step's extractions that found nothing and so unset their variable, across every virtual user and iteration; it is absent at 0.
 A miss is filed under its element's `missing` too (or `skipped`, for an optional `extract.json` that could not read the body), and a miss a `default` answered is neither: the rule is in [`elements.md`](../elements.md#kinds).
 
+`label` (#3829) is present only on a step whose body mode is `mcp`, and says which call the row's latency measures: `<method> <name>`, the name being `params.name` of a `tools/call` or `prompts/get`, so `tools/call search` for a call of the `search` tool.
+It is read once, when the run is planned, from the request's *stored* body, never the composed one, so no value a `{{variable}}` resolves to (a secret's included) can reach it:
+a name spelled with a `{{token}}` (one an environment, a data row or the iteration answers), an empty one, and every other method are labelled by the method alone (`tools/call`, `tools/list`, `resources/read`, whose `params.uri` names no tool and can carry a credential).
+A stored body that is not one JSON object, or whose method is itself a token, carries no `label`.
+`name` stays the stored request's name either way, because it is the `setNextRequest` target.
+Two steps calling two tools are two rows, each with its own percentiles, so a per-tool latency needs no `control.transaction`.
+
 **Response:**
 ```json
 {
