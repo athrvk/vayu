@@ -122,6 +122,11 @@ A streaming request's latency budgets read on each stream's full duration, from 
 It is offered for any streaming request (the dialog does not read the request's marker), so its hint says the request must declare a first content marker; a run where no stream matched has no figure, and the engine reports the budget not evaluated, which counts as failed, never as a pass.
 `StreamMetrics` draws the figure as a **first match** row, only when the report carries it; the live panel stays on the first event, because a live frame carries no match.
 
+**MCP error class budgets** (issue #3830): `maxToolErrors`, `maxProtocolErrors` and `maxTransportErrors` (counts, 0 to 1e12) and `maxToolErrorRatePct`, `maxProtocolErrorRatePct` and `maxTransportErrorRatePct` (percent of the run's requests, 0 to 100) are ceilings on the run's failed `mcp` replies of one class, the figures the report's `summary.errorClasses` carries.
+`BUDGET_FIELDS` offers all six on every run, not `streamOnly`: the engine judges them on any run shape, and a run with no failed reply of the class meets even a `0`.
+The fields read "Tool errors at most" and so on, a count with no unit; `THRESHOLD_METRICS` gives the verdict the same words ("Tool errors", "Tool error rate") and the short names `tool errors` ... `transport error rate`.
+`thresholdsInput` on the MCP side names none of them: the open `catchall` carries them to the engine, which bounds them, and `tools/list` does not grow.
+
 **`custom.<name>.<stat>` budgets** (issue #1579) are the only dynamic thing the block can carry: a ceiling on a value the run records itself through a `metric.record` element or a `pm.metrics` call, keyed by the name it was recorded under and one of `p50`, `p95`, `p99`, `max`, `value`, `rate`.
 `RunThresholds` holds them as a *pattern* index signature (`` [key: `custom.${string}`]: number | undefined ``), so the fixed fields keep their own types and `failRun` keeps its `boolean`.
 Both dialogs declare them as free-text rows (`CustomBudgetRows.tsx`) rather than as a picker of recorded names:

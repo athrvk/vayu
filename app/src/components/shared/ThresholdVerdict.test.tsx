@@ -117,6 +117,34 @@ describe("ThresholdVerdict", () => {
 		expect(screen.getByText(/≤ 0%/)).toBeInTheDocument();
 	});
 
+	describe("MCP error class budgets (#3830)", () => {
+		// Mutation check: delete a metric's THRESHOLD_METRICS entry and its row reads the raw key.
+		// The counts carry no unit and the rates carry %; both are ceilings.
+		it.each([
+			["maxToolErrors", "Tool errors", "(≤ 5)", "7"],
+			["maxProtocolErrors", "Protocol errors", "(≤ 5)", "7"],
+			["maxTransportErrors", "Transport errors", "(≤ 5)", "7"],
+			["maxToolErrorRatePct", "Tool error rate", "(≤ 5%)", "7%"],
+			["maxProtocolErrorRatePct", "Protocol error rate", "(≤ 5%)", "7%"],
+			["maxTransportErrorRatePct", "Transport error rate", "(≤ 5%)", "7%"],
+		])("labels %s as %s, a ceiling in its own unit", (metric, label, limit, actual) => {
+			render(
+				<ThresholdVerdict
+					verdict={verdict({
+						checks: [{ metric, limit: 5, actual: 7, passed: false }],
+						passed: 0,
+						failed: 1,
+						verdict: "failed",
+					})}
+				/>
+			);
+			expect(screen.getByText(label)).toBeInTheDocument();
+			expect(screen.queryByText(metric)).not.toBeInTheDocument();
+			expect(screen.getByText(limit)).toBeInTheDocument();
+			expect(screen.getByText(actual)).toBeInTheDocument();
+		});
+	});
+
 	describe("stream budgets (issue #3234)", () => {
 		it("labels the first-event ceiling in milliseconds", () => {
 			render(

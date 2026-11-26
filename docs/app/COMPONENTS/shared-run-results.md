@@ -23,7 +23,7 @@ before they existed - following the same absent-vs-zero rule as
 `SampleRetentionNote` and `CapturedDataWarning`: "not judged" is a different
 claim from "judged and passed nothing", and only absence can make the first.
 The comparator follows the metric (`≥` for the throughput floor, `≤` for the
-ceilings), and a metric key this build has no label for renders under its raw
+ceilings; a count budget such as `maxToolErrors` carries no unit), and a metric key this build has no label for renders under its raw
 name rather than vanishing from a verdict whose counts still include it.
 
 A single check can itself carry no measurement (issue #1484): a latency

@@ -163,6 +163,24 @@ const CASES: Array<[name: string, input: RunOutcomeInput, expected: unknown]> = 
 		{ outcome: "failed", reason: "1 of 1 budget missed: time to first match p95" },
 	],
 	[
+		"a missed MCP error class budget is named by its short name (#3830)",
+		{
+			status: "completed",
+			thresholdValidation: budgets(
+				["maxToolErrors", false],
+				["maxProtocolErrors", false],
+				["maxTransportErrors", false],
+				["maxToolErrorRatePct", false],
+				["maxProtocolErrorRatePct", false],
+				["maxTransportErrorRatePct", false]
+			),
+		},
+		{
+			outcome: "failed",
+			reason: "6 of 6 budgets missed: tool errors, protocol errors, transport errors, tool error rate, protocol error rate, transport error rate",
+		},
+	],
+	[
 		"every budget met and no errors",
 		{ status: "completed", thresholdValidation: THREE_MET, errorRate: 0 },
 		{ outcome: "passed", reason: "All 3 budgets met" },

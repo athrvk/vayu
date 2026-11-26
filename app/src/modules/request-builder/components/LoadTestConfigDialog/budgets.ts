@@ -37,9 +37,10 @@ export interface BudgetField {
 	/** DOM id, so the label is associated rather than merely adjacent. */
 	id: string;
 	label: string;
+	/** Empty for a plain count. */
 	unit: string;
 	min: number;
-	/** Whether `min` is itself a legal budget - true only for the error rate. */
+	/** Whether `min` is itself a legal budget - true for the rates and counts, where 0 means "none may fail". */
 	minInclusive: boolean;
 	max: number;
 	hint?: string;
@@ -59,6 +60,47 @@ export interface BudgetField {
 
 /** A day. Past it no request completes, so no ceiling above it is a budget. */
 const MAX_LATENCY_MS = 86_400_000;
+
+/** The engine's bound on an error-class count: 1e12, past any run's request total. */
+const MAX_ERROR_COUNT = 1_000_000_000_000;
+
+/**
+ * A class of failed `mcp` replies has two ceilings, a count and a share of the run's requests (#3830).
+ * Both read the run's `errorClasses`, so they are judged on any run shape and an `mcp` request is
+ * not required: a run with no failed reply of the class meets even a 0. Not `streamOnly`.
+ */
+function mcpErrorClassFields(spec: {
+	slug: string;
+	name: string;
+	count: BudgetKey;
+	rate: BudgetKey;
+	failure: string;
+}): BudgetField[] {
+	const { slug, name, count, rate, failure } = spec;
+	return [
+		{
+			key: count,
+			id: `lt-budget-${slug}-errors`,
+			label: `${name} errors at most`,
+			unit: "",
+			// As the error rate: "no tool call may fail" is a budget.
+			min: 0,
+			minInclusive: true,
+			max: MAX_ERROR_COUNT,
+			hint: `Failed MCP replies of this class: ${failure}.`,
+		},
+		{
+			key: rate,
+			id: `lt-budget-${slug}-error-rate`,
+			label: `${name} error rate at most`,
+			unit: "%",
+			min: 0,
+			minInclusive: true,
+			max: 100,
+			hint: "The same replies as a share of all the run's requests.",
+		},
+	];
+}
 
 export const BUDGET_FIELDS: readonly BudgetField[] = [
 	{
@@ -155,6 +197,27 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		hint: "Events delivered by all streams together, per second of the run.",
 		streamOnly: true,
 	},
+	...mcpErrorClassFields({
+		slug: "tool",
+		name: "Tool",
+		count: "maxToolErrors",
+		rate: "maxToolErrorRatePct",
+		failure: "the server's own isError result",
+	}),
+	...mcpErrorClassFields({
+		slug: "protocol",
+		name: "Protocol",
+		count: "maxProtocolErrors",
+		rate: "maxProtocolErrorRatePct",
+		failure: "a JSON-RPC error answer",
+	}),
+	...mcpErrorClassFields({
+		slug: "transport",
+		name: "Transport",
+		count: "maxTransportErrors",
+		rate: "maxTransportErrorRatePct",
+		failure: "no JSON-RPC reply at all, a failed transfer or an HTTP refusal",
+	}),
 ];
 
 /**
@@ -187,6 +250,12 @@ export function emptyBudgetDraft(): BudgetDraft {
 		streamTimeToFirstEventP95Ms: "",
 		streamTimeToFirstMatchP95Ms: "",
 		streamEventsPerSecondMin: "",
+		maxToolErrors: "",
+		maxProtocolErrors: "",
+		maxTransportErrors: "",
+		maxToolErrorRatePct: "",
+		maxProtocolErrorRatePct: "",
+		maxTransportErrorRatePct: "",
 	};
 }
 
@@ -361,6 +430,7 @@ export function buildThresholds(
 /** One fixed budget as it reads in a sentence: "p99 latency at most 200 ms". */
 export function describeFixedBudget(field: BudgetField, raw: string): string {
 	const value = raw.trim();
+	if (field.unit === "") return `${field.label} ${value}`;
 	return `${field.label} ${value}${field.unit === "%" ? "%" : ` ${field.unit}`}`;
 }
 
