@@ -89,7 +89,8 @@ namespace limits   = vayu::core::constants::import_mcp;
 
 template <typename T> using Refusable = std::expected<T, RouteError>;
 
-constexpr std::int64_t METHOD_NOT_FOUND = -32601;
+constexpr std::int64_t METHOD_NOT_FOUND    = -32601;
+constexpr std::int64_t UNSUPPORTED_VERSION = -32022;
 
 /// Which primitives the caller asked for.
 struct Include {
@@ -432,12 +433,20 @@ bool is_method_not_found (const McpCall& call) {
     call.reply.code == METHOD_NOT_FOUND;
 }
 
-/// The plain `400` a legacy-era server answers a modern request with (#3762):
-/// a status alone, no JSON-RPC error. A failed transfer is not one.
+/// Whether @p call is the refusal a legacy-era server answers `server/discover`
+/// with (#3762, #3989): an HTTP `400`, either bare (a status, or plain text) or
+/// carrying a JSON-RPC error, as the reference SDK servers answer a session-less
+/// POST (`-32000` with `id: null`, `INVALID_REQUEST` with `id: "server-error"`).
+/// A modern-era server's own answers are not one: `-32022` refuses the version
+/// and `-32601` has no `server/discover`. Only a `400` counts, so a `401`, a
+/// `403`, a `404` or a `5xx` fails the import, as does a failed transfer.
 bool is_legacy_refusal (const McpCall& call) {
-    return call.reply.error_class == McpErrorClass::Transport &&
-    !call.response.has_error () && call.response.status_code == 400 &&
-    !call.reply.code.has_value ();
+    if (call.response.has_error () || call.response.status_code != 400) {
+        return false;
+    }
+    const auto& code = call.reply.code;
+    return call.reply.error_class.has_value () && code != UNSUPPORTED_VERSION &&
+    code != METHOD_NOT_FOUND;
 }
 
 /// The reply's `result` object, or nothing when it carried none.
@@ -471,7 +480,8 @@ std::string server_name (const ordered_json& result) {
 
 /// What `server/discover` said of the server.
 struct Discovery {
-    /// It answered the legacy era's plain `400`, so the import opens a session.
+    /// It answered a legacy-era `400` (`is_legacy_refusal`), so the import opens
+    /// a session.
     bool legacy = false;
     /// `serverInfo.name`, empty when the server named none.
     std::string name;
@@ -479,8 +489,8 @@ struct Discovery {
 
 /// `server/discover`, best effort for its `serverInfo.name`. A server that
 /// answers `-32601` (modern-era, with no `server/discover` of its own) is read
-/// on unnamed, a legacy-era one is told apart by its plain `400` for its
-/// handshake, and any other failure fails the import.
+/// on unnamed, a legacy-era one is told apart by its `400` (`is_legacy_refusal`)
+/// for its handshake, and any other failure fails the import.
 Refusable<Discovery> discover (McpSession& session) {
     auto sent = send_call (session, "server/discover", ordered_json::object ());
     if (!sent) {

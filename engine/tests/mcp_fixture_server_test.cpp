@@ -219,6 +219,26 @@ TEST_F (McpFixtureServerTest, DiscoverIsRefusedAsAModernServerWithNoSuchMethodOr
     EXPECT_EQ (response_of (listed).at ("result").at ("tools").size (), 1U);
 }
 
+// The reference SDK servers' refusal of a session-less POST (#3989): a `400`
+// carrying a JSON-RPC error, whose id is not the request's.
+TEST_F (McpFixtureServerTest, DiscoverCanBeRefusedInTheShapesTheReferenceSdksUse) {
+    server_.discover_as (McpDiscovery::LegacyTypeScriptSessionRequired);
+    const auto typescript = send ("server/discover");
+    ASSERT_TRUE (typescript);
+    EXPECT_EQ (typescript->status, 400);
+    const json typescript_frame = response_of (typescript);
+    EXPECT_EQ (typescript_frame.at ("error").at ("code"), -32000);
+    EXPECT_TRUE (typescript_frame.at ("id").is_null ());
+
+    server_.discover_as (McpDiscovery::LegacyPythonInvalidRequest);
+    const auto python = send ("server/discover");
+    ASSERT_TRUE (python);
+    EXPECT_EQ (python->status, 400);
+    const json python_frame = response_of (python);
+    EXPECT_EQ (python_frame.at ("error").at ("code"), -32600);
+    EXPECT_EQ (python_frame.at ("id"), "server-error");
+}
+
 TEST_F (McpFixtureServerTest, ALegacyServerRefusesAPostThatDoesNotAcceptBothReplyTypes) {
     server_.speak_legacy ();
     httplib::Client client ("127.0.0.1", server_.port ());
