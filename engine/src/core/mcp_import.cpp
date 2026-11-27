@@ -85,6 +85,13 @@ const json* input_schema_of (const json& tool) {
     return found != tool.end () && found->is_object () ? &*found : nullptr;
 }
 
+/// The tool's `outputSchema` when it is an object, the one shape the request
+/// builder reads (a default `assert.jsonschema`, the Body tab's editor).
+const json* output_schema_of (const json& tool) {
+    const auto found = tool.find ("outputSchema");
+    return found != tool.end () && found->is_object () ? &*found : nullptr;
+}
+
 /**
  * The arguments a call to a tool described by @p schema carries: the required
  * ones only, each as its schema states it (a `const`, a `default`, an `enum`'s
@@ -103,12 +110,15 @@ json sampled_arguments (const json& schema) {
 /// What an `mcp` body stores of a tool, or null when `read_mcp_tool` refuses it
 /// (an `x-mcp-header` that is not a usable header name): `POST /import/apply`
 /// refuses the whole tree over one such body, so it is left out of the request.
-/// `outputSchema` is not stored; nothing reads it.
-json storable_tool (const std::string& name, const json* schema) {
+/// `outputSchema` is stored for the builder; a send never reads it (#3986).
+json storable_tool (const std::string& name, const json* schema, const json* output_schema) {
     json tool    = json::object ();
     tool["name"] = name;
     if (schema != nullptr) {
         tool["inputSchema"] = *schema;
+    }
+    if (output_schema != nullptr) {
+        tool["outputSchema"] = *output_schema;
     }
     if (!vayu::http::read_mcp_tool (nlohmann::json (tool))) {
         return nullptr;
@@ -127,7 +137,7 @@ std::optional<EntryRequest> tool_request (const json& tool) {
         params["arguments"] = sampled_arguments (*schema);
     }
     EntryRequest request{ *name, description_of (tool), "tools/call", std::move (params) };
-    request.mcp_tool             = storable_tool (*name, schema);
+    request.mcp_tool = storable_tool (*name, schema, output_schema_of (tool));
     request.tool_schema_unusable = request.mcp_tool.is_null ();
     return request;
 }

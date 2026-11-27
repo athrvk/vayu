@@ -358,7 +358,9 @@ Every request carries one element, `assert.status` with `in: [200]`; the MCP rep
 There is no `assert.jsonschema` from a tool's `outputSchema`: that kind reads draft-07, which a 2020-12 schema can fail by construction (issue [#3763](https://github.com/athrvk/vayu/issues/3763)).
 
 **A tool's schema (issue [#3839](https://github.com/athrvk/vayu/issues/3839)).**
-A tool with an object `inputSchema` stores `mcpTool: {name, inputSchema}` in its body, so the `x-mcp-header` mirrors are derived at send ([The `mcp` body](request-body.md#the-mcp-body)); `outputSchema` is not stored.
+A tool with an object `inputSchema` stores `mcpTool: {name, inputSchema}` in its body, so the `x-mcp-header` mirrors are derived at send ([The `mcp` body](request-body.md#the-mcp-body)).
+A tool whose `outputSchema` is an object stores it as `mcpTool.outputSchema` too (issue [#3986](https://github.com/athrvk/vayu/issues/3986)): a send never reads it ([The `mcp` body](request-body.md#the-mcp-body)), and the request builder does, for the Body tab's "Output schema" and as the default of an `assert.jsonschema` the user adds.
+An `outputSchema` of any other shape is dropped without a note.
 A tool with no such schema stores `mcpTool: {name}`.
 `arguments` is drawn from the `inputSchema` (`$ref` resolved against the schema itself, so `#/$defs/x` works): only the properties `required` names, each as its schema states it, in order of preference a `const`, a `default`, an `example`, an `enum`'s first member, then a typed stub (`""`, `0`, `false`, `{}`, `[]`).
 These are values, not `{{variables}}`, so the generated collection runs as it stands: a name left unresolved at send is refused, and a placeholder would fail every run until it was edited.

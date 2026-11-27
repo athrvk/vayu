@@ -83,3 +83,21 @@ describe("requestFieldsFromDraft - protocol switches", () => {
 		expect(fields.postmanProtocolBehavior).toBe(carrier);
 	});
 });
+
+describe("requestFieldsFromDraft - an mcp body", () => {
+	it("carries the tool whole, outputSchema included", () => {
+		// The builder reads `mcpTool.outputSchema` (Body tab, default
+		// `assert.jsonschema`); a copy of the body that picked members would drop it.
+		const mcpTool = {
+			name: "search",
+			inputSchema: { type: "object", properties: { query: { type: "string" } } },
+			outputSchema: { type: "object", properties: { hits: { type: "array" } } },
+		};
+		const fields = requestFieldsFromDraft({
+			...draft,
+			method: "POST",
+			body: { mode: "mcp", content: '{"method":"tools/call"}', mcpTool },
+		});
+		expect(fields.body).toMatchObject({ mode: "mcp", mcpTool });
+	});
+});

@@ -89,7 +89,7 @@ The Body panel has an **Output schema** editor beside the input one (the same co
 **Adding an `assert.jsonschema` element to a request in `mcp` mode whose tool has an `outputSchema` starts it as `{source: "jsonpath", path: "$.result.structuredContent", schema: <outputSchema>}`** (`startingElementConfigs` via `ElementList`'s `startingConfigs`):
 the copy is written into the element's `config` at add time, never re-derived from the tool, so a later edit of the tool leaves the stored assertion as it was.
 Any other body, or a tool with no `outputSchema`, starts the element blank.
-Nothing in the app populates `mcpTool` from a live `tools/list` yet - the fields are typed by hand until the MCP import (#3765) fills them.
+The MCP server import fills `mcpTool` from a live `tools/list`, `outputSchema` included when it is an object ([`POST /import/mcp`](../../engine/api-reference/import.md#post-importmcp)); the import payload carries `body` whole, so the tool reaches the engine as the tree held it.
 
 The `assert.jsonschema` element itself is the engine's (`docs/engine/elements.md`): `source` is `body` or `jsonpath` (with a `path`, which is refused beside `body`), `schema` is an object or a boolean, and a keyword the draft-07 validator does not evaluate fails the assertion naming it.
 Its failures arrive in the response's Elements section as any other `assert.*` outcome does.

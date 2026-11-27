@@ -37,6 +37,7 @@ Their values stay for the other tabs.
 ## What each request is
 
 What the route generates, the requests' shape and what the engine adds at send are in [`POST /import/mcp`](../../engine/api-reference/import.md#post-importmcp); the dialog previews and applies that tree unchanged.
+A tool's output schema is kept with the request, so adding "Assert JSON Schema" to an imported tool request starts from it.
 
 ## Credentials
 
