@@ -27,14 +27,14 @@ happens around it.
 |---|---|---|
 | **What it is** | An API client and load engine; an MCP call is a request body mode | A developer tool with Web, CLI and TUI clients\* |
 | **Transports** | Streamable HTTP, protocol revision `2026-07-28` only | stdio, SSE and HTTP servers, legacy and modern eras\* |
-| **Interactive use** | The request builder's `mcp` mode: a JSON call editor, the tool typed by hand, the tool result drawn above the raw reply | The tool's input schema rendered as a form, results rendered, Protocol and Network tabs\*\* |
+| **Interactive use** | The request builder's `mcp` mode: a JSON call editor, the tool and its schemas set by hand or filled in by an import, the tool result drawn above the raw reply | The tool's input schema rendered as a form, results rendered, Protocol and Network tabs\*\* |
 | **Saved suites** | Requests in collections, run in order, with data-driven rows | Load scenarios as a JSON file of independent weighted calls\*\*\* |
 | **Data between steps** | `extract.json` and `extract.header` feed later steps; state is per virtual user under load | The documented scenario step keys have no extraction field\*\*\* |
 | **Assertions** | JSONPath, JSON Schema (draft-07) and a `tools/list`-style snapshot, on the run itself | The documented scenario step keys have no assertion field\*\*\* |
 | **Load shapes** | Constant rate, constant users, a ramp-up, a fixed iteration count, a capacity search | Concurrency, rate, duration or count, warm-up, open loop, stepped stairs\*\*\* |
 | **CI gate on a run** | A thresholds block judges the run; the command line starts a run and does not exit on a verdict | Thresholds and baseline regression exit `10`\*\*\* |
 | **Per-call output** | Aggregates plus a bounded set of kept traces (failures, status exemplars, slowest, a sample); no record of every call | One NDJSON line per call from the CLI\*\*\* |
-| **Failure classes in reports** | `tool`, `protocol` and `transport` counts per run, compared run to run | `isError` results counted apart from thrown errors\*\*\* |
+| **Failure classes in reports** | `tool`, `protocol` and `transport` counts per run, compared run to run, each with its own budget | `isError` results counted apart from thrown errors\*\*\* |
 | **Authorization** | Request auth, plus a sign-in discovered from an MCP server URL and a Re-authorize offer in the request builder; a run never re-authorizes | Full OAuth flow, re-authorization and step-up\*\*\*\* |
 | **Scale-out** | One process on one machine | `--load-workers` child processes\*\*\* |
 
@@ -109,7 +109,9 @@ a renamed or dropped tool fails the step. One limit to know before you rely on t
 assertion: the validator is **draft-07**, and a keyword from MCP's default 2020-12 dialect
 that it does not evaluate (`unevaluatedProperties`, `prefixItems`) fails the assertion
 loudly rather than passing unchecked. The request builder prefills a new schema assertion
-from a stored `outputSchema`; the engine itself never reads that field. Detail:
+from a stored `outputSchema`; the engine itself never reads that field. A request made by
+[importing a server](#importing-a-server) stores no `outputSchema`, so nothing is prefilled
+there until the schema is pasted into the request's Output schema field. Detail:
 [Kinds](../engine/elements.md#kinds).
 
 ## Reports that name the failure
@@ -123,22 +125,30 @@ call (`tools/call search`), so the latency row says which tool it measured. Deta
 [the run export](../engine/api-reference/export.md#post-exportrun-report) and
 [scenario load runs](../engine/api-reference/scenario-load.md#scenario-load-runs).
 
-The verdict is the generic one. A failed MCP reply counts toward `maxErrorRatePct` like any
-other error, and the [thresholds block](../engine/api-reference/load-runs.md#the-thresholds-block-passfail-budgets)
-holds latency, error-rate and throughput budgets. There is **no budget on an MCP error class
-by itself**, and the command line does not turn a verdict into an exit code
-([CLI](../engine/cli.md#error-handling)).
+The verdict is the [thresholds block](../engine/api-reference/load-runs.md#the-thresholds-block-passfail-budgets).
+Beside the latency, error-rate and throughput budgets it holds six on the MCP failure classes:
+`maxToolErrors`, `maxProtocolErrors` and `maxTransportErrors`, and the same three as a
+percentage of the run's requests (`maxToolErrorRatePct` and its two kin). `0` is a legal
+ceiling, so "no tool call may fail" is a budget, and the load test dialog offers all six. A failed
+MCP reply also counts toward `maxErrorRatePct` like any other error. The command line does not
+turn a verdict into an exit code ([CLI](../engine/cli.md#error-handling)).
 
 ## Importing a server
 
-`POST /import/mcp` asks a live MCP server what it offers (`tools/list`, optionally
-`resources/list` and `prompts/list`, following pagination) and answers a tree the existing
-import path persists: one folder per primitive and one `mcp` request per listed entry. It
-reads and stores nothing by itself, and it sends bare calls: the tool's schema, arguments
-drawn from it and assertions are not filled in. **The app has no Import dialog source for
-it yet** ([#3843](https://github.com/athrvk/vayu/issues/3843)), so today it is a call to
-the engine's HTTP API. Detail:
-[`POST /import/mcp`](../engine/api-reference/import.md#post-importmcp).
+The Import dialog's **MCP server** tab takes a server's URL, headers and an optional bearer token,
+asks the live server what it offers (`tools/list`, optionally `resources/list` and
+`prompts/list`, following pagination) and previews a collection: one folder per primitive and
+one `mcp` request per listed entry. Nothing is stored until Import applies it, as on the other
+tabs. A tool's request carries its `mcpTool` (the name and `inputSchema`, so the `Mcp-Param-*`
+headers are derived), arguments drawn from the schema (the required properties only, each from
+its `const`, `default`, `example` or first `enum` member, else a typed stub) and an
+`assert.status` on `200`. The reply's own failures, a JSON-RPC error or a tool's `isError`,
+fail a step without an assertion. Two limits: imported tools carry no `outputSchema`, so a new
+`assert.jsonschema` is not prefilled, and the dialog sends a static bearer token with no OAuth
+sign-in ([#3983](https://github.com/athrvk/vayu/issues/3983)). Detail:
+[MCP server import](../app/import-collections/mcp-server.md) and
+[`POST /import/mcp`](../engine/api-reference/import.md#post-importmcp), the engine route
+behind it.
 
 ## Other tools in this space
 
@@ -157,8 +167,9 @@ the better tool, and several of these are not close:
 
 - **You are building or debugging a server.** It is the reference developer tool, the input
   schema becomes a form, and the Protocol and Network tabs show the exchange. Vayu's
-  request builder has the JSON editor and a rendered tool result, but the tool and its schema
-  are typed by hand, and there is no MCP-specific browser for tools, resources and prompts.
+  request builder has the JSON editor and a rendered tool result, but a request you build by
+  hand has its tool and schemas typed in (an import fills them), and there is no MCP-specific
+  browser for tools, resources and prompts.
 - **Your server uses stdio, or the legacy era.** Vayu has no stdio transport and speaks
   the modern Streamable HTTP era only.
 - **You need MCP's authorization flow across a whole session.** The Inspector runs the OAuth
@@ -172,11 +183,13 @@ the better tool, and several of these are not close:
 - **You want its load features.** Stepped and ramped stairs, a warm-up, a weighted mix with
   an exact ratio, baselines with a regression budget, a `--load-max-p99`-style exit code
   for CI, an NDJSON line per call, session churn and `--load-workers` are documented on
-  its page. Vayu has no user-declared stepped stairs (its capacity search steps adaptively), no weighted mix, no baseline-regression budget that
-  fails a run, no per-call NDJSON and no multi-process generator.
+  its page. Vayu has no user-declared stepped stairs (its capacity search steps adaptively),
+  no step weights (a `control.throughput` element runs a step for a share of occurrences, which
+  is not a mix of independent calls), no baseline-regression budget that fails a run, no
+  per-call NDJSON and no multi-process generator.
 - **You test notifications or the other MCP surfaces.** Subscriptions, `listen` and
-  notification fan-out load, and the Apps, Skills and Tasks surfaces are outside Vayu. It is not an LLM playground or an evals tool;
-  MCPJam describes itself as one.
+  notification fan-out load, and the Apps, Skills and Tasks surfaces are outside Vayu. It is
+  not an LLM playground or an evals tool; MCPJam describes itself as one.
 
 ## When to choose Vayu
 
@@ -186,8 +199,9 @@ the better tool, and several of these are not close:
 - **MCP calls sit beside plain HTTP in the same scenario.** `mcp` is a body mode of an
   ordinary request, so one collection holds the login call, the MCP calls and the REST
   check that confirms them.
-- **You want runs you can compare.** History keeps every run, `errorClasses` separates tool
-  errors from protocol and transport ones, and one run is compared against another.
+- **You want runs you can compare.** History keeps your recent runs (200 by default, and a run
+  pinned as a baseline is never pruned), `errorClasses` separates tool errors from protocol and
+  transport ones, each class can carry a budget, and one run is compared against another.
 - **You already use Vayu for the HTTP side.** The load engine, the live dashboard and the
   exports are the same ones, pointed at an MCP request.
 
