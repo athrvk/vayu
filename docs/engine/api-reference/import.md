@@ -500,6 +500,7 @@ Two requests claiming one key are each compared; a key the server lists twice is
 
 Write the rows of a [`POST /import/mcp/diff`](#post-importmcpdiff) answer a caller selects to the collection it compared (issue [#3994](https://github.com/athrvk/vayu/issues/3994)), in one transaction: all of it lands or none does.
 The analogue of [`POST /specs/sync`](specs.md#post-specssync) for a collection an MCP import built.
+The app's Import dialog calls it from **Update existing** ([MCP server import](../../app/import-collections/mcp-server.md#updating-the-existing-collection)).
 
 **Request:** the body of [`POST /import/mcp`](#post-importmcp), validated the same way, plus:
 
