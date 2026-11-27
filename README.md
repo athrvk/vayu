@@ -105,6 +105,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4 and v5, JMeter `.jmx`, OpenAPI 3.1/3.0, Swagger 2.0
 - **Saved response examples** - capture a real response against a request and keep it as a named example
 - **Mock servers** - serve a collection's saved examples as a live mock, plus a mock OAuth issuer for auth flows and a webhook inbox that captures inbound calls
+- **MCP server testing** - an `mcp` request body mode sends `tools/call`, `resources/read` and `prompts/get` to a Streamable HTTP MCP server; assert on the reply, run it in a collection or under load, and read failures by class (tool, protocol, transport)
 - **MCP server for coding agents** - typed tools over inspection, execution, load runs and writes, behind a host allowlist, load caps, and a write toggle that ships off (and withholds the write tools until it is on)
 - **Layered environments** - variable resolution flows from globals → collection chain → active environment, with overrides at any level
 - **Auth, the way you expect it** - Bearer token, Basic auth, API key (header or query), and OAuth 2.0 (client credentials, password, JWT bearer, and interactive authorization code with PKCE); resolved engine-side and inherits down the collection tree
