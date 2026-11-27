@@ -11,15 +11,16 @@
 
 /**
  * The Import dialog's MCP server tab (#3843): a form that asks `POST /import/mcp` for the tree and
- * hands it to the preview and the apply every other tab uses. The engine's answer is stubbed here;
- * what it builds from a server is pinned engine-side.
+ * hands it to the preview and the apply every other tab uses, and `POST /import/mcp/diff` (#3842)
+ * for the collections an earlier import of the server built. The engine's answers are stubbed here;
+ * what it builds from a server and what it compares are pinned engine-side.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ImportMcpRequest } from "@/types";
+import type { ImportMcpDiffMatch, ImportMcpRequest } from "@/types";
 import type { ImportResult } from "@/services/importers/types";
 
 const applied = vi.hoisted(() => ({ mutate: vi.fn() }));
@@ -59,6 +60,35 @@ function serverTree(opts: { withToken?: boolean } = {}): ImportResult {
 		],
 		meta: { format: "MCP server", requestCount: 1, folderCount: 1 },
 	});
+}
+
+/** An earlier import of the server whose `search` tool is now listed as `find`. */
+function renamedToolMatch(over: Partial<ImportMcpDiffMatch> = {}): ImportMcpDiffMatch {
+	return {
+		collectionId: "col_1",
+		name: "Acme tools",
+		identical: false,
+		added: [{ kind: "tool", key: "export", name: "export" }],
+		removed: [{ kind: "resource", key: "file:///a.txt", name: "a.txt", requestId: "req_9" }],
+		changed: [
+			{
+				kind: "tool",
+				key: "find",
+				name: "search",
+				requestId: "req_1",
+				fields: [],
+				renamedFrom: "search",
+			},
+			{
+				kind: "prompt",
+				key: "greet",
+				name: "greet",
+				requestId: "req_2",
+				fields: ["description", "inputSchema"],
+			},
+		],
+		...over,
+	};
 }
 
 function renderModal() {
@@ -121,6 +151,8 @@ describe("ImportModal MCP server tab", () => {
 			rootIds: { c1: "col_1" },
 			environmentIds: {},
 		}));
+		// Every connect also asks for the earlier imports of the server; none by default.
+		vi.spyOn(apiService, "importMcpDiff").mockResolvedValue({ matches: [] });
 		useToastStore.setState({ toasts: [] });
 		useImportModalStore.setState({ isOpen: true });
 	});
@@ -285,6 +317,136 @@ describe("ImportModal MCP server tab", () => {
 			await screen.findByText("search_docs");
 
 			expect(screen.queryByText(/not stored in the collection/)).toBeNull();
+		});
+	});
+
+	describe("an earlier import of the same server (#3842)", () => {
+		async function connectWith(matches: ImportMcpDiffMatch[]) {
+			vi.spyOn(apiService, "importMcp").mockResolvedValue(serverTree());
+			vi.spyOn(apiService, "importMcpDiff").mockResolvedValue({ matches });
+			openMcpTab();
+			typeUrl();
+			fireEvent.click(connectButton());
+			await screen.findByText("search_docs");
+		}
+
+		const report = () => screen.queryByRole("region", { name: /Earlier import/ });
+
+		it("asks the diff route with the request the connect sent, and the same cancel", async () => {
+			const importMcp = vi.spyOn(apiService, "importMcp").mockResolvedValue(serverTree());
+			const diff = vi.spyOn(apiService, "importMcpDiff").mockResolvedValue({ matches: [] });
+			openMcpTab();
+			typeUrl();
+			fireEvent.click(connectButton());
+			await screen.findByText("search_docs");
+
+			expect(diff).toHaveBeenCalledTimes(1);
+			expect(diff.mock.calls[0][0]).toEqual(lastPayload(importMcp));
+			expect(diff.mock.calls[0][1]?.signal).toBe(importMcp.mock.calls[0][1]?.signal);
+		});
+
+		it("shows a renamed tool as one change, beside what was added and removed", async () => {
+			await connectWith([renamedToolMatch()]);
+
+			const found = within(report() as HTMLElement);
+			expect(found.getByText("1 added · 2 changed · 1 removed")).toBeInTheDocument();
+			expect(found.getByText("search → find")).toBeInTheDocument();
+			expect(found.getByText("tool - renamed")).toBeInTheDocument();
+			expect(found.getByText("prompt - description, input schema")).toBeInTheDocument();
+			expect(found.getByText("export")).toBeInTheDocument();
+			expect(found.getByText("a.txt")).toBeInTheDocument();
+			// One line for the rename: the old name is not also a removal and the new one an add.
+			expect(found.getAllByText(/search/)).toHaveLength(1);
+			expect(found.getAllByText(/find/)).toHaveLength(1);
+		});
+
+		it("states every count, the zeros included, for a server that has not moved", async () => {
+			await connectWith([
+				renamedToolMatch({ identical: true, added: [], removed: [], changed: [] }),
+			]);
+
+			const found = within(report() as HTMLElement);
+			expect(found.getByText("0 added · 0 changed · 0 removed")).toBeInTheDocument();
+			expect(found.getByText(/Nothing differs/)).toBeInTheDocument();
+			expect(found.queryByText("Added")).toBeNull();
+			expect(found.queryByText("Changed")).toBeNull();
+			expect(found.queryByText("Removed")).toBeNull();
+		});
+
+		it("reports each collection an earlier import made", async () => {
+			await connectWith([
+				renamedToolMatch(),
+				renamedToolMatch({
+					collectionId: "col_2",
+					name: "Acme tools copy",
+					added: [],
+					removed: [],
+					changed: [],
+					identical: true,
+				}),
+			]);
+
+			const found = within(report() as HTMLElement);
+			expect(found.getByText("Acme tools")).toBeInTheDocument();
+			expect(found.getByText("Acme tools copy")).toBeInTheDocument();
+			expect(found.getByText(/existing ones/)).toBeInTheDocument();
+		});
+
+		it("says Import anyway, says nothing changes, and imports the shown tree as a new collection", async () => {
+			const tree = serverTree();
+			vi.spyOn(apiService, "importMcp").mockResolvedValue(tree);
+			vi.spyOn(apiService, "importMcpDiff").mockResolvedValue({
+				matches: [renamedToolMatch()],
+			});
+			openMcpTab();
+			typeUrl();
+			fireEvent.click(connectButton());
+			await screen.findByText("search_docs");
+
+			expect(screen.getByText(/nothing is changed in the existing one/)).toBeInTheDocument();
+			expect(screen.queryByRole("button", { name: /^Import →$/ })).toBeNull();
+			fireEvent.click(screen.getByRole("button", { name: /^Import anyway →$/ }));
+
+			await waitFor(() => expect(applied.mutate).toHaveBeenCalledTimes(1));
+			expect(applied.mutate.mock.calls[0][0].result).toBe(tree);
+		});
+
+		it("shows nothing extra when no collection holds the server's URL", async () => {
+			await connectWith([]);
+
+			expect(report()).toBeNull();
+			expect(screen.getByRole("button", { name: /^Import →$/ })).toBeInTheDocument();
+			expect(screen.queryByRole("button", { name: /Import anyway/ })).toBeNull();
+		});
+
+		it("still previews and imports when the comparison fails, without a word of it", async () => {
+			vi.spyOn(apiService, "importMcp").mockResolvedValue(serverTree());
+			vi.spyOn(apiService, "importMcpDiff").mockRejectedValue(
+				new ApiError(502, "BAD_GATEWAY", "The server did not answer")
+			);
+			openMcpTab();
+			typeUrl();
+			fireEvent.click(connectButton());
+			await screen.findByText("search_docs");
+
+			expect(report()).toBeNull();
+			expect(screen.queryByText(/did not answer/)).toBeNull();
+			expect(useToastStore.getState().toasts).toEqual([]);
+			fireEvent.click(screen.getByRole("button", { name: /^Import →$/ }));
+			await waitFor(() => expect(applied.mutate).toHaveBeenCalledTimes(1));
+		});
+
+		it("does not ask for a comparison when the connect itself failed", async () => {
+			vi.spyOn(apiService, "importMcp").mockRejectedValue(
+				new ApiError(502, "BAD_GATEWAY", "The server did not answer")
+			);
+			const diff = vi.spyOn(apiService, "importMcpDiff");
+			openMcpTab();
+			typeUrl();
+			fireEvent.click(connectButton());
+
+			expect(await screen.findByText(/did not answer/)).toBeInTheDocument();
+			expect(diff).not.toHaveBeenCalled();
 		});
 	});
 

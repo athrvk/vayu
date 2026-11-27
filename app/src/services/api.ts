@@ -85,6 +85,7 @@ import type {
 	ImportApplyRequest,
 	ImportParseRequest,
 	ImportMcpRequest,
+	ImportMcpDiffResponse,
 	ImportApplyResponse,
 	CreateSpecRequest,
 	SpecBindRequest,
@@ -1133,6 +1134,28 @@ export const apiService = {
 			timeout: IMPORT_MCP_BUDGET_MS,
 			...(options?.signal ? { signal: options.signal } : {}),
 		});
+	},
+
+	/**
+	 * What importing an MCP server again would change about the collections an earlier import of it
+	 * built (#3842). Takes the body `importMcp` takes and reads the server the same way, so it
+	 * waits the same {@link IMPORT_MCP_BUDGET_MS}. Reads only. `matches` is empty when no collection
+	 * holds the URL.
+	 *
+	 * @param signal cancels the wait, as for `importMcp`.
+	 */
+	async importMcpDiff(
+		payload: ImportMcpRequest,
+		options?: { signal?: AbortSignal }
+	): Promise<ImportMcpDiffResponse> {
+		return await httpClient.post<ImportMcpDiffResponse>(
+			API_ENDPOINTS.IMPORT_MCP_DIFF,
+			payload,
+			{
+				timeout: IMPORT_MCP_BUDGET_MS,
+				...(options?.signal ? { signal: options.signal } : {}),
+			}
+		);
 	},
 
 	/**

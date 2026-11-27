@@ -1720,6 +1720,50 @@ export interface ImportMcpRequest {
 	include?: { tools?: boolean; resources?: boolean; prompts?: boolean };
 }
 
+/** What one entry of an MCP listing is, as `POST /import/mcp/diff` names it (#3842). */
+export type ImportMcpDiffKind = "tool" | "resource" | "prompt";
+
+/** A listed entry no stored request claims. `name` is what an import would call the request. */
+export interface ImportMcpDiffAdded {
+	kind: ImportMcpDiffKind;
+	key: string;
+	name: string;
+}
+
+/** A stored request whose key the server no longer lists. */
+export interface ImportMcpDiffRemoved extends ImportMcpDiffAdded {
+	requestId: string;
+}
+
+/**
+ * A stored request the server still lists, with the fields that differ. `key` is the listing's and
+ * `name` the stored request's; `renamedFrom` is the key the request had when the listing renamed
+ * it, and `fields` may then be empty.
+ */
+export interface ImportMcpDiffChanged extends ImportMcpDiffRemoved {
+	fields: ("description" | "inputSchema" | "outputSchema")[];
+	renamedFrom?: string;
+}
+
+/** One root collection whose `mcpBaseUrl` is the request's `url`, compared with the server now. */
+export interface ImportMcpDiffMatch {
+	collectionId: string;
+	name: string;
+	identical: boolean;
+	added: ImportMcpDiffAdded[];
+	removed: ImportMcpDiffRemoved[];
+	changed: ImportMcpDiffChanged[];
+}
+
+/**
+ * `POST /import/mcp/diff` (#3842): the body of `POST /import/mcp` in, what importing that server
+ * again would change about each collection an earlier import of it built. `matches` is `[]` when
+ * no collection holds the URL, which is not an error.
+ */
+export interface ImportMcpDiffResponse {
+	matches: ImportMcpDiffMatch[];
+}
+
 export interface ImportApplyRequest {
 	collections: ImportApplyCollection[];
 	requests: ImportApplyRequestItem[];

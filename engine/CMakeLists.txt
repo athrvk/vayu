@@ -583,6 +583,7 @@ add_library(vayu_core STATIC
     src/core/operation_match.cpp
     src/core/import_document.cpp
     src/core/jmeter_import.cpp
+    src/core/mcp_diff.cpp
     src/core/mcp_import.cpp
     src/core/script_api_scan.cpp
     src/core/script_config.cpp

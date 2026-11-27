@@ -429,6 +429,21 @@ describe("mcpBatchEntry (#3843)", () => {
 		expect(applicableEntries([entry])).toEqual([entry]);
 	});
 
+	it("carries the earlier imports of the server, and none by default (#3842)", async () => {
+		const result = await parsedResult();
+		const match = {
+			collectionId: "col_1",
+			name: "Acme tools",
+			identical: true,
+			added: [],
+			removed: [],
+			changed: [],
+		};
+
+		expect(mcpBatchEntry(result, URL).existingMcp).toEqual([]);
+		expect(mcpBatchEntry(result, URL, [match]).existingMcp).toEqual([match]);
+	});
+
 	it("is left untouched by a re-parse, which would have no document to post", async () => {
 		const entry = mcpBatchEntry(await parsedResult(), URL);
 		const parse = vi.spyOn(apiService, "parseImport");

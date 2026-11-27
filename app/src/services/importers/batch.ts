@@ -42,7 +42,7 @@ import {
 } from "./ref-bundler";
 import { parseImport } from "./factory";
 import { UnrecognisedFormatError, type ImportOptions, type ImportResult } from "./types";
-import type { ImportFetchOptions } from "@/types/api";
+import type { ImportFetchOptions, ImportMcpDiffMatch } from "@/types/api";
 
 /**
  * What a folder pick will even look at. A folder is picked wholesale (`webkitdirectory` hands over
@@ -120,6 +120,12 @@ export interface BatchEntry {
 	selectedCertificates?: number[];
 	/** What the apply did with it. Absent until Import has run. */
 	outcome?: { ok: boolean; message: string };
+	/**
+	 * Collections an earlier import of this MCP server built, compared with what the server lists
+	 * now (#3842). Only `mcpBatchEntry` sets it; empty or absent means nothing was found or the
+	 * comparison failed, and the preview then shows no diff.
+	 */
+	existingMcp?: ImportMcpDiffMatch[];
 }
 
 /** How the batch reaches files the picked documents reference. */
@@ -206,9 +212,14 @@ export function entryLabel(entry: BatchEntry): string {
 /**
  * The entry for a result the engine already built from a live MCP server (`POST /import/mcp`,
  * #3843). It has no document: `raw` is `null`, and the server URL stands where a file's name
- * would, so `entryLabel` names it.
+ * would, so `entryLabel` names it. `existingMcp` is what the diff route found of an earlier
+ * import of the same server.
  */
-export function mcpBatchEntry(result: ImportResult, url: string): BatchEntry {
+export function mcpBatchEntry(
+	result: ImportResult,
+	url: string,
+	existingMcp: ImportMcpDiffMatch[] = []
+): BatchEntry {
 	return {
 		id: `mcp:${url}`,
 		fileName: "",
@@ -221,6 +232,7 @@ export function mcpBatchEntry(result: ImportResult, url: string): BatchEntry {
 		error: null,
 		bundledInto: null,
 		included: true,
+		existingMcp,
 	};
 }
 

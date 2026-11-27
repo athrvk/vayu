@@ -52,6 +52,7 @@ import {
 import SpecReimportDialog from "./SpecReimportDialog";
 import { apiService } from "@/services/api";
 import { type CollectionDraft, type ImportResult } from "@/services/importers/types";
+import type { ImportMcpDiffMatch } from "@/types";
 import { draftSiblings } from "@/services/importers/draft-siblings";
 import {
 	unselectedCertificateCount,
@@ -61,7 +62,8 @@ import { describeCarriedOver, describeCounts, importResultNotices } from "./impo
 import { NoticeList } from "./NoticeList";
 import { ImportClientCertificates } from "./ImportClientCertificates";
 import { ImportMcpForm } from "./ImportMcpForm";
-import { canConnectMcp, emptyMcpForm, mcpImportRequest } from "./import-mcp";
+import { canConnectMcp, emptyMcpForm, existingMcpImports, mcpImportRequest } from "./import-mcp";
+import { McpReimportDiff } from "./McpReimportDiff";
 import { announceImport, buildImportReport } from "./import-report";
 import { activateImportedEnvironment } from "./import-environment";
 import { ImportFileFolders } from "./ImportFileFolders";
@@ -570,7 +572,9 @@ export function ImportModal() {
 	/**
 	 * Ask the typed MCP server what it offers and preview the tree the engine builds from it. The
 	 * answer is already parsed, so it becomes the tab's one entry directly (`mcpBatchEntry`): the
-	 * preview, the notices and the apply are the other tabs' own from there.
+	 * preview, the notices and the apply are the other tabs' own from there. The collections an
+	 * earlier import of the server built are looked up before the preview opens, so a duplicate is
+	 * flagged before the user can import one; that lookup never fails the connect (#3842).
 	 */
 	const handleConnectMcp = async () => {
 		if (isBusy || !canConnectMcp(mcpForm)) return;
@@ -581,9 +585,10 @@ export function ImportModal() {
 		const request = mcpImportRequest(mcpForm);
 		try {
 			const result = await apiService.importMcp(request, { signal: abort.signal });
+			const existing = await existingMcpImports(request, abort.signal);
 			patchTab("mcp", at, {
 				progress: null,
-				entries: [mcpBatchEntry(result, request.url)],
+				entries: [mcpBatchEntry(result, request.url, existing)],
 				phase: "preview",
 			});
 		} catch (e) {
@@ -789,6 +794,7 @@ export function ImportModal() {
 									? entryLabel(single)
 									: undefined
 							}
+							existingMcp={single.existingMcp}
 							onDismiss={() => resetTab(tab)}
 						/>
 					) : (
@@ -1127,12 +1133,7 @@ export function ImportModal() {
 								>
 									{applying
 										? "Importing…"
-										: // The count only appears for a batch: it is what the
-											// button is about to do N times, and on one file it
-											// would just restate the preview.
-											applicable.length > 1
-											? `Import ${applicable.length} files →`
-											: "Import →"}
+										: importLabel(applicable.length, single?.existingMcp)}
 								</Button>
 							</div>
 						</div>
@@ -1166,11 +1167,22 @@ export function ImportModal() {
 	);
 }
 
+/**
+ * The Import button's words. The count only appears for a batch: it is what the button is about to
+ * do N times, and on one file it would just restate the preview. A server an earlier import already
+ * built is imported anyway, as a second collection (#3842).
+ */
+function importLabel(count: number, existingMcp: ImportMcpDiffMatch[] | undefined): string {
+	if (count > 1) return `Import ${count} files →`;
+	return existingMcp && existingMcp.length > 0 ? "Import anyway →" : "Import →";
+}
+
 function PreviewView({
 	result,
 	importEnvironments,
 	selectedCertificates,
 	source,
+	existingMcp,
 	onDismiss,
 }: {
 	result: ImportResult;
@@ -1178,6 +1190,8 @@ function PreviewView({
 	selectedCertificates: readonly number[] | undefined;
 	/** What the result was read from when `meta.fileName` does not say: the MCP server's URL. */
 	source?: string;
+	/** Earlier imports of this MCP server, compared with its listing now (#3842). */
+	existingMcp?: ImportMcpDiffMatch[];
 	onDismiss: () => void;
 }) {
 	const { meta, collections, environments, globals } = result;
@@ -1239,6 +1253,7 @@ function PreviewView({
 			    saved example lands inside a request with no row of its own (#481). */}
 			<p className="text-label text-muted-foreground">{describeCounts(meta)}</p>
 			{carriedOver && <p className="text-label text-muted-foreground">{carriedOver}</p>}
+			{existingMcp && existingMcp.length > 0 && <McpReimportDiff matches={existingMcp} />}
 			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
 				<FieldError icon={AlertTriangle}>
 					{importEnvironments

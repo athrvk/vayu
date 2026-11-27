@@ -10,7 +10,7 @@ Unlike the other tabs it reads no document.
 It sends the engine a URL and gets the parsed tree back, so the preview and the apply that follow are the ones every other tab uses.
 
 - **Route:** [`POST /import/mcp`](../../engine/api-reference/import.md#post-importmcp) is the contract: the calls the engine makes, the tree it builds, the bounds and every error. This page covers only what the dialog does with it.
-- **Code:** `app/src/modules/collections/ImportMcpForm.tsx` (the fields), `import-mcp.ts` (the form's state and the request it makes), `ImportModal.tsx` (`handleConnectMcp`), `apiService.importMcp` in `app/src/services/api.ts`, and `mcpBatchEntry` in `app/src/services/importers/batch.ts`.
+- **Code:** `app/src/modules/collections/ImportMcpForm.tsx` (the fields), `import-mcp.ts` (the form's state and the request it makes), `ImportModal.tsx` (`handleConnectMcp`), `McpReimportDiff.tsx` (the report of a server imported before), `apiService.importMcp` and `apiService.importMcpDiff` in `app/src/services/api.ts`, and `mcpBatchEntry` in `app/src/services/importers/batch.ts`.
 
 ## The form
 
@@ -32,6 +32,15 @@ A legacy-era server's tree also holds its handshake as requests on the root, lis
 Run the collection with **Include nested collections** on, or `initialize` first: a request sent on its own before that has no session to send, and a run of the root alone sends only the handshake and `Close session`, no tool.
 **Nothing is stored at this point.** The route reads only, and the dialog holds the answer in memory until **Import** writes it through [`POST /import/apply`](../../engine/api-reference/import.md#post-importapply), as one new root collection.
 Dismissing the preview, or closing the dialog, discards the tree.
+
+### A server imported before
+
+Right after the connect succeeds the dialog also asks [`POST /import/mcp/diff`](../../engine/api-reference/import.md#post-importmcpdiff) with the same request, so it reads the server a second time.
+When a collection already holds this URL (as the `mcpBaseUrl` variable an import stores), the preview adds a report on it: *You already imported this server*, and for each such collection the counts of entries *added*, *changed* and *removed* (zeros stated), then the names under each.
+A tool the server renamed is one changed row, `old → new`, not an added tool and a removed one; a changed row also names what differs (description, input schema, output schema).
+The footer's button then reads **Import anyway**: it creates a new collection exactly as Import does.
+**Nothing is changed in the existing collection**, and the dialog offers no way to apply the difference to it.
+A comparison that fails (the server answered the connect and then not the second read, say) is logged and treated as no match: the preview shows no report and Import is unchanged.
 
 The environment and script checkboxes are not offered on this tab: the tree carries no environment, no global and no script, so each would answer a question the source cannot ask.
 Their values stay for the other tabs.
@@ -70,3 +79,5 @@ Every failure arrives as the engine's own sentence.
 ## Limits
 
 The dialog has no OAuth sign-in; it sends a static bearer token (tracked in [#3983](https://github.com/athrvk/vayu/issues/3983)).
+
+Importing a server again shows what changed against the collection an earlier import built, but cannot apply it ([#3994](https://github.com/athrvk/vayu/issues/3994)): Import always makes a new collection.
