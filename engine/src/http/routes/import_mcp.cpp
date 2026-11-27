@@ -9,8 +9,10 @@
  * @file http/routes/import_mcp.cpp
  * @brief `POST /import/mcp` (#3838): import from a live MCP server - the calls
  *        that read what it offers. The tree they become is
- *        `core/mcp_import.hpp`'s; the handler is registered beside the other
- *        import routes in `import.cpp`.
+ *        `core/mcp_import.hpp`'s; the handlers are registered beside the other
+ *        import routes in `import.cpp`. `POST /import/mcp/diff` (#3842) reads
+ *        the server through the same calls and compares the listing with the
+ *        collections an earlier import of it built (`core/mcp_diff.hpp`).
  *
  * Every call goes through `vayu::http::Client` as an `mcp` body, so the
  * envelope, `_meta` and the derived headers are the ones a stored request
@@ -24,7 +26,9 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/mcp_diff.hpp"
 #include "vayu/core/mcp_import.hpp"
+#include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/header_names.hpp"
@@ -79,6 +83,11 @@ std::size_t max_total_bytes);
 /// `import_fetch_client_config` precedent).
 std::optional<std::pair<vayu::http::ClientConfig, vayu::Request>>
 import_mcp_call_shape (const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel);
+
+std::pair<int, nlohmann::json> import_mcp_diff_response (vayu::db::Database& db,
+const nlohmann::json& body,
 const vayu::http::TransportPolicy& transport,
 const std::atomic<bool>* cancel);
 
@@ -715,6 +724,109 @@ const std::atomic<bool>* cancel) {
     return config;
 }
 
+/// What an import of @p body reads from its server, under the whole-import
+/// bounds; both routes read the server through this one call.
+Refusable<vayu::core::McpServerListing> fetch_listing (const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel,
+std::chrono::milliseconds total_timeout,
+std::size_t max_total_bytes) {
+    auto target = read_target (body);
+    if (!target) {
+        return std::unexpected (target.error ());
+    }
+    McpSession session{ vayu::http::Client (mcp_client_config (transport, cancel)),
+        target->base,
+        ImportBudget{ .deadline = std::chrono::steady_clock::now () + total_timeout,
+        .total     = total_timeout,
+        .max_bytes = max_total_bytes },
+        std::nullopt };
+    return read_listing (session, *target);
+}
+
+/// @p collection is a root an import of @p url built: it has no parent and its
+/// `mcpBaseUrl` holds @p url as written, a query string included.
+bool imported_from (const vayu::db::Collection& collection, const std::string& url) {
+    if (collection.parent_id) {
+        return false;
+    }
+    const vayu::Environment variables = vayu::json::parse_variables (collection.variables);
+    const auto base_url =
+    variables.find (std::string (vayu::core::MCP_BASE_URL_VARIABLE));
+    return base_url != variables.end () && base_url->second.value == url;
+}
+
+/// The MCP requests beneath one collection, as the comparison reads them.
+struct StoredEntries {
+    std::vector<vayu::core::McpEntry> entries;
+    /// Parallel to `entries`: the stored row each was read from.
+    std::vector<std::string> request_ids;
+};
+
+/// Every request at or beneath @p root that is an MCP call, in
+/// `collection_subtree_requests` order.
+StoredEntries stored_entries (vayu::db::Database& db,
+const std::vector<vayu::db::Collection>& all,
+const std::string& root) {
+    const auto subtree = collection_subtree_ids (
+    all, root, [] (const vayu::db::Collection&) { return true; });
+    StoredEntries out;
+    for (auto& row : collection_subtree_requests (db, all, subtree)) {
+        const auto stored_body =
+        nlohmann::json::parse (row.body, nullptr, /*allow_exceptions=*/false);
+        auto entry = vayu::core::mcp_entry_of (
+        std::move (row.name), std::move (row.description), stored_body);
+        if (entry) {
+            out.entries.push_back (std::move (*entry));
+            out.request_ids.push_back (std::move (row.id));
+        }
+    }
+    return out;
+}
+
+nlohmann::json entry_json (const vayu::core::McpEntry& entry) {
+    return nlohmann::json{
+        { "kind", std::string (vayu::core::mcp_entry_kind_name (entry.kind)) },
+        { "key", entry.key }, { "name", entry.name }
+    };
+}
+
+/// One matched collection's answer. A changed entry carries the listing's
+/// key and the stored request's name; a rename adds the key it had.
+nlohmann::json match_json (const vayu::db::Collection& root,
+const vayu::core::McpDiff& diff,
+const std::vector<vayu::core::McpEntry>& fetched,
+const StoredEntries& stored) {
+    nlohmann::json added = nlohmann::json::array ();
+    for (const std::size_t at : diff.added) {
+        added.push_back (entry_json (fetched.at (at)));
+    }
+    nlohmann::json removed = nlohmann::json::array ();
+    for (const std::size_t at : diff.removed) {
+        nlohmann::json row = entry_json (stored.entries.at (at));
+        row["requestId"]   = stored.request_ids.at (at);
+        removed.push_back (std::move (row));
+    }
+    nlohmann::json changed = nlohmann::json::array ();
+    for (const auto& change : diff.changed) {
+        const vayu::core::McpEntry& was = stored.entries.at (change.stored);
+        nlohmann::json row = entry_json (fetched.at (change.fetched));
+        row["name"]        = was.name;
+        row["requestId"]   = stored.request_ids.at (change.stored);
+        row["fields"]      = nlohmann::json::array ();
+        for (const auto field : change.fields) {
+            row["fields"].push_back (std::string (vayu::core::mcp_field_name (field)));
+        }
+        if (change.renamed) {
+            row["renamedFrom"] = was.key;
+        }
+        changed.push_back (std::move (row));
+    }
+    return nlohmann::json{ { "collectionId", root.id }, { "name", root.name },
+        { "identical", diff.identical () }, { "added", std::move (added) },
+        { "removed", std::move (removed) }, { "changed", std::move (changed) } };
+}
+
 } // namespace
 
 std::optional<std::pair<vayu::http::ClientConfig, vayu::Request>>
@@ -766,23 +878,48 @@ const vayu::http::TransportPolicy& transport,
 const std::atomic<bool>* cancel,
 std::chrono::milliseconds total_timeout,
 std::size_t max_total_bytes) {
-    auto target = read_target (body);
-    if (!target) {
-        return as_response (target.error ());
-    }
-    McpSession session{ vayu::http::Client (mcp_client_config (transport, cancel)),
-        target->base,
-        ImportBudget{ .deadline = std::chrono::steady_clock::now () + total_timeout,
-        .total     = total_timeout,
-        .max_bytes = max_total_bytes },
-        std::nullopt };
-    auto listing = read_listing (session, *target);
+    auto listing = fetch_listing (body, transport, cancel, total_timeout, max_total_bytes);
     if (!listing) {
         return as_response (listing.error ());
     }
     // A copy: `ordered_json` to `json` is a conversion, never a move.
     nlohmann::json result = vayu::core::mcp_import_result (*listing);
     return { 200, std::move (result) };
+}
+
+/**
+ * Testable core of POST /import/mcp/diff (#3842): read the server at
+ * `body.url` exactly as `POST /import/mcp` does, then compare the listing with
+ * every root collection an import of that URL built (its `mcpBaseUrl` holds
+ * the URL, byte for byte). Writes nothing.
+ *
+ * @return {http_status, json_body}: 200 `{matches: [...]}`, one entry per such
+ *         collection and an empty list for none; every refusal
+ *         `POST /import/mcp` answers, for the same reasons.
+ */
+std::pair<int, nlohmann::json> import_mcp_diff_response (vayu::db::Database& db,
+const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel) {
+    auto listing = fetch_listing (body, transport, cancel,
+    std::chrono::milliseconds (limits::TOTAL_TIMEOUT_MS), limits::MAX_TOTAL_BYTES);
+    if (!listing) {
+        return as_response (listing.error ());
+    }
+    const vayu::core::McpListingEntries fetched =
+    vayu::core::mcp_listing_entries (*listing);
+    const auto collections = db.get_collections ();
+    nlohmann::json matches = nlohmann::json::array ();
+    for (const auto& root : collections) {
+        if (!imported_from (root, listing->url)) {
+            continue;
+        }
+        const StoredEntries stored = stored_entries (db, collections, root.id);
+        const vayu::core::McpDiff diff =
+        vayu::core::diff_mcp (fetched.entries, fetched.kinds, stored.entries);
+        matches.push_back (match_json (root, diff, fetched.entries, stored));
+    }
+    return { 200, nlohmann::json{ { "matches", std::move (matches) } } };
 }
 
 } // namespace vayu::http::routes

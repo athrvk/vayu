@@ -47,8 +47,8 @@ httplib::Response& res) {
     if (req.method != "POST" || !req.has_header ("Content-Length")) {
         return httplib::Server::HandlerResponse::Unhandled;
     }
-    if (req.path != "/import" && req.path != "/import/parse" &&
-    req.path != "/import/document" && req.path != "/import/mcp") {
+    if (req.path != "/import" && req.path != "/import/parse" && req.path != "/import/document" &&
+    req.path != "/import/mcp" && req.path != "/import/mcp/diff") {
         return httplib::Server::HandlerResponse::Unhandled;
     }
     const size_t limit =
@@ -75,6 +75,13 @@ create_client_certificate_response (vayu::db::Database& db, const nlohmann::json
 // Defined in import_mcp.cpp, the testable core of POST /import/mcp (#3838);
 // returns {http_status, json_body}.
 std::pair<int, nlohmann::json> import_mcp_response (const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel);
+
+// Defined in import_mcp.cpp, the testable core of POST /import/mcp/diff
+// (#3842); returns {http_status, json_body}.
+std::pair<int, nlohmann::json> import_mcp_diff_response (vayu::db::Database& db,
+const nlohmann::json& body,
 const vayu::http::TransportPolicy& transport,
 const std::atomic<bool>* cancel);
 
@@ -1634,6 +1641,38 @@ void handle_import_mcp (RouteContext& ctx, const httplib::Request& req, httplib:
     }
 }
 
+void handle_import_mcp_diff (RouteContext& ctx,
+const httplib::Request& req,
+httplib::Response& res) {
+    const auto body = parse_request_json (req.body);
+    if (!body) {
+        refuse_request_body (res, "POST /import/mcp/diff", body.error ());
+        return;
+    }
+    try {
+        auto [status, response] = import_mcp_diff_response (ctx.db, *body,
+        vayu::http::resolve_transport_policy (ctx.db), &ctx.server_stopping);
+        if (status != 200) {
+            // A field, not the message: the reason can quote the server.
+            vayu::utils::log_warning ("http",
+            "POST /import/mcp/diff - " + std::to_string (status),
+            { { "reason", vayu::utils::bounded_log_text (error_message_of (response)) } });
+        } else {
+            vayu::utils::log_info ("http",
+            "MCP server diff, " + std::to_string (response["matches"].size ()) +
+            " matching collection(s)");
+        }
+        res.status = status;
+        res.set_content (
+        response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "http", "POST /import/mcp/diff - Error: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
 void handle_import_document (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
@@ -1781,6 +1820,22 @@ void register_import_routes (RouteContext& ctx) {
     ctx.server.Post (
     "/import/mcp", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_import_mcp (ctx, req, res);
+    });
+
+    /**
+     * POST /import/mcp/diff
+     * What importing an MCP server again would change (#3842): reads the
+     * server as `POST /import/mcp` does and compares the listing, keyed by
+     * tool, prompt and resource identity, with every root collection whose
+     * `mcpBaseUrl` holds the same url. Reads only; nothing is stored.
+     * Body params: those of `POST /import/mcp`.
+     * Returns: 200 `{matches: [{collectionId, name, identical, added, removed,
+     * changed}]}` (empty when no collection matches), and every refusal of
+     * `POST /import/mcp`.
+     */
+    ctx.server.Post ("/import/mcp/diff",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_import_mcp_diff (ctx, req, res);
     });
 
     /**

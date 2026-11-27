@@ -227,6 +227,8 @@ const std::vector<CodedRoute>& other_routes () {
         { "POST", "/import/document", GENERIC_CODE, R"({"content":"x","extra":)", "}" },
         { "POST", "/import/mcp", GENERIC_CODE,
         R"({"url":"http://127.0.0.1:1/mcp","extra":)", "}" },
+        { "POST", "/import/mcp/diff", GENERIC_CODE,
+        R"({"url":"http://127.0.0.1:1/mcp","extra":)", "}" },
         { "POST", "/import/apply", GENERIC_CODE, R"({"collections":[],"extra":)", "}" },
         { "POST", "/import/fetch", GENERIC_CODE,
         R"({"url":"http://127.0.0.1:1/x","extra":)", "}" },

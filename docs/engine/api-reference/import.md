@@ -298,8 +298,8 @@ The preview tree lists them in the same order.
 - `400` `Invalid 'importScripts': must be a boolean` (and the same for `importEnvironments`, `fileName`, `sourceUrl`, `unresolvedRefs`).
 - `413` `Import document is N bytes, over the limit of M (raise the 'maxSpecDocumentBytes' setting to allow more)`.
 
-**Body cap (`POST /import`, `/import/parse`, `/import/document`, `/import/mcp`).**
-The management API buffers a request body before a route sees it, so these four routes are bounded from the `Content-Length` header, before the body is read:
+**Body cap (`POST /import`, `/import/parse`, `/import/document`, `/import/mcp`, `/import/mcp/diff`).**
+The management API buffers a request body before a route sees it, so these five routes are bounded from the `Content-Length` header, before the body is read:
 a body over `maxSpecDocumentBytes` plus half again plus 1 MiB (headroom for the JSON string escaping of the document) answers `413` `Request body is N bytes, over the limit of M for an import (raise the 'maxSpecDocumentBytes' setting to allow more)`.
 The limit is read live, so a raised setting applies to the next request.
 A chunked body is refused with `411` like on every route (see [Request bodies](index.md#request-bodies)).
@@ -435,6 +435,65 @@ The tree's root then holds the handshake as its own requests, around the folders
 A stateless server, whose `initialize` answers no `Mcp-Session-Id`, gets no extract, no session rows and no `DELETE`: there is no session to carry or end.
 `meta.requestCount` counts the handshake's requests.
 The folders are children of the root, so the tree is run with **Include nested collections** on (`recursive: true` in a scenario): a run of the root alone sends only `initialize`, `notifications/initialized` and `Close session`, and no tool.
+
+## POST /import/mcp/diff
+
+What importing an MCP server again would change about the collection an earlier import of it built (issue [#3842](https://github.com/athrvk/vayu/issues/3842)), so a renamed tool reads as a change rather than as a second collection.
+Reads only - nothing is stored.
+
+**Request:** the body of [`POST /import/mcp`](#post-importmcp), validated the same way.
+The server is read exactly as that route reads it: the same calls, the same bounds, the same legacy-era handshake.
+
+**Which collections are compared.** Every root collection whose `mcpBaseUrl` variable holds the request's `url` byte for byte, a query string included: the variable an import stores the `url` in.
+A URL that differs in any way (another host spelling, a query key added or dropped, a trailing `/`) matches nothing.
+Every request beneath a matched root is read, wherever in its subtree it now sits.
+
+**Identity, never position.** Each side is keyed by what the entry is, not by where the server lists it, so a reordered listing is identical:
+
+| Kind | Read from a request whose `mcp` body calls | Keyed by |
+|------|--------------------------------------------|----------|
+| `tool` | `tools/call` | `mcpTool.name`, else the call's `params.name` |
+| `resource` | `resources/read` | the call's `params.uri` (a template's `uriTemplate` as written) |
+| `prompt` | `prompts/get` | the call's `params.name` |
+
+Any other request is not compared: a legacy-era server's `initialize`, `notifications/initialized` and `Close session`, and a request a person added that is not one of these calls.
+A kind the request's `include` leaves out is not compared either, so a tools-only read reports none of a collection's resources or prompts removed.
+The listing side is the tree `POST /import/mcp` would build now, read by the same reader, so a field differs only when the server's answer differs from what the request holds; a description a person edited reads as changed.
+
+**A rename** is reported when an added tool and a removed tool are each the only one on their side with that `inputSchema`: one `changed` entry carrying `renamedFrom`, instead of an add and a remove.
+Two removed tools sharing the added one's schema are an add and two removes, since nothing tells them apart.
+
+**Response:** `200`
+```json
+{
+  "matches": [
+    {
+      "collectionId": "col_...",
+      "name": "my-server",
+      "identical": false,
+      "added": [{ "kind": "tool", "key": "export", "name": "export" }],
+      "removed": [{ "kind": "resource", "key": "file:///a.txt", "name": "a", "requestId": "req_..." }],
+      "changed": [
+        { "kind": "tool", "key": "find", "name": "search", "requestId": "req_...", "fields": [], "renamedFrom": "search" },
+        { "kind": "prompt", "key": "greet", "name": "greet", "requestId": "req_...", "fields": ["description"] }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Notes |
+|-------|-------|
+| `matches` | One entry per matched root, in collection order; `[]` when none matches, which is not an error. |
+| `identical` | `added`, `removed` and `changed` are all empty. |
+| `added` | Listed entries no request claims, in listing order. `name` is the name an import would give the request. |
+| `removed` | Requests whose key the server no longer lists, with the stored `requestId` and `name`. |
+| `changed` | Requests whose key the server still lists and whose `fields` differ, in collection order. A rename adds `renamedFrom`, the key the request had; its `fields` may be empty. |
+
+A `changed` entry's `fields` are any of `description`, `inputSchema` and `outputSchema`, the last two a tool's `mcpTool` schemas; its `key` is the listing's, its `name` and `requestId` the stored request's.
+Two requests claiming one key are each compared; a key the server lists twice is its first entry.
+
+**Errors:** every error of `POST /import/mcp`, for the same reasons; nothing is compared until the listing is read.
 
 ## POST /import
 

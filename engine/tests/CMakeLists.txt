@@ -146,6 +146,7 @@ add_executable(vayu_tests
     if_match_route_test.cpp
     implied_content_type_test.cpp
     import_apply_route_test.cpp
+    import_mcp_diff_test.cpp
     import_mcp_test.cpp
     import_parse_insomnia_test.cpp
     import_parse_openapi_test.cpp
@@ -527,6 +528,7 @@ set(vayu_scratch_database_suites
     IfMatchServerTest
     ImportApplyRouteTest
     ImportMcpApplyTest
+    ImportMcpDiffTest
     ImportParseRoute
     InboxListenerTest
     InboxStorageTest
