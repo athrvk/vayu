@@ -344,6 +344,7 @@ halves are known) and `ScenarioFacts` (virtual users, iterations started,
 completed, and abandoned while non-zero). `SequenceBadge` is the neutral outline
 "SEQUENCE" chip that stands where a method sits; History's request bar and the live
 `LiveSequencePanel` both wear it. History's `ScenarioStepsTab` supplies the finished
-report's rows; the live panel supplies a gate frame's. They import `pluralize` from
+report's rows; the live panel supplies a gate frame's, passing the frame's `label` on an
+mcp step (#3987) as History passes the report's. They import `pluralize` from
 `modules/dashboard/utils/format`, the direction every file in `components/shared`
 already takes.

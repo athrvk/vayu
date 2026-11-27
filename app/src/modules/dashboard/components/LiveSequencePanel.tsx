@@ -59,7 +59,11 @@ function LiveSequencePanel({ progress }: { progress: LiveScenarioProgress }) {
 					<TableBody>
 						{steps.map((step) => (
 							<TableRow key={step.index}>
-								<StepLabelCell index={step.index} name={step.name} />
+								<StepLabelCell
+									index={step.index}
+									name={step.name}
+									label={step.label}
+								/>
 								<ExecutedCell executed={step.executed} />
 								<ErrorsCell errors={step.errors} />
 							</TableRow>

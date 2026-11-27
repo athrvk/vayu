@@ -95,7 +95,7 @@ Row 3 of the live view: the latency distribution (HDR plot, its min / mean / p50
 
 Row 1.5 of the live view, between the hero row and the charts, for a **scenario load run** only (#2823): the shared `SequenceBadge`, "N steps per iteration", the iterations started / completed / abandoned (`ScenarioFacts`; abandoned only while non-zero) and a Step / Executed / Errors table drawn from the same cells as History's Steps tab (`StepLabelCell`, `ExecutedCell`, `ErrorsCell`).
 Its data is the gate frame's `scenario` block (`LoadTestMetrics.scenario`; its one timing is `meanIterationMs`, the mean completed pass, which the iterations hero and the Mean iteration time stat read through `DashboardDerived.meanIterationTime` rather than the pooled request latency, #3570), read from the latest frame that carries it (`utils/liveScenario.ts`) and passed down as the block itself so this memo'd panel re-renders when a gate lands and not at the tick rate; a run whose frames carry none draws nothing, and the hero latency card, the Response-time percentile card and the distribution card read "pooled" / "(all steps)" for the same run.
-A live row has no "(n short)" marker (a step in flight is always behind the one before it) and no method badge (a frame names the step, not its request)
+A live row has no "(n short)" marker (a step in flight is always behind the one before it) and no method badge (a frame names the step, not its request), but an mcp step's row carries the frame's `label` beside its name (#3987)
 
 ## `LiveStreamPanel.tsx`
 

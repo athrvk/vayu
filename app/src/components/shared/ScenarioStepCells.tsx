@@ -30,7 +30,7 @@ export function StepLabelCell({
 	/** Absent live, where a frame names the step and not its request. */
 	method?: string;
 	name: string;
-	/** `RunScenarioStepStat.label` (#3829); absent live. */
+	/** The engine's label, on an mcp step only: `RunScenarioStepStat.label` (#3829) and the gate frame's `LiveScenarioStep.label` (#3987). */
 	label?: string;
 }) {
 	return (
