@@ -526,4 +526,69 @@ const std::vector<SpecDocument>& specs) {
     });
 }
 
+// ============================================================================
+// The request halves of a batch write: spec_sync_apply's and mcp_apply's
+// ============================================================================
+
+void Database::verify_live_requests_locked (const std::vector<Request>& rows) {
+    for (const auto& row : rows) {
+        if (impl_->storage.count<Request> (where (
+            c (&Request::id) == row.id && is_null (&Request::deleted_at))) == 0) {
+            throw MissingRowError ("Request", row.id);
+        }
+    }
+}
+
+void Database::purge_batch_requests_locked (const std::vector<std::string>& ids,
+std::vector<Change>& written) {
+    for (const auto& id : ids) {
+        for (auto& owner : impl_->storage.select (
+             &Request::collection_id, where (c (&Request::id) == id))) {
+            written.push_back (Change{ ChangeKind::Request, ChangeOp::Purge, id,
+            std::move (owner), std::nullopt });
+        }
+        impl_->storage.remove_all<RequestExample> (
+        where (c (&RequestExample::request_id) == id));
+        impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
+    }
+}
+
+// Deletes before inserts, for spec_sync_apply's reason, then folders before
+// the requests they own.
+void Database::mcp_apply (const McpApplyBatch& batch) {
+    vayu::utils::log_debug ("db", "Applying MCP re-import",
+    { { "collection", batch.root_id }, { "created", batch.created.size () },
+    { "updated", batch.updated.size () }, { "deleted", batch.deleted.size () },
+    { "newCollections", batch.new_collections.size () } });
+
+    retry_on_busy ("apply MCP re-import", 5, std::chrono::milliseconds (100), [&] {
+        std::vector<Change> written;
+        impl_->storage.transaction ([&] {
+            if (impl_->storage.count<Collection> (
+                where (c (&Collection::id) == batch.root_id &&
+                is_null (&Collection::deleted_at))) == 0) {
+                throw MissingRowError ("Collection", batch.root_id);
+            }
+            verify_live_requests_locked (batch.updated);
+            purge_batch_requests_locked (batch.deleted, written);
+            for (const auto& row : batch.new_collections) {
+                written.push_back (collection_change (
+                row, upsert_op<Collection> (impl_->storage, row.id)));
+                impl_->storage.replace (row);
+            }
+            for (const auto& row : batch.created) {
+                written.push_back (
+                request_change (row, upsert_op<Request> (impl_->storage, row.id)));
+                impl_->storage.replace (row);
+            }
+            for (const auto& row : batch.updated) {
+                impl_->storage.update (row);
+                written.push_back (request_change (row, ChangeOp::Update));
+            }
+            return true; // Commit
+        });
+        changes_.publish (std::move (written));
+    });
+}
+
 } // namespace vayu::db
