@@ -456,7 +456,7 @@ std::vector<ScenarioStepLabel> scenario_step_labels (const ScenarioPlan& plan) {
     std::vector<ScenarioStepLabel> labels;
     labels.reserve (plan.steps.size ());
     for (const auto& step : plan.steps) {
-        labels.push_back ({ step.index, step.name });
+        labels.push_back ({ step.index, step.name, step.mcp_label });
     }
     return labels;
 }
@@ -464,9 +464,15 @@ std::vector<ScenarioStepLabel> scenario_step_labels (const ScenarioPlan& plan) {
 nlohmann::json build_scenario_live_progress (const ScenarioLoadState& state) {
     nlohmann::json steps = nlohmann::json::array ();
     for (size_t i = 0; i < state.step_labels.size (); ++i) {
-        const auto& label = state.step_labels[i];
-        steps.push_back ({ { "index", label.index }, { "name", label.name },
-        { "executed", state.steps.completed (i) }, { "errors", state.steps.errors (i) } });
+        const auto& label    = state.step_labels[i];
+        nlohmann::json entry = { { "index", label.index },
+            { "name", label.name }, { "executed", state.steps.completed (i) },
+            { "errors", state.steps.errors (i) } };
+        // Absent off the `mcp` mode, like the summary's `steps[].label`.
+        if (!label.mcp_label.empty ()) {
+            entry["label"] = label.mcp_label;
+        }
+        steps.push_back (std::move (entry));
     }
     nlohmann::json progress = {
         { "iterations", state.iterations_started.load (std::memory_order_relaxed) },

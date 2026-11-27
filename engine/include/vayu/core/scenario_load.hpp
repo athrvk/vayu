@@ -440,6 +440,7 @@ ScriptsOverrideMode scripts_mode);
 struct ScenarioStepLabel {
     size_t index = 0;
     std::string name;
+    std::string mcp_label; ///< `ScenarioStep::mcp_label`; empty off the `mcp` mode.
 };
 
 /// Every step's label, in plan order.
@@ -709,8 +710,9 @@ build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan&
 /**
  * @brief The `scenario` object a live gate frame carries for a scenario load
  *        run (#2823): `{iterations, iterationsCompleted, iterationsAbandoned,
- *        stepsExecuted, meanIterationMs?, steps: [{index, name, executed,
- *        errors}]}`, `meanIterationMs` from the first completed pass on.
+ *        stepsExecuted, meanIterationMs?, steps: [{index, name, label?, executed,
+ *        errors}]}`, `meanIterationMs` from the first completed pass on and
+ *        `label` only on an `mcp` step (the summary's `steps[].label`, #3987).
  *
  * Built while the workers still write, so it reads only relaxed atomics and the
  * immutable `step_labels`, never a histogram (a step's `percentiles` and

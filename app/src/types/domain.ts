@@ -2146,6 +2146,8 @@ export interface LiveScenarioStep {
 	name: string;
 	executed: number;
 	errors: number;
+	/** The engine's label for the call an mcp step makes (`tools/call a`); present only on an mcp step (#3987). */
+	label?: string;
 }
 
 /** A gate frame's run-so-far latency distribution, as the engine sends it (ms). */
