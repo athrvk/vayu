@@ -1363,6 +1363,11 @@ constexpr size_t MAX_ITEMS = 10000;
 /// The whole import's bound, every call together: without it a server could
 /// hold one request open for `MAX_PAGES` calls of `CALL_TIMEOUT_MS` each.
 constexpr long long TOTAL_TIMEOUT_MS = 120000;
+/// The `DELETE` that ends a legacy-era session, whose bound is its own and not
+/// what is left of `TOTAL_TIMEOUT_MS`: an import that failed by running out of
+/// time must still end the session it opened. Inside the transport grace the
+/// app's client waits past `TOTAL_TIMEOUT_MS` (`PROXIED_TIMEOUT_GRACE_MS`).
+constexpr int SESSION_CLOSE_TIMEOUT_MS = 5000;
 /// The most reply bytes one import reads, every call together.
 constexpr size_t MAX_TOTAL_BYTES = size_t{ 32 } * 1024 * 1024;
 } // namespace import_mcp

@@ -313,14 +313,14 @@ Import from a live MCP server (issue [#3838](https://github.com/athrvk/vayu/issu
 Reads only - nothing is stored.
 The app's Import dialog calls it from its MCP server tab ([MCP server import](../../app/import-collections/mcp-server.md)).
 
-Every call is a modern-era (`2026-07-28`) Streamable HTTP POST sent as an `mcp` body ([The `mcp` body](request-body.md#the-mcp-body)).
+Every call to a modern-era (`2026-07-28`) server is a Streamable HTTP POST sent as an `mcp` body ([The `mcp` body](request-body.md#the-mcp-body)); a legacy-era server's session is the exception ([A legacy-era server](#a-legacy-era-server)).
 The envelope, `_meta` and the derived headers are the ones a saved request sends.
 The reply is read by the same reader ([The `mcp` reply](request-body.md#the-mcp-reply)), an event stream included.
 In order:
 
 1. `server/discover`, **best effort**, for the collection's name (`serverInfo.name`).
-   A server older than the method is read on, and the collection is named after the URL's host.
-   That is JSON-RPC `-32601`, or the plain `400` a legacy-era server answers with.
+   A server that answers JSON-RPC `-32601` (a modern-era one with no `server/discover`) is read on, and the collection is named after the URL's host.
+   The plain `400` with no JSON-RPC error that a legacy-era server answers with opens a session first ([A legacy-era server](#a-legacy-era-server)).
    A version refusal (`-32022`) and every other failure (a refused connection, a `401`/`403`, a `5xx`) fail the import.
 2. `tools/list`, then `resources/list` and `resources/templates/list`, then `prompts/list`, each as `include` asks and each **following `nextCursor`** until a page carries none.
    A server that answers `resources/templates/list` with `-32601` lists no templates.
@@ -352,9 +352,10 @@ One root collection named after the server, holding a folder per included primit
 | `Resources` | listed resource, then resource template | `{"method": "resources/read", "params": {"uri": <uri>}}`; a template's `uriTemplate` as written, with `URI template: <uriTemplate>` leading its description | `name`, else the URI |
 | `Prompts` | listed prompt | `{"method": "prompts/get", "params": {"name": <prompt>, "arguments": {}}}` | `name` |
 
-Every request is a `POST` to `{{mcpBaseUrl}}`, a collection variable on the root holding the `url` the import was sent, described by the entry's `description`, with the `Content-Type: application/json` row an `mcp` body carries and `inherit` auth.
+In the tree of a modern-era server every request is a `POST` to `{{mcpBaseUrl}}`, a collection variable on the root holding the `url` the import was sent, described by the entry's `description`, with the `Content-Type: application/json` row an `mcp` body carries and `inherit` auth.
 The body is a bare call (no `jsonrpc` or `id`), so the engine stamps the envelope and `_meta` at send.
-Every request carries one element, `assert.status` with `in: [200]`; the MCP reply's own failure classes (a JSON-RPC error, a tool's `isError`) need none.
+Each carries one element, `assert.status` with `in: [200]`; the MCP reply's own failure classes (a JSON-RPC error, a tool's `isError`) need none.
+A legacy-era server's tree differs in its calls (full envelopes), its handshake and close requests and what they expect ([below](#a-legacy-era-server)).
 There is no `assert.jsonschema` from a tool's `outputSchema`: that kind reads draft-07, which a 2020-12 schema can fail by construction (issue [#3763](https://github.com/athrvk/vayu/issues/3763)).
 
 **A tool's schema (issue [#3839](https://github.com/athrvk/vayu/issues/3839)).**
@@ -395,10 +396,45 @@ Header and token values are never logged.
 - `502` `<method> failed: <reason>`, where the reason is the reply reader's own message:
   - `server supports 2025-11-25, 2025-06-18; this request is 2026-07-28` for a version refusal;
   - `insufficient_scope: needs "<scopes>"` for a `403` naming them;
-  - `HTTP 400 with no JSON-RPC error: the server looks legacy-era ...` for a legacy server's list call;
+  - `HTTP 400 with no JSON-RPC error: the server looks legacy-era ...` for a call the handshake did not satisfy;
   - a transfer's own error (a refused connection, a timeout, a reserved port).
+- `502` `initialize answered with no result` or `initialize answered with no protocolVersion`.
 - `502` `<method> answered with no '<key>' list`, `<method> repeated a cursor it had already been sent, so the list would never end`, or `<method> still had a nextCursor after 100 pages, the most one import follows`.
 - `502` `The import ran past its 120000 ms total at <method>, the longest one import takes`: a timeout is a `502` here, as it is on `POST /import/fetch`.
+
+### A legacy-era server
+
+A server from before `server/discover` (issue [#3840](https://github.com/athrvk/vayu/issues/3840)) needs an `initialize` handshake and, usually, a session.
+This is the one place an `mcp` exchange falls back: the import speaks the handshake itself, then generates it as requests the user can read and edit, so a run holds no session state the collection does not show.
+
+The import sends, after the refused `server/discover`:
+
+1. `initialize`, offering `2025-11-25` (the newest revision with the handshake), with empty `capabilities` and `clientInfo` `{name: "vayu", version}`.
+   Its result's `protocolVersion` is the negotiated one; `serverInfo.name` names the collection.
+   A failed `initialize`, one with no `result`, or one naming no `protocolVersion` fails the import.
+2. `notifications/initialized`, an envelope with no `id`, which a server answers `202` with no body; any `2xx` passes.
+3. The list calls above.
+4. A `DELETE` ending the session, **best effort**: whatever it answers, `405` included, the import's answer is unchanged.
+   It is sent when a step above failed too, so a failed import leaves no session open: one that ran past the 120 seconds, or whose reply the byte cap refused, included.
+   It carries the negotiated `MCP-Protocol-Version` and has a bound of its own, 5 seconds, since what is left of the total may be none; its reply counts against no budget.
+
+Every call after `initialize` carries `MCP-Protocol-Version: <negotiated>` and, when `initialize` answered one, `Mcp-Session-Id`.
+Every call is a full JSON-RPC envelope numbered from `1`, because a session refuses an `id` it has seen, so nothing modern is stamped into it.
+
+The tree's root then holds the handshake as its own requests, around the folders, each draft's `order` stating its place so the sidebar and a recursive run read one sequence:
+
+| `order` | Request | Body | Expects |
+|---------|---------|------|---------|
+| 0 | `initialize` | `mcp`, the envelope the import sent, `id` `1` | `200`, and `extract.header` of `Mcp-Session-Id` into `mcpSessionId` (`scope: "collection"`, `required: true`) |
+| 1 | `notifications/initialized` | `mcp`, `{"jsonrpc": "2.0", "method": "notifications/initialized"}` | any of `200`, `202`, `204` |
+| 2.. | the `Tools`, `Resources` and `Prompts` folders | each call a full envelope, `id` from `2` in run order | `200` |
+| last | `Close session`, a `DELETE` | `none` | any of `200`, `202`, `204`, `405` (a server may refuse to let a client end a session) |
+
+`initialize` carries `MCP-Protocol-Version: 2025-11-25`; every later request carries the negotiated version and `Mcp-Session-Id: {{mcpSessionId}}` as header rows, which win over the headers the `mcp` mode derives.
+`{{mcpSessionId}}` is undefined until `initialize` has run, and the session a run opened is ended by its last step: a later request sent on its own carries the name unresolved, or a closed session, and the server refuses it until `initialize` runs again.
+A stateless server, whose `initialize` answers no `Mcp-Session-Id`, gets no extract, no session rows and no `DELETE`: there is no session to carry or end.
+`meta.requestCount` counts the handshake's requests.
+The folders are children of the root, so the tree is run with **Include nested collections** on (`recursive: true` in a scenario): a run of the root alone sends only `initialize`, `notifications/initialized` and `Close session`, and no tool.
 
 ## POST /import
 

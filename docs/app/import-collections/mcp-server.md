@@ -28,6 +28,8 @@ A tab switch keeps what was typed and leaves a running connect to land on its ow
 ## The preview
 
 A successful connect shows the preview every other format shows, with the server's URL under the format name: a count line, the tree of folders (`Tools`, `Resources`, `Prompts`, as included) and requests under a root collection named after the server, and a note for anything the engine stepped over.
+A legacy-era server's tree also holds its handshake as requests on the root, listed in the order a run sends them: `initialize` and `notifications/initialized` above the folders, and `Close session` below them when the server keeps a session ([A legacy-era server](../../engine/api-reference/import.md#a-legacy-era-server)).
+Run the collection with **Include nested collections** on, or `initialize` first: a request sent on its own before that has no session to send, and a run of the root alone sends only the handshake and `Close session`, no tool.
 **Nothing is stored at this point.** The route reads only, and the dialog holds the answer in memory until **Import** writes it through [`POST /import/apply`](../../engine/api-reference/import.md#post-importapply), as one new root collection.
 Dismissing the preview, or closing the dialog, discards the tree.
 

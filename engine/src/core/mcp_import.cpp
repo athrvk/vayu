@@ -14,6 +14,8 @@
 #include "vayu/core/mcp_import.hpp"
 
 #include <cstddef>
+#include <cstdint>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -25,6 +27,7 @@
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/http/mcp_body.hpp"
 #include "vayu/utils/log_redact.hpp"
+#include "vayu/version.hpp"
 
 namespace vayu::core {
 
@@ -191,22 +194,40 @@ json carried_header_rows (const std::vector<HeaderLine>& headers) {
     return rows;
 }
 
-/// The bare call an `mcp` body holds: the engine adds `jsonrpc`, `id` and
-/// `_meta` at send, which it would not do to a written envelope.
-std::string bare_call (const EntryRequest& entry) {
-    json call      = json::object ();
+/// How a request's call is written, and the header rows it carries.
+struct CallFraming {
+    /// The caller's rows, and a legacy session's version and session rows.
+    json header_rows;
+    /// The next envelope's `id` in a legacy session; nothing for a bare call.
+    std::optional<std::int64_t> next_id;
+};
+
+/// The call an `mcp` body holds. Bare for a modern server: the engine adds
+/// `jsonrpc`, `id` and `_meta` at send, which it would not do to a written
+/// envelope. A full envelope in a legacy session, numbered in run order,
+/// because a session refuses an `id` it has already seen.
+std::string framed_call (const EntryRequest& entry, CallFraming& framing) {
+    json call = json::object ();
+    if (auto& next_id = framing.next_id; next_id) {
+        call["jsonrpc"] = "2.0";
+        call["id"]      = (*next_id)++;
+    }
     call["method"] = entry.method;
     call["params"] = entry.params;
     return call.dump (2);
 }
 
-/// Every generated request expects a `200`; the MCP reply's own failure classes
-/// (a JSON-RPC error, a tool's `isError`) are judged by the engine without an
-/// element. No `assert.jsonschema` from a tool's `outputSchema`: that kind reads
-/// draft-07, which a 2020-12 schema can fail by construction (#3763).
-json expected_status_elements () {
-    json config       = json::object ();
-    config["in"]      = json::array ({ 200 });
+/// An `assert.status` over @p accepted. A call expects a `200`; the MCP reply's
+/// own failure classes (a JSON-RPC error, a tool's `isError`) are judged by the
+/// engine without an element. No `assert.jsonschema` from a tool's
+/// `outputSchema`: that kind reads draft-07, which a 2020-12 schema can fail by
+/// construction (#3763).
+json expected_status_elements (std::initializer_list<int> accepted = { 200 }) {
+    json config  = json::object ();
+    config["in"] = json::array ();
+    for (const int status : accepted) {
+        config["in"].push_back (status);
+    }
     json element      = json::object ();
     element["kind"]   = "assert.status";
     element["config"] = std::move (config);
@@ -215,24 +236,39 @@ json expected_status_elements () {
     return elements;
 }
 
-json request_draft (EntryRequest entry, const json& header_rows) {
-    json body       = json::object ();
-    body["mode"]    = "mcp";
-    body["content"] = bare_call (entry);
-    if (!entry.mcp_tool.is_null ()) {
-        body["mcpTool"] = std::move (entry.mcp_tool);
-    }
+json request_draft (std::string name,
+std::string description,
+std::string_view method,
+json body,
+const json& header_rows,
+json elements) {
     json request           = json::object ();
-    request["name"]        = std::move (entry.name);
-    request["description"] = std::move (entry.description);
-    request["method"]      = "POST";
+    request["name"]        = std::move (name);
+    request["description"] = std::move (description);
+    request["method"]      = std::string (method);
     request["url"]         = "{{" + std::string (MCP_BASE_URL_VARIABLE) + "}}";
     request["params"]      = json::array ();
     request["headers"]     = with_required_content_type (header_rows, body);
     request["body"]        = std::move (body);
     request["auth"]        = json{ { "mode", "inherit" } };
-    request["elements"]    = expected_status_elements ();
+    request["elements"]    = std::move (elements);
     return request;
+}
+
+json mcp_body_draft (std::string content) {
+    json body       = json::object ();
+    body["mode"]    = "mcp";
+    body["content"] = std::move (content);
+    return body;
+}
+
+json entry_draft (EntryRequest entry, CallFraming& framing) {
+    json body = mcp_body_draft (framed_call (entry, framing));
+    if (!entry.mcp_tool.is_null ()) {
+        body["mcpTool"] = std::move (entry.mcp_tool);
+    }
+    return request_draft (std::move (entry.name), std::move (entry.description),
+    "POST", std::move (body), framing.header_rows, expected_status_elements ());
 }
 
 /// Appends a request per usable entry of @p entries to @p requests, counting
@@ -240,7 +276,7 @@ json request_draft (EntryRequest entry, const json& header_rows) {
 /// send would refuse as an `unusable_tool_schema`, named by the tool.
 void append_requests (const json& entries,
 EntryReader read,
-const json& header_rows,
+CallFraming& framing,
 json& requests,
 ImportTally& tally) {
     for (const json& entry : entries) {
@@ -254,7 +290,110 @@ ImportTally& tally) {
             tally.add ("unusable_tool_schema");
             tally.set_subject ("");
         }
-        requests.push_back (request_draft (std::move (*request), header_rows));
+        requests.push_back (entry_draft (std::move (*request), framing));
+    }
+}
+
+json with_header_row (json rows, std::string_view key, std::string value) {
+    json row       = json::object ();
+    row["key"]     = std::string (key);
+    row["value"]   = std::move (value);
+    row["enabled"] = true;
+    rows.push_back (std::move (row));
+    return rows;
+}
+
+/// The rows every request after `initialize` carries: the negotiated version,
+/// and the session `initialize` extracted when the server issued one.
+json session_rows (const json& caller_rows, const McpLegacyHandshake& handshake) {
+    json rows = with_header_row (caller_rows,
+    vayu::http::mcp::PROTOCOL_VERSION_HEADER, handshake.protocol_version);
+    if (!handshake.session) {
+        return rows;
+    }
+    return with_header_row (std::move (rows), MCP_SESSION_HEADER,
+    "{{" + std::string (MCP_SESSION_VARIABLE) + "}}");
+}
+
+/// `initialize`'s `extract.header`: a reply without the session fails the
+/// step, because every later request would send an unresolved name.
+json session_extract_element () {
+    json config        = json::object ();
+    config["header"]   = std::string (MCP_SESSION_HEADER);
+    config["variable"] = std::string (MCP_SESSION_VARIABLE);
+    config["scope"]    = "collection";
+    config["required"] = true;
+    json element       = json::object ();
+    element["kind"]    = "extract.header";
+    element["config"]  = std::move (config);
+    return element;
+}
+
+std::string initialize_description (const McpLegacyHandshake& handshake) {
+    if (!handshake.session) {
+        return "Negotiates the protocol version the requests after it name. "
+               "The server keeps no session.";
+    }
+    return "Opens the session the requests after it run in and extracts its " +
+    std::string (MCP_SESSION_HEADER) + " into {{" + std::string (MCP_SESSION_VARIABLE) +
+    "}}, which is undefined until this request has run: run the collection, "
+    "or this request first.";
+}
+
+json initialize_draft (const McpLegacyHandshake& handshake, CallFraming& framing) {
+    EntryRequest entry{ "initialize", initialize_description (handshake),
+        "initialize", mcp_initialize_params () };
+    json request = entry_draft (std::move (entry), framing);
+    if (handshake.session) {
+        request["elements"].push_back (session_extract_element ());
+    }
+    return request;
+}
+
+/// A notification is an envelope with no `id`, which a server answers `202`
+/// with no body; the import accepts any 2xx, so the step does too.
+json initialized_draft (const json& header_rows) {
+    json note       = json::object ();
+    note["jsonrpc"] = "2.0";
+    note["method"]  = "notifications/initialized";
+    return request_draft ("notifications/initialized",
+    "Tells the server the handshake is complete.", "POST",
+    mcp_body_draft (note.dump (2)), header_rows,
+    expected_status_elements ({ 200, 202, 204 }));
+}
+
+json close_session_draft (const json& header_rows) {
+    return request_draft ("Close session",
+    "Ends the session {{" + std::string (MCP_SESSION_VARIABLE) +
+    "}} names. A server that does not let a client end one answers 405, "
+    "which passes too.",
+    "DELETE", json{ { "mode", "none" } }, header_rows,
+    expected_status_elements ({ 200, 202, 204, 405 }));
+}
+
+/// The requests a legacy tree's root runs before its folders, and switches
+/// @p framing to the rows and numbering every later call carries.
+json session_opening (const McpLegacyHandshake& handshake,
+const json& caller_rows,
+CallFraming& framing) {
+    framing.next_id     = 1;
+    framing.header_rows = with_header_row (caller_rows,
+    vayu::http::mcp::PROTOCOL_VERSION_HEADER, std::string (MCP_LEGACY_PROTOCOL_VERSION));
+    json opening        = json::array ();
+    opening.push_back (initialize_draft (handshake, framing));
+    framing.header_rows = session_rows (caller_rows, handshake);
+    opening.push_back (initialized_draft (framing.header_rows));
+    return opening;
+}
+
+/// A legacy tree's root children in run order, each draft's `order`: the
+/// opening requests, the folders, then the closing ones.
+void order_root_children (json& opening, json& folders, json& closing) {
+    int order = 0;
+    for (json* list : { &opening, &folders, &closing }) {
+        for (json& draft : *list) {
+            draft["order"] = order++;
+        }
     }
 }
 
@@ -310,9 +449,24 @@ json import_meta (std::size_t requests, std::size_t folders, const ImportTally& 
 
 } // namespace
 
+json mcp_initialize_params () {
+    json params               = json::object ();
+    params["protocolVersion"] = std::string (MCP_LEGACY_PROTOCOL_VERSION);
+    params["capabilities"]    = json::object ();
+    params["clientInfo"]      = json{ { "name", vayu::http::mcp::CLIENT_NAME },
+        { "version", vayu::Version::string } };
+    return params;
+}
+
 json mcp_import_result (const McpServerListing& listing) {
-    const json header_rows = carried_header_rows (listing.headers);
+    const json caller_rows = carried_header_rows (listing.headers);
     ImportTally tally;
+    CallFraming framing{ caller_rows, std::nullopt };
+    const std::optional<McpLegacyHandshake>& legacy = listing.legacy;
+    json opening                                    = json::array ();
+    if (legacy) {
+        opening = session_opening (*legacy, caller_rows, framing);
+    }
     json children         = json::array ();
     std::size_t requests  = 0;
     const auto add_folder = [&] (std::string_view name, json folder_requests) {
@@ -322,23 +476,36 @@ json mcp_import_result (const McpServerListing& listing) {
 
     if (listing.tools) {
         json tools = json::array ();
-        append_requests (*listing.tools, tool_request, header_rows, tools, tally);
+        append_requests (*listing.tools, tool_request, framing, tools, tally);
         add_folder ("Tools", std::move (tools));
     }
     if (listing.resources) {
         json resources = json::array ();
-        append_requests (*listing.resources, resource_request, header_rows, resources, tally);
+        append_requests (*listing.resources, resource_request, framing, resources, tally);
         if (listing.resource_templates) {
             append_requests (*listing.resource_templates, template_request,
-            header_rows, resources, tally);
+            framing, resources, tally);
         }
         add_folder ("Resources", std::move (resources));
     }
     if (listing.prompts) {
         json prompts = json::array ();
-        append_requests (*listing.prompts, prompt_request, header_rows, prompts, tally);
+        append_requests (*listing.prompts, prompt_request, framing, prompts, tally);
         add_folder ("Prompts", std::move (prompts));
     }
+
+    json closing = json::array ();
+    if (legacy) {
+        if (legacy->session) {
+            closing.push_back (close_session_draft (framing.header_rows));
+        }
+        order_root_children (opening, children, closing);
+    }
+    json root_requests = std::move (opening);
+    for (json& request : closing) {
+        root_requests.push_back (std::move (request));
+    }
+    requests += root_requests.size ();
 
     json root           = json::object ();
     root["name"]        = listing.name;
@@ -347,7 +514,7 @@ json mcp_import_result (const McpServerListing& listing) {
     root["elements"]          = json::array ();
     const std::size_t folders = children.size ();
     root["children"]          = std::move (children);
-    root["requests"]          = json::array ();
+    root["requests"]          = std::move (root_requests);
 
     json result = json::object ();
     // Pushed rather than listed: an initializer list copies, and the root

@@ -8,7 +8,9 @@
 /**
  * @file mcp_fixture_server_test.cpp
  * @brief `McpFixtureServer`'s discovery and list methods (#3838): the pages,
- *        the cursors it records, the legacy answers to `server/discover`.
+ *        the cursors it records, the refusals of `server/discover`. And its
+ *        legacy-era mode (#3840): the refusals of a request after `initialize`
+ *        and of a `DELETE`.
  *
  * A route that imports from a live MCP server is tested against this fixture,
  * so what it answers is pinned here rather than inferred from that route's
@@ -22,6 +24,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -30,8 +33,10 @@
 namespace {
 
 using nlohmann::json;
+using vayu::tests::MCP_LEGACY_FIXTURE_VERSION;
 using vayu::tests::McpDiscovery;
 using vayu::tests::McpFixtureServer;
+using vayu::tests::McpLegacySessions;
 using vayu::tests::McpReplyOutcome;
 
 json tool (const std::string& name) {
@@ -74,6 +79,26 @@ class McpFixtureServerTest : public ::testing::Test {
         const std::size_t data = reply->body.rfind ("data: ");
         const std::size_t end  = reply->body.find ("\n\n", data);
         return json::parse (reply->body.substr (data + 6, end - data - 6));
+    }
+
+    /// A legacy-era POST: @p headers beside the `Accept` it must carry.
+    httplib::Result post_legacy (const json& body, httplib::Headers headers = {}) {
+        headers.emplace ("Accept", "application/json, text/event-stream");
+        httplib::Client client ("127.0.0.1", server_.port ());
+        return client.Post ("/mcp", headers, body.dump (), "application/json");
+    }
+
+    httplib::Result delete_with (const httplib::Headers& headers = {}) {
+        httplib::Client client ("127.0.0.1", server_.port ());
+        return client.Delete ("/mcp", headers);
+    }
+
+    /// `initialize` against a legacy-era fixture: the session it issued.
+    std::string open_legacy_session () {
+        const auto reply = post_legacy ({ { "jsonrpc", "2.0" }, { "id", 1 },
+        { "method", "initialize" }, { "params", { { "protocolVersion", "any" } } } });
+        EXPECT_TRUE (reply);
+        return reply ? reply->get_header_value ("Mcp-Session-Id") : std::string ();
     }
 
     McpFixtureServer server_;
@@ -175,7 +200,7 @@ TEST_F (McpFixtureServerTest, DiscoverAnswersAModernResultByDefault) {
     EXPECT_TRUE (result.at ("serverInfo").contains ("name"));
 }
 
-TEST_F (McpFixtureServerTest, DiscoverAsALegacyServerRefusesInEitherShape) {
+TEST_F (McpFixtureServerTest, DiscoverIsRefusedAsAModernServerWithNoSuchMethodOrAsALegacyOne) {
     server_.discover_as (McpDiscovery::MethodNotFound);
     const auto not_found = send ("server/discover");
     ASSERT_TRUE (not_found);
@@ -192,6 +217,77 @@ TEST_F (McpFixtureServerTest, DiscoverAsALegacyServerRefusesInEitherShape) {
     const auto listed = send ("tools/list");
     ASSERT_TRUE (listed);
     EXPECT_EQ (response_of (listed).at ("result").at ("tools").size (), 1U);
+}
+
+TEST_F (McpFixtureServerTest, ALegacyServerRefusesAPostThatDoesNotAcceptBothReplyTypes) {
+    server_.speak_legacy ();
+    httplib::Client client ("127.0.0.1", server_.port ());
+    const json body{ { "jsonrpc", "2.0" }, { "id", 1 }, { "method", "initialize" } };
+    const auto reply = client.Post ("/mcp",
+    { { "Accept", "application/json" } }, body.dump (), "application/json");
+    ASSERT_TRUE (reply);
+    EXPECT_EQ (reply->status, 406);
+}
+
+TEST_F (McpFixtureServerTest, ALegacyInitializeThatOffersNoVersionIsInvalidParams) {
+    server_.speak_legacy ();
+    const auto reply = post_legacy ({ { "jsonrpc", "2.0" }, { "id", 1 },
+    { "method", "initialize" }, { "params", json::object () } });
+    ASSERT_TRUE (reply);
+    EXPECT_EQ (reply->status, 400);
+    EXPECT_EQ (response_of (reply).at ("error").at ("code"), -32602);
+    EXPECT_TRUE (server_.live_sessions ().empty ());
+}
+
+TEST_F (McpFixtureServerTest, ALegacyServerInASessionKnowsNoDiscover) {
+    server_.speak_legacy ();
+    const std::string session = open_legacy_session ();
+    const auto reply          = post_legacy (
+    { { "jsonrpc", "2.0" }, { "id", 2 }, { "method", "server/discover" } },
+    { { "Mcp-Session-Id", session },
+    { "MCP-Protocol-Version", std::string (MCP_LEGACY_FIXTURE_VERSION) } });
+    ASSERT_TRUE (reply);
+    EXPECT_EQ (response_of (reply).at ("error").at ("code"), -32601);
+}
+
+TEST_F (McpFixtureServerTest, ALegacyDeleteNeedsALiveSessionAndTheNegotiatedVersion) {
+    server_.speak_legacy ();
+    const std::string session = open_legacy_session ();
+    const std::string version (MCP_LEGACY_FIXTURE_VERSION);
+
+    const auto no_session = delete_with ({ { "MCP-Protocol-Version", version } });
+    ASSERT_TRUE (no_session);
+    EXPECT_EQ (no_session->status, 400);
+    const auto unknown = delete_with (
+    { { "Mcp-Session-Id", "elsewhere" }, { "MCP-Protocol-Version", version } });
+    ASSERT_TRUE (unknown);
+    EXPECT_EQ (unknown->status, 404);
+    for (const httplib::Headers& wrong : { httplib::Headers{ { "Mcp-Session-Id", session } },
+         httplib::Headers{ { "Mcp-Session-Id", session },
+         { "MCP-Protocol-Version", "1999-01-01" } } }) {
+        const auto refused = delete_with (wrong);
+        ASSERT_TRUE (refused);
+        EXPECT_EQ (refused->status, 400);
+    }
+    EXPECT_EQ (server_.live_sessions (), std::set<std::string>{ session });
+
+    const auto ended = delete_with (
+    { { "Mcp-Session-Id", session }, { "MCP-Protocol-Version", version } });
+    ASSERT_TRUE (ended);
+    EXPECT_EQ (ended->status, 200);
+    EXPECT_TRUE (server_.live_sessions ().empty ());
+    EXPECT_EQ (server_.calls ().back ().protocol_version, version);
+}
+
+TEST_F (McpFixtureServerTest, ADeleteWhereThereIsNoSessionToEndIsMethodNotAllowed) {
+    const auto modern = delete_with ();
+    ASSERT_TRUE (modern);
+    EXPECT_EQ (modern->status, 405);
+
+    server_.speak_legacy (McpLegacySessions::Stateless);
+    const auto stateless = delete_with ();
+    ASSERT_TRUE (stateless);
+    EXPECT_EQ (stateless->status, 405);
 }
 
 TEST_F (McpFixtureServerTest, ResourcesTemplatesAndPromptsAnswerWhatWasSet) {

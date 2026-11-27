@@ -26,7 +26,7 @@ happens around it.
 | | Vayu | MCP Inspector |
 |---|---|---|
 | **What it is** | An API client and load engine; an MCP call is a request body mode | A developer tool with Web, CLI and TUI clients\* |
-| **Transports** | Streamable HTTP, protocol revision `2026-07-28` only | stdio, SSE and HTTP servers, legacy and modern eras\* |
+| **Transports** | Streamable HTTP: `2026-07-28` requests, and a legacy-era server through the `initialize` steps an import generates | stdio, SSE and HTTP servers, legacy and modern eras\* |
 | **Interactive use** | The request builder's `mcp` mode: a JSON call editor, the tool and its schemas set by hand or filled in by an import, the tool result drawn above the raw reply | The tool's input schema rendered as a form, results rendered, Protocol and Network tabs\*\* |
 | **Saved suites** | Requests in collections, run in order, with data-driven rows | Load scenarios as a JSON file of independent weighted calls\*\*\* |
 | **Data between steps** | `extract.json` and `extract.header` feed later steps; state is per virtual user under load | The documented scenario step keys have no extraction field\*\*\* |
@@ -82,13 +82,16 @@ assertion does**, so a regression run goes red on a tool that reports an error i
 turning green on a `200`. Detail:
 [The `mcp` reply](../engine/api-reference/request-body.md#the-mcp-reply).
 
-Vayu speaks only the modern era. A legacy-era server, the kind that opens with `initialize`
-and a session id, can be approached with hand-built steps (an explicit `initialize` request, then
-`extract.header` on `Mcp-Session-Id` feeding the later calls), which this page does not
-promise works against every server. There is no automatic fallback
-and no hidden session state, and a refusal names the era mismatch instead of retrying
+A request speaks the modern era. A legacy-era server, the kind that opens with `initialize`
+and a session id, is reached through explicit steps, and importing one writes them for you:
+an `initialize` request whose `extract.header` copies `Mcp-Session-Id` into a variable, the
+`notifications/initialized` notification, the calls carrying that session, and a closing
+`DELETE`, all ordinary requests you can read and edit
+([A legacy-era server](../engine/api-reference/import.md#a-legacy-era-server)). The import is
+the only place that falls back; a send keeps no hidden session state, and a refusal names the
+era mismatch instead of retrying
 ([the reply reader](../engine/api-reference/request-body.md#the-mcp-reply)). If most of
-your servers are legacy-era, or speak stdio, that alone decides it.
+your servers speak stdio, that alone decides it.
 
 ## Stateful scenarios and assertions are the dividing line
 
@@ -169,8 +172,9 @@ the better tool, and several of these are not close:
   request builder has the JSON editor and a rendered tool result, but a request you build by
   hand has its tool and schemas typed in (an import fills them), and there is no MCP-specific
   browser for tools, resources and prompts.
-- **Your server uses stdio, or the legacy era.** Vayu has no stdio transport and speaks
-  the modern Streamable HTTP era only.
+- **Your server uses stdio, or you want the legacy era handled for you.** Vayu has no stdio
+  transport, and reaches a legacy-era Streamable HTTP server only through the explicit
+  handshake steps an import generates, never a session the client keeps on its own.
 - **You need MCP's authorization flow across a whole session.** The Inspector runs the OAuth
   flow in all three clients and steps up on `insufficient_scope`. Vayu's request builder
   discovers a server's OAuth endpoints (protected-resource and authorization-server
