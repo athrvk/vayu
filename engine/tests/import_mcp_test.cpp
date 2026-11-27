@@ -901,6 +901,10 @@ TEST (ImportMcpRoute, ALegacyEraServerIsImportedThroughASessionItThenEnds) {
     "POST tools/list @legacy-session-1", "DELETE @legacy-session-1" }));
     EXPECT_TRUE (server.live_sessions ().empty ());
     EXPECT_EQ (root_of (result).at ("name"), "vayu-legacy-fixture");
+    // The fixture refuses a `DELETE` without the version; this pins that the
+    // import sent it rather than relying on that refusal being noticed.
+    EXPECT_EQ (server.calls ().back ().protocol_version,
+    std::string (vayu::tests::MCP_LEGACY_FIXTURE_VERSION));
 }
 
 TEST (ImportMcpRoute, ALegacyEraTreeIsItsHandshakeThenTheToolsThenTheClose) {
@@ -1014,6 +1018,47 @@ TEST (ImportMcpRoute, AFailedLegacyImportStillEndsItsSession) {
     EXPECT_EQ (capped, 413) << capped_body.dump ();
     EXPECT_EQ (listing.calls ().back ().verb, "DELETE");
     EXPECT_TRUE (listing.live_sessions ().empty ());
+}
+
+// A reply the whole-import byte cap refuses still came from a server that
+// opened a session, so the `DELETE` is sent with it. `server/discover`'s
+// refusal is a few dozen bytes and `initialize`'s answer is over the cap, so the
+// refusal is at `initialize`, before its session could be read from the answer.
+// That answer is never read either, so no version was negotiated and the
+// `DELETE` carries the offered one, which this fixture (it negotiated down)
+// refuses: the session is not asserted ended, only the `DELETE` sent.
+// Mutation check: read the session in `initialize` after `send_call` instead
+// of in `keep_issued_session` and the 413 sends no `DELETE`.
+TEST (ImportMcpRoute, ALegacyImportRefusedByTheByteCapAtInitializeStillSendsItsDelete) {
+    McpFixtureServer server;
+    server.speak_legacy ();
+    const auto [status, body] =
+    import_within (body_for (server), std::chrono::milliseconds (60000), 100);
+    EXPECT_EQ (status, 413) << body.dump ();
+    EXPECT_EQ (sequence_of (server.calls ()),
+    (std::vector<std::string>{ "POST server/discover @-", "POST initialize @-",
+    "DELETE @legacy-session-1" }));
+    EXPECT_EQ (server.calls ().back ().protocol_version,
+    std::string (vayu::core::MCP_LEGACY_PROTOCOL_VERSION));
+}
+
+// The deadline is what ends the import at a list call that never answers, and
+// is spent by the time the session is closed. The handshake takes
+// milliseconds against the 400 a spent deadline waits for.
+// Mutation check: send the `DELETE` in `close_legacy_session` through
+// `transfer` and a spent deadline refuses it, leaving the session open.
+TEST (ImportMcpRoute, ALegacyImportThatRanOutOfTimeStillEndsItsSession) {
+    McpFixtureServer server;
+    server.speak_legacy ();
+    server.hang_method ("tools/list");
+    const auto [status, body] = import_within (
+    body_for (server), std::chrono::milliseconds (400), limits::MAX_TOTAL_BYTES);
+    EXPECT_EQ (status, 502) << body.dump ();
+    EXPECT_EQ (sequence_of (server.calls ()),
+    (std::vector<std::string>{ "POST server/discover @-", "POST initialize @-",
+    "POST notifications/initialized @legacy-session-1",
+    "POST tools/list @legacy-session-1", "DELETE @legacy-session-1" }));
+    EXPECT_TRUE (server.live_sessions ().empty ());
 }
 
 // The generated sequence runs against the server it was read from, with no

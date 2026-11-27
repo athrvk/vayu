@@ -44,6 +44,8 @@
  * `MCP_LEGACY_FIXTURE_VERSION` and issues a fresh `Mcp-Session-Id`, every later
  * POST and the `DELETE` that ends the session must carry a live one and that
  * version, and anything else is the plain `400` (so `server/discover` gets it).
+ * `hang_method` receives a method's requests and never answers them, for a
+ * client whose own bound is under test.
  */
 
 #include <httplib.h>
@@ -126,6 +128,8 @@ struct McpRecordedCall {
     /// The `Mcp-Session-Id` header as sent, absent when none was.
     std::optional<std::string> session_id;
     /// The body's `params.cursor`, absent when none was sent.
+    /// The `MCP-Protocol-Version` header as sent, absent when none was.
+    std::optional<std::string> protocol_version;
     std::optional<std::string> cursor;
     /// The `Authorization` header as sent, absent when none was.
     std::optional<std::string> authorization;
@@ -169,6 +173,10 @@ class McpFixtureServer {
             }
             const Settings settings = record (req, call);
             if (const auto legacy = settings.legacy) {
+            if (is_hung (settings, req.body)) {
+                hold_until_stopped ();
+                return;
+            }
                 answer_legacy (req, res, settings, *legacy);
                 return;
             }
@@ -177,7 +185,7 @@ class McpFixtureServer {
         svr_.Delete ("/mcp", [this] (const httplib::Request& req, httplib::Response& res) {
             const std::size_t call  = requests_++;
             const Settings settings = record (req, call);
-            end_session (req, res, settings.legacy);
+            end_session (req, res, settings);
         });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -228,6 +236,13 @@ class McpFixtureServer {
     }
 
     /// The session ids issued and not yet ended by a `DELETE`.
+    /// Every request for @p method from now on is received and recorded and
+    /// never answered, until the fixture stops.
+    void hang_method (std::string method) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.hung_methods.insert (std::move (method));
+    }
+
     std::set<std::string> live_sessions () const {
         std::lock_guard<std::mutex> lock (mutex_);
         return live_sessions_;
@@ -352,6 +367,7 @@ class McpFixtureServer {
         std::optional<McpLegacySessions> legacy;
         bool legacy_names_version = true;
     };
+        std::set<std::string> hung_methods;
 
     static constexpr std::string_view CURSOR_PREFIX   = "cursor-";
     static constexpr std::string_view SENTINEL_PREFIX = "=?base64?";
@@ -685,6 +701,10 @@ class McpFixtureServer {
             call.session_id = req.get_header_value ("Mcp-Session-Id");
         }
         call.cursor = body_string (body, "/params/cursor");
+        if (req.has_header ("MCP-Protocol-Version")) {
+            call.protocol_version =
+            req.get_header_value ("MCP-Protocol-Version");
+        }
         call.body   = req.body;
         if (req.has_header ("Authorization")) {
             call.authorization = req.get_header_value ("Authorization");
@@ -706,6 +726,21 @@ class McpFixtureServer {
     }
 
     void answer (const httplib::Request& req, httplib::Response& res, const Settings& settings) const {
+    /// How often a hung request looks for the fixture stopping.
+    static constexpr std::chrono::milliseconds HOLD_POLL{ 5 };
+
+    static bool is_hung (const Settings& settings, const std::string& body) {
+        const auto method =
+        body_string (nlohmann::json::parse (body, nullptr, false), "/method");
+        return method && settings.hung_methods.contains (*method);
+    }
+
+    void hold_until_stopped () const {
+        while (!stopping_.load ()) {
+            std::this_thread::sleep_for (HOLD_POLL);
+        }
+    }
+
         if (refuse_before_parsing (res, settings.outcome)) {
             return;
         }
@@ -776,9 +811,22 @@ class McpFixtureServer {
     }
 
     /// Why a legacy-era server refuses @p req, a request after `initialize`,
+    static constexpr std::string_view UNSUPPORTED_VERSION_TEXT =
+    "Bad Request: Unsupported protocol version";
+
+    /// Whether @p req carries the version `initialize` negotiated; a server
+    /// whose `initialize` named none negotiated none to hold a request to.
+    static bool carries_negotiated_version (const httplib::Request& req,
+    const Settings& settings) {
+        return !settings.legacy_names_version ||
+        req.get_header_value ("MCP-Protocol-Version") == MCP_LEGACY_FIXTURE_VERSION;
+    }
+
     /// as a status and the plain text it answers; nothing when it is accepted.
-    std::optional<std::pair<int, std::string_view>>
-    legacy_refusal (const httplib::Request& req, McpLegacySessions sessions) const {
+    std::optional<std::pair<int, std::string_view>> legacy_refusal (
+    const httplib::Request& req,
+    const Settings& settings,
+    McpLegacySessions sessions) const {
         if (sessions == McpLegacySessions::Issued) {
             if (!req.has_header (std::string (SESSION_HEADER))) {
                 return std::make_pair (400, "Bad Request: No valid session ID provided");
@@ -789,8 +837,8 @@ class McpFixtureServer {
                 return std::make_pair (404, "Session not found");
             }
         }
-        if (req.get_header_value ("MCP-Protocol-Version") != MCP_LEGACY_FIXTURE_VERSION) {
-            return std::make_pair (400, "Bad Request: Unsupported protocol version");
+        if (!carries_negotiated_version (req, settings)) {
+            return std::make_pair (400, UNSUPPORTED_VERSION_TEXT);
         }
         return std::nullopt;
     }
@@ -817,7 +865,7 @@ class McpFixtureServer {
             open_session (res, call, id, settings, sessions);
             return;
         }
-        if (const auto refusal = legacy_refusal (req, sessions)) {
+        if (const auto refusal = legacy_refusal (req, settings, sessions)) {
             refuse_plainly (res, refusal->first, refusal->second);
             return;
         }
@@ -836,12 +884,11 @@ class McpFixtureServer {
         send_frame (res, response_frame (id, McpReplyOutcome::Result), McpReplyShape::Json);
     }
 
-    /// A `DELETE`: the session it names ended. The modern era and a stateless
-    /// server have none, which is the `405` the specification allows.
-    void end_session (const httplib::Request& req,
-    httplib::Response& res,
-    std::optional<McpLegacySessions> legacy) {
-        if (legacy != McpLegacySessions::Issued) {
+    /// A `DELETE`: the session it names ended, when it names a live one and the
+    /// negotiated version. The modern era and a stateless server have none,
+    /// which is the `405` the specification allows.
+    void end_session (const httplib::Request& req, httplib::Response& res, const Settings& settings) {
+        if (settings.legacy != McpLegacySessions::Issued) {
             refuse_plainly (res, 405, "Method Not Allowed");
             return;
         }
@@ -850,6 +897,10 @@ class McpFixtureServer {
             return;
         }
         std::lock_guard<std::mutex> lock (mutex_);
+        if (!carries_negotiated_version (req, settings)) {
+            refuse_plainly (res, 400, UNSUPPORTED_VERSION_TEXT);
+            return;
+        }
         if (live_sessions_.erase (req.get_header_value (std::string (SESSION_HEADER))) == 0) {
             refuse_plainly (res, 404, "Session not found");
             return;

@@ -412,7 +412,8 @@ The import sends, after the refused `server/discover`:
 2. `notifications/initialized`, an envelope with no `id`, which a server answers `202` with no body.
 3. The list calls above.
 4. A `DELETE` ending the session, **best effort**: whatever it answers, `405` included, the import's answer is unchanged.
-   It is sent when a step above failed too, so a failed import leaves no session open.
+   It is sent when a step above failed too, so a failed import leaves no session open: one that ran past the 120 seconds, or whose reply the byte cap refused, included.
+   It carries the negotiated `MCP-Protocol-Version` and has a bound of its own, 5 seconds, since what is left of the total may be none; its reply counts against no budget.
 
 Every call after `initialize` carries `MCP-Protocol-Version: <negotiated>` and, when `initialize` answered one, `Mcp-Session-Id`.
 Every call is a full JSON-RPC envelope numbered from `1`, because a session refuses an `id` it has seen, so nothing modern is stamped into it.

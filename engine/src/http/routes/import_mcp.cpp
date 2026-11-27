@@ -301,6 +301,40 @@ RouteError deadline_refusal (const ImportBudget& budget, std::string_view method
     .error ();
 }
 
+/// The `Mcp-Session-Id` @p response issued, or nothing.
+std::optional<std::string> issued_session (const vayu::Response& response) {
+    const auto issued =
+    response.headers.find (std::string (vayu::core::MCP_SESSION_HEADER));
+    if (issued == response.headers.end () || issued->second.empty ()) {
+        return std::nullopt;
+    }
+    return issued->second;
+}
+
+/// @p request sent as it stands; a failed transfer is a response carrying its
+/// error, for the reply reader to name.
+vayu::Response send_as_response (McpSession& session, const vayu::Request& request) {
+    auto result = session.client.send (request);
+    if (result.is_ok ()) {
+        return std::move (result).value ();
+    }
+    vayu::Response failed;
+    failed.error_code    = result.error ().code;
+    failed.error_message = result.error ().message;
+    return failed;
+}
+
+/// The session a legacy-era server's first reply issues is kept here, at the
+/// transport and before the budget judges that reply: the server holds the
+/// session open whatever the import makes of the answer, so a reply the byte
+/// cap refuses must still be ended.
+void keep_issued_session (McpSession& session, const vayu::Response& response) {
+    auto& legacy = session.legacy;
+    if (legacy && !legacy->session_id) {
+        legacy->session_id = issued_session (response);
+    }
+}
+
 /// @p request sent within what is left of the import's deadline and counted
 /// against its byte budget; a failed transfer is a response carrying its
 /// error, for the reply reader to name.
@@ -315,14 +349,8 @@ transfer (McpSession& session, std::string_view method, vayu::Request request) {
     request.timeout_ms = static_cast<int> (
     std::min<long long> (limits::CALL_TIMEOUT_MS, remaining.count ()));
 
-    vayu::Response response;
-    auto result = session.client.send (request);
-    if (result.is_ok ()) {
-        response = std::move (result).value ();
-    } else {
-        response.error_code    = result.error ().code;
-        response.error_message = result.error ().message;
-    }
+    vayu::Response response = send_as_response (session, request);
+    keep_issued_session (session, response);
     if (response.error_code == ErrorCode::Timeout &&
     std::chrono::steady_clock::now () >= budget.deadline) {
         return std::unexpected (deadline_refusal (budget, method));
@@ -472,25 +500,15 @@ Refusable<Discovery> discover (McpSession& session) {
         .name = result ? server_name (*result) : std::string () };
 }
 
-/// The `Mcp-Session-Id` @p response issued, or nothing.
-std::optional<std::string> issued_session (const vayu::Response& response) {
-    const auto issued =
-    response.headers.find (std::string (vayu::core::MCP_SESSION_HEADER));
-    if (issued == response.headers.end () || issued->second.empty ()) {
-        return std::nullopt;
-    }
-    return issued->second;
-}
-
-/// `initialize`: the version it negotiated and the session it issued, into
-/// @p legacy, and the result it answered. The session is kept before the
-/// result is judged, so a refused handshake still ends the session it opened.
+/// `initialize`: the version it negotiated into @p legacy, and the result it
+/// answered. The session it issued is already kept (`keep_issued_session`),
+/// before the reply is judged, so a refused handshake still ends the session
+/// it opened.
 Refusable<ordered_json> initialize (McpSession& session, LegacySession& legacy) {
     auto sent = send_call (session, "initialize", vayu::core::mcp_initialize_params ());
     if (!sent) {
         return std::unexpected (sent.error ());
     }
-    legacy.session_id = issued_session (sent->response);
     if (sent->reply.error_class) {
         return std::unexpected (call_refusal ("initialize", *sent));
     }
@@ -536,16 +554,20 @@ RouteResult open_legacy_session (McpSession& session, vayu::core::McpServerListi
 
 /// Ends the session the import opened, best effort: nothing the server
 /// answers (a `405` included, which the specification allows) changes the
-/// import's answer.
+/// import's answer. Sent under a bound of its own, not through `transfer`,
+/// which refuses once the total deadline has passed: an import that ran out of
+/// time still ends its session. Its reply is read for nothing, so it is not
+/// counted against the byte budget either.
 void close_legacy_session (McpSession& session) {
     const auto& legacy = session.legacy;
     if (!legacy || !legacy->session_id) {
         return;
     }
-    vayu::Request request = session_request (session);
-    request.method        = vayu::HttpMethod::DELETE;
-    request.body          = vayu::Body{};
-    [[maybe_unused]] const auto ended = transfer (session, "DELETE", std::move (request));
+    vayu::Request request             = session_request (session);
+    request.method                    = vayu::HttpMethod::DELETE;
+    request.body                      = vayu::Body{};
+    request.timeout_ms                = limits::SESSION_CLOSE_TIMEOUT_MS;
+    [[maybe_unused]] const auto ended = send_as_response (session, request);
 }
 
 /// The array a list page keeps its entries under, or null when it has none.
