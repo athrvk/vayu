@@ -797,6 +797,42 @@
                 "protocol": {"$ref": "#/definitions/errorClassDelta"},
                 "tool": {"$ref": "#/definitions/errorClassDelta"}
               }
+            },
+            "stream": {
+              "description": "The report's top-level stream figures both runs carry as a finite number (issue #3781), in this order. A run that did not stream, or lacks a figure, is no row and never a 0.",
+              "type": "array",
+              "items": {
+                "allOf": [
+                  {"$ref": "#/definitions/sharedDelta"},
+                  {
+                    "properties": {
+                      "metric": {
+                        "enum": [
+                          "stream.timeToFirstEvent.p50", "stream.timeToFirstEvent.p95",
+                          "stream.timeToFirstMatch.p50", "stream.timeToFirstMatch.p95",
+                          "stream.maxEventGap.p95", "stream.eventRate.p50",
+                          "stream.eventsPerSecond", "stream.events.p50"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "customMetrics": {
+              "description": "A trend's p50 and p95, or a counter's or rate's value, for each custom metric both runs recorded as the same type (issue #3781), in name order. Always neutral: the data carries no direction. A name one run lacks, or recorded as another type, is no row.",
+              "type": "array",
+              "items": {
+                "allOf": [
+                  {"$ref": "#/definitions/sharedDelta"},
+                  {
+                    "properties": {
+                      "metric": {"pattern": "^customMetrics\\..+\\.(p50|p95|value)$"},
+                      "direction": {"const": "neutral"}
+                    }
+                  }
+                ]
+              }
             }
           }
         }
@@ -825,6 +861,20 @@
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {"^-?[0-9]+$": {"type": "number"}}
+    },
+    "sharedDelta": {
+      "description": "A comparison row for a figure both runs carry: deltas[]'s shape, with no null.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "base", "target", "delta", "pctChange", "direction"],
+      "properties": {
+        "metric": {"type": "string"},
+        "base": {"type": "number"},
+        "target": {"type": "number"},
+        "delta": {"type": "number"},
+        "pctChange": {"description": "Null against a zero base.", "type": ["number", "null"]},
+        "direction": {"enum": ["lower-is-better", "higher-is-better", "neutral"]}
+      }
     },
     "errorClassDelta": {
       "type": "object",

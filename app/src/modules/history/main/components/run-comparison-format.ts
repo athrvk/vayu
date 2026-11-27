@@ -26,7 +26,33 @@ export const METRIC_LABELS: Record<string, string> = {
 	"summary.throughput": "Response rate (whole run, drain included)",
 	"summary.errorRate": "Error rate",
 	"summary.totalRequests": "Total requests",
+	"stream.timeToFirstEvent.p50": "Time to first event (P50)",
+	"stream.timeToFirstEvent.p95": "Time to first event (P95)",
+	"stream.timeToFirstMatch.p50": "Time to first match (P50)",
+	"stream.timeToFirstMatch.p95": "Time to first match (P95)",
+	"stream.maxEventGap.p95": "Longest gap between events (P95)",
+	"stream.eventRate.p50": "Events per second, per stream (P50)",
+	"stream.eventsPerSecond": "Events per second (whole run)",
+	"stream.events.p50": "Events per stream (P50)",
 };
+
+const CUSTOM_METRIC_PREFIX = "customMetrics.";
+
+/**
+ * A row's name: the fixed label, or for `customMetrics.<name>.<field>` the script's own name, which
+ * may itself contain dots (the field is the last segment) and is the user's text, never markup.
+ */
+export function metricLabel(metric: string): string {
+	const fixed = METRIC_LABELS[metric];
+	if (fixed !== undefined) return fixed;
+	if (!metric.startsWith(CUSTOM_METRIC_PREFIX)) return metric;
+	const path = metric.slice(CUSTOM_METRIC_PREFIX.length);
+	const dot = path.lastIndexOf(".");
+	if (dot < 0) return metric;
+	const name = path.slice(0, dot);
+	const field = path.slice(dot + 1);
+	return field === "value" ? name : `${name} (${field.toUpperCase()})`;
+}
 
 /** A negative delta switches unit at the same point a positive one does ("-1.50s", not "-1,500ms"). */
 function formatSignedLatency(ms: number): string {
@@ -40,5 +66,9 @@ export function formatValue(metric: string, value: number): string {
 		return `${formatRate(value)} rps`;
 	}
 	if (metric === "summary.errorRate") return `${formatPercent(value)}%`;
+	if (/^stream\.(timeToFirst|maxEventGap)/.test(metric)) return formatSignedLatency(value);
+	if (metric === "stream.eventRate.p50" || metric === "stream.eventsPerSecond") {
+		return `${formatRate(value)} events/s`;
+	}
 	return formatNumber(value);
 }

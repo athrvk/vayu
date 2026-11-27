@@ -677,6 +677,32 @@ TEST_F (RunExportSchemaTest, AComparisonCarryingFailureClassesValidates) {
     json::parse (R"({"transport":{"base":0,"target":4},"tool":{"base":1,"target":6}})"));
 }
 
+// #3781: a comparison with stream and custom-metric rows in it, so the schema
+// reads their shape. Mutation check: drop either property from the schema's
+// `comparison` and the validation fails; stop writing either and the
+// expectations do.
+TEST_F (RunExportSchemaTest, AComparisonCarryingStreamAndCustomMetricRowsValidates) {
+    json later                                 = healthy_summary ();
+    later["stream"]["eventsPerSecond"]         = 12.5;
+    later["stream"]["timeToFirstEvent"]["p50"] = 205.0;
+    later["customMetrics"]["ttfb"]["p50"]      = 1.5;
+    later["customMetrics"]["hits"]["value"]    = 8.0;
+    seed ("run_healthy", vayu::RunStatus::Stopped, healthy_summary ());
+    seed ("run_later", vayu::RunStatus::Completed, later);
+    const json document =
+    expect_valid (json{ { "runId", "run_later" }, { "baseRunId", "run_healthy" } });
+    const json& comparison = document["comparison"];
+    ASSERT_EQ (comparison["stream"].size (), 8U) << comparison.dump (2);
+    EXPECT_EQ (comparison["stream"][0], json::parse (R"({"metric":"stream.timeToFirstEvent.p50","base":410,"target":205,
+        "delta":-205,"pctChange":-50,"direction":"lower-is-better"})"));
+    EXPECT_EQ (comparison["stream"][6], json::parse (R"({"metric":"stream.eventsPerSecond","base":10,"target":12.5,
+        "delta":2.5,"pctChange":25,"direction":"higher-is-better"})"));
+    ASSERT_EQ (comparison["customMetrics"].size (), 3U) << comparison.dump (2);
+    EXPECT_EQ (comparison["customMetrics"][0], json::parse (R"({"metric":"customMetrics.hits.value","base":5,"target":8,
+        "delta":3,"pctChange":60,"direction":"neutral"})"));
+    EXPECT_EQ (comparison["customMetrics"][1]["metric"], "customMetrics.ttfb.p50");
+}
+
 // #2386: a second with no completion is stored without percentile keys, and
 // the export carries the tick without them rather than refusing the document.
 // Mutation check: put the three keys back in the schema's `required` and this

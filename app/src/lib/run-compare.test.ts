@@ -446,3 +446,36 @@ describe("comparability", () => {
 		]);
 	});
 });
+
+/*
+ * The shared fixture pins the row semantics; these are the cases only a JavaScript object can get
+ * wrong: a name that is an inherited property, a name that reads as an integer (an object lists
+ * those first, in numeric order), and a name that contains a dot.
+ */
+describe("custom metric names", () => {
+	const counter = (value: number) => ({ type: "counter", count: 1, value });
+	const metrics = (customMetrics: Record<string, unknown>) => ({ customMetrics });
+	const rowsOf = (base: Record<string, unknown>, target: Record<string, unknown>) =>
+		compareReports("a", "b", metrics(base), metrics(target)).customMetrics.map(
+			(row) => row.metric
+		);
+
+	test("rows follow the name's code-unit order, not an integer name's numeric order", () => {
+		const both = { "9": counter(1), "10": counter(1), a: counter(1), B: counter(1) };
+		expect(rowsOf(both, both)).toEqual([
+			"customMetrics.10.value",
+			"customMetrics.9.value",
+			"customMetrics.B.value",
+			"customMetrics.a.value",
+		]);
+	});
+
+	test("a name the other run only inherits is not a shared name", () => {
+		expect(rowsOf({ constructor: counter(1), toString: counter(1) }, {})).toEqual([]);
+	});
+
+	test("a dotted name keeps its whole name in the row", () => {
+		const both = { "http.reqs": counter(1) };
+		expect(rowsOf(both, both)).toEqual(["customMetrics.http.reqs.value"]);
+	});
+});

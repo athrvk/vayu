@@ -8,9 +8,10 @@
 /**
  * The open load run against any other finished load run of the same request or collection: every
  * latency percentile, both throughput measures, the reliability rows and the status-code merge, and
- * for MCP runs that both counted them the failure classes, under the comparability warnings. It is
- * the full diff behind the report's vs-baseline strip, and replaces the report's tabs in the same
- * pane rather than opening a tab (#2164).
+ * for runs that both have them the stream figures, the shared custom metrics and (MCP runs) the
+ * failure classes, under the comparability warnings. It is the full diff behind the report's
+ * vs-baseline strip, and replaces the report's tabs in the same pane rather than opening a tab
+ * (#2164).
  *
  * The compared run defaults to the pinned baseline when there is one and it is not the open run,
  * else the newest other run. The compared run is the base and the open run the target, as in
@@ -58,7 +59,7 @@ import {
 import type { Run, RunReport } from "@/types";
 import { comparableRuns } from "./comparable-runs";
 import { ERROR_CLASS_LABELS } from "./error-classes";
-import { METRIC_LABELS, formatValue } from "./run-comparison-format";
+import { formatValue, metricLabel } from "./run-comparison-format";
 import { ComparabilityWarnings, DeltaChange } from "./run-comparison-parts";
 import { NOT_RECORDED } from "./unrecorded-figures";
 
@@ -94,7 +95,7 @@ function MetricValue({ metric, value }: { metric: string; value: number | null }
 function MetricRow({ metric }: { metric: MetricDelta }) {
 	return (
 		<TableRow>
-			<TableCell className="text-muted-foreground">{METRIC_LABELS[metric.metric]}</TableCell>
+			<TableCell className="text-muted-foreground">{metricLabel(metric.metric)}</TableCell>
 			<TableCell className="tabular-nums">
 				<MetricValue metric={metric.metric} value={metric.base} />
 			</TableCell>
@@ -113,6 +114,38 @@ function MetricRow({ metric }: { metric: MetricDelta }) {
 }
 
 const COLUMN_HEADS = ["Compared run", "This run", "Change"];
+
+/**
+ * One titled table of rows a comparison carries only for runs that both have them (#3781): the
+ * stream figures and the custom metrics. Nothing for an empty list, so a pair where either run
+ * never streamed or recorded the metric draws no table rather than a column of "not recorded".
+ */
+function MetricGroup({ title, metrics }: { title: string; metrics: MetricDelta[] }) {
+	if (metrics.length === 0) return null;
+
+	return (
+		<section className="flex flex-col gap-2" aria-label={title}>
+			<h3 className="text-sm font-semibold text-foreground">{title}</h3>
+			<Card className="overflow-hidden">
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead>Metric</TableHead>
+							{COLUMN_HEADS.map((head) => (
+								<TableHead key={head}>{head}</TableHead>
+							))}
+						</TableRow>
+					</TableHeader>
+					<TableBody>
+						{metrics.map((metric) => (
+							<MetricRow key={metric.metric} metric={metric} />
+						))}
+					</TableBody>
+				</Table>
+			</Card>
+		</section>
+	);
+}
 
 function StatusCodeTable({
 	statusCodes,
@@ -291,6 +324,8 @@ function ComparisonPanel({
 					</TableBody>
 				</Table>
 			</Card>
+			<MetricGroup title="Stream" metrics={comparison.stream} />
+			<MetricGroup title="Custom metrics" metrics={comparison.customMetrics} />
 			<StatusCodeTable statusCodes={comparison.statusCodes} />
 			<ErrorClassTable errorClasses={comparison.errorClasses} />
 		</>

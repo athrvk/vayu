@@ -29,6 +29,7 @@
 #include <format>
 #include <initializer_list>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -47,7 +48,7 @@ using Text    = std::optional<std::string>;
 /// experiments.
 constexpr double DURATION_RATIO_LIMIT = 2;
 
-const json* walk (const json& report, Path path) {
+const json* walk_keys (const json& report, std::span<const std::string_view> path) {
     const json* at = &report;
     for (const std::string_view key : path) {
         if (!at->is_object ()) {
@@ -62,13 +63,20 @@ const json* walk (const json& report, Path path) {
     return at;
 }
 
-/// The finite number at @p path, as the report spells it.
-const json* number_node (const json& report, Path path) {
-    const json* value = walk (report, path);
+const json* walk (const json& report, Path path) {
+    return walk_keys (report, std::span (path.begin (), path.size ()));
+}
+
+/// @p value when it is a finite number, as the report spells it.
+const json* finite_number (const json* value) {
     return value != nullptr && value->is_number () &&
     std::isfinite (value->get<double> ()) ?
     value :
     nullptr;
+}
+
+const json* number_node (const json& report, Path path) {
+    return finite_number (walk (report, path));
 }
 
 std::optional<double> number_at (const json& report, Path path) {
@@ -401,9 +409,9 @@ const json* recorded_number_node (const json& report, const ComparedMetric& metr
     return unrecorded ? nullptr : number_node (report, { metric.section, metric.key });
 }
 
-ordered metric_delta (const ComparedMetric& metric, const json& base, const json& target) {
-    const json* b = recorded_number_node (base, metric);
-    const json* t = recorded_number_node (target, metric);
+/// `target` against `base`, each null where the report has no figure. `delta` and
+/// `pctChange` need both sides, and `pctChange` a non-zero base.
+ordered delta_row (std::string metric, const json* b, const json* t, std::string_view direction) {
     ordered delta = nullptr;
     ordered pct   = nullptr;
     if (b != nullptr && t != nullptr) {
@@ -414,13 +422,116 @@ ordered metric_delta (const ComparedMetric& metric, const json& base, const json
             pct = (d / from) * 100;
         }
     }
-    ordered out = ordered::object ();
-    out["metric"] = std::string (metric.section) + "." + std::string (metric.key);
+    ordered out      = ordered::object ();
+    out["metric"]    = std::move (metric);
     out["base"]      = b == nullptr ? ordered () : ordered (*b);
     out["target"]    = t == nullptr ? ordered () : ordered (*t);
     out["delta"]     = std::move (delta);
     out["pctChange"] = std::move (pct);
-    out["direction"] = metric.direction;
+    out["direction"] = direction;
+    return out;
+}
+
+ordered metric_delta (const ComparedMetric& metric, const json& base, const json& target) {
+    return delta_row (std::string (metric.section) + "." + std::string (metric.key),
+    recorded_number_node (base, metric), recorded_number_node (target, metric),
+    metric.direction);
+}
+
+// --- stream and custom metrics ------------------------------------------------------
+
+/// A row for @p keys only when both reports carry a finite number there: a run
+/// that never streamed, or never recorded the metric, has no figure, and
+/// reading it as 0 would show a change that never happened (#3781).
+void push_shared_delta (ordered& rows,
+std::string metric,
+std::span<const std::string_view> keys,
+std::string_view direction,
+const json& base,
+const json& target) {
+    const json* b = finite_number (walk_keys (base, keys));
+    const json* t = finite_number (walk_keys (target, keys));
+    if (b != nullptr && t != nullptr) {
+        rows.push_back (delta_row (std::move (metric), b, t, direction));
+    }
+}
+
+/// A metric named by its path in the report, dotted.
+struct PathMetric {
+    std::string_view path;
+    std::string_view direction;
+};
+
+/// In the order the report documents them. `stream.events.p50` is how many
+/// events a stream delivered, which no direction improves.
+constexpr auto STREAM_METRICS = std::to_array<PathMetric> ({
+{ "stream.timeToFirstEvent.p50", LOWER_IS_BETTER },
+{ "stream.timeToFirstEvent.p95", LOWER_IS_BETTER },
+{ "stream.timeToFirstMatch.p50", LOWER_IS_BETTER },
+{ "stream.timeToFirstMatch.p95", LOWER_IS_BETTER },
+{ "stream.maxEventGap.p95", LOWER_IS_BETTER },
+{ "stream.eventRate.p50", HIGHER_IS_BETTER },
+{ "stream.eventsPerSecond", HIGHER_IS_BETTER },
+{ "stream.events.p50", NEUTRAL },
+});
+
+std::vector<std::string_view> split_path (std::string_view path) {
+    std::vector<std::string_view> keys;
+    for (auto dot = path.find ('.'); dot != std::string_view::npos; dot = path.find ('.')) {
+        keys.push_back (path.substr (0, dot));
+        path.remove_prefix (dot + 1);
+    }
+    keys.push_back (path);
+    return keys;
+}
+
+ordered stream_deltas (const json& base, const json& target) {
+    ordered out = ordered::array ();
+    for (const PathMetric& metric : STREAM_METRICS) {
+        push_shared_delta (out, std::string (metric.path),
+        split_path (metric.path), metric.direction, base, target);
+    }
+    return out;
+}
+
+constexpr auto TREND_FIELDS = std::to_array<std::string_view> ({ "p50", "p95" });
+constexpr auto VALUE_FIELDS = std::to_array<std::string_view> ({ "value" });
+
+/// The figures a custom metric of @p type is compared on; none for a type
+/// this engine does not name.
+std::span<const std::string_view> custom_metric_fields (std::string_view type) {
+    if (type == "trend") {
+        return TREND_FIELDS;
+    }
+    if (type == "counter" || type == "rate") {
+        return VALUE_FIELDS;
+    }
+    return {};
+}
+
+/// Every name both reports carry as the same type, in name order (the
+/// report's object keeps its keys sorted), each on its type's figures. A name
+/// recorded as one type by one run and another by the other compares nothing:
+/// a trend's percentile is not a counter's total. No direction is recorded for
+/// a custom metric, so none is claimed.
+ordered custom_metric_deltas (const json& base, const json& target) {
+    ordered out       = ordered::array ();
+    const json* names = walk (base, { "customMetrics" });
+    if (names == nullptr || !names->is_object ()) {
+        return out;
+    }
+    for (const auto& entry : names->items ()) {
+        const std::string& name = entry.key ();
+        const Text type = text_at (base, { "customMetrics", name, "type" });
+        if (!type || type != text_at (target, { "customMetrics", name, "type" })) {
+            continue;
+        }
+        for (const std::string_view field : custom_metric_fields (*type)) {
+            const std::array<std::string_view, 3> keys = { "customMetrics", name, field };
+            push_shared_delta (out, "customMetrics." + name + "." + std::string (field),
+            keys, NEUTRAL, base, target);
+        }
+    }
     return out;
 }
 
@@ -510,11 +621,13 @@ compare_run_reports (const nlohmann::json& base, const nlohmann::json& target) {
     collect_codes (base, "base", codes);
     collect_codes (target, "target", codes);
 
-    ordered out         = ordered::object ();
-    out["differences"]  = differences (base, target);
-    out["deltas"]       = std::move (deltas);
-    out["statusCodes"]  = ordered (codes);
-    out["errorClasses"] = error_class_deltas (base, target);
+    ordered out          = ordered::object ();
+    out["differences"]   = differences (base, target);
+    out["deltas"]        = std::move (deltas);
+    out["statusCodes"]   = ordered (codes);
+    out["errorClasses"]  = error_class_deltas (base, target);
+    out["stream"]        = stream_deltas (base, target);
+    out["customMetrics"] = custom_metric_deltas (base, target);
     return out;
 }
 

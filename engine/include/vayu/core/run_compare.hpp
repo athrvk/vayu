@@ -56,7 +56,7 @@ inline constexpr auto COMPARED_METRICS = std::to_array<ComparedMetric> ({
 
 /**
  * @p target against @p base, both `GET /runs/:id/report` bodies:
- * `{differences, deltas, statusCodes, errorClasses}`.
+ * `{differences, deltas, statusCodes, errorClasses, stream, customMetrics}`.
  *
  * - `differences[]`: `{field, base, target}`, every way the two runs were not
  *   the same experiment, in `compareReports`' `comparability` order
@@ -79,6 +79,22 @@ inline constexpr auto COMPARED_METRICS = std::to_array<ComparedMetric> ({
  *   `summary.errorClasses` as an object: a run stored before the engine
  *   counted them has no figure, and reading it as 0 would show a regression
  *   that never happened. `protocolCodes` is not compared.
+ * - `stream[]`: `deltas[]`' row shape (`null` is never written: a row is
+ *   emitted only when *both* reports carry a finite number at its path, so a
+ *   side that never streamed is no row, not a 0). Read from the report's
+ *   top-level `stream`, named by their dotted path: `stream.timeToFirstEvent`
+ *   and `.timeToFirstMatch` `p50` and `p95` and `stream.maxEventGap.p95`
+ *   (`lower-is-better`), `stream.eventRate.p50` and `stream.eventsPerSecond`
+ *   (`higher-is-better`), `stream.events.p50` (`neutral`: events a stream
+ *   delivered, which no direction improves), in that order. `[]` when no row
+ *   qualifies (#3781).
+ * - `customMetrics[]`: the same row shape over the report's `customMetrics`
+ *   (`{name: {type, ...}}`), for each name in *both* reports with the *same*
+ *   `type`, by name: `customMetrics.<name>.p50` and `.p95` for a `trend`,
+ *   `customMetrics.<name>.value` for a `counter` or `rate`, every one
+ *   `neutral` (the data carries no direction), each only when both sides are
+ *   numeric. A name one run lacks, or recorded as another type, has no row
+ *   (#3781).
  */
 [[nodiscard]] nlohmann::ordered_json
 compare_run_reports (const nlohmann::json& base, const nlohmann::json& target);

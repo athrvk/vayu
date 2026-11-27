@@ -1067,7 +1067,8 @@ json load_compare_fixture () {
 }
 
 /// What the engine writes for `compareReports`' @p expected: the three metric
-/// groups as one `deltas[]`, and `comparability` as `{field, base, target}`.
+/// groups as one `deltas[]`, and `comparability` as `{field, base, target}`;
+/// `errorClasses`, `stream` and `customMetrics` are written as they stand.
 json engine_shape (const json& expected) {
     json deltas = json::array ();
     for (const char* group : { "latency", "throughput", "reliability" }) {
@@ -1082,7 +1083,9 @@ json engine_shape (const json& expected) {
     }
     return { { "differences", differences }, { "deltas", deltas },
         { "statusCodes", expected.at ("statusCodes") },
-        { "errorClasses", expected.at ("errorClasses") } };
+        { "errorClasses", expected.at ("errorClasses") },
+        { "stream", expected.at ("stream") },
+        { "customMetrics", expected.at ("customMetrics") } };
 }
 
 TEST (RunCompareConformance, EveryCaseDiffsAsTheAppDiffsIt) {
