@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 #include "mcp_fixture_server.hpp"
@@ -276,6 +277,53 @@ TEST_F (ScenarioLoadTest, TheSummaryCarriesAPerStepBreakdownAndTheSharedScenario
     EXPECT_FALSE (summary["steps"][0].contains ("label"));
 }
 
+// A two-step plan over the stored `mcp` requests `Call a` and `Call b`, each a
+// `tools/call` of the tool it is named for, against @p mcp_url.
+static vayu::core::ScenarioExecution
+resolve_two_tool_mcp_plan (vayu::db::Database& db, const std::string& mcp_url) {
+    vayu::db::Collection collection;
+    collection.id         = "col_test";
+    collection.name       = "Collection";
+    collection.created_at = 1;
+    collection.updated_at = 1;
+    db.create_collection (collection);
+    const auto save_call = [&] (const std::string& tool, int order) {
+        vayu::db::Request request;
+        request.id            = "req_" + tool;
+        request.collection_id = collection.id;
+        request.name          = "Call " + tool;
+        request.method        = vayu::HttpMethod::POST;
+        request.url           = mcp_url;
+        request.body          = json{
+            { "mode", "mcp" },
+            { "content",
+            json{ { "method", "tools/call" }, { "params", { { "name", tool } } } }
+            .dump () }
+        }.dump ();
+        request.order      = order;
+        request.created_at = 1;
+        request.updated_at = 1;
+        db.save_request (request);
+    };
+    save_call ("a", 0);
+    save_call ("b", 1);
+
+    vayu::core::ScenarioResolveOptions options;
+    options.timeout_ms           = 5000;
+    options.limits.max_steps     = 10;
+    options.limits.max_data_rows = 100;
+    options.limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+    auto resolved = vayu::core::resolve_scenario (db,
+    json{ { "source", "collection" }, { "collectionId", collection.id } }, options);
+    if (!resolved.ok) {
+        throw std::runtime_error (resolved.error);
+    }
+    vayu::core::ScenarioExecution execution;
+    execution.request = std::move (resolved.request);
+    execution.plan    = std::move (resolved.plan);
+    return execution;
+}
+
 // Each `mcp` step's row says which call its latency measures (#3829), so a
 // per-tool split needs no `control.transaction`: the plan labels the step from
 // its stored body, and the label reaches the stored report beside the step's
@@ -291,44 +339,7 @@ TEST_F (ScenarioLoadTest, AnMcpStepsRowIsLabelledWithItsToolBesideItsOwnLatency)
     vayu::tests::McpFixtureServer mcp;
     mcp.delay_tool ("b", TOOL_DELAY);
 
-    vayu::db::Collection collection;
-    collection.id         = "col_test";
-    collection.name       = "Collection";
-    collection.created_at = 1;
-    collection.updated_at = 1;
-    db_->create_collection (collection);
-    const auto save_call = [&] (const std::string& tool, int order) {
-        vayu::db::Request request;
-        request.id            = "req_" + tool;
-        request.collection_id = collection.id;
-        request.name          = "Call " + tool;
-        request.method        = vayu::HttpMethod::POST;
-        request.url           = mcp.url ();
-        request.body          = json{
-            { "mode", "mcp" },
-            { "content",
-            json{ { "method", "tools/call" }, { "params", { { "name", tool } } } }
-            .dump () }
-        }.dump ();
-        request.order      = order;
-        request.created_at = 1;
-        request.updated_at = 1;
-        db_->save_request (request);
-    };
-    save_call ("a", 0);
-    save_call ("b", 1);
-
-    vayu::core::ScenarioResolveOptions options;
-    options.timeout_ms           = 5000;
-    options.limits.max_steps     = 10;
-    options.limits.max_data_rows = 100;
-    options.limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
-    auto resolved = vayu::core::resolve_scenario (*db_,
-    json{ { "source", "collection" }, { "collectionId", collection.id } }, options);
-    ASSERT_TRUE (resolved.ok) << resolved.error;
-    vayu::core::ScenarioExecution execution;
-    execution.request = std::move (resolved.request);
-    execution.plan    = std::move (resolved.plan);
+    const auto execution = resolve_two_tool_mcp_plan (*db_, mcp.url ());
 
     const json report = run_to_report (
     json{ { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 1 } },
@@ -348,6 +359,43 @@ TEST_F (ScenarioLoadTest, AnMcpStepsRowIsLabelledWithItsToolBesideItsOwnLatency)
     static_cast<double> (TOOL_DELAY.count ()))
     << steps.dump ();
     EXPECT_EQ (mcp.requests (), 2 * ITERATIONS);
+}
+
+// The live gate frame names an `mcp` step by its call too (#3987), so the
+// gate's per-step rows read like the stored report's. Mutation check: drop the
+// `label` write in `build_scenario_live_progress` and this reddens.
+TEST_F (ScenarioLoadTest, TheLiveFrameLabelsAnMcpStepWithItsToolBesideItsStoredName) {
+    vayu::tests::McpFixtureServer mcp;
+    const auto execution = resolve_two_tool_mcp_plan (*db_, mcp.url ());
+
+    auto state = run (
+    json{ { "mode", "iterations" }, { "iterations", 1 }, { "concurrency", 1 } }, execution);
+
+    const json frame  = vayu::core::build_scenario_live_progress (*state);
+    const json& steps = frame.at ("steps");
+    ASSERT_EQ (steps.size (), 2u) << frame.dump ();
+    // `name` stays the stored name: it is the `setNextRequest` target.
+    EXPECT_EQ (steps[0].value ("name", ""), "Call a");
+    EXPECT_EQ (steps[0].value ("label", ""), "tools/call a");
+    EXPECT_EQ (steps[1].value ("name", ""), "Call b");
+    EXPECT_EQ (steps[1].value ("label", ""), "tools/call b");
+}
+
+// A step off the `mcp` mode carries no `label` key at all, never an empty one.
+// Mutation check: write `label` on every step, empty included, and this reddens.
+TEST_F (ScenarioLoadTest, TheLiveFrameCarriesNoLabelOnAPlainHttpStep) {
+    ScenarioMockServer server;
+    const auto execution = plan_over ({ server.url ("/s0"), server.url ("/s1") });
+
+    auto state = run (
+    json{ { "mode", "iterations" }, { "iterations", 1 }, { "concurrency", 1 } }, execution);
+
+    const json frame  = vayu::core::build_scenario_live_progress (*state);
+    const json& steps = frame.at ("steps");
+    ASSERT_EQ (steps.size (), 2u) << frame.dump ();
+    for (const auto& step : steps) {
+        EXPECT_FALSE (step.contains ("label")) << step.dump ();
+    }
 }
 
 // A load run resolves no residual pass over what it binds (issue #1503): a
