@@ -1158,10 +1158,7 @@ export function ImportModal() {
 								</div>
 							)}
 							<div className="ml-auto flex gap-2">
-								<DialogCancelButton
-									onClick={handleClose}
-									disabled={importMutation.isPending}
-								/>
+								<DialogCancelButton onClick={handleClose} disabled={applying} />
 								{updatableMatch && (
 									<Button
 										onClick={() =>

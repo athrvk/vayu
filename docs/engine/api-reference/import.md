@@ -542,7 +542,7 @@ A changed row writes `description` to the request's description, `inputSchema` a
 A rename writes the request's name, `mcpTool.name` and the call's `params.name`.
 **Nothing else is touched**: the call's `arguments`, the headers, auth, elements and every other field a person may have edited stay as they are, and an unselected changed row is not written at all.
 
-An added entry whose folder the collection no longer has (or never had: a kind the first import left out) gets one, created once however many entries it takes, and each created request is appended after its folder's last row.
+An added entry whose folder the collection no longer has (or the collection has none for that kind) gets one, created once however many entries it takes, and each created request is appended after its folder's last row.
 In a legacy-era tree ([A legacy-era server](#a-legacy-era-server)) a created call's envelope `id` is numbered past every one the collection's calls carry, because a session refuses an `id` it has seen.
 A removed request is deleted, not moved to the trash, for the reason a sync's removals are: each was shown before it landed and had to be selected.
 
