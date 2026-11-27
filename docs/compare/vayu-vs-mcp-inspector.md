@@ -110,8 +110,8 @@ assertion: the validator is **draft-07**, and a keyword from MCP's default 2020-
 that it does not evaluate (`unevaluatedProperties`, `prefixItems`) fails the assertion
 loudly rather than passing unchecked. The request builder prefills a new schema assertion
 from a stored `outputSchema`; the engine itself never reads that field. A request made by
-[importing a server](#importing-a-server) stores no `outputSchema`, so nothing is prefilled
-there until the schema is pasted into the request's Output schema field. Detail:
+[importing a server](#importing-a-server) stores the tool's `outputSchema` when it is an
+object, so the prefill works there without pasting. Detail:
 [Kinds](../engine/elements.md#kinds).
 
 ## Reports that name the failure
@@ -143,8 +143,7 @@ tabs. A tool's request carries its `mcpTool` (the name and `inputSchema`, so the
 headers are derived), arguments drawn from the schema (the required properties only, each from
 its `const`, `default`, `example` or first `enum` member, else a typed stub) and an
 `assert.status` on `200`. The reply's own failures, a JSON-RPC error or a tool's `isError`,
-fail a step without an assertion. Two limits: imported tools carry no `outputSchema`, so a new
-`assert.jsonschema` is not prefilled, and the dialog sends a static bearer token with no OAuth
+fail a step without an assertion. One limit: the dialog sends a static bearer token with no OAuth
 sign-in ([#3983](https://github.com/athrvk/vayu/issues/3983)). Detail:
 [MCP server import](../app/import-collections/mcp-server.md) and
 [`POST /import/mcp`](../engine/api-reference/import.md#post-importmcp), the engine route

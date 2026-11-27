@@ -822,7 +822,7 @@ TEST_F (ImportMcpApplyTest, AToolsSchemaAndExpectationSurviveApplyAndABadOneCost
     EXPECT_EQ (body.at ("mcpTool").at ("outputSchema"), tools.at (0).at ("outputSchema"));
     EXPECT_EQ (search->url, "{{mcpBaseUrl}}");
     const json elements = json::parse (search->elements);
-    // One element still: nothing generates an `assert.jsonschema` from the
+    // One element: nothing generates an `assert.jsonschema` from the
     // stored `outputSchema`.
     ASSERT_EQ (elements.size (), 1U) << search->elements;
     EXPECT_EQ (elements.at (0).at ("kind"), "assert.status");
