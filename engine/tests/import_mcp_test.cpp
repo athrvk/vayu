@@ -472,20 +472,21 @@ TEST (ImportMcpRoute, IncludedResourcesAndPromptsGetTheirFolders) {
 // Discovery.
 // ---------------------------------------------------------------------------
 
-// Mutation check: drop either half of `discovery_unanswered` and that case
-// fails the import with the reader's message.
+// A `-32601` is a modern server that predates the method, so no handshake.
+// Mutation check: drop the `is_method_not_found` test in `discover` and the
+// import fails with the reader's message.
 TEST (ImportMcpRoute, AServerOlderThanDiscoveryIsReadOnAndNamedByItsHost) {
-    for (const auto discovery :
-    { McpDiscovery::MethodNotFound, McpDiscovery::LegacyBadRequest }) {
-        McpFixtureServer server;
-        server.discover_as (discovery);
-        server.set_tools (tools_named ({ "a" }));
-        const auto [status, result] = import_from (body_for (server));
-        ASSERT_EQ (status, 200) << result.dump ();
-        EXPECT_EQ (root_of (result).at ("name"), "127.0.0.1");
-        EXPECT_EQ (names_of (folder_of (result, "Tools").at ("requests")),
-        std::vector<std::string>{ "a" });
-    }
+    McpFixtureServer server;
+    server.discover_as (McpDiscovery::MethodNotFound);
+    server.set_tools (tools_named ({ "a" }));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    EXPECT_EQ (root_of (result).at ("name"), "127.0.0.1");
+    EXPECT_EQ (names_of (folder_of (result, "Tools").at ("requests")),
+    std::vector<std::string>{ "a" });
+    EXPECT_TRUE (root_of (result).at ("requests").empty ());
+    EXPECT_EQ (server.methods (),
+    (std::vector<std::string>{ "server/discover", "tools/list" }));
 }
 
 TEST (ImportMcpRoute, AVersionRefusalAtDiscoveryFailsTheImportWithTheReadersMessage) {
@@ -852,6 +853,212 @@ TEST_F (ScenarioRunnerTest, AnImportedMcpCollectionRunsWithNoEdits) {
     for (std::size_t at = 0; at < tools.size (); ++at) {
         EXPECT_EQ (calls.at (tools_listed + at).method, "tools/call");
     }
+}
+
+// ---------------------------------------------------------------------------
+// A legacy-era server: the handshake as explicit requests (#3840).
+// ---------------------------------------------------------------------------
+
+using vayu::tests::McpLegacySessions;
+using vayu::tests::McpRecordedCall;
+
+/// Each call as `<verb> <method>`, or the verb alone for a `DELETE`, and the
+/// session it carried, `-` for none.
+std::vector<std::string> sequence_of (const std::vector<McpRecordedCall>& calls) {
+    std::vector<std::string> sequence;
+    for (const auto& call : calls) {
+        const std::string step =
+        call.verb == "DELETE" ? call.verb : call.verb + " " + call.method;
+        sequence.push_back (step + " @" + call.session_id.value_or ("-"));
+    }
+    return sequence;
+}
+
+/// The value of @p request's header row @p key, or `-` when it has none.
+std::string row_value (const json& request, const std::string& key) {
+    const auto row = header_row (request, key);
+    return row ? row->at ("value").get<std::string> () : "-";
+}
+
+json session_extract_json () {
+    return json::parse (R"({"kind":"extract.header","config":{"header":"Mcp-Session-Id",
+      "variable":"mcpSessionId","scope":"collection","required":true}})");
+}
+
+// Mutation checks: drop the `is_legacy_refusal` test in `discover` and the
+// import fails at `server/discover`; drop the session header from
+// `session_request` and every call after `initialize` is refused.
+TEST (ImportMcpRoute, ALegacyEraServerIsImportedThroughASessionItThenEnds) {
+    McpFixtureServer server;
+    server.speak_legacy ();
+    server.set_tools (tools_named ({ "a", "b" }));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+
+    EXPECT_EQ (sequence_of (server.calls ()),
+    (std::vector<std::string>{ "POST server/discover @-", "POST initialize @-",
+    "POST notifications/initialized @legacy-session-1",
+    "POST tools/list @legacy-session-1", "DELETE @legacy-session-1" }));
+    EXPECT_TRUE (server.live_sessions ().empty ());
+    EXPECT_EQ (root_of (result).at ("name"), "vayu-legacy-fixture");
+}
+
+TEST (ImportMcpRoute, ALegacyEraTreeIsItsHandshakeThenTheToolsThenTheClose) {
+    McpFixtureServer server;
+    server.speak_legacy ();
+    server.set_tools (tools_named ({ "a", "b" }));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    const json& root = root_of (result);
+    const std::string negotiated (vayu::tests::MCP_LEGACY_FIXTURE_VERSION);
+
+    // The root's requests and folders share one `order` space, which is the
+    // run's order.
+    const json& requests = root.at ("requests");
+    ASSERT_EQ (names_of (requests),
+    (std::vector<std::string>{ "initialize", "notifications/initialized", "Close session" }));
+    EXPECT_EQ (requests.at (0).at ("order"), 0);
+    EXPECT_EQ (requests.at (1).at ("order"), 1);
+    EXPECT_EQ (folder_of (result, "Tools").at ("order"), 2);
+    EXPECT_EQ (requests.at (2).at ("order"), 3);
+
+    const json& init = requests.at (0);
+    EXPECT_EQ (init.at ("body").at ("mode"), "mcp");
+    const json init_call = call_of (init);
+    EXPECT_EQ (init_call.at ("jsonrpc"), "2.0");
+    EXPECT_EQ (init_call.at ("id"), 1);
+    EXPECT_EQ (init_call.at ("method"), "initialize");
+    EXPECT_EQ (init_call.at ("params").at ("protocolVersion"),
+    std::string (vayu::core::MCP_LEGACY_PROTOCOL_VERSION));
+    EXPECT_EQ (init_call.at ("params").at ("clientInfo").at ("name"), "vayu");
+    EXPECT_EQ (row_value (init, "MCP-Protocol-Version"),
+    std::string (vayu::core::MCP_LEGACY_PROTOCOL_VERSION));
+    EXPECT_EQ (row_value (init, "Mcp-Session-Id"), "-");
+    EXPECT_EQ (init.at ("elements"),
+    json::array ({ status_200_elements ().at (0), session_extract_json () }));
+
+    const json& note = requests.at (1);
+    EXPECT_EQ (call_of (note),
+    json::parse (R"({"jsonrpc":"2.0","method":"notifications/initialized"})"));
+    EXPECT_EQ (note.at ("elements"),
+    json::parse (R"([{"kind":"assert.status","config":{"in":[202]}}])"));
+
+    const json tools = folder_of (result, "Tools").at ("requests");
+    ASSERT_EQ (tools.size (), 2U);
+    for (std::size_t at = 0; at < tools.size (); ++at) {
+        const json call = call_of (tools.at (at));
+        EXPECT_EQ (call.at ("jsonrpc"), "2.0");
+        // Numbered after `initialize`: a session refuses an id it has seen.
+        EXPECT_EQ (call.at ("id"), at + 2);
+        EXPECT_EQ (call.at ("method"), "tools/call");
+        EXPECT_TRUE (tools.at (at).at ("body").contains ("mcpTool"));
+        EXPECT_EQ (tools.at (at).at ("elements"), status_200_elements ());
+    }
+
+    const json& close = requests.at (2);
+    EXPECT_EQ (close.at ("method"), "DELETE");
+    EXPECT_EQ (close.at ("body"), json ({ { "mode", "none" } }));
+    EXPECT_EQ (close.at ("elements"),
+    json::parse (R"([{"kind":"assert.status","config":{"in":[200,202,204,405]}}])"));
+    for (const json* later : { &note, &tools.at (0), &tools.at (1), &close }) {
+        EXPECT_EQ (row_value (*later, "MCP-Protocol-Version"), negotiated)
+        << later->at ("name");
+        EXPECT_EQ (row_value (*later, "Mcp-Session-Id"), "{{mcpSessionId}}")
+        << later->at ("name");
+    }
+    EXPECT_EQ (result.at ("meta").at ("requestCount"), 5);
+    EXPECT_EQ (result.at ("meta").at ("folderCount"), 1);
+}
+
+// No session to carry or end, so the tree neither extracts one nor closes it,
+// and no request names one a run could not resolve.
+TEST (ImportMcpRoute, AStatelessLegacyServerGetsTheHandshakeWithNoSession) {
+    McpFixtureServer server;
+    server.speak_legacy (McpLegacySessions::Stateless);
+    server.set_tools (tools_named ({ "a" }));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+
+    EXPECT_EQ (sequence_of (server.calls ()),
+    (std::vector<std::string>{ "POST server/discover @-", "POST initialize @-",
+    "POST notifications/initialized @-", "POST tools/list @-" }));
+    const json& requests = root_of (result).at ("requests");
+    EXPECT_EQ (names_of (requests),
+    (std::vector<std::string>{ "initialize", "notifications/initialized" }));
+    EXPECT_EQ (requests.at (0).at ("elements"), status_200_elements ());
+    EXPECT_EQ (result.dump ().find ("mcpSessionId"), std::string::npos)
+    << result.dump ();
+    EXPECT_EQ (row_value (folder_of (result, "Tools").at ("requests").at (0), "MCP-Protocol-Version"),
+    std::string (vayu::tests::MCP_LEGACY_FIXTURE_VERSION));
+}
+
+// The session opens before anything can fail, so each failure still ends it.
+// Mutation check: return before `close_legacy_session` in `read_listing` on a
+// failure and the session is left open.
+TEST (ImportMcpRoute, AFailedLegacyImportStillEndsItsSession) {
+    McpFixtureServer server;
+    server.speak_legacy (McpLegacySessions::Issued, /*names_version=*/false);
+    const auto [status, body] = import_from (body_for (server));
+    EXPECT_EQ (status, 502) << body.dump ();
+    EXPECT_EQ (message_of (body), "initialize answered with no protocolVersion");
+    EXPECT_EQ (sequence_of (server.calls ()),
+    (std::vector<std::string>{ "POST server/discover @-", "POST initialize @-",
+    "DELETE @legacy-session-1" }));
+    EXPECT_TRUE (server.live_sessions ().empty ());
+
+    McpFixtureServer listing;
+    listing.speak_legacy ();
+    listing.set_tools (tools_named (numbered_names (40)));
+    const auto [capped, capped_body] =
+    import_within (body_for (listing), std::chrono::milliseconds (60000), 1000);
+    EXPECT_EQ (capped, 413) << capped_body.dump ();
+    EXPECT_EQ (listing.calls ().back ().verb, "DELETE");
+    EXPECT_TRUE (listing.live_sessions ().empty ());
+}
+
+// The generated sequence runs against the server it was read from, with no
+// edit: `initialize` extracts the run's own session (not the import's, which
+// the import ended), every later step sends it, and the close ends it.
+// Mutation checks: drop `session_extract_element` from `initialize_draft` and
+// every later step sends `{{mcpSessionId}}` unresolved, which the fixture
+// answers `404`; drop `order_root_children` and `initialize` runs after the
+// tools.
+TEST_F (ScenarioRunnerTest, AnImportedLegacyMcpCollectionRunsItsSessionWithNoEdits) {
+    McpFixtureServer mcp;
+    mcp.speak_legacy ();
+    mcp.set_tools (schema_tools ());
+    const auto [status, result] = import_from (body_for (mcp));
+    ASSERT_EQ (status, 200) << result.dump ();
+    apply_tree (*db_, result);
+    const std::size_t imported = mcp.calls ().size ();
+
+    for (const auto& collection : db_->get_collections ()) {
+        if (collection.name == vayu::tests::MCP_LEGACY_FIXTURE_NAME) {
+            collection_id_ = collection.id;
+        }
+    }
+    ASSERT_NE (collection_id_, "col_1");
+    recursive_        = true;
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const std::size_t steps = schema_tools ().size () + 3;
+    const auto traces       = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), steps);
+    for (const auto& trace : traces) {
+        EXPECT_EQ (trace.at ("outcome"), "passed") << trace.dump ();
+    }
+
+    const auto calls = mcp.calls ();
+    ASSERT_EQ (calls.size (), imported + steps);
+    const std::vector<McpRecordedCall> run (
+    calls.begin () + static_cast<std::ptrdiff_t> (imported), calls.end ());
+    EXPECT_EQ (sequence_of (run),
+    (std::vector<std::string>{ "POST initialize @-",
+    "POST notifications/initialized @legacy-session-2", "POST tools/call @legacy-session-2",
+    "POST tools/call @legacy-session-2", "POST tools/call @legacy-session-2",
+    "POST tools/call @legacy-session-2", "DELETE @legacy-session-2" }));
+    EXPECT_TRUE (mcp.live_sessions ().empty ());
 }
 
 } // namespace

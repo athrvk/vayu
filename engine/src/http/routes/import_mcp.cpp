@@ -16,6 +16,11 @@
  * envelope, `_meta` and the derived headers are the ones a stored request
  * sends, the reply is read by the one reader (`read_mcp_reply`), and the
  * reserved-port guard and the transport policy apply as on any send.
+ *
+ * A legacy-era server (#3840) is the one place an `mcp` exchange falls back:
+ * the import speaks its handshake itself, as full envelopes carrying the
+ * session's headers, and generates the same handshake as requests, so a run
+ * holds no session the collection does not show.
  */
 
 #include "vayu/core/constants.hpp"
@@ -24,6 +29,7 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
+#include "vayu/http/mcp_body.hpp"
 #include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/url_parts.hpp"
@@ -43,6 +49,13 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+// `<httplib.h>` brings in `<resolv.h>` on Linux and `<windows.h>` on Windows,
+// and both define `DELETE` as a macro, which `HttpMethod::DELETE` cannot be
+// spelled through.
+#ifdef DELETE
+#undef DELETE
+#endif
 
 namespace vayu::http::routes {
 
@@ -104,11 +117,25 @@ struct ImportBudget {
     std::size_t items     = 0;
 };
 
+/// A legacy-era handshake in progress (#3840): what every call after
+/// `initialize` carries.
+struct LegacySession {
+    /// Offered until `initialize` answers, then the one it negotiated.
+    std::string protocol_version;
+    /// The `Mcp-Session-Id` `initialize` issued; nothing from a stateless server.
+    std::optional<std::string> session_id;
+    /// The next call's JSON-RPC `id`: a session refuses one it has seen.
+    std::int64_t next_id = 1;
+};
+
 /// The connection, the request and the budget every call of one import shares.
 struct McpSession {
     vayu::http::Client client;
     vayu::Request base;
     ImportBudget budget;
+    /// Set once the import speaks the legacy era: every call is a full
+    /// envelope carrying the session's headers.
+    std::optional<LegacySession> legacy;
 };
 
 /// One call and how the reply reader read it.
@@ -274,44 +301,93 @@ RouteError deadline_refusal (const ImportBudget& budget, std::string_view method
     .error ();
 }
 
-/// One call, sent within what is left of the import's deadline and counted
-/// against its byte budget.
-Refusable<McpCall>
-send_call (McpSession& session, std::string_view method, ordered_json params) {
+/// @p request sent within what is left of the import's deadline and counted
+/// against its byte budget; a failed transfer is a response carrying its
+/// error, for the reply reader to name.
+Refusable<vayu::Response>
+transfer (McpSession& session, std::string_view method, vayu::Request request) {
     ImportBudget& budget = session.budget;
     const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds> (
     budget.deadline - std::chrono::steady_clock::now ());
     if (remaining.count () <= 0) {
         return std::unexpected (deadline_refusal (budget, method));
     }
-    vayu::Request request = session.base;
-    request.timeout_ms    = static_cast<int> (
+    request.timeout_ms = static_cast<int> (
     std::min<long long> (limits::CALL_TIMEOUT_MS, remaining.count ()));
-    ordered_json call    = ordered_json::object ();
-    call["method"]       = std::string (method);
-    call["params"]       = std::move (params);
-    request.body.content = call.dump ();
 
-    McpCall sent;
+    vayu::Response response;
     auto result = session.client.send (request);
     if (result.is_ok ()) {
-        sent.response = std::move (result).value ();
+        response = std::move (result).value ();
     } else {
-        sent.response.error_code    = result.error ().code;
-        sent.response.error_message = result.error ().message;
+        response.error_code    = result.error ().code;
+        response.error_message = result.error ().message;
     }
-    if (sent.response.error_code == ErrorCode::Timeout &&
+    if (response.error_code == ErrorCode::Timeout &&
     std::chrono::steady_clock::now () >= budget.deadline) {
         return std::unexpected (deadline_refusal (budget, method));
     }
-    budget.bytes += sent.response.body.size ();
+    budget.bytes += response.body.size ();
     if (budget.bytes > budget.max_bytes) {
         return route_error (413,
         "The server's replies came to more than " +
         std::to_string (budget.max_bytes) + " bytes, the most one import reads");
     }
+    return response;
+}
+
+/// The base request with a legacy session's headers, which win over the ones
+/// the `mcp` mode derives.
+vayu::Request session_request (const McpSession& session) {
+    vayu::Request request = session.base;
+    if (const auto& legacy = session.legacy) {
+        request.headers[vayu::http::mcp::PROTOCOL_VERSION_HEADER] = legacy->protocol_version;
+        if (legacy->session_id) {
+            request.headers[vayu::core::MCP_SESSION_HEADER] = *legacy->session_id;
+        }
+    }
+    return request;
+}
+
+/// A call's frame up to its `params`: bare for a modern server, which the
+/// engine stamps at send; in a legacy session a full envelope, which nothing
+/// is stamped into, numbered because a session refuses an `id` it has seen. A
+/// notification is an envelope with no `id`.
+ordered_json frame_of (McpSession& session, std::string_view method, bool notification) {
+    ordered_json frame = ordered_json::object ();
+    if (auto& legacy = session.legacy; legacy) {
+        frame["jsonrpc"] = "2.0";
+        if (!notification) {
+            frame["id"] = legacy->next_id++;
+        }
+    }
+    frame["method"] = std::string (method);
+    return frame;
+}
+
+Refusable<McpCall>
+send_frame (McpSession& session, std::string_view method, const ordered_json& frame) {
+    vayu::Request request = session_request (session);
+    request.body.content  = frame.dump ();
+    auto response         = transfer (session, method, request);
+    if (!response) {
+        return std::unexpected (response.error ());
+    }
+    McpCall sent{ std::move (*response), McpReply{} };
     sent.reply = read_mcp_reply (request, sent.response);
     return sent;
+}
+
+/// One call, read by the reply reader.
+Refusable<McpCall>
+send_call (McpSession& session, std::string_view method, ordered_json params) {
+    ordered_json frame = frame_of (session, method, /*notification=*/false);
+    frame["params"]    = std::move (params);
+    return send_frame (session, method, frame);
+}
+
+Refusable<McpCall> send_notification (McpSession& session, std::string_view method) {
+    return send_frame (session, method, frame_of (session, method, /*notification=*/true));
 }
 
 /// The failed call @p call as the import's answer: the reader's message under
@@ -328,12 +404,9 @@ bool is_method_not_found (const McpCall& call) {
     call.reply.code == METHOD_NOT_FOUND;
 }
 
-/// A server older than `server/discover`: `-32601`, or the plain `400` a
-/// legacy-era server answers a modern request with. A failed transfer is not.
-bool discovery_unanswered (const McpCall& call) {
-    if (is_method_not_found (call)) {
-        return true;
-    }
+/// The plain `400` a legacy-era server answers a modern request with (#3762):
+/// a status alone, no JSON-RPC error. A failed transfer is not one.
+bool is_legacy_refusal (const McpCall& call) {
     return call.reply.error_class == McpErrorClass::Transport &&
     !call.response.has_error () && call.response.status_code == 400 &&
     !call.reply.code.has_value ();
@@ -354,31 +427,125 @@ std::optional<ordered_json> call_result (const McpCall& call) {
     return std::optional<ordered_json> (std::in_place, std::move (*result));
 }
 
-/// `serverInfo.name` from `server/discover`, or empty when the server is
-/// older than the method or names nothing. Any other failure fails the import.
-Refusable<std::string> discover_server_name (McpSession& session) {
+/// @p object's member @p key when it is a string, else empty.
+std::string string_member (const ordered_json& object, const char* key) {
+    const auto found = object.find (key);
+    return found != object.end () && found->is_string () ? found->get<std::string> () :
+                                                           std::string ();
+}
+
+/// @p result's `serverInfo.name`, or empty when it names none.
+std::string server_name (const ordered_json& result) {
+    const auto info = result.find ("serverInfo");
+    return info != result.end () && info->is_object () ? string_member (*info, "name") :
+                                                         std::string ();
+}
+
+/// What `server/discover` said of the server.
+struct Discovery {
+    /// It answered the legacy era's plain `400`, so the import opens a session.
+    bool legacy = false;
+    /// `serverInfo.name`, empty when the server named none.
+    std::string name;
+};
+
+/// `server/discover`, best effort for its `serverInfo.name`. A modern server
+/// older than the method (`-32601`) is read on unnamed, a legacy-era one is
+/// told apart for its handshake, and any other failure fails the import.
+Refusable<Discovery> discover (McpSession& session) {
     auto sent = send_call (session, "server/discover", ordered_json::object ());
     if (!sent) {
         return std::unexpected (sent.error ());
     }
     const McpCall& call = *sent;
-    if (discovery_unanswered (call)) {
-        return std::string ();
+    if (is_legacy_refusal (call)) {
+        return Discovery{ .legacy = true, .name = std::string () };
+    }
+    if (is_method_not_found (call)) {
+        return Discovery{};
     }
     if (call.reply.error_class) {
         return std::unexpected (call_refusal ("server/discover", call));
     }
     const auto result = call_result (call);
+    return Discovery{ .legacy = false,
+        .name = result ? server_name (*result) : std::string () };
+}
+
+/// The `Mcp-Session-Id` @p response issued, or nothing.
+std::optional<std::string> issued_session (const vayu::Response& response) {
+    const auto issued =
+    response.headers.find (std::string (vayu::core::MCP_SESSION_HEADER));
+    if (issued == response.headers.end () || issued->second.empty ()) {
+        return std::nullopt;
+    }
+    return issued->second;
+}
+
+/// `initialize`: the version it negotiated and the session it issued, into
+/// @p legacy, and the result it answered. The session is kept before the
+/// result is judged, so a refused handshake still ends the session it opened.
+Refusable<ordered_json> initialize (McpSession& session, LegacySession& legacy) {
+    auto sent = send_call (session, "initialize", vayu::core::mcp_initialize_params ());
+    if (!sent) {
+        return std::unexpected (sent.error ());
+    }
+    legacy.session_id = issued_session (sent->response);
+    if (sent->reply.error_class) {
+        return std::unexpected (call_refusal ("initialize", *sent));
+    }
+    auto result = call_result (*sent);
     if (!result) {
-        return std::string ();
+        return route_error (502, "initialize answered with no result");
     }
-    const auto info = result->find ("serverInfo");
-    if (info == result->end () || !info->is_object ()) {
-        return std::string ();
+    std::string version = string_member (*result, "protocolVersion");
+    if (version.empty ()) {
+        return route_error (502, "initialize answered with no protocolVersion");
     }
-    const auto name = info->find ("name");
-    return name != info->end () && name->is_string () ? name->get<std::string> () :
-                                                        std::string ();
+    legacy.protocol_version = std::move (version);
+    return std::move (*result);
+}
+
+/// The handshake a legacy-era server needs before anything else (#3840):
+/// `initialize`, then `notifications/initialized`. Leaves @p session speaking
+/// the session it opened; what the handshake settled and the server's name
+/// fill @p listing.
+RouteResult open_legacy_session (McpSession& session, vayu::core::McpServerListing& listing) {
+    LegacySession& legacy = session.legacy.emplace (LegacySession{
+    .protocol_version = std::string (vayu::core::MCP_LEGACY_PROTOCOL_VERSION),
+    .session_id       = std::nullopt,
+    .next_id          = 1 });
+    const auto result     = initialize (session, legacy);
+    if (!result) {
+        return std::unexpected (result.error ());
+    }
+    auto note = send_notification (session, "notifications/initialized");
+    if (!note) {
+        return std::unexpected (note.error ());
+    }
+    if (note->reply.error_class) {
+        return std::unexpected (call_refusal ("notifications/initialized", *note));
+    }
+    listing.legacy = vayu::core::McpLegacyHandshake{ .protocol_version = legacy.protocol_version,
+        .session = legacy.session_id.has_value () };
+    if (std::string name = server_name (*result); !name.empty ()) {
+        listing.name = std::move (name);
+    }
+    return {};
+}
+
+/// Ends the session the import opened, best effort: nothing the server
+/// answers (a `405` included, which the specification allows) changes the
+/// import's answer.
+void close_legacy_session (McpSession& session) {
+    const auto& legacy = session.legacy;
+    if (!legacy || !legacy->session_id) {
+        return;
+    }
+    vayu::Request request = session_request (session);
+    request.method        = vayu::HttpMethod::DELETE;
+    request.body          = vayu::Body{};
+    [[maybe_unused]] const auto ended = transfer (session, "DELETE", std::move (request));
 }
 
 /// The array a list page keeps its entries under, or null when it has none.
@@ -466,24 +633,16 @@ struct ListStep {
     std::optional<ordered_json> vayu::core::McpServerListing::* into = nullptr;
 };
 
-Refusable<vayu::core::McpServerListing>
-read_listing (McpSession& session, const McpImportTarget& target) {
-    auto name = discover_server_name (session);
-    if (!name) {
-        return std::unexpected (name.error ());
-    }
-    vayu::core::McpServerListing listing;
-    listing.url = target.base.url;
-    listing.name = name->empty () ? url_host (target.base.url) : std::move (*name);
-    listing.headers = target.caller_headers;
-    listing.bearer  = target.bearer;
-
+/// Every included list method, every page, into @p listing.
+RouteResult read_lists (McpSession& session,
+const Include& include,
+vayu::core::McpServerListing& listing) {
     using Listing    = vayu::core::McpServerListing;
     const auto steps = std::to_array<ListStep> ({
-    { target.include.tools, &TOOLS_LIST, &Listing::tools },
-    { target.include.resources, &RESOURCES_LIST, &Listing::resources },
-    { target.include.resources, &TEMPLATES_LIST, &Listing::resource_templates },
-    { target.include.prompts, &PROMPTS_LIST, &Listing::prompts },
+    { include.tools, &TOOLS_LIST, &Listing::tools },
+    { include.resources, &RESOURCES_LIST, &Listing::resources },
+    { include.resources, &TEMPLATES_LIST, &Listing::resource_templates },
+    { include.prompts, &PROMPTS_LIST, &Listing::prompts },
     });
     for (const auto& step : steps) {
         if (!step.included) {
@@ -494,6 +653,32 @@ read_listing (McpSession& session, const McpImportTarget& target) {
             return std::unexpected (entries.error ());
         }
         listing.*(step.into) = std::move (*entries);
+    }
+    return {};
+}
+
+Refusable<vayu::core::McpServerListing>
+read_listing (McpSession& session, const McpImportTarget& target) {
+    auto discovery = discover (session);
+    if (!discovery) {
+        return std::unexpected (discovery.error ());
+    }
+    vayu::core::McpServerListing listing;
+    listing.url     = target.base.url;
+    listing.name    = discovery->name.empty () ? url_host (target.base.url) :
+                                                 std::move (discovery->name);
+    listing.headers = target.caller_headers;
+    listing.bearer  = target.bearer;
+    RouteResult read =
+    discovery->legacy ? open_legacy_session (session, listing) : RouteResult{};
+    if (read) {
+        read = read_lists (session, target.include, listing);
+    }
+    // Ended whether or not the import got this far, so a failed import leaves
+    // no session open on the server.
+    close_legacy_session (session);
+    if (!read) {
+        return std::unexpected (read.error ());
     }
     return listing;
 }
@@ -527,9 +712,12 @@ const std::atomic<bool>* cancel) {
  * nowhere.
  *
  * `server/discover` is best effort, for its `serverInfo.name`: a server older
- * than the method (`-32601`, or a legacy-era plain `400`) is read on, while a
- * version refusal or any other failure fails the import with what the reply
- * reader said. Then each included list method, every page.
+ * than the method (`-32601`) is read on, while a version refusal or any other
+ * failure fails the import with what the reply reader said. A legacy-era
+ * server's plain `400` opens a session first (`initialize`, whose
+ * `serverInfo.name` names the collection, then `notifications/initialized`),
+ * which every later call carries and a best-effort `DELETE` ends. Then each
+ * included list method, every page.
  *
  * @param transport `resolve_transport_policy (db)`, required for the reason
  *                  `import_fetch`'s is.
@@ -538,7 +726,8 @@ const std::atomic<bool>* cancel) {
  *         names no usable server, headers or auth, or a URL with userinfo;
  *         413 for a reply over `MAX_REPLY_BYTES`, replies over
  *         `MAX_TOTAL_BYTES` or a listing over `MAX_ITEMS`; 502 for a call
- *         that failed, a reply with no list, a repeated cursor, a list past
+ *         that failed, an `initialize` that negotiated no version, a reply
+ *         with no list, a repeated cursor, a list past
  *         `MAX_PAGES` or an import past `TOTAL_TIMEOUT_MS` (a timeout is a
  *         `502` here, as on `POST /import/fetch`).
  */
@@ -562,7 +751,8 @@ std::size_t max_total_bytes) {
         target->base,
         ImportBudget{ .deadline = std::chrono::steady_clock::now () + total_timeout,
         .total     = total_timeout,
-        .max_bytes = max_total_bytes } };
+        .max_bytes = max_total_bytes },
+        std::nullopt };
     auto listing = read_listing (session, *target);
     if (!listing) {
         return as_response (listing.error ());

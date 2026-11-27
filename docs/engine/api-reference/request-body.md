@@ -202,6 +202,7 @@ A failed reply carries one of three stable wire names:
 
 A JSON-RPC notification (an envelope with no `id`) expects no response, so a 2xx with none is a success.
 Two messages name an era mismatch without retrying or falling back, since a retry hides the mismatch from a regression test and doubles a load run's traffic: a `-32022` that lists `error.data.supported` reads `server supports 2025-11-25, 2025-06-18; this request is 2026-07-28`, and a `400` with no JSON-RPC error says the server looks legacy-era and to send an explicit `initialize` request first.
+A send never falls back; [`POST /import/mcp`](import.md#a-legacy-era-server) is the one exchange that does, and it writes the handshake into the collection as requests rather than holding it.
 
 A `401` or `403` whose `WWW-Authenticate` is a `Bearer` challenge with `error="insufficient_scope"` (RFC 6750 section 3.1) stays `transport` and names what the token lacks (#3795): `insufficient_scope: needs "db:read db:write"` from the challenge's `scope`, or `insufficient_scope: the token lacks a scope the server did not name` when it gives none.
 The challenge is read by `classify_bearer_challenge`, the classifier behind [`POST /oauth2/step-up`](authentication.md#post-oauth2step-up); the run never retries, refreshes or re-authorizes, and its status counts are the ones the `403` always had.
