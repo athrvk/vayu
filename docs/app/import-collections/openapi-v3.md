@@ -43,7 +43,7 @@ detect(parsed) {
 }
 ```
 
-The top-level `openapi` field must be a string beginning with `"3."` (so `3.0.0`, `3.0.3`, and `3.1.x` all match). The 3.1 claim is honoured on the schema side too: `Sampler::sample` reads the JSON-Schema keywords 3.1 adopted - type arrays (`type: ["string", "null"]`), `const`, and the plural `examples` (see [`Sampler::sample`](#samplersample-schema--stub-value)) - and a `{"$ref": ...}` path item, which 3.1 made common, is resolved rather than dropped. Swagger 2.0 (`swagger: "2.0"`, no `openapi` field) is handled by a separate parser - see [OpenAPI v2](./openapi-v2.md). The factory (`core::parse_import`) parses the raw text once (JSON, then YAML fallback) and runs each parser's `detect` in registration order.
+The top-level `openapi` field must be a string beginning with `"3."` (so `3.0.0`, `3.0.3`, and `3.1.x` all match). The 3.1 claim is honoured on the schema side too: `SchemaSampler::sample` reads the JSON-Schema keywords 3.1 adopted - type arrays (`type: ["string", "null"]`), `const`, and the plural `examples` (see [`SchemaSampler::sample`](#schemasamplersample-schema--stub-value)) - and a `{"$ref": ...}` path item, which 3.1 made common, is resolved rather than dropped. Swagger 2.0 (`swagger: "2.0"`, no `openapi` field) is handled by a separate parser - see [OpenAPI v2](./openapi-v2.md). The factory (`core::parse_import`) parses the raw text once (JSON, then YAML fallback) and runs each parser's `detect` in registration order.
 
 ## Tree structure
 
@@ -218,7 +218,7 @@ Why optional value-less parameters import **disabled** (issues #622, #658): the 
 | `application/json` (also any key starting with `application/json` or ending in `+json`, via `findJsonMedia`) | `{ mode: "json", content }` | `content = JSON.stringify(media.example ?? sampleSchema(media.schema), null, 2)`. The media-object `example` wins over the schema; if neither exists, `{}`. |
 | `text/plain` | `{ mode: "text", content }` | the media object's `example` as the text it is, else empty (the schema is not sampled for text bodies) |
 | `application/xml`, `text/xml`, or any `+xml` type | `{ mode: "xml", content }` | the same: the `example` as the text it is, else empty - a Vayu skeleton export writes an `xml` body exactly this way |
-| `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per field from `schemaFormFields(schema)` |
+| `application/x-www-form-urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = one `{ key, value: "", enabled: true }` per field from `Sampler::form_fields(schema)` |
 | `multipart/form-data` | `{ mode: "form-data", fields }` | same as urlencoded, except a `format: binary` field becomes a **file part** (see [File parts](#file-parts)) |
 | `application/octet-stream` (any schema), else the first media type whose schema is one `format: binary` string (`$ref` and the first composed branch followed) | `{ mode: "binary", file: { src: "", contentType } }` | a **whole-file body** with no file chosen: the spec names the upload, never the file. `contentType` is that media type, lowered and without parameters; a wildcard such as `image/*` gives none, and the send derives one from the file. Counted as `file_body` |
 | no `content`, or none of the above | `{ mode: "none" }` | |
@@ -237,12 +237,12 @@ JSON is preferred: `findJsonMedia` is checked first and takes precedence over te
 
 **Form field names resolve `$ref` and `allOf`, exactly as far as a JSON body does.** `Sampler::form_fields` (`openapi_drafts.cpp`) samples the schema and returns the stub's own keys, rather than reading `schema.properties` directly. That key does not exist on a schema written as `{"$ref": "#/components/schemas/TokenRequest"}` or as an `allOf` - the shape generators emit - which would yield the right body mode with an **empty** field list and no warning anywhere. Consequences of going through the sampler: composition follows the **first** branch only (the same rule JSON bodies get, not an `allOf` merge), and a schema that samples to a non-object (a scalar, an array, or an `example` that is not an object) contributes no field names.
 
-### `Sampler::sample` (schema → stub value)
+### `SchemaSampler::sample` (schema → stub value)
 
-`Sampler::sample` in `openapi_drafts.cpp` generates a sample JSON value by walking the schema. It is **bounded and recursive** - materially more capable than a one-level stub:
+`SchemaSampler::sample` in `engine/src/core/schema_sampler.hpp` generates a sample JSON value by walking the schema; `Sampler` in `openapi_drafts.cpp` is the document's view of it. It is **bounded and recursive** - materially more capable than a one-level stub:
 
-- **Depth cap.** `MAX_DEPTH = 6`. Once `depth > 6`, the walker returns `{}`. Non-object / null nodes also return `{}`.
-- **`$ref` resolution + cycle guard.** A node with a string `$ref` is resolved via `resolveRef` and walked (depth +1). A `Set` of already-visited `$ref` strings is threaded down each branch; re-encountering a `$ref` already on the current path returns `{}` (breaks reference cycles). Resolution failures (`throw` or `null` result) also yield `{}`.
+- **Depth cap.** `MAX_SAMPLE_DEPTH = 6`. Once `depth > 6`, the walker returns `{}`. Non-object / null nodes also return `{}`.
+- **`$ref` resolution + cycle guard.** A node with a string `$ref` is resolved as a JSON Pointer against the sampler's root (the document here) and walked (depth +1). The `$ref` strings already followed are threaded down each branch; re-encountering one on the current path returns `{}` (breaks reference cycles). A `$ref` that resolves to nothing or to `null` also yields `{}`.
 - **Pinned-value precedence:** `const` → `example` → `examples[0]`, all checked **after** `$ref` and before composition and `type`.
   - **`const`** (JSON Schema, so OpenAPI 3.1) is returned verbatim and **outranks `example`**: it says the value MUST be exactly this, where `example` is only an annotation. `const: null` samples as `null`.
   - **`example`** is returned verbatim - this is how authors pin exact sample values.
@@ -263,9 +263,16 @@ JSON is preferred: `findJsonMedia` is checked first and takes precedence over te
 
   The `object`/default branch is the same fallback used for untyped schemas - a node with `properties` but no `type` is still expanded.
 
-`Sampler::form_fields` is the form-body wrapper over this: it samples the schema, returns `Object.keys()` of the result (`[]` for a non-object sample), and marks each field text or file. The file flag is read off the **property schema**, not the sampled value: the sampler turns a `format: binary` string into `""`, which no longer says anything about the field. See [Request body generation](#request-body-generation).
+`Sampler::form_fields` is the form-body wrapper over this: it samples the schema, returns the keys of the result (none for a non-object sample), and marks each field text or file. The file flag is read off the **property schema**, not the sampled value: the sampler turns a `format: binary` string into `""`, which no longer says anything about the field. See [Request body generation](#request-body-generation).
 
-> Older notes claimed sampling was "one level only" and "`oneOf` → `{}`". That is **not** what the code does: sampling recurses to depth 6, resolves and cycle-guards `$ref`s, honors `example`, and follows the first branch of `oneOf`/`anyOf`/`allOf`.
+**Options.** A default `SampleOptions` is everything above, the rule set the OpenAPI import and its conformance fixture hold. A caller that is not an OpenAPI import (the MCP import, which samples a tool's `inputSchema` against itself as the `$ref` root) opts into four more, each off by default:
+
+| Option | Effect when on |
+|--------|----------------|
+| `use_default` | a schema's `default` is a pinned value, ranked `const` → `default` → `example` → `examples[0]` |
+| `required_only` | an object samples only the properties its `required` array names, in `required` order; no `required` samples to `{}`, and a required name `properties` does not declare stubs to `""`. A node that also composes (`allOf` / `oneOf` / `anyOf`) keeps its own required properties and takes the first branch's members beside them, its own winning |
+| `enum_any_type` | a non-empty `enum` samples to `enum[0]` for every scalar `type` and for no `type`, not for `type: string` alone |
+| `honour_bounds` | a stub clears the lower bounds the schema states: `minimum` / numeric `exclusiveMinimum` above zero (an integer rounds up), `minLength` as a string of `a`s, `minItems` as that many copies of the sampled item. Strings and item counts are capped (`MAX_BOUNDED_STRING_LENGTH`, `MAX_BOUNDED_ITEMS`); `pattern` and `format` are not read |
 
 ## Auth / security
 
@@ -355,7 +362,7 @@ An import with nothing to report still yields `skipped: []` - only non-zero kind
 | Helper | Source | Use in this parser |
 |--------|--------|--------------------|
 | [`normalize_template_vars`](./README.md#normalize_template_vars--normalize_path_templates) | `path_template.cpp` | convert OpenAPI `{param}` path templates → Vayu `{{param}}` in request URLs |
-| `Sampler::sample` | `openapi_drafts.cpp` | generate a sample JSON body from a request `schema` (bounded, ref-resolving) |
+| `Sampler::sample` (over `SchemaSampler::sample`) | `openapi_drafts.cpp`, `schema_sampler.hpp` | generate a sample JSON body from a request `schema` (bounded, ref-resolving) |
 | `Sampler::form_fields` | `openapi_drafts.cpp` | field names for an urlencoded / multipart body, resolved through the sampler, each flagged text or file |
 | `imported_file_part`, `unattached_file_parts` | `import_document.cpp` | build a file form row; count the rows that still need a file, for `meta` |
 | `walk::resolve_ref`, `walk::resolve_single_hop`, `ImportTally` | `openapi_drafts.cpp` | resolve an in-document `$ref` and a `$ref`'d path item; guard `parameters` and tally what was dropped |

@@ -253,27 +253,15 @@ The import preview counts these as `N file parts need a file`, beside the skip c
 
 ## `$ref` & schema sampling
 
-`resolveRef` resolves any JSON-pointer ref against the whole spec - Swagger model refs are `#/definitions/...`, but the resolver is generic. It strips the leading `#/`, splits on `/`, un-escapes `~1`→`/` and `~0`→`~`, and walks the spec object segment by segment.
+An `in: "body"` parameter's schema becomes a stub value through the same `SchemaSampler` the v3 parser uses (`schema_sampler.hpp`, wrapped by `Sampler::sample` in `openapi_drafts.cpp`),
+with a `#/definitions/...` ref resolved as a JSON Pointer against the whole spec. Its rules - the depth cap, the `$ref` cycle
+guard, pinned-value precedence, first-branch composition, the type defaults - are written out once, in
+[`SchemaSampler::sample`](./openapi-v3.md#schemasamplersample-schema--stub-value). Swagger 2.0 schemas only ever carry `example`,
+so in practice this parser reads that one of the pinned values. A type written as an array is not legal Swagger 2.0, but the
+shared sampler reads it.
 
-Body schemas are turned into stub values by `Sampler::sample` (`openapi_drafts.cpp`), which walks the schema recursively. It is **bounded and recursive** - materially more capable than older "one level deep" notes:
-
-- **Depth cap.** `MAX_DEPTH = 6`. Once `depth > 6`, the walker returns `{}`. Non-object / null nodes also return `{}`.
-- **`$ref` resolution + cycle guard.** A node with a string `$ref` (e.g. `#/definitions/User`) is resolved via `resolveRef` and walked (depth +1). A `Set` of already-visited `$ref` strings is threaded down each branch; re-encountering a `$ref` already on the current path returns `{}` (breaks reference cycles). Resolution failures (`throw` or `null` result) also yield `{}`.
-- **Pinned-value precedence:** `const` → `example` → `examples[0]` (checked **after** `$ref`, before composition and `type`). `const` outranks `example` because JSON Schema makes it the only permitted value; `examples` is the plural form 3.1 introduced. Swagger 2.0 schemas only ever carry `example`, so in practice this parser reads that one - the other two come along because the sampler is shared.
-- **`allOf` / `oneOf` / `anyOf` - first branch.** If any of these is a non-empty array, the walker recurses into **`branch[0]` only** (precedence `allOf` → `oneOf` → `anyOf`). It does not merge `allOf` members.
-- **Type arrays.** A `type` written as an array (a JSON-Schema / OpenAPI 3.1 shape, not legal Swagger 2.0) samples its first non-`"null"` member; an only-`"null"` type samples as `null`.
-- **Type defaults:**
-
-  | `schema.type` | Sample value |
-  |---------------|--------------|
-  | `string` | `enum[0]` if a non-empty `enum` is present, else `""` |
-  | `integer` / `number` | `0` |
-  | `boolean` | `false` |
-  | `null` | `null` |
-  | `array` | `[ sample(items) ]` if `items` is present, else `[]` (one element) |
-  | `object` (or no/unknown `type`) | walks each entry of `properties`, producing `{ key: sample }`; `{}` if no `properties` |
-
-`Sampler::sample` is shared verbatim with the v3 parser - same depth cap, cycle guard, and branch handling. Its `Sampler::form_fields` companion is v3-only: Swagger 2.0 form fields come from `formData` parameters, not from a schema, so this parser reads `param.type === "file"` where v3 reads `format: binary`.
+`Sampler::form_fields`, the sampler's form-body companion, is v3-only: Swagger 2.0 form fields come from `formData`
+parameters, not from a schema, so this parser reads `param.type === "file"` where v3 reads `format: binary`.
 
 ## `collectionFormat` for array query params
 
@@ -357,7 +345,7 @@ Shared between both: the folder routing (`OperationFolders` - first tag, else pa
 | Helper | Source | Use in this parser |
 |--------|--------|--------------------|
 | [`normalize_template_vars`](./README.md#normalize_template_vars--normalize_path_templates) | `path_template.cpp` | convert Swagger `{param}` path templates → Vayu `{{param}}` in request URLs |
-| `Sampler::sample` | `openapi_drafts.cpp` | generate a sample JSON body from an `in: "body"` parameter `schema` (bounded, ref-resolving) |
+| `Sampler::sample` | `openapi_drafts.cpp` | generate a sample JSON body from an `in: "body"` parameter `schema`, through the shared [`SchemaSampler`](./openapi-v3.md#schemasamplersample-schema--stub-value) |
 | `walk::resolve_ref`, `walk::resolve_single_hop`, `ImportTally` | `openapi_drafts.cpp` | resolve an in-document `$ref` and a `$ref`'d path item; guard `parameters` and tally what was dropped |
 | `bundleExternalRefs` | `ref-bundler.ts` | resolve references to *other files* before parse, and count what it could not reach |
 | `response_example`, `example_body_text`, `deref` | `openapi_drafts.cpp` | map one `responses` entry to an example draft - the half shared with the v3 parser |

@@ -549,9 +549,9 @@ struct SpecRequestDraft {
  *   headers are dropped too: both are produced by the request's own auth and
  *   body rather than typed into a row.
  * - **The body is sampled from its schema** when the document documents no
- *   example, by `$ref`-following, depth-capped, first-branch-of-`allOf` rules
- *   that have to match the renderer's sampler exactly - the sample *is* the
- *   compared value, so a different sampler is a different draft for an
+ *   example, by the `$ref`-following, depth-capped, first-branch-of-`allOf`
+ *   rules of `src/core/schema_sampler.hpp` - the sample *is* the compared
+ *   value, so a change to what it samples to is a different draft for an
  *   unchanged document.
  * - **The folder is where an import would have put it**: first tag, else the
  *   first path segment that names a resource, else the root.

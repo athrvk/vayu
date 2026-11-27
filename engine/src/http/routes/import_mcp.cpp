@@ -147,8 +147,8 @@ Refusable<std::string> read_url (const nlohmann::json& body) {
     if (auto problem = vayu::http::unsendable_scheme (text)) {
         return route_error (400, "Invalid 'url': " + *problem);
     }
-    // Every generated request stores the URL, so a password in it would be
-    // stored as many times as the server lists entries.
+    // The root collection stores the URL (`mcpBaseUrl`), so a password in it
+    // would be stored in the collection.
     const auto host = vayu::http::url_host_span (text);
     if (host && text.find ('@') < host->begin) {
         return route_error (400, "Invalid 'url': put credentials in auth or headers, not the URL");

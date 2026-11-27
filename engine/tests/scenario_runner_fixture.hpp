@@ -562,7 +562,7 @@ class ScenarioRunnerTest : public ::testing::Test {
     bool fail_on_schema_error = false,
     const json& thresholds    = json (),
     bool stop_on_error        = false) {
-        json scenario{ { "source", "collection" }, { "collectionId", "col_1" } };
+        json scenario{ { "source", "collection" }, { "collectionId", collection_id_ } };
         if (iterations) {
             scenario["iterations"] = *iterations;
         }
@@ -751,6 +751,8 @@ class ScenarioRunnerTest : public ::testing::Test {
     vayu::core::RunManager manager_;
     vayu::http::CookieJar jar_;
     size_t runs_started_ = 0;
+    /// The collection `start` runs: the seeded `col_1`, or one a test applied.
+    std::string collection_id_ = "col_1";
     /// Runs `col_1` with its sub-folders (`scenario.recursive`).
     bool recursive_ = false;
     /// Lets the steps' scripts call `pm.sendRequest` (`allowScriptRequests`).

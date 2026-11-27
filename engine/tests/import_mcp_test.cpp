@@ -35,6 +35,7 @@
 #include "mcp_fixture_server.hpp"
 #include "mcp_port_stand_in.hpp"
 #include "optional_assert.hpp"
+#include "scenario_runner_fixture.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/import_document.hpp"
@@ -73,6 +74,7 @@ using vayu::tests::McpDiscovery;
 using vayu::tests::McpFixtureServer;
 using vayu::tests::McpReplyOutcome;
 using vayu::tests::McpReplyShape;
+using vayu::tests::scenario_runner::ScenarioRunnerTest;
 namespace limits = vayu::core::constants::import_mcp;
 
 std::pair<int, json> import_from (const json& body) {
@@ -142,6 +144,16 @@ json call_of (const json& request) {
     return json::parse (request.at ("body").at ("content").get<std::string> ());
 }
 
+/// What every generated request asserts.
+json status_200_elements () {
+    return json::parse (R"([{"kind":"assert.status","config":{"in":[200]}}])");
+}
+
+/// The endpoint an imported tree's requests send to: its root's `mcpBaseUrl`.
+std::string base_url_of (const json& result) {
+    return root_of (result).at ("variables").at ("mcpBaseUrl").at ("value").get<std::string> ();
+}
+
 std::optional<json> header_row (const json& request, const std::string& key) {
     for (const auto& row : request.at ("headers")) {
         if (row.at ("key") == key) {
@@ -167,6 +179,8 @@ TEST (ImportMcpRoute, EachToolIsAnMcpRequestInTheToolsFolder) {
     EXPECT_EQ (names_of (root.at ("children")), std::vector<std::string>{ "Tools" });
     EXPECT_TRUE (root.at ("requests").empty ());
     EXPECT_EQ (root.at ("auth"), json ({ { "mode", "none" } }));
+    EXPECT_EQ (root.at ("variables"),
+    json ({ { "mcpBaseUrl", { { "value", server.url () }, { "enabled", true } } } }));
 
     const json tools = folder_of (result, "Tools").at ("requests");
     EXPECT_EQ (names_of (tools),
@@ -174,11 +188,13 @@ TEST (ImportMcpRoute, EachToolIsAnMcpRequestInTheToolsFolder) {
     for (const auto& request : tools) {
         const std::string name = request.at ("name").get<std::string> ();
         EXPECT_EQ (request.at ("method"), "POST") << name;
-        EXPECT_EQ (request.at ("url"), server.url ()) << name;
+        EXPECT_EQ (request.at ("url"), "{{mcpBaseUrl}}") << name;
         EXPECT_EQ (request.at ("description"), "Runs " + name);
         EXPECT_EQ (request.at ("body").at ("mode"), "mcp") << name;
-        // Item 2 (#3839) fills the tool's schema in; this slice does not.
-        EXPECT_FALSE (request.at ("body").contains ("mcpTool")) << name;
+        EXPECT_EQ (request.at ("body").at ("mcpTool"),
+        json ({ { "name", name }, { "inputSchema", { { "type", "object" } } } }))
+        << name;
+        EXPECT_EQ (request.at ("elements"), status_200_elements ()) << name;
         EXPECT_EQ (request.at ("auth"), json ({ { "mode", "inherit" } })) << name;
         const json call = call_of (request);
         // Bare, so the engine stamps the envelope and `_meta` at send.
@@ -203,6 +219,163 @@ TEST (ImportMcpRoute, EachToolIsAnMcpRequestInTheToolsFolder) {
     (std::vector<std::string>{ "server/discover", "tools/list" }));
 }
 
+// ---------------------------------------------------------------------------
+// A tool's schema: `mcpTool` and the arguments drawn from it.
+// ---------------------------------------------------------------------------
+
+/// Three tools whose schemas each exercise a rule of the sampler, and `plain`,
+/// which has none. `execute_sql` is the fixture's annotated tool with both of
+/// its arguments required, so its `region` is sampled and mirrored as a header.
+json schema_tools () {
+    return json::parse (R"([
+      {"name":"search","description":"Runs search",
+       "inputSchema":{"type":"object",
+         "properties":{
+           "query":{"type":"string"},
+           "limit":{"type":"integer","enum":[5,10],"default":10},
+           "level":{"type":"integer","enum":[3,4]},
+           "verbose":{"type":"boolean"}},
+         "required":["query","limit","level"]},
+       "outputSchema":{"type":"object","properties":{"hits":{"type":"array"}}}},
+      {"name":"create","description":"Runs create",
+       "inputSchema":{"type":"object",
+         "properties":{
+           "owner":{"$ref":"#/$defs/person"},
+           "retries":{"type":"integer","default":3},
+           "note":{"type":"string"}},
+         "required":["owner","retries"],
+         "$defs":{"person":{"type":"object",
+           "properties":{"name":{"type":"string"},"nickname":{"type":"string"}},
+           "required":["name"]}}}},
+      {"name":"execute_sql","description":"Runs execute_sql",
+       "inputSchema":{"type":"object",
+         "properties":{
+           "region":{"type":"string","x-mcp-header":"Region"},
+           "query":{"type":"string"}},
+         "required":["region","query"]}},
+      {"name":"plain","description":"Runs plain"}])");
+}
+
+json arguments_of (const json& request) {
+    return call_of (request).at ("params").at ("arguments");
+}
+
+TEST (ImportMcpRoute, AToolsRequiredArgumentsAreSampledFromItsSchema) {
+    McpFixtureServer server;
+    server.set_tools (schema_tools ());
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    const json tools = folder_of (result, "Tools").at ("requests");
+    ASSERT_EQ (tools.size (), 4U);
+
+    // A default and an enum's first member are values the server accepts, which
+    // a typed zero is not, and the default outranks the enum; an optional
+    // property is not sent at all.
+    EXPECT_EQ (arguments_of (tools.at (0)),
+    json::parse (R"({"query":"","limit":10,"level":3})"));
+    // A `$ref` resolves against the tool's own schema, so `#/$defs/person` is found.
+    EXPECT_EQ (arguments_of (tools.at (1)),
+    json::parse (R"({"owner":{"name":""},"retries":3})"));
+    EXPECT_EQ (arguments_of (tools.at (2)), json::parse (R"({"region":"","query":""})"));
+    EXPECT_EQ (arguments_of (tools.at (3)), json::object ());
+}
+
+TEST (ImportMcpRoute, ArgumentsSatisfyAToolsComposedRequiredAndItsMinimums) {
+    McpFixtureServer server;
+    server.set_tools (json::parse (R"([
+      {"name":"either","description":"Runs either",
+       "inputSchema":{"type":"object",
+         "properties":{"a":{"type":"string"},"page":{"type":"integer","minimum":1}},
+         "required":["a","page","undeclared"],
+         "oneOf":[{"required":["a"]},{"required":["b"]}]}}])"));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    const json tools = folder_of (result, "Tools").at ("requests");
+    ASSERT_EQ (tools.size (), 1U);
+
+    // The tool's own required names survive its `oneOf`, the integer clears
+    // `minimum: 1`, and a required name no property declares is still sent.
+    EXPECT_EQ (arguments_of (tools.at (0)),
+    json::parse (R"({"a":"","page":1,"undeclared":""})"));
+}
+
+TEST (ImportMcpRoute, AToolsSchemaIsStoredAsMcpToolWithoutItsOutputSchema) {
+    McpFixtureServer server;
+    server.set_tools (schema_tools ());
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    const json tools = folder_of (result, "Tools").at ("requests");
+
+    const json& stored = tools.at (0).at ("body").at ("mcpTool");
+    EXPECT_EQ (stored.at ("name"), "search");
+    EXPECT_EQ (stored.at ("inputSchema"), schema_tools ().at (0).at ("inputSchema"));
+    EXPECT_FALSE (stored.contains ("outputSchema"));
+    // A tool with no schema is still named, so a person's later edit of the
+    // call is held to the tool.
+    EXPECT_EQ (tools.at (3).at ("body").at ("mcpTool"), json ({ { "name", "plain" } }));
+    EXPECT_EQ (result.at ("meta").at ("skipped"), json::array ());
+}
+
+TEST (ImportMcpRoute, EveryRequestOfEveryFolderExpectsA200) {
+    McpFixtureServer server;
+    server.set_tools (schema_tools ());
+    server.set_resources (json::parse (R"([{"uri":"file:///a.txt"}])"));
+    server.set_resource_templates (json::parse (R"([{"uriTemplate":"file:///{p}"}])"));
+    server.set_prompts (json::parse (R"([{"name":"greet"}])"));
+    const auto [status, result] = import_from (json{ { "url", server.url () },
+    { "include", { { "resources", true }, { "prompts", true } } } });
+    ASSERT_EQ (status, 200) << result.dump ();
+
+    std::size_t seen = 0;
+    for (const auto& folder : root_of (result).at ("children")) {
+        for (const auto& request : folder.at ("requests")) {
+            EXPECT_EQ (request.at ("elements"), status_200_elements ())
+            << request.at ("name");
+            ++seen;
+        }
+    }
+    EXPECT_EQ (seen, 7U);
+}
+
+// `apply` refuses a whole tree over one body `read_mcp_tool` cannot read, so a
+// server's bad annotation must cost one tool its schema, not the import.
+TEST (ImportMcpRoute, AToolWhoseSchemaASendRefusesKeepsItsRequestAndIsCounted) {
+    McpFixtureServer server;
+    server.set_tools (json::parse (R"([
+      {"name":"ok","inputSchema":{"type":"object"}},
+      {"name":"bad_header","inputSchema":{"type":"object",
+         "properties":{"region":{"type":"string","x-mcp-header":"Bad Name"}},
+         "required":["region"]}},
+      {"name":"worse","inputSchema":{"type":"object",
+         "properties":{"a":{"x-mcp-header":7}}}}])"));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    const json tools = folder_of (result, "Tools").at ("requests");
+    ASSERT_EQ (tools.size (), 3U);
+
+    EXPECT_TRUE (tools.at (0).at ("body").contains ("mcpTool"));
+    for (const std::size_t at : { 1U, 2U }) {
+        EXPECT_FALSE (tools.at (at).at ("body").contains ("mcpTool")) << at;
+        EXPECT_EQ (tools.at (at).at ("elements"), status_200_elements ());
+    }
+    EXPECT_EQ (arguments_of (tools.at (1)), json::parse (R"({"region":""})"));
+    EXPECT_EQ (result.at ("meta").at ("skipped"),
+    json::parse (R"([{"kind":"unusable_tool_schema","count":2,"requests":["bad_header","worse"]}])"));
+}
+
+// A subject is named per kind until the next call; the bad tool's must not
+// leak onto the malformed entry that follows it.
+TEST (ImportMcpRoute, AnUnusableToolSchemaNamesNoLaterMalformedItem) {
+    McpFixtureServer server;
+    server.set_tools (json::parse (R"([
+      {"name":"bad","inputSchema":{"properties":{"a":{"x-mcp-header":""}}}},
+      {"description":"nameless"}])"));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    EXPECT_EQ (result.at ("meta").at ("skipped"), json::parse (R"([{"kind":"malformed_item","count":1},
+                     {"kind":"unusable_tool_schema","count":1,"requests":["bad"]}])"));
+}
+
 // The stored body is what a person's Send carries, so it is held to the
 // server's header-against-body check too.
 TEST (ImportMcpRoute, AnImportedToolCallIsOneTheServerAccepts) {
@@ -214,7 +387,7 @@ TEST (ImportMcpRoute, AnImportedToolCallIsOneTheServerAccepts) {
 
     vayu::Request send;
     send.method       = vayu::HttpMethod::POST;
-    send.url          = request.at ("url").get<std::string> ();
+    send.url          = base_url_of (result);
     send.body.mode    = vayu::BodyMode::Mcp;
     send.body.content = request.at ("body").at ("content").get<std::string> ();
     vayu::http::Client client;
@@ -415,16 +588,18 @@ TEST (ImportMcpRoute, AnImportPastItsTotalDeadlineFailsBeforeTheNextCall) {
     EXPECT_EQ (server.requests (), 0U);
 }
 
+// The query rides in the variable's value, so a request's own Params stay empty
+// and a send resolves to the URL exactly as given.
 TEST (ImportMcpRoute, AUrlsQueryIsKeptAsGiven) {
     McpFixtureServer server;
     server.set_tools (tools_named ({ "a" }));
     const std::string url       = server.url () + "?tenant=acme";
     const auto [status, result] = import_from (json{ { "url", url } });
     ASSERT_EQ (status, 200) << result.dump ();
+    EXPECT_EQ (base_url_of (result), url);
     const json request = folder_of (result, "Tools").at ("requests").at (0);
-    EXPECT_EQ (request.at ("url"), url);
-    EXPECT_EQ (request.at ("params").at (0).at ("key"), "tenant");
-    EXPECT_EQ (request.at ("params").at (0).at ("value"), "acme");
+    EXPECT_EQ (request.at ("url"), "{{mcpBaseUrl}}");
+    EXPECT_EQ (request.at ("params"), json::array ());
 }
 
 TEST (ImportMcpRoute, AListingPastTheItemCapFailsNamingIt) {
@@ -578,6 +753,105 @@ TEST_F (ImportMcpApplyTest, TheImportedTreePersistsThroughImportApply) {
         }
     }
     EXPECT_EQ (requests, 4U);
+}
+
+/// The tree an import answers, applied; the apply answer's status is checked.
+void apply_tree (vayu::db::Database& db, const json& result) {
+    const auto tree = vayu::utils::parse_ordered_json (
+    result.dump (), vayu::utils::ORDERED_JSON_UNBOUNDED);
+    ASSERT_HAS_VALUE (tree);
+    const json payload = vayu::core::import_apply_payload (*tree);
+    const auto [status, applied] = vayu::http::routes::import_apply_response (db, payload);
+    ASSERT_EQ (status, 200) << applied.dump ();
+}
+
+/// The stored request named @p name, wherever the tree filed it.
+std::optional<vayu::db::Request>
+stored_request (vayu::db::Database& db, const std::string& name) {
+    for (const auto& collection : db.get_collections ()) {
+        for (auto& request : db.get_requests_in_collection (collection.id)) {
+            if (request.name == name) {
+                return std::optional<vayu::db::Request> (std::in_place, std::move (request));
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+TEST_F (ImportMcpApplyTest, AToolsSchemaAndExpectationSurviveApplyAndABadOneCostsOnlyItself) {
+    McpFixtureServer server;
+    json tools = schema_tools ();
+    tools.push_back (json::parse (R"({"name":"bad_header","inputSchema":{
+      "properties":{"region":{"type":"string","x-mcp-header":"Bad Name"}}}})"));
+    server.set_tools (tools);
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    apply_tree (*db_, result);
+
+    const auto search = stored_request (*db_, "search");
+    ASSERT_HAS_VALUE (search);
+    const json body = json::parse (search->body);
+    EXPECT_EQ (body.at ("mcpTool").at ("name"), "search");
+    EXPECT_EQ (body.at ("mcpTool").at ("inputSchema"), tools.at (0).at ("inputSchema"));
+    EXPECT_EQ (search->url, "{{mcpBaseUrl}}");
+    const json elements = json::parse (search->elements);
+    ASSERT_EQ (elements.size (), 1U) << search->elements;
+    EXPECT_EQ (elements.at (0).at ("kind"), "assert.status");
+    EXPECT_EQ (elements.at (0).at ("config"), json::parse (R"({"in":[200]})"));
+
+    const auto bad = stored_request (*db_, "bad_header");
+    ASSERT_HAS_VALUE (bad);
+    EXPECT_FALSE (json::parse (bad->body).contains ("mcpTool"));
+
+    for (const auto& collection : db_->get_collections ()) {
+        if (collection.name == "vayu-fixture") {
+            EXPECT_EQ (json::parse (collection.variables).at ("mcpBaseUrl").at ("value"),
+            server.url ());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The generated collection runs as it stands.
+// ---------------------------------------------------------------------------
+
+// The tree is applied and its collection run, with no edit between: each tool's
+// sampled arguments, its mirrored `Mcp-Param-Region` header, `{{mcpBaseUrl}}`
+// and the `200` expectation all have to hold against a server that checks every
+// call's headers against its body. The empty `region` is mirrored as a
+// `=?base64??=` sentinel, which the fixture decodes back to the empty argument.
+// Mutation checks: set no `mcpTool` and `execute_sql` is refused for its missing
+// `Mcp-Param-Region`; drop the root variable and the step's URL stays unresolved.
+TEST_F (ScenarioRunnerTest, AnImportedMcpCollectionRunsWithNoEdits) {
+    McpFixtureServer mcp;
+    mcp.set_tools (schema_tools ());
+    const auto [status, result] = import_from (body_for (mcp));
+    ASSERT_EQ (status, 200) << result.dump ();
+    apply_tree (*db_, result);
+    const std::size_t tools_listed = mcp.calls ().size ();
+
+    for (const auto& collection : db_->get_collections ()) {
+        if (collection.name == "vayu-fixture") {
+            collection_id_ = collection.id;
+        }
+    }
+    ASSERT_NE (collection_id_, "col_1");
+    recursive_        = true;
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const json tools  = schema_tools ();
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), tools.size ());
+    for (const auto& trace : traces) {
+        EXPECT_EQ (trace.at ("outcome"), "passed") << trace.dump ();
+    }
+
+    const auto calls = mcp.calls ();
+    ASSERT_EQ (calls.size (), tools_listed + tools.size ());
+    for (std::size_t at = 0; at < tools.size (); ++at) {
+        EXPECT_EQ (calls.at (tools_listed + at).method, "tools/call");
+    }
 }
 
 } // namespace
