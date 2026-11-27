@@ -299,20 +299,46 @@ TEST (ImportMcpRoute, ArgumentsSatisfyAToolsComposedRequiredAndItsMinimums) {
     json::parse (R"({"a":"","page":1,"undeclared":""})"));
 }
 
-TEST (ImportMcpRoute, AToolsSchemaIsStoredAsMcpToolWithoutItsOutputSchema) {
+TEST (ImportMcpRoute, AToolsSchemasAreStoredAsMcpToolInputAndOutput) {
     McpFixtureServer server;
     server.set_tools (schema_tools ());
     const auto [status, result] = import_from (body_for (server));
     ASSERT_EQ (status, 200) << result.dump ();
     const json tools = folder_of (result, "Tools").at ("requests");
 
+    // The builder reads `outputSchema` (the Body tab, the default
+    // `assert.jsonschema`); a send ignores it.
     const json& stored = tools.at (0).at ("body").at ("mcpTool");
     EXPECT_EQ (stored.at ("name"), "search");
     EXPECT_EQ (stored.at ("inputSchema"), schema_tools ().at (0).at ("inputSchema"));
-    EXPECT_FALSE (stored.contains ("outputSchema"));
+    EXPECT_EQ (stored.at ("outputSchema"), schema_tools ().at (0).at ("outputSchema"));
+    EXPECT_FALSE (
+    tools.at (1).at ("body").at ("mcpTool").contains ("outputSchema"));
     // A tool with no schema is still named, so a person's later edit of the
     // call is held to the tool.
     EXPECT_EQ (tools.at (3).at ("body").at ("mcpTool"), json ({ { "name", "plain" } }));
+    EXPECT_EQ (result.at ("meta").at ("skipped"), json::array ());
+}
+
+TEST (ImportMcpRoute, AnOutputSchemaThatIsNotAnObjectIsNotStoredAndCostsNothing) {
+    McpFixtureServer server;
+    server.set_tools (json::parse (R"([
+      {"name":"flag","description":"Runs flag",
+       "inputSchema":{"type":"object","properties":{}},
+       "outputSchema":true},
+      {"name":"listing","description":"Runs listing","outputSchema":[{"type":"string"}]}])"));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    const json tools = folder_of (result, "Tools").at ("requests");
+    ASSERT_EQ (tools.size (), 2U);
+
+    for (const auto& request : tools) {
+        EXPECT_FALSE (
+        request.at ("body").at ("mcpTool").contains ("outputSchema"))
+        << request.at ("name");
+    }
+    EXPECT_EQ (tools.at (0).at ("body").at ("mcpTool").at ("inputSchema"),
+    json::parse (R"({"type":"object","properties":{}})"));
     EXPECT_EQ (result.at ("meta").at ("skipped"), json::array ());
 }
 
@@ -793,8 +819,11 @@ TEST_F (ImportMcpApplyTest, AToolsSchemaAndExpectationSurviveApplyAndABadOneCost
     const json body = json::parse (search->body);
     EXPECT_EQ (body.at ("mcpTool").at ("name"), "search");
     EXPECT_EQ (body.at ("mcpTool").at ("inputSchema"), tools.at (0).at ("inputSchema"));
+    EXPECT_EQ (body.at ("mcpTool").at ("outputSchema"), tools.at (0).at ("outputSchema"));
     EXPECT_EQ (search->url, "{{mcpBaseUrl}}");
     const json elements = json::parse (search->elements);
+    // One element: nothing generates an `assert.jsonschema` from the
+    // stored `outputSchema`.
     ASSERT_EQ (elements.size (), 1U) << search->elements;
     EXPECT_EQ (elements.at (0).at ("kind"), "assert.status");
     EXPECT_EQ (elements.at (0).at ("config"), json::parse (R"({"in":[200]})"));
