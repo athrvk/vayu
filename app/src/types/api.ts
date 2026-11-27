@@ -1764,6 +1764,30 @@ export interface ImportMcpDiffResponse {
 	matches: ImportMcpDiffMatch[];
 }
 
+/**
+ * What `POST /import/mcp/apply` writes (#3994): each list names rows of the diff the caller was
+ * shown. `added` entries are the diff's `{kind, key}`; `changed` and `removed` are stored request ids.
+ */
+export interface ImportMcpApplySelect {
+	added: { kind: ImportMcpDiffKind; key: string }[];
+	changed: string[];
+	removed: string[];
+}
+
+/** `POST /import/mcp/apply`: the body of `POST /import/mcp`, the collection compared and the rows chosen. */
+export interface ImportMcpApplyRequest extends ImportMcpRequest {
+	collectionId: string;
+	select: ImportMcpApplySelect;
+}
+
+/** What an apply wrote: the requests it created, the ones it updated in place, the ones it deleted. */
+export interface ImportMcpApplyResponse {
+	collectionId: string;
+	created: { kind: ImportMcpDiffKind; key: string; requestId: string }[];
+	updated: string[];
+	deleted: string[];
+}
+
 export interface ImportApplyRequest {
 	collections: ImportApplyCollection[];
 	requests: ImportApplyRequestItem[];

@@ -18,7 +18,7 @@ import { apiService } from "./api";
 import { httpClient } from "./http-client";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { IMPORT_MCP_TOTAL_TIMEOUT_MS } from "@/constants/import";
-import type { ImportMcpRequest } from "@/types/api";
+import type { ImportMcpApplyRequest, ImportMcpRequest } from "@/types/api";
 
 vi.mock("./http-client", async () => {
 	const actual = await vi.importActual<typeof import("./http-client")>("./http-client");
@@ -132,5 +132,53 @@ describe("apiService.importMcpDiff (#3842)", () => {
 		post.mockRejectedValue(refusal);
 
 		await expect(apiService.importMcpDiff(PAYLOAD)).rejects.toBe(refusal);
+	});
+});
+
+describe("apiService.importMcpApply (#3994)", () => {
+	const APPLY: ImportMcpApplyRequest = {
+		...PAYLOAD,
+		collectionId: "col_1",
+		select: {
+			added: [{ kind: "tool", key: "export" }],
+			changed: ["req_1"],
+			removed: ["req_9"],
+		},
+	};
+	const APPLIED = {
+		collectionId: "col_1",
+		created: [{ kind: "tool", key: "export", requestId: "req_3" }],
+		updated: ["req_1"],
+		deleted: ["req_9"],
+	};
+
+	beforeEach(() => {
+		post.mockResolvedValue(APPLIED);
+	});
+
+	it("posts the server request, the collection and the selection to /import/mcp/apply", async () => {
+		const result = await apiService.importMcpApply(APPLY);
+
+		expect(result).toBe(APPLIED);
+		const [path, body] = post.mock.calls[0] ?? [];
+		expect(path).toBe(API_ENDPOINTS.IMPORT_MCP_APPLY);
+		expect(path).toBe("/import/mcp/apply");
+		expect(body).toEqual(APPLY);
+	});
+
+	it("waits as long as importMcp, since it reads the server the same way first", async () => {
+		await apiService.importMcpApply(APPLY);
+		await apiService.importMcp(PAYLOAD);
+
+		const [apply, imported] = post.mock.calls.map((call) => call[2] as { timeout: number });
+		expect(apply.timeout).toBe(imported.timeout);
+		expect(apply.timeout).toBeGreaterThan(IMPORT_MCP_TOTAL_TIMEOUT_MS);
+	});
+
+	it("lets the engine's refusal reach the caller untouched", async () => {
+		const stale = new Error("req_1 is no longer a changed entry; compare again");
+		post.mockRejectedValue(stale);
+
+		await expect(apiService.importMcpApply(APPLY)).rejects.toBe(stale);
 	});
 });

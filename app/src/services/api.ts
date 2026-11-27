@@ -86,6 +86,8 @@ import type {
 	ImportParseRequest,
 	ImportMcpRequest,
 	ImportMcpDiffResponse,
+	ImportMcpApplyRequest,
+	ImportMcpApplyResponse,
 	ImportApplyResponse,
 	CreateSpecRequest,
 	SpecBindRequest,
@@ -1155,6 +1157,21 @@ export const apiService = {
 				timeout: IMPORT_MCP_BUDGET_MS,
 				...(options?.signal ? { signal: options.signal } : {}),
 			}
+		);
+	},
+
+	/**
+	 * Write the rows of an MCP re-import diff the user selected to the collection it compared, in
+	 * one transaction (#3994). The engine reads the server first, exactly as the diff does, so it
+	 * waits the same {@link IMPORT_MCP_BUDGET_MS}; a selected row the diff no longer holds is a 409
+	 * and nothing is written. Not retried by the caller: an added entry is a created request, so a
+	 * second send after a lost reply would answer 409 for it rather than resume.
+	 */
+	async importMcpApply(payload: ImportMcpApplyRequest): Promise<ImportMcpApplyResponse> {
+		return await httpClient.post<ImportMcpApplyResponse>(
+			API_ENDPOINTS.IMPORT_MCP_APPLY,
+			payload,
+			{ timeout: IMPORT_MCP_BUDGET_MS }
 		);
 	},
 

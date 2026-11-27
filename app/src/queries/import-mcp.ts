@@ -1,0 +1,37 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiService } from "@/services/api";
+import { invalidateAllRequestLists } from "./collections";
+import { queryKeys } from "./keys";
+import type { ImportMcpApplyRequest, ImportMcpApplyResponse } from "@/types";
+
+/**
+ * Apply the rows of an MCP re-import diff the user ticked to the collection it compared (#3994). One
+ * mutation for one engine call, which is one transaction, so a refusal (a 409 for a row the server's
+ * listing no longer holds) wrote nothing and there is nothing to roll back or refetch.
+ *
+ * On success, not settled, and the same invalidation a spec sync makes (`useSyncSpecMutation`): the
+ * collection list, and every request list as a family, since the creates land in the root's
+ * Tools, Resources and Prompts folders and the deletes in any of them.
+ *
+ * `retry: false`: an added entry is a created request, so a second send of a lost reply is not a
+ * resume. The shared client's default of one retry would turn it into a 409.
+ */
+export function useImportMcpApplyMutation() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		retry: false,
+		mutationFn: (payload: ImportMcpApplyRequest): Promise<ImportMcpApplyResponse> =>
+			apiService.importMcpApply(payload),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+			invalidateAllRequestLists(queryClient);
+		},
+	});
+}
