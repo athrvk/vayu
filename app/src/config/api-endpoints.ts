@@ -234,6 +234,7 @@ export const API_ENDPOINTS = {
 	IMPORT_FETCH: `/import/fetch`,
 	IMPORT_PARSE: `/import/parse`,
 	IMPORT_MCP: `/import/mcp`,
+	IMPORT_MCP_DIFF: `/import/mcp/diff`,
 	IMPORT_DOCUMENT: `/import/document`,
 	IMPORT_APPLY: `/import/apply`,
 

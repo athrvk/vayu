@@ -88,3 +88,49 @@ describe("apiService.importMcp", () => {
 		await expect(apiService.importMcp(PAYLOAD)).rejects.toBe(refusal);
 	});
 });
+
+describe("apiService.importMcpDiff (#3842)", () => {
+	const DIFF = { matches: [] };
+
+	beforeEach(() => {
+		post.mockResolvedValue(DIFF);
+	});
+
+	it("posts the same body as importMcp to /import/mcp/diff and returns the answer", async () => {
+		const result = await apiService.importMcpDiff(PAYLOAD);
+
+		expect(result).toBe(DIFF);
+		const [path, body] = post.mock.calls[0] ?? [];
+		expect(path).toBe(API_ENDPOINTS.IMPORT_MCP_DIFF);
+		expect(path).toBe("/import/mcp/diff");
+		expect(body).toEqual(PAYLOAD);
+	});
+
+	it("waits as long as importMcp, since it reads the server the same way", async () => {
+		await apiService.importMcpDiff(PAYLOAD);
+		await apiService.importMcp(PAYLOAD);
+
+		const [diff, imported] = post.mock.calls.map((call) => call[2] as { timeout: number });
+		expect(diff.timeout).toBe(imported.timeout);
+		expect(diff.timeout).toBeGreaterThan(IMPORT_MCP_TOTAL_TIMEOUT_MS);
+	});
+
+	it("passes the caller's signal through, and sends none when there is none", async () => {
+		const controller = new AbortController();
+
+		await apiService.importMcpDiff(PAYLOAD, { signal: controller.signal });
+		await apiService.importMcpDiff(PAYLOAD);
+
+		expect((post.mock.calls[0]?.[2] as { signal?: AbortSignal }).signal).toBe(
+			controller.signal
+		);
+		expect(post.mock.calls[1]?.[2]).not.toHaveProperty("signal");
+	});
+
+	it("lets the engine's refusal reach the caller untouched", async () => {
+		const refusal = new Error("Server did not answer");
+		post.mockRejectedValue(refusal);
+
+		await expect(apiService.importMcpDiff(PAYLOAD)).rejects.toBe(refusal);
+	});
+});

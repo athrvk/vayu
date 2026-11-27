@@ -169,7 +169,15 @@ The MCP server tab's fields, controlled by `ImportModal`: a tab switch leaves th
 `import-mcp.ts` beside it holds the form's state, `canConnectMcp` (a URL and at least one primitive) and `mcpImportRequest` (the `POST /import/mcp` body: blank and disabled header rows are dropped).
 The connect is `ImportModal`'s `handleConnectMcp`: its own `AbortController` and generation, as the URL download has, and the answer becomes the tab's one batch entry (`mcpBatchEntry`), so the preview and apply are the other tabs' own.
 The environment and script checkboxes are not drawn on this tab.
+Right after the connect, `existingMcpImports` (`import-mcp.ts`) asks `apiService.importMcpDiff` which collections an earlier import of the URL built and stores them on the entry as `BatchEntry.existingMcp`; it never throws, so a failed comparison is the same as no match.
 See [import-collections/mcp-server.md](../import-collections/mcp-server.md).
+
+## `McpReimportDiff.tsx`
+
+The preview's report on an MCP server that was imported before (issue [#3842](https://github.com/athrvk/vayu/issues/3842)): one block per matched collection, with its added, changed and removed counts stated in full, zeros included, and the entries under each.
+A renamed tool is one changed row reading `old → new`.
+Read-only: the footer's button reads **Import anyway** and makes a new collection as before, and the copy says nothing is changed in the existing one.
+It reads the engine's `ImportMcpDiffMatch` shape directly, not the spec sync's `SpecDiff` types.
 
 ## `ImportClientCertificates.tsx`
 

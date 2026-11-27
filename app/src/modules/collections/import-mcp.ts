@@ -12,7 +12,9 @@
  */
 
 import { withTrailingBlank } from "@/components/shared/KeyValueEditor/key-value";
-import type { ImportMcpRequest, KeyValueItem } from "@/types";
+import { logError } from "@/errors/error-logger";
+import { apiService } from "@/services/api";
+import type { ImportMcpDiffMatch, ImportMcpRequest, KeyValueItem } from "@/types";
 
 export type McpPrimitive = "tools" | "resources" | "prompts";
 
@@ -54,4 +56,23 @@ export function mcpImportRequest(form: McpFormState): ImportMcpRequest {
 		...(token !== "" ? { auth: { mode: "bearer" as const, token } } : {}),
 		include: form.include,
 	};
+}
+
+/**
+ * The collections an earlier import of this server built, compared with what it lists now (#3842).
+ * Never throws: the comparison is a courtesy beside an import that does not need it, so a failure
+ * reads as "nothing to compare" and is logged, not shown. A cancel is no failure and is not logged.
+ */
+export async function existingMcpImports(
+	request: ImportMcpRequest,
+	signal: AbortSignal
+): Promise<ImportMcpDiffMatch[]> {
+	try {
+		return (await apiService.importMcpDiff(request, { signal })).matches;
+	} catch (e) {
+		if (!signal.aborted) {
+			logError(e as Error, "low", { component: "renderer", action: "import-mcp-diff" });
+		}
+		return [];
+	}
 }

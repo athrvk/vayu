@@ -31,6 +31,7 @@ apiService.updateGlobals(variables): Promise<GlobalVariables>
 apiService.importFetch(url, maxBytes?, onProgress?, signal?, options?): Promise<ImportFetchResponse> // POST /import/fetch
 apiService.applyImport(payload): Promise<ImportApplyResponse>      // POST /import/apply
 apiService.importMcp(payload, { signal? }): Promise<ImportResult>  // POST /import/mcp
+apiService.importMcpDiff(payload, { signal? }): Promise<ImportMcpDiffResponse>  // POST /import/mcp/diff
 ```
 
 `importFetch`'s `maxBytes` is the largest response that fetch may read.
@@ -66,5 +67,6 @@ Imported **globals** are not in this payload: they are a singleton written throu
 `importMcp` asks a live MCP server what it offers and answers the tree `parseImport` answers, for the Import dialog's MCP server tab ([mcp-server.md](../import-collections/mcp-server.md)).
 The engine makes several calls to the server, so the budget is the engine's 120 s whole-import bound (`IMPORT_MCP_TOTAL_TIMEOUT_MS`, mirrored from `constants::import_mcp::TOTAL_TIMEOUT_MS` and pinned by `import.engine-parity.test.ts`) plus the transport grace, not the `defaultTimeout` setting.
 The optional `signal` cancels the wait and raises an `AbortError`; the engine keeps talking to the server until its own bound, but nothing acts on the answer.
+`importMcpDiff` takes the same body and the same budget and answers which collections an earlier import of that server built and how its listing now differs from each ([`POST /import/mcp/diff`](../../engine/api-reference/import.md#post-importmcpdiff)); the dialog asks it right after `importMcp` succeeds, and a failure there is treated as no match.
 
 See [import-collections/README.md](.././import-collections/README.md#3-persist---orchestratorts) for the pipeline and [engine/api-reference/import.md](../../engine/api-reference/import.md#post-importapply) for the contract.
