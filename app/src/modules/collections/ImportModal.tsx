@@ -57,9 +57,11 @@ import {
 	unselectedCertificateCount,
 	withCertificateTicked,
 } from "@/services/importers/client-certificate-selection";
-import { describeCarriedOver, describeCounts, importNotices } from "./import-notices";
+import { describeCarriedOver, describeCounts, importResultNotices } from "./import-notices";
 import { NoticeList } from "./NoticeList";
 import { ImportClientCertificates } from "./ImportClientCertificates";
+import { ImportMcpForm } from "./ImportMcpForm";
+import { canConnectMcp, emptyMcpForm, mcpImportRequest } from "./import-mcp";
 import { announceImport, buildImportReport } from "./import-report";
 import { activateImportedEnvironment } from "./import-environment";
 import { ImportFileFolders } from "./ImportFileFolders";
@@ -69,12 +71,14 @@ import {
 	detectBatch,
 	entryLabel,
 	isImportableFileName,
+	mcpBatchEntry,
 	reparseBatch,
 	type BatchDocument,
 	type BatchEntry,
 } from "@/services/importers/batch";
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { fileBaseName } from "@/lib/file-path";
+import { IMPORT_MCP_FORMAT } from "@/constants/import";
 import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
 import { Callout, MethodBadge, FieldError } from "@/components/shared";
 import { isCommitEnter } from "@/lib/keyboard";
@@ -85,7 +89,15 @@ import { importCommand, type CommandImport } from "@/services/curl/parseCurl";
 import { pasteNotices } from "@/modules/request-builder/utils/paste-disclosure";
 import { presetFromCommand } from "./curl-request-preset";
 
-type Tab = "file" | "url" | "paste";
+/** The dialog's sources, in tab order. */
+const TABS = ["file", "url", "paste", "mcp"] as const;
+type Tab = (typeof TABS)[number];
+const TAB_LABELS: Record<Tab, string> = {
+	file: "File",
+	url: "URL",
+	paste: "Paste",
+	mcp: "MCP server",
+};
 type Phase = "idle" | "detecting" | "preview" | "error";
 
 /**
@@ -143,11 +155,14 @@ export function ImportModal() {
 		file: IDLE_TAB,
 		url: IDLE_TAB,
 		paste: IDLE_TAB,
+		mcp: IDLE_TAB,
 	}));
 	const [pasteText, setPasteText] = useState("");
 	/** The Paste tab's text when it is a curl/wget command, which is not a collection (#2250). */
 	const [pastedCommand, setPastedCommand] = useState<CommandImport | null>(null);
 	const [url, setUrl] = useState("");
+	/** The MCP tab's fields, the bearer token among them: state here and nowhere else. */
+	const [mcpForm, setMcpForm] = useState(emptyMcpForm);
 	const [importEnvironments, setImportEnvironments] = useState(true);
 	const [importScripts, setImportScripts] = useState(true);
 	/**
@@ -175,20 +190,21 @@ export function ImportModal() {
 
 	/**
 	 * Which run of each tab is current (issue #893). A generation rather than an abort path per
-	 * stage, because the writes are what must stop and there are four kinds: the fetch, the detect,
-	 * an option re-parse and the apply's outcomes. Each captures its tab's number at the start and
+	 * stage, because the writes are what must stop and there are five kinds: the fetch, the detect,
+	 * the MCP connect, an option re-parse and the apply's outcomes. Each captures its tab's number at the start and
 	 * drops its patch if the number has moved (the dialog closed or the tab was reset), so a parse
 	 * finishing after a close cannot write a preview into the state the dialog next opens with.
 	 *
 	 * A ref, not state: async work must read the current value, not the one its closure captured.
 	 */
-	const generation = useRef<Record<Tab, number>>({ file: 0, url: 0, paste: 0 });
+	const generation = useRef<Record<Tab, number>>({ file: 0, url: 0, paste: 0, mcp: 0 });
 	/**
-	 * The in-flight URL download's cancel, or null. The generation stops the writes; this stops the
-	 * work. Only the fetch has one: it is the only stage that goes on costing after nobody is
-	 * listening (the engine reads the rest of a 10 MB document either way).
+	 * Each tab's in-flight call's cancel. The generation stops the writes; this stops the wait: the
+	 * engine keeps talking to an MCP server until its own bound.
+	 * Only the URL download and the MCP connect have one: they are the stages that go on costing
+	 * after nobody is listening (the engine reads the rest of a 10 MB document either way).
 	 */
-	const fetchAbort = useRef<AbortController | null>(null);
+	const inFlight = useRef<Partial<Record<Tab, AbortController>>>({});
 
 	const active = tabs[tab];
 	const { phase, error, entries, progress } = active;
@@ -207,10 +223,8 @@ export function ImportModal() {
 	/** Abandon whatever this tab was doing, so no late write can land on it. */
 	const supersede = (t: Tab): number => {
 		generation.current[t] += 1;
-		if (t === "url") {
-			fetchAbort.current?.abort();
-			fetchAbort.current = null;
-		}
+		inFlight.current[t]?.abort();
+		delete inFlight.current[t];
 		return generation.current[t];
 	};
 
@@ -226,6 +240,7 @@ export function ImportModal() {
 	const resetTab = (t: Tab) => {
 		const at = supersede(t);
 		if (t === "url") setUrl("");
+		if (t === "mcp") setMcpForm(emptyMcpForm());
 		if (t === "paste") {
 			setPasteText("");
 			setPastedCommand(null);
@@ -237,7 +252,7 @@ export function ImportModal() {
 		if (applying) return;
 		// Every tab, not just the visible one: another may be mid-download, and a reopened dialog
 		// must not show work the user closed.
-		(["file", "url", "paste"] as Tab[]).forEach(resetTab);
+		TABS.forEach(resetTab);
 		setReimports(null);
 		close();
 	};
@@ -395,7 +410,7 @@ export function ImportModal() {
 	 * options would make the same two checkboxes answer differently by tab.
 	 */
 	const redetect = (next: { importEnvironments: boolean; importScripts: boolean }) => {
-		for (const t of ["file", "url", "paste"] as Tab[]) {
+		for (const t of TABS) {
 			const state = tabs[t];
 			if (state.phase !== "preview" || state.entries.length === 0) continue;
 			// Supersede, not merely capture (issue #895). A re-parse is an engine round trip per
@@ -488,7 +503,8 @@ export function ImportModal() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isOpen, pendingFiles]);
 
-	// Fetching a URL is the only source a user can enter twice by hand, so it needs the guard. The
+	// Fetching a URL and connecting to an MCP server are the sources a user can enter twice by hand,
+	// so they need the guard. The
 	// same phase disables the drop zone, the folder picker and the Paste button (a second drop
 	// mid-read races the first as a second fetch does) and puts the progress panel on screen (issue
 	// #882).
@@ -522,7 +538,7 @@ export function ImportModal() {
 		if (isBusy) return;
 		const at = supersede("url");
 		const abort = new AbortController();
-		fetchAbort.current = abort;
+		inFlight.current.url = abort;
 		patchTab("url", at, { phase: "detecting", error: "" });
 		try {
 			// No `maxBytes`: this box takes any format, and a Postman or Insomnia export is never
@@ -547,7 +563,34 @@ export function ImportModal() {
 			if (abort.signal.aborted) return;
 			patchTab("url", at, { progress: null, error: (e as Error).message, phase: "error" });
 		} finally {
-			if (fetchAbort.current === abort) fetchAbort.current = null;
+			if (inFlight.current.url === abort) delete inFlight.current.url;
+		}
+	};
+
+	/**
+	 * Ask the typed MCP server what it offers and preview the tree the engine builds from it. The
+	 * answer is already parsed, so it becomes the tab's one entry directly (`mcpBatchEntry`): the
+	 * preview, the notices and the apply are the other tabs' own from there.
+	 */
+	const handleConnectMcp = async () => {
+		if (isBusy || !canConnectMcp(mcpForm)) return;
+		const at = supersede("mcp");
+		const abort = new AbortController();
+		inFlight.current.mcp = abort;
+		patchTab("mcp", at, { phase: "detecting", error: "", progress: { stage: "connecting" } });
+		const request = mcpImportRequest(mcpForm);
+		try {
+			const result = await apiService.importMcp(request, { signal: abort.signal });
+			patchTab("mcp", at, {
+				progress: null,
+				entries: [mcpBatchEntry(result, request.url)],
+				phase: "preview",
+			});
+		} catch (e) {
+			// A cancel (`supersede`) moved the generation, so `patchTab` drops its AbortError.
+			patchTab("mcp", at, { progress: null, error: (e as Error).message, phase: "error" });
+		} finally {
+			if (inFlight.current.mcp === abort) delete inFlight.current.mcp;
 		}
 	};
 
@@ -730,7 +773,7 @@ export function ImportModal() {
 		redetect({ importEnvironments, importScripts: v });
 	};
 
-	// Shared by all three tab panels; the inner conditionals already switch on
+	// Shared by all four tab panels; the inner conditionals already switch on
 	// the active tab, and only the active panel is mounted.
 	const panelBody = (
 		<>
@@ -741,6 +784,11 @@ export function ImportModal() {
 							result={single.result}
 							importEnvironments={importEnvironments}
 							selectedCertificates={single.selectedCertificates}
+							source={
+								single.result.meta.format === IMPORT_MCP_FORMAT
+									? entryLabel(single)
+									: undefined
+							}
 							onDismiss={() => resetTab(tab)}
 						/>
 					) : (
@@ -914,6 +962,14 @@ export function ImportModal() {
 							)}
 						</div>
 					)}
+					{tab === "mcp" && (
+						<ImportMcpForm
+							form={mcpForm}
+							onChange={setMcpForm}
+							onConnect={() => void handleConnectMcp()}
+							busy={isBusy}
+						/>
+					)}
 					{/*
 					 * Below the tab's controls, not replacing them: the URL being downloaded is the
 					 * context a user waiting on 8 MB wants most, and the disabled Fetch button says
@@ -969,7 +1025,7 @@ export function ImportModal() {
 				 * brings the tabs keyboard model (one tab stop for the set, arrow keys between
 				 * tabs).
 				 *
-				 * `size="sm"` (28px), not the `xs` default: File/URL/Paste is this dialog's
+				 * `size="sm"` (28px), not the `xs` default: the source tabs are this dialog's
 				 * top-level navigation, the role the dashboard's root tabs play, while `xs` is
 				 * sized for a strip nested in a chosen section (Collection Detail, the response
 				 * viewer) and reads thinner than the header and footer bands here.
@@ -982,11 +1038,9 @@ export function ImportModal() {
 					className="flex min-h-0 flex-1 flex-col"
 				>
 					<TabsList variant="pane" size="sm" className="w-full">
-						{(["file", "url", "paste"] as Tab[]).map((t) => (
+						{TABS.map((t) => (
 							<TabsTrigger key={t} value={t}>
-								<TabLabel>
-									{t === "file" ? "File" : t === "url" ? "URL" : "Paste"}
-								</TabLabel>
+								<TabLabel>{TAB_LABELS[t]}</TabLabel>
 							</TabsTrigger>
 						))}
 					</TabsList>
@@ -997,17 +1051,17 @@ export function ImportModal() {
 					 * referencing missing ids. Only the active panel mounts, so the shared body
 					 * still renders once.
 					 */}
-					{(["file", "url", "paste"] as Tab[]).map((t) => (
+					{TABS.map((t) => (
 						<TabsContent
 							key={t}
 							value={t}
 							/*
-							 * `min-h` holds the three tabs to one height: the File dropzone is
-							 * 247px tall and the URL row 76, so the centred dialog would resize by
-							 * 171px and jump 85px up on a switch to URL. Sized to the tallest tab,
-							 * so the shell never moves.
+							 * `min-h` holds the tabs to one height, so the centred dialog does not
+							 * resize on a switch. Sized to the tallest, the MCP server form: its
+							 * panel measures 273px with its padding, against 230 for File, 184 for
+							 * Paste and 58 for URL. Header rows the user adds grow it past that.
 							 */
-							className="mt-0 min-h-[248px] overflow-y-auto p-5"
+							className="mt-0 min-h-[273px] overflow-y-auto p-5"
 						>
 							{panelBody}
 						</TabsContent>
@@ -1035,27 +1089,34 @@ export function ImportModal() {
 							 * alone). `size-target` (issue #1679, 24-28px) is the box's own floor;
 							 * the labels fix which words each checkbox answers to, not its size.
 							 */}
-							<div className="flex flex-col gap-1 text-label text-muted-foreground">
-								<label className="flex w-fit items-center gap-1.5">
-									<Checkbox
-										checked={importEnvironments}
-										disabled={applying}
-										onChange={(e) => toggleEnvironments(e.target.checked)}
-										className="size-target"
-									/>
-									Import environments &amp; variables
-								</label>
-								<label className="flex w-fit items-center gap-1.5">
-									<Checkbox
-										checked={importScripts}
-										disabled={applying}
-										onChange={(e) => toggleScripts(e.target.checked)}
-										className="size-target"
-									/>
-									Import pre-request &amp; test scripts
-								</label>
-							</div>
-							<div className="flex gap-2">
+							{/*
+							 * Not offered for an MCP server: its tree carries no environment, no global
+							 * and no script, so both boxes would answer a question the source cannot
+							 * ask. The values stay, for the tabs that do.
+							 */}
+							{tab !== "mcp" && (
+								<div className="flex flex-col gap-1 text-label text-muted-foreground">
+									<label className="flex w-fit items-center gap-1.5">
+										<Checkbox
+											checked={importEnvironments}
+											disabled={applying}
+											onChange={(e) => toggleEnvironments(e.target.checked)}
+											className="size-target"
+										/>
+										Import environments &amp; variables
+									</label>
+									<label className="flex w-fit items-center gap-1.5">
+										<Checkbox
+											checked={importScripts}
+											disabled={applying}
+											onChange={(e) => toggleScripts(e.target.checked)}
+											className="size-target"
+										/>
+										Import pre-request &amp; test scripts
+									</label>
+								</div>
+							)}
+							<div className="ml-auto flex gap-2">
 								<DialogCancelButton
 									onClick={handleClose}
 									disabled={importMutation.isPending}
@@ -1109,11 +1170,14 @@ function PreviewView({
 	result,
 	importEnvironments,
 	selectedCertificates,
+	source,
 	onDismiss,
 }: {
 	result: ImportResult;
 	importEnvironments: boolean;
 	selectedCertificates: readonly number[] | undefined;
+	/** What the result was read from when `meta.fileName` does not say: the MCP server's URL. */
+	source?: string;
 	onDismiss: () => void;
 }) {
 	const { meta, collections, environments, globals } = result;
@@ -1134,9 +1198,9 @@ function PreviewView({
 					/>
 				}
 			>
-				{meta.fileName && (
+				{(meta.fileName ?? source) && (
 					<span className="font-mono text-label text-muted-foreground">
-						{meta.fileName}
+						{meta.fileName ?? source}
 					</span>
 				)}
 			</Callout>
@@ -1188,8 +1252,8 @@ function PreviewView({
 				</p>
 			)}
 			<NoticeList
-				notices={importNotices(
-					meta,
+				notices={importResultNotices(
+					result,
 					unselectedCertificateCount(result, selectedCertificates)
 				)}
 			/>
@@ -1264,7 +1328,10 @@ function BatchRow({
 	// wherever it is named.
 	const name = entryLabel(entry);
 	const notices = result
-		? importNotices(result.meta, unselectedCertificateCount(result, entry.selectedCertificates))
+		? importResultNotices(
+				result,
+				unselectedCertificateCount(result, entry.selectedCertificates)
+			)
 		: [];
 	return (
 		<label className="flex items-start gap-2 py-1 pl-1 text-xs">

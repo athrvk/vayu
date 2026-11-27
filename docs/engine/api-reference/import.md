@@ -311,6 +311,7 @@ A client that streams a very large body may see the connection closed rather tha
 Import from a live MCP server (issue [#3838](https://github.com/athrvk/vayu/issues/3838)): ask it what it offers and answer the tree [`POST /import/parse`](#post-importparse) answers.
 [`POST /import/apply`](#post-importapply) persists it unchanged and the import preview reads it as any other format.
 Reads only - nothing is stored.
+The app's Import dialog calls it from its MCP server tab ([MCP server import](../../app/import-collections/mcp-server.md)).
 
 Every call is a modern-era (`2026-07-28`) Streamable HTTP POST sent as an `mcp` body ([The `mcp` body](request-body.md#the-mcp-body)).
 The envelope, `_meta` and the derived headers are the ones a saved request sends.

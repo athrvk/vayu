@@ -30,9 +30,11 @@ import type {
 } from "@/services/importers/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { containsVariableToken } from "@/constants/variables";
+import { IMPORT_MCP_FORMAT, IMPORT_MCP_TOKEN_VARIABLE } from "@/constants/import";
 import { isBlankScriptElement } from "@/lib/elements";
 import { formatNumber } from "@/lib/format-number";
 import { parentFolder } from "@/lib/file-path";
+import { isSecretHeaderName } from "@/lib/secret-header-name";
 
 export type NoticeTier = "action" | "note";
 
@@ -615,6 +617,67 @@ export function importNotices(meta: ImportMeta, unticked = 0): ImportNotice[] {
 	return [
 		...notices.filter((n) => n.tier === "action"),
 		...notices.filter((n) => n.tier === "note"),
+	];
+}
+
+/**
+ * The line for an MCP import made with a bearer token (#3843). The engine never returns the token:
+ * the root collection reads a secret `mcpToken` variable it leaves empty, so the requests send
+ * nothing until the user fills it. The variable's presence is the engine's own record that a token
+ * was given, so the line follows the result and not the form.
+ */
+export function mcpTokenNotice(result: ImportResult): ImportNotice[] {
+	if (result.meta.format !== IMPORT_MCP_FORMAT) return [];
+	if (!result.collections.some((c) => IMPORT_MCP_TOKEN_VARIABLE in c.variables)) return [];
+	return [
+		{
+			tier: "action",
+			text: `The token is not stored in the collection - set the ${IMPORT_MCP_TOKEN_VARIABLE} variable before you send`,
+		},
+	];
+}
+
+/** Every request in the tree, depth first. */
+function requestsOf(collections: readonly CollectionDraft[]): RequestDraft[] {
+	return collections.flatMap((c) => [...c.requests, ...requestsOf(c.children)]);
+}
+
+/**
+ * The line for headers the user typed into the MCP form that the engine carried blank (#3843): a
+ * credential-named header (`X-API-Key`, `Cookie`) comes back as a disabled row with no value, so
+ * its secret never lands in the collection. Counted by name, as every request repeats the same rows.
+ */
+export function mcpBlankedHeaderNotice(result: ImportResult): ImportNotice[] {
+	if (result.meta.format !== IMPORT_MCP_FORMAT) return [];
+	const names = new Set(
+		requestsOf(result.collections)
+			.flatMap((request) => request.headers)
+			.filter((row) => !row.enabled && row.value === "" && isSecretHeaderName(row.key))
+			.map((row) => row.key.toLowerCase())
+	);
+	if (names.size === 0) return [];
+	const n = names.size;
+	return [
+		{
+			tier: "action",
+			text: `${n} ${pluralize(n, "header holds", "headers hold")} a credential and ${pluralize(n, "arrives", "arrive")} blank and disabled - fill ${pluralize(n, "it", "them")} in before you send`,
+		},
+	];
+}
+
+/**
+ * Every line an applied or previewed result carries: the MCP lines, which read the drafts (the
+ * engine reports them nowhere in `meta`), then the engine's own. The preview, the batch ledger and
+ * the report kept after the dialog closes (`buildImportReport`) all read this one list, so what the
+ * preview told the user is what the report still says.
+ *
+ * @param unticked as `importNotices`
+ */
+export function importResultNotices(result: ImportResult, unticked = 0): ImportNotice[] {
+	return [
+		...mcpTokenNotice(result),
+		...mcpBlankedHeaderNotice(result),
+		...importNotices(result.meta, unticked),
 	];
 }
 

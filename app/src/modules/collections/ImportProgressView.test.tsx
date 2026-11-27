@@ -46,4 +46,11 @@ describe("ImportProgressView", () => {
 		const detail = region().querySelector('[aria-hidden="true"]');
 		expect(detail?.textContent).toMatch(/\bKB\b/);
 	});
+
+	it("names a connect to a server and reports no figures for it", () => {
+		render(<ImportProgressView progress={{ stage: "connecting" }} />);
+
+		expect(region().textContent).toBe("Asking the server");
+		expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
+	});
 });

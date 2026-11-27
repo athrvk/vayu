@@ -30,6 +30,7 @@ apiService.updateGlobals(variables): Promise<GlobalVariables>
 ```typescript
 apiService.importFetch(url, maxBytes?, onProgress?, signal?, options?): Promise<ImportFetchResponse> // POST /import/fetch
 apiService.applyImport(payload): Promise<ImportApplyResponse>      // POST /import/apply
+apiService.importMcp(payload, { signal? }): Promise<ImportResult>  // POST /import/mcp
 ```
 
 `importFetch`'s `maxBytes` is the largest response that fetch may read.
@@ -62,4 +63,8 @@ Every layer between the bundler and `importFetch` (`ExternalRefIntake.fetchUrl`,
 Items reference each other by opaque `tempId`s and the engine returns the temp-id -> real-id `idMap`; a rejected payload persisted nothing, so there is nothing to roll back.
 An OpenAPI import puts the document in the `specs` section and binds its root collection with `openapi.specTempId`, so the spec, the binding and every request's `specOperation` land in the same transaction - `specs: []` is sent for every other format rather than omitted, so the payload is one shape.
 Imported **globals** are not in this payload: they are a singleton written through `updateGlobals` after the apply succeeds.
+`importMcp` asks a live MCP server what it offers and answers the tree `parseImport` answers, for the Import dialog's MCP server tab ([mcp-server.md](../import-collections/mcp-server.md)).
+The engine makes several calls to the server, so the budget is the engine's 120 s whole-import bound (`IMPORT_MCP_TOTAL_TIMEOUT_MS`, mirrored from `constants::import_mcp::TOTAL_TIMEOUT_MS` and pinned by `import.engine-parity.test.ts`) plus the transport grace, not the `defaultTimeout` setting.
+The optional `signal` cancels the wait and raises an `AbortError`; the engine keeps talking to the server until its own bound, but nothing acts on the answer.
+
 See [import-collections/README.md](.././import-collections/README.md#3-persist---orchestratorts) for the pipeline and [engine/api-reference/import.md](../../engine/api-reference/import.md#post-importapply) for the contract.

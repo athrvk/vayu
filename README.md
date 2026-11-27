@@ -91,6 +91,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **Insomnia** - v4 JSON and v5 YAML exports (collections, and v5 environments)
 - **JMeter** - `.jmx` test plans: HTTP samplers, extractors, assertions, timers and logic controllers; a class with no equivalent is counted rather than dropped ([what carries over](https://athrvk.github.io/vayu/app/import-collections/jmeter/))
 - **OpenAPI / Swagger** - 3.1, 3.0 and 2.0 specs (JSON or YAML); generates a ready-to-use collection from the spec
+- **MCP server** - paste a server's URL (and a bearer token, if it needs one) in the Import dialog and get a request for each of its tools, resources and prompts ([how it works](https://athrvk.github.io/vayu/app/import-collections/mcp-server/))
 
 ---
 
@@ -102,7 +103,7 @@ Migrating takes seconds. Drop an existing export onto Vayu and the workspace is 
 - **Collections & folder hierarchy** - nested collections with per-collection variables, auth, and pre/post scripts
 - **Scenario collection runs** - run a collection as an ordered scenario, in design mode or under load, with per-step results and threshold verdicts
 - **Data-driven runs** - drive a collection from a CSV, TSV, JSON or JSONL file; columns arrive as `{{data.column}}` tokens and `pm.iterationData`, declared up front on the collection's Data tab
-- **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4 and v5, JMeter `.jmx`, OpenAPI 3.1/3.0, Swagger 2.0
+- **One-drop import** - Postman v2.0/v2.1, Postman environments and globals, Insomnia v4 and v5, JMeter `.jmx`, OpenAPI 3.1/3.0, Swagger 2.0, or a live MCP server's URL
 - **Saved response examples** - capture a real response against a request and keep it as a named example
 - **Mock servers** - serve a collection's saved examples as a live mock, plus a mock OAuth issuer for auth flows and a webhook inbox that captures inbound calls
 - **MCP server testing** - an `mcp` request body mode sends `tools/call`, `resources/read` and `prompts/get` to a Streamable HTTP MCP server; assert on the reply, run it in a collection or under load, and read failures by class (tool, protocol, transport)

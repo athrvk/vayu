@@ -233,6 +233,7 @@ export const API_ENDPOINTS = {
 	// find and rewrite external `$ref`s before a spec is stored.
 	IMPORT_FETCH: `/import/fetch`,
 	IMPORT_PARSE: `/import/parse`,
+	IMPORT_MCP: `/import/mcp`,
 	IMPORT_DOCUMENT: `/import/document`,
 	IMPORT_APPLY: `/import/apply`,
 

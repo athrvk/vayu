@@ -15,6 +15,7 @@
  */
 export const IMPORT_STAGE_LABELS = {
 	reading: "Reading files",
+	connecting: "Asking the server",
 	fetching: "Downloading",
 	bundling: "Resolving references",
 	parsing: "Reading documents",
@@ -42,3 +43,19 @@ export const IMPORT_FETCH_EVENTS = {
  * download the engine is still reading, or a connect the engine is still allowed to wait on.
  */
 export const IMPORT_FETCH_STALL_TIMEOUT_MS = 30_000;
+
+/**
+ * The whole-import bound `POST /import/mcp` holds a server to, mirroring
+ * `constants::import_mcp::TOTAL_TIMEOUT_MS` (`import.engine-parity.test.ts` pins the two). The
+ * renderer's budget for the call derives from it, so the engine's own 502 names the overrun
+ * before the client gives up.
+ */
+export const IMPORT_MCP_TOTAL_TIMEOUT_MS = 120_000;
+
+/**
+ * What an MCP import's tree is named, mirroring `MCP_IMPORT_FORMAT` and `MCP_TOKEN_VARIABLE`
+ * (`mcp_import.hpp`; `import.engine-parity.test.ts` pins both). The format says the tree came from
+ * a server, and the variable is the secret one a bearer import leaves empty for the user to fill.
+ */
+export const IMPORT_MCP_FORMAT = "MCP server";
+export const IMPORT_MCP_TOKEN_VARIABLE = "mcpToken";

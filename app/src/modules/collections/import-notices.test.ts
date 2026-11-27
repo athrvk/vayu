@@ -27,6 +27,9 @@ import {
 	describeCounts,
 	fileReferenceNeeds,
 	importNotices,
+	importResultNotices,
+	mcpBlankedHeaderNotice,
+	mcpTokenNotice,
 } from "./import-notices";
 import { stubNumberLocale } from "@/test/number-locale";
 import { collection, request, result } from "./import-preview.testkit";
@@ -1072,5 +1075,116 @@ describe("importNotices - client certificates left unticked (#2363)", () => {
 			"2 client certificates not imported - add them in Settings",
 			"1 per-request proxy setting not imported",
 		]);
+	});
+});
+
+describe("mcpTokenNotice (#3843)", () => {
+	const tokenVariable = { mcpToken: { value: "", enabled: true, secret: true } };
+	const treeOf = (format: string, variables: CollectionDraft["variables"]) =>
+		result({ collections: [collection({ variables })], meta: { format } });
+
+	it("tells the user to fill the variable a bearer import leaves empty", () => {
+		const [notice, ...rest] = mcpTokenNotice(treeOf("MCP server", tokenVariable));
+		expect(rest).toEqual([]);
+		expect(notice.tier).toBe("action");
+		expect(notice.text).toBe(
+			"The token is not stored in the collection - set the mcpToken variable before you send"
+		);
+	});
+
+	it("says nothing for an import made without a token", () => {
+		expect(mcpTokenNotice(treeOf("MCP server", {}))).toEqual([]);
+	});
+
+	it("leaves another format's variable of the same name alone", () => {
+		expect(mcpTokenNotice(treeOf("Postman Collection v2.1", tokenVariable))).toEqual([]);
+	});
+});
+
+describe("mcpBlankedHeaderNotice (#3843)", () => {
+	const row = (key: string, value = "", enabled = false) => ({ key, value, enabled });
+	const treeOf = (format: string, ...headers: ReturnType<typeof row>[][]) =>
+		result({
+			collections: [collection({ requests: headers.map((h) => request({ headers: h })) })],
+			meta: { format },
+		});
+
+	it("says a credential header the user typed arrives blank and disabled", () => {
+		const [notice, ...rest] = mcpBlankedHeaderNotice(treeOf("MCP server", [row("X-API-Key")]));
+		expect(rest).toEqual([]);
+		expect(notice.tier).toBe("action");
+		expect(notice.text).toBe(
+			"1 header holds a credential and arrives blank and disabled - fill it in before you send"
+		);
+	});
+
+	it("counts each name once, however many requests repeat the row, in any case", () => {
+		const [notice] = mcpBlankedHeaderNotice(
+			treeOf(
+				"MCP server",
+				[row("Authorization"), row("Cookie")],
+				[row("authorization"), row("COOKIE")]
+			)
+		);
+		expect(notice.text).toBe(
+			"2 headers hold a credential and arrive blank and disabled - fill them in before you send"
+		);
+	});
+
+	it("looks in nested collections too", () => {
+		const nested = result({
+			collections: [
+				collection({
+					children: [collection({ requests: [request({ headers: [row("Cookie")] })] })],
+				}),
+			],
+			meta: { format: "MCP server" },
+		});
+		expect(mcpBlankedHeaderNotice(nested)).toHaveLength(1);
+	});
+
+	it("leaves a header the user can still send alone", () => {
+		const sendable = [
+			row("X-Tenant"),
+			row("X-API-Key", "kept", true),
+			row("Cookie", "", true),
+			row("X-Tenant", "", false),
+		];
+		expect(mcpBlankedHeaderNotice(treeOf("MCP server", sendable))).toEqual([]);
+	});
+
+	it("leaves another format's disabled credential header alone", () => {
+		expect(
+			mcpBlankedHeaderNotice(treeOf("Postman Collection v2.1", [row("Authorization")]))
+		).toEqual([]);
+	});
+});
+
+describe("importResultNotices (#3843)", () => {
+	const mcp = () =>
+		result({
+			collections: [
+				collection({
+					variables: { mcpToken: { value: "", enabled: true, secret: true } },
+					requests: [
+						request({ headers: [{ key: "Cookie", value: "", enabled: false }] }),
+					],
+				}),
+			],
+			meta: { format: "MCP server", skipped: [{ kind: "proxy_config", count: 1 }] },
+		});
+
+	it("puts the MCP lines before the engine's, which follow in their own order", () => {
+		expect(importResultNotices(mcp()).map((n) => n.text)).toEqual([
+			"The token is not stored in the collection - set the mcpToken variable before you send",
+			"1 header holds a credential and arrives blank and disabled - fill it in before you send",
+			"1 per-request proxy setting not imported",
+		]);
+	});
+
+	it("passes the unticked certificates on to the engine's lines", () => {
+		expect(importResultNotices(mcp(), 2).map((n) => n.text)).toContain(
+			"2 client certificates not imported - add them in Settings"
+		);
 	});
 });

@@ -18,7 +18,7 @@ import {
 	environmentClause,
 	type EnvironmentOutcome,
 } from "./import-environment";
-import { fileReferenceNeeds, importNotices } from "./import-notices";
+import { fileReferenceNeeds, importResultNotices } from "./import-notices";
 import {
 	hasReport,
 	useImportReportStore,
@@ -48,7 +48,10 @@ export function buildImportReport(
 				? result.collections[0].name
 				: (meta.fileName ?? meta.format),
 		fileName: meta.fileName ?? null,
-		notices: importNotices(meta, unselectedCertificateCount(result, selectedCertificates)),
+		notices: importResultNotices(
+			result,
+			unselectedCertificateCount(result, selectedCertificates)
+		),
 		fileNeeds: fileReferenceNeeds([result]),
 		counts: {
 			requests: meta.requestCount,

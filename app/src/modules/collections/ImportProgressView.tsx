@@ -16,6 +16,8 @@ import { pluralize } from "@/modules/dashboard/utils/format";
  * document to read it, and one atomic write per document to store it. Naming the running one is
  * half the report: "Importing" during a two-minute download would lie about what takes the time.
  *
+ * `connecting` is `reading` for a live server: one engine call with no figures to report.
+ *
  * `fetching` counts bytes and the rest count documents, hence a union rather than a `{done, total}`
  * with a label: bytes and files format differently, and `total` can be *unknown* for bytes, never
  * for files.
@@ -27,12 +29,13 @@ export type ImportProgress =
 	 * *name* shows, as a folder of large specs spends a real moment here.
 	 */
 	| { stage: "reading" }
+	| { stage: "connecting" }
 	| { stage: "fetching"; received: number; total: number | null }
 	| { stage: "bundling" | "parsing" | "applying"; done: number; total: number };
 
 /** The figures under the bar - the part that proves a stalled bar has moved. */
 function detailOf(progress: ImportProgress): string {
-	if (progress.stage === "reading") return "";
+	if (progress.stage === "reading" || progress.stage === "connecting") return "";
 	if (progress.stage === "fetching") {
 		return progress.total === null
 			? `${formatBytes(progress.received)} received`
@@ -44,7 +47,7 @@ function detailOf(progress: ImportProgress): string {
 
 /** 0..1, or null when nothing stated a total to be a fraction of. */
 function fractionOf(progress: ImportProgress): number | null {
-	if (progress.stage === "reading") return null;
+	if (progress.stage === "reading" || progress.stage === "connecting") return null;
 	if (progress.stage === "fetching") {
 		return progress.total === null || progress.total === 0
 			? null

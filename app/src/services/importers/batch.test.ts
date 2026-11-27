@@ -21,10 +21,13 @@ import { join } from "node:path";
 import {
 	applicableEntries,
 	detectBatch,
+	entryLabel,
 	isImportableFileName,
+	mcpBatchEntry,
 	reparseBatch,
 	type BatchIntake,
 } from "./batch";
+import { apiService } from "@/services/api";
 
 /**
  * The parse is the engine's now (issue #877), so it is stubbed here - and that
@@ -391,6 +394,79 @@ describe("reparseBatch", () => {
 			kind: "external_ref",
 			count: 3,
 		});
+	});
+});
+
+describe("mcpBatchEntry (#3843)", () => {
+	const URL = "https://mcp.example.com/mcp";
+
+	/** Any parsed result will do: the entry is about the ledger row, not the tree. */
+	async function parsedResult() {
+		const [entry] = await detectBatch(
+			[{ fileName: "a.json", relativePath: "a.json", text: postman }],
+			OPTS,
+			intake()
+		);
+		if (!entry?.result) throw new Error("fixture did not parse");
+		return entry.result;
+	}
+
+	it("is an included, document-less row labelled by the server URL", async () => {
+		const result = await parsedResult();
+		const entry = mcpBatchEntry(result, URL);
+
+		expect(entry).toMatchObject({
+			fileName: "",
+			sourceUrl: URL,
+			raw: null,
+			unresolvedRefs: 0,
+			error: null,
+			bundledInto: null,
+			included: true,
+		});
+		expect(entry.result).toBe(result);
+		expect(entryLabel(entry)).toBe(URL);
+		expect(applicableEntries([entry])).toEqual([entry]);
+	});
+
+	it("is left untouched by a re-parse, which would have no document to post", async () => {
+		const entry = mcpBatchEntry(await parsedResult(), URL);
+		const parse = vi.spyOn(apiService, "parseImport");
+		parse.mockClear();
+
+		const [again] = await reparseBatch([entry], {
+			importEnvironments: false,
+			importScripts: false,
+		});
+
+		expect(again).toBe(entry);
+		expect(parse).not.toHaveBeenCalled();
+	});
+
+	it("does not count towards a re-parse's progress", async () => {
+		const entry = mcpBatchEntry(await parsedResult(), URL);
+		const onProgress = vi.fn();
+
+		await reparseBatch([entry], OPTS, onProgress);
+
+		expect(onProgress).not.toHaveBeenCalled();
+	});
+
+	it("is re-parsed alongside a file in the same batch, which is not skipped with it", async () => {
+		const mcp = mcpBatchEntry(await parsedResult(), URL);
+		const files = await detectBatch(
+			[{ fileName: "env.json", relativePath: "env.json", text: environment }],
+			OPTS,
+			intake()
+		);
+
+		const [first, second] = await reparseBatch([mcp, ...files], {
+			importEnvironments: false,
+			importScripts: true,
+		});
+
+		expect(first).toBe(mcp);
+		expect(second?.result?.environments).toEqual([]);
 	});
 });
 

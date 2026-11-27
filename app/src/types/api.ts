@@ -1707,6 +1707,19 @@ export interface ImportParseRequest {
 	unresolvedRefs?: number;
 }
 
+/**
+ * `POST /import/mcp` (#3838): the engine asks a live MCP server what it offers and answers the
+ * `POST /import/parse` tree. `headers` ride every call; `auth` is written as an `Authorization`
+ * header unless `headers` names one. `include` defaults engine-side to tools only, and one that
+ * leaves nothing included is a 400.
+ */
+export interface ImportMcpRequest {
+	url: string;
+	headers?: { name: string; value: string }[];
+	auth?: { mode: "bearer"; token: string };
+	include?: { tools?: boolean; resources?: boolean; prompts?: boolean };
+}
+
 export interface ImportApplyRequest {
 	collections: ImportApplyCollection[];
 	requests: ImportApplyRequestItem[];

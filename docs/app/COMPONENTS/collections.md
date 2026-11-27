@@ -22,7 +22,8 @@ description: >-
 | `RequestItem.tsx` | A request row (method badge, click → open in RequestBuilder), wrapped in `memo` like `CollectionItem` (#2543). [Details](#requestitemtsx) |
 | `tree-row-menu.ts` | A row's actions and its menu's name, for both menus that show them (#2543). [Details](#tree-row-menuts) |
 | `CollectionTreeContextMenu.tsx` | The tree's one right-click menu (#1360, #2543): the `role="tree"` element is the only trigger. [Details](#collectiontreecontextmenutsx) |
-| `ImportModal.tsx` | Import collections from file/URL/paste (Postman / Insomnia / OpenAPI). [Details](#importmodaltsx) |
+| `ImportModal.tsx` | Import collections from a file, a URL, pasted text or a live MCP server (Postman / Insomnia / OpenAPI / JMeter). [Details](#importmodaltsx) |
+| `ImportMcpForm.tsx` | The Import dialog's MCP server tab: server URL, headers, bearer token and the primitives to list. [Details](#importmcpformtsx) |
 | `ImportClientCertificates.tsx` | The footer section of `ImportModal` that offers a Postman import's client-certificate candidates for registration (issue #2363). [Details](#importclientcertificatestsx) |
 | `import-notices.ts` | What a parsed file lost or changed, as the lines the import preview and every batch ledger row show. [Details](#import-noticests) |
 | `NoticeList.tsx` | The lines `importNotices` writes, drawn: amber for what the user finishes by hand, muted for what the import decided. [Details](#noticelisttsx) |
@@ -146,12 +147,12 @@ The menu closes if its row starts a rename or delete while it is open. → `Coll
 
 ## `ImportModal.tsx`
 
-Import collections from file/URL/paste (Postman / Insomnia / OpenAPI).
+Import collections from a file, a URL, pasted text or a live MCP server (Postman / Insomnia / OpenAPI / JMeter).
 Mounted globally in `Shell`; open-state in a dedicated store.
 Entry is per **file**: a multi-file drop or selection, or "Import folder" (`webkitdirectory`, recursed and filtered to `.json/.yaml/.yml`), previews as a **batch ledger** - one row per picked file with its detected format, counts, skip tally or error, and an include checkbox - and applies each file as its own `POST /import/apply`, so one refused file does not undo the others.
 One file renders the full preview tree instead, each collection's sub-folders and requests in the one order the sidebar will list them (`draftSiblings`: a Postman or JMeter file's document order, an Insomnia file's sort-key order, every other format's folders first, issue #2535); a file another picked document inlined as a `$ref` target is listed as such and never imported twice.
 A document a collection is already bound to forks before the apply into Sync or import-anyway (`SpecReimportDialog.tsx`, issue #680).
-**Each of the three tabs holds its own state** - phase, entries, error and progress (issue #893): they were one set for the whole dialog, and switching tab `reset()` them, which cleared the *display* of work that went right on running and then landed under whichever tab was showing when it finished.
+**Each of the four tabs holds its own state** - phase, entries, error and progress (issue #893): they were one set for the whole dialog, and switching tab `reset()` them, which cleared the *display* of work that went right on running and then landed under whichever tab was showing when it finished.
 So a tab switch now only switches tabs, every async writer patches the tab it started on behind a per-tab generation counter that a close, a reset or an option toggle bumps, and the URL download carries an `AbortSignal` the close actually fires.
 The two option checkboxes stay dialog-wide, so a toggle re-parses **every** tab holding a parse rather than the visible one - otherwise the other tab keeps a parse made under the old options.
 A toggle bumps the generation before it re-parses (issue #895): a re-parse is an engine round trip per file and the checkboxes stay live for it, so two toggles inside one round trip would otherwise hold the same generation and whichever landed last would win the entries - importing a setting the checkbox says is off, since `importScripts` is baked in at parse time.
@@ -161,6 +162,14 @@ A path that arrives while the dialog is already open is picked up the same way (
 The packaged macOS app declares the three extensions as `Viewer` at rank `Alternate`, so it is offered in Open With and never becomes the default for `.json`.
 A Postman import that resolved client-certificate candidates lists them in the footer through `ImportClientCertificates.tsx` (host, port, certificate path, key path; never the passphrase), one unticked checkbox each, kept per batch entry as `BatchEntry.selectedCertificates`: only the ticked ones reach `POST /import/apply`, and the rest are tallied in the `certificate` notice (issue #2363).
 See [import-collections/](../import-collections/README.md) for the batch layer and the parser pipeline
+
+## `ImportMcpForm.tsx`
+
+The MCP server tab's fields, controlled by `ImportModal`: a tab switch leaves the entered values in place, and a reset or close clears them, the bearer token included (it lives in this state and nowhere else).
+`import-mcp.ts` beside it holds the form's state, `canConnectMcp` (a URL and at least one primitive) and `mcpImportRequest` (the `POST /import/mcp` body: blank and disabled header rows are dropped).
+The connect is `ImportModal`'s `handleConnectMcp`: its own `AbortController` and generation, as the URL download has, and the answer becomes the tab's one batch entry (`mcpBatchEntry`), so the preview and apply are the other tabs' own.
+The environment and script checkboxes are not drawn on this tab.
+See [import-collections/mcp-server.md](../import-collections/mcp-server.md).
 
 ## `ImportClientCertificates.tsx`
 
