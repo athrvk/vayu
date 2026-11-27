@@ -210,7 +210,7 @@ httplib::Response& res) {
 // Unhandled.
 TEST_F (ServerBindTest, AnOversizedImportBodyIsRefusedWith413BeforeItIsRead) {
     for (const char* path : { "/import", "/import/parse", "/import/document",
-         "/import/mcp", "/import/mcp/diff" }) {
+         "/import/mcp", "/import/mcp/diff", "/import/mcp/apply" }) {
         httplib::Response res;
         // The default cap is 10 MiB, so the limit is 16 MiB: 20 MiB is refused.
         EXPECT_EQ (guard_outcome (*db_, path, std::to_string (20U * 1024U * 1024U), res),

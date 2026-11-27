@@ -47,8 +47,9 @@ httplib::Response& res) {
     if (req.method != "POST" || !req.has_header ("Content-Length")) {
         return httplib::Server::HandlerResponse::Unhandled;
     }
-    if (req.path != "/import" && req.path != "/import/parse" && req.path != "/import/document" &&
-    req.path != "/import/mcp" && req.path != "/import/mcp/diff") {
+    if (req.path != "/import" && req.path != "/import/parse" &&
+    req.path != "/import/document" && req.path != "/import/mcp" &&
+    req.path != "/import/mcp/diff" && req.path != "/import/mcp/apply") {
         return httplib::Server::HandlerResponse::Unhandled;
     }
     const size_t limit =
@@ -81,6 +82,13 @@ const std::atomic<bool>* cancel);
 // Defined in import_mcp.cpp, the testable core of POST /import/mcp/diff
 // (#3842); returns {http_status, json_body}.
 std::pair<int, nlohmann::json> import_mcp_diff_response (vayu::db::Database& db,
+const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel);
+
+// Defined in import_mcp.cpp, the testable core of POST /import/mcp/apply
+// (#3994); returns {http_status, json_body}.
+std::pair<int, nlohmann::json> import_mcp_apply_response (vayu::db::Database& db,
 const nlohmann::json& body,
 const vayu::http::TransportPolicy& transport,
 const std::atomic<bool>* cancel);
@@ -1673,6 +1681,46 @@ httplib::Response& res) {
     }
 }
 
+void handle_import_mcp_apply (RouteContext& ctx,
+const httplib::Request& req,
+httplib::Response& res) {
+    const auto body = parse_request_json (req.body);
+    if (!body) {
+        refuse_request_body (res, "POST /import/mcp/apply", body.error ());
+        return;
+    }
+    try {
+        auto [status, response] = import_mcp_apply_response (ctx.db, *body,
+        vayu::http::resolve_transport_policy (ctx.db), &ctx.server_stopping);
+        if (status != 200) {
+            // A field, not the message: the reason can quote the server.
+            vayu::utils::log_warning ("http",
+            "POST /import/mcp/apply - " + std::to_string (status),
+            { { "reason", vayu::utils::bounded_log_text (error_message_of (response)) } });
+        } else {
+            vayu::utils::log_info ("http",
+            "applied MCP re-import to " + response["collectionId"].get<std::string> () +
+            ": +" + std::to_string (response["created"].size ()) + " ~" +
+            std::to_string (response["updated"].size ()) + " -" +
+            std::to_string (response["deleted"].size ()));
+        }
+        res.status = status;
+        res.set_content (
+        response.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+    } catch (const vayu::db::MissingRowError& e) {
+        // `POST /specs/sync`'s window: a row checked under the lock went before
+        // a busy retry committed. Nothing was written.
+        vayu::utils::log_warning (
+        "http", "POST /import/mcp/apply - 409: " + std::string (e.what ()));
+        send_error (res, 409, e.what ());
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "http", "POST /import/mcp/apply - Error: " + std::string (e.what ()));
+        send_exception (res, e);
+    }
+}
+
 void handle_import_document (RouteContext& ctx,
 const httplib::Request& req,
 httplib::Response& res) {
@@ -1836,6 +1884,27 @@ void register_import_routes (RouteContext& ctx) {
     ctx.server.Post ("/import/mcp/diff",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_import_mcp_diff (ctx, req, res);
+    });
+
+    /**
+     * POST /import/mcp/apply
+     * Writes the rows of `POST /import/mcp/diff`'s answer a caller selects to
+     * the collection it compared (#3994), in one transaction: an added entry
+     * becomes the request an import would build, a changed request takes only
+     * the fields the diff names (a rename its name and call too), and a
+     * removed one is deleted. Reads the server again first.
+     * Body params: those of `POST /import/mcp`, collectionId (required - a
+     * `matches[].collectionId`), select (optional - `{added: [{kind, key}],
+     * changed: [requestId], removed: [requestId]}`; an absent list selects
+     * nothing).
+     * Returns: 200 `{collectionId, created: [{kind, key, requestId}], updated,
+     * deleted}`, 400 for a bad body, 404 for an unknown collection, 409 for a
+     * collection no import of the url built or a selected row the diff no
+     * longer holds, and every refusal of `POST /import/mcp`.
+     */
+    ctx.server.Post ("/import/mcp/apply",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        handle_import_mcp_apply (ctx, req, res);
     });
 
     /**
