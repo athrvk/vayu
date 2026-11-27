@@ -9,7 +9,7 @@
  * The Import dialog's report on an MCP server it has imported before (#3842): what the server lists
  * now, set against each collection an earlier import of it built, so a renamed tool reads as one
  * change rather than as a second collection. Read-only. The one way forward is Import, which makes
- * a new collection as it always did; applying the difference to the existing one is not offered,
+ * a new collection as it always did; applying the difference to the existing one is not offered (#3994),
  * and the copy says so rather than leaving the user to look for it.
  */
 

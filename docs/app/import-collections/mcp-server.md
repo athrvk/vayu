@@ -80,4 +80,4 @@ Every failure arrives as the engine's own sentence.
 
 The dialog has no OAuth sign-in; it sends a static bearer token (tracked in [#3983](https://github.com/athrvk/vayu/issues/3983)).
 
-Importing a server again shows what changed against the collection an earlier import built, but cannot apply it: Import always makes a new collection.
+Importing a server again shows what changed against the collection an earlier import built, but cannot apply it ([#3994](https://github.com/athrvk/vayu/issues/3994)): Import always makes a new collection.
