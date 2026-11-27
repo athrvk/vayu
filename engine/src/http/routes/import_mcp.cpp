@@ -477,9 +477,10 @@ struct Discovery {
     std::string name;
 };
 
-/// `server/discover`, best effort for its `serverInfo.name`. A modern server
-/// older than the method (`-32601`) is read on unnamed, a legacy-era one is
-/// told apart for its handshake, and any other failure fails the import.
+/// `server/discover`, best effort for its `serverInfo.name`. A server that
+/// answers `-32601` (modern-era, with no `server/discover` of its own) is read
+/// on unnamed, a legacy-era one is told apart by its plain `400` for its
+/// handshake, and any other failure fails the import.
 Refusable<Discovery> discover (McpSession& session) {
     auto sent = send_call (session, "server/discover", ordered_json::object ());
     if (!sent) {
@@ -733,13 +734,13 @@ const std::atomic<bool>* cancel) {
  * offers and answer the `ImportResult` `POST /import/parse` would, stored
  * nowhere.
  *
- * `server/discover` is best effort, for its `serverInfo.name`: a server older
- * than the method (`-32601`) is read on, while a version refusal or any other
- * failure fails the import with what the reply reader said. A legacy-era
- * server's plain `400` opens a session first (`initialize`, whose
- * `serverInfo.name` names the collection, then `notifications/initialized`),
- * which every later call carries and a best-effort `DELETE` ends. Then each
- * included list method, every page.
+ * `server/discover` is best effort, for its `serverInfo.name`: a server that
+ * answers `-32601` (a modern-era one with no such method) is read on, while a
+ * version refusal or any other failure fails the import with what the reply
+ * reader said. A legacy-era server's plain `400` opens a session first
+ * (`initialize`, whose `serverInfo.name` names the collection, then
+ * `notifications/initialized`), which every later call carries and a
+ * best-effort `DELETE` ends. Then each included list method, every page.
  *
  * @param transport `resolve_transport_policy (db)`, required for the reason
  *                  `import_fetch`'s is.

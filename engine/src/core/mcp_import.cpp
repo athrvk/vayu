@@ -341,14 +341,15 @@ json initialize_draft (const McpLegacyHandshake& handshake, CallFraming& framing
 }
 
 /// A notification is an envelope with no `id`, which a server answers `202`
-/// with no body.
+/// with no body; the import accepts any 2xx, so the step does too.
 json initialized_draft (const json& header_rows) {
     json note       = json::object ();
     note["jsonrpc"] = "2.0";
     note["method"]  = "notifications/initialized";
     return request_draft ("notifications/initialized",
     "Tells the server the handshake is complete.", "POST",
-    mcp_body_draft (note.dump (2)), header_rows, expected_status_elements ({ 202 }));
+    mcp_body_draft (note.dump (2)), header_rows,
+    expected_status_elements ({ 200, 202, 204 }));
 }
 
 json close_session_draft (const json& header_rows) {

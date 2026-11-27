@@ -472,10 +472,10 @@ TEST (ImportMcpRoute, IncludedResourcesAndPromptsGetTheirFolders) {
 // Discovery.
 // ---------------------------------------------------------------------------
 
-// A `-32601` is a modern server that predates the method, so no handshake.
+// A `-32601` is a modern server that has no such method, so no handshake.
 // Mutation check: drop the `is_method_not_found` test in `discover` and the
 // import fails with the reader's message.
-TEST (ImportMcpRoute, AServerOlderThanDiscoveryIsReadOnAndNamedByItsHost) {
+TEST (ImportMcpRoute, AServerWithNoDiscoverIsReadOnAndNamedByItsHost) {
     McpFixtureServer server;
     server.discover_as (McpDiscovery::MethodNotFound);
     server.set_tools (tools_named ({ "a" }));
@@ -576,7 +576,7 @@ TEST (ImportMcpRoute, RepliesPastTheWholeImportByteCapFailNamingIt) {
 }
 
 // Driven with a spent deadline rather than by waiting one out. Mutation check:
-// drop the `remaining` test in `send_call` and the import answers 200.
+// drop the `remaining` test in `transfer` and the import answers 200.
 TEST (ImportMcpRoute, AnImportPastItsTotalDeadlineFailsBeforeTheNextCall) {
     McpFixtureServer server;
     server.set_tools (tools_named ({ "a" }));
@@ -945,7 +945,7 @@ TEST (ImportMcpRoute, ALegacyEraTreeIsItsHandshakeThenTheToolsThenTheClose) {
     EXPECT_EQ (call_of (note),
     json::parse (R"({"jsonrpc":"2.0","method":"notifications/initialized"})"));
     EXPECT_EQ (note.at ("elements"),
-    json::parse (R"([{"kind":"assert.status","config":{"in":[202]}}])"));
+    json::parse (R"([{"kind":"assert.status","config":{"in":[200,202,204]}}])"));
 
     const json tools = folder_of (result, "Tools").at ("requests");
     ASSERT_EQ (tools.size (), 2U);

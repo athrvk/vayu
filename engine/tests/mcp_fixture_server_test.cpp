@@ -200,7 +200,7 @@ TEST_F (McpFixtureServerTest, DiscoverAnswersAModernResultByDefault) {
     EXPECT_TRUE (result.at ("serverInfo").contains ("name"));
 }
 
-TEST_F (McpFixtureServerTest, DiscoverAsALegacyServerRefusesInEitherShape) {
+TEST_F (McpFixtureServerTest, DiscoverIsRefusedAsAModernServerWithNoSuchMethodOrAsALegacyOne) {
     server_.discover_as (McpDiscovery::MethodNotFound);
     const auto not_found = send ("server/discover");
     ASSERT_TRUE (not_found);
