@@ -424,6 +424,72 @@ describe("summariseBudgets", () => {
 	});
 });
 
+describe("MCP error class budgets (#3830)", () => {
+	const COUNT_KEYS = ["maxToolErrors", "maxProtocolErrors", "maxTransportErrors"] as const;
+	const RATE_KEYS = [
+		"maxToolErrorRatePct",
+		"maxProtocolErrorRatePct",
+		"maxTransportErrorRatePct",
+	] as const;
+	const ALL_KEYS = [...COUNT_KEYS, ...RATE_KEYS];
+
+	// Mutation check: drop one of the rows from BUDGET_FIELDS and this reds.
+	it("the editor offers the three classes, as a count and as a rate, on every run", () => {
+		const offered = budgetFieldsFor(false).map((field) => field.key);
+		for (const key of ALL_KEYS) expect(offered, key).toContain(key);
+		for (const key of ALL_KEYS) {
+			expect(BUDGET_FIELDS.find((f) => f.key === key)?.streamOnly, key).toBeFalsy();
+		}
+	});
+
+	it("gives every field its own id, so no label is tied to another's input", () => {
+		const ids = BUDGET_FIELDS.map((field) => field.id);
+		expect(new Set(ids).size).toBe(ids.length);
+	});
+
+	it.each(ALL_KEYS)("%s accepts 0, the budget of 'none may fail'", (key) => {
+		expect(budgetError(draft({ [key]: "0" }))).toBeNull();
+		expect(buildThresholds(draft({ [key]: "0" }))).toEqual({ [key]: 0 });
+	});
+
+	it.each(ALL_KEYS)("%s refuses a negative or non-numeric budget", (key) => {
+		expect(budgetError(draft({ [key]: "-1" }))).not.toBeNull();
+		expect(budgetError(draft({ [key]: "many" }))).toMatch(/must be a number/);
+	});
+
+	it.each(RATE_KEYS)("%s is a percentage, 0 to 100 inclusive", (key) => {
+		expect(budgetError(draft({ [key]: "100" }))).toBeNull();
+		expect(budgetError(draft({ [key]: "100.5" }))).toMatch(/at most 100%/);
+	});
+
+	it.each(COUNT_KEYS)("%s is a count with no unit, up to the engine's 1e12", (key) => {
+		expect(budgetError(draft({ [key]: "1000000000000" }))).toBeNull();
+		expect(budgetError(draft({ [key]: "1000000000001" }))).toMatch(/at most 1000000000000,/);
+		expect(BUDGET_FIELDS.find((f) => f.key === key)?.unit).toBe("");
+	});
+
+	it("sends each declared budget under the engine's key", () => {
+		const values = Object.fromEntries(ALL_KEYS.map((key, i) => [key, String(i)]));
+		expect(buildThresholds(draft(values))).toEqual({
+			maxToolErrors: 0,
+			maxProtocolErrors: 1,
+			maxTransportErrors: 2,
+			maxToolErrorRatePct: 3,
+			maxProtocolErrorRatePct: 4,
+			maxTransportErrorRatePct: 5,
+		});
+	});
+
+	it("reads a count in the collapsed card with no stray unit", () => {
+		expect(summariseBudgets(draft({ maxToolErrors: "5" }))).toBe(
+			"1 budget active - Tool errors at most 5"
+		);
+		expect(summariseBudgets(draft({ maxToolErrorRatePct: "5" }))).toBe(
+			"1 budget active - Tool error rate at most 5%"
+		);
+	});
+});
+
 describe("the budgets explainer", () => {
 	const here = dirname(fileURLToPath(import.meta.url));
 	const sources = [

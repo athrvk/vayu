@@ -24,7 +24,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -89,6 +91,12 @@ const std::unordered_map<std::string, std::string>& metric_labels () {
         { "streamTimeToFirstEventP95Ms", "Time to first event p95" },
         { "streamTimeToFirstMatchP95Ms", "Time to first match p95" },
         { "streamEventsPerSecondMin", "Events per second" },
+        { "maxToolErrors", "Tool errors" },
+        { "maxProtocolErrors", "Protocol errors" },
+        { "maxTransportErrors", "Transport errors" },
+        { "maxToolErrorRatePct", "Tool error rate" },
+        { "maxProtocolErrorRatePct", "Protocol error rate" },
+        { "maxTransportErrorRatePct", "Transport error rate" },
     };
     return labels;
 }
@@ -189,11 +197,14 @@ TEST (ThresholdEval, EveryKnownBudgetIsAcceptedTogether) {
     nlohmann::json thresholds{ { "latencyP50Ms", 20 }, { "latencyP95Ms", 40 },
         { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 }, { "minThroughputRps", 10000 },
         { "maxAssertionFailureRatePct", 5 }, { "streamTimeToFirstEventP95Ms", 800 },
-        { "streamTimeToFirstMatchP95Ms", 900 }, { "streamEventsPerSecondMin", 200 } };
+        { "streamTimeToFirstMatchP95Ms", 900 }, { "streamEventsPerSecondMin", 200 },
+        { "maxToolErrors", 5 }, { "maxProtocolErrors", 0 },
+        { "maxTransportErrors", 1 }, { "maxToolErrorRatePct", 1 },
+        { "maxProtocolErrorRatePct", 0 }, { "maxTransportErrorRatePct", 0.5 } };
     EXPECT_FALSE (validate_thresholds (config_with (thresholds)).has_value ());
     auto outcome = evaluate_thresholds (config_with (thresholds), measured_run ());
     ASSERT_HAS_VALUE (outcome);
-    EXPECT_EQ (outcome->checks.size (), 9u);
+    EXPECT_EQ (outcome->checks.size (), 15u);
 }
 
 // --- The verdict: each budget passes and fails off the run's own numbers ---
@@ -693,6 +704,124 @@ TEST (ThresholdEval, AFirstEventBudgetIsUnevaluatedWhenNoStreamWasTimed) {
     EXPECT_TRUE (outcome->checks[1].evaluated);
     EXPECT_DOUBLE_EQ (outcome->checks[1].actual, 0.0);
     EXPECT_FALSE (outcome->checks[1].passed);
+}
+
+// --- MCP error classes (issue #3830): the report's `summary.errorClasses` ---
+
+/// measured_run (), as an `mcp` run: of its 1000 requests 20 replies answered
+/// `isError`, 4 a JSON-RPC error and 1 no readable reply, all under status 0.
+RunSummaryInputs mcp_run () {
+    RunSummaryInputs inputs = measured_run ();
+    inputs.status_codes     = { { 200, 975 }, { 0, 25 } };
+    const auto record = [&inputs] (vayu::McpErrorClass error_class, int times) {
+        for (int i = 0; i < times; ++i) {
+            inputs.error_classes.record (error_class, std::nullopt);
+        }
+    };
+    record (vayu::McpErrorClass::Tool, 20);
+    record (vayu::McpErrorClass::Protocol, 4);
+    record (vayu::McpErrorClass::Transport, 1);
+    return inputs;
+}
+
+constexpr std::array<const char*, 3> ERROR_CLASS_COUNT_KEYS = { "maxToolErrors",
+    "maxProtocolErrors", "maxTransportErrors" };
+constexpr std::array<const char*, 3> ERROR_CLASS_RATE_KEYS  = {
+    "maxToolErrorRatePct", "maxProtocolErrorRatePct", "maxTransportErrorRatePct"
+};
+
+TEST (ThresholdEval, AnErrorClassBudgetOutsideItsRangeIsRejected) {
+    for (const char* key : ERROR_CLASS_COUNT_KEYS) {
+        expect_rejected ({ { key, -1 } }, key);
+        expect_rejected ({ { key, 1e12 + 1 } }, key);
+        expect_rejected ({ { key, "five" } }, key);
+        EXPECT_FALSE (validate_thresholds (config_with ({ { key, 0 } })).has_value ()) << key;
+        EXPECT_FALSE (validate_thresholds (config_with ({ { key, 1e12 } })).has_value ())
+        << key;
+    }
+    for (const char* key : ERROR_CLASS_RATE_KEYS) {
+        expect_rejected ({ { key, -0.1 } }, key);
+        expect_rejected ({ { key, 100.5 } }, key);
+        EXPECT_FALSE (validate_thresholds (config_with ({ { key, 0 } })).has_value ()) << key;
+        EXPECT_FALSE (validate_thresholds (config_with ({ { key, 100 } })).has_value ())
+        << key;
+    }
+}
+
+// The issue's case: at most 5 tool failures against 20 fails the run's only
+// budget, so its verdict cannot read passed; at the boundary it passes.
+// Mutation check: measure 0 in `measured_error_class_count` and this reds.
+TEST (ThresholdEval, AToolErrorBudgetFailsARunOverIt) {
+    const auto outcome =
+    evaluate_thresholds (config_with ({ { "maxToolErrors", 5 } }), mcp_run ());
+    const auto check = only_check (outcome);
+    EXPECT_TRUE (check.evaluated);
+    EXPECT_DOUBLE_EQ (check.actual, 20.0);
+    EXPECT_FALSE (check.passed);
+    ASSERT_HAS_VALUE (outcome);
+    EXPECT_EQ (outcome->passed, 0u);
+    EXPECT_EQ (outcome->failed, 1u);
+
+    EXPECT_TRUE (only_check (
+    evaluate_thresholds (config_with ({ { "maxToolErrors", 20 } }), mcp_run ()))
+    .passed);
+}
+
+// A copy-paste in the table (every row reading `Tool`) passes the tool rows
+// and fails the other four here.
+TEST (ThresholdEval, EachErrorClassBudgetReadsItsOwnClass) {
+    const auto outcome = evaluate_thresholds (
+    config_with ({ { "maxToolErrors", 20 }, { "maxProtocolErrors", 4 },
+    { "maxTransportErrors", 1 }, { "maxToolErrorRatePct", 2 },
+    { "maxProtocolErrorRatePct", 0.4 }, { "maxTransportErrorRatePct", 0.1 } }),
+    mcp_run ());
+    ASSERT_HAS_VALUE (outcome);
+    const std::unordered_map<std::string, double> expected{ { "maxToolErrors", 20.0 },
+        { "maxProtocolErrors", 4.0 }, { "maxTransportErrors", 1.0 },
+        { "maxToolErrorRatePct", 2.0 }, { "maxProtocolErrorRatePct", 0.4 },
+        { "maxTransportErrorRatePct", 0.1 } };
+    ASSERT_EQ (outcome->checks.size (), expected.size ());
+    for (const auto& check : outcome->checks) {
+        EXPECT_TRUE (check.evaluated) << check.metric;
+        EXPECT_DOUBLE_EQ (check.actual, expected.at (check.metric)) << check.metric;
+        EXPECT_TRUE (check.passed) << check.metric;
+    }
+    EXPECT_EQ (outcome->failed, 0u);
+}
+
+// A run with requests and no failed reply (an `mcp` run that never failed, or
+// no `mcp` traffic at all) measured zero of each class and meets a 0 ceiling.
+TEST (ThresholdEval, AnErrorClassBudgetOfZeroPassesARunWithNoFailedReply) {
+    for (const char* key : { "maxToolErrors", "maxToolErrorRatePct" }) {
+        const auto check = only_check (
+        evaluate_thresholds (config_with ({ { key, 0 } }), measured_run ()));
+        EXPECT_TRUE (check.evaluated) << key;
+        EXPECT_DOUBLE_EQ (check.actual, 0.0) << key;
+        EXPECT_TRUE (check.passed) << key;
+    }
+}
+
+// A run that sent nothing measured no class, so neither form reads its zero
+// as a pass. Mutation check: make a class row's `has_data` nullptr and its
+// check reads evaluated and passed.
+TEST (ThresholdEval, AnErrorClassBudgetOnARunThatSentNothingIsUnevaluated) {
+    nlohmann::json thresholds = nlohmann::json::object ();
+    for (const char* key : ERROR_CLASS_COUNT_KEYS) {
+        thresholds[key] = 0;
+    }
+    for (const char* key : ERROR_CLASS_RATE_KEYS) {
+        thresholds[key] = 0;
+    }
+    const auto outcome =
+    evaluate_thresholds (config_with (thresholds), RunSummaryInputs{});
+    ASSERT_HAS_VALUE (outcome);
+    ASSERT_EQ (outcome->checks.size (), 6u);
+    EXPECT_EQ (outcome->failed, 6u);
+    const auto payload = build_threshold_outcome_payload (*outcome);
+    for (const auto& row : payload["checks"]) {
+        EXPECT_EQ (row["evaluated"], false) << row.dump ();
+        EXPECT_FALSE (row.contains ("actual")) << row.dump ();
+    }
 }
 
 // --- thresholds.failRun (issue #1497): a flag, not a budget -----------------

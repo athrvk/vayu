@@ -1749,19 +1749,20 @@ RunManager& manager) {
     // run's tallies, not about locking (this function runs on the run's single
     // worker thread). `RunSummaryInputs` is the load path's shape; a collection
     // run fills only what `evaluate_thresholds`'s metric table reads (latency,
-    // status codes, throughput, assertions) rather than going through an
-    // adapter, which nothing in the engine has, since most of its fields (peak
-    // concurrency, dropped requests, a load run's queue wait) have no
-    // counterpart in this mode.
+    // status codes, MCP error classes, throughput, assertions) rather than
+    // going through an adapter, which nothing in the engine has, since most of
+    // its fields (peak concurrency, dropped requests, a load run's queue wait)
+    // have no counterpart in this mode.
     summary.latency = summarize_latencies (summary.latencies);
     RunSummaryInputs threshold_inputs;
     // Off the status tally, not the latencies: a step refused before the wire
     // is a request with no duration.
     threshold_inputs.total_requests =
     vayu::count_status_failures (summary.status_codes).total;
-    threshold_inputs.status_codes = summary.status_codes;
-    threshold_inputs.latency      = summary.latency.percentiles;
-    threshold_inputs.throughput   = summary.duration_s > 0 ?
+    threshold_inputs.status_codes  = summary.status_codes;
+    threshold_inputs.error_classes = summary.error_classes;
+    threshold_inputs.latency       = summary.latency.percentiles;
+    threshold_inputs.throughput    = summary.duration_s > 0 ?
     static_cast<double> (threshold_inputs.total_requests) / summary.duration_s :
     0.0;
     // Every step's assertions ran on every send, so the whole tally is the

@@ -1344,7 +1344,7 @@ describe("pass/fail budgets", () => {
 		expect(card()).toHaveTextContent("No budgets");
 
 		openBudgets();
-		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "0.1" } });
+		fireEvent.change(screen.getByLabelText(/^error/i), { target: { value: "0.1" } });
 		expect(card()).toHaveTextContent("1 budget active - Error rate at most 0.1%");
 		fireEvent.change(screen.getByLabelText(/throughput/i), { target: { value: "1000" } });
 		expect(card()).toHaveTextContent("2 budgets active");
@@ -1369,7 +1369,7 @@ describe("pass/fail budgets", () => {
 	it("offers no stream budget when no step streams: there is no stream section to judge (#3234)", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		openBudgets();
-		expect(screen.getByLabelText(/error rate/i)).toBeInTheDocument();
+		expect(screen.getByLabelText(/^error/i)).toBeInTheDocument();
 		expect(screen.queryByLabelText(/time to first event/i)).not.toBeInTheDocument();
 		expect(screen.queryByLabelText(/events per second/i)).not.toBeInTheDocument();
 		expect(screen.queryByText(STREAM_LATENCY_NOTE)).not.toBeInTheDocument();
@@ -1378,7 +1378,7 @@ describe("pass/fail budgets", () => {
 	it("sends every declared budget under the engine's own key", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		openBudgets();
-		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "0.1" } });
+		fireEvent.change(screen.getByLabelText(/^error/i), { target: { value: "0.1" } });
 		fireEvent.change(screen.getByLabelText(/throughput/i), { target: { value: "1000" } });
 		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 
@@ -1410,7 +1410,7 @@ describe("pass/fail budgets", () => {
 
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		openBudgets();
-		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "0.1" } });
+		fireEvent.change(screen.getByLabelText(/^error/i), { target: { value: "0.1" } });
 		startLoad("run_budget_2");
 		expect(useDashboardStore.getState().loadTestConfig?.latencyP99Ms).toBeUndefined();
 	});
@@ -1418,7 +1418,7 @@ describe("pass/fail budgets", () => {
 	it("blocks Run on an out-of-range budget instead of dropping the field", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		openBudgets();
-		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "150" } });
+		fireEvent.change(screen.getByLabelText(/^error/i), { target: { value: "150" } });
 
 		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", true);
 		expect(screen.getByText(/budget is out of range/i)).toBeInTheDocument();
@@ -1429,7 +1429,7 @@ describe("pass/fail budgets", () => {
 	it("applies to a load run exactly as it does a design-mode run - not gated by Load test", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		openBudgets();
-		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "0.1" } });
+		fireEvent.change(screen.getByLabelText(/^error/i), { target: { value: "0.1" } });
 		fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
 		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 
@@ -2412,7 +2412,7 @@ describe("the stream caps of a collection with a streaming request (#3235)", () 
 		fireEvent.change(budgetField(/events per second/i)!, { target: { value: "-1" } });
 		expect(screen.getByRole("button", { name: /^run$/i })).toBeDisabled();
 		fireEvent.change(budgetField(/time to first event/i)!, { target: { value: "300" } });
-		fireEvent.change(budgetField(/error rate/i)!, { target: { value: "1" } });
+		fireEvent.change(budgetField(/^error/i)!, { target: { value: "1" } });
 
 		fireEvent.click(nested);
 		expect(budgetField(/time to first event/i)).not.toBeInTheDocument();

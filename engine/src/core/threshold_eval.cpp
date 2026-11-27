@@ -39,9 +39,9 @@ struct ThresholdMetric {
     const char* label;
     Direction direction;
     double min_limit;
-    /// Whether `min_limit` itself is legal. Only for the error rate: "no
-    /// request may fail" is a real ask, a zero latency ceiling or throughput
-    /// floor a typo.
+    /// Whether `min_limit` itself is legal. Only for a failure budget (an
+    /// error rate or count, the assertion rate): "nothing may fail" is a real
+    /// ask, a zero latency ceiling or throughput floor a typo.
     bool min_inclusive;
     double max_limit;
     const char* range; // the accepted span, spelled for the rejection message
@@ -75,6 +75,7 @@ bool error_rate_data_present (const RunSummaryInputs& inputs) {
 
 constexpr double MAX_LATENCY_BUDGET_MS = 86400000.0; // a day; past it nothing completes
 constexpr double MAX_THROUGHPUT_BUDGET_RPS = 1e9;
+constexpr double MAX_ERROR_COUNT_BUDGET = 1e12; // a sanity bound, past any run's requests
 
 /// One population's failure share as a percentage; 0 when it is empty.
 double failure_rate_pct (const AssertionTotals& totals) {
@@ -144,9 +145,27 @@ double measured_events_per_second (const RunSummaryInputs& inputs) {
     return stream ? stream->events_per_second (inputs.test_duration_s) : 0.0;
 }
 
+/// The run's failed `mcp` replies of class @p C, from `summary.errorClasses`
+/// (#3830). A template, not a parameter, because `ThresholdMetric::measured`
+/// is a plain function pointer.
+template <McpErrorClass C>
+double measured_error_class_count (const RunSummaryInputs& inputs) {
+    return static_cast<double> (
+    inputs.error_classes.classes.at (static_cast<size_t> (C)));
+}
+
+/// That count as a percentage of the run's requests, the error rate's
+/// denominator. Every failed reply is also one of `status_codes`, so it never
+/// passes 100. Read only when `error_rate_data_present` holds.
+template <McpErrorClass C>
+double measured_error_class_rate (const RunSummaryInputs& inputs) {
+    return measured_error_class_count<C> (inputs) * 100.0 /
+    static_cast<double> (inputs.total_requests);
+}
+
 /// Every budget a run may declare, in the order the report lists them.
-const std::array<ThresholdMetric, 9>& metrics () {
-    static const std::array<ThresholdMetric, 9> table = { {
+const std::array<ThresholdMetric, 15>& metrics () {
+    static const std::array<ThresholdMetric, 15> table = { {
     { "latencyP50Ms", "p50 latency", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p50; },
@@ -179,6 +198,27 @@ const std::array<ThresholdMetric, 9>& metrics () {
     false, MAX_THROUGHPUT_BUDGET_RPS, "greater than 0 and at most 1000000000",
     "It is a floor on a streaming run's delivered events per second.",
     measured_events_per_second, stream_data_present, nullptr },
+    // A run that sent nothing measured no count either: a zero there is no
+    // run, not a clean one, so it shares the error rate's data guard.
+    { "maxToolErrors", "Tool errors", Direction::AtMost, 0.0, true, MAX_ERROR_COUNT_BUDGET,
+    "between 0 and 1000000000000", "It is a ceiling on the run's MCP replies that answered isError.",
+    measured_error_class_count<McpErrorClass::Tool>, error_rate_data_present, nullptr },
+    { "maxProtocolErrors", "Protocol errors", Direction::AtMost, 0.0, true,
+    MAX_ERROR_COUNT_BUDGET, "between 0 and 1000000000000",
+    "It is a ceiling on the run's MCP replies that carried a JSON-RPC error.",
+    measured_error_class_count<McpErrorClass::Protocol>, error_rate_data_present, nullptr },
+    { "maxTransportErrors", "Transport errors", Direction::AtMost, 0.0, true, MAX_ERROR_COUNT_BUDGET,
+    "between 0 and 1000000000000", "It is a ceiling on the run's MCP calls that got no readable JSON-RPC reply.",
+    measured_error_class_count<McpErrorClass::Transport>, error_rate_data_present, nullptr },
+    { "maxToolErrorRatePct", "Tool error rate", Direction::AtMost, 0.0, true,
+    100.0, "between 0 and 100", "It is a percentage of the run's requests.",
+    measured_error_class_rate<McpErrorClass::Tool>, error_rate_data_present, nullptr },
+    { "maxProtocolErrorRatePct", "Protocol error rate", Direction::AtMost, 0.0,
+    true, 100.0, "between 0 and 100", "It is a percentage of the run's requests.",
+    measured_error_class_rate<McpErrorClass::Protocol>, error_rate_data_present, nullptr },
+    { "maxTransportErrorRatePct", "Transport error rate", Direction::AtMost, 0.0,
+    true, 100.0, "between 0 and 100", "It is a percentage of the run's requests.",
+    measured_error_class_rate<McpErrorClass::Transport>, error_rate_data_present, nullptr },
     } };
     return table;
 }

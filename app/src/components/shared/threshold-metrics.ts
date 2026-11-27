@@ -47,6 +47,21 @@ export const THRESHOLD_METRICS: Record<string, ThresholdMetricMeta> = {
 		unit: "events/s",
 		floor: true,
 	},
+	// Counts carry no unit: "≤ 5" is five failed replies, and the check's `actual` is a plain number.
+	maxToolErrors: { label: "Tool errors", short: "tool errors", unit: "" },
+	maxProtocolErrors: { label: "Protocol errors", short: "protocol errors", unit: "" },
+	maxTransportErrors: { label: "Transport errors", short: "transport errors", unit: "" },
+	maxToolErrorRatePct: { label: "Tool error rate", short: "tool error rate", unit: "%" },
+	maxProtocolErrorRatePct: {
+		label: "Protocol error rate",
+		short: "protocol error rate",
+		unit: "%",
+	},
+	maxTransportErrorRatePct: {
+		label: "Transport error rate",
+		short: "transport error rate",
+		unit: "%",
+	},
 };
 
 /** The short name of a budget in running text; an unknown metric keeps its raw key. */

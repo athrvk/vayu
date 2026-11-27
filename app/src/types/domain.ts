@@ -1773,6 +1773,17 @@ export interface RunThresholdBudgets {
 	 * Floor on `stream.eventsPerSecond` (#3234), judged like {@link streamTimeToFirstEventP95Ms}.
 	 */
 	streamEventsPerSecondMin?: number;
+	/**
+	 * Ceilings (#3830) on the run's failed `mcp` replies of one failure class, as counts
+	 * (`maxToolErrors` and its two siblings, 0-1e12) and as a share of the run's requests
+	 * (`max<Class>ErrorRatePct`, 0-100). 0 is a legal ceiling; a run that sent nothing fails them.
+	 */
+	maxToolErrors?: number;
+	maxProtocolErrors?: number;
+	maxTransportErrors?: number;
+	maxToolErrorRatePct?: number;
+	maxProtocolErrorRatePct?: number;
+	maxTransportErrorRatePct?: number;
 }
 
 /**

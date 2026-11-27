@@ -1456,7 +1456,7 @@ describe("pass/fail budgets", () => {
 		const { onStart } = open();
 		openBudgets();
 		fireEvent.change(p99(), { target: { value: "50" } });
-		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "0.1" } });
+		fireEvent.change(screen.getByLabelText(/^error/i), { target: { value: "0.1" } });
 		fireEvent.change(screen.getByLabelText(/throughput/i), { target: { value: "1000" } });
 		expect(started(onStart).thresholds).toEqual({
 			latencyP99Ms: 50,
@@ -1468,7 +1468,7 @@ describe("pass/fail budgets", () => {
 	it("blocks Start on an out-of-range budget instead of dropping the field", () => {
 		const { onStart } = open();
 		openBudgets();
-		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "150" } });
+		fireEvent.change(screen.getByLabelText(/^error/i), { target: { value: "150" } });
 		fireEvent.click(screen.getByRole("button", { name: "Start" }));
 		expect(onStart).not.toHaveBeenCalled();
 		expect(screen.getByText(/budget is out of range/i)).toBeInTheDocument();
@@ -1572,9 +1572,7 @@ describe("pass/fail budgets", () => {
 
 			openBudgets();
 			fireEvent.change(p99(), { target: { value: "" } });
-			fireEvent.change(screen.getByLabelText(/error rate at most/i), {
-				target: { value: "" },
-			});
+			fireEvent.change(screen.getByLabelText(/^error/i), { target: { value: "" } });
 			expect(trigger()).toHaveTextContent("No budgets");
 		});
 
@@ -1644,7 +1642,7 @@ describe("pass/fail budgets", () => {
 			fireEvent.click(clearCarriedButton()!);
 
 			expect(p99().value).toBe("");
-			expect(screen.getByLabelText(/error rate at most/i)).toHaveValue(null);
+			expect(screen.getByLabelText(/^error/i)).toHaveValue(null);
 			expect(screen.getByLabelText(/throughput/i)).toHaveValue(500);
 			expect(carriedNotice()).not.toBeInTheDocument();
 			expect(started(onStart).thresholds).toEqual({ minThroughputRps: 500 });
@@ -2217,7 +2215,7 @@ describe("a saved config missing a field a newer build added", () => {
 		open();
 		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
 		expect(screen.getByLabelText(/p99 latency at most/i)).toHaveValue(500);
-		expect(screen.getByLabelText(/error rate at most/i)).toHaveValue(2);
+		expect(screen.getByLabelText(/^error/i)).toHaveValue(2);
 	});
 });
 
@@ -2461,7 +2459,7 @@ describe("the target (issue #2117)", () => {
 	it("withholds the count while a blocking error is live, as the summary does", () => {
 		open({ url: "https://api.example.com/" });
 		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
-		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "150" } });
+		fireEvent.change(screen.getByLabelText(/^error/i), { target: { value: "150" } });
 
 		const advisory = screen.getByText(ADVISORY).parentElement;
 		expect(advisory).toHaveTextContent("Starting sends requests to api.example.com.");
