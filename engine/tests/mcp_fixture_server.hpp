@@ -43,7 +43,8 @@
  * era's rules instead of the header-against-body ones: `initialize` negotiates
  * `MCP_LEGACY_FIXTURE_VERSION` and issues a fresh `Mcp-Session-Id`, every later
  * POST and the `DELETE` that ends the session must carry a live one and that
- * version, and anything else is the plain `400` (so `server/discover` gets it).
+ * version, and anything else is the plain `400` (so `server/discover` gets it,
+ * unless `discover_as` picks the JSON-RPC `400` a reference SDK server sends, #3989).
  * `hang_method` receives a method's requests and never answers them, for a
  * client whose own bound is under test.
  */
@@ -116,8 +117,16 @@ enum class McpDiscovery : std::uint8_t {
     /// JSON-RPC `-32601` in a `200`, as a modern-era server with no such method
     /// answers it.
     MethodNotFound,
+    /// The same `-32601`, under a `400`: still a modern server's answer (#3989).
+    MethodNotFoundBadRequest,
     /// The plain-text `400` a legacy-era server answers a modern request with.
     LegacyBadRequest,
+    /// The TypeScript SDK's refusal of a session-less POST: `400`, JSON-RPC
+    /// `-32000`, `id: null` (#3989).
+    LegacyTypeScriptSessionRequired,
+    /// The Python SDK's: `400`, JSON-RPC `INVALID_REQUEST` (`-32600`),
+    /// `id: "server-error"` (#3989).
+    LegacyPythonInvalidRequest,
 };
 
 /// One request the fixture received, in arrival order.
@@ -673,14 +682,24 @@ class McpFixtureServer {
     static bool refuse_discovery (httplib::Response& res,
     const nlohmann::json& id,
     McpDiscovery discovery) {
-        if (discovery == McpDiscovery::MethodNotFound) {
-            res.set_content (error_frame (id, -32601, "Method not found").dump (),
-            "application/json");
+        switch (discovery) {
+        case McpDiscovery::Modern: return false;
+        case McpDiscovery::MethodNotFound:
+            send_error (res, id, 200, -32601, "Method not found");
             return true;
-        }
-        if (discovery == McpDiscovery::LegacyBadRequest) {
+        case McpDiscovery::MethodNotFoundBadRequest:
+            send_error (res, id, 400, -32601, "Method not found");
+            return true;
+        case McpDiscovery::LegacyBadRequest:
             res.status = 400;
             res.set_content ("Bad Request: No valid session ID provided", "text/plain");
+            return true;
+        case McpDiscovery::LegacyTypeScriptSessionRequired:
+            send_error (res, nullptr, 400, -32000,
+            "Bad Request: Mcp-Session-Id header is required");
+            return true;
+        case McpDiscovery::LegacyPythonInvalidRequest:
+            send_error (res, "server-error", 400, -32600, "Bad Request: Missing session ID");
             return true;
         }
         return false;
@@ -864,6 +883,9 @@ class McpFixtureServer {
         const auto method = string_at (call, nlohmann::json::json_pointer ("/method"));
         if (method == "initialize") {
             open_session (res, call, id, settings, sessions);
+            return;
+        }
+        if (method == "server/discover" && refuse_discovery (res, id, settings.discovery)) {
             return;
         }
         if (const auto refusal = legacy_refusal (req, settings, sessions)) {

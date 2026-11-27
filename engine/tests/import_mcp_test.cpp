@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -515,6 +516,25 @@ TEST (ImportMcpRoute, AServerWithNoDiscoverIsReadOnAndNamedByItsHost) {
     (std::vector<std::string>{ "server/discover", "tools/list" }));
 }
 
+// The `-32601` stays a modern server's whatever status carries it.
+// Mutation check: drop the `-32601` test from `is_legacy_refusal` and the import
+// opens a session instead.
+TEST (ImportMcpRoute, AMethodNotFoundUnderA400AtDiscoveryIsStillAModernServer) {
+    McpFixtureServer server;
+    server.discover_as (McpDiscovery::MethodNotFoundBadRequest);
+    server.set_tools (tools_named ({ "a" }));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+    EXPECT_EQ (root_of (result).at ("name"), "127.0.0.1");
+    EXPECT_EQ (server.methods (),
+    (std::vector<std::string>{ "server/discover", "tools/list" }));
+}
+
+// A `400` is a legacy-era refusal only for a status and a JSON-RPC error that is
+// neither `-32022` nor `-32601`; the version refusal below is the `400` a modern
+// server answers with, and stays a failure.
+// Mutation check: widen `is_legacy_refusal` to any `400` and this import goes on
+// to `initialize`.
 TEST (ImportMcpRoute, AVersionRefusalAtDiscoveryFailsTheImportWithTheReadersMessage) {
     McpFixtureServer server;
     server.reply_with (McpReplyShape::Json, McpReplyOutcome::UnsupportedVersion);
@@ -523,6 +543,20 @@ TEST (ImportMcpRoute, AVersionRefusalAtDiscoveryFailsTheImportWithTheReadersMess
     EXPECT_EQ (message_of (body),
     "server/discover failed: server supports 2025-11-25, 2025-06-18; this "
     "request is 2026-07-28");
+    EXPECT_EQ (server.methods (), std::vector<std::string>{ "server/discover" });
+}
+
+// Only a `400` is a legacy-era refusal: the same kind of JSON-RPC error under any
+// other status fails the import.
+// Mutation check: drop the status test in `is_legacy_refusal` and the import
+// goes on to `initialize`.
+TEST (ImportMcpRoute, AJsonRpcErrorAtDiscoveryUnderAnotherStatusFailsTheImport) {
+    McpFixtureServer server;
+    server.reply_with (McpReplyShape::Json, McpReplyOutcome::RpcError);
+    const auto [status, body] = import_from (body_for (server));
+    EXPECT_EQ (status, 502) << body.dump ();
+    EXPECT_EQ (message_of (body),
+    "server/discover failed: JSON-RPC error -32602: Unknown tool: execute_sql");
     EXPECT_EQ (server.methods (), std::vector<std::string>{ "server/discover" });
 }
 
@@ -936,6 +970,38 @@ TEST (ImportMcpRoute, ALegacyEraServerIsImportedThroughASessionItThenEnds) {
     std::string (vayu::tests::MCP_LEGACY_FIXTURE_VERSION));
 }
 
+/// An import of a legacy-era server whose `server/discover` is refused as
+/// @p refusal: the handshake, the list and the close all follow.
+void expect_legacy_import_after (McpDiscovery refusal) {
+    McpFixtureServer server;
+    server.speak_legacy ();
+    server.discover_as (refusal);
+    server.set_tools (tools_named ({ "a", "b" }));
+    const auto [status, result] = import_from (body_for (server));
+    ASSERT_EQ (status, 200) << result.dump ();
+
+    EXPECT_EQ (sequence_of (server.calls ()),
+    (std::vector<std::string>{ "POST server/discover @-", "POST initialize @-",
+    "POST notifications/initialized @legacy-session-1",
+    "POST tools/list @legacy-session-1", "DELETE @legacy-session-1" }));
+    EXPECT_EQ (root_of (result).at ("name"), "vayu-legacy-fixture");
+    EXPECT_EQ (names_of (folder_of (result, "Tools").at ("requests")),
+    (std::vector<std::string>{ "a", "b" }));
+}
+
+// The reference SDK servers refuse a session-less POST with a JSON-RPC error
+// under the `400`, not plain text (#3989).
+// Mutation check: restore the plain-text-only `is_legacy_refusal` (class
+// Transport, no code) and each of these fails with the `502` that names the
+// server's JSON-RPC error.
+TEST (ImportMcpRoute, ALegacyServerThatRefusesDiscoverInTheTypeScriptSdkShapeIsImported) {
+    expect_legacy_import_after (McpDiscovery::LegacyTypeScriptSessionRequired);
+}
+
+TEST (ImportMcpRoute, ALegacyServerThatRefusesDiscoverInThePythonSdkShapeIsImported) {
+    expect_legacy_import_after (McpDiscovery::LegacyPythonInvalidRequest);
+}
+
 TEST (ImportMcpRoute, ALegacyEraTreeIsItsHandshakeThenTheToolsThenTheClose) {
     McpFixtureServer server;
     server.speak_legacy ();
@@ -1090,49 +1156,70 @@ TEST (ImportMcpRoute, ALegacyImportThatRanOutOfTimeStillEndsItsSession) {
     EXPECT_TRUE (server.live_sessions ().empty ());
 }
 
+
+/// The calls one run of the imported legacy collection makes: the handshake,
+/// every tool and the close, all in the run's own session (the import's was
+/// the first, so the run's is the second).
+std::vector<std::string> legacy_run_sequence () {
+    std::vector<std::string> sequence{ "POST initialize @-",
+        "POST notifications/initialized @legacy-session-2" };
+    sequence.insert (sequence.end (), schema_tools ().size (),
+    "POST tools/call @legacy-session-2");
+    sequence.emplace_back ("DELETE @legacy-session-2");
+    return sequence;
+}
+
 // The generated sequence runs against the server it was read from, with no
 // edit: `initialize` extracts the run's own session (not the import's, which
-// the import ended), every later step sends it, and the close ends it.
+// the import ended), every later step sends it, and the close ends it. The
+// server's refusal of `server/discover` does not change it, whichever of the
+// shapes (plain text, the TypeScript and the Python SDK's JSON-RPC error) it
+// arrives in (#3989); each one gets a server and a collection of its own.
 // Mutation checks: drop `session_extract_element` from `initialize_draft` and
 // every later step sends `{{mcpSessionId}}` unresolved, which the fixture
 // answers `404`; drop `order_root_children` and `initialize` runs after the
-// tools.
+// tools; restore the plain-text-only `is_legacy_refusal` and the two JSON-RPC
+// shapes fail at the import.
 TEST_F (ScenarioRunnerTest, AnImportedLegacyMcpCollectionRunsItsSessionWithNoEdits) {
-    McpFixtureServer mcp;
-    mcp.speak_legacy ();
-    mcp.set_tools (schema_tools ());
-    const auto [status, result] = import_from (body_for (mcp));
-    ASSERT_EQ (status, 200) << result.dump ();
-    apply_tree (*db_, result);
-    const std::size_t imported = mcp.calls ().size ();
+    std::set<std::string> collections_run;
+    for (const auto refusal : { McpDiscovery::LegacyBadRequest, McpDiscovery::LegacyTypeScriptSessionRequired,
+         McpDiscovery::LegacyPythonInvalidRequest }) {
+        SCOPED_TRACE (static_cast<int> (refusal));
+        McpFixtureServer mcp;
+        mcp.speak_legacy ();
+        mcp.discover_as (refusal);
+        mcp.set_tools (schema_tools ());
+        const auto [status, result] = import_from (body_for (mcp));
+        ASSERT_EQ (status, 200) << result.dump ();
+        apply_tree (*db_, result);
+        const std::size_t imported = mcp.calls ().size ();
 
-    for (const auto& collection : db_->get_collections ()) {
-        if (collection.name == vayu::tests::MCP_LEGACY_FIXTURE_NAME) {
-            collection_id_ = collection.id;
+        collection_id_.clear ();
+        for (const auto& collection : db_->get_collections ()) {
+            if (collection.name == vayu::tests::MCP_LEGACY_FIXTURE_NAME &&
+            collections_run.insert (collection.id).second) {
+                collection_id_ = collection.id;
+            }
         }
-    }
-    ASSERT_NE (collection_id_, "col_1");
-    recursive_        = true;
-    const auto run_id = start (/*iterations=*/1);
-    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+        ASSERT_FALSE (collection_id_.empty ());
+        recursive_        = true;
+        const auto run_id = start (/*iterations=*/1);
+        ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
-    const std::size_t steps = schema_tools ().size () + 3;
-    const auto traces       = stored_traces (run_id);
-    ASSERT_EQ (traces.size (), steps);
-    for (const auto& trace : traces) {
-        EXPECT_EQ (trace.at ("outcome"), "passed") << trace.dump ();
-    }
+        const std::size_t steps = schema_tools ().size () + 3;
+        const auto traces       = stored_traces (run_id);
+        ASSERT_EQ (traces.size (), steps);
+        for (const auto& trace : traces) {
+            EXPECT_EQ (trace.at ("outcome"), "passed") << trace.dump ();
+        }
 
-    const auto calls = mcp.calls ();
-    ASSERT_EQ (calls.size (), imported + steps);
-    const std::vector<McpRecordedCall> run (
-    calls.begin () + static_cast<std::ptrdiff_t> (imported), calls.end ());
-    EXPECT_EQ (sequence_of (run),
-    (std::vector<std::string>{ "POST initialize @-",
-    "POST notifications/initialized @legacy-session-2", "POST tools/call @legacy-session-2",
-    "POST tools/call @legacy-session-2", "POST tools/call @legacy-session-2",
-    "POST tools/call @legacy-session-2", "DELETE @legacy-session-2" }));
-    EXPECT_TRUE (mcp.live_sessions ().empty ());
+        const auto calls = mcp.calls ();
+        ASSERT_EQ (calls.size (), imported + steps);
+        const std::vector<McpRecordedCall> run (
+        calls.begin () + static_cast<std::ptrdiff_t> (imported), calls.end ());
+        EXPECT_EQ (sequence_of (run), legacy_run_sequence ());
+        EXPECT_TRUE (mcp.live_sessions ().empty ());
+    }
 }
 
 } // namespace

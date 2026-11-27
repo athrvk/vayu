@@ -320,8 +320,9 @@ In order:
 
 1. `server/discover`, **best effort**, for the collection's name (`serverInfo.name`).
    A server that answers JSON-RPC `-32601` (a modern-era one with no `server/discover`) is read on, and the collection is named after the URL's host.
-   The plain `400` with no JSON-RPC error that a legacy-era server answers with opens a session first ([A legacy-era server](#a-legacy-era-server)).
-   A version refusal (`-32022`) and every other failure (a refused connection, a `401`/`403`, a `5xx`) fail the import.
+   An HTTP `400` that is neither of those opens a session first ([A legacy-era server](#a-legacy-era-server)): the plain `400` (a status alone, or plain text) and a `400` carrying a JSON-RPC error whose code is not `-32022` or `-32601`.
+   The reference SDK servers answer a session-less POST with the second kind (the TypeScript SDK `-32000` with `id: null`, the Python SDK `-32600` with `id: "server-error"`).
+   Only a `400` counts: a version refusal (`-32022`, the `400` a modern-era server answers with) and every other failure (a refused connection, a `401`/`403`/`404`, a `5xx`, a JSON-RPC error under any other status) fail the import.
 2. `tools/list`, then `resources/list` and `resources/templates/list`, then `prompts/list`, each as `include` asks and each **following `nextCursor`** until a page carries none.
    A server that answers `resources/templates/list` with `-32601` lists no templates.
    Any other failure of a list call fails the import.
@@ -404,7 +405,7 @@ Header and token values are never logged.
 
 ### A legacy-era server
 
-A server from before `server/discover` (issue [#3840](https://github.com/athrvk/vayu/issues/3840)) needs an `initialize` handshake and, usually, a session.
+A server from before `server/discover` (issues [#3840](https://github.com/athrvk/vayu/issues/3840), [#3989](https://github.com/athrvk/vayu/issues/3989)) needs an `initialize` handshake and, usually, a session.
 This is the one place an `mcp` exchange falls back: the import speaks the handshake itself, then generates it as requests the user can read and edit, so a run holds no session state the collection does not show.
 
 The import sends, after the refused `server/discover`:
