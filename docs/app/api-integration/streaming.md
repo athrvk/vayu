@@ -24,6 +24,10 @@ Turning Event stream off empties the field (`streamPatch`) so a save never pairs
 What the path reads comes back as `text` on each relayed `message` frame and each stored item, and as `streamText` on the stored `events` node, joined over every stored event (past the stored-items cap) and present only when a path was declared; a captured load sample carries both the same way.
 The renderer joins live `text` itself in `execution-events-store` (`streamText`), and `restore-response.ts` carries the stored string, which wins at the swap.
 
+**An in-band error** (issue #3996) rides each relayed `message` frame and each stored item as `isError: true`, judged by the engine ([the rule](../../engine/api-reference/execute.md)) and never re-derived here.
+`parseMessageFrame` copies it only when it is `true`, `eventsFromTrace` passes items through, and `events-funnels.test.ts` holds the two agreeing.
+The store keeps a running `errorCount` beside `streamText`, for the Events header's "N errors".
+
 **The first content marker** (issue #3774) is the request's declared literal for the first token: the bytes a load run watches each stream's raw wire for, so the report's `stream.timeToFirstMatch` (and the `streamTimeToFirstMatchP95Ms` budget) times the first content and not a preamble event, which `timeToFirstEvent` reads as near zero.
 It is stored beside the path (`requests.stream_first_content_marker`; `streamFirstContentMarker` on `POST`/`PUT /requests`, `null` clears, an absent key keeps), held as a string (empty is none) and, unlike the path, **never trimmed**, since the engine matches its bytes as written.
 The Settings tab offers two presets (`content_block_delta`, `"delta":{"content":"`) and any literal typed in, with the caveat that the match is on the raw stream, so a server's JSON spacing and escaping decide what it must say.

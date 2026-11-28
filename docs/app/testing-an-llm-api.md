@@ -67,6 +67,13 @@ path does not match, such as a role-only chunk, a ping or the `[DONE]` sentinel,
 is skipped. For a provider that streams a different shape, set the path to
 wherever the text sits in one event; leave it empty to see rows only.
 
+A server that fails partway through a reply often says so inside the stream, as
+an `event: error` frame or as a data object carrying an `error` member, with a
+`200` status. The engine marks such an event, the Text view then shows a callout
+above the reply, the Rows view puts an **error** chip on the row, and the
+strip's header counts them ("2 errors"). The
+[execute reference](../engine/api-reference/execute.md) states what counts.
+
 ## 4. Assert
 
 Each template's closing assertion is an **Assert text** element on the Elements
@@ -77,6 +84,15 @@ carried is in the body the assertion searches.
 Add more elements the same way. Common checks for an LLM endpoint:
 
 - **Assert text** on the body for a string the answer must contain.
+- A post-request script that fails the step on an error the stream reported
+  mid-reply, which the `200` status hides:
+
+  ```javascript
+  pm.test('the stream reported no error', function () {
+      pm.expect((pm.response.events || []).some((e) => e.isError)).to.be.false;
+  });
+  ```
+
 - A post-request script that reads the assembled reply, which exists whenever a
   stream text path is set:
 

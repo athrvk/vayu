@@ -843,6 +843,32 @@ TEST_F (ScriptEngineTest, ResponseEventsDisclosesAPerEventTruncation) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
+// The engine's error mark (#3996) reaches a script as `isError`, absent on an
+// event it did not mark. Mutation check: drop the `isError` copy in
+// `install_response_events` and the first expectation fails.
+TEST_F (ScriptEngineTest, ResponseEventsCarriesTheErrorMark) {
+    const nlohmann::json events{
+        { "items",
+        nlohmann::json::array ({ nlohmann::json{ { "event", "message" }, { "data", "token" } },
+        nlohmann::json{ { "event", "message" },
+        { "data", R"({"error":{"message":"overloaded"}})" }, { "isError", true } } }) },
+        { "totalEvents", 2 }, { "eventsTruncated", false }
+    };
+    auto ctx = streamed_test (request, response, env, events);
+
+    auto result = engine.execute (R"JS(
+        pm.test("the error chunk is marked and the token is not", function() {
+            pm.expect(pm.response.events[1].isError).to.equal(true);
+            pm.expect(typeof pm.response.events[0].isError).to.equal("undefined");
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
 // A stream that declared a `streamTextPath` (#3773) binds each event's `text`
 // and the joined `streamText`; one that declared none binds neither, so
 // `typeof` tells "no path" from "a path that read nothing" (""). Mutation

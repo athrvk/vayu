@@ -112,6 +112,65 @@ describe("dispatchTool", () => {
 			expect(client.consumeStreamEvents).toHaveBeenCalledWith("run_s", 50, 5_000, undefined);
 		});
 
+		/*
+		 * #3996: the engine marks an in-band error event `isError`; this tool counts the
+		 * mark and never judges an event itself, so `events: false` cannot hide the one row
+		 * that says the reply went wrong.
+		 */
+		describe("an event the engine flagged as an error", () => {
+			const marked = { event: "message", data: '{"error":"x"}', isError: true };
+			const plain = { event: "message", data: "hello" };
+			const unmarkedNamedError = { event: "error", data: "no mark" };
+			const read = (args: Record<string, unknown> = {}) =>
+				dispatchTool(
+					"run_request",
+					{ url: "https://api.example.com/events", stream: true, ...args },
+					ctxWith(
+						streamingClient({
+							events: [plain, marked, unmarkedNamedError],
+							completed: true,
+							capReached: false,
+						}),
+						allow
+					)
+				);
+
+			test("is counted, and stays in the rows", async () => {
+				const out = (await read()).structuredContent as Record<string, unknown>;
+				expect(out).toMatchObject({ eventCount: 3, errorEventCount: 1 });
+				expect(out.events).toEqual([plain, marked, unmarkedNamedError]);
+				expect(out).not.toHaveProperty("errorEvents");
+			});
+
+			// Mutation check: drop `errorEvents` from the `events: false` result and this fails.
+			test("with events: false, the rows go and the flagged one comes back", async () => {
+				const out = (await read({ events: false })).structuredContent as Record<
+					string,
+					unknown
+				>;
+				expect(out).toMatchObject({ eventCount: 3, errorEventCount: 1 });
+				expect(out).not.toHaveProperty("events");
+				expect(out.errorEvents).toEqual([marked]);
+			});
+
+			test("a stream with none says 0, and an empty list when rowless", async () => {
+				const client = streamingClient({
+					events: [plain],
+					completed: true,
+					capReached: false,
+				});
+				const rowless = await dispatchTool(
+					"run_request",
+					{ url: "https://api.example.com/events", stream: true, events: false },
+					ctxWith(client, allow)
+				);
+				expect(rowless.structuredContent).toMatchObject({
+					errorEventCount: 0,
+					errorEvents: [],
+				});
+			});
+		});
+
 		test("a capped read says so rather than reading as the whole stream", async () => {
 			const client = streamingClient({
 				events: [{ event: "tick" }, { event: "tick" }],

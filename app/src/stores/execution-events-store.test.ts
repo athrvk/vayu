@@ -131,6 +131,34 @@ describe("execution events store", () => {
 		expect(useExecutionEventsStore.getState().streamText).toBe("");
 	});
 
+	it("counts the events the engine flagged as errors, and forgets the count with the stream (#3996)", () => {
+		// Mutation check: drop the count in `addEvents` and this reads 0.
+		start("run_1");
+		const flagged = (data: string): StreamEvent => ({ event: "message", data, isError: true });
+		// Only the flag counts: an event named `error` the engine did not mark is not one.
+		useExecutionEventsStore
+			.getState()
+			.addEvents("run_1", [flagged("a"), event("b"), { event: "error", data: "c" }]);
+		useExecutionEventsStore.getState().addEvents("run_1", [flagged("d")]);
+		expect(useExecutionEventsStore.getState().errorCount).toBe(2);
+
+		// Another run's batch is not this stream's.
+		useExecutionEventsStore.getState().addEvents("run_2", [flagged("stranger")]);
+		expect(useExecutionEventsStore.getState().errorCount).toBe(2);
+
+		useExecutionEventsStore.getState().handOver("req_2");
+		expect(useExecutionEventsStore.getState().errorCount).toBe(0);
+		useExecutionEventsStore.getState().addEvents("run_1", [flagged("late")]);
+		start("run_3");
+		useExecutionEventsStore.getState().addEvents("run_3", [flagged("e")]);
+		expect(useExecutionEventsStore.getState().errorCount).toBe(1);
+		start("run_4");
+		expect(useExecutionEventsStore.getState().errorCount).toBe(0);
+		useExecutionEventsStore.getState().addEvents("run_4", [flagged("f")]);
+		useExecutionEventsStore.getState().clear();
+		expect(useExecutionEventsStore.getState().errorCount).toBe(0);
+	});
+
 	it("drops an event addressed to a run it is not holding", () => {
 		start("run_2");
 		useExecutionEventsStore.getState().addEvents("run_1", [event("from the old socket")]);

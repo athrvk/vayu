@@ -297,19 +297,21 @@ nlohmann::json stream_completion_json (const SseStreamContext& context) {
     return out;
 }
 
-std::optional<std::string>
-sse_event_text (const SseEvent& event, const std::vector<JsonPathStep>& path) {
+namespace {
+
+/// @p event's data as JSON, or nothing when it is not JSON or was truncated.
+std::optional<nlohmann::ordered_json> parse_event_data (const SseEvent& event) {
     if (event.truncated) {
         // A prefix of JSON can still parse (`12345` cut to `123`), and what
         // it reads is not what the server sent.
         return std::nullopt;
     }
-    const auto data =
-    vayu::utils::parse_ordered_json (event.data, constants::elements::MAX_BODY_DEPTH);
-    if (!data) {
-        return std::nullopt;
-    }
-    const auto matches = vayu::core::detail::evaluate_json_path (*data, path);
+    return vayu::utils::parse_ordered_json (event.data, constants::elements::MAX_BODY_DEPTH);
+}
+
+std::optional<std::string> text_at_path (const nlohmann::ordered_json& data,
+const std::vector<JsonPathStep>& path) {
+    const auto matches = vayu::core::detail::evaluate_json_path (data, path);
     if (matches.empty ()) {
         return std::nullopt;
     }
@@ -318,6 +320,63 @@ sse_event_text (const SseEvent& event, const std::vector<JsonPathStep>& path) {
         return std::nullopt;
     }
     return vayu::core::detail::json_value_to_string (first);
+}
+
+/// The byte check before any parse for an error member: an object, and the
+/// key's bytes somewhere in it. A key spelled with an escape (`"\u0065rror"`)
+/// fails it, with or without a text path having parsed the data anyway, so
+/// the answer never depends on `streamTextPath`.
+bool may_hold_error_member (std::string_view data) {
+    const auto first = data.find_first_not_of (" \t\r\n");
+    return first != std::string_view::npos && data.substr (first).starts_with ('{') &&
+    data.find (R"("error")") != std::string_view::npos;
+}
+
+/// A top-level `error` member that is neither `null` nor `false`: both are a
+/// success envelope's way of saying there was none.
+bool holds_error_member (const nlohmann::ordered_json& data) {
+    if (!data.is_object ()) {
+        return false;
+    }
+    const auto error = data.find ("error");
+    if (error == data.end () || error->is_null ()) {
+        return false;
+    }
+    return !error->is_boolean () || error->get<bool> ();
+}
+
+/// `sse_event_is_error`, reading @p parsed (the event's `parse_event_data`)
+/// when the caller already made that parse, and parsing only past the byte
+/// check when it is null.
+bool is_error_event (const SseEvent& event,
+const std::optional<nlohmann::ordered_json>* parsed) {
+    if (event.event == "error") {
+        return true;
+    }
+    if (!may_hold_error_member (event.data)) {
+        return false;
+    }
+    if (parsed) {
+        const auto& data = *parsed;
+        return data && holds_error_member (*data);
+    }
+    const auto data = parse_event_data (event);
+    return data && holds_error_member (*data);
+}
+
+} // namespace
+
+std::optional<std::string>
+sse_event_text (const SseEvent& event, const std::vector<JsonPathStep>& path) {
+    const auto data = parse_event_data (event);
+    if (!data) {
+        return std::nullopt;
+    }
+    return text_at_path (*data, path);
+}
+
+bool sse_event_is_error (const SseEvent& event) {
+    return is_error_event (event, nullptr);
 }
 
 nlohmann::json sse_event_node (const SseEvent& event,
@@ -338,8 +397,17 @@ const std::vector<JsonPathStep>* text_path) {
         payload["dataTruncated"] = true;
         payload["dataBytes"]     = event.data_bytes;
     }
+    // One parse serves both reads; without a text path the error check makes
+    // its own, and only for data that passes the byte check.
+    std::optional<nlohmann::ordered_json> data;
     if (text_path) {
-        if (auto text = sse_event_text (event, *text_path)) {
+        data = parse_event_data (event);
+    }
+    if (is_error_event (event, text_path ? &data : nullptr)) {
+        payload["isError"] = true;
+    }
+    if (text_path && data) {
+        if (auto text = text_at_path (*data, *text_path)) {
             payload["text"] = std::move (*text);
         }
     }

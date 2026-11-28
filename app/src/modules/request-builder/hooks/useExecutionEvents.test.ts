@@ -54,6 +54,17 @@ describe("parseMessageFrame", () => {
 		expect(parsed).toMatchObject({ dataTruncated: true, dataBytes: 9000 });
 	});
 
+	it("keeps the engine's error mark, and only a true one (#3996)", () => {
+		// Mutation check: drop the member from `parseMessageFrame` and the first case reads
+		// without it.
+		const frame = { event: "message", data: '{"error":"x"}' };
+		expect(parseMessageFrame({ ...frame, isError: true })).toEqual({ ...frame, isError: true });
+		for (const notTrue of [false, "true", 1, null]) {
+			expect(parseMessageFrame({ ...frame, isError: notTrue })).not.toHaveProperty("isError");
+		}
+		expect(parseMessageFrame(frame)).not.toHaveProperty("isError");
+	});
+
 	it("keeps the text the stream text path read off the event (#3773)", () => {
 		// The frame is whitelisted field by field, so a field this list does not
 		// name never reaches the Text view.

@@ -354,10 +354,22 @@ class SseStreamContext {
 [[nodiscard]] std::optional<std::string> sse_event_text (const SseEvent& event,
 const std::vector<vayu::core::detail::JsonPathStep>& path);
 
+/**
+ * Whether @p event reports a failure (#3996): it is named `error`, or it is
+ * whole and its `data` is a JSON object whose top-level `error` member is
+ * neither `null` nor `false`. A truncated event's data is a prefix, so only
+ * its name can mark it. No provider's shape is read: an `error` nested below
+ * the top level is not one. Data that does not open with `{` (after
+ * whitespace) or holds no `"error"` bytes is judged without a parse.
+ */
+[[nodiscard]] bool sse_event_is_error (const SseEvent& event);
+
 /// One parsed event in the shape every stored `items` array uses - `event`,
 /// `data`, `sourceId` when the origin sent an id, the in-band
-/// `dataTruncated` / `dataBytes` pair when the per-event cap cut it, and
-/// `text` when @p text_path is given and `sse_event_text` reads one.
+/// `dataTruncated` / `dataBytes` pair when the per-event cap cut it,
+/// `isError: true` when `sse_event_is_error` holds (absent otherwise, and with
+/// or without @p text_path), and `text` when @p text_path is given and
+/// `sse_event_text` reads one. The data is parsed at most once for both.
 ///
 /// No `receivedAt`: only a live consumer knows when an event arrived, and
 /// `buffered_stream_events_node` adds the one it was given. A node built from

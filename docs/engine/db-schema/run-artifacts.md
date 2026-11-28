@@ -173,6 +173,7 @@ when the transfer began, in epoch milliseconds on the clock `receivedAt` reads, 
 It is absent for a stream refused before its transfer began and for a row stored before the key, never written as `0`.
 The list is not stored (#657): every route that serves a stored trace parses it back from `response.body` with the same `SseParser` (`expand_stored_stream_events`) and serves `events` as `items` (each `event` / `data` / optional `sourceId` / `receivedAt`, and `dataTruncated` + `dataBytes` on one that hit the per-event cap, at most one per `receivedAt` and never past `totalEvents`),
 `totalEvents`, `eventsTruncated` (true when the list is shorter than `totalEvents` or the body is a prefix), `endReason` and `startedAt` when the row has one.
+An item's `isError` (#3996) is derived from the body on the same read and never stored; [POST /execute](../api-reference/execute.md#post-execute) states the rule.
 A row stored before #3770 holds an empty body and the `items` list itself, and is served as stored.
 
 A design send or a scenario step whose scripts called `pm.sendRequest` carries **`scripts.scriptRequests`** (issue #3633): one record per call in execution order, each in the design-mode trace shape above (`request`, `response`, `error_type` / `error_message`, the eight timing keys) plus `source`, `scope`, `startedAt`, `status` and `statusText`, and without `rawRequest`.

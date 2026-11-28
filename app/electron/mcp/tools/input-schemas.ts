@@ -436,7 +436,7 @@ export const eventsInput = z
 	.boolean()
 	.optional()
 	.describe(
-		"Streaming only: false returns the reply as `text` without the event rows; `eventCount`, `totalEvents` and the stop flags stay. `text` is present only when the request has a `streamTextPath`, and joins the events this read collected, so a `capReached` or `budgetExhausted` result holds the reply so far (raise `maxStreamEvents`, or read get_run_report once the run ends)."
+		"Streaming only: false returns the reply as `text` without the event rows; `eventCount`, `errorEventCount`, `totalEvents` and the stop flags stay, and the rows the engine flagged `isError` return as `errorEvents`. `text` is present only when the request has a `streamTextPath`, and joins the events this read collected, so a `capReached` or `budgetExhausted` result holds the reply so far (raise `maxStreamEvents`, or read get_run_report once the run ends)."
 	);
 
 export const streamBudgetMsInput = z

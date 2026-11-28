@@ -239,6 +239,7 @@ data: {"runId":"run_1234567890","reason":"completed","totalEvents":128}
 - `message` carries one upstream event: its `event` name (`message` when the origin sent none), its `data` (multiple `data:` lines joined with `\n`), the origin's own `id:` as **`sourceId`**, and `receivedAt`.
   An event larger than `sseMaxEventBytes` is stored as a prefix and says so in band, with `dataTruncated: true` and `dataBytes` (the size as sent) - never silently cut.
   A send that declared a `streamTextPath` adds `text`, what the path read off this event, and leaves it off an event the path reads nothing from; see [POST /execute](execute.md#post-execute) (issue #3773).
+  An event that reports a failure carries `isError: true`, by the rule in [POST /execute](execute.md#post-execute) (issue #3996).
 - `complete`'s `reason` is one of `completed`, `stopped`, `shutdown`, `maxStreamEvents`, `maxStreamDurationMs`, `idleTimeout`, `error`; see [POST /execute](execute.md#post-execute).
   No frame carries the exchange's `warnings` (issue #3315): they are on the stored trace, which the report already holds when `complete` arrives.
 

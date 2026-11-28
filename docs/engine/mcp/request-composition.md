@@ -150,6 +150,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   A path rides beside `stream: true` only, so a call that does not stream drops it from the payload (`setStreamFlag`, shared with `start_load_run` and `run_collection_smoke`), and `text` is masked as the rows are, after the events are joined, so a secret split across two of them is still caught.
   A saved request's path is stored with `create_request` / `update_request` and a by-id send reads it from there.
   An ad-hoc send (`url`) states its own as `run_request`'s `streamTextPath` (#3818), which `/compose` copies onto the payload like any other inline field; a by-id send ignores that argument, and so does a send that does not stream.
+  **`errorEventCount` (#3996) is the number of those events the engine flagged `isError`**, on every streaming answer, counted over the events this read collected as `eventCount` is.
+  The rule that marks an event is the engine's, in [the execute reference](../api-reference/execute.md); the tool reads the mark and never judges an event, `text` or `data` itself.
+  With `events: false` the rows go but `errorEvents` stays, the flagged rows as `events` would have carried them (masked the same way, `[]` when none), so a rowless read still shows what went wrong.
+  `get_run_report` serves the stored trace's items with the mark on each, derived when the trace is read.
 - **Data rows** - `run_request` takes an optional `data` object: one row, which binds every `{{data.column}}` in the URL, headers and body and which both scripts read as `pm.iterationData` (`pm.info.iteration` is `0`, issue #601).
   It rides *beside* the composed payload rather than through `/compose`, because `{{data.*}}` survives composition by design - that is what leaves the tokens for the engine to bind.
   A column the row does not carry is an error naming the token and the row's columns, and **nothing is sent**.
