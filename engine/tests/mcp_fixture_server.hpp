@@ -252,6 +252,13 @@ class McpFixtureServer {
         settings_.hung_methods.insert (std::move (method));
     }
 
+    /// Answers @p method with JSON-RPC `-32601` in a `200`, as a modern-era
+    /// server that does not implement it would (the modern path only).
+    void leave_out_method (std::string method) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.unimplemented_methods.insert (std::move (method));
+    }
+
     /// The session ids issued and not yet ended by a `DELETE`.
     std::set<std::string> live_sessions () const {
         std::lock_guard<std::mutex> lock (mutex_);
@@ -377,6 +384,7 @@ class McpFixtureServer {
         std::optional<McpLegacySessions> legacy;
         bool legacy_names_version = true;
         std::set<std::string> hung_methods;
+        std::set<std::string> unimplemented_methods;
     };
 
     static constexpr std::string_view CURSOR_PREFIX   = "cursor-";
@@ -777,6 +785,10 @@ class McpFixtureServer {
         }
         if (const auto reason = header_mismatch (req, call)) {
             send_error (res, id, 400, -32020, "Header mismatch: " + *reason);
+            return;
+        }
+        if (method && settings.unimplemented_methods.contains (*method)) {
+            send_error (res, id, 200, -32601, "Method not found");
             return;
         }
         if (settings.shape == McpReplyShape::EventStreamEndless) {

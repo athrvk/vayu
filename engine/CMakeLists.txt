@@ -585,6 +585,7 @@ add_library(vayu_core STATIC
     src/core/jmeter_import.cpp
     src/core/mcp_diff.cpp
     src/core/mcp_import.cpp
+    src/core/mcp_list_pages.cpp
     src/core/script_api_scan.cpp
     src/core/script_config.cpp
     src/core/openapi_document.cpp

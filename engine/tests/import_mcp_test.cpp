@@ -437,8 +437,8 @@ TEST (ImportMcpRoute, AToolWithNoNameIsSkippedAndCounted) {
     json::parse (R"([{"kind":"malformed_item","count":2}])"));
 }
 
-// Mutation check: return after the first page in `list_all` and only the
-// first two tools import.
+// Mutation check: return after the first page in `collect_mcp_list_pages`
+// and only the first two tools import.
 TEST (ImportMcpRoute, EveryPageOfToolsListIsRead) {
     McpFixtureServer server;
     server.set_tools (tools_named ({ "a", "b", "c", "d", "e" }), 2);
@@ -493,6 +493,31 @@ TEST (ImportMcpRoute, IncludedResourcesAndPromptsGetTheirFolders) {
     EXPECT_EQ (server.methods (),
     (std::vector<std::string>{ "server/discover", "resources/list",
     "resources/templates/list", "prompts/list" }));
+}
+
+// `resources/templates/list` is optional for a server that lists resources,
+// so its `-32601` is an empty list, where the same answer to any other list
+// fails the import.
+// Mutation check: drop the `unknown_method` branch in `list_all` and the first
+// import answers 502.
+TEST (ImportMcpRoute, ATemplatesListTheServerDoesNotImplementIsReadAsNone) {
+    McpFixtureServer server;
+    server.set_resources (json::parse (R"([{"uri":"file:///a.txt","name":"a"}])"));
+    server.leave_out_method ("resources/templates/list");
+    const json include = { { "tools", false }, { "resources", true } };
+    const auto [status, result] =
+    import_from (json{ { "url", server.url () }, { "include", include } });
+    ASSERT_EQ (status, 200) << result.dump ();
+    EXPECT_EQ (names_of (folder_of (result, "Resources").at ("requests")),
+    (std::vector<std::string>{ "a" }));
+
+    McpFixtureServer without_resources;
+    without_resources.leave_out_method ("resources/list");
+    const auto [refused, body] =
+    import_from (json{ { "url", without_resources.url () }, { "include", include } });
+    EXPECT_EQ (refused, 502) << body.dump ();
+    EXPECT_NE (message_of (body).find ("resources/list failed"), std::string::npos)
+    << message_of (body);
 }
 
 // ---------------------------------------------------------------------------
@@ -592,8 +617,8 @@ TEST (ImportMcpRoute, VayusOwnPortsAreRefusedBeforeAnythingIsSent) {
     << message_of (mcp_body);
 }
 
-// Mutation check: raise the loop's bound in `list_all` and the import follows
-// the 101st cursor and answers 200.
+// Mutation check: raise the loop's bound in `collect_mcp_list_pages` and the
+// import follows the 101st cursor and answers 200.
 TEST (ImportMcpRoute, AListPastThePageCapFailsNamingIt) {
     McpFixtureServer server;
     server.set_tools (tools_named (numbered_names (limits::MAX_PAGES + 1)), 1);
@@ -605,8 +630,8 @@ TEST (ImportMcpRoute, AListPastThePageCapFailsNamingIt) {
     EXPECT_EQ (server.tools_list_cursors ().size (), limits::MAX_PAGES);
 }
 
-// Mutation check: drop the `sent_cursors` test in `list_all` and the import
-// asks for the same page until the page cap.
+// Mutation check: drop the `sent_cursors` test in `collect_mcp_list_pages`
+// and the import asks for the same page until the page cap.
 TEST (ImportMcpRoute, ARepeatedCursorFailsTheListAtTheFirstRepeat) {
     McpFixtureServer server;
     server.set_tools (tools_named (numbered_names (5)), 2);

@@ -185,6 +185,7 @@ add_executable(vayu_tests
     managed_listener_test.cpp
     mcp_body_test.cpp
     mcp_fixture_server_test.cpp
+    mcp_list_pages_test.cpp
     mcp_reply_test.cpp
     metric_record_test.cpp
     metrics_collector_test.cpp
