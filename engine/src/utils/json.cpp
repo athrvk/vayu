@@ -1506,6 +1506,9 @@ Json serialize_warnings (const std::vector<ResponseWarning>& warnings) {
 
 Json serialize_mcp_reply (const McpReply& reply) {
     Json out = Json::object ();
+    if (reply.pages > 1) {
+        out["pages"] = reply.pages;
+    }
     if (!reply.error_class) {
         return out;
     }

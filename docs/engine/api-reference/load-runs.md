@@ -337,7 +337,8 @@ Every key is optional; an unknown key or an out-of-set value is a `400` naming t
   `"asMarked"` (the default) reads each element's own `config.inline`; `"allInline"` / `"allDeferred"` force every `script.*` element of the run one way, regardless of its own marking.
   `extract.*` and `assert.*` are unaffected - they always run inline on a scenario load run.
 - **`includeScriptTime`** folds the element pipeline's own elapsed time into a step's recorded latency when `true`, and into the run's latency figures with it (`latency`, the per-tick percentiles and a stored result's `latencyMs`), so the run's `max` is never below a step's (#2792); by default (`false`) both are the transfer alone.
-  A stored trace's `totalMs`, the per-phase timings and the `slow_threshold_ms` decision stay on the transfer either way.
+  The transfer counts any list pages an `assert.snapshot` followed ([a paged list](../elements.md#kinds)), which the pipeline time leaves out.
+  A stored trace's `totalMs` and the `slow_threshold_ms` decision stay on the transfer either way, and the per-phase timings on the step's own request.
 - **`timers`** (issue #1498) is wired end to end: `"asConfigured"` (default) runs every `timer.*` element's own stored config unchanged; `"off"` silences every `timer.*` element for the run (`waitedMs: 0`, no sleep);
   `{"fixedMs": N}` or `{"minMs": N, "maxMs": N}` replace every `timer.*` element's own computed wait with the same fixed value or uniform range, whatever that element's own config says - "replaced, not merged", the same rule `scripts` above uses.
   `timer.think`'s `step.between` phase now dispatches on a scenario load run too (non-blocking, summed into `VirtualUser::ready_at_ms`), so this override reaches load runs as well as the sequential run.

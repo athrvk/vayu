@@ -31,6 +31,7 @@
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/mcp_diff.hpp"
 #include "vayu/core/mcp_import.hpp"
+#include "vayu/core/mcp_list_pages.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
@@ -602,73 +603,78 @@ void close_legacy_session (McpSession& session) {
     [[maybe_unused]] const auto ended = send_as_response (session, request);
 }
 
-/// The array a list page keeps its entries under, or null when it has none.
-ordered_json* page_rows (ordered_json& result, const char* key) {
-    const auto rows = result.find (key);
-    return rows == result.end () || !rows->is_array () ? nullptr : &*rows;
+/// What a refused page of @p list becomes: the loop's own failure kinds worded
+/// as the import's `502` / `413`.
+RouteError list_refusal (const ListMethod& list, const vayu::core::McpListFailure& failure) {
+    using Kind = vayu::core::McpListFailureKind;
+    const std::string method (list.method);
+    switch (failure.kind) {
+    case Kind::PageCapReached:
+        return route_error (502,
+        method + " still had a nextCursor after " +
+        std::to_string (limits::MAX_PAGES) + " pages, the most one import follows")
+        .error ();
+    case Kind::RepeatedCursor:
+        return route_error (502, method + " repeated a cursor it had already been sent, so the list would never end")
+        .error ();
+    case Kind::ItemsOverBudget:
+        return route_error (413,
+        "The server lists more than " + std::to_string (limits::MAX_ITEMS) +
+        " tools, resources and prompts, the most one import reads")
+        .error ();
+    case Kind::MissingList:
+    case Kind::SendFailed: break;
+    }
+    return route_error (502, method + " answered with no '" + list.key + "' list")
+    .error ();
 }
 
-/// Every entry @p list answers, following `nextCursor` until a page carries
-/// none; nothing for a `may_be_unknown` method the server does not know.
-/// A cursor the server hands back a second time is refused: the list would
-/// never end. Entries count against `MAX_ITEMS` across the whole import.
+/// Every entry @p list answers, through `core::collect_mcp_list_pages`; nothing
+/// for a `may_be_unknown` method the server does not know. Entries count
+/// against `MAX_ITEMS` across the whole import.
 Refusable<std::optional<ordered_json>> list_all (McpSession& session, const ListMethod& list) {
-    const std::string method (list.method);
-    const auto no_list = [&] {
-        return route_error (502, method + " answered with no '" + list.key + "' list");
+    // The loop carries a sender's failure through untouched, so the refusal
+    // the import answers with (its status, its code) is kept here whole.
+    std::optional<RouteError> refused;
+    bool unknown_method = false;
+    const auto refuse   = [&] (RouteError error) {
+        refused = std::move (error);
+        return std::unexpected (vayu::core::McpPageFailure{
+        .status = refused->status, .message = error_message_of (refused->body) });
     };
-    ordered_json entries = ordered_json::array ();
-    std::optional<std::string> cursor;
-    std::set<std::string> sent_cursors;
-    for (std::size_t pages = 0; pages < limits::MAX_PAGES; ++pages) {
+    const auto send = [&] (const std::optional<std::string>& cursor)
+    -> std::expected<ordered_json, vayu::core::McpPageFailure> {
         ordered_json params = ordered_json::object ();
         if (cursor) {
             params["cursor"] = *cursor;
-            sent_cursors.insert (*cursor);
         }
         auto sent = send_call (session, list.method, std::move (params));
         if (!sent) {
-            return std::unexpected (sent.error ());
+            return refuse (std::move (sent.error ()));
         }
         const McpCall& call = *sent;
-        if (pages == 0 && list.may_be_unknown && is_method_not_found (call)) {
-            return std::optional<ordered_json> ();
+        if (!cursor && list.may_be_unknown && is_method_not_found (call)) {
+            unknown_method = true;
+            return std::unexpected (vayu::core::McpPageFailure{});
         }
         if (call.reply.error_class) {
-            return std::unexpected (call_refusal (list.method, call));
+            return refuse (call_refusal (list.method, call));
         }
-        auto result = call_result (call);
-        if (!result) {
-            return no_list ();
-        }
-        ordered_json& page = *result;
-        ordered_json* rows = page_rows (page, list.key);
-        if (rows == nullptr) {
-            return no_list ();
-        }
-        session.budget.items += rows->size ();
-        if (session.budget.items > limits::MAX_ITEMS) {
-            return route_error (413,
-            "The server lists more than " + std::to_string (limits::MAX_ITEMS) +
-            " tools, resources and prompts, the most one import reads");
-        }
-        for (auto& entry : *rows) {
-            entries.push_back (std::move (entry));
-        }
-        const auto next = page.find ("nextCursor");
-        if (next == page.end () || !next->is_string () ||
-        next->get_ref<const std::string&> ().empty ()) {
-            return std::optional<ordered_json> (std::in_place, std::move (entries));
-        }
-        cursor = next->get<std::string> ();
-        if (sent_cursors.contains (*cursor)) {
-            return route_error (502,
-            method + " repeated a cursor it had already been sent, so the list would never end");
-        }
+        // No result object is a page with no list, which the loop names.
+        return call_result (call).value_or (ordered_json ());
+    };
+    auto pages = vayu::core::collect_mcp_list_pages (
+    send, list.key, limits::MAX_PAGES, session.budget.items, limits::MAX_ITEMS);
+    if (pages) {
+        return std::optional<ordered_json> (std::in_place, std::move (pages->rows));
     }
-    return route_error (502,
-    method + " still had a nextCursor after " +
-    std::to_string (limits::MAX_PAGES) + " pages, the most one import follows");
+    if (unknown_method) {
+        return std::optional<ordered_json> ();
+    }
+    if (refused) {
+        return std::unexpected (std::move (*refused));
+    }
+    return std::unexpected (list_refusal (list, pages.error ()));
 }
 
 /// The host @p url names, the collection's name when the server names none.

@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cmath>
 #include <optional>
+#include <string>
 #include <utility>
 
 #include "vayu/core/json_path.hpp"
@@ -30,6 +31,7 @@
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/snapshot_page_send.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/log_text.hpp"
@@ -1368,6 +1370,31 @@ std::optional<std::string> check_files (vayu::http::FilePlan* files, vayu::Reque
     return none.prepare (request);
 }
 
+/// What every transfer of one step leaves through: its own send, and each
+/// list page `assert.snapshot` follows (#3824). The staged jar writes are the
+/// step's send's alone, so the caller adds them.
+vayu::http::ClientConfig step_client_config (const ExchangeInputs& inputs,
+const vayu::Request& request,
+vayu::http::CookieJar& jar,
+const std::string& cookie_scope) {
+    vayu::http::ClientConfig config;
+    config.default_headers = inputs.default_headers;
+    // No jar rides a request that disables cookies (issue #1765).
+    if (!request.disable_cookies) {
+        config.cookie_jar   = &jar;
+        config.cookie_scope = cookie_scope;
+    }
+    config.transport = inputs.transport;
+    // Design mode's own bound, and the reading of it that keeps the prefix
+    // (issue #1157). A body past it stops being read here rather than being
+    // buffered whole and then found to be too large downstream - the renderer
+    // holds this string too, so the cost of an unbounded one is paid twice.
+    config.max_response_bytes  = inputs.max_response_bytes;
+    config.truncate_over_limit = true;
+    config.cancel              = inputs.cancel;
+    return config;
+}
+
 } // namespace
 
 std::vector<std::string> unresolved_token_names (vayu::Request& request) {
@@ -1574,28 +1601,24 @@ ExchangeInputs inputs) {
         vayu::Error{ vayu::ErrorCode::UnsendableFile, std::move (*unsendable) });
         outcome.response.request_headers = outcome.request.headers;
     } else {
-        vayu::http::ClientConfig config;
-        config.default_headers = inputs.default_headers;
+        auto config = step_client_config (inputs, outcome.request, jar, cookie_scope);
+        // A page is a machine read, which half a reply cannot serve: past the
+        // bound it fails rather than keeping the prefix.
+        auto page_config                = config;
+        page_config.truncate_over_limit = false;
+        element_ctx.send_list_page = [&, page_config] (const vayu::Request& page_request) {
+            return send_list_page (
+            page_config, page_request, outcome.response, element_ctx.response);
+        };
         if (outcome.request.disable_cookies) {
-            // No jar rides this transfer (issue #1765), so nothing would
-            // carry the pre-request script's writes: they are applied here,
-            // once, the way the post-request writes below always are.
+            // No jar rides this transfer, so nothing would carry the
+            // pre-request script's writes: they are applied here, once, the
+            // way the post-request writes below always are.
             jar.apply (cookie_scope, pre_cookie_writes);
         } else {
-            config.cookie_jar    = &jar;
-            config.cookie_scope  = cookie_scope;
             config.cookie_writes = std::move (pre_cookie_writes);
         }
-        config.transport = inputs.transport;
-        // Design mode's own bound, and the reading of it that keeps the prefix
-        // (issue #1157). A body past it stops being read here rather than
-        // being buffered whole and then found to be too large downstream - the
-        // renderer holds this string too, so the cost of an unbounded one is
-        // paid twice.
-        config.max_response_bytes  = inputs.max_response_bytes;
-        config.truncate_over_limit = true;
-        config.cancel              = inputs.cancel;
-        outcome.unresolved_tokens  = unresolved_token_names (outcome.request);
+        outcome.unresolved_tokens = unresolved_token_names (outcome.request);
         vayu::http::Client client (config);
         outcome.response = client.send (outcome.request).value ();
     }

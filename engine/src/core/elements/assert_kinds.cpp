@@ -29,6 +29,7 @@
 #include <string_view>
 #include <vector>
 
+#include "snapshot_pages.hpp"
 #include "user_regex.hpp"
 #include "vayu/core/json_path.hpp"
 
@@ -490,7 +491,8 @@ class AssertJsonSchemaElement final : public Element {
 // schema fails the step. A generic kind rather than an MCP-only one: the
 // registry has no protocol gate, and a kind that read `result.tools` on any
 // other reply would only report that the list is missing. What is compared,
-// and how, is `core/list_snapshot.hpp`.
+// and how, is `core/list_snapshot.hpp`; a paged list is read whole first
+// (`snapshot_pages.hpp`, #3824).
 // ---------------------------------------------------------------------------
 
 /// The list `method` names (the default when it is absent), or why it names
@@ -557,11 +559,28 @@ class AssertSnapshotElement final : public Element {
             return;
         }
         // No problem means the method named a list and the baseline exists.
-        const auto drift = snapshot_drift (*list_, *body, config_.at ("baseline"));
+        const auto whole = whole_snapshot_reply (*list_, *body, ctx);
+        if (!whole) {
+            record_unread_list (ctx, whole.error ());
+            return;
+        }
+        const auto drift = snapshot_drift (
+        *list_, whole->has_value () ? **whole : *body, config_.at ("baseline"));
         record_assertion (ctx, name_, !drift, drift.value_or (""));
     }
 
     private:
+    /// A list that was not read to its end: a failed assertion, unless the
+    /// run ended mid-list, which is no verdict and records no test (#3824).
+    void record_unread_list (ElementContext& ctx, const ListPageFailure& failure) const {
+        if (failure.cancelled) {
+            ctx.outcome_status  = "skipped";
+            ctx.outcome_message = failure.message;
+            return;
+        }
+        record_assertion (ctx, name_, false, failure.message);
+    }
+
     nlohmann::json config_;
     std::optional<std::string> problem_;
     const SnapshotList* list_ = nullptr;

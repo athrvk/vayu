@@ -377,18 +377,20 @@ It is a generic kind rather than an MCP-only one because the registry has no pro
 reads `result.tools`, `result.resources` or `result.prompts` of the final JSON-RPC response the
 elements read (above), so it belongs on an `mcp` request that sends the matching list method.
 
-Only the fields a client reads are compared, and the baseline is cut to them the same way the
-reply is, so a recorded `_meta` or `icons` is harmless: a tool's `name`, `title`, `description`,
-`inputSchema`, `outputSchema` and `annotations`; a resource's `uri`, `name`, `title`,
-`description`, `mimeType` and `annotations`; a prompt's `name`, `title`, `description` and
-`arguments`. Items are matched by `name` (`uri` for a resource), so a server that reorders its list
-has not changed it, and the members of an object compare without regard to order for the same
-reason; an array inside a field (`required`, `enum`) compares in order, since there the order is the
-value. A `null` is a value too: a field the baseline holds as `null` and the reply omits, or the
-reverse, is a difference, at the top of an item and inside a field alike. A baseline is refused when
-it is not an array, holds an item that is not an object with a text identity, or names one twice,
-each naming `baseline`. The reply is compared as it came: a
-server that pages its list (`nextCursor`) is compared on the page the step received.
+Only the fields a client reads are compared, and the baseline is cut to them the same way the reply is, so a recorded `_meta` or `icons` is harmless: a tool's `name`, `title`, `description`, `inputSchema`, `outputSchema` and `annotations`; a resource's `uri`, `name`, `title`, `description`, `mimeType` and `annotations`; a prompt's `name`, `title`, `description` and `arguments`.
+Items are matched by `name` (`uri` for a resource), so a server that reorders its list has not changed it, and the members of an object compare without regard to order for the same reason; an array inside a field (`required`, `enum`) compares in order, since there the order is the value.
+A `null` is a value too: a field the baseline holds as `null` and the reply omits, or the reverse, is a difference, at the top of an item and inside a field alike.
+A baseline is refused when it is not an array, holds an item that is not an object with a text identity, or names one twice, each naming `baseline`.
+
+**A paged list is compared whole** (issue #3824): when the reply's `result` carries a non-empty `nextCursor` beside the list, the element asks for each next page as part of the step.
+It resends the step's own call with `params.cursor` set (a bare call gains `params`, an envelope keeps its `id`) through the same transport, cookies, default headers and body bound, its `Mcp-*` headers derived again from that body.
+Items are matched across pages as within one, so a server that moves an item to another page has not changed the list.
+Each page's time is added to the step's (`totalMs` and `wireMs`: a collection run's latency counts them, and a Send's `engineMs` leaves them out as network time), and the reply's `mcp` node counts the requests as `pages`, absent for one page ([the mcp reply](api-reference/request-body.md#the-mcp-reply)).
+A list is never compared on the pages read so far: the assertion fails with `<method> was not compared: <why>` when a page still names a `nextCursor` after `MAX_SNAPSHOT_PAGES` (100) pages, hands back a cursor already sent, takes the items past `MAX_SNAPSHOT_ITEMS` (10,000), holds no list, cannot be read, or fails as an `mcp` reply (`page 2: protocol failure: ...`).
+A Send, a collection run and both load-run shapes follow pages; a request of another body mode, and a streamed Send (`... and a streamed send does not follow pages`), fail with that reason instead.
+Under load a page is part of its step and no submission of its own: its time is in that step's recorded latency and the run's, and the run's request and iteration counts do not move; `includeScriptTime` leaves it out of the pipeline time it adds ([Load paths](#load-paths)), so it counts once.
+The event-loop worker that completed the step sends the page and waits for it, as for an inline script's `pm.sendRequest`, through the run's transport, default headers and `maxResponseBodyBytes`; a step that keeps cookies sends it with the virtual user's session and keeps what it set.
+A Stop, or the caller leaving, while a page is in flight is the run ending: the element reports `skipped` and records no test.
 
 A failure is one line, `tools/list changed: removed 'a'; added 'b'; 'c' differs at
 /inputSchema/properties/x/type`: removed names, added names, then each changed item with the first
@@ -692,16 +694,10 @@ strategy thread and each event-loop worker - are spawned fresh for that run and 
 it retains, so `vayu::http::routes::script_engine_for_this_thread` constructs one lazily on
 first use and is never stale, never shared across runs, and never a caller-visible lock.
 
-**`elements.includeScriptTime`.** A step's recorded latency is its transfer alone by default -
-an inline element runs after `Client::send`'s own timing already stopped and before
-`StepHistograms::record` - so opting a script in does not, by itself, change what the latency
-figures measure. Setting the run's `elements.includeScriptTime` folds the pipeline's own
-elapsed time back in for anyone who wants the scripted cost in the figures. It moves the step's
-histogram and the run's together (#2792): the scenario executor decides the figure once per
-completion and hands it to `StepHistograms` and, as `ResultAnnotations::script_ms`, to the run's
-latency histogram, so the run's `max` is never below a step's. What stays on the transfer is the
-stored trace's `totalMs` (it stays consistent with the phase breakdown beside it), the per-phase
-histograms and the `slow_threshold_ms` decision.
+**`elements.includeScriptTime`.** A step's recorded latency is its transfer alone by default, with any list pages an `assert.snapshot` followed ([a paged list](#kinds)) - an inline element runs after `Client::send`'s own timing already stopped and before `StepHistograms::record` - so opting a script in does not, by itself, change what the latency figures measure.
+Setting the run's `elements.includeScriptTime` folds the pipeline's own elapsed time back in for anyone who wants the scripted cost in the figures.
+It moves the step's histogram and the run's together (#2792): the scenario executor decides the figure once per completion and hands it to `StepHistograms` and, as `ResultAnnotations::script_ms`, to the run's latency histogram, so the run's `max` is never below a step's.
+What stays on the transfer and its list pages is the stored trace's `totalMs`, the per-phase histograms (the step's own transfer) and the `slow_threshold_ms` decision.
 
 **Per-step tallies.** `scenario.steps[i].elements[] = { id, kind, name?, origin?, required?,
 passed, failed, missing, error, skipped, deferred }` beside the existing `tests` node, one row per

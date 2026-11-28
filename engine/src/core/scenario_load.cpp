@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <deque>
 #include <limits>
@@ -30,6 +31,7 @@
 #include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/http/snapshot_page_send.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/log_text.hpp"
@@ -625,6 +627,10 @@ struct StepAfterResult {
     bool assertion_failed = false;
     bool script_threw     = false;
     std::vector<vayu::core::ElementOutcome> outcomes;
+    /// The step's response with every list page an `assert.snapshot`
+    /// followed (#3824), which the completion records in the received
+    /// response's place; nothing when no page was asked for.
+    std::optional<vayu::Result<vayu::Response>> paged;
 };
 
 /// Adds @p tests to the run's inline assertion tally (#1497) and answers
@@ -770,9 +776,10 @@ const nlohmann::json* data_row) {
  *        `const_cast` exists because the completion holds only a
  *        `const Response&` off `Result::value()`, and copying it would pay for
  *        the body twice.
- * @return elapsed milliseconds on @ref run_step_before's terms, whether an
- *         assertion failed, whether a script threw, and the outcomes, not yet
- *         tallied.
+ * @return elapsed milliseconds on @ref run_step_before's terms, less the
+ *         list pages, which are the step's latency (#3824); whether an
+ *         assertion failed, whether a script threw, the outcomes, not yet
+ *         tallied, and the response with its pages.
  */
 StepAfterResult run_step_after (const std::shared_ptr<RunContext>& context,
 ScenarioLoadState& state,
@@ -801,6 +808,7 @@ const nlohmann::json* data_row) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     auto& received = const_cast<vayu::Response&> (response);
     std::optional<vayu::Response> unwrapped;
+    vayu::http::LoadListPages pages (context->script_send, response);
     vayu::core::ElementContext ctx{
         .request        = request,
         .response       = vayu::http::mcp_element_view (received, unwrapped),
@@ -810,14 +818,15 @@ const nlohmann::json* data_row) {
             auto& engine =
             vayu::http::routes::script_engine_for_this_thread (state.script_config);
             auto scopes = vu.scope_overlay.materialize (base.scopes);
-            auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
+            auto script_ctx =
+            vayu::runtime::ScriptContext::for_test (request, pages.step ());
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             context->script_send.apply (script_ctx);
             script_ctx.cookie_read_lines = &vu.cookies;
             bind_step_identity (script_ctx, step, iteration, vu_index, data_row);
             nlohmann::json stream_events;
             vayu::http::bind_buffered_stream_events (
-            script_ctx, response, context->sse_limits, stream_events);
+            script_ctx, pages.step (), context->sse_limits, stream_events);
             script_ctx.record_metric = [&context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);
@@ -860,6 +869,7 @@ const nlohmann::json* data_row) {
         .max_body_bytes  = context->max_element_body_bytes,
         .max_event_bytes = context->sse_limits.max_event_bytes,
     };
+    pages.bind (ctx);
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx, *step.elements,
     outcomes, [&context] (const vayu::core::CompiledElement& element) {
@@ -870,12 +880,19 @@ const nlohmann::json* data_row) {
     const bool assertion_failed = tally_inline_tests (state, post_result.tests);
     const bool threw            = script_threw (post_result);
 
-    const int64_t elapsed_ms = start ?
-    std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::steady_clock::now () - *start)
-    .count () :
-    0;
-    return StepAfterResult{ elapsed_ms, assertion_failed, threw, std::move (outcomes) };
+    int64_t elapsed_ms = 0;
+    if (start) {
+        const std::chrono::duration<double, std::milli> pipeline =
+        std::chrono::steady_clock::now () - *start;
+        elapsed_ms =
+        std::max<int64_t> (0, std::llround (pipeline.count () - pages.page_ms ()));
+    }
+    StepAfterResult after{ elapsed_ms, assertion_failed, threw,
+        std::move (outcomes), std::nullopt };
+    if (auto paged = pages.take ()) {
+        after.paged.emplace (std::move (*paged));
+    }
+    return after;
 }
 
 } // namespace
@@ -1094,12 +1111,15 @@ class ScenarioLoadDriver {
                 return;
             }
 
-            const vayu::Response& response = result.value ();
             StepAfterResult after;
             if (sent_request) {
                 after = run_step_after (context, *state, *vu, *step_ptr, step_index,
-                iteration, vu_index, *sent_request, response, data_row);
+                iteration, vu_index, *sent_request, result.value (), data_row);
             }
+            // Every reader below takes the step with its list pages (#3824).
+            const vayu::Result<vayu::Response>& step_result =
+            after.paged ? *after.paged : result;
+            const vayu::Response& response = step_result.value ();
 
             const bool errored = response.has_error ();
             // Decided once and handed to both populations, so the step's
@@ -1131,7 +1151,7 @@ class ScenarioLoadDriver {
             .transaction_error = transaction_member_errored (&response, assertion_failed) },
             session_after (errored, step_ptr->request, response, *vu),
             std::move (after.outcomes), next_target_before);
-            handle_result (context, db, result,
+            handle_result (context, db, step_result,
             ResultAnnotations{ row, step_index, iteration, vu_index, script_ms });
         });
         context_->requests_sent++;

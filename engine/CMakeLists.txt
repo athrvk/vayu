@@ -528,6 +528,7 @@ add_library(vayu_core STATIC
     src/http/event_loop/event_loop_impl.cpp
     src/http/script_parts.cpp
     src/http/request_exchange.cpp
+    src/http/snapshot_page_send.cpp
     src/http/set_cookie.cpp
     src/http/cookie_warnings.cpp
     src/http/sse_parser.cpp
@@ -585,6 +586,7 @@ add_library(vayu_core STATIC
     src/core/jmeter_import.cpp
     src/core/mcp_diff.cpp
     src/core/mcp_import.cpp
+    src/core/mcp_list_pages.cpp
     src/core/script_api_scan.cpp
     src/core/script_config.cpp
     src/core/openapi_document.cpp
@@ -624,6 +626,7 @@ add_library(vayu_core STATIC
     src/core/elements/extract_kinds.cpp
     src/core/elements/assert_kinds.cpp
     src/core/elements/list_snapshot.cpp
+    src/core/elements/snapshot_pages.cpp
     src/core/elements/timer_think.cpp
     src/core/elements/timer_pacing.cpp
     src/core/elements/timer_throughput.cpp

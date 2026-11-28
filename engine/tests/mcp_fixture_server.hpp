@@ -33,9 +33,9 @@
  * mirrors as `Mcp-Param-Region` (`execute_sql_tool_json`).
  *
  * The discovery and list methods an import reads (#3838) are answered from
- * what the test configures: `server/discover` (`discover_as`), `tools/list`
- * in pages (`set_tools`), `resources/list`, `resources/templates/list` and
- * `prompts/list`. Any other method keeps the `tools/call`-shaped answer above.
+ * what the test configures: `server/discover` (`discover_as`), `tools/list`,
+ * `resources/list` and `prompts/list` in pages (`set_tools` and its kin), and
+ * `resources/templates/list` in one. Any other method keeps the `tools/call`-shaped answer above.
  * Every request is recorded (`calls`), so a test asserts the order of methods
  * and the cursors a client sent back.
  *
@@ -46,7 +46,8 @@
  * version, and anything else is the plain `400` (so `server/discover` gets it,
  * unless `discover_as` picks the JSON-RPC `400` a reference SDK server sends, #3989).
  * `hang_method` receives a method's requests and never answers them, for a
- * client whose own bound is under test.
+ * client whose own bound is under test; `delay_cursor_pages` and
+ * `hang_cursor_pages` hold back a list's later pages alone (#3824).
  */
 
 #include <httplib.h>
@@ -252,6 +253,13 @@ class McpFixtureServer {
         settings_.hung_methods.insert (std::move (method));
     }
 
+    /// Answers @p method with JSON-RPC `-32601` in a `200`, as a modern-era
+    /// server that does not implement it would (the modern path only).
+    void leave_out_method (std::string method) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.unimplemented_methods.insert (std::move (method));
+    }
+
     /// The session ids issued and not yet ended by a `DELETE`.
     std::set<std::string> live_sessions () const {
         std::lock_guard<std::mutex> lock (mutex_);
@@ -282,10 +290,12 @@ class McpFixtureServer {
         settings_.repeat_tools_cursor = on;
     }
 
-    /// What `resources/list` answers; one page, no cursor.
-    void set_resources (nlohmann::json resources) {
+    /// What `resources/list` answers, @p page_size to a page as `set_tools`
+    /// pages its list.
+    void set_resources (nlohmann::json resources, std::size_t page_size = 0) {
         std::lock_guard<std::mutex> lock (mutex_);
-        settings_.resources = std::move (resources);
+        settings_.resources           = std::move (resources);
+        settings_.resources_page_size = page_size;
     }
 
     /// What `resources/templates/list` answers; one page, no cursor.
@@ -294,10 +304,12 @@ class McpFixtureServer {
         settings_.resource_templates = std::move (templates);
     }
 
-    /// What `prompts/list` answers; one page, no cursor.
-    void set_prompts (nlohmann::json prompts) {
+    /// What `prompts/list` answers, @p page_size to a page as `set_tools`
+    /// pages its list.
+    void set_prompts (nlohmann::json prompts, std::size_t page_size = 0) {
         std::lock_guard<std::mutex> lock (mutex_);
-        settings_.prompts = std::move (prompts);
+        settings_.prompts           = std::move (prompts);
+        settings_.prompts_page_size = page_size;
     }
 
     /// The n-th call from now on answered with @p turns `[n % size]`, so a
@@ -313,6 +325,28 @@ class McpFixtureServer {
     void delay_tool (std::string tool, std::chrono::milliseconds delay) {
         std::lock_guard<std::mutex> lock (mutex_);
         tool_delays_[std::move (tool)] = delay;
+    }
+
+    /// Every request carrying a `params.cursor` from now on answered @p delay
+    /// late, for a step whose later list pages have to take measurable time.
+    void delay_cursor_pages (std::chrono::milliseconds delay) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        cursor_page_delay_ = delay;
+    }
+
+    /// Every request carrying a `params.cursor` from now on is received and
+    /// recorded and never answered, until the fixture stops.
+    void hang_cursor_pages () {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.hang_cursor_pages = true;
+    }
+
+    /// Every list page asked for by a cursor from now on answers with
+    /// @p set_cookie as its `Set-Cookie`, for a step whose pages change the
+    /// session.
+    void set_cookie_on_cursor_pages (std::string set_cookie) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.cursor_page_cookie = std::move (set_cookie);
     }
 
     /// Calls answered so far.
@@ -371,12 +405,17 @@ class McpFixtureServer {
         bool first_tools_page_stream      = false;
         bool repeat_tools_cursor          = false;
         nlohmann::json resources          = nlohmann::json::array ();
+        std::size_t resources_page_size   = 0;
         nlohmann::json resource_templates = nlohmann::json::array ();
         nlohmann::json prompts            = nlohmann::json::array ();
+        std::size_t prompts_page_size     = 0;
         /// Set by `speak_legacy`: the legacy era's rules answer every call.
         std::optional<McpLegacySessions> legacy;
         bool legacy_names_version = true;
         std::set<std::string> hung_methods;
+        bool hang_cursor_pages = false;
+        std::string cursor_page_cookie;
+        std::set<std::string> unimplemented_methods;
     };
 
     static constexpr std::string_view CURSOR_PREFIX   = "cursor-";
@@ -457,9 +496,15 @@ class McpFixtureServer {
         return std::nullopt;
     }
 
-    /// How long `delay_tool` holds back the call @p body makes.
+    /// How long `delay_tool` or `delay_cursor_pages` holds back the call
+    /// @p body makes.
     std::chrono::milliseconds delay_for (const std::string& body) const {
         const auto call = nlohmann::json::parse (body, nullptr, false);
+        if (call.is_object () &&
+        string_at (call, nlohmann::json::json_pointer ("/params/cursor"))) {
+            std::lock_guard<std::mutex> lock (mutex_);
+            return cursor_page_delay_;
+        }
         if (!call.is_object () ||
         string_at (call, nlohmann::json::json_pointer ("/method")) != "tools/call") {
             return std::chrono::milliseconds{ 0 };
@@ -591,29 +636,38 @@ class McpFixtureServer {
         return offset;
     }
 
-    static nlohmann::json tools_page_frame (const nlohmann::json& call,
+    /// One list's paging, as a list method's answer reads it.
+    struct PagedList {
+        const char* key             = "";
+        const nlohmann::json* items = nullptr;
+        std::size_t page_size       = 0;
+        bool repeat_cursor          = false;
+    };
+
+    /// The page of @p list the call's `params.cursor` names, the first when it
+    /// names none.
+    static nlohmann::json list_page_frame (const nlohmann::json& call,
     const nlohmann::json& id,
-    const Settings& settings) {
-        const std::size_t total = settings.tools.size ();
+    const PagedList& list) {
+        const std::size_t total = list.items->size ();
         std::size_t offset      = 0;
         const auto cursor =
         string_at (call, nlohmann::json::json_pointer ("/params/cursor"));
         if (cursor) {
-            const auto start = cursor_offset (*cursor, total, settings.tools_page_size);
+            const auto start = cursor_offset (*cursor, total, list.page_size);
             if (!start) {
                 return error_frame (id, -32602, "Invalid cursor: " + *cursor);
             }
             offset = *start;
         }
-        const std::size_t end = settings.tools_page_size == 0 ?
-        total :
-        (std::min)(total, offset + settings.tools_page_size);
-        nlohmann::json page   = nlohmann::json::array ();
+        const std::size_t end =
+        list.page_size == 0 ? total : (std::min)(total, offset + list.page_size);
+        nlohmann::json page = nlohmann::json::array ();
         for (std::size_t at = offset; at < end; ++at) {
-            page.push_back (settings.tools.at (at));
+            page.push_back (list.items->at (at));
         }
-        nlohmann::json result{ { "tools", std::move (page) } };
-        if (cursor && settings.repeat_tools_cursor) {
+        nlohmann::json result{ { list.key, std::move (page) } };
+        if (cursor && list.repeat_cursor) {
             result["nextCursor"] = *cursor;
         } else if (end < total) {
             result["nextCursor"] = cursor_at (end);
@@ -632,19 +686,20 @@ class McpFixtureServer {
             return std::make_optional (result_frame (id, discover_result ()));
         }
         if (method == "tools/list") {
-            return std::make_optional (tools_page_frame (call, id, settings));
+            return std::make_optional (list_page_frame (call, id,
+            { "tools", &settings.tools, settings.tools_page_size, settings.repeat_tools_cursor }));
         }
         if (method == "resources/list") {
-            return std::make_optional (
-            result_frame (id, { { "resources", settings.resources } }));
+            return std::make_optional (list_page_frame (call, id,
+            { "resources", &settings.resources, settings.resources_page_size, false }));
         }
         if (method == "resources/templates/list") {
             return std::make_optional (result_frame (
             id, { { "resourceTemplates", settings.resource_templates } }));
         }
         if (method == "prompts/list") {
-            return std::make_optional (
-            result_frame (id, { { "prompts", settings.prompts } }));
+            return std::make_optional (list_page_frame (call, id,
+            { "prompts", &settings.prompts, settings.prompts_page_size, false }));
         }
         return std::nullopt;
     }
@@ -749,8 +804,11 @@ class McpFixtureServer {
     static constexpr std::chrono::milliseconds HOLD_POLL{ 5 };
 
     static bool is_hung (const Settings& settings, const std::string& body) {
-        const auto method =
-        body_string (nlohmann::json::parse (body, nullptr, false), "/method");
+        const auto call   = nlohmann::json::parse (body, nullptr, false);
+        const auto method = body_string (call, "/method");
+        if (settings.hang_cursor_pages && body_string (call, "/params/cursor")) {
+            return true;
+        }
         return method && settings.hung_methods.contains (*method);
     }
 
@@ -779,12 +837,20 @@ class McpFixtureServer {
             send_error (res, id, 400, -32020, "Header mismatch: " + *reason);
             return;
         }
+        if (method && settings.unimplemented_methods.contains (*method)) {
+            send_error (res, id, 200, -32601, "Method not found");
+            return;
+        }
         if (settings.shape == McpReplyShape::EventStreamEndless) {
             stream_endlessly (res);
             return;
         }
         if (settings.outcome == McpReplyOutcome::Result) {
             if (const auto known = known_method_frame (method, call, id, settings)) {
+                if (!settings.cursor_page_cookie.empty () &&
+                string_at (call, nlohmann::json::json_pointer ("/params/cursor"))) {
+                    res.set_header ("Set-Cookie", settings.cursor_page_cookie);
+                }
                 send_frame (res, *known, known_method_shape (method, call, settings));
                 return;
             }
@@ -939,6 +1005,7 @@ class McpFixtureServer {
     Settings settings_;
     std::vector<McpRecordedCall> calls_;
     std::map<std::string, std::chrono::milliseconds> tool_delays_;
+    std::chrono::milliseconds cursor_page_delay_{ 0 };
     std::set<std::string> live_sessions_;
     std::size_t sessions_issued_ = 0;
     std::atomic<std::size_t> requests_{ 0 };

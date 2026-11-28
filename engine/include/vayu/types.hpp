@@ -1074,6 +1074,9 @@ struct McpReply {
     std::optional<std::int64_t> code;
     /// What a person reads about the failure; empty on success.
     std::string message;
+    /// The list pages the step requested, its own reply included: more than
+    /// one only when `assert.snapshot` followed `result.nextCursor` (#3824).
+    std::size_t pages = 1;
 };
 
 // `optin.performance.Padding` is right that size-ordering these fields would
