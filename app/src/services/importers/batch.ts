@@ -42,7 +42,7 @@ import {
 } from "./ref-bundler";
 import { parseImport } from "./factory";
 import { UnrecognisedFormatError, type ImportOptions, type ImportResult } from "./types";
-import type { ImportFetchOptions, ImportMcpDiffMatch } from "@/types/api";
+import type { ImportFetchOptions, ImportMcpDiffMatch, ImportMcpRequest } from "@/types/api";
 
 /**
  * What a folder pick will even look at. A folder is picked wholesale (`webkitdirectory` hands over
@@ -126,6 +126,13 @@ export interface BatchEntry {
 	 * comparison failed, and the preview then shows no diff.
 	 */
 	existingMcp?: ImportMcpDiffMatch[];
+	/**
+	 * The request the connect sent, which `existingMcp` was computed from (#3994). An update sends
+	 * it again, so it writes against the listing the user was shown rather than whatever the form
+	 * holds by then. It carries the bearer token, so it lives and dies with the entry, which
+	 * `resetTab` drops when the preview is dismissed or the dialog closes.
+	 */
+	mcpRequest?: ImportMcpRequest;
 }
 
 /** How the batch reaches files the picked documents reference. */
@@ -213,13 +220,14 @@ export function entryLabel(entry: BatchEntry): string {
  * The entry for a result the engine already built from a live MCP server (`POST /import/mcp`,
  * #3843). It has no document: `raw` is `null`, and the server URL stands where a file's name
  * would, so `entryLabel` names it. `existingMcp` is what the diff route found of an earlier
- * import of the same server.
+ * import of the same server, and `request` is what both calls were sent.
  */
 export function mcpBatchEntry(
 	result: ImportResult,
-	url: string,
+	request: ImportMcpRequest,
 	existingMcp: ImportMcpDiffMatch[] = []
 ): BatchEntry {
+	const { url } = request;
 	return {
 		id: `mcp:${url}`,
 		fileName: "",
@@ -233,6 +241,7 @@ export function mcpBatchEntry(
 		bundledInto: null,
 		included: true,
 		existingMcp,
+		mcpRequest: request,
 	};
 }
 

@@ -223,12 +223,7 @@ void Database::verify_spec_sync_rows_locked (const SpecSyncBatch& batch) {
         c (&Collection::id) == batch.binding.id && is_null (&Collection::deleted_at))) == 0) {
         throw MissingRowError ("Collection", batch.binding.id);
     }
-    for (const auto& row : batch.updated) {
-        if (impl_->storage.count<Request> (where (
-            c (&Request::id) == row.id && is_null (&Request::deleted_at))) == 0) {
-            throw MissingRowError ("Request", row.id);
-        }
-    }
+    verify_live_requests_locked (batch.updated);
 }
 
 std::vector<Change> Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
@@ -242,18 +237,8 @@ std::vector<Change> Database::write_spec_sync_batch_locked (const SpecSyncBatch&
     // back a request the current document cannot explain. A caller wanting them
     // recoverable omits them and calls `DELETE /requests/:id`. For the same
     // reason they record no declined operation (#3031): the document dropped
-    // it, nobody declined it. A named row already gone publishes nothing:
-    // nothing changed.
-    for (const auto& id : batch.deleted) {
-        for (auto& owner : impl_->storage.select (
-             &Request::collection_id, where (c (&Request::id) == id))) {
-            written.push_back (Change{ ChangeKind::Request, ChangeOp::Purge, id,
-            std::move (owner), std::nullopt });
-        }
-        impl_->storage.remove_all<RequestExample> (
-        where (c (&RequestExample::request_id) == id));
-        impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
-    }
+    // it, nobody declined it.
+    purge_batch_requests_locked (batch.deleted, written);
     for (const auto& id : batch.deleted_examples) {
         for (auto& owner : impl_->storage.select (&RequestExample::request_id,
              where (c (&RequestExample::id) == id))) {

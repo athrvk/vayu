@@ -20,7 +20,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ImportMcpDiffMatch, ImportMcpRequest } from "@/types";
+import type { ImportMcpApplyRequest, ImportMcpDiffMatch, ImportMcpRequest } from "@/types";
 import type { ImportResult } from "@/services/importers/types";
 
 const applied = vi.hoisted(() => ({ mutate: vi.fn() }));
@@ -35,6 +35,7 @@ vi.mock("@/queries/import", () => ({
 
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore, useToastStore } from "@/stores";
+import { queryKeys } from "@/queries/keys";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services/http-client";
 import { collection, request, result } from "./import-preview.testkit";
@@ -91,9 +92,9 @@ function renamedToolMatch(over: Partial<ImportMcpDiffMatch> = {}): ImportMcpDiff
 	};
 }
 
-function renderModal() {
+function renderModal(client = new QueryClient()) {
 	return render(
-		<QueryClientProvider client={new QueryClient()}>
+		<QueryClientProvider client={client}>
 			<ImportModal />
 		</QueryClientProvider>
 	);
@@ -118,8 +119,8 @@ function connectButton(): HTMLButtonElement {
 	return screen.getByRole("button", { name: /^Connect$/ }) as HTMLButtonElement;
 }
 
-function openMcpTab() {
-	renderModal();
+function openMcpTab(client?: QueryClient) {
+	renderModal(client);
 	selectTab(/^MCP server$/);
 }
 
@@ -389,10 +390,10 @@ describe("ImportModal MCP server tab", () => {
 			const found = within(report() as HTMLElement);
 			expect(found.getByText("Acme tools")).toBeInTheDocument();
 			expect(found.getByText("Acme tools copy")).toBeInTheDocument();
-			expect(found.getByText(/existing ones/)).toBeInTheDocument();
+			expect(found.getByText(/leaves the existing ones as they are/)).toBeInTheDocument();
 		});
 
-		it("says Import anyway, says nothing changes, and imports the shown tree as a new collection", async () => {
+		it("says Import anyway makes a new collection, and imports the shown tree as one", async () => {
 			const tree = serverTree();
 			vi.spyOn(apiService, "importMcp").mockResolvedValue(tree);
 			vi.spyOn(apiService, "importMcpDiff").mockResolvedValue({
@@ -403,7 +404,11 @@ describe("ImportModal MCP server tab", () => {
 			fireEvent.click(connectButton());
 			await screen.findByText("search_docs");
 
-			expect(screen.getByText(/nothing is changed in the existing one/)).toBeInTheDocument();
+			expect(
+				screen.getByText(
+					/Import anyway creates a new collection and leaves the existing one as it is/
+				)
+			).toBeInTheDocument();
 			expect(screen.queryByRole("button", { name: /^Import →$/ })).toBeNull();
 			fireEvent.click(screen.getByRole("button", { name: /^Import anyway →$/ }));
 
@@ -551,6 +556,285 @@ describe("ImportModal MCP server tab", () => {
 			selectTab(/^MCP server$/);
 
 			expect(tokenInput().value).toBe("s3cret");
+		});
+	});
+
+	describe("Update existing (#3994)", () => {
+		const APPLIED = {
+			collectionId: "col_1",
+			created: [{ kind: "tool" as const, key: "export", requestId: "req_3" }],
+			updated: ["req_1", "req_2"],
+			deleted: [] as string[],
+		};
+		const secondMatch = (): ImportMcpDiffMatch =>
+			renamedToolMatch({
+				collectionId: "col_2",
+				name: "Acme tools copy",
+				added: [{ kind: "prompt", key: "hello", name: "hello" }],
+				changed: [],
+				removed: [],
+			});
+
+		let importMcpApply: ReturnType<typeof vi.spyOn>;
+
+		beforeEach(() => {
+			importMcpApply = vi.spyOn(apiService, "importMcpApply").mockResolvedValue(APPLIED);
+		});
+
+		/** Connect with `token` typed, to the diff `matches` answers. */
+		async function connectTo(
+			matches: ImportMcpDiffMatch[],
+			opts: { client?: QueryClient; token?: string } = {}
+		) {
+			const importMcp = vi.spyOn(apiService, "importMcp").mockResolvedValue(serverTree());
+			vi.spyOn(apiService, "importMcpDiff").mockResolvedValue({ matches });
+			openMcpTab(opts.client);
+			typeUrl();
+			if (opts.token) fireEvent.change(tokenInput(), { target: { value: opts.token } });
+			fireEvent.click(connectButton());
+			await screen.findByText("search_docs");
+			return importMcp;
+		}
+
+		const box = (name: string) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
+		const updateButton = () => screen.getByRole("button", { name: /^Update existing$/ });
+		const sent = () => importMcpApply.mock.calls.at(-1)?.[0] as ImportMcpApplyRequest;
+
+		it("offers it beside Import anyway for the one collection, and not Import", async () => {
+			await connectTo([renamedToolMatch()]);
+
+			expect(updateButton()).toBeEnabled();
+			expect(screen.getByRole("button", { name: /^Import anyway →$/ })).toBeEnabled();
+			expect(screen.queryByRole("button", { name: /^Import →$/ })).toBeNull();
+		});
+
+		it("offers nothing when no earlier import holds the server's URL", async () => {
+			await connectTo([]);
+
+			expect(screen.queryByRole("button", { name: /Update existing/ })).toBeNull();
+		});
+
+		it("starts with added and changed rows ticked and the removed one not", async () => {
+			await connectTo([renamedToolMatch()]);
+
+			expect(box("export (tool)").checked).toBe(true);
+			expect(box("search → find (tool)").checked).toBe(true);
+			expect(box("greet (prompt)").checked).toBe(true);
+			expect(box("a.txt (resource)").checked).toBe(false);
+		});
+
+		it("sends the connect's request, the collection and the ticks, then closes and says what landed", async () => {
+			const client = new QueryClient();
+			const invalidate = vi.spyOn(client, "invalidateQueries");
+			const importMcp = await connectTo([renamedToolMatch()], { client, token: "s3cret" });
+			fireEvent.click(box("greet (prompt)"));
+
+			fireEvent.click(updateButton());
+
+			await waitFor(() => expect(importMcpApply).toHaveBeenCalledTimes(1));
+			expect(sent()).toEqual({
+				...lastPayload(importMcp),
+				collectionId: "col_1",
+				select: {
+					added: [{ kind: "tool", key: "export" }],
+					changed: ["req_1"],
+					removed: [],
+				},
+			});
+			expect(sent().auth).toEqual({ mode: "bearer", token: "s3cret" });
+			await waitFor(() => expect(useImportModalStore.getState().isOpen).toBe(false));
+			expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([
+				'Updated "Acme tools" - 1 request created, 2 updated, 0 deleted.',
+			]);
+			// No second collection: the tree is refreshed, not written to.
+			expect(applied.mutate).not.toHaveBeenCalled();
+			const refreshed = invalidate.mock.calls.map((call) => call[0]?.queryKey);
+			expect(refreshed).toContainEqual(queryKeys.collections.all);
+			expect(refreshed).toContainEqual(queryKeys.requests.all);
+		});
+
+		it("is off while nothing is ticked", async () => {
+			await connectTo([renamedToolMatch()]);
+
+			["export (tool)", "search → find (tool)", "greet (prompt)"].forEach((name) =>
+				fireEvent.click(box(name))
+			);
+
+			expect(updateButton()).toBeDisabled();
+			fireEvent.click(box("a.txt (resource)"));
+			expect(updateButton()).toBeEnabled();
+		});
+
+		it("asks before deleting, naming the count, and deletes only what was ticked", async () => {
+			await connectTo([renamedToolMatch()]);
+			fireEvent.click(box("a.txt (resource)"));
+
+			fireEvent.click(updateButton());
+
+			const confirm = await screen.findByRole("dialog", {
+				name: "Delete requests the server no longer lists?",
+			});
+			expect(
+				within(confirm).getByText(/1 request and everything saved on it are deleted/)
+			).toBeInTheDocument();
+			expect(importMcpApply).not.toHaveBeenCalled();
+
+			// Backing out writes nothing and keeps the tick.
+			fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+			await waitFor(() =>
+				expect(screen.queryByText(/Delete requests the server/)).toBeNull()
+			);
+			expect(importMcpApply).not.toHaveBeenCalled();
+			expect(box("a.txt (resource)").checked).toBe(true);
+
+			fireEvent.click(updateButton());
+			fireEvent.click(
+				within(await screen.findByRole("dialog", { name: /Delete requests/ })).getByRole(
+					"button",
+					{ name: "Update and delete" }
+				)
+			);
+
+			await waitFor(() => expect(importMcpApply).toHaveBeenCalledTimes(1));
+			expect(sent().select).toEqual({
+				added: [{ kind: "tool", key: "export" }],
+				changed: ["req_1", "req_2"],
+				removed: ["req_9"],
+			});
+		});
+
+		it("does not ask when nothing is to be deleted", async () => {
+			await connectTo([renamedToolMatch()]);
+
+			fireEvent.click(updateButton());
+
+			await waitFor(() => expect(importMcpApply).toHaveBeenCalledTimes(1));
+			expect(screen.queryByText(/Delete requests the server/)).toBeNull();
+		});
+
+		it("says to compare again on a 409, keeps the selection, and stays open", async () => {
+			importMcpApply.mockRejectedValue(
+				new ApiError(
+					409,
+					"CONFLICT",
+					"export is no longer an added entry in this server's diff of the collection"
+				)
+			);
+			await connectTo([renamedToolMatch()]);
+			fireEvent.click(box("export (tool)"));
+			fireEvent.click(box("a.txt (resource)"));
+
+			fireEvent.click(updateButton());
+			fireEvent.click(
+				within(await screen.findByRole("dialog", { name: /Delete requests/ })).getByRole(
+					"button",
+					{ name: "Update and delete" }
+				)
+			);
+
+			const failure = await screen.findByText(
+				/Couldn't update the collection - export is no longer/
+			);
+			expect(failure).toHaveTextContent("Nothing was written");
+			expect(failure).toHaveTextContent("connect again to compare");
+			// Still the diff, still as ticked: nothing was written, so there is nothing to redo.
+			await waitFor(() =>
+				expect(screen.queryByText(/Delete requests the server/)).toBeNull()
+			);
+			expect(useImportModalStore.getState().isOpen).toBe(true);
+			expect(box("export (tool)").checked).toBe(false);
+			expect(box("a.txt (resource)").checked).toBe(true);
+			expect(box("greet (prompt)").checked).toBe(true);
+			expect(useToastStore.getState().toasts).toEqual([]);
+			expect(updateButton()).toBeEnabled();
+		});
+
+		it("writes nothing to the tree after a failure", async () => {
+			importMcpApply.mockRejectedValue(
+				new ApiError(502, "BAD_GATEWAY", "The server did not answer")
+			);
+			const client = new QueryClient();
+			const invalidate = vi.spyOn(client, "invalidateQueries");
+			await connectTo([renamedToolMatch()], { client });
+
+			fireEvent.click(updateButton());
+
+			expect(await screen.findByText(/did not answer/)).toBeInTheDocument();
+			expect(invalidate).not.toHaveBeenCalled();
+		});
+
+		it("holds the dialog and both buttons while the update is under way", async () => {
+			let release!: (value: typeof APPLIED) => void;
+			importMcpApply.mockReturnValue(new Promise((res) => (release = res)));
+			await connectTo([renamedToolMatch()]);
+
+			fireEvent.click(updateButton());
+
+			const busy = await screen.findByRole("button", { name: /^Updating…$/ });
+			expect(busy).toBeDisabled();
+			expect(screen.getByRole("button", { name: /^Import anyway →$/ })).toBeDisabled();
+			expect(box("export (tool)").disabled).toBe(true);
+			release(APPLIED);
+			await waitFor(() => expect(useImportModalStore.getState().isOpen).toBe(false));
+		});
+
+		it("starts the next connect from the defaults and with that connect's request", async () => {
+			importMcpApply.mockRejectedValue(new ApiError(409, "CONFLICT", "stale"));
+			await connectTo([renamedToolMatch()], { token: "first-token" });
+			fireEvent.click(box("a.txt (resource)"));
+			fireEvent.click(updateButton());
+			fireEvent.click(
+				within(await screen.findByRole("dialog", { name: /Delete requests/ })).getByRole(
+					"button",
+					{ name: "Update and delete" }
+				)
+			);
+			await screen.findByText(/Couldn't update the collection/);
+
+			// Dismissing drops the form and the entry, token and request with them.
+			fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+			await screen.findByLabelText("Server URL");
+			expect(tokenInput().value).toBe("");
+			typeUrl();
+			fireEvent.change(tokenInput(), { target: { value: "second-token" } });
+			fireEvent.click(connectButton());
+			await screen.findByText("search_docs");
+
+			expect(screen.queryByText(/Couldn't update the collection/)).toBeNull();
+			expect(box("a.txt (resource)").checked).toBe(false);
+			importMcpApply.mockResolvedValue(APPLIED);
+			fireEvent.click(updateButton());
+			await waitFor(() => expect(importMcpApply).toHaveBeenCalledTimes(2));
+			expect(sent().auth).toEqual({ mode: "bearer", token: "second-token" });
+			expect(sent().select.removed).toEqual([]);
+		});
+
+		describe("with several earlier imports", () => {
+			it("gives each its own Update existing, and the footer has none", async () => {
+				await connectTo([renamedToolMatch(), secondMatch()]);
+
+				const buttons = screen.getAllByRole("button", { name: /^Update existing$/ });
+				expect(buttons).toHaveLength(2);
+				// Each sits inside its match's report, not in the footer beside Import anyway.
+				expect(
+					buttons.map((b) => b.closest('[role="group"]')?.getAttribute("aria-label"))
+				).toEqual(["Acme tools", "Acme tools copy"]);
+			});
+
+			it("updates the one it sits under, with that match's ticks alone", async () => {
+				await connectTo([renamedToolMatch(), secondMatch()]);
+
+				const second = within(screen.getByRole("group", { name: "Acme tools copy" }));
+				fireEvent.click(second.getByRole("button", { name: /^Update existing$/ }));
+
+				await waitFor(() => expect(importMcpApply).toHaveBeenCalledTimes(1));
+				expect(sent().collectionId).toBe("col_2");
+				expect(sent().select).toEqual({
+					added: [{ kind: "prompt", key: "hello" }],
+					changed: [],
+					removed: [],
+				});
+			});
 		});
 	});
 });

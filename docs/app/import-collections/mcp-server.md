@@ -10,7 +10,10 @@ Unlike the other tabs it reads no document.
 It sends the engine a URL and gets the parsed tree back, so the preview and the apply that follow are the ones every other tab uses.
 
 - **Route:** [`POST /import/mcp`](../../engine/api-reference/import.md#post-importmcp) is the contract: the calls the engine makes, the tree it builds, the bounds and every error. This page covers only what the dialog does with it.
-- **Code:** `app/src/modules/collections/ImportMcpForm.tsx` (the fields), `import-mcp.ts` (the form's state and the request it makes), `ImportModal.tsx` (`handleConnectMcp`), `McpReimportDiff.tsx` (the report of a server imported before), `apiService.importMcp` and `apiService.importMcpDiff` in `app/src/services/api.ts`, and `mcpBatchEntry` in `app/src/services/importers/batch.ts`.
+- **Code:** `app/src/modules/collections/ImportMcpForm.tsx` (the fields), `import-mcp.ts` (the form's state and the request it makes), `ImportModal.tsx` (`handleConnectMcp`),
+  `McpReimportDiff.tsx` (the report of a server imported before and its ticks), `mcp-reimport-selection.ts` (what is ticked and the `select` it makes), `useMcpReimport.ts` (the update),
+  `apiService.importMcp`, `importMcpDiff` and `importMcpApply` in `app/src/services/api.ts`, `useImportMcpApplyMutation` in `app/src/queries/import-mcp.ts`,
+  and `mcpBatchEntry` in `app/src/services/importers/batch.ts`.
 
 ## The form
 
@@ -38,9 +41,25 @@ Dismissing the preview, or closing the dialog, discards the tree.
 Right after the connect succeeds the dialog also asks [`POST /import/mcp/diff`](../../engine/api-reference/import.md#post-importmcpdiff) with the same request, so it reads the server a second time.
 When a collection already holds this URL (as the `mcpBaseUrl` variable an import stores), the preview adds a report on it: *You already imported this server*, and for each such collection the counts of entries *added*, *changed* and *removed* (zeros stated), then the names under each.
 A tool the server renamed is one changed row, `old → new`, not an added tool and a removed one; a changed row also names what differs (description, input schema, output schema).
-The footer's button then reads **Import anyway**: it creates a new collection exactly as Import does.
-**Nothing is changed in the existing collection**, and the dialog offers no way to apply the difference to it.
+The footer then offers two answers: **Update existing**, and **Import anyway**, which creates a new collection exactly as Import does and changes nothing in the existing one.
 A comparison that fails (the server answered the connect and then not the second read, say) is logged and treated as no match: the preview shows no report and Import is unchanged.
+
+### Updating the existing collection
+
+Every row of the report has a checkbox.
+Added and changed rows start ticked; **removed rows start unticked and are never ticked for you**, because deleting a request takes everything saved on it (the rule the OpenAPI sync's Apply uses, see [OpenAPI Collections](../openapi.md)).
+A changed row writes only what its line names (the fields listed, and a rename), so a request's arguments, headers and auth are kept.
+**Update existing** is off while nothing is ticked.
+With one ticked removal it first asks *Delete requests the server no longer lists?* and names the count, and **Update and delete** goes on; Cancel writes nothing and keeps the ticks.
+The write is [`POST /import/mcp/apply`](../../engine/api-reference/import.md#post-importmcpapply), which owns what each row writes and its single transaction; this page covers only what the dialog sends and shows.
+
+- **The request is the connect's.** The update sends the request the report was computed from (its URL, headers and token), kept with the preview, not what the form holds now. The engine reads the server again and checks every ticked row against that read.
+- **Success** closes the dialog with a toast, *Updated "Acme tools" - 1 request created, 2 updated, 0 deleted.*, and refreshes the collection tree and request lists. No second collection appears.
+- **A stale selection** (a `409`: the server's listing moved since the report, or a row is gone) shows *Couldn't update the collection - ...* with *Nothing was written*, keeps the preview and every tick, and tells the user to dismiss it and connect again to compare. Any other refusal shows the engine's sentence the same way.
+- **With several collections** holding the URL, each report carries its own **Update existing**, since one footer button could not say which it means; the footer then offers only Import anyway.
+- **While it runs** the ticks, both buttons and the close are held.
+
+Dismissing the preview or closing the dialog drops the ticks and the kept request, token included.
 
 The environment and script checkboxes are not offered on this tab: the tree carries no environment, no global and no script, so each would answer a question the source cannot ask.
 Their values stay for the other tabs.
@@ -52,7 +71,8 @@ A tool's output schema is kept with the request, so adding "Assert JSON Schema" 
 
 ## Credentials
 
-**The token is never stored.** It lives in the dialog's state for the length of the form and in the one request to the engine, and nowhere else: not a store, not a query key, not a log.
+**The token is never stored.** It lives in the dialog's state for the length of the form and in the requests to the engine, and nowhere else: not a store, not a query key, not a log.
+The requests are the connect, the comparison and an update, which sends the connect's request again from where the preview keeps it.
 Dismissing the preview or closing the dialog clears it with the rest of the form.
 
 What the collection holds in its place is a **secret `mcpToken` collection variable left empty**, which the route's tree reads.
@@ -80,4 +100,5 @@ Every failure arrives as the engine's own sentence.
 
 The dialog has no OAuth sign-in; it sends a static bearer token (tracked in [#3983](https://github.com/athrvk/vayu/issues/3983)).
 
-Importing a server again shows what changed against the collection an earlier import built, but cannot apply it ([#3994](https://github.com/athrvk/vayu/issues/3994)): Import always makes a new collection.
+An update writes against the diff as the server lists it at that moment, not as the report showed it: a row that moved in between is refused whole ([above](#updating-the-existing-collection)), and the user compares again.
+The update is offered in the dialog only: there is no MCP agent tool for it.

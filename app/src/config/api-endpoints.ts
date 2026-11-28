@@ -235,6 +235,7 @@ export const API_ENDPOINTS = {
 	IMPORT_PARSE: `/import/parse`,
 	IMPORT_MCP: `/import/mcp`,
 	IMPORT_MCP_DIFF: `/import/mcp/diff`,
+	IMPORT_MCP_APPLY: `/import/mcp/apply`,
 	IMPORT_DOCUMENT: `/import/document`,
 	IMPORT_APPLY: `/import/apply`,
 

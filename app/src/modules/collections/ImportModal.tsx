@@ -22,6 +22,7 @@ import {
 import {
 	Button,
 	Checkbox,
+	DeleteConfirmDialog,
 	Dialog,
 	DialogContent,
 	DialogHeader,
@@ -64,6 +65,14 @@ import { ImportClientCertificates } from "./ImportClientCertificates";
 import { ImportMcpForm } from "./ImportMcpForm";
 import { canConnectMcp, emptyMcpForm, existingMcpImports, mcpImportRequest } from "./import-mcp";
 import { McpReimportDiff } from "./McpReimportDiff";
+import { isEmptyMcpSelection } from "./mcp-reimport-selection";
+import {
+	mcpUpdateFailureMessage,
+	mcpUpdateToastMessage,
+	useMcpReimport,
+	type McpApplied,
+	type McpReimport,
+} from "./useMcpReimport";
 import { announceImport, buildImportReport } from "./import-report";
 import { activateImportedEnvironment } from "./import-environment";
 import { ImportFileFolders } from "./ImportFileFolders";
@@ -178,14 +187,6 @@ export function ImportModal() {
 	 * this dialog, so no tab can be switched to while it runs.
 	 */
 	const [checkingBindings, setCheckingBindings] = useState(false);
-	/**
-	 * An apply is under way: the bound-document lookup or the writes. Read by the close, the apply
-	 * guard, the Import button and the option toggles (issue #895). A toggle supersedes the tab
-	 * while the apply holds a generation captured before its first file went out, so a toggle
-	 * mid-apply would drop the outcome write that reports which files failed. Nor could a toggle
-	 * change anything then: `runImport` sends each file with the values it started with.
-	 */
-	const applying = importMutation.isPending || checkingBindings;
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const folderInputRef = useRef<HTMLInputElement>(null);
 	const { maxBytes: specMaxBytes } = useSpecDocumentLimit();
@@ -232,8 +233,24 @@ export function ImportModal() {
 
 	/** The one-file case, which renders the full preview rather than a ledger row. */
 	const single = entries.length === 1 ? entries[0] : null;
+	/** "Update existing": an update of the earlier import of an MCP server is an apply too. */
+	const mcpReimport = useMcpReimport(single);
+	/**
+	 * An apply is under way: the bound-document lookup or the writes. Read by the close, the apply
+	 * guard, the Import button and the option toggles (issue #895). A toggle supersedes the tab
+	 * while the apply holds a generation captured before its first file went out, so a toggle
+	 * mid-apply would drop the outcome write that reports which files failed. Nor could a toggle
+	 * change anything then: `runImport` sends each file with the values it started with.
+	 */
+	const applying = importMutation.isPending || checkingBindings || mcpReimport.isPending;
 	/** What Import would send: included, parsed, and carrying something to create. */
 	const applicable = applicableEntries(entries);
+	/**
+	 * The one collection the footer's Update existing writes to. With several matches the button
+	 * could not say which, so each match carries its own inside the report.
+	 */
+	const deleteCount = mcpReimport.confirming?.deleteCount ?? 0;
+	const updatableMatch = single?.existingMcp?.length === 1 ? single.existingMcp[0] : undefined;
 
 	/**
 	 * Put one tab back to empty and abandon its work: the preview's Dismiss and the dialog closing.
@@ -588,7 +605,7 @@ export function ImportModal() {
 			const existing = await existingMcpImports(request, abort.signal);
 			patchTab("mcp", at, {
 				progress: null,
-				entries: [mcpBatchEntry(result, request.url, existing)],
+				entries: [mcpBatchEntry(result, request, existing)],
 				phase: "preview",
 			});
 		} catch (e) {
@@ -732,6 +749,17 @@ export function ImportModal() {
 		});
 	};
 
+	/** Close and say what an update wrote, once it has landed; a refusal stays on screen as it is. */
+	const finishMcpUpdate = async (update: Promise<McpApplied | null>) => {
+		const landed = await update;
+		if (!landed) return;
+		handleClose();
+		showToast({
+			message: mcpUpdateToastMessage(landed.match.name, landed.response),
+			variant: "success",
+		});
+	};
+
 	/** Include or exclude one file of the batch. Nothing re-parses; only the apply set changes. */
 	const toggleEntry = (id: string, included: boolean) => {
 		const t = tab;
@@ -795,6 +823,10 @@ export function ImportModal() {
 									: undefined
 							}
 							existingMcp={single.existingMcp}
+							reimport={mcpReimport}
+							onUpdate={(collectionId) =>
+								void finishMcpUpdate(mcpReimport.update(collectionId))
+							}
 							onDismiss={() => resetTab(tab)}
 						/>
 					) : (
@@ -804,6 +836,9 @@ export function ImportModal() {
 							onDismiss={() => resetTab(tab)}
 						/>
 					)}
+					<FieldError icon={AlertTriangle} className="mt-3">
+						{mcpReimport.error ? mcpUpdateFailureMessage(mcpReimport.error) : null}
+					</FieldError>
 					{/* An apply that failed leaves the list on screen - the per-file
 					    outcomes are in it - so the message that would have replaced it
 					    is stated here instead. */}
@@ -1123,15 +1158,31 @@ export function ImportModal() {
 								</div>
 							)}
 							<div className="ml-auto flex gap-2">
-								<DialogCancelButton
-									onClick={handleClose}
-									disabled={importMutation.isPending}
-								/>
+								<DialogCancelButton onClick={handleClose} disabled={applying} />
+								{updatableMatch && (
+									<Button
+										onClick={() =>
+											void finishMcpUpdate(
+												mcpReimport.update(updatableMatch.collectionId)
+											)
+										}
+										disabled={
+											applying ||
+											isEmptyMcpSelection(
+												mcpReimport.selectionFor(updatableMatch)
+											)
+										}
+									>
+										{mcpReimport.isPending ? "Updating…" : "Update existing"}
+									</Button>
+								)}
 								<Button
+									// Beside Update existing it is the other answer, a second collection.
+									variant={updatableMatch ? "outline" : "default"}
 									onClick={handleImport}
 									disabled={applying || applicable.length === 0}
 								>
-									{applying
+									{importMutation.isPending || checkingBindings
 										? "Importing…"
 										: importLabel(applicable.length, single?.existingMcp)}
 								</Button>
@@ -1161,6 +1212,23 @@ export function ImportModal() {
 					/>
 				)}
 			</DialogContent>
+			<DeleteConfirmDialog
+				open={mcpReimport.confirming !== null}
+				onOpenChange={(open) => {
+					if (!open) mcpReimport.cancelConfirm();
+				}}
+				title="Delete requests the server no longer lists?"
+				description={
+					<>
+						{deleteCount} {pluralize(deleteCount, "request")} and everything saved on{" "}
+						{pluralize(deleteCount, "it", "them")} are deleted. The rest of this update
+						is written in the same step.
+					</>
+				}
+				onConfirm={() => finishMcpUpdate(mcpReimport.confirmUpdate())}
+				isDeleting={mcpReimport.isPending}
+				confirmLabel="Update and delete"
+			/>
 			{/* Beside the content, not in it: the dialog closes before the picker is answered. */}
 			<CollectionPicker {...pickerProps} />
 		</Dialog>
@@ -1183,6 +1251,8 @@ function PreviewView({
 	selectedCertificates,
 	source,
 	existingMcp,
+	reimport,
+	onUpdate,
 	onDismiss,
 }: {
 	result: ImportResult;
@@ -1192,6 +1262,10 @@ function PreviewView({
 	source?: string;
 	/** Earlier imports of this MCP server, compared with its listing now (#3842). */
 	existingMcp?: ImportMcpDiffMatch[];
+	/** Ticks and the update of `existingMcp` (#3994). */
+	reimport: McpReimport;
+	/** Writes the ticked rows of one match, then closes with a toast: the dialog's, not the hook's. */
+	onUpdate: (collectionId: string) => void;
 	onDismiss: () => void;
 }) {
 	const { meta, collections, environments, globals } = result;
@@ -1253,7 +1327,15 @@ function PreviewView({
 			    saved example lands inside a request with no row of its own (#481). */}
 			<p className="text-label text-muted-foreground">{describeCounts(meta)}</p>
 			{carriedOver && <p className="text-label text-muted-foreground">{carriedOver}</p>}
-			{existingMcp && existingMcp.length > 0 && <McpReimportDiff matches={existingMcp} />}
+			{existingMcp && existingMcp.length > 0 && (
+				<McpReimportDiff
+					matches={existingMcp}
+					selectionFor={reimport.selectionFor}
+					onSelectionChange={reimport.setSelection}
+					disabled={reimport.isPending}
+					{...(existingMcp.length > 1 ? { onUpdate } : {})}
+				/>
+			)}
 			{collections.length === 0 && environments.length === 0 && globalCount === 0 && (
 				<FieldError icon={AlertTriangle}>
 					{importEnvironments

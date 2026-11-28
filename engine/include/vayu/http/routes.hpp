@@ -1407,7 +1407,8 @@ size_t spec_size_cap (vayu::db::Database& db);
 
 /**
  * Pre-routing guard for the import routes (`POST /import`, `/import/parse`,
- * `/import/document`, and `/import/mcp` and `/import/mcp/diff`, whose bodies
+ * `/import/document`, and `/import/mcp`, `/import/mcp/diff` and
+ * `/import/mcp/apply`, whose bodies
  * carry no document but are an import all the same, #3838): answers 413
  * from the `Content-Length` header, before cpp-httplib buffers the body, when it
  * exceeds the live `maxSpecDocumentBytes` plus JSON-escaping headroom. The

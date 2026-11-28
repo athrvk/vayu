@@ -28,6 +28,7 @@ import {
 	type BatchIntake,
 } from "./batch";
 import { apiService } from "@/services/api";
+import type { ImportMcpRequest } from "@/types/api";
 
 /**
  * The parse is the engine's now (issue #877), so it is stubbed here - and that
@@ -399,6 +400,8 @@ describe("reparseBatch", () => {
 
 describe("mcpBatchEntry (#3843)", () => {
 	const URL = "https://mcp.example.com/mcp";
+	/** What the connect sent, which the entry keeps (#3994). */
+	const REQUEST: ImportMcpRequest = { url: URL, auth: { mode: "bearer", token: "s3cret" } };
 
 	/** Any parsed result will do: the entry is about the ledger row, not the tree. */
 	async function parsedResult() {
@@ -413,7 +416,7 @@ describe("mcpBatchEntry (#3843)", () => {
 
 	it("is an included, document-less row labelled by the server URL", async () => {
 		const result = await parsedResult();
-		const entry = mcpBatchEntry(result, URL);
+		const entry = mcpBatchEntry(result, REQUEST);
 
 		expect(entry).toMatchObject({
 			fileName: "",
@@ -429,6 +432,13 @@ describe("mcpBatchEntry (#3843)", () => {
 		expect(applicableEntries([entry])).toEqual([entry]);
 	});
 
+	it("keeps the request the connect sent, whose url labels the row (#3994)", async () => {
+		const entry = mcpBatchEntry(await parsedResult(), REQUEST);
+
+		expect(entry.mcpRequest).toBe(REQUEST);
+		expect(entry.sourceUrl).toBe(REQUEST.url);
+	});
+
 	it("carries the earlier imports of the server, and none by default (#3842)", async () => {
 		const result = await parsedResult();
 		const match = {
@@ -440,12 +450,12 @@ describe("mcpBatchEntry (#3843)", () => {
 			changed: [],
 		};
 
-		expect(mcpBatchEntry(result, URL).existingMcp).toEqual([]);
-		expect(mcpBatchEntry(result, URL, [match]).existingMcp).toEqual([match]);
+		expect(mcpBatchEntry(result, REQUEST).existingMcp).toEqual([]);
+		expect(mcpBatchEntry(result, REQUEST, [match]).existingMcp).toEqual([match]);
 	});
 
 	it("is left untouched by a re-parse, which would have no document to post", async () => {
-		const entry = mcpBatchEntry(await parsedResult(), URL);
+		const entry = mcpBatchEntry(await parsedResult(), REQUEST);
 		const parse = vi.spyOn(apiService, "parseImport");
 		parse.mockClear();
 
@@ -459,7 +469,7 @@ describe("mcpBatchEntry (#3843)", () => {
 	});
 
 	it("does not count towards a re-parse's progress", async () => {
-		const entry = mcpBatchEntry(await parsedResult(), URL);
+		const entry = mcpBatchEntry(await parsedResult(), REQUEST);
 		const onProgress = vi.fn();
 
 		await reparseBatch([entry], OPTS, onProgress);
@@ -468,7 +478,7 @@ describe("mcpBatchEntry (#3843)", () => {
 	});
 
 	it("is re-parsed alongside a file in the same batch, which is not skipped with it", async () => {
-		const mcp = mcpBatchEntry(await parsedResult(), URL);
+		const mcp = mcpBatchEntry(await parsedResult(), REQUEST);
 		const files = await detectBatch(
 			[{ fileName: "env.json", relativePath: "env.json", text: environment }],
 			OPTS,

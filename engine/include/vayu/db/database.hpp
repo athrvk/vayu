@@ -255,6 +255,26 @@ struct SpecSyncBatch {
 };
 
 /**
+ * @brief One applied MCP re-import (#3994), as the rows it writes beneath the
+ *        collection an import of the server built.
+ *
+ * All-or-nothing for `SpecSyncBatch`'s reason, and with its id rule: every row
+ * carries the id the caller minted.
+ */
+struct McpApplyBatch {
+    /// The root collection the import built; a vanished one is a
+    /// `MissingRowError`.
+    std::string root_id;
+    /// Folders a created request needs and the collection does not have.
+    std::vector<Collection> new_collections;
+    std::vector<Request> created;
+    /// Updated, never inserted, on `apply_reorder`'s rule and for its reason.
+    std::vector<Request> updated;
+    /// Request ids to delete. Their examples cascade.
+    std::vector<std::string> deleted;
+};
+
+/**
  * @brief One workspace snapshot, as `POST /workspace/backup` reports it (#987).
  *
  * `path` is absolute on every real start (the daemon gets a data directory), as
@@ -630,6 +650,17 @@ class Database {
      * examples go either way.
      */
     void spec_sync_apply (const SpecSyncBatch& batch); // db_specs.cpp
+
+    /**
+     * @brief Persist one applied MCP re-import in one transaction (#3994).
+     *
+     * `spec_sync_apply`'s rules without its document half: the root and every
+     * `updated` row must exist at commit, or `MissingRowError` rolls it all
+     * back (the route's 409); a `deleted` request already gone is fine; and
+     * the deletes are hard for the reason a sync's are, its removals being
+     * shown and opted into before they land.
+     */
+    void mcp_apply (const McpApplyBatch& batch); // db_requests.cpp
 
     /**
      * @brief Run @p fn with the DB mutex held for the whole of it (#386).
@@ -1395,6 +1426,22 @@ class Database {
      * @return the changes the batch publishes once its transaction commits.
      */
     std::vector<Change> write_spec_sync_batch_locked (const SpecSyncBatch& batch); // db_specs.cpp
+
+    /**
+     * @brief `MissingRowError` for a row of @p rows no longer stored, a
+     *        trashed one included: an update carrying the caller's struct would
+     *        clear its stamp (#988). Scope as
+     *        @ref verify_spec_sync_rows_locked.
+     */
+    void verify_live_requests_locked (const std::vector<Request>& rows); // db_requests.cpp
+
+    /**
+     * @brief Hard-delete each request of @p ids and its examples, appending the
+     *        purge each publishes to @p written; one already gone publishes
+     *        nothing. Caller holds the DB mutex inside the write's transaction.
+     */
+    void purge_batch_requests_locked (const std::vector<std::string>& ids,
+    std::vector<Change>& written); // db_requests.cpp
 
     /**
      * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked

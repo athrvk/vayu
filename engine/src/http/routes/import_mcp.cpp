@@ -12,7 +12,9 @@
  *        `core/mcp_import.hpp`'s; the handlers are registered beside the other
  *        import routes in `import.cpp`. `POST /import/mcp/diff` (#3842) reads
  *        the server through the same calls and compares the listing with the
- *        collections an earlier import of it built (`core/mcp_diff.hpp`).
+ *        collections an earlier import of it built (`core/mcp_diff.hpp`), and
+ *        `POST /import/mcp/apply` (#3994) writes the rows of that diff a
+ *        caller selects to the collection.
  *
  * Every call goes through `vayu::http::Client` as an `mcp` body, so the
  * envelope, `_meta` and the derived headers are the ones a stored request
@@ -26,6 +28,7 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/import_document.hpp"
 #include "vayu/core/mcp_diff.hpp"
 #include "vayu/core/mcp_import.hpp"
 #include "vayu/db/database.hpp"
@@ -37,6 +40,7 @@
 #include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/url_parts.hpp"
+#include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/ordered_json.hpp"
 
@@ -47,10 +51,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <map>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -87,6 +94,11 @@ const vayu::http::TransportPolicy& transport,
 const std::atomic<bool>* cancel);
 
 std::pair<int, nlohmann::json> import_mcp_diff_response (vayu::db::Database& db,
+const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel);
+
+std::pair<int, nlohmann::json> import_mcp_apply_response (vayu::db::Database& db,
 const nlohmann::json& body,
 const vayu::http::TransportPolicy& transport,
 const std::atomic<bool>* cancel);
@@ -766,29 +778,33 @@ bool imported_from (const vayu::db::Collection& collection, const std::string& u
     return base_url != variables.end () && base_url->second.value == url;
 }
 
-/// The MCP requests beneath one collection, as the comparison reads them.
-struct StoredEntries {
-    std::vector<vayu::core::McpEntry> entries;
-    /// Parallel to `entries`: the stored row each was read from.
-    std::vector<std::string> request_ids;
-};
-
-/// Every request at or beneath @p root that is an MCP call, in
-/// `collection_subtree_requests` order.
-StoredEntries stored_entries (vayu::db::Database& db,
+/// Every request at or beneath @p root, in `collection_subtree_requests` order.
+std::vector<vayu::db::Request> subtree_requests (vayu::db::Database& db,
 const std::vector<vayu::db::Collection>& all,
 const std::string& root) {
     const auto subtree = collection_subtree_ids (
     all, root, [] (const vayu::db::Collection&) { return true; });
+    return collection_subtree_requests (db, all, subtree);
+}
+
+/// The MCP requests beneath one collection, as the comparison reads them.
+struct StoredEntries {
+    std::vector<vayu::core::McpEntry> entries;
+    /// Parallel to `entries`: the stored row each was read from, borrowed
+    /// from the rows `stored_entries` read.
+    std::vector<const vayu::db::Request*> rows;
+};
+
+/// The requests of @p rows that are an MCP call, in their order.
+StoredEntries stored_entries (const std::vector<vayu::db::Request>& rows) {
     StoredEntries out;
-    for (auto& row : collection_subtree_requests (db, all, subtree)) {
+    for (const auto& row : rows) {
         const auto stored_body =
         nlohmann::json::parse (row.body, nullptr, /*allow_exceptions=*/false);
-        auto entry = vayu::core::mcp_entry_of (
-        std::move (row.name), std::move (row.description), stored_body);
+        auto entry = vayu::core::mcp_entry_of (row.name, row.description, stored_body);
         if (entry) {
             out.entries.push_back (std::move (*entry));
-            out.request_ids.push_back (std::move (row.id));
+            out.rows.push_back (&row);
         }
     }
     return out;
@@ -814,7 +830,7 @@ const StoredEntries& stored) {
     nlohmann::json removed = nlohmann::json::array ();
     for (const std::size_t at : diff.removed) {
         nlohmann::json row = entry_json (stored.entries.at (at));
-        row["requestId"]   = stored.request_ids.at (at);
+        row["requestId"]   = stored.rows.at (at)->id;
         removed.push_back (std::move (row));
     }
     nlohmann::json changed = nlohmann::json::array ();
@@ -822,7 +838,7 @@ const StoredEntries& stored) {
         const vayu::core::McpEntry& was = stored.entries.at (change.stored);
         nlohmann::json row = entry_json (fetched.at (change.fetched));
         row["name"]        = was.name;
-        row["requestId"]   = stored.request_ids.at (change.stored);
+        row["requestId"]   = stored.rows.at (change.stored)->id;
         row["fields"]      = nlohmann::json::array ();
         for (const auto field : change.fields) {
             row["fields"].push_back (std::string (vayu::core::mcp_field_name (field)));
@@ -835,6 +851,593 @@ const StoredEntries& stored) {
     return nlohmann::json{ { "collectionId", root.id }, { "name", root.name },
         { "identical", diff.identical () }, { "added", std::move (added) },
         { "removed", std::move (removed) }, { "changed", std::move (changed) } };
+}
+
+// ---------------------------------------------------------------------------
+// POST /import/mcp/apply (#3994)
+// ---------------------------------------------------------------------------
+
+using EntryKey = std::pair<vayu::core::McpEntryKind, std::string>;
+
+/// What an apply was asked to write, read before the server is.
+struct McpApplySelection {
+    std::string collection_id;
+    /// Listing entries to create, by identity, in the order asked.
+    std::vector<EntryKey> added;
+    /// Stored request ids to update and to delete.
+    std::vector<std::string> changed;
+    std::vector<std::string> removed;
+};
+
+std::optional<vayu::core::McpEntryKind> entry_kind_named (std::string_view name) {
+    using vayu::core::McpEntryKind;
+    for (const auto kind :
+    { McpEntryKind::Tool, McpEntryKind::Resource, McpEntryKind::Prompt }) {
+        if (vayu::core::mcp_entry_kind_name (kind) == name) {
+            return kind;
+        }
+    }
+    return std::nullopt;
+}
+
+std::string entry_label (const EntryKey& key) {
+    return std::string (vayu::core::mcp_entry_kind_name (key.first)) + " '" +
+    key.second + "'";
+}
+
+/// @p row as `{kind, key}`, or nothing when it is not one.
+std::optional<EntryKey> read_entry_key (const nlohmann::json& row) {
+    if (!row.is_object ()) {
+        return std::nullopt;
+    }
+    const nlohmann::json* kind = stated (row, "kind");
+    const nlohmann::json* key  = stated (row, "key");
+    if (kind == nullptr || !kind->is_string () || key == nullptr ||
+    !key->is_string () || key->get_ref<const std::string&> ().empty ()) {
+        return std::nullopt;
+    }
+    const auto named = entry_kind_named (kind->get_ref<const std::string&> ());
+    if (!named) {
+        return std::nullopt;
+    }
+    return EntryKey{ *named, key->get<std::string> () };
+}
+
+/// `select.added`, each entry at most once.
+Refusable<std::vector<EntryKey>> read_selected_added (const nlohmann::json* rows) {
+    std::vector<EntryKey> added;
+    if (rows == nullptr) {
+        return added;
+    }
+    if (!rows->is_array ()) {
+        return route_error (400, "Invalid 'select.added': must be an array");
+    }
+    std::set<EntryKey> seen;
+    for (const auto& row : *rows) {
+        auto key = read_entry_key (row);
+        if (!key) {
+            return route_error (400,
+            "Invalid 'select.added': each entry must be {\"kind\": \"tool\", "
+            "\"resource\" or \"prompt\", \"key\": <non-empty string>}");
+        }
+        if (!seen.insert (*key).second) {
+            return route_error (400,
+            "Invalid 'select.added': " + entry_label (*key) + " appears twice");
+        }
+        added.push_back (std::move (*key));
+    }
+    return added;
+}
+
+/// `select.<list>`: request ids, none named twice across the lists @p seen
+/// spans.
+Refusable<std::vector<std::string>> read_selected_ids (const nlohmann::json* rows,
+const std::string& list,
+std::set<std::string>& seen) {
+    std::vector<std::string> ids;
+    if (rows == nullptr) {
+        return ids;
+    }
+    if (!rows->is_array ()) {
+        return route_error (400, "Invalid 'select." + list + "': must be an array");
+    }
+    for (const auto& row : *rows) {
+        if (!row.is_string () || row.get_ref<const std::string&> ().empty ()) {
+            return route_error (400,
+            "Invalid 'select." + list + "': each entry must be a request id");
+        }
+        if (!seen.insert (row.get<std::string> ()).second) {
+            return route_error (400,
+            "Invalid 'select." + list + "': request '" +
+            row.get<std::string> () + "' is selected twice");
+        }
+        ids.push_back (row.get<std::string> ());
+    }
+    return ids;
+}
+
+Refusable<McpApplySelection> read_selection (const nlohmann::json& body) {
+    if (!body.is_object ()) {
+        return route_error (400, "Body must be a JSON object");
+    }
+    const nlohmann::json* id = stated (body, "collectionId");
+    if (id == nullptr || !id->is_string () || id->get_ref<const std::string&> ().empty ()) {
+        return route_error (
+        400, "Invalid 'collectionId': must be the id of the collection an import of the server built");
+    }
+    McpApplySelection selection;
+    selection.collection_id      = id->get<std::string> ();
+    const nlohmann::json* select = stated (body, "select");
+    if (select == nullptr) {
+        return selection;
+    }
+    if (!select->is_object ()) {
+        return route_error (400, "Invalid 'select': must be an object");
+    }
+    for (const auto& [key, value] : select->items ()) {
+        if (key != "added" && key != "changed" && key != "removed") {
+            return route_error (400,
+            "Invalid 'select': unknown member '" + key +
+            "' (added, changed and removed are the members)");
+        }
+    }
+    auto added = read_selected_added (stated (*select, "added"));
+    if (!added) {
+        return std::unexpected (added.error ());
+    }
+    std::set<std::string> seen;
+    auto changed = read_selected_ids (stated (*select, "changed"), "changed", seen);
+    if (!changed) {
+        return std::unexpected (changed.error ());
+    }
+    auto removed = read_selected_ids (stated (*select, "removed"), "removed", seen);
+    if (!removed) {
+        return std::unexpected (removed.error ());
+    }
+    selection.added   = std::move (*added);
+    selection.changed = std::move (*changed);
+    selection.removed = std::move (*removed);
+    return selection;
+}
+
+/// The call an `mcp` @p body holds, or nothing for one whose `content` is not a
+/// JSON object.
+std::optional<ordered_json> call_of (const nlohmann::json& body) {
+    const auto content = body.find ("content");
+    if (content == body.end () || !content->is_string ()) {
+        return std::nullopt;
+    }
+    auto call = vayu::utils::parse_ordered_json (content->get_ref<const std::string&> (),
+    vayu::core::constants::request_body::MAX_JSON_DEPTH);
+    if (!call || !call->is_object ()) {
+        return std::nullopt;
+    }
+    return std::optional<ordered_json> (std::in_place, std::move (*call));
+}
+
+/// The tree an import of the listing builds now, as `import_apply_payload`'s
+/// items, and each request item's identity as the diff's reader reads it.
+struct ListingDrafts {
+    ordered_json payload;
+    /// The first item claiming each identity, as `diff_mcp` takes it.
+    std::map<EntryKey, std::size_t> requests;
+    /// `tempId` to index into `payload.collections`.
+    std::map<std::string, std::size_t> collections;
+
+    [[nodiscard]] const ordered_json& request (const EntryKey& key) const {
+        const auto found = requests.find (key);
+        if (found == requests.end ()) {
+            throw std::logic_error ("broken invariant: every listed entry is a "
+                                    "request of the tree it was read from");
+        }
+        return payload.at ("requests").at (found->second);
+    }
+
+    [[nodiscard]] const ordered_json& folder_of (const ordered_json& request) const {
+        return payload.at ("collections")
+        .at (collections.at (request.at ("collectionTempId").get<std::string> ()));
+    }
+};
+
+ListingDrafts listing_drafts (const vayu::core::McpServerListing& listing) {
+    ListingDrafts drafts{ vayu::core::import_apply_payload (
+                          vayu::core::mcp_import_result (listing)),
+        {}, {} };
+    const ordered_json& requests = drafts.payload.at ("requests");
+    for (std::size_t at = 0; at < requests.size (); ++at) {
+        const ordered_json& item = requests.at (at);
+        // A copy: `ordered_json` to `json` is a conversion.
+        const auto entry = vayu::core::mcp_entry_of (item.value ("name", ""),
+        item.value ("description", ""), nlohmann::json (item.at ("body")));
+        if (entry) {
+            drafts.requests.try_emplace (EntryKey{ entry->kind, entry->key }, at);
+        }
+    }
+    const ordered_json& collections = drafts.payload.at ("collections");
+    for (std::size_t at = 0; at < collections.size (); ++at) {
+        drafts.collections.emplace (
+        collections.at (at).at ("tempId").get<std::string> (), at);
+    }
+    return drafts;
+}
+
+/// What a selection is checked against, read and compared under the lock.
+struct ApplyGround {
+    vayu::db::Collection root;
+    std::vector<vayu::db::Collection> collections;
+    std::vector<vayu::db::Request> rows;
+    StoredEntries stored;
+    vayu::core::McpListingEntries fetched;
+    vayu::core::McpDiff diff;
+};
+
+/// The collection @p selection names, when it is a root an import of
+/// @p listing's URL built: `404` for none, `409` for another.
+Refusable<vayu::db::Collection> applied_root (vayu::db::Database& db,
+const McpApplySelection& selection,
+const vayu::core::McpServerListing& listing) {
+    auto root = db.get_collection (selection.collection_id);
+    if (!root) {
+        return route_error (404, "Collection '" + selection.collection_id + "' not found");
+    }
+    if (!imported_from (*root, listing.url)) {
+        return route_error (409,
+        "Collection '" + selection.collection_id +
+        "' is not a root collection whose mcpBaseUrl holds this URL");
+    }
+    return std::move (*root);
+}
+
+/// The rows of the recomputed diff a selection names, in the order it names
+/// them.
+struct SelectedRows {
+    std::vector<EntryKey> added;
+    std::vector<const vayu::core::McpChange*> changed;
+    std::vector<std::string> removed;
+};
+
+/// @p selection against the diff as it stands now: a row it names that the
+/// diff no longer holds (the request gone, no longer changed, the entry no
+/// longer added) is a `409`, and nothing is written.
+Refusable<SelectedRows>
+selected_rows (const McpApplySelection& selection, const ApplyGround& ground) {
+    std::set<EntryKey> added;
+    for (const std::size_t at : ground.diff.added) {
+        const vayu::core::McpEntry& entry = ground.fetched.entries.at (at);
+        added.emplace (entry.kind, entry.key);
+    }
+    std::map<std::string, const vayu::core::McpChange*> changed;
+    for (const auto& change : ground.diff.changed) {
+        changed.emplace (ground.stored.rows.at (change.stored)->id, &change);
+    }
+    std::set<std::string> removed;
+    for (const std::size_t at : ground.diff.removed) {
+        removed.insert (ground.stored.rows.at (at)->id);
+    }
+    const auto stale = [] (const std::string& what, const char* row) {
+        return route_error (409,
+        what + " is no longer " +
+        row + " in this server's diff of the collection; compare again and choose from what it answers");
+    };
+
+    SelectedRows rows;
+    for (const auto& key : selection.added) {
+        if (!added.contains (key)) {
+            return stale (entry_label (key), "an added entry");
+        }
+        rows.added.push_back (key);
+    }
+    for (const auto& id : selection.changed) {
+        const auto change = changed.find (id);
+        if (change == changed.end ()) {
+            return stale ("Request '" + id + "'", "a changed entry");
+        }
+        rows.changed.push_back (change->second);
+    }
+    for (const auto& id : selection.removed) {
+        if (!removed.contains (id)) {
+            return stale ("Request '" + id + "'", "a removed entry");
+        }
+        rows.removed.push_back (id);
+    }
+    return rows;
+}
+
+/// The rows one apply writes, and the answer it builds as it goes.
+struct ApplyPlan {
+    vayu::db::McpApplyBatch batch;
+    SiblingSlots slots;
+    std::int64_t now = 0;
+    /// The next JSON-RPC `id` a created legacy envelope takes.
+    std::int64_t next_envelope_id = 1;
+    nlohmann::json created        = nlohmann::json::array ();
+};
+
+/// One past the highest JSON-RPC `id` any of @p rows' calls carries: a legacy
+/// session refuses an `id` it has seen, so a created envelope never reuses one.
+std::int64_t next_envelope_id (const std::vector<vayu::db::Request>& rows) {
+    std::int64_t highest = 0;
+    for (const auto& row : rows) {
+        const auto body =
+        nlohmann::json::parse (row.body, nullptr, /*allow_exceptions=*/false);
+        const auto call = body.is_object () ? call_of (body) : std::nullopt;
+        if (!call) {
+            continue;
+        }
+        const auto id = call->find ("id");
+        if (id != call->end () && id->is_number_integer ()) {
+            highest = (std::max)(highest, id->get<std::int64_t> ());
+        }
+    }
+    return highest + 1;
+}
+
+/// A created request's envelope numbered past the stored ones; a bare call,
+/// which the engine numbers at send, is left as it is.
+void renumber_envelope (nlohmann::json& fields, ApplyPlan& plan) {
+    nlohmann::json& body = fields.at ("body");
+    auto call            = call_of (body);
+    if (!call || !call->contains ("id")) {
+        return;
+    }
+    (*call)["id"]   = plan.next_envelope_id++;
+    body["content"] = call->dump (2);
+}
+
+/// Where a created request lands: the folder the import files its kind under
+/// (`Tools`, `Resources`, `Prompts`), as the root's direct child of that name,
+/// else one this apply creates, once.
+class FolderPlacer {
+    public:
+    FolderPlacer (const vayu::db::Collection& root,
+    const std::vector<vayu::db::Collection>& all)
+    : root_id_ (root.id) {
+        for (const auto& collection : all) {
+            if (collection.parent_id && *collection.parent_id == root_id_) {
+                existing_.try_emplace (collection.name, collection.id);
+            }
+        }
+    }
+
+    /// The id of the stored collection standing for @p folder, a payload
+    /// collection item.
+    Refusable<std::string>
+    owner_of (vayu::db::Database& db, const ordered_json& folder, ApplyPlan& plan) {
+        if (folder.at ("parentTempId").is_null ()) {
+            return root_id_;
+        }
+        const std::string name = folder.at ("name").get<std::string> ();
+        if (const auto found = existing_.find (name); found != existing_.end ()) {
+            return found->second;
+        }
+        nlohmann::json fields (folder);
+        fields.erase ("tempId");
+        fields.erase ("parentTempId");
+        fields.erase ("order");
+        fields["parentId"] = root_id_;
+        vayu::db::Collection row;
+        row.id         = vayu::utils::generate_id ("col_");
+        row.created_at = plan.now;
+        row.updated_at = plan.now;
+        if (auto applied = apply_collection_fields (db, row, fields, /*is_create=*/true);
+        !applied) {
+            return std::unexpected (applied.error ());
+        }
+        if (auto slot = plan.slots.take (db, root_id_, row.order); !slot) {
+            return std::unexpected (slot.error ());
+        }
+        existing_.emplace (name, row.id);
+        plan.batch.new_collections.push_back (row);
+        return row.id;
+    }
+
+    private:
+    std::string root_id_;
+    std::unordered_map<std::string, std::string> existing_;
+};
+
+/// The request an import would build for @p key now, appended under its
+/// folder.
+RouteResult plan_created (vayu::db::Database& db,
+const EntryKey& key,
+const ListingDrafts& drafts,
+FolderPlacer& folders,
+ApplyPlan& plan) {
+    const ordered_json& item = drafts.request (key);
+    auto owner = folders.owner_of (db, drafts.folder_of (item), plan);
+    if (!owner) {
+        return std::unexpected (owner.error ());
+    }
+    nlohmann::json fields (item);
+    fields.erase ("tempId");
+    fields.erase ("collectionTempId");
+    fields.erase ("order");
+    fields["collectionId"] = *owner;
+    renumber_envelope (fields, plan);
+
+    vayu::db::Request row;
+    row.id         = vayu::utils::generate_id ("req_");
+    row.created_at = plan.now;
+    row.updated_at = plan.now;
+    if (auto applied = apply_request_fields (db, row, fields, /*is_create=*/true); !applied) {
+        return applied;
+    }
+    if (auto slot = plan.slots.take (db, row.collection_id, row.order); !slot) {
+        return slot;
+    }
+    plan.created.push_back (nlohmann::json{
+    { "kind", std::string (vayu::core::mcp_entry_kind_name (key.first)) },
+    { "key", key.second }, { "requestId", row.id } });
+    plan.batch.created.push_back (std::move (row));
+    return {};
+}
+
+/// @p body's `mcpTool` with @p member as the listing's tool states it, and
+/// without it where that states none (a schema a send refuses included, which
+/// the import leaves out).
+void take_tool_member (nlohmann::json& body,
+const nlohmann::json& listed_body,
+const char* member,
+const std::string& key) {
+    const auto stored_tool = body.find ("mcpTool");
+    nlohmann::json tool = stored_tool != body.end () && stored_tool->is_object () ?
+    *stored_tool :
+    nlohmann::json::object ();
+    const auto listed_tool = listed_body.find ("mcpTool");
+    const bool listed      = listed_tool != listed_body.end () &&
+    listed_tool->is_object () && listed_tool->contains (member);
+    if (listed) {
+        tool[member] = listed_tool->at (member);
+    } else {
+        tool.erase (member);
+    }
+    tool["name"]    = key;
+    body["mcpTool"] = std::move (tool);
+}
+
+/// A renamed tool's call names @p key, as its `mcpTool` does where the body
+/// stores one; the call's `arguments` are kept as they stand.
+void rename_call (nlohmann::json& body, const std::string& key) {
+    if (const auto tool = body.find ("mcpTool"); tool != body.end () && tool->is_object ()) {
+        (*tool)["name"] = key;
+    }
+    auto call = call_of (body);
+    if (!call) {
+        return;
+    }
+    const auto params = call->find ("params");
+    if (params == call->end () || !params->is_object ()) {
+        return;
+    }
+    (*params)["name"] = key;
+    body["content"]   = call->dump (2);
+}
+
+/**
+ * The merge-patch one selected changed row writes: the fields @p change names
+ * and nothing else (#3994). A description is the request's; a schema is its
+ * `mcpTool`'s; a rename is the request's name, `mcpTool.name` and the call's
+ * `params.name`. Arguments, headers, auth, elements and every other field a
+ * person may have edited are not part of the patch.
+ */
+nlohmann::json change_patch (const vayu::db::Request& stored,
+const vayu::core::McpChange& change,
+const vayu::core::McpEntry& listed,
+const nlohmann::json& listed_body) {
+    nlohmann::json patch = nlohmann::json::object ();
+    const auto original_body =
+    nlohmann::json::parse (stored.body, nullptr, /*allow_exceptions=*/false);
+    nlohmann::json body = original_body;
+    for (const auto field : change.fields) {
+        switch (field) {
+        case vayu::core::McpField::Description:
+            patch["description"] = listed.description;
+            break;
+        case vayu::core::McpField::InputSchema:
+            take_tool_member (body, listed_body, "inputSchema", listed.key);
+            break;
+        case vayu::core::McpField::OutputSchema:
+            take_tool_member (body, listed_body, "outputSchema", listed.key);
+            break;
+        }
+    }
+    if (change.renamed) {
+        patch["name"] = listed.name;
+        rename_call (body, listed.key);
+    }
+    if (body != original_body) {
+        patch["body"] = std::move (body);
+    }
+    return patch;
+}
+
+/// The stored request @p change names, patched in place: the row is kept,
+/// its id included, never recreated.
+RouteResult plan_updated (vayu::db::Database& db,
+const vayu::core::McpChange& change,
+const ApplyGround& ground,
+const ListingDrafts& drafts,
+ApplyPlan& plan) {
+    const vayu::db::Request& stored = *ground.stored.rows.at (change.stored);
+    const vayu::core::McpEntry& listed = ground.fetched.entries.at (change.fetched);
+    // A copy: `ordered_json` to `json` is a conversion.
+    const nlohmann::json listed_body (
+    drafts.request (EntryKey{ listed.kind, listed.key }).at ("body"));
+    vayu::db::Request row = stored;
+    row.updated_at        = next_updated_at (stored.updated_at);
+    if (auto applied = apply_request_fields (db, row,
+        change_patch (stored, change, listed, listed_body), /*is_create=*/false);
+    !applied) {
+        return applied;
+    }
+    plan.batch.updated.push_back (std::move (row));
+    return {};
+}
+
+/// Every selected row as the rows the batch writes.
+RouteResult plan_selected (vayu::db::Database& db,
+const SelectedRows& selected,
+const ApplyGround& ground,
+const vayu::core::McpServerListing& listing,
+ApplyPlan& plan) {
+    const ListingDrafts drafts = listing_drafts (listing);
+    for (const auto* change : selected.changed) {
+        if (auto planned = plan_updated (db, *change, ground, drafts, plan); !planned) {
+            return planned;
+        }
+    }
+    if (!selected.added.empty ()) {
+        plan.next_envelope_id = next_envelope_id (ground.rows);
+    }
+    FolderPlacer folders (ground.root, ground.collections);
+    for (const auto& key : selected.added) {
+        if (auto planned = plan_created (db, key, drafts, folders, plan); !planned) {
+            return planned;
+        }
+    }
+    plan.batch.deleted = selected.removed;
+    return {};
+}
+
+/// The whole apply, under the caller's lock: the collection, its requests and
+/// the diff are read again here, so what is written is decided against what
+/// is stored when it lands (#386).
+std::pair<int, nlohmann::json> apply_listing_locked (vayu::db::Database& db,
+const vayu::core::McpServerListing& listing,
+const McpApplySelection& selection) {
+    auto root = applied_root (db, selection, listing);
+    if (!root) {
+        return as_response (root.error ());
+    }
+    ApplyGround ground;
+    ground.root        = std::move (*root);
+    ground.collections = db.get_collections ();
+    ground.rows    = subtree_requests (db, ground.collections, ground.root.id);
+    ground.stored  = stored_entries (ground.rows);
+    ground.fetched = vayu::core::mcp_listing_entries (listing);
+    ground.diff    = vayu::core::diff_mcp (
+    ground.fetched.entries, ground.fetched.kinds, ground.stored.entries);
+
+    auto selected = selected_rows (selection, ground);
+    if (!selected) {
+        return as_response (selected.error ());
+    }
+    ApplyPlan plan;
+    plan.batch.root_id = ground.root.id;
+    plan.now           = now_ms ();
+    if (auto planned = plan_selected (db, *selected, ground, listing, plan); !planned) {
+        return as_response (planned.error ());
+    }
+    db.mcp_apply (plan.batch);
+
+    nlohmann::json updated = nlohmann::json::array ();
+    for (const auto& row : plan.batch.updated) {
+        updated.push_back (row.id);
+    }
+    return { 200,
+        nlohmann::json{ { "collectionId", ground.root.id },
+        { "created", std::move (plan.created) },
+        { "updated", std::move (updated) }, { "deleted", plan.batch.deleted } } };
 }
 
 } // namespace
@@ -924,12 +1527,48 @@ const std::atomic<bool>* cancel) {
         if (!imported_from (root, listing->url)) {
             continue;
         }
-        const StoredEntries stored = stored_entries (db, collections, root.id);
+        const std::vector<vayu::db::Request> rows =
+        subtree_requests (db, collections, root.id);
+        const StoredEntries stored = stored_entries (rows);
         const vayu::core::McpDiff diff =
         vayu::core::diff_mcp (fetched.entries, fetched.kinds, stored.entries);
         matches.push_back (match_json (root, diff, fetched.entries, stored));
     }
     return { 200, nlohmann::json{ { "matches", std::move (matches) } } };
+}
+
+/**
+ * Testable core of POST /import/mcp/apply (#3994): read the server at
+ * `body.url` exactly as `POST /import/mcp/diff` does, then write the rows of
+ * its diff that `body.select` names to the collection `body.collectionId`, in
+ * one transaction. The server is read before the database lock is taken, so a
+ * slow server holds up no other write; the collection, its requests and the
+ * diff are read again under the lock, and a selected row the diff no longer
+ * holds refuses the whole apply.
+ *
+ * @return {http_status, json_body}: 200 `{collectionId, created, updated,
+ *         deleted}`; 400 for a body that names no collection or a malformed
+ *         selection, and every refusal of `POST /import/mcp`; 404 for an
+ *         unknown collection; 409 for a collection no import of the URL built,
+ *         or a selected row the diff no longer holds.
+ */
+std::pair<int, nlohmann::json> import_mcp_apply_response (vayu::db::Database& db,
+const nlohmann::json& body,
+const vayu::http::TransportPolicy& transport,
+const std::atomic<bool>* cancel) {
+    auto selection = read_selection (body);
+    if (!selection) {
+        return as_response (selection.error ());
+    }
+    auto listing = fetch_listing (body, transport, cancel,
+    std::chrono::milliseconds (limits::TOTAL_TIMEOUT_MS), limits::MAX_TOTAL_BYTES);
+    if (!listing) {
+        return as_response (listing.error ());
+    }
+    std::pair<int, nlohmann::json> result;
+    db.with_lock (
+    [&] { result = apply_listing_locked (db, *listing, *selection); });
+    return result;
 }
 
 } // namespace vayu::http::routes

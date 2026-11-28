@@ -298,8 +298,8 @@ The preview tree lists them in the same order.
 - `400` `Invalid 'importScripts': must be a boolean` (and the same for `importEnvironments`, `fileName`, `sourceUrl`, `unresolvedRefs`).
 - `413` `Import document is N bytes, over the limit of M (raise the 'maxSpecDocumentBytes' setting to allow more)`.
 
-**Body cap (`POST /import`, `/import/parse`, `/import/document`, `/import/mcp`, `/import/mcp/diff`).**
-The management API buffers a request body before a route sees it, so these five routes are bounded from the `Content-Length` header, before the body is read:
+**Body cap (`POST /import`, `/import/parse`, `/import/document`, `/import/mcp`, `/import/mcp/diff`, `/import/mcp/apply`).**
+The management API buffers a request body before a route sees it, so these six routes are bounded from the `Content-Length` header, before the body is read:
 a body over `maxSpecDocumentBytes` plus half again plus 1 MiB (headroom for the JSON string escaping of the document) answers `413` `Request body is N bytes, over the limit of M for an import (raise the 'maxSpecDocumentBytes' setting to allow more)`.
 The limit is read live, so a raised setting applies to the next request.
 A chunked body is refused with `411` like on every route (see [Request bodies](index.md#request-bodies)).
@@ -495,6 +495,76 @@ A `changed` entry's `fields` are any of `description`, `inputSchema` and `output
 Two requests claiming one key are each compared; a key the server lists twice is its first entry.
 
 **Errors:** every error of `POST /import/mcp`, for the same reasons; nothing is compared until the listing is read.
+
+## POST /import/mcp/apply
+
+Write the rows of a [`POST /import/mcp/diff`](#post-importmcpdiff) answer a caller selects to the collection it compared (issue [#3994](https://github.com/athrvk/vayu/issues/3994)), in one transaction: all of it lands or none does.
+The analogue of [`POST /specs/sync`](specs.md#post-specssync) for a collection an MCP import built.
+The app's Import dialog calls it from **Update existing** ([MCP server import](../../app/import-collections/mcp-server.md#updating-the-existing-collection)).
+
+**Request:** the body of [`POST /import/mcp`](#post-importmcp), validated the same way, plus:
+
+```json
+{
+  "url": "https://mcp.example.com/mcp",
+  "collectionId": "col_...",
+  "select": {
+    "added": [{ "kind": "tool", "key": "export" }],
+    "changed": ["req_..."],
+    "removed": ["req_..."]
+  }
+}
+```
+
+| Field | Notes |
+|-------|-------|
+| `collectionId` | **Required.** A `matches[].collectionId` of the diff: a root collection whose `mcpBaseUrl` holds `url` byte for byte. |
+| `select.added` | Entries to create, each `{kind, key}` as the diff's `added` names it. |
+| `select.changed` | Request ids of the diff's `changed` rows to update. |
+| `select.removed` | Request ids of the diff's `removed` rows to delete. |
+
+`select` and each of its lists are optional, and an absent or `null` one selects nothing, so nothing is deleted that was not named.
+A list that is not an array, an entry of the wrong shape, an entry named twice (a request id across `changed` and `removed` included) or a member other than these three is a `400`, before the server is read.
+
+**The server is read first**, exactly as the diff reads it and before the database lock is taken, so a slow server holds up no other write.
+Then, under one lock, the collection, every request beneath it and the diff are read again, and each selected row is checked against the diff as it stands now: a request gone, no longer changed, no longer removed, or an entry no longer added is a `409` and **nothing is written**, valid rows included.
+Diff again and choose from what it answers.
+
+**What each selected row writes:**
+
+| Row | Write |
+|-----|-------|
+| `added` | The request `POST /import/mcp` would build for the entry now, in the root's direct child folder its kind is filed under (`Tools`, `Resources`, `Prompts`). |
+| `changed` | The stored request, updated in place: its id is kept and it is never recreated. Only the fields the row's `fields` name are written, and a rename. |
+| `removed` | The request and its saved examples, deleted. |
+
+A changed row writes `description` to the request's description, `inputSchema` and `outputSchema` to the body's `mcpTool` (a schema the server no longer states, or one a send would refuse, is removed from it).
+A rename writes the request's name, `mcpTool.name` and the call's `params.name`.
+**Nothing else is touched**: the call's `arguments`, the headers, auth, elements and every other field a person may have edited stay as they are, and an unselected changed row is not written at all.
+
+An added entry whose folder the collection no longer has (or the collection has none for that kind) gets one, created once however many entries it takes, and each created request is appended after its folder's last row.
+In a legacy-era tree ([A legacy-era server](#a-legacy-era-server)) a created call's envelope `id` is numbered past every one the collection's calls carry, because a session refuses an `id` it has seen.
+A removed request is deleted, not moved to the trash, for the reason a sync's removals are: each was shown before it landed and had to be selected.
+
+**Response:** `200`
+```json
+{
+  "collectionId": "col_...",
+  "created": [{ "kind": "tool", "key": "export", "requestId": "req_..." }],
+  "updated": ["req_..."],
+  "deleted": ["req_..."]
+}
+```
+
+An apply that selects nothing answers `200` with three empty lists.
+
+**Errors:**
+
+- `400` for a missing or empty `collectionId`, a malformed `select`, and every `400` of `POST /import/mcp`.
+- `404` `Collection '<id>' not found`.
+- `409` for a collection no import of `url` built (another URL in `mcpBaseUrl`, or not a root), and for a selected row the diff no longer holds.
+- `413` and `502` as `POST /import/mcp` answers them, before anything is read from the database.
+- `500`, `503` or `507` for a storage failure ([A storage failure is not a 400](resource-writes.md#a-storage-failure-is-not-a-400)).
 
 ## POST /import
 
