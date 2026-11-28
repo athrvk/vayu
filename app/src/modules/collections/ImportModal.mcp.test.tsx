@@ -18,9 +18,8 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { render } from "@/test/render-with-tooltips";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ImportMcpApplyRequest, ImportMcpDiffMatch, ImportMcpRequest } from "@/types";
+import { QueryClient } from "@tanstack/react-query";
+import type { ImportMcpApplyRequest, ImportMcpDiffMatch } from "@/types";
 import type { ImportResult } from "@/services/importers/types";
 
 const applied = vi.hoisted(() => ({ mutate: vi.fn() }));
@@ -33,35 +32,22 @@ vi.mock("@/queries/import", () => ({
 	}),
 }));
 
-import { ImportModal } from "./ImportModal";
 import { useImportModalStore, useToastStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services/http-client";
-import { collection, request, result } from "./import-preview.testkit";
-
-const SERVER = "https://mcp.example.com/mcp";
-
-/** What the engine builds for a server with one tool, as `POST /import/mcp` answers. */
-function serverTree(opts: { withToken?: boolean } = {}): ImportResult {
-	return result({
-		collections: [
-			collection({
-				name: "Acme tools",
-				variables: opts.withToken
-					? { mcpToken: { value: "", enabled: true, secret: true } }
-					: {},
-				children: [
-					collection({
-						name: "Tools",
-						requests: [request({ name: "search_docs", method: "POST", url: SERVER })],
-					}),
-				],
-			}),
-		],
-		meta: { format: "MCP server", requestCount: 1, folderCount: 1 },
-	});
-}
+import {
+	SERVER,
+	connectButton,
+	lastPayload,
+	openMcpTab,
+	renderModal,
+	selectTab,
+	serverTree,
+	tokenInput,
+	typeUrl,
+	urlInput,
+} from "./import-mcp-tab.testkit";
 
 /**
  * An earlier import of the server whose `search` tool the diff guesses is now listed as `find`:
@@ -110,42 +96,6 @@ function renamedToolMatch(over: Partial<ImportMcpDiffMatch> = {}): ImportMcpDiff
 	};
 }
 
-function renderModal(client = new QueryClient()) {
-	return render(
-		<QueryClientProvider client={client}>
-			<ImportModal />
-		</QueryClientProvider>
-	);
-}
-
-/** Radix tabs activate on mousedown, not a bare click (see ImportModal.curl.test.tsx). */
-function selectTab(name: RegExp) {
-	const tab = screen.getByRole("tab", { name });
-	fireEvent.mouseDown(tab);
-	fireEvent.click(tab);
-}
-
-function urlInput(): HTMLInputElement {
-	return screen.getByLabelText("Server URL") as HTMLInputElement;
-}
-
-function tokenInput(): HTMLInputElement {
-	return screen.getByLabelText(/Bearer token/) as HTMLInputElement;
-}
-
-function connectButton(): HTMLButtonElement {
-	return screen.getByRole("button", { name: /^Connect$/ }) as HTMLButtonElement;
-}
-
-function openMcpTab(client?: QueryClient) {
-	renderModal(client);
-	selectTab(/^MCP server$/);
-}
-
-function typeUrl(value = SERVER) {
-	fireEvent.change(urlInput(), { target: { value } });
-}
-
 /** The answer a test releases by hand, so a case can act while the call is in flight. */
 function deferredAnswer() {
 	let resolve!: (value: ImportResult) => void;
@@ -155,10 +105,6 @@ function deferredAnswer() {
 		reject = rej;
 	});
 	return { promise, resolve, reject };
-}
-
-function lastPayload(spy: ReturnType<typeof vi.spyOn>): ImportMcpRequest {
-	return spy.mock.calls.at(-1)?.[0] as ImportMcpRequest;
 }
 
 describe("ImportModal MCP server tab", () => {
