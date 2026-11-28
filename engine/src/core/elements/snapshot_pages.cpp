@@ -84,9 +84,10 @@ std::optional<std::string> unfollowable (const ElementContext& ctx) {
         return "the reply is paged (nextCursor), and only an mcp request's "
                "pages are followed";
     }
+    // A streamed Send is the one path that binds no sender.
     if (!ctx.send_list_page) {
-        return "the reply is paged (nextCursor), and this run cannot follow "
-               "pages";
+        return "the reply is paged (nextCursor), and a streamed send does not "
+               "follow pages";
     }
     return std::nullopt;
 }

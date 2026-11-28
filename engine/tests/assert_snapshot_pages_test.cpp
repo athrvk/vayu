@@ -14,7 +14,9 @@
  * The element cases stub `ElementContext::send_list_page`. The exchange cases
  * send through `execute_exchange` to `McpFixtureServer`, whose list methods
  * page and whose header check refuses a follow-up whose headers disagree with
- * its body; the run case is a collection run's step.
+ * its body; the run case is a collection run's step, and the stream case a
+ * streamed Send, the one path that follows no page. The load runs are
+ * `assert_snapshot_pages_load_test.cpp`'s.
  *
  * Mutation checks: return `std::nullopt` from `whole_snapshot_reply` (compare
  * page one only) and the later-page cases go red; compare the merged list in
@@ -51,6 +53,7 @@
 #include "wait_until.hpp"
 
 #include "scenario_runner_fixture.hpp"
+#include "sse_stream_fixture.hpp"
 
 namespace {
 
@@ -174,6 +177,11 @@ class AssertSnapshotPagesTest : public ::testing::Test {
         return found->second;
     }
 };
+
+/// The assertion's message wherever no sender is bound.
+constexpr const char* STREAMED_SEND_REFUSAL =
+"tools/list was not compared: the reply is paged (nextCursor), and a "
+"streamed send does not follow pages";
 
 std::string message_of (const SnapshotRun& run) {
     return run.outcomes.empty () ? "" : run.outcomes[0].message.value_or ("");
@@ -312,10 +320,7 @@ TEST_F (AssertSnapshotPagesTest, APagedReplyThisRunCannotFollowFails) {
     bind_sender = false;
     auto run    = this->apply (snapshot_element (three_tools ()));
     EXPECT_EQ (run.outcomes.at (0).status, "failed");
-    EXPECT_EQ (message_of (run),
-    "tools/list was not compared: the reply is paged (nextCursor), and this "
-    "run "
-    "cannot follow pages");
+    EXPECT_EQ (message_of (run), STREAMED_SEND_REFUSAL);
 
     bind_sender       = true;
     request.body.mode = vayu::BodyMode::Json;
@@ -527,7 +532,7 @@ TEST_F (AssertSnapshotPagesExchangeTest, ACancelledPageEndsTheStepWithoutAVerdic
 using vayu::tests::scenario_runner::ScenarioRunnerTest;
 
 // Mutation check: leave `send_list_page` unbound in `execute_exchange` and the
-// step fails "this run cannot follow pages".
+// step fails "a streamed send does not follow pages".
 TEST_F (ScenarioRunnerTest, AnMcpListStepIsComparedOverEveryPageInACollectionRun) {
     constexpr std::chrono::milliseconds PAGE_DELAY{ 300 };
     McpFixtureServer mcp;
@@ -555,6 +560,46 @@ TEST_F (ScenarioRunnerTest, AnMcpListStepIsComparedOverEveryPageInACollectionRun
     EXPECT_GE (rows[0].latency_ms, static_cast<double> (PAGE_DELAY.count ()));
     EXPECT_EQ (mcp.tools_list_cursors (),
     (std::vector<std::optional<std::string>>{ std::nullopt, "cursor-2" }));
+}
+
+// ---------------------------------------------------------------------------
+// A streamed Send, which binds no sender: its paged list fails by name.
+// ---------------------------------------------------------------------------
+
+using vayu::tests::sse_stream::StreamExecuteTest;
+
+// The first page answers as an event stream, so the Send streams, and the
+// reply names a second page. Mutation check: bind a sender on the streamed
+// `step.after` context in `execution.cpp` and the list is compared whole and
+// passes.
+TEST_F (StreamExecuteTest, APagedListOnAStreamedSendFailsSayingItIsNotFollowed) {
+    McpFixtureServer mcp;
+    mcp.set_tools (three_tools (), 2);
+    mcp.first_tools_page_as_event_stream ();
+    const json payload{ { "method", "POST" }, { "url", mcp.url () },
+        { "timeout", 5000 }, { "stream", true },
+        { "body", { { "mode", "mcp" }, { "content", R"({"method":"tools/list"})" } } },
+        { "elements", json::array ({ snapshot_element (three_tools ()) }) } };
+    httplib::Client client ("127.0.0.1", port_);
+    client.set_read_timeout (20, 0);
+    const auto answer = client.Post ("/execute", payload.dump (), "application/json");
+    ASSERT_TRUE (answer);
+    ASSERT_EQ (answer->status, 202) << answer->body;
+    const auto run_id = json::parse (answer->body).value ("runId", std::string ());
+
+    const auto trace = trace_for (run_id);
+    json snapshot_test;
+    for (const auto& test : trace["scripts"].value ("testResults", json::array ())) {
+        if (test.value ("name", "") == "tools/list matches the snapshot") {
+            snapshot_test = test;
+        }
+    }
+    ASSERT_TRUE (snapshot_test.is_object ()) << trace.dump (2);
+    EXPECT_FALSE (snapshot_test.value ("passed", true));
+    EXPECT_EQ (snapshot_test.value ("error", ""), STREAMED_SEND_REFUSAL)
+    << snapshot_test.dump ();
+    EXPECT_EQ (mcp.tools_list_cursors (),
+    (std::vector<std::optional<std::string>>{ std::nullopt }));
 }
 
 } // namespace
