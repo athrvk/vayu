@@ -7,9 +7,19 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
+import { mcpOAuthBearer } from "@/modules/collections/import-mcp";
 import { invalidateAllRequestLists } from "./collections";
 import { queryKeys } from "./keys";
-import type { ImportMcpApplyRequest, ImportMcpApplyResponse } from "@/types";
+import type { ImportMcpApplyRequest, ImportMcpApplyResponse, OAuth2Config } from "@/types";
+
+export interface McpApplyVariables {
+	payload: ImportMcpApplyRequest;
+	/**
+	 * The config an OAuth connect signed in with (#3983). Its token is fetched inside the mutation,
+	 * so `isPending` holds the button across both calls and no token the connect sent is replayed.
+	 */
+	oauth?: OAuth2Config;
+}
 
 /**
  * Apply the rows of an MCP re-import diff the user ticked to the collection it compared (#3994). One
@@ -27,8 +37,13 @@ export function useImportMcpApplyMutation() {
 	const queryClient = useQueryClient();
 	return useMutation({
 		retry: false,
-		mutationFn: (payload: ImportMcpApplyRequest): Promise<ImportMcpApplyResponse> =>
-			apiService.importMcpApply(payload),
+		mutationFn: async ({
+			payload,
+			oauth,
+		}: McpApplyVariables): Promise<ImportMcpApplyResponse> =>
+			apiService.importMcpApply(
+				oauth ? { ...payload, auth: await mcpOAuthBearer(oauth) } : payload
+			),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 			invalidateAllRequestLists(queryClient);

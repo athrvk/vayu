@@ -136,10 +136,16 @@ export interface BatchEntry {
 	/**
 	 * The request the connect sent, which `existingMcp` was computed from (#3994). An update sends
 	 * it again, so it writes against the listing the user was shown rather than whatever the form
-	 * holds by then. It carries the bearer token, so it lives and dies with the entry, which
+	 * holds by then. It carries a static bearer token, so it lives and dies with the entry, which
 	 * `resetTab` drops when the preview is dismissed or the dialog closes.
 	 */
 	mcpRequest?: ImportMcpRequest;
+	/**
+	 * The config an OAuth connect signed in with, as discovery filled it (#3983). Set, `mcpRequest`
+	 * carries no token: the access token expires, so an update asks the engine's cache for it again
+	 * rather than replaying the one the connect sent.
+	 */
+	mcpOAuth?: OAuth2Config;
 }
 
 /** How the batch reaches files the picked documents reference. */
@@ -231,7 +237,7 @@ export function entryLabel(entry: BatchEntry): string {
  *
  * With @p oauth (#3983) the token in `request` came from a sign-in, so the root the engine built
  * around it (bearer `{{mcpToken}}` over an empty secret variable) becomes an OAuth 2.0 root on
- * that sign-in's config.
+ * that sign-in's config, and the kept request drops the token.
  */
 export function mcpBatchEntry(
 	result: ImportResult,
@@ -253,7 +259,9 @@ export function mcpBatchEntry(
 		bundledInto: null,
 		included: true,
 		existingMcp,
-		mcpRequest: request,
+		...(oauth
+			? { mcpRequest: withoutAuth(request), mcpOAuth: oauth }
+			: { mcpRequest: request }),
 	};
 }
 
@@ -268,6 +276,11 @@ function withSignedInRoots(result: ImportResult, config: OAuth2Config): ImportRe
 		return { ...root, auth: { mode: "oauth2", config }, variables };
 	};
 	return { ...result, collections: result.collections.map(signedIn) };
+}
+
+function withoutAuth(request: ImportMcpRequest): ImportMcpRequest {
+	const { auth: _auth, ...rest } = request;
+	return rest;
 }
 
 const NO_REFS: RefReport = { fetched: [], refused: [] };

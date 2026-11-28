@@ -515,6 +515,14 @@ describe("mcpBatchEntry (#3843)", () => {
 			expect(Object.keys(root.variables)).toEqual(["mcpBaseUrl"]);
 		});
 
+		it("keeps the request without its token, and the config to fetch the next one from", () => {
+			const entry = mcpBatchEntry(bearerTree(), REQUEST, [], SIGNED_IN);
+
+			expect(entry.mcpRequest).toEqual({ url: URL });
+			expect(entry.mcpOAuth).toBe(SIGNED_IN);
+			expect(JSON.stringify(entry)).not.toContain("s3cret");
+		});
+
 		it("leaves a static token's tree as the engine built it", () => {
 			const tree = bearerTree();
 

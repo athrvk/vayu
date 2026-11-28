@@ -60,12 +60,13 @@ With one ticked removal (one a ticked rename does not stand in for) it first ask
 The write is [`POST /import/mcp/apply`](../../engine/api-reference/import.md#post-importmcpapply), which owns what each row writes and its single transaction; this page covers only what the dialog sends and shows.
 
 - **The request is the connect's.** The update sends the request the report was computed from (its URL, headers and token), kept with the preview, not what the form holds now. The engine reads the server again and checks every ticked row against that read.
+- **An OAuth connect keeps no token.** Its update asks the engine for the token the sign-in cached ([`POST /oauth2/token`](../../engine/api-reference/authentication.md#post-oauth2token)), refreshed when it has expired, and sends that. When none is left to refresh it writes nothing and says *the sign-in to this server has run out*: dismiss the preview and connect again to sign in.
 - **Success** closes the dialog with a toast, *Updated "Acme tools" - 1 request created, 2 updated, 0 deleted.*, and refreshes the collection tree and request lists. No second collection appears.
 - **A stale selection** (a `409`: the server's listing moved since the report, or a row is gone) shows *Couldn't update the collection - ...* with *Nothing was written*, keeps the preview and every tick, and tells the user to dismiss it and connect again to compare. Any other refusal shows the engine's sentence the same way.
 - **With several collections** holding the URL, each report carries its own **Update existing**, since one footer button could not say which it means; the footer then offers only Import anyway.
 - **While it runs** the ticks, both buttons and the close are held.
 
-Dismissing the preview or closing the dialog drops the ticks and the kept request, token included.
+Dismissing the preview or closing the dialog drops the ticks and the kept request, a static token included.
 
 The environment and script checkboxes are not offered on this tab: the tree carries no environment, no global and no script, so each would answer a question the source cannot ask.
 Their values stay for the other tabs.

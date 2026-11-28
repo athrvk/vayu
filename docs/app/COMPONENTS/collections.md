@@ -169,7 +169,7 @@ The MCP server tab's fields, controlled by `ImportModal`: a tab switch leaves th
 `import-mcp.ts` beside it holds the form's state, `canConnectMcp` (a URL and at least one primitive) and `mcpImportRequest` (the `POST /import/mcp` body: blank and disabled header rows are dropped).
 The connect is `ImportModal`'s `handleConnectMcp`: its own `AbortController` and generation, as the URL download has, and the answer becomes the tab's one batch entry (`mcpBatchEntry`), so the preview and apply are the other tabs' own.
 With **OAuth sign-in** chosen (a `ToggleGroup` beside the token field, off without `window.electronAPI`), the connect first runs `signInToMcpServer` (`import-mcp.ts`: `runInteractiveAuthorization` on a `discoverUrl` config, registered in `oauth-signin-store`, cancelled by the same abort) and sends `mcpOAuthBearer`'s cached token.
-`mcpBatchEntry` then puts the root on the filled config and drops the `mcpToken` variable.
+`mcpBatchEntry` then puts the root on the filled config, drops the `mcpToken` variable, and keeps the request without its token beside the config (`BatchEntry.mcpOAuth`).
 The environment and script checkboxes are not drawn on this tab.
 Right after the connect, `existingMcpImports` (`import-mcp.ts`) asks `apiService.importMcpDiff` which collections an earlier import of the URL built and stores them on the entry as `BatchEntry.existingMcp`; it never throws, so a failed comparison is the same as no match.
 See [import-collections/mcp-server.md](../import-collections/mcp-server.md).
@@ -182,7 +182,7 @@ Each row has a `Checkbox` (`size-target`, labelled `name (kind)`): added and cha
 Ticking a possible rename shows its added and removed halves unticked and disabled without changing their stored ticks, so unticking it restores them.
 It is controlled: the ticks and the update live in `useMcpReimport.ts`, which `ImportModal` calls, and `mcp-reimport-selection.ts` holds the defaults and `buildMcpSelect`, the `select` body of [`POST /import/mcp/apply`](../../engine/api-reference/import.md#post-importmcpapply).
 The footer's **Update existing** writes the ticks to the one matched collection beside **Import anyway** (a new collection, as before); with several matches each block carries its own button instead, passed in as `onUpdate`.
-A removal asks first through `DeleteConfirmDialog`, naming the count; the update sends the request the connect made (`BatchEntry.mcpRequest`, dropped with the entry), and a `409` keeps the ticks and says to connect again.
+A removal asks first through `DeleteConfirmDialog`, naming the count; the update sends the request the connect made (`BatchEntry.mcpRequest`, dropped with the entry; for an OAuth entry the mutation fetches the cached token for `BatchEntry.mcpOAuth` first), and a `409` keeps the ticks and says to connect again.
 The success refresh is `useImportMcpApplyMutation` (`queries/import-mcp.ts`): the collection list and every request list, as `useSyncSpecMutation` does.
 It reads the engine's `ImportMcpDiffMatch` shape directly, not the spec sync's `SpecDiff` types.
 

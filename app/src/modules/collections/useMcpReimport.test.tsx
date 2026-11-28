@@ -24,7 +24,12 @@ import { mcpBatchEntry, type BatchEntry } from "@/services/importers/batch";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services/http-client";
 import { result as emptyResult } from "./import-preview.testkit";
-import type { ImportMcpApplyResponse, ImportMcpDiffMatch, ImportMcpRequest } from "@/types";
+import type {
+	ImportMcpApplyResponse,
+	ImportMcpDiffMatch,
+	ImportMcpRequest,
+	OAuth2Config,
+} from "@/types";
 
 const MATCH: ImportMcpDiffMatch = {
 	collectionId: "col_1",
@@ -228,6 +233,49 @@ describe("useMcpReimport", () => {
 		expect(await settle(() => noRequest.result.current.update("col_1"))).toBeNull();
 		expect(await settle(() => named.result.current.update("col_404"))).toBeNull();
 		expect(importMcpApply).not.toHaveBeenCalled();
+	});
+});
+
+describe("an update of an OAuth connect's comparison (#3983)", () => {
+	const SIGNED_IN: OAuth2Config = {
+		grantType: "authorization_code",
+		discoverUrl: CONNECT.url,
+		accessTokenUrl: "https://auth.example.com/token",
+		clientId: "registered-client",
+	};
+
+	it("sends the token the engine holds now, never the one the connect sent", async () => {
+		const fetchToken = vi.spyOn(apiService, "fetchOAuth2Token").mockResolvedValue({
+			cacheKey: "key",
+			accessToken: "refreshed-token",
+			tokenType: "Bearer",
+			expiresIn: 3600,
+			createdAt: 0,
+			expiresAt: 3_600_000,
+			hasRefreshToken: true,
+		});
+		const { result } = mount(mcpBatchEntry(emptyResult(), CONNECT, [MATCH], SIGNED_IN));
+
+		await settle(() => result.current.update("col_1"));
+
+		expect(fetchToken).toHaveBeenCalledWith({ config: SIGNED_IN });
+		const sent = importMcpApply.mock.calls[0][0] as ImportMcpRequest;
+		expect(sent.auth).toEqual({ mode: "bearer", token: "refreshed-token" });
+		expect(JSON.stringify(sent)).not.toContain("connect-time-token");
+	});
+
+	it("writes nothing and says to sign in again when no token is left to refresh", async () => {
+		vi.spyOn(apiService, "fetchOAuth2Token").mockRejectedValue(
+			new ApiError(409, "oauth2_interactive_required", "OAuth 2.0 authorization required")
+		);
+		const { result } = mount(mcpBatchEntry(emptyResult(), CONNECT, [MATCH], SIGNED_IN));
+
+		expect(await settle(() => result.current.update("col_1"))).toBeNull();
+
+		expect(importMcpApply).not.toHaveBeenCalled();
+		const said = mcpUpdateFailureMessage(result.current.error as Error);
+		expect(said).toContain("the sign-in to this server has run out");
+		expect(said).toContain("connect again to sign in");
 	});
 });
 
