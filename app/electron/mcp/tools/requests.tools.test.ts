@@ -1172,6 +1172,74 @@ describe("data-write tools", () => {
 		expect(client.updateRequest).not.toHaveBeenCalled();
 	});
 
+	describe("an mcpTool argument (#3792)", () => {
+		const TOOL = {
+			name: "execute_sql",
+			inputSchema: { type: "object", properties: { region: { "x-mcp-header": "Region" } } },
+		};
+		const CALL = '{"method":"tools/call","params":{"name":"execute_sql"}}';
+		const created = {
+			collectionId: "c1",
+			name: "Query",
+			url: "https://mcp.example.com/mcp",
+			method: "POST",
+		};
+
+		test("create_request stores the tool inside the mcp body", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"create_request",
+				{ ...created, bodyType: "mcp", body: CALL, mcpTool: TOOL },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(res.isError).toBeFalsy();
+			const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+			expect(payload).toMatchObject({
+				body: { mode: "mcp", content: CALL, mcpTool: TOOL },
+				bodyType: "mcp",
+			});
+			expect(Object.keys(payload as object)).not.toContain("mcpTool");
+		});
+
+		test.each([
+			["another bodyType", { bodyType: "json", body: "{}" }, 'not "json"'],
+			["no bodyType", { body: CALL }, 'pass it with bodyType "mcp".'],
+			["no body", { bodyType: "mcp" }, 'pass the "body" it belongs to'],
+			["nothing else", {}, 'pass it with bodyType "mcp".'],
+		])("both write tools refuse it with %s", async (_case, args, refusal) => {
+			const client = fakeClient();
+			const ctx = ctxWith(client, { allowWrites: true });
+			for (const [name, base] of [
+				["create_request", created],
+				["update_request", { requestId: "req_1" }],
+			] as const) {
+				const res = await dispatchTool(name, { ...base, ...args, mcpTool: TOOL }, ctx);
+				expect(res.isError, name).toBe(true);
+				expect(firstText(res), name).toContain(refusal);
+			}
+			expect(client.createRequest).not.toHaveBeenCalled();
+			expect(client.updateRequest).not.toHaveBeenCalled();
+		});
+
+		test("both tools' schema takes a tool as listed or imported and refuses a nameless one", () => {
+			for (const name of ["create_request", "update_request"]) {
+				const schema = TOOLS.find((t) => t.name === name)!.inputSchema.mcpTool as z.ZodType;
+				const listed = {
+					...TOOL,
+					title: "Execute SQL",
+					annotations: { readOnlyHint: false },
+				};
+				expect(schema.safeParse(listed).success, `${name} as listed`).toBe(true);
+				expect(schema.safeParse({ name: "ping" }).success, `${name} as imported`).toBe(
+					true
+				);
+				expect(schema.safeParse({ inputSchema: {} }).success, `${name} nameless`).toBe(
+					false
+				);
+			}
+		});
+	});
+
 	test("update_request refuses a patch with no fields at all", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(

@@ -802,14 +802,14 @@ describe("undeclared arguments", () => {
 	});
 
 	/**
-	 * The top-level arguments whose object is open on purpose, by name and why.
-	 * Each is listed only while some tool still carries it open, so an entry
-	 * outlives no reason.
+	 * The top-level arguments whose object is open on purpose, by name and why. Each is listed
+	 * only while some tool still carries it open, so an entry outlives no reason.
 	 */
 	const OPEN_ARGUMENTS: Record<string, string> = {
 		auth: "each mode's members are the engine's to know (`authBlock`'s passthrough)",
 		thresholds: "a `custom.<name>.<stat>` budget is a key no schema can name (catchall)",
 		config: "fetch_oauth2_token's OAuth 2.0 config, read by the engine (passthrough)",
+		mcpTool: "a tool as listed carries members the engine stores (looseObject)",
 	};
 
 	/** Each object node under @p schema that declares properties and leaves others open. */

@@ -37,7 +37,7 @@ import {
 	writesDisabled,
 } from "./kit.js";
 import { ID_KINDS } from "./failure.js";
-import { fileRefInput, shapeBody } from "./request-body.js";
+import { fileRefInput, mcpToolInput, shapeBody } from "./request-body.js";
 import { readAuthArg, readScriptEdits, scriptElement, upsertScriptElement } from "./compose.js";
 import {
 	applyRequestSettings,
@@ -59,7 +59,7 @@ import {
 	type HeaderRowArg,
 } from "./header-rows.js";
 import { refuseRedactedHeaders, refuseRedactedUrl } from "./redacted-input.js";
-import { BINARY_FILE_ACCESS_TOKEN, GUARDED_WRITE_SENTENCE } from "../remedy.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const REQUEST_TOOLS: McpTool[] = [
 	{
@@ -88,13 +88,12 @@ export const REQUEST_TOOLS: McpTool[] = [
 			),
 			body: z.string().optional().describe("Request body content."),
 			file: fileRefInput(),
+			mcpTool: mcpToolInput(),
 			bodyType: z
 				.string()
 				.optional()
 				.describe(
-					'Body type: json, text, graphql, jsonrpc, mcp, xml, form-data, x-www-form-urlencoded, binary (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. `binary` sends one file as the whole body: pass `file` instead of `body` (`file` alone implies `binary`). The engine sends the path only once ' +
-						BINARY_FILE_ACCESS_TOKEN +
-						', because an agent cannot choose a file on their behalf. Form-data file parts are not supported here; author them in the app. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the GET a new request defaults to. An mcp `body` is one call to an MCP server (`{"method":"tools/call","params":{"name":...,"arguments":{...}}}`); the engine adds `params._meta`, Accept, MCP-Protocol-Version, Mcp-Method and Mcp-Name itself, so set no header by hand (Mcp-Param-* needs a tool only the app sets). An xml `body` is stored and sent verbatim as application/xml.'
+					'Body type: json, text, graphql, jsonrpc, mcp, xml, form-data, x-www-form-urlencoded, binary (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A graphql, jsonrpc or xml `body` is sent as `run_request` describes: graphql goes as query parameters on GET, so a mutation needs `method` POST, not the GET default. `binary` sends one file as the whole body: pass `file` instead of `body` (`file` alone implies `binary`). Form-data file parts are not supported here; author them in the app. An mcp `body` is one call to an MCP server (`{"method":"tools/call","params":{"name":...,"arguments":{...}}}`); the engine adds `params._meta`, Accept, MCP-Protocol-Version, Mcp-Method and Mcp-Name itself, so set no header by hand (`mcpTool` adds Mcp-Param-*).'
 				),
 			description: z.string().optional(),
 			auth: storedAuthInput(
@@ -172,7 +171,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 		description: (config) =>
 			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, stream text path, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). " +
 			GUARDED_WRITE_SENTENCE +
-			". Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it. `mockResponseMode`/`mockExampleId` set which saved example a mock server answers this request with (`mockExampleId: null` clears it) - get_mock_routes shows the effect once a mock is running." +
+			". Only the fields you pass change - anything you leave out keeps its stored value; `headers`, `auth` and `elements` each replace the stored value whole, and a script replaces just its own element." +
 			withheldPointer(config),
 		annotations: {
 			title: "Update saved request",
@@ -191,25 +190,27 @@ export const REQUEST_TOOLS: McpTool[] = [
 			),
 			body: z.string().optional().describe("New request body content."),
 			file: fileRefInput("create_request"),
+			mcpTool: mcpToolInput("create_request"),
 			bodyType: z
 				.string()
 				.optional()
 				.describe(
-					"Body type for `body`: json, text, graphql, jsonrpc, mcp, xml, form-data, x-www-form-urlencoded, binary. Only meaningful alongside `body`, or alongside `file` for binary, which replaces the body with that file exactly as `create_request` describes - sent only once " +
-						BINARY_FILE_ACCESS_TOKEN +
-						". A jsonrpc or mcp `body` is completed engine-side exactly as `create_request` describes, and a graphql `body` travels by the same method-dependent rule that tool describes - the JSON envelope on POST, query parameters on GET; an xml `body` is stored and sent verbatim as application/xml. Form-data file parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
+					asOn(
+						"create_request",
+						"only meaningful alongside `body` (or `file` for binary); a graphql `body` goes as query parameters on GET, so a mutation needs POST. A stored form-data file part is left alone unless `body` replaces the whole body."
+					)
 				),
 			description: z.string().optional().describe("New description."),
 			auth: storedAuthInput(
 				"this request",
-				"Replaces the stored block whole - send the mode and its credentials together. Leave it out to keep what is stored."
+				"Replaces the stored block whole - send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain)."
 			),
 			...requestSettingsInput("create_request"),
 			mockResponseMode: z
 				.enum(["first", "fixed", "random"])
 				.optional()
 				.describe(
-					"Which saved example a mock server answers with. 'fixed' requires mockExampleId. Takes effect the next time start_mock_server runs, like every other change to a saved example."
+					"Which saved example a mock server answers with. 'fixed' requires mockExampleId. Takes effect the next time start_mock_server runs, like every other change to a saved example; get_mock_routes shows it."
 				),
 			mockExampleId: z
 				.string()
@@ -291,7 +292,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				elementsGiven === undefined
 			) {
 				return errorResult(
-					"Pass at least one field to change (name, url, method, headers, body, file, auth, followRedirects, maxRedirects, timeout, httpVersion, stream, streamTextPath, streamFirstContentMarker, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript).",
+					"Pass at least one field to change (name, url, method, headers, body, file, mcpTool, auth, followRedirects, maxRedirects, timeout, httpVersion, stream, streamTextPath, streamFirstContentMarker, description, mockResponseMode, mockExampleId, elements, preRequestScript or postRequestScript).",
 					"input"
 				);
 			}
@@ -465,7 +466,7 @@ async function writeRequestEdits(
  * list whole (#1514); a header row written back withheld, which keeps the stored value (#3550);
  * while secrets are withheld, a `url`, whose credentials the read emptied (#3549), or any
  * `headers`, so a stored row the session could not read is named when the write drops it (#3550);
- * and an `mcp` body, whose stored tool a write of the body would otherwise clear (#3762).
+ * and an `mcp` body that states no tool, whose stored tool the write would otherwise clear (#3762).
  */
 function readsStoredRequest(
 	payload: Record<string, unknown>,
@@ -473,20 +474,21 @@ function readsStoredRequest(
 	reveal: boolean
 ): boolean {
 	if (edits.scripts.length > 0 || edits.headers?.some(keepsStoredValue)) return true;
-	if (isMcpBody(payload.body)) return true;
+	if (keepsStoredMcpTool(payload.body)) return true;
 	return !reveal && (typeof payload.url === "string" || edits.headers !== undefined);
 }
 
-function isMcpBody(body: unknown): boolean {
-	return isRecord(body) && body.mode === "mcp";
+/**
+ * Whether a written `mcp` body takes the stored tool. The engine keeps the tool
+ * inside the body object and a write of `body` replaces that object whole, so
+ * an `mcp` body written without `mcpTool` would clear the stored one; a body
+ * that states its own tool replaces it (#3792).
+ */
+function keepsStoredMcpTool(body: unknown): body is Record<string, unknown> {
+	return isRecord(body) && body.mode === "mcp" && body.mcpTool === undefined;
 }
 
-/**
- * The tool a stored `mcp` body carries. The engine keeps it inside the body
- * object and a write of `body` replaces that object whole, while this server
- * has no argument to state one (the cost is `tools/list` bytes), so a write of
- * an `mcp` body would clear a tool the app set.
- */
+/** The tool a stored `mcp` body carries. */
 function storedMcpTool(body: unknown): unknown {
 	return isRecord(body) && body.mode === "mcp" ? body.mcpTool : undefined;
 }
@@ -515,7 +517,7 @@ function mergeRequestEdits(
 			);
 		}
 	}
-	const keptTool = isMcpBody(payload.body) ? storedMcpTool(stored.body) : undefined;
+	const keptTool = keepsStoredMcpTool(payload.body) ? storedMcpTool(stored.body) : undefined;
 	if (keptTool !== undefined) {
 		body.body = { ...(payload.body as Record<string, unknown>), mcpTool: keptTool };
 		notes.push(
