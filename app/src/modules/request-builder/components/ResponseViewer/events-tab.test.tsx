@@ -65,6 +65,9 @@ const okResponse = (overrides: Partial<ResponseState> = {}): ResponseState => ({
 
 const event = (data: string, name = "message"): StreamEvent => ({ event: name, data });
 
+/** What the engine does to an event it judged an error; the renderer only reads the mark (#3996). */
+const flagged = (e: StreamEvent): StreamEvent => ({ ...e, isError: true });
+
 function renderViewer() {
 	return render(
 		<TooltipProvider>
@@ -765,7 +768,7 @@ describe("the Events tab's Text view", () => {
 
 	it("calls out an error event, in the Text view only, beside the end-reason note", () => {
 		state.response = okResponse({
-			events: [token("Hel"), event('{"message":"Overloaded"}', "error")],
+			events: [token("Hel"), flagged(event('{"message":"Overloaded"}', "error"))],
 			totalEvents: 2,
 			eventsTruncated: false,
 			streamEndReason: "error",
@@ -784,7 +787,7 @@ describe("the Events tab's Text view", () => {
 	});
 
 	it("lists a few error events and counts the rest", () => {
-		const errors = Array.from({ length: 5 }, (_, i) => event(`boom ${i}`, "error"));
+		const errors = Array.from({ length: 5 }, (_, i) => flagged(event(`boom ${i}`, "error")));
 		state.response = okResponse({
 			events: [token("x"), ...errors],
 			totalEvents: 6,
@@ -797,5 +800,117 @@ describe("the Events tab's Text view", () => {
 
 		expect(screen.getAllByText("The server sent an error event")).toHaveLength(3);
 		expect(screen.getByText(/2 more error events in Rows/)).toBeTruthy();
+	});
+});
+
+/**
+ * An in-band stream error (issue #3996). The engine decides which events are errors and marks them
+ * `isError`; the pane reads that mark and nothing else, so an event named `error` the engine did
+ * not mark draws no error, and an unnamed one it did mark does.
+ */
+describe("the Events tab's in-band error", () => {
+	const marked = flagged(event('{"error":{"message":"Overloaded"}}'));
+	const token = (text: string): StreamEvent => ({
+		event: "message",
+		data: '{"choices":[{"delta":{}}]}',
+		text,
+	});
+	const stored = (events: StreamEvent[], overrides: Partial<ResponseState> = {}) =>
+		okResponse({
+			events,
+			totalEvents: events.length,
+			eventsTruncated: false,
+			streamEndReason: "completed",
+			...overrides,
+		});
+	const pick = (name: RegExp) => fireEvent.click(screen.getByRole("radio", { name }));
+
+	beforeEach(() => {
+		cleanup();
+		useExecutionEventsStore.getState().clear();
+		state.response = null;
+		state.isExecuting = false;
+		state.request = { id: "req_1" };
+	});
+
+	// Mutation check: compare `event.event === "error"` in `errorEventsOf` again and the
+	// unnamed marked event draws no callout.
+	it("calls out a marked event whatever its name, in the Text view", () => {
+		state.response = stored([token("Hel"), marked], { streamText: "Hel" });
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getByText("The server sent an error event")).toBeTruthy();
+		expect(screen.getByText('{"error":{"message":"Overloaded"}}')).toBeTruthy();
+	});
+
+	it("puts an error chip on the marked row and not on its neighbours", () => {
+		state.response = stored([event("fine"), marked]);
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getAllByText("error")).toHaveLength(1);
+		expect(screen.getByText("error").closest("button")?.textContent).toContain("Overloaded");
+	});
+
+	it("states how many errors the list holds beside the event count", () => {
+		state.response = stored([event("fine"), marked, flagged(event("again"))]);
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getByText("2 errors")).toBeTruthy();
+		expect(screen.getByText(/3 events/)).toBeTruthy();
+	});
+
+	it("says one error in the singular", () => {
+		state.response = stored([marked]);
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getByText("1 error")).toBeTruthy();
+	});
+
+	it("trusts the mark: an event named error that the engine did not mark draws nothing", () => {
+		state.response = stored([token("Hel"), event("plain", "error")], { streamText: "Hel" });
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.queryByText("The server sent an error event")).toBeNull();
+		expect(screen.queryByText(/\d errors?$/)).toBeNull();
+		pick(/rows/i);
+		// The name chip is the only "error" on screen.
+		expect(screen.getAllByText("error")).toHaveLength(1);
+	});
+
+	it("counts a live stream's errors from the store, batch by batch", () => {
+		state.response = okResponse();
+		const store = useExecutionEventsStore.getState();
+		store.startStream({
+			requestId: "req_1",
+			runId: "run_1",
+			eventsUrl: "/runs/run_1/events",
+		});
+		store.addEvents("run_1", [event("fine"), marked]);
+		renderViewer();
+		openEventsTab();
+		expect(screen.getByText("1 error")).toBeTruthy();
+
+		act(() => useExecutionEventsStore.getState().addEvents("run_1", [flagged(event("two"))]));
+		expect(screen.getByText("2 errors")).toBeTruthy();
+	});
+
+	it("shows no count for a stream another request started", () => {
+		state.response = okResponse();
+		const store = useExecutionEventsStore.getState();
+		store.startStream({
+			requestId: "req_other",
+			runId: "run_1",
+			eventsUrl: "/runs/run_1/events",
+		});
+		store.addEvents("run_1", [marked]);
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.queryByText(/\d errors?$/)).toBeNull();
 	});
 });

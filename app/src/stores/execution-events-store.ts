@@ -41,6 +41,7 @@
 
 import { create } from "zustand";
 import type { LeftOutElement } from "@/lib/elements";
+import { countErrorEvents } from "@/lib/stream-events";
 import type { ExampleSentRequest, StreamEndReason, StreamEvent, StreamOpen } from "@/types";
 
 /** What a stream's Send knew that its stored run cannot say. */
@@ -96,6 +97,11 @@ interface ExecutionEventsState {
 	 * until an event carries one, which is also what a request with no path reads as.
 	 */
 	streamText: string;
+	/**
+	 * How many of `events` the engine flagged `isError` (#3996), kept beside `events` for the same
+	 * reason as `streamText`: the header's count must not re-walk a 100,000-event list per batch.
+	 */
+	errorCount: number;
 	/**
 	 * Every event the engine has seen, as the `complete` frame reports it. Set only from that
 	 * frame: while the stream runs the arrived-so-far count is `events.length`, and anything else
@@ -203,6 +209,7 @@ const EMPTY = {
 	open: null,
 	events: [],
 	streamText: "",
+	errorCount: 0,
 	totalEvents: null,
 	isStreaming: false,
 	endReason: null,
@@ -356,6 +363,7 @@ export const useExecutionEventsStore = create<ExecutionEventsState>((set, get) =
 				? {
 						events: [...s.events, ...events],
 						streamText: s.streamText + joinedText(events),
+						errorCount: s.errorCount + countErrorEvents(events),
 					}
 				: s
 		),

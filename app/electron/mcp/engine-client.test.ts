@@ -353,6 +353,17 @@ describe("EngineClient.consumeStreamEvents", () => {
 		expect(result.totalEvents).toBe(2);
 	});
 
+	it("keeps the engine's error mark on a relayed event (#3996)", async () => {
+		const result = await client(
+			streamingFetch([
+				frame("message", '{"event":"message","data":"{\\"error\\":1}","isError":true}', 0),
+				frame("message", '{"event":"message","data":"ok"}', 1),
+				frame("complete", '{"reason":"completed","totalEvents":2}', 2),
+			])
+		).consumeStreamEvents("run_s");
+		expect(result.events.map((e) => e.isError)).toEqual([true, undefined]);
+	});
+
 	it("stops at the event cap and says the stream did not end", async () => {
 		const result = await client(
 			streamingFetch([

@@ -92,6 +92,7 @@ export function parseMessageFrame(raw: unknown): StreamEvent | null {
 		...(e.dataTruncated === true && { dataTruncated: true }),
 		...(typeof e.dataBytes === "number" && { dataBytes: e.dataBytes }),
 		...(typeof e.text === "string" && { text: e.text }),
+		...(e.isError === true && { isError: true }),
 	};
 }
 

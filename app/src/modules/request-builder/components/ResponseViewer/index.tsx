@@ -216,6 +216,7 @@ export default function ResponseViewer() {
 	const liveSentAt = useExecutionEventsStore((s) => s.sentAt);
 	const liveEvents = useExecutionEventsStore((s) => s.events);
 	const liveStreamText = useExecutionEventsStore((s) => s.streamText);
+	const liveErrorCount = useExecutionEventsStore((s) => s.errorCount);
 	// The stream's identity, for the Events window: the list grows in place, so the window resets
 	// when the stream changes, not when a batch lands (#1158).
 	const liveRunId = useExecutionEventsStore((s) => s.runId);
@@ -394,6 +395,9 @@ export default function ResponseViewer() {
 	// The stored string wins as the stored list does, and outlives the stored-items cap. Live, `""`
 	// is "nothing matched yet", reading as no path declared until an event with text.
 	const streamText = storedEvents ? shown.streamText : liveStreamText || undefined;
+	// Live: the store's running count, but only for this request's own feed. Otherwise left to the
+	// list to count over the events it holds.
+	const errorCount = !storedEvents && streamIsMine ? liveErrorCount : undefined;
 	const endReason = storedEvents
 		? shown.streamEndReason
 		: (streamIsMine && liveEndReason) || undefined;
@@ -819,6 +823,7 @@ export default function ResponseViewer() {
 						totalEvents={totalEvents}
 						eventsTruncated={eventsTruncated}
 						streamText={streamText}
+						errorCount={errorCount}
 						endReason={endReason}
 						isStreaming={isStreaming}
 						isStream={isStream}

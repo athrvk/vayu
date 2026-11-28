@@ -24,7 +24,10 @@
  * **A Text view beside the rows** (#3773) when the request declared a stream text path: the events'
  * `text`, joined, as the reply reads. It renders what the engine put on each event and never reads
  * `data`: with no provider shape known there is no finish-reason callout, only what the stream says
- * (an event named `error`, the end reason). **Every disclosure is in band**: a capped stream and a
+ * (an event the engine flagged `isError`, the end reason). **The judgement of what is an error is
+ * the engine's, never made here** (#3996): the callout, the row chip and the header's count all read
+ * the flag, so a stream whose error rides a `message` event is as visible as a named `error` one.
+ * **Every disclosure is in band**: a capped stream and a
  * server-closed one are different facts, and 100 rows of 4,000 is not a complete 100; neither is
  * left to the row count.
  */
@@ -43,6 +46,7 @@ import { Callout, EmptyState } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { formatJson } from "@/lib/json-format";
+import { countErrorEvents } from "@/lib/stream-events";
 import { cn } from "@/lib/utils";
 import type { StreamEndReason, StreamEvent } from "@/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -66,6 +70,12 @@ export interface ResponseEventsProps {
 	 * only if an event carries `text`.
 	 */
 	streamText?: string;
+	/**
+	 * How many of `events` carry the engine's `isError` flag. The live caller passes the store's
+	 * running count, so a 100,000-event list is not re-walked per batch; absent, it is counted from
+	 * `events`, which for a stored list is the kept ones.
+	 */
+	errorCount?: number;
 	/** Why the stream ended, or undefined while it is still open. */
 	endReason?: StreamEndReason;
 	/** The stream is still open and rows are still arriving. */
@@ -188,12 +198,9 @@ function replyText(events: readonly StreamEvent[], streamText: string | undefine
 	return streamText ?? events.map((event) => event.text ?? "").join("");
 }
 
-/**
- * Events the server named `error`: the one mid-stream failure readable without a provider's shape,
- * as SSE names the event.
- */
+/** The events the engine flagged `isError`: a mid-stream failure, judged without a provider's shape. */
 function errorEventsOf(events: readonly StreamEvent[]): StreamEvent[] {
-	return events.filter((event) => event.event === "error");
+	return events.filter((event) => event.isError === true);
 }
 
 /** The reply, and what the stream said went wrong while it was being written. */
@@ -313,6 +320,11 @@ const EventRow = memo(function EventRow({
 					<Badge variant="chip" className="shrink-0 bg-muted text-muted-foreground">
 						{event.event}
 					</Badge>
+					{event.isError && (
+						<Badge variant="chip" className="shrink-0 bg-status-error-fill text-white">
+							error
+						</Badge>
+					)}
 					{event.sourceId && (
 						<span className="shrink-0 font-mono text-label text-muted-foreground">
 							id {event.sourceId}
@@ -364,6 +376,7 @@ export default function ResponseEvents({
 	totalEvents,
 	eventsTruncated,
 	streamText,
+	errorCount,
 	endReason,
 	isStreaming = false,
 	isStream = false,
@@ -394,6 +407,7 @@ export default function ResponseEvents({
 		[showText, events, streamText]
 	);
 	const errorEvents = useMemo(() => (showText ? errorEventsOf(events) : []), [showText, events]);
+	const errorTotal = useMemo(() => errorCount ?? countErrorEvents(events), [errorCount, events]);
 
 	// Two absences, two answers: a response that was never a stream has no timeline and never will;
 	// a stream that produced nothing yet still may.
@@ -430,6 +444,11 @@ export default function ResponseEvents({
 					{received.toLocaleString()} {pluralize(received, "event")}
 					{eventsTruncated && ` - showing ${events.length.toLocaleString()}`}
 				</span>
+				{errorTotal > 0 && (
+					<span className="text-xs text-status-error-text">
+						{errorTotal.toLocaleString()} {pluralize(errorTotal, "error")}
+					</span>
+				)}
 				{hasText && (
 					<ToggleGroup
 						value={view}

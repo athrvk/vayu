@@ -289,6 +289,31 @@ describe("secret withholding", () => {
 		expect(revealed.body.text).toBe("key glob-secret-1 ok");
 	});
 
+	// The engine's `isError` mark is not a string to mask, and neither tool may drop it.
+	test("run_request and get_run_report keep an event's error mark while masking its data", async () => {
+		const marked = { event: "message", data: '{"error":"glob-secret-1"}', isError: true };
+		const stream = runClient({
+			executeRequest: vi
+				.fn()
+				.mockResolvedValue({ runId: "run_s", eventsUrl: "/runs/run_s/events" }),
+			consumeStreamEvents: vi
+				.fn()
+				.mockResolvedValue({ events: [marked], completed: true, capReached: false }),
+		});
+		const args = { url: "https://api.example.com/v1", stream: true };
+		const live = (await read("run_request", stream, ALLOW_API, { ...args, events: false }))
+			.body;
+		expect(live.errorEvents).toEqual([{ ...marked, data: '{"error":"<redacted>"}' }]);
+
+		const trace = { ...RUN_REPORT.results[0].trace, events: { items: [marked] } };
+		const report = { ...RUN_REPORT, results: [{ ...RUN_REPORT.results[0], trace }] };
+		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(report) });
+		const { body } = await read("get_run_report", client, undefined, { runId: "run_1" });
+		expect(body.results[0].trace.events.items).toEqual([
+			{ ...marked, data: '{"error":"<redacted>"}' },
+		]);
+	});
+
 	test("get_run_report masks the stored trace and keeps its shape", async () => {
 		const client = runClient({ getRunReport: vi.fn().mockResolvedValue(RUN_REPORT) });
 		const { text, body } = await read("get_run_report", client, undefined, { runId: "run_1" });

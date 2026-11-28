@@ -329,6 +329,8 @@ export async function runStreamingRequest(
 	// Declared by the request, not inferred from the events: a path that read
 	// nothing yet is an empty reply, and no path is no `text` at all.
 	const declaresText = typeof payload.streamTextPath === "string";
+	// The engine's flag (`isError`), read as it came; this tool never judges an event itself.
+	const errorEvents = consumed.events.filter((event) => event.isError === true);
 	return structuredResult({
 		runId,
 		eventsUrl: started.eventsUrl,
@@ -342,8 +344,12 @@ export async function runStreamingRequest(
 		...(consumed.endReason !== undefined && { endReason: consumed.endReason }),
 		...(consumed.totalEvents !== undefined && { totalEvents: consumed.totalEvents }),
 		eventCount: consumed.events.length,
+		errorEventCount: errorEvents.length,
 		...(declaresText && { text: withhold(joinedEventText(consumed.events)) }),
 		...(args.events !== false && { events: withhold(consumed.events) }),
+		// Rowless, the flagged rows still come back: an agent that left out the rows to save
+		// tokens must not lose the one thing it needs to see went wrong.
+		...(args.events === false && { errorEvents: withhold(errorEvents) }),
 		nextStep: consumed.completed
 			? "The stream has ended. get_run_report has the stored events and any test results."
 			: "The run is still streaming engine-side. get_run says whether it is done and get_run_report reads the events stored so far; end it with stop_run.",

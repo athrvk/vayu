@@ -1141,6 +1141,12 @@ export interface StreamEvent {
 	 * provider shape.
 	 */
 	text?: string;
+	/**
+	 * `true` when the engine judged this event an in-band error (#3996); absent, never `false`.
+	 * Engine-evaluated, so the app never re-derives it from the name or `data`: compare `text`, and
+	 * see `docs/engine/api-reference/execute.md` for the rule.
+	 */
+	isError?: boolean;
 }
 
 /** The relay's `open` frame, sent on the response headers so even a late consumer learns them. */
