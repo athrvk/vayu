@@ -116,9 +116,11 @@ TEST (BufferedStreamEvents, ParsesTheBufferedBodyIntoTheStoredItemShape) {
 // once. Mutation-check: hand-roll a split-on-blank-line parser here and the
 // multi-line frame alone reddens this.
 TEST (BufferedStreamEvents, AgreesWithTheLivePathOnTheSameBytes) {
-    const std::string body = "event: chunk\ndata: one\ndata: two\n\n"
-                             ": a comment is not an event\n\n"
-                             "data: last\n\n";
+    const std::string body =
+    "event: chunk\ndata: one\ndata: two\n\n"
+    ": a comment is not an event\n\n"
+    "data: {\"error\":{\"message\":\"overloaded\"}}\n\n"
+    "data: last\n\n";
 
     vayu::http::SseLimits limits;
     vayu::http::SseStreamContext context ("run-live", limits);
@@ -145,8 +147,26 @@ TEST (BufferedStreamEvents, AgreesWithTheLivePathOnTheSameBytes) {
         live_item.erase ("receivedAt");
         EXPECT_EQ (buffered["items"][i], live_item) << "item " << i;
     }
+    ASSERT_EQ (live.size (), 3u);
+    EXPECT_TRUE (live[1].value ("isError", false)) << live[1].dump ();
     EXPECT_EQ (buffered["totalEvents"], context.total_events ());
     EXPECT_FALSE (buffered["eventsTruncated"]);
+}
+
+// A load sample's script sees the same mark a Send does (#3996), because it is
+// derived from the buffered bytes. Mutation check: drop the `isError` write in
+// `sse_event_node` and the error chunk carries none.
+TEST (BufferedStreamEvents, MarksAnErrorChunkAsTheLivePathDoes) {
+    const std::string body = "data: token\n\n"
+                             "data: {\"error\":\"overloaded\"}\n\n"
+                             "data: {\"error\":null}\n\n";
+    const vayu::http::SseLimits limits;
+    const auto node = vayu::http::buffered_stream_events_node (body, limits, 3, true);
+
+    ASSERT_EQ (node["items"].size (), 3u);
+    EXPECT_FALSE (node["items"][0].contains ("isError"));
+    EXPECT_TRUE (node["items"][1].value ("isError", false)) << node["items"][1].dump ();
+    EXPECT_FALSE (node["items"][2].contains ("isError")) << node["items"][2].dump ();
 }
 
 // The arrival times a live consumer kept are paired with the events in order

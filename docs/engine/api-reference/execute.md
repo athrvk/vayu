@@ -151,7 +151,7 @@ The stored `response` carries `bodyBytes`, the body bytes the server delivered, 
 The declarative elements and the post-request script read the same bytes, so `assert.contains`, `assert.size`, `extract.regex` and `pm.response.text()` judge a streamed Send as they judge a collection or load run's.
 
 The bytes are stored once (issue #657).
-The trace's `events` node is served as `{items, totalEvents, eventsTruncated, endReason, streamText?, startedAt?}` (each item `{event, data, sourceId?, dataTruncated?, dataBytes?, text?, receivedAt}`),
+The trace's `events` node is served as `{items, totalEvents, eventsTruncated, endReason, streamText?, startedAt?}` (each item `{event, data, sourceId?, dataTruncated?, dataBytes?, isError?, text?, receivedAt}`),
 but the list is parsed from the stored body when the trace is read ([`GET /runs/:runId/results/:resultId`](runs.md#get-runsrunidresultsresultid), the report's `results[]` and `GET /runs/:runId`'s `result`): what the row stores is the sidecar `{totalEvents, endReason, maxEventBytes, receivedAt: [ms, ...], streamTextPath?, startedAt?}`, one arrival time per event `sseMaxStoredEvents` kept.
 `startedAt` (issue #3805) is when the transfer began, in epoch milliseconds on the clock `receivedAt` reads, so `receivedAt[0] - startedAt` is the wait for the first event; it is absent - never `0` - for a stream refused before its transfer began and for a row stored before the key, and is served as stored.
 The served list stops at the shorter of that and `totalEvents`, and `eventsTruncated` is `true` when either the list is shorter than `totalEvents` or the body is a prefix (`bodyCapped`, or `bodyTruncated` from `maxTraceBodyBytes`).
@@ -175,6 +175,15 @@ With no path the node has no `streamText` and no item has `text`.
   "streamTextPath": "$.choices[0].delta.content"
 }
 ```
+
+**`isError` marks an event that reports a failure** (issue #3996).
+An item carries `isError: true` when the event is named `error`, or when its `data` is a JSON object with a top-level `error` member whose value is neither `null` nor `false`.
+Both of those state that nothing failed: `{"result": ..., "error": null}` is a common success envelope.
+The key is otherwise absent, never `false`, and the same with or without a `streamTextPath`.
+An event cut at `sseMaxEventBytes` (`dataTruncated`) is marked by its name alone, because its data is a prefix of the JSON.
+The engine sniffs no provider: an `error` nested below the top level (`{"response": {"error": ...}}`) marks nothing, and neither does a key written with JSON escapes.
+Each relayed `message` frame carries the mark as it arrives; a stored trace's items derive it from the body when the trace is read, so it is never stored, and an `items` list stored before #3770 carries none.
+The mark changes nothing else: the run's status and `endReason` are the stream's, and failing a request on it is a script's assertion (`pm.response.events.some((e) => e.isError)`).
 
 A UTF-8 byte-order mark at the very start of the stream is dropped, as the EventSource specification requires (issue #1917); without that the first line's field name would carry the mark and the first event would be lost.
 One mark is dropped, however its three bytes are split across reads, and only at the start.

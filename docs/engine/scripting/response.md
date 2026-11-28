@@ -103,6 +103,7 @@ Each entry is `{ event, id, data, receivedAt }`:
 | `id` | The origin's `id:`, **absent** when it sent none. Not the relay's own frame id, which is a different number and would make a comparison silently wrong. |
 | `data` | The `data:` payload as a string, multi-line frames joined with `\n`. `JSON.parse` it yourself - the wire says nothing about what it holds. |
 | `dataTruncated` | `true` only when that one event hit `sseMaxEventBytes` and `data` is a prefix. Absent otherwise. |
+| `isError` | `true` only when the engine judged the event a reported failure ([the rule](../api-reference/execute.md#post-execute)). Absent otherwise. |
 | `text` | What the request's `streamTextPath` read off this event (issue #3773). [Details](#the-text-of-an-event-in-full) |
 | `receivedAt` | When the engine received the event, in milliseconds since the Unix epoch (the clock `Date.now()` reads)... [Details](#the-receivedat-of-an-event-in-full) |
 

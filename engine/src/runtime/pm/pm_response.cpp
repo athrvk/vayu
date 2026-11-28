@@ -1664,7 +1664,8 @@ JSValue js_response_size (JSContext* ctx, JSValueConst this_val, int argc, JSVal
  * response: `typeof pm.response.events` separates "not a stream" from "no
  * events" (the `pm.request.body` and `pm.iterationData` rule).
  *
- * Entries are `{ event, id?, data, receivedAt?, dataTruncated?, text? }`, and a
+ * Entries are `{ event, id?, data, receivedAt?, dataTruncated?, isError?,
+ * text? }`, `isError` being `sse_event_is_error`'s judgement (#3996), and a
  * stream that declared a `streamTextPath` (#3773) also binds `streamText`,
  * every event's `text` joined; both absent without one. The stored node calls
  * the upstream id `sourceId`, as a relay frame id sits beside it; a script has
@@ -1709,6 +1710,9 @@ void install_response_events (JSContext* ctx, JSValue response, const nlohmann::
             // does: a prefix must never read as a whole event.
             if (item.value ("dataTruncated", false)) {
                 JS_SetPropertyStr (ctx, entry, "dataTruncated", JS_NewBool (ctx, 1));
+            }
+            if (item.value ("isError", false)) {
+                JS_SetPropertyStr (ctx, entry, "isError", JS_NewBool (ctx, 1));
             }
             if (const auto text = item.find ("text");
             text != item.end () && text->is_string ()) {

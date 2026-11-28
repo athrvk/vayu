@@ -1027,6 +1027,97 @@ TEST (SseConsumer, AStreamWithNoTextPathRelaysNoText) {
 }
 
 // ---------------------------------------------------------------------------
+// The error mark (#3996)
+// ---------------------------------------------------------------------------
+
+/// An OpenAI-compatible stream's mid-stream failure: a data chunk, no `event:`.
+constexpr const char* IN_BAND_ERROR =
+R"({"error":{"message":"overloaded","type":"server_error"}})";
+
+struct ErrorMarkCase {
+    const char* name;
+    const char* event;
+    const char* data;
+    bool truncated;
+    bool expected;
+};
+
+constexpr auto ERROR_MARK_CASES = std::to_array<ErrorMarkCase> ({
+{ "AnUnnamedErrorObject", "message", IN_BAND_ERROR, false, true },
+{ "AStringErrorAfterWhitespace", "message", " \t{\"error\":\"overloaded\"}", false, true },
+{ "AnErrorBesideADelta", "message",
+R"({"choices":[{"delta":{"content":"x"}}],"error":{"message":"m"}})", false, true },
+{ "ATokenChunk", "message", R"({"choices":[{"delta":{"content":"Hel"}}]})", false, false },
+{ "ANamedErrorThatIsNotJson", "error", "upstream overloaded", false, true },
+{ "ATruncatedNamedError", "error", "upstream overl", true, true },
+{ "ANullError", "message", R"({"choices":[],"error":null})", false, false },
+{ "AFalseError", "message", R"({"error":false})", false, false },
+{ "AnArray", "message", R"([{"error":{}}])", false, false },
+{ "ABareString", "message", R"("error")", false, false },
+{ "ErrorAsAValue", "message", R"({"code":"error"})", false, false },
+{ "TheDoneSentinel", "message", "[DONE]", false, false },
+{ "ANestedError", "message", R"({"response":{"error":{}}})", false, false },
+// The byte check reads the key as written, so a text path's parse cannot
+// mark what the check refused.
+{ "AnEscapedKey", "message", R"({"\u0065rror":{}})", false, false },
+// The flag says the bytes are a prefix, however whole they parse.
+{ "ATruncatedErrorObject", "message", R"({"error":"x"})", true, false },
+});
+
+class ErrorMarkTest : public ::testing::TestWithParam<ErrorMarkCase> {};
+
+// The mark is the same with and without a text path, and the text path reads
+// what it reads with or without the mark. Mutation checks: judge by the name
+// alone in `is_error_event` and AnUnnamedErrorObject fails; drop the `false`
+// refinement in `holds_error_member` and AFalseError fails.
+TEST_P (ErrorMarkTest, MarksANamedErrorOrATopLevelErrorMember) {
+    const auto& c   = GetParam ();
+    const auto path = vayu::core::detail::parse_json_path (OPENAI_CONTENT);
+    ASSERT_HAS_VALUE (path);
+    vayu::http::SseEvent event;
+    event.event     = c.event;
+    event.data      = c.data;
+    event.truncated = c.truncated;
+
+    EXPECT_EQ (vayu::http::sse_event_is_error (event), c.expected);
+    const auto bare      = vayu::http::sse_event_node (event);
+    const auto with_path = vayu::http::sse_event_node (event, &*path);
+    for (const auto* node : { &bare, &with_path }) {
+        // Absent, never `false`: the `dataTruncated` convention.
+        EXPECT_EQ (node->contains ("isError"), c.expected) << node->dump ();
+        EXPECT_EQ (node->value ("isError", c.expected), c.expected) << node->dump ();
+    }
+    EXPECT_FALSE (bare.contains ("text")) << bare.dump ();
+    EXPECT_EQ (with_path.value ("text", std::string ("<absent>")),
+    vayu::http::sse_event_text (event, *path).value_or ("<absent>"));
+}
+
+INSTANTIATE_TEST_SUITE_P (ErrorMark,
+ErrorMarkTest,
+::testing::ValuesIn (ERROR_MARK_CASES),
+[] (const ::testing::TestParamInfo<ErrorMarkCase>& info) {
+    return std::string (info.param.name);
+});
+
+// The relay frame carries the mark with no text path declared. Mutation check:
+// drop the `isError` write in `sse_event_node` and the second frame has none.
+TEST (SseConsumer, ARelayedErrorEventCarriesTheMark) {
+    StreamServer server (
+    { "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n",
+    std::string ("data: ") + IN_BAND_ERROR + "\n\n", "event: error\ndata: gone\n\n" });
+    SseStreamContext context ("run_test", brisk_limits ());
+    vayu::http::consume_sse_stream (
+    spec_for (server.url ("/scripted"), brisk_limits ()), context);
+
+    const auto payloads = ring_payloads (context);
+    ASSERT_EQ (payloads.size (), 4u) << "open plus three events";
+    EXPECT_FALSE (payloads[1].contains ("isError")) << payloads[1].dump ();
+    EXPECT_EQ (payloads[2].value ("event", ""), "message");
+    EXPECT_TRUE (payloads[2].value ("isError", false)) << payloads[2].dump ();
+    EXPECT_TRUE (payloads[3].value ("isError", false)) << payloads[3].dump ();
+}
+
+// ---------------------------------------------------------------------------
 // The trace node
 // ---------------------------------------------------------------------------
 
@@ -1186,6 +1277,20 @@ TEST (StoredStreamEvents, DeriveTheTextTheStoredPathReads) {
     vayu::http::expand_stored_stream_events (bare);
     EXPECT_FALSE (bare["events"].contains ("streamText")) << bare["events"].dump (2);
     EXPECT_FALSE (bare["events"]["items"][1].contains ("text"));
+}
+
+// The mark is derived from the stored bytes on the read, as `text` is, with no
+// path declared: the sidecar stores none. Mutation check: drop the `isError`
+// write in `sse_event_node` and the second item has none.
+TEST (StoredStreamEvents, DeriveTheErrorMarkFromTheStoredBytes) {
+    auto trace = stored_stream_trace (
+    std::string ("data: token\n\ndata: ") + IN_BAND_ERROR + "\n\n", 2, 2);
+    vayu::http::expand_stored_stream_events (trace);
+
+    const auto& items = trace["events"]["items"];
+    ASSERT_EQ (items.size (), 2u) << trace["events"].dump (2);
+    EXPECT_FALSE (items[0].contains ("isError")) << items[0].dump ();
+    EXPECT_TRUE (items[1].value ("isError", false)) << items[1].dump ();
 }
 
 // `streamText` is the whole reply even when `sseMaxStoredEvents` kept two
