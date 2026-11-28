@@ -143,6 +143,7 @@ describe("apiService.importMcpApply (#3994)", () => {
 			added: [{ kind: "tool", key: "export" }],
 			changed: ["req_1"],
 			removed: ["req_9"],
+			renamed: [{ requestId: "req_2", key: "find" }],
 		},
 	};
 	const APPLIED = {

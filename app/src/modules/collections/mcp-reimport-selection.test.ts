@@ -29,15 +29,15 @@ const MATCH: ImportMcpDiffMatch = {
 	added: [
 		{ kind: "tool", key: "export", name: "export" },
 		{ kind: "resource", key: "file:///a.txt", name: "a.txt" },
+		{ kind: "tool", key: "find", name: "find" },
 	],
 	changed: [
 		{
 			kind: "tool",
-			key: "find",
-			name: "search",
+			key: "lookup",
+			name: "lookup",
 			requestId: "req_1",
-			fields: [],
-			renamedFrom: "search",
+			fields: ["inputSchema"],
 		},
 		{
 			kind: "prompt",
@@ -50,16 +50,39 @@ const MATCH: ImportMcpDiffMatch = {
 	removed: [
 		{ kind: "tool", key: "old", name: "old", requestId: "req_8" },
 		{ kind: "resource", key: "file:///b.txt", name: "b.txt", requestId: "req_9" },
+		{ kind: "tool", key: "search", name: "search", requestId: "req_5" },
+	],
+	renameCandidates: [
+		{
+			kind: "tool",
+			key: "find",
+			name: "search",
+			requestId: "req_5",
+			fields: [],
+			renamedFrom: "search",
+		},
 	],
 };
 
+const NONE: McpSelection = {
+	added: new Set(),
+	changed: new Set(),
+	removed: new Set(),
+	renamed: new Set(),
+};
+
 describe("defaultMcpSelection", () => {
-	it("ticks every added and every changed row, and no removed one", () => {
+	it("ticks every added and every changed row, and no removed one nor possible rename", () => {
 		const selection = defaultMcpSelection(MATCH);
 
-		expect([...selection.added]).toEqual(["tool:export", "resource:file:///a.txt"]);
+		expect([...selection.added]).toEqual([
+			"tool:export",
+			"resource:file:///a.txt",
+			"tool:find",
+		]);
 		expect([...selection.changed]).toEqual(["req_1", "req_2"]);
 		expect(selection.removed.size).toBe(0);
+		expect(selection.renamed.size).toBe(0);
 	});
 
 	it("is empty for a match that does not differ", () => {
@@ -67,6 +90,11 @@ describe("defaultMcpSelection", () => {
 
 		expect(isEmptyMcpSelection(defaultMcpSelection(same))).toBe(true);
 		expect(isEmptyMcpSelection(defaultMcpSelection(MATCH))).toBe(false);
+	});
+
+	it("counts a ticked rename, so Update existing is on when it is the only tick", () => {
+		expect(isEmptyMcpSelection({ ...NONE, renamed: new Set(["req_5"]) })).toBe(false);
+		expect(isEmptyMcpSelection(NONE)).toBe(true);
 	});
 });
 
@@ -76,9 +104,11 @@ describe("buildMcpSelect", () => {
 			added: [
 				{ kind: "tool", key: "export" },
 				{ kind: "resource", key: "file:///a.txt" },
+				{ kind: "tool", key: "find" },
 			],
 			changed: ["req_1", "req_2"],
 			removed: [],
+			renamed: [],
 		});
 	});
 
@@ -87,19 +117,67 @@ describe("buildMcpSelect", () => {
 			added: new Set(["resource:file:///a.txt"]),
 			changed: new Set(["req_2"]),
 			removed: new Set(["req_9", "req_8"]),
+			renamed: new Set(),
 		};
 
 		expect(buildMcpSelect(MATCH, selection)).toEqual({
 			added: [{ kind: "resource", key: "file:///a.txt" }],
 			changed: ["req_2"],
 			removed: ["req_8", "req_9"],
+			renamed: [],
 		});
 	});
 
-	it("sends an empty list for a group with nothing ticked", () => {
-		const none: McpSelection = { added: new Set(), changed: new Set(), removed: new Set() };
+	it("sends a ticked candidate as a rename and neither of its halves, whatever else is ticked", () => {
+		const selection: McpSelection = {
+			...defaultMcpSelection(MATCH),
+			removed: new Set(["req_5", "req_9"]),
+			renamed: new Set(["req_5"]),
+		};
 
-		expect(buildMcpSelect(MATCH, none)).toEqual({ added: [], changed: [], removed: [] });
+		expect(buildMcpSelect(MATCH, selection)).toEqual({
+			added: [
+				{ kind: "tool", key: "export" },
+				{ kind: "resource", key: "file:///a.txt" },
+			],
+			changed: ["req_1", "req_2"],
+			removed: ["req_9"],
+			renamed: [{ requestId: "req_5", key: "find" }],
+		});
+	});
+
+	it("sends the added half and no rename for a candidate left unticked", () => {
+		const selection: McpSelection = { ...NONE, added: new Set(["tool:find"]) };
+
+		expect(buildMcpSelect(MATCH, selection)).toEqual({
+			added: [{ kind: "tool", key: "find" }],
+			changed: [],
+			removed: [],
+			renamed: [],
+		});
+	});
+
+	it("restores the halves' own ticks when the rename is unticked again", () => {
+		const ticked = withTicked(defaultMcpSelection(MATCH).renamed, "req_5", true);
+		const selection = { ...defaultMcpSelection(MATCH), renamed: ticked };
+		const unticked = { ...selection, renamed: withTicked(ticked, "req_5", false) };
+
+		expect(buildMcpSelect(MATCH, selection).added).not.toContainEqual({
+			kind: "tool",
+			key: "find",
+		});
+		expect(buildMcpSelect(MATCH, unticked)).toEqual(
+			buildMcpSelect(MATCH, defaultMcpSelection(MATCH))
+		);
+	});
+
+	it("sends an empty list for a group with nothing ticked", () => {
+		expect(buildMcpSelect(MATCH, NONE)).toEqual({
+			added: [],
+			changed: [],
+			removed: [],
+			renamed: [],
+		});
 	});
 
 	it("leaves out a tick that is no row of this match", () => {
@@ -107,10 +185,17 @@ describe("buildMcpSelect", () => {
 			added: new Set(["tool:gone"]),
 			changed: new Set(["req_404"]),
 			removed: new Set(["req_1"]),
+			renamed: new Set(["req_1"]),
 		};
 
-		// `req_1` is a changed row here, not a removed one: ticking it as removed must not delete it.
-		expect(buildMcpSelect(MATCH, selection)).toEqual({ added: [], changed: [], removed: [] });
+		// `req_1` is a changed row here, not a removed one or a candidate: ticking it as either must
+		// not delete or rename it.
+		expect(buildMcpSelect(MATCH, selection)).toEqual({
+			added: [],
+			changed: [],
+			removed: [],
+			renamed: [],
+		});
 	});
 });
 

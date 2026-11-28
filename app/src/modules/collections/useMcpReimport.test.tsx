@@ -35,6 +35,7 @@ const MATCH: ImportMcpDiffMatch = {
 	changed: [
 		{ kind: "tool", key: "find", name: "find", requestId: "req_1", fields: ["description"] },
 	],
+	renameCandidates: [],
 };
 
 /** What the connect sent: a token and a header no other field of this test spells. */
@@ -103,7 +104,12 @@ describe("useMcpReimport", () => {
 		expect(importMcpApply).toHaveBeenCalledWith({
 			...CONNECT,
 			collectionId: "col_1",
-			select: { added: [{ kind: "tool", key: "export" }], changed: ["req_1"], removed: [] },
+			select: {
+				added: [{ kind: "tool", key: "export" }],
+				changed: ["req_1"],
+				removed: [],
+				renamed: [],
+			},
 		});
 	});
 
@@ -129,6 +135,45 @@ describe("useMcpReimport", () => {
 		expect(importMcpApply).toHaveBeenCalledTimes(1);
 		expect(importMcpApply.mock.calls[0][0]).toMatchObject({ select: { removed: ["req_9"] } });
 		expect(result.current.confirming).toBeNull();
+	});
+
+	it("does not ask about a removal that a ticked rename stands in for, and sends the rename", async () => {
+		const renaming: ImportMcpDiffMatch = {
+			...MATCH,
+			added: [{ kind: "tool", key: "find", name: "find" }],
+			removed: [{ kind: "tool", key: "search", name: "search", requestId: "req_5" }],
+			changed: [],
+			renameCandidates: [
+				{
+					kind: "tool",
+					key: "find",
+					name: "search",
+					requestId: "req_5",
+					fields: [],
+					renamedFrom: "search",
+				},
+			],
+		};
+		const { result } = mount(entryFor([renaming]));
+		act(() =>
+			result.current.setSelection("col_1", {
+				added: new Set(),
+				changed: new Set(),
+				removed: new Set(["req_5"]),
+				renamed: new Set(["req_5"]),
+			})
+		);
+
+		await settle(() => result.current.update("col_1"));
+
+		expect(result.current.confirming).toBeNull();
+		expect(importMcpApply.mock.calls[0][0]).toMatchObject({
+			select: {
+				added: [],
+				removed: [],
+				renamed: [{ requestId: "req_5", key: "find" }],
+			},
+		});
 	});
 
 	it("keeps the ticks and the error after a refusal, and reports nothing landed", async () => {

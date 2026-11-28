@@ -31,7 +31,7 @@ vi.mock("@/services/api", () => ({
 const PAYLOAD: ImportMcpApplyRequest = {
 	url: "https://mcp.example.com/mcp",
 	collectionId: "col_1",
-	select: { added: [], changed: ["req_1"], removed: [] },
+	select: { added: [], changed: ["req_1"], removed: [], renamed: [] },
 };
 
 function mutation() {

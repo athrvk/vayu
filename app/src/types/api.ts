@@ -1735,14 +1735,19 @@ export interface ImportMcpDiffRemoved extends ImportMcpDiffAdded {
 	requestId: string;
 }
 
-/**
- * A stored request the server still lists, with the fields that differ. `key` is the listing's and
- * `name` the stored request's; `renamedFrom` is the key the request had when the listing renamed
- * it, and `fields` may then be empty.
- */
+/** A stored request the server still lists, with the fields that differ. `key` is the listing's and `name` the stored request's. */
 export interface ImportMcpDiffChanged extends ImportMcpDiffRemoved {
 	fields: ("description" | "inputSchema" | "outputSchema")[];
-	renamedFrom?: string;
+}
+
+/**
+ * A guess that a `removed` tool and an `added` one are one tool renamed (#3997): the two are each
+ * the only one on their side with an equal `inputSchema`. Both halves stay in `added` and
+ * `removed`; `requestId` is the removed one's and `key` the added one's, `renamedFrom` the key the
+ * request has, and `fields` may be empty.
+ */
+export interface ImportMcpDiffRenameCandidate extends ImportMcpDiffChanged {
+	renamedFrom: string;
 }
 
 /** One root collection whose `mcpBaseUrl` is the request's `url`, compared with the server now. */
@@ -1753,6 +1758,7 @@ export interface ImportMcpDiffMatch {
 	added: ImportMcpDiffAdded[];
 	removed: ImportMcpDiffRemoved[];
 	changed: ImportMcpDiffChanged[];
+	renameCandidates: ImportMcpDiffRenameCandidate[];
 }
 
 /**
@@ -1766,12 +1772,16 @@ export interface ImportMcpDiffResponse {
 
 /**
  * What `POST /import/mcp/apply` writes (#3994): each list names rows of the diff the caller was
- * shown. `added` entries are the diff's `{kind, key}`; `changed` and `removed` are stored request ids.
+ * shown. `added` entries are the diff's `{kind, key}`; `changed` and `removed` are stored request ids;
+ * `renamed` pairs a removed tool's request id with an added tool's key (#3997). The engine refuses
+ * a request id or a tool key named twice across the lists, so a renamed pair's halves are not also
+ * in `added` or `removed`.
  */
 export interface ImportMcpApplySelect {
 	added: { kind: ImportMcpDiffKind; key: string }[];
 	changed: string[];
 	removed: string[];
+	renamed: { requestId: string; key: string }[];
 }
 
 /** `POST /import/mcp/apply`: the body of `POST /import/mcp`, the collection compared and the rows chosen. */
