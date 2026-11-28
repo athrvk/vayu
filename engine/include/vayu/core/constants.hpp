@@ -1643,5 +1643,15 @@ constexpr size_t MAX_SNAPSHOT_POINTERS = 3;
 /// Characters of one name or pointer an `assert.snapshot` message quotes before
 /// it ends in `...`: both are a server's text and can be any length.
 constexpr size_t MAX_SNAPSHOT_FRAGMENT_CHARS = 200;
+
+/// Pages of one paged list `assert.snapshot` reads, the first included, before
+/// it fails instead of comparing (#3824): a server one step names chooses its
+/// own page size, and each page is a request the step makes.
+constexpr size_t MAX_SNAPSHOT_PAGES = 100;
+
+/// Items of one paged list `assert.snapshot` holds in memory across its pages
+/// before it fails instead of comparing (#3824). Each page is already bounded
+/// by the send's own body bound; this bounds what the merged list grows to.
+constexpr size_t MAX_SNAPSHOT_ITEMS = 10000;
 } // namespace elements
 } // namespace vayu::core::constants

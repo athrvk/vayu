@@ -273,10 +273,10 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
 /// stored trace's top-level `warnings`.
 [[nodiscard]] Json serialize_warnings (const std::vector<ResponseWarning>& warnings);
 
-/// `Response::mcp_reply` as `{errorClass?, code?, message?}` (#3762): `{}` for
-/// a reply that succeeded, `code` only when the reply carried a JSON-RPC error
-/// code. The one spelling behind `serialize`'s `mcp` and the stored trace's
-/// `response.mcp`.
+/// `Response::mcp_reply` as `{pages?, errorClass?, code?, message?}` (#3762):
+/// `{}` for a one-page reply that succeeded, `code` only when the reply carried
+/// a JSON-RPC error code, `pages` only past one (#3824). The one spelling
+/// behind `serialize`'s `mcp` and the stored trace's `response.mcp`.
 [[nodiscard]] Json serialize_mcp_reply (const McpReply& reply);
 
 /**

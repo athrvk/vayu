@@ -80,11 +80,15 @@ struct McpListFailure {
     McpPageFailure send;
 };
 
+/// The cursor that asks for the page after @p page (a reply's `result`), or
+/// nothing when @p page is the last: a `nextCursor` that is absent, not a
+/// string or empty ends a list, and so does a @p page that is not an object.
+[[nodiscard]] std::optional<std::string> mcp_next_cursor (const nlohmann::ordered_json& page);
+
 /**
  * @brief Reads every page of one list through @p send.
  *
- * A page ends the list when its `nextCursor` is absent, not a string, or
- * empty. An entry counts against @p items_used as its page arrives, and a page
+ * A page ends the list by @ref mcp_next_cursor's rule. An entry counts against @p items_used as its page arrives, and a page
  * that takes the total past @p max_items fails: an import passes the one counter
  * every list of the import shares, so the cap is on all of them together, and an
  * element passes a counter of its own. The counter is left at what was counted

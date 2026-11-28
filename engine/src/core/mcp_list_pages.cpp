@@ -23,9 +23,13 @@ ordered_json* page_rows (ordered_json& page, const char* key) {
     return rows == page.end () || !rows->is_array () ? nullptr : &*rows;
 }
 
-/// The cursor that asks for the page after @p page, or nothing when it is the
-/// last: absent, not a string and empty all end a list.
-std::optional<std::string> next_cursor (const ordered_json& page) {
+McpListFailure failure (McpListFailureKind kind, std::size_t pages_sent) {
+    return McpListFailure{ .kind = kind, .pages_sent = pages_sent, .send = McpPageFailure{} };
+}
+
+} // namespace
+
+std::optional<std::string> mcp_next_cursor (const ordered_json& page) {
     const auto next = page.find ("nextCursor");
     if (next == page.end () || !next->is_string () ||
     next->get_ref<const std::string&> ().empty ()) {
@@ -33,12 +37,6 @@ std::optional<std::string> next_cursor (const ordered_json& page) {
     }
     return next->get<std::string> ();
 }
-
-McpListFailure failure (McpListFailureKind kind, std::size_t pages_sent) {
-    return McpListFailure{ .kind = kind, .pages_sent = pages_sent, .send = McpPageFailure{} };
-}
-
-} // namespace
 
 std::expected<McpListPages, McpListFailure> collect_mcp_list_pages (const McpPageSender& send,
 const char* key,
@@ -72,7 +70,7 @@ std::size_t max_items) {
         for (auto& entry : *rows) {
             list.rows.push_back (std::move (entry));
         }
-        cursor = next_cursor (*page);
+        cursor = mcp_next_cursor (*page);
         if (!cursor) {
             return list;
         }

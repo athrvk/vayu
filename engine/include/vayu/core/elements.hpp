@@ -31,6 +31,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -292,6 +293,19 @@ struct CountedMessage {
     bool operator== (const CountedMessage&) const = default;
 };
 
+/// Why `ElementContext::send_list_page` has no page to answer with (#3824).
+struct ListPageFailure {
+    /// What a person reads: the reply reader's failure class and message.
+    std::string message;
+    /// The run ended (a Stop, the caller leaving, a shutdown) while the page
+    /// was in flight, which is no verdict about the list.
+    bool cancelled = false;
+};
+
+/// @copydoc ElementContext::send_list_page
+using ListPageSender =
+std::function<std::expected<std::string, ListPageFailure> (const vayu::Request& page_request)>;
+
 /**
  * Everything a compiled element's `apply` reads and writes (issue #1514).
  *
@@ -455,6 +469,17 @@ struct ElementContext {
     std::function<vayu::ScriptResult (const std::string& script)> run_setup_script{};
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::function<vayu::ScriptResult (const std::string& script)> run_teardown_script{};
+
+    /// `assert.snapshot`'s follow-up request for the next page of a paged list
+    /// (#3824): sends @p page_request, a copy of `request` with `params.cursor`
+    /// set, the way the step's own send went, and answers that reply's final
+    /// JSON-RPC response text. The binder adds the page's time to the step's
+    /// response, so a step's latency is every page it read. Bound only where
+    /// the step's send has a blocking thread behind it (the design send, the
+    /// sequential run); unset, a paged list fails its assertion rather than
+    /// being compared on one page.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    ListPageSender send_list_page{};
 
     /// One JSON parse of the response body, shared by every `extract.json` /
     /// `assert.jsonpath` / `metric.record` on the same step rather than paid
