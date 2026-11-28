@@ -173,6 +173,22 @@ class ImportMcpApplyRouteTest : public ::testing::Test {
         return row->id;
     }
 
+    /// @p row with what a person saves on a request: an argument and an
+    /// assertion, stored and read back.
+    std::optional<vayu::db::Request> save_edits (std::optional<vayu::db::Request> row) {
+        if (!row) {
+            return std::nullopt;
+        }
+        json body                            = body_of (*row);
+        json call                            = call_of (*row);
+        call["params"]["arguments"]["saved"] = "by hand";
+        body["content"]                      = call.dump ();
+        row->body                            = body.dump ();
+        row->elements = R"([{"id":"e1","kind":"assert.status","config":{"expected":200}}])";
+        db_->save_request (*row);
+        return db_->get_request (row->id);
+    }
+
     /// Every stored request's `row_fields`, by id.
     std::map<std::string, std::vector<std::string>> every_row () {
         std::map<std::string, std::vector<std::string>> rows;
@@ -197,26 +213,76 @@ TEST_F (ImportMcpApplyRouteTest, ARenameUpdatesTheRequestInPlaceAndLeavesASiblin
     const std::string root = import_and_apply (read);
     const auto alpha       = request_named ("alpha");
     ASSERT_HAS_VALUE (alpha);
-    const std::string search_id = request_id ("search");
+    const auto search = save_edits (request_named ("search"));
+    ASSERT_HAS_VALUE (search);
 
     server.set_tools (
     json::array ({ tool ("find", { "query" }), tool ("alpha", { "x" }) }));
-    const auto [status, answer] =
-    apply (read, root, json{ { "changed", json::array ({ search_id }) } });
+    const auto [status, answer] = apply (read, root,
+    json{ { "renamed", json::array ({ renaming (search->id, "find") }) } });
 
     ASSERT_EQ (status, 200) << answer.dump ();
     EXPECT_EQ (answer,
     (json{ { "collectionId", root }, { "created", json::array () },
-    { "updated", json::array ({ search_id }) }, { "deleted", json::array () } }));
-    const auto renamed = db_->get_request (search_id);
+    { "updated", json::array ({ search->id }) }, { "deleted", json::array () } }));
+    const auto renamed = db_->get_request (search->id);
     ASSERT_HAS_VALUE (renamed);
     EXPECT_EQ (renamed->name, "find");
     EXPECT_EQ (body_of (*renamed).at ("mcpTool").at ("name"), "find");
     EXPECT_EQ (call_of (*renamed).at ("params").at ("name"), "find");
+    EXPECT_EQ (call_of (*renamed).at ("params").at ("arguments"),
+    call_of (*search).at ("params").at ("arguments"));
+    EXPECT_EQ (renamed->elements, search->elements);
     const auto sibling = db_->get_request (alpha->id);
     ASSERT_HAS_VALUE (sibling);
     EXPECT_EQ (row_fields (*sibling), row_fields (*alpha));
     EXPECT_EQ (only_match (read).value ("identical", false), true);
+}
+
+// Mutation check: erase a rename candidate's halves from `added` and
+// `removed` in `propose_renames` and this apply is a `409`.
+TEST_F (ImportMcpApplyRouteTest, AnUnconfirmedRenameAppliesAsTheAddAndTheRemoveItIs) {
+    McpFixtureServer server;
+    server.set_tools (json::array ({ tool ("alpha", { "x" }), tool ("ping", {}) }));
+    const json read{ { "url", server.url () } };
+    const std::string root    = import_and_apply (read);
+    const std::string ping_id = request_id ("ping");
+
+    server.set_tools (json::array ({ tool ("alpha", { "x" }), tool ("health", {}) }));
+    ASSERT_EQ (only_match (read).at ("renameCandidates").size (), 1U);
+    const auto [status, answer] = apply (read, root,
+    json{ { "added", json::array ({ { { "kind", "tool" }, { "key", "health" } } }) },
+    { "removed", json::array ({ ping_id }) } });
+
+    ASSERT_EQ (status, 200) << answer.dump ();
+    ASSERT_EQ (answer.at ("created").size (), 1U) << answer.dump ();
+    EXPECT_EQ (answer.at ("created").at (0).at ("key"), "health");
+    EXPECT_EQ (answer.at ("updated"), json::array ());
+    EXPECT_EQ (answer.at ("deleted"), json::array ({ ping_id }));
+    EXPECT_FALSE (db_->get_request (ping_id).has_value ());
+    EXPECT_EQ (only_match (read).value ("identical", false), true);
+}
+
+// What the dialog sends for a candidate nobody ticked: the added half alone.
+TEST_F (ImportMcpApplyRouteTest, TheDefaultSelectionForARenameCandidateLeavesTheOldRequestAsItIs) {
+    McpFixtureServer server;
+    server.set_tools (json::array ({ tool ("alpha", { "x" }), tool ("ping", {}) }));
+    const json read{ { "url", server.url () } };
+    const std::string root = import_and_apply (read);
+    const auto ping        = save_edits (request_named ("ping"));
+    ASSERT_HAS_VALUE (ping);
+
+    server.set_tools (json::array ({ tool ("alpha", { "x" }), tool ("health", {}) }));
+    const auto [status, answer] = apply (read, root,
+    json{ { "added", json::array ({ { { "kind", "tool" }, { "key", "health" } } }) } });
+
+    ASSERT_EQ (status, 200) << answer.dump ();
+    ASSERT_EQ (answer.at ("created").size (), 1U) << answer.dump ();
+    EXPECT_EQ (answer.at ("updated"), json::array ());
+    EXPECT_TRUE (request_named ("health").has_value ());
+    const auto stored = db_->get_request (ping->id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (row_fields (*stored), row_fields (*ping));
 }
 
 TEST_F (ImportMcpApplyRouteTest, ARenameTheDiffDidNotProposeIsWrittenWhenConfirmed) {
@@ -230,6 +296,7 @@ TEST_F (ImportMcpApplyRouteTest, ARenameTheDiffDidNotProposeIsWrittenWhenConfirm
 
     // Two removed tools share the added one's schema, so nothing is proposed.
     server.set_tools (json::array ({ tool ("c", { "id" }) }));
+    ASSERT_EQ (only_match (read).at ("renameCandidates"), json::array ());
     const auto [status, answer] =
     apply (read, root, json{ { "renamed", json::array ({ renaming (a_id, "c") }) } });
 

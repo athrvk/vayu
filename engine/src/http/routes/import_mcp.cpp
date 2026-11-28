@@ -817,8 +817,24 @@ nlohmann::json entry_json (const vayu::core::McpEntry& entry) {
     };
 }
 
-/// One matched collection's answer. A changed entry carries the listing's
-/// key and the stored request's name; a rename adds the key it had.
+/// A pairing of a stored request with a listing entry: the listing's key and
+/// the stored request's name and id.
+nlohmann::json change_json (const vayu::core::McpChange& change,
+const std::vector<vayu::core::McpEntry>& fetched,
+const StoredEntries& stored) {
+    nlohmann::json row = entry_json (fetched.at (change.fetched));
+    row["name"]        = stored.entries.at (change.stored).name;
+    row["requestId"]   = stored.rows.at (change.stored)->id;
+    row["fields"]      = nlohmann::json::array ();
+    for (const auto field : change.fields) {
+        row["fields"].push_back (std::string (vayu::core::mcp_field_name (field)));
+    }
+    return row;
+}
+
+/// One matched collection's answer. A rename candidate is a pairing that also
+/// carries the key the request had; its two halves stay in `added` and
+/// `removed`.
 nlohmann::json match_json (const vayu::db::Collection& root,
 const vayu::core::McpDiff& diff,
 const std::vector<vayu::core::McpEntry>& fetched,
@@ -835,22 +851,18 @@ const StoredEntries& stored) {
     }
     nlohmann::json changed = nlohmann::json::array ();
     for (const auto& change : diff.changed) {
-        const vayu::core::McpEntry& was = stored.entries.at (change.stored);
-        nlohmann::json row = entry_json (fetched.at (change.fetched));
-        row["name"]        = was.name;
-        row["requestId"]   = stored.rows.at (change.stored)->id;
-        row["fields"]      = nlohmann::json::array ();
-        for (const auto field : change.fields) {
-            row["fields"].push_back (std::string (vayu::core::mcp_field_name (field)));
-        }
-        if (change.renamed) {
-            row["renamedFrom"] = was.key;
-        }
-        changed.push_back (std::move (row));
+        changed.push_back (change_json (change, fetched, stored));
+    }
+    nlohmann::json candidates = nlohmann::json::array ();
+    for (const auto& candidate : diff.rename_candidates) {
+        nlohmann::json row = change_json (candidate, fetched, stored);
+        row["renamedFrom"] = stored.entries.at (candidate.stored).key;
+        candidates.push_back (std::move (row));
     }
     return nlohmann::json{ { "collectionId", root.id }, { "name", root.name },
         { "identical", diff.identical () }, { "added", std::move (added) },
-        { "removed", std::move (removed) }, { "changed", std::move (changed) } };
+        { "removed", std::move (removed) }, { "changed", std::move (changed) },
+        { "renameCandidates", std::move (candidates) } };
 }
 
 // ---------------------------------------------------------------------------

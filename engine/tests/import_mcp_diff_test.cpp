@@ -9,7 +9,8 @@
  * @file tests/import_mcp_diff_test.cpp
  * @brief `POST /import/mcp/diff` (#3842): importing an MCP server again is
  *        compared with the collection the first import built, keyed by each
- *        entry's identity, so a renamed tool is a change and not a duplicate.
+ *        entry's identity, so a server's changes are not a duplicate
+ *        collection and a rename is only ever proposed.
  *
  * `ImportMcpDiffTest` drives the route's core against `McpFixtureServer` and
  * a scratch database holding what `POST /import/apply` stored; `McpDiff`
@@ -125,8 +126,8 @@ class ImportMcpDiffTest : public ::testing::Test {
         const auto matches = answer.value ("matches", json::array ());
         EXPECT_EQ (matches.size (), 1U) << answer.dump ();
         if (matches.size () != 1) {
-            return json{ { "added", json::array () },
-                { "removed", json::array () }, { "changed", json::array () } };
+            return json{ { "added", json::array () }, { "removed", json::array () },
+                { "changed", json::array () }, { "renameCandidates", json::array () } };
         }
         return matches.at (0);
     }
@@ -150,7 +151,7 @@ class ImportMcpDiffTest : public ::testing::Test {
 
 // Mutation check: key `diff_mcp` on the entry's index instead of its key and
 // the renamed tool, listed first now, pairs with `alpha`'s request.
-TEST_F (ImportMcpDiffTest, ARenamedToolIsOneChangeNotAnAddAndARemove) {
+TEST_F (ImportMcpDiffTest, ARenamedToolIsProposedBesideItsAddAndItsRemove) {
     McpFixtureServer server;
     server.set_tools (json::array ({ tool ("alpha", "x"), tool ("search", "query") }));
     import_and_apply (json{ { "url", server.url () } });
@@ -160,16 +161,16 @@ TEST_F (ImportMcpDiffTest, ARenamedToolIsOneChangeNotAnAddAndARemove) {
     const json match = only_match (json{ { "url", server.url () } });
 
     EXPECT_EQ (match.at ("identical"), false);
-    EXPECT_TRUE (match.at ("added").empty ()) << match.dump ();
-    EXPECT_TRUE (match.at ("removed").empty ()) << match.dump ();
-    ASSERT_EQ (match.at ("changed").size (), 1U) << match.dump ();
-    const json& change = match.at ("changed").at (0);
-    EXPECT_EQ (change.at ("kind"), "tool");
-    EXPECT_EQ (change.at ("key"), "find");
-    EXPECT_EQ (change.at ("renamedFrom"), "search");
-    EXPECT_EQ (change.at ("requestId"), search_id);
-    EXPECT_EQ (change.at ("name"), "search");
-    EXPECT_TRUE (change.at ("fields").empty ()) << change.dump ();
+    EXPECT_EQ (match.at ("added"),
+    json::parse (R"([{"kind":"tool","key":"find","name":"find"}])"));
+    EXPECT_EQ (match.at ("removed"),
+    (json::array ({ { { "kind", "tool" }, { "key", "search" },
+    { "name", "search" }, { "requestId", search_id } } })));
+    EXPECT_TRUE (match.at ("changed").empty ()) << match.dump ();
+    ASSERT_EQ (match.at ("renameCandidates").size (), 1U) << match.dump ();
+    EXPECT_EQ (match.at ("renameCandidates").at (0),
+    (json{ { "kind", "tool" }, { "key", "find" }, { "name", "search" }, { "requestId", search_id },
+    { "fields", json::array () }, { "renamedFrom", "search" } }));
 }
 
 TEST_F (ImportMcpDiffTest, AToolWithANewSchemaIsAnAddAndTheOneGoneIsARemove) {
@@ -186,6 +187,7 @@ TEST_F (ImportMcpDiffTest, AToolWithANewSchemaIsAnAddAndTheOneGoneIsARemove) {
     EXPECT_EQ (match.at ("removed").at (0).at ("key"), "beta");
     EXPECT_EQ (match.at ("removed").at (0).at ("requestId"), beta_id);
     EXPECT_TRUE (match.at ("changed").empty ()) << match.dump ();
+    EXPECT_TRUE (match.at ("renameCandidates").empty ()) << match.dump ();
 }
 
 // Mutation check: drop the `InputSchema` comparison from `differing_fields`
@@ -326,24 +328,73 @@ constexpr McpKinds ALL_KINDS{ .tools = true, .resources = true, .prompts = true 
 
 } // namespace
 
-TEST (McpDiff, ARenameWhoseSchemaTwoRemovedToolsShareIsAnAddAndTwoRemoves) {
+// Mutation check: erase each candidate's halves from `added` and `removed` in
+// `propose_renames` and both lists come back empty.
+TEST (McpDiff, ARenameCandidateLeavesItsAddAndItsRemoveInPlace) {
+    const std::vector<McpEntry> stored{ tool_entry ("a", "one") };
+    const std::vector<McpEntry> fetched{ tool_entry ("b", "one") };
+    const auto diff = vayu::core::diff_mcp (fetched, ALL_KINDS, stored);
+    EXPECT_EQ (diff.added, (std::vector<std::size_t>{ 0 }));
+    EXPECT_EQ (diff.removed, (std::vector<std::size_t>{ 0 }));
+    EXPECT_TRUE (diff.changed.empty ());
+    EXPECT_FALSE (diff.identical ());
+    ASSERT_EQ (diff.rename_candidates.size (), 1U);
+    const auto& candidate = diff.rename_candidates[0];
+    EXPECT_EQ (candidate.stored, 0U);
+    EXPECT_EQ (candidate.fetched, 0U);
+    EXPECT_TRUE (candidate.renamed);
+    EXPECT_TRUE (candidate.fields.empty ());
+}
+
+TEST (McpDiff, ASchemaTwoRemovedToolsShareProposesNoRename) {
     const std::vector<McpEntry> stored{ tool_entry ("a", "same"), tool_entry ("b", "same") };
     const std::vector<McpEntry> fetched{ tool_entry ("c", "same") };
     const auto diff = vayu::core::diff_mcp (fetched, ALL_KINDS, stored);
     EXPECT_EQ (diff.added, (std::vector<std::size_t>{ 0 }));
     EXPECT_EQ (diff.removed, (std::vector<std::size_t>{ 0, 1 }));
     EXPECT_TRUE (diff.changed.empty ());
+    EXPECT_TRUE (diff.rename_candidates.empty ());
 }
 
-TEST (McpDiff, ARenameBesideAnUnrelatedAddIsStillFound) {
+TEST (McpDiff, ARenameBesideAnUnrelatedAddIsStillProposed) {
     const std::vector<McpEntry> stored{ tool_entry ("a", "one") };
     const std::vector<McpEntry> fetched{ tool_entry ("new", "two"), tool_entry ("b", "one") };
     const auto diff = vayu::core::diff_mcp (fetched, ALL_KINDS, stored);
-    EXPECT_EQ (diff.added, (std::vector<std::size_t>{ 0 }));
-    EXPECT_TRUE (diff.removed.empty ());
-    ASSERT_EQ (diff.changed.size (), 1U);
-    EXPECT_TRUE (diff.changed[0].renamed);
-    EXPECT_EQ (diff.changed[0].fetched, 1U);
+    EXPECT_EQ (diff.added, (std::vector<std::size_t>{ 0, 1 }));
+    EXPECT_EQ (diff.removed, (std::vector<std::size_t>{ 0 }));
+    EXPECT_TRUE (diff.changed.empty ());
+    ASSERT_EQ (diff.rename_candidates.size (), 1U);
+    EXPECT_EQ (diff.rename_candidates[0].stored, 0U);
+    EXPECT_EQ (diff.rename_candidates[0].fetched, 1U);
+}
+
+// Mutation check: skip a tool with no `inputSchema` in `tools_by_schema` and
+// the two are an add and a remove with nothing proposed.
+TEST (McpDiff, TwoToolsWithNoInputSchemaAreProposedAsARename) {
+    auto was         = tool_entry ("ping", "");
+    was.input_schema = nullptr;
+    auto now         = tool_entry ("health", "");
+    now.input_schema = nullptr;
+    const std::vector<McpEntry> stored{ was, tool_entry ("alpha", "x") };
+    const std::vector<McpEntry> fetched{ tool_entry ("alpha", "x"), now };
+    const auto diff = vayu::core::diff_mcp (fetched, ALL_KINDS, stored);
+    EXPECT_EQ (diff.added, (std::vector<std::size_t>{ 1 }));
+    EXPECT_EQ (diff.removed, (std::vector<std::size_t>{ 0 }));
+    ASSERT_EQ (diff.rename_candidates.size (), 1U);
+    EXPECT_EQ (diff.rename_candidates[0].stored, 0U);
+    EXPECT_EQ (diff.rename_candidates[0].fetched, 1U);
+}
+
+TEST (McpDiff, ARenameChangeNamesEachFieldThePairDiffersIn) {
+    auto was          = tool_entry ("a", "one");
+    auto now          = tool_entry ("b", "two");
+    now.description   = "Says b";
+    const auto change = vayu::core::mcp_rename_change (
+    std::vector<McpEntry>{ was }, 0, std::vector<McpEntry>{ now }, 0);
+    EXPECT_TRUE (change.renamed);
+    EXPECT_EQ (change.fields,
+    (std::vector<vayu::core::McpField>{
+    vayu::core::McpField::Description, vayu::core::McpField::InputSchema }));
 }
 
 TEST (McpDiff, AToolNamedOnlyByItsCallIsKeyedByIt) {
