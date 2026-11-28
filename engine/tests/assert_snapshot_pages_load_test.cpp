@@ -147,15 +147,12 @@ class LoadListPagesTest : public ::testing::Test {
 
         vayu::runtime::ScriptSendInputs route;
         vayu::http::LoadListPages pages (route, bound.received);
-        // The completion's cast, for the same reason (`run_step_after`).
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-        auto& received = const_cast<vayu::Response&> (bound.received);
         std::optional<vayu::Response> unwrapped;
         vayu::ScriptResult pre;
         vayu::ScriptResult post;
         vayu::core::ElementContext ctx{
-            .request  = request,
-            .response = vayu::http::mcp_element_view (received, unwrapped),
+            .request = request,
+            .response = vayu::http::mcp_element_view (bound.received, unwrapped),
             .run_pre_script     = {},
             .run_post_script    = {},
             .pre_script_result  = pre,
