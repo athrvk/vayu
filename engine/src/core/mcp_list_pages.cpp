@@ -30,12 +30,20 @@ McpListFailure failure (McpListFailureKind kind, std::size_t pages_sent) {
 } // namespace
 
 std::optional<std::string> mcp_next_cursor (const ordered_json& page) {
-    const auto next = page.find ("nextCursor");
-    if (next == page.end () || !next->is_string () ||
-    next->get_ref<const std::string&> ().empty ()) {
+    if (!page.is_object ()) {
         return std::nullopt;
     }
-    return next->get<std::string> ();
+    const auto next = page.find ("nextCursor");
+    if (next == page.end ()) {
+        return std::nullopt;
+    }
+    // get_ptr rather than is_string + get: GCC's -Wnull-dereference at -O3
+    // reads the inlined from_json conversion as a possible null dereference.
+    const auto* text = next->get_ptr<const std::string*> ();
+    if (text == nullptr || text->empty ()) {
+        return std::nullopt;
+    }
+    return *text;
 }
 
 std::expected<McpListPages, McpListFailure> collect_mcp_list_pages (const McpPageSender& send,
