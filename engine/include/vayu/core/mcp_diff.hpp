@@ -134,6 +134,14 @@ struct McpDiff {
     [[nodiscard]] bool identical () const;
 };
 
+/// The rename of `stored[stored_index]` to `fetched[fetched_index]`, with
+/// every field the two differ in. The one builder of a rename, for a pair the
+/// diff makes and for a pair a caller confirmed alike.
+[[nodiscard]] McpChange mcp_rename_change (const std::vector<McpEntry>& stored,
+std::size_t stored_index,
+const std::vector<McpEntry>& fetched,
+std::size_t fetched_index);
+
 /**
  * @brief Compare a collection's requests against the listing a server answers
  *        now.

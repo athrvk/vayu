@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -97,6 +98,11 @@ json call_of (const vayu::db::Request& row) {
     return json::parse (body_of (row).at ("content").get<std::string> ());
 }
 
+/// A `select.renamed` entry.
+json renaming (const std::string& request_id, const std::string& key) {
+    return json{ { "requestId", request_id }, { "key", key } };
+}
+
 } // namespace
 
 class ImportMcpApplyRouteTest : public ::testing::Test {
@@ -167,6 +173,15 @@ class ImportMcpApplyRouteTest : public ::testing::Test {
         return row->id;
     }
 
+    /// Every stored request's `row_fields`, by id.
+    std::map<std::string, std::vector<std::string>> every_row () {
+        std::map<std::string, std::vector<std::string>> rows;
+        for (const auto& row : db_->get_requests_in_live_collections ()) {
+            rows.emplace (row.id, row_fields (row));
+        }
+        return rows;
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
 };
 
@@ -202,6 +217,63 @@ TEST_F (ImportMcpApplyRouteTest, ARenameUpdatesTheRequestInPlaceAndLeavesASiblin
     ASSERT_HAS_VALUE (sibling);
     EXPECT_EQ (row_fields (*sibling), row_fields (*alpha));
     EXPECT_EQ (only_match (read).value ("identical", false), true);
+}
+
+TEST_F (ImportMcpApplyRouteTest, ARenameTheDiffDidNotProposeIsWrittenWhenConfirmed) {
+    McpFixtureServer server;
+    server.set_tools (json::array ({ tool ("a", { "id" }), tool ("b", { "id" }) }));
+    const json read{ { "url", server.url () } };
+    const std::string root = import_and_apply (read);
+    const std::string a_id = request_id ("a");
+    const auto b           = request_named ("b");
+    ASSERT_HAS_VALUE (b);
+
+    // Two removed tools share the added one's schema, so nothing is proposed.
+    server.set_tools (json::array ({ tool ("c", { "id" }) }));
+    const auto [status, answer] =
+    apply (read, root, json{ { "renamed", json::array ({ renaming (a_id, "c") }) } });
+
+    ASSERT_EQ (status, 200) << answer.dump ();
+    EXPECT_EQ (answer.at ("updated"), json::array ({ a_id }));
+    EXPECT_EQ (answer.at ("created"), json::array ());
+    const auto renamed = db_->get_request (a_id);
+    ASSERT_HAS_VALUE (renamed);
+    EXPECT_EQ (renamed->name, "c");
+    const auto other = db_->get_request (b->id);
+    ASSERT_HAS_VALUE (other);
+    EXPECT_EQ (row_fields (*other), row_fields (*b));
+}
+
+// Mutation check: drop the tool check from `confirmed_rename` and the prompt's
+// request is renamed after a tool.
+TEST_F (ImportMcpApplyRouteTest, ARenameThatPairsNoRemovedToolWithAnAddedOneIsRefused) {
+    McpFixtureServer server;
+    server.set_tools (json::array ({ tool ("alpha", { "x" }), tool ("ping", {}) }));
+    server.set_prompts (json::parse (R"([{"name":"greet"}])"));
+    const json read{ { "url", server.url () }, { "include", { { "prompts", true } } } };
+    const std::string root     = import_and_apply (read);
+    const auto before          = every_row ();
+    const std::string alpha_id = request_id ("alpha");
+    const std::string ping_id  = request_id ("ping");
+    const std::string greet_id = request_id ("greet");
+
+    server.set_tools (json::array ({ tool ("alpha", { "x" }), tool ("health", {}) }));
+    server.set_prompts (json::array ());
+    const auto refused = [&] (const std::string& request, const std::string& key) {
+        return apply (read, root,
+        json{ { "renamed", json::array ({ renaming (request, key) }) } });
+    };
+    EXPECT_EQ (refused (alpha_id, "health").first, 409)
+    << "a request still listed";
+    EXPECT_EQ (refused (ping_id, "alpha").first, 409) << "a key not added";
+    EXPECT_EQ (refused (ping_id, "missing").first, 409) << "a key not listed";
+    const auto [status, answer] = refused (greet_id, "health");
+    EXPECT_EQ (status, 409) << answer.dump ();
+    EXPECT_NE (
+    answer.dump ().find ("pairs a removed tool with an added tool only"), std::string::npos)
+    << answer.dump ();
+
+    EXPECT_EQ (every_row (), before);
 }
 
 TEST_F (ImportMcpApplyRouteTest, AnAddedEntryBecomesTheRequestAnImportBuildsInItsFolder) {
@@ -398,8 +470,35 @@ TEST_F (ImportMcpApplyRouteTest, AMalformedSelectionIsRefusedBeforeAnyCall) {
          json{ { "changed", json::array ({ "req_a" }) },
          { "removed", json::array ({ "req_a" }) } },
          json{ { "changed", "req_a" } },
-         json{ { "renamed", json::array () } },
+         json{ { "renames", json::array () } },
          }) {
+        EXPECT_EQ (apply (read, "col_a", select).first, 400) << select.dump ();
+    }
+    EXPECT_EQ (server.requests (), 0U);
+}
+
+// Mutation check: give `read_selected_renamed` a `seen` set of its own and a
+// request id also named in `select.removed` is no longer refused.
+TEST_F (ImportMcpApplyRouteTest, AMalformedRenameIsRefusedBeforeAnyCall) {
+    McpFixtureServer server;
+    const json read{ { "url", server.url () } };
+    const json add_b = json::array ({ { { "kind", "tool" }, { "key", "b" } } });
+    for (const json& select :
+    {
+    json{ { "renamed", "req_a" } },
+    json{ { "renamed", json::array ({ "req_a" }) } },
+    json{ { "renamed", json::array ({ json{ { "requestId", "req_a" } } }) } },
+    json{ { "renamed", json::array ({ renaming ("", "b") }) } },
+    json{ { "renamed", json::array ({ renaming ("req_a", "") }) } },
+    json{ { "renamed", json::array ({ json{ { "requestId", 1 }, { "key", "b" } } }) } },
+    json{ { "renamed", json::array ({ renaming ("req_a", "b"), renaming ("req_a", "c") }) } },
+    json{ { "renamed", json::array ({ renaming ("req_a", "b"), renaming ("req_c", "b") }) } },
+    json{ { "renamed", json::array ({ renaming ("req_a", "b") }) },
+    { "changed", json::array ({ "req_a" }) } },
+    json{ { "renamed", json::array ({ renaming ("req_a", "b") }) },
+    { "removed", json::array ({ "req_a" }) } },
+    json{ { "renamed", json::array ({ renaming ("req_a", "b") }) }, { "added", add_b } },
+    }) {
         EXPECT_EQ (apply (read, "col_a", select).first, 400) << select.dump ();
     }
     EXPECT_EQ (server.requests (), 0U);

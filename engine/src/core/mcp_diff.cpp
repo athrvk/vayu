@@ -118,10 +118,7 @@ McpDiff& diff) {
         }
         const std::size_t to   = added_tools.front ();
         const std::size_t from = removed_tools->second.front ();
-        diff.changed.push_back (McpChange{ .stored = from,
-        .fetched                                   = to,
-        .fields  = differing_fields (stored.at (from), fetched.at (to)),
-        .renamed = true });
+        diff.changed.push_back (mcp_rename_change (stored, from, fetched, to));
         renamed_added.insert (to);
         renamed_removed.insert (from);
     }
@@ -162,6 +159,16 @@ bool McpKinds::contains (McpEntryKind kind) const {
 
 bool McpDiff::identical () const {
     return added.empty () && removed.empty () && changed.empty ();
+}
+
+McpChange mcp_rename_change (const std::vector<McpEntry>& stored,
+std::size_t stored_index,
+const std::vector<McpEntry>& fetched,
+std::size_t fetched_index) {
+    return McpChange{ .stored = stored_index,
+        .fetched              = fetched_index,
+        .fields = differing_fields (stored.at (stored_index), fetched.at (fetched_index)),
+        .renamed = true };
 }
 
 std::optional<McpEntry>
