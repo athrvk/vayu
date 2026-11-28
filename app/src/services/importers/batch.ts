@@ -41,8 +41,15 @@ import {
 	type RefReport,
 } from "./ref-bundler";
 import { parseImport } from "./factory";
-import { UnrecognisedFormatError, type ImportOptions, type ImportResult } from "./types";
+import {
+	UnrecognisedFormatError,
+	type CollectionDraft,
+	type ImportOptions,
+	type ImportResult,
+} from "./types";
+import { IMPORT_MCP_TOKEN_VARIABLE } from "@/constants/import";
 import type { ImportFetchOptions, ImportMcpDiffMatch, ImportMcpRequest } from "@/types/api";
+import type { OAuth2Config } from "@/types";
 
 /**
  * What a folder pick will even look at. A folder is picked wholesale (`webkitdirectory` hands over
@@ -221,11 +228,16 @@ export function entryLabel(entry: BatchEntry): string {
  * #3843). It has no document: `raw` is `null`, and the server URL stands where a file's name
  * would, so `entryLabel` names it. `existingMcp` is what the diff route found of an earlier
  * import of the same server, and `request` is what both calls were sent.
+ *
+ * With @p oauth (#3983) the token in `request` came from a sign-in, so the root the engine built
+ * around it (bearer `{{mcpToken}}` over an empty secret variable) becomes an OAuth 2.0 root on
+ * that sign-in's config.
  */
 export function mcpBatchEntry(
 	result: ImportResult,
 	request: ImportMcpRequest,
-	existingMcp: ImportMcpDiffMatch[] = []
+	existingMcp: ImportMcpDiffMatch[] = [],
+	oauth?: OAuth2Config
 ): BatchEntry {
 	const { url } = request;
 	return {
@@ -236,13 +248,26 @@ export function mcpBatchEntry(
 		sourceUrl: url,
 		raw: null,
 		unresolvedRefs: 0,
-		result,
+		result: oauth ? withSignedInRoots(result, oauth) : result,
 		error: null,
 		bundledInto: null,
 		included: true,
 		existingMcp,
 		mcpRequest: request,
 	};
+}
+
+/**
+ * Each root on @p config's OAuth 2.0 sign-in, without the token variable a bearer root reads. The
+ * config holds discovered endpoints and a client id, never a token: a run keys the cached token
+ * from it and refreshes it headless.
+ */
+function withSignedInRoots(result: ImportResult, config: OAuth2Config): ImportResult {
+	const signedIn = (root: CollectionDraft): CollectionDraft => {
+		const { [IMPORT_MCP_TOKEN_VARIABLE]: _token, ...variables } = root.variables;
+		return { ...root, auth: { mode: "oauth2", config }, variables };
+	};
+	return { ...result, collections: result.collections.map(signedIn) };
 }
 
 const NO_REFS: RefReport = { fetched: [], refused: [] };

@@ -23,7 +23,7 @@ description: >-
 | `tree-row-menu.ts` | A row's actions and its menu's name, for both menus that show them (#2543). [Details](#tree-row-menuts) |
 | `CollectionTreeContextMenu.tsx` | The tree's one right-click menu (#1360, #2543): the `role="tree"` element is the only trigger. [Details](#collectiontreecontextmenutsx) |
 | `ImportModal.tsx` | Import collections from a file, a URL, pasted text or a live MCP server (Postman / Insomnia / OpenAPI / JMeter). [Details](#importmodaltsx) |
-| `ImportMcpForm.tsx` | The Import dialog's MCP server tab: server URL, headers, bearer token and the primitives to list. [Details](#importmcpformtsx) |
+| `ImportMcpForm.tsx` | The Import dialog's MCP server tab: server URL, headers, a bearer token or an OAuth sign-in, and the primitives to list. [Details](#importmcpformtsx) |
 | `ImportClientCertificates.tsx` | The footer section of `ImportModal` that offers a Postman import's client-certificate candidates for registration (issue #2363). [Details](#importclientcertificatestsx) |
 | `import-notices.ts` | What a parsed file lost or changed, as the lines the import preview and every batch ledger row show. [Details](#import-noticests) |
 | `NoticeList.tsx` | The lines `importNotices` writes, drawn: amber for what the user finishes by hand, muted for what the import decided. [Details](#noticelisttsx) |
@@ -168,6 +168,8 @@ See [import-collections/](../import-collections/README.md) for the batch layer a
 The MCP server tab's fields, controlled by `ImportModal`: a tab switch leaves the entered values in place, and a reset or close clears them, the bearer token included (it lives in this state and nowhere else).
 `import-mcp.ts` beside it holds the form's state, `canConnectMcp` (a URL and at least one primitive) and `mcpImportRequest` (the `POST /import/mcp` body: blank and disabled header rows are dropped).
 The connect is `ImportModal`'s `handleConnectMcp`: its own `AbortController` and generation, as the URL download has, and the answer becomes the tab's one batch entry (`mcpBatchEntry`), so the preview and apply are the other tabs' own.
+With **OAuth sign-in** chosen (a `ToggleGroup` beside the token field, off without `window.electronAPI`), the connect first runs `signInToMcpServer` (`import-mcp.ts`: `runInteractiveAuthorization` on a `discoverUrl` config, registered in `oauth-signin-store`, cancelled by the same abort) and sends `mcpOAuthBearer`'s cached token.
+`mcpBatchEntry` then puts the root on the filled config and drops the `mcpToken` variable.
 The environment and script checkboxes are not drawn on this tab.
 Right after the connect, `existingMcpImports` (`import-mcp.ts`) asks `apiService.importMcpDiff` which collections an earlier import of the URL built and stores them on the entry as `BatchEntry.existingMcp`; it never throws, so a failed comparison is the same as no match.
 See [import-collections/mcp-server.md](../import-collections/mcp-server.md).

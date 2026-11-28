@@ -53,4 +53,11 @@ describe("ImportProgressView", () => {
 		expect(region().textContent).toBe("Asking the server");
 		expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
 	});
+
+	it("names a sign-in to a server and reports no figures for it (#3983)", () => {
+		render(<ImportProgressView progress={{ stage: "signingIn" }} />);
+
+		expect(region().textContent).toBe("Signing in to the server");
+		expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
+	});
 });
