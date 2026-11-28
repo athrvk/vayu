@@ -478,6 +478,40 @@ describe("update_request under a concurrent edit (#3549)", () => {
 			expect(engine.stored().body).toEqual({ mode: "json", content: "{}" });
 		});
 
+		test("writes a supplied tool over the stored one, and says nothing was kept", async () => {
+			const engine = fakeRequestEngine(
+				mcpRequest({ mode: "mcp", content: "{}", mcpTool: TOOL }),
+				[]
+			);
+			const supplied = {
+				name: "execute_sql",
+				inputSchema: { type: "object", properties: {} },
+			};
+
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", bodyType: "mcp", body: CALL, mcpTool: supplied },
+				engine.ctx
+			);
+
+			expect(res.isError).toBeFalsy();
+			expect(engine.stored().body).toEqual({ mode: "mcp", content: CALL, mcpTool: supplied });
+			expect(res.content.map((c) => c.text).join("\n")).not.toContain("was kept");
+		});
+
+		test("writes a supplied tool where the stored body had none", async () => {
+			const engine = fakeRequestEngine(mcpRequest({ mode: "mcp", content: "{}" }), []);
+
+			const res = await dispatchTool(
+				"update_request",
+				{ requestId: "req_1", bodyType: "mcp", body: CALL, mcpTool: TOOL },
+				engine.ctx
+			);
+
+			expect(res.isError).toBeFalsy();
+			expect(engine.stored().body).toEqual({ mode: "mcp", content: CALL, mcpTool: TOOL });
+		});
+
 		test("carries no tool into an mcp body that replaced one of another mode", async () => {
 			const engine = fakeRequestEngine(mcpRequest({ mode: "json", content: "{}" }), []);
 

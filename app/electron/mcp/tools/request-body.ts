@@ -6,8 +6,8 @@
  */
 
 /**
- * @brief The body a write tool stores, from the `body` / `bodyType` / `file`
- *        arguments.
+ * @brief The body a write tool stores, from the `body` / `bodyType` / `file` /
+ *        `mcpTool` arguments.
  */
 
 import { z } from "zod";
@@ -77,6 +77,28 @@ export function fileRefInput(statedOn?: string) {
 }
 
 /**
+ * The `mcpTool` argument of an `mcp` body, as the two write tools declare it.
+ * Loose, because the engine is the one judge of a tool (`read_mcp_tool`
+ * answers a malformed one with a 400) and a tool written back as read may
+ * carry members this server does not name (`outputSchema`); `inputSchema` is
+ * optional because an import stores a tool without one as `{name}`. With
+ * @p statedOn the description points there.
+ */
+export function mcpToolInput(statedOn?: string) {
+	return z
+		.looseObject({
+			name: z.string(),
+			inputSchema: z.record(z.string(), z.unknown()).optional(),
+		})
+		.optional()
+		.describe(
+			statedOn
+				? asOn(statedOn, "left out of an mcp `body`, the stored tool is kept.")
+				: 'The tool an mcp `body` calls, `{name, inputSchema}` as its server lists it, stored inside the body: each `inputSchema` property carrying `x-mcp-header` is sent as an Mcp-Param-* header while `params.name` names this tool. Needs bodyType "mcp" and `body`.'
+		);
+}
+
+/**
  * `file` on the tools that send an ad-hoc request. Declared only so that it
  * reaches the handler and is refused there with {@link INLINE_FILE_REFUSAL},
  * which names the route that does send a file.
@@ -95,12 +117,13 @@ export const inlineFileInput = z
 export const INLINE_FILE_REFUSAL = `A request body that sends a file cannot be given inline. Save the request (create_request with bodyType "binary" and \`file\`) and run the saved request by id - run_request with \`requestId\` and no \`url\`, start_load_run with \`requestId\`, or run_collection / run_collection_smoke over its collection. The engine sends a file only once ${BINARY_FILE_ACCESS_TOKEN}.`;
 
 /**
- * The body a write tool stores, from the `body` / `bodyType` / `file`
- * arguments, or undefined when the caller named none of them.
+ * The body a write tool stores, from the `body` / `bodyType` / `file` /
+ * `mcpTool` arguments, or undefined when the caller named none of them.
  *
  * A file reference carries `src`, `fileName` and `contentType` and nothing
  * else the agent wrote: an agent names a path, and only a person's pick in the
- * app (or an allowed folder) makes the engine read it.
+ * app (or an allowed folder) makes the engine read it. An `mcpTool` is
+ * forwarded as written, inside the body object where the engine keeps it.
  */
 export function shapeBody(
 	args: Record<string, unknown>
@@ -108,7 +131,9 @@ export function shapeBody(
 	const content = str(args, "body");
 	const file = args.file;
 	const named = str(args, "bodyType");
-	if (content === undefined && file === undefined && named === undefined) return undefined;
+	const tool = args.mcpTool;
+	if ([content, file, named, tool].every((arg) => arg === undefined)) return undefined;
+	if (tool !== undefined) refuseMisplacedMcpTool(named, content);
 	const bodyType = named ?? (file !== undefined ? "binary" : "text");
 	let body: Record<string, unknown>;
 	if (bodyType === "binary") {
@@ -140,6 +165,22 @@ export function shapeBody(
 			);
 		}
 		body = bodyPayload(bodyType, content);
+		if (tool !== undefined) body.mcpTool = tool;
 	}
 	return { body, bodyType };
+}
+
+/** Refuse an `mcpTool` that is not stated beside the `mcp` body it is stored in. */
+function refuseMisplacedMcpTool(named: string | undefined, content: string | undefined): void {
+	if (named !== "mcp") {
+		const instead = named === undefined ? "" : `, not "${named}"`;
+		throw new ToolArgError(
+			`"mcpTool" is the tool an "mcp" body calls - pass it with bodyType "mcp"${instead}.`
+		);
+	}
+	if (content === undefined) {
+		throw new ToolArgError(
+			'"mcpTool" is stored inside the "mcp" body - pass the "body" it belongs to in the same call.'
+		);
+	}
 }
