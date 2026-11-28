@@ -70,7 +70,7 @@ The engine makes several calls to the server, so the budget is the engine's 120 
 The optional `signal` cancels the wait and raises an `AbortError`; the engine keeps talking to the server until its own bound, but nothing acts on the answer.
 `importMcpDiff` takes the same body and the same budget and answers which collections an earlier import of that server built and how its listing now differs from each ([`POST /import/mcp/diff`](../../engine/api-reference/import.md#post-importmcpdiff)); the dialog asks it right after `importMcp` succeeds, and a failure there is treated as no match.
 `importMcpApply` writes the ticked rows of one such comparison to the collection it compared ([`POST /import/mcp/apply`](../../engine/api-reference/import.md#post-importmcpapply)): the connect's request, plus `collectionId` and `select: {added: [{kind, key}], changed: [requestId], removed: [requestId], renamed: [{requestId, key}]}`, always with all four lists.
-A `renamed` pair is a `renameCandidates` row the user ticked, and `buildMcpSelect` leaves its two halves out of `added` and `removed`, because the engine answers `400` for a request id or tool key named twice.
+A `renamed` pair is a `renameCandidates` row the user ticked, and `buildMcpSelect` leaves its two halves out of `added` and `removed` (the engine's `400` for a row named twice is on [the import page](../../engine/api-reference/import.md#post-importmcpapply)).
 It reads the server first, so it waits the same budget as `importMcpDiff`, and has no `signal`: the dialog holds its own close while it runs.
 The mutation (`useImportMcpApplyMutation`) does not retry, and refreshes the collection list and every request list on success only; a `409` for a stale row wrote nothing.
 

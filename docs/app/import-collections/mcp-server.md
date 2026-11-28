@@ -41,7 +41,7 @@ Dismissing the preview, or closing the dialog, discards the tree.
 Right after the connect succeeds the dialog also asks [`POST /import/mcp/diff`](../../engine/api-reference/import.md#post-importmcpdiff) with the same request, so it reads the server a second time.
 When a collection already holds this URL (as the `mcpBaseUrl` variable an import stores), the preview adds a report on it: *You already imported this server*, and for each such collection the counts of entries *added*, *changed* and *removed* (zeros stated), then the names under each.
 A changed row names what differs (description, input schema, output schema).
-A tool the server may have renamed is a guess, not a row of its own: the diff pairs an added tool with a removed one when each is the only one on its side with an equal input schema, and the report lists the pair under *Possible rename* as `old → new` while the added tool and the removed request stay under Added and Removed.
+A tool the server may have renamed is a guess, not a row of its own: the diff proposes one from an equal input schema (the rule is on [the import page](../../engine/api-reference/import.md#post-importmcpdiff)), and the report lists the pair under *Possible rename* as `old → new` while the added tool and the removed request stay under Added and Removed.
 The footer then offers two answers: **Update existing**, and **Import anyway**, which creates a new collection exactly as Import does and changes nothing in the existing one.
 A comparison that fails (the server answered the connect and then not the second read, say) is logged and treated as no match: the preview shows no report and Import is unchanged.
 
@@ -51,7 +51,7 @@ Every row of the report has a checkbox.
 Added and changed rows start ticked; **removed rows start unticked and are never ticked for you**, because deleting a request takes everything saved on it (the rule the OpenAPI sync's Apply uses, see [OpenAPI Collections](../openapi.md)).
 **A possible rename starts unticked too**: an equal input schema does not make two tools one (two unrelated no-argument tools share one), and writing the guess would point the old request, with its arguments and assertions, at another tool.
 Left unticked it is only a note, and the added tool and the removed request keep their own ticks.
-Ticked, the request is renamed in place and keeps its id, arguments, assertions, headers, auth and examples, and its two rows are shown unticked and disabled (the engine takes a row once, so they are not also sent); unticking it gives them back the ticks they had.
+Ticked, the request is renamed in place and keeps its id, arguments, assertions, headers, auth and examples, and its two rows are shown unticked and disabled (they are not also sent); unticking it gives them back the ticks they had.
 A changed row writes only what its line names (the fields listed), so a request's arguments, headers and auth are kept.
 **Update existing** is off while nothing is ticked, a ticked possible rename included.
 With one ticked removal (one a ticked rename does not stand in for) it first asks *Delete requests the server no longer lists?* and names the count, and **Update and delete** goes on; Cancel writes nothing and keeps the ticks.

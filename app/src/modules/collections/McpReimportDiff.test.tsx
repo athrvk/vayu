@@ -122,7 +122,7 @@ describe("McpReimportDiff selection", () => {
 		expect(screen.getByText(/A guess from a matching input schema/)).toHaveTextContent(
 			/renamed in place and keeps its arguments, assertions and examples.*Unticked, they stand as an added and a removed entry/
 		);
-		// A rename is no longer a changed row's business.
+		// The Changed hint does not mention a rename.
 		expect(screen.getByText(/Ticked ones are updated in place/)).not.toHaveTextContent(
 			/rename/
 		);
