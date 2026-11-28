@@ -40,7 +40,8 @@ Dismissing the preview, or closing the dialog, discards the tree.
 
 Right after the connect succeeds the dialog also asks [`POST /import/mcp/diff`](../../engine/api-reference/import.md#post-importmcpdiff) with the same request, so it reads the server a second time.
 When a collection already holds this URL (as the `mcpBaseUrl` variable an import stores), the preview adds a report on it: *You already imported this server*, and for each such collection the counts of entries *added*, *changed* and *removed* (zeros stated), then the names under each.
-A tool the server renamed is one changed row, `old → new`, not an added tool and a removed one; a changed row also names what differs (description, input schema, output schema).
+A changed row names what differs (description, input schema, output schema).
+A tool the server may have renamed is a guess, not a row of its own: the diff proposes one from an equal input schema (the rule is on [the import page](../../engine/api-reference/import.md#post-importmcpdiff)), and the report lists the pair under *Possible rename* as `old → new` while the added tool and the removed request stay under Added and Removed.
 The footer then offers two answers: **Update existing**, and **Import anyway**, which creates a new collection exactly as Import does and changes nothing in the existing one.
 A comparison that fails (the server answered the connect and then not the second read, say) is logged and treated as no match: the preview shows no report and Import is unchanged.
 
@@ -48,9 +49,12 @@ A comparison that fails (the server answered the connect and then not the second
 
 Every row of the report has a checkbox.
 Added and changed rows start ticked; **removed rows start unticked and are never ticked for you**, because deleting a request takes everything saved on it (the rule the OpenAPI sync's Apply uses, see [OpenAPI Collections](../openapi.md)).
-A changed row writes only what its line names (the fields listed, and a rename), so a request's arguments, headers and auth are kept.
-**Update existing** is off while nothing is ticked.
-With one ticked removal it first asks *Delete requests the server no longer lists?* and names the count, and **Update and delete** goes on; Cancel writes nothing and keeps the ticks.
+**A possible rename starts unticked too**: an equal input schema does not make two tools one (two unrelated no-argument tools share one), and writing the guess would point the old request, with its arguments and assertions, at another tool.
+Left unticked it is only a note, and the added tool and the removed request keep their own ticks.
+Ticked, the request is renamed in place and keeps its id, arguments, assertions, headers, auth and examples, and its two rows are shown unticked and disabled (they are not also sent); unticking it gives them back the ticks they had.
+A changed row writes only what its line names (the fields listed), so a request's arguments, headers and auth are kept.
+**Update existing** is off while nothing is ticked, a ticked possible rename included.
+With one ticked removal (one a ticked rename does not stand in for) it first asks *Delete requests the server no longer lists?* and names the count, and **Update and delete** goes on; Cancel writes nothing and keeps the ticks.
 The write is [`POST /import/mcp/apply`](../../engine/api-reference/import.md#post-importmcpapply), which owns what each row writes and its single transaction; this page covers only what the dialog sends and shows.
 
 - **The request is the connect's.** The update sends the request the report was computed from (its URL, headers and token), kept with the preview, not what the form holds now. The engine reads the server again and checks every ticked row against that read.

@@ -10,10 +10,19 @@
  * and the `select` body `POST /import/mcp/apply` takes. The judgement of what differs is the
  * diff's and the judgement of what each row writes is the apply's (the route's page); this holds
  * only the ticks, so the rule that matters is provable without a collection to damage: a removal
- * is never a default, because deleting a request takes everything saved on it.
+ * is never a default, because deleting a request takes everything saved on it, and neither is a
+ * rename (#3997), because the diff proposes one from an equal input schema alone and writing it
+ * redirects the request, arguments and assertions included, to another tool. A ticked rename
+ * stands in for its two halves: they stay in the selection, so unticking it restores them, but
+ * `buildMcpSelect` leaves them out, as the engine refuses a row named twice.
  */
 
-import type { ImportMcpApplySelect, ImportMcpDiffAdded, ImportMcpDiffMatch } from "@/types";
+import type {
+	ImportMcpApplySelect,
+	ImportMcpDiffAdded,
+	ImportMcpDiffMatch,
+	ImportMcpDiffRenameCandidate,
+} from "@/types";
 
 /** The ticked rows of one match of the diff. */
 export interface McpSelection {
@@ -23,6 +32,8 @@ export interface McpSelection {
 	changed: ReadonlySet<string>;
 	/** Stored request ids. */
 	removed: ReadonlySet<string>;
+	/** Stored request ids of the removed halves of the `renameCandidates` ticked. */
+	renamed: ReadonlySet<string>;
 }
 
 /** An entry of the listing, as the diff identifies it: `kind` never holds a colon, so this is one-to-one. */
@@ -30,17 +41,47 @@ export function addedRowId(entry: ImportMcpDiffAdded): string {
 	return `${entry.kind}:${entry.key}`;
 }
 
-/** Added and changed are ticked, as a sync's are; removed is not, as a sync's is not. */
+/** Added and changed are ticked, as a sync's are; removed and renamed are not, as a sync's are not. */
 export function defaultMcpSelection(match: ImportMcpDiffMatch): McpSelection {
 	return {
 		added: new Set(match.added.map(addedRowId)),
 		changed: new Set(match.changed.map((row) => row.requestId)),
 		removed: new Set(),
+		renamed: new Set(),
 	};
 }
 
 export function isEmptyMcpSelection(selection: McpSelection): boolean {
-	return selection.added.size + selection.changed.size + selection.removed.size === 0;
+	return (
+		selection.added.size +
+			selection.changed.size +
+			selection.removed.size +
+			selection.renamed.size ===
+		0
+	);
+}
+
+/** The rename candidates of `match` that `selection` ticks. */
+function tickedCandidates(
+	match: ImportMcpDiffMatch,
+	selection: McpSelection
+): ImportMcpDiffRenameCandidate[] {
+	return match.renameCandidates.filter((row) => selection.renamed.has(row.requestId));
+}
+
+/**
+ * The halves of the ticked rename candidates: the ids, in the `added` and `removed` lists' own
+ * terms, of the rows a rename stands in for and so are neither drawn ticked nor sent.
+ */
+export function renamedHalves(
+	match: ImportMcpDiffMatch,
+	selection: McpSelection
+): { added: ReadonlySet<string>; removed: ReadonlySet<string> } {
+	const ticked = tickedCandidates(match, selection);
+	return {
+		added: new Set(ticked.map(addedRowId)),
+		removed: new Set(ticked.map((row) => row.requestId)),
+	};
 }
 
 /**
@@ -62,15 +103,25 @@ export function buildMcpSelect(
 	match: ImportMcpDiffMatch,
 	selection: McpSelection
 ): ImportMcpApplySelect {
+	const halves = renamedHalves(match, selection);
 	return {
 		added: match.added
-			.filter((entry) => selection.added.has(addedRowId(entry)))
+			.filter(
+				(entry) =>
+					selection.added.has(addedRowId(entry)) && !halves.added.has(addedRowId(entry))
+			)
 			.map(({ kind, key }) => ({ kind, key })),
 		changed: match.changed
 			.filter((row) => selection.changed.has(row.requestId))
 			.map((row) => row.requestId),
 		removed: match.removed
-			.filter((row) => selection.removed.has(row.requestId))
+			.filter(
+				(row) => selection.removed.has(row.requestId) && !halves.removed.has(row.requestId)
+			)
 			.map((row) => row.requestId),
+		renamed: tickedCandidates(match, selection).map(({ requestId, key }) => ({
+			requestId,
+			key,
+		})),
 	};
 }

@@ -10,7 +10,10 @@
  * now, set against each collection an earlier import of it built, so a renamed tool reads as one
  * change rather than as a second collection. Each row is ticked to be written to that collection
  * (#3994), the way `SpecSync` ticks what a document moved: added and changed start ticked, and a
- * removal never does, since deleting a request takes everything saved on it.
+ * removal never does, since deleting a request takes everything saved on it. A possible rename
+ * (#3997) is the diff's guess from an equal input schema and starts unticked as well: it sits
+ * beside the added and removed rows it pairs, which stand as they are until it is ticked, and
+ * then show unticked and disabled, since the rename writes for both.
  *
  * Controlled: the ticks live with the dialog, whose footer holds the action that writes them (and
  * the request the diff was computed from), so this draws the rows and reports a tick.
@@ -23,10 +26,12 @@ import type {
 	ImportMcpDiffChanged,
 	ImportMcpDiffMatch,
 	ImportMcpDiffKind,
+	ImportMcpDiffRenameCandidate,
 } from "@/types";
 import {
 	addedRowId,
 	isEmptyMcpSelection,
+	renamedHalves,
 	withTicked,
 	type McpSelection,
 } from "./mcp-reimport-selection";
@@ -43,22 +48,27 @@ interface DiffRow {
 	label: string;
 	kind: ImportMcpDiffKind;
 	detail?: string;
+	/** Shown unticked and untouchable: a ticked rename stands in for this row. */
+	locked?: boolean;
 }
 
 function addedRow(entry: ImportMcpDiffAdded): DiffRow {
 	return { id: addedRowId(entry), label: entry.name, kind: entry.kind };
 }
 
-/** A rename reads `old → new`; `fields` may be empty for one, and a rename with edits states both. */
 function changedRow(entry: ImportMcpDiffChanged): DiffRow {
-	const moved = entry.fields.map((field) => FIELD_LABELS[field]);
-	const detail = [...(entry.renamedFrom === undefined ? [] : ["renamed"]), ...moved].join(", ");
+	const detail = entry.fields.map((field) => FIELD_LABELS[field]).join(", ");
 	return {
 		id: entry.requestId,
-		label: entry.renamedFrom === undefined ? entry.name : `${entry.renamedFrom} → ${entry.key}`,
+		label: entry.name,
 		kind: entry.kind,
 		...(detail === "" ? {} : { detail }),
 	};
+}
+
+/** A possible rename reads `old → new`; `fields` may be empty, and a pair that also differs states them. */
+function renameRow(entry: ImportMcpDiffRenameCandidate): DiffRow {
+	return { ...changedRow(entry), label: `${entry.renamedFrom} → ${entry.key}` };
 }
 
 interface DiffListProps {
@@ -81,8 +91,8 @@ function DiffList({ title, hint, rows, ticked, onTick, disabled }: DiffListProps
 					<li key={row.id} className="text-label">
 						<label className="flex flex-wrap items-center gap-x-2">
 							<Checkbox
-								checked={ticked.has(row.id)}
-								disabled={disabled}
+								checked={!row.locked && ticked.has(row.id)}
+								disabled={disabled || row.locked === true}
 								onChange={(e) => onTick(row.id, e.target.checked)}
 								aria-label={`${row.label} (${row.kind})`}
 								// `size-target`, not `size-icon`: a bare checkbox is its own hit target,
@@ -118,7 +128,8 @@ function MatchReport({
 	disabled,
 	onUpdate,
 }: MatchReportProps) {
-	const { added, changed, removed } = match;
+	const { added, changed, removed, renameCandidates } = match;
+	const halves = renamedHalves(match, selection);
 	const tick = (key: keyof McpSelection) => (id: string, on: boolean) =>
 		onSelectionChange({ ...selection, [key]: withTicked(selection[key], id, on) });
 	return (
@@ -135,23 +146,38 @@ function MatchReport({
 			<DiffList
 				title="Added"
 				hint="Ticked ones become requests, filed under Tools, Resources or Prompts by kind."
-				rows={added.map(addedRow)}
+				rows={added.map((entry) => ({
+					...addedRow(entry),
+					locked: halves.added.has(addedRow(entry).id),
+				}))}
 				ticked={selection.added}
 				onTick={tick("added")}
 				disabled={disabled}
 			/>
 			<DiffList
 				title="Changed"
-				hint="Ticked ones are updated in place: only the fields listed, and a rename, are written."
+				hint="Ticked ones are updated in place: only the fields listed are written."
 				rows={changed.map(changedRow)}
 				ticked={selection.changed}
 				onTick={tick("changed")}
 				disabled={disabled}
 			/>
 			<DiffList
+				title="Possible rename"
+				hint="A guess from a matching input schema, so unticked by default. Ticked, the request is renamed in place and keeps its arguments, assertions and examples, and the two rows it pairs are left alone. Unticked, they stand as an added and a removed entry."
+				rows={renameCandidates.map(renameRow)}
+				ticked={selection.renamed}
+				onTick={tick("renamed")}
+				disabled={disabled}
+			/>
+			<DiffList
 				title="Removed"
 				hint="Unticked by default - deleting a request takes everything saved on it."
-				rows={removed.map((entry) => ({ ...addedRow(entry), id: entry.requestId }))}
+				rows={removed.map((entry) => ({
+					...addedRow(entry),
+					id: entry.requestId,
+					locked: halves.removed.has(entry.requestId),
+				}))}
 				ticked={selection.removed}
 				onTick={tick("removed")}
 				disabled={disabled}

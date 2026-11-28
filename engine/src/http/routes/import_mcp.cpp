@@ -817,8 +817,24 @@ nlohmann::json entry_json (const vayu::core::McpEntry& entry) {
     };
 }
 
-/// One matched collection's answer. A changed entry carries the listing's
-/// key and the stored request's name; a rename adds the key it had.
+/// A pairing of a stored request with a listing entry: the listing's key and
+/// the stored request's name and id.
+nlohmann::json change_json (const vayu::core::McpChange& change,
+const std::vector<vayu::core::McpEntry>& fetched,
+const StoredEntries& stored) {
+    nlohmann::json row = entry_json (fetched.at (change.fetched));
+    row["name"]        = stored.entries.at (change.stored).name;
+    row["requestId"]   = stored.rows.at (change.stored)->id;
+    row["fields"]      = nlohmann::json::array ();
+    for (const auto field : change.fields) {
+        row["fields"].push_back (std::string (vayu::core::mcp_field_name (field)));
+    }
+    return row;
+}
+
+/// One matched collection's answer. A rename candidate is a pairing that also
+/// carries the key the request had; its two halves stay in `added` and
+/// `removed`.
 nlohmann::json match_json (const vayu::db::Collection& root,
 const vayu::core::McpDiff& diff,
 const std::vector<vayu::core::McpEntry>& fetched,
@@ -835,22 +851,18 @@ const StoredEntries& stored) {
     }
     nlohmann::json changed = nlohmann::json::array ();
     for (const auto& change : diff.changed) {
-        const vayu::core::McpEntry& was = stored.entries.at (change.stored);
-        nlohmann::json row = entry_json (fetched.at (change.fetched));
-        row["name"]        = was.name;
-        row["requestId"]   = stored.rows.at (change.stored)->id;
-        row["fields"]      = nlohmann::json::array ();
-        for (const auto field : change.fields) {
-            row["fields"].push_back (std::string (vayu::core::mcp_field_name (field)));
-        }
-        if (change.renamed) {
-            row["renamedFrom"] = was.key;
-        }
-        changed.push_back (std::move (row));
+        changed.push_back (change_json (change, fetched, stored));
+    }
+    nlohmann::json candidates = nlohmann::json::array ();
+    for (const auto& candidate : diff.rename_candidates) {
+        nlohmann::json row = change_json (candidate, fetched, stored);
+        row["renamedFrom"] = stored.entries.at (candidate.stored).key;
+        candidates.push_back (std::move (row));
     }
     return nlohmann::json{ { "collectionId", root.id }, { "name", root.name },
         { "identical", diff.identical () }, { "added", std::move (added) },
-        { "removed", std::move (removed) }, { "changed", std::move (changed) } };
+        { "removed", std::move (removed) }, { "changed", std::move (changed) },
+        { "renameCandidates", std::move (candidates) } };
 }
 
 // ---------------------------------------------------------------------------
@@ -858,6 +870,13 @@ const StoredEntries& stored) {
 // ---------------------------------------------------------------------------
 
 using EntryKey = std::pair<vayu::core::McpEntryKind, std::string>;
+
+/// A rename the caller confirmed: the stored request of a removed tool takes
+/// the key of an added one.
+struct ConfirmedRename {
+    std::string request_id;
+    std::string key;
+};
 
 /// What an apply was asked to write, read before the server is.
 struct McpApplySelection {
@@ -867,6 +886,7 @@ struct McpApplySelection {
     /// Stored request ids to update and to delete.
     std::vector<std::string> changed;
     std::vector<std::string> removed;
+    std::vector<ConfirmedRename> renamed;
 };
 
 std::optional<vayu::core::McpEntryKind> entry_kind_named (std::string_view name) {
@@ -956,6 +976,52 @@ std::set<std::string>& seen) {
     return ids;
 }
 
+/// @p row's member @p name when it is a non-empty string, else null.
+const nlohmann::json* nonempty_string_member (const nlohmann::json& row, const char* name) {
+    const nlohmann::json* member = row.is_object () ? stated (row, name) : nullptr;
+    if (member == nullptr || !member->is_string () ||
+    member->get_ref<const std::string&> ().empty ()) {
+        return nullptr;
+    }
+    return member;
+}
+
+/// `select.renamed`: each request id at most once across the lists @p seen
+/// spans, and each tool key at most once, never one @p added also creates.
+Refusable<std::vector<ConfirmedRename>> read_selected_renamed (const nlohmann::json* rows,
+const std::vector<EntryKey>& added,
+std::set<std::string>& seen) {
+    std::vector<ConfirmedRename> renamed;
+    if (rows == nullptr) {
+        return renamed;
+    }
+    if (!rows->is_array ()) {
+        return route_error (400, "Invalid 'select.renamed': must be an array");
+    }
+    std::set<EntryKey> keys (added.begin (), added.end ());
+    for (const auto& row : *rows) {
+        const nlohmann::json* id  = nonempty_string_member (row, "requestId");
+        const nlohmann::json* key = nonempty_string_member (row, "key");
+        if (id == nullptr || key == nullptr) {
+            return route_error (400,
+            "Invalid 'select.renamed': each entry must be "
+            "{\"requestId\": <request id>, \"key\": <the added tool's key>}");
+        }
+        ConfirmedRename rename{ id->get<std::string> (), key->get<std::string> () };
+        if (!seen.insert (rename.request_id).second) {
+            return route_error (400,
+            "Invalid 'select.renamed': request '" + rename.request_id + "' is selected twice");
+        }
+        const EntryKey tool{ vayu::core::McpEntryKind::Tool, rename.key };
+        if (!keys.insert (tool).second) {
+            return route_error (400,
+            "Invalid 'select.renamed': " + entry_label (tool) + " is selected twice");
+        }
+        renamed.push_back (std::move (rename));
+    }
+    return renamed;
+}
+
 Refusable<McpApplySelection> read_selection (const nlohmann::json& body) {
     if (!body.is_object ()) {
         return route_error (400, "Body must be a JSON object");
@@ -975,10 +1041,10 @@ Refusable<McpApplySelection> read_selection (const nlohmann::json& body) {
         return route_error (400, "Invalid 'select': must be an object");
     }
     for (const auto& [key, value] : select->items ()) {
-        if (key != "added" && key != "changed" && key != "removed") {
+        if (key != "added" && key != "changed" && key != "removed" && key != "renamed") {
             return route_error (400,
             "Invalid 'select': unknown member '" + key +
-            "' (added, changed and removed are the members)");
+            "' (added, changed, removed and renamed are the members)");
         }
     }
     auto added = read_selected_added (stated (*select, "added"));
@@ -994,9 +1060,14 @@ Refusable<McpApplySelection> read_selection (const nlohmann::json& body) {
     if (!removed) {
         return std::unexpected (removed.error ());
     }
+    auto renamed = read_selected_renamed (stated (*select, "renamed"), *added, seen);
+    if (!renamed) {
+        return std::unexpected (renamed.error ());
+    }
     selection.added   = std::move (*added);
     selection.changed = std::move (*changed);
     selection.removed = std::move (*removed);
+    selection.renamed = std::move (*renamed);
     return selection;
 }
 
@@ -1094,51 +1165,97 @@ struct SelectedRows {
     std::vector<EntryKey> added;
     std::vector<const vayu::core::McpChange*> changed;
     std::vector<std::string> removed;
+    /// Built for each confirmed pair, which the diff need not have proposed.
+    std::vector<vayu::core::McpChange> renamed;
 };
 
-/// @p selection against the diff as it stands now: a row it names that the
-/// diff no longer holds (the request gone, no longer changed, the entry no
-/// longer added) is a `409`, and nothing is written.
-Refusable<SelectedRows>
-selected_rows (const McpApplySelection& selection, const ApplyGround& ground) {
-    std::set<EntryKey> added;
+/// The recomputed diff's rows, keyed as a selection names them.
+struct DiffRows {
+    /// To the listing index.
+    std::map<EntryKey, std::size_t> added;
+    std::map<std::string, const vayu::core::McpChange*> changed;
+    /// To the stored index.
+    std::map<std::string, std::size_t> removed;
+};
+
+DiffRows diff_rows (const ApplyGround& ground) {
+    DiffRows rows;
     for (const std::size_t at : ground.diff.added) {
         const vayu::core::McpEntry& entry = ground.fetched.entries.at (at);
-        added.emplace (entry.kind, entry.key);
+        rows.added.emplace (EntryKey{ entry.kind, entry.key }, at);
     }
-    std::map<std::string, const vayu::core::McpChange*> changed;
     for (const auto& change : ground.diff.changed) {
-        changed.emplace (ground.stored.rows.at (change.stored)->id, &change);
+        rows.changed.emplace (ground.stored.rows.at (change.stored)->id, &change);
     }
-    std::set<std::string> removed;
     for (const std::size_t at : ground.diff.removed) {
-        removed.insert (ground.stored.rows.at (at)->id);
+        rows.removed.emplace (ground.stored.rows.at (at)->id, at);
     }
-    const auto stale = [] (const std::string& what, const char* row) {
-        return route_error (409,
-        what + " is no longer " +
-        row + " in this server's diff of the collection; compare again and choose from what it answers");
-    };
+    return rows;
+}
 
+std::unexpected<RouteError> stale_row (const std::string& what, const char* row) {
+    return route_error (409,
+    what + " is no longer " +
+    row + " in this server's diff of the collection; compare again and choose from what it answers");
+}
+
+/// The change @p rename confirms: a removed request whose entry is a tool,
+/// taking an added tool's key; anything else is a `409`.
+Refusable<vayu::core::McpChange> confirmed_rename (const ConfirmedRename& rename,
+const DiffRows& rows,
+const ApplyGround& ground) {
+    const std::string request = "Request '" + rename.request_id + "'";
+    const auto removed        = rows.removed.find (rename.request_id);
+    if (removed == rows.removed.end ()) {
+        return stale_row (request, "a removed entry");
+    }
+    const vayu::core::McpEntry& was = ground.stored.entries.at (removed->second);
+    if (was.kind != vayu::core::McpEntryKind::Tool) {
+        return route_error (409,
+        request + " is a " + std::string (vayu::core::mcp_entry_kind_name (was.kind)) +
+        "; a rename pairs a removed tool with an added tool only");
+    }
+    const EntryKey tool{ vayu::core::McpEntryKind::Tool, rename.key };
+    const auto added = rows.added.find (tool);
+    if (added == rows.added.end ()) {
+        return stale_row (entry_label (tool), "an added entry");
+    }
+    return vayu::core::mcp_rename_change (ground.stored.entries,
+    removed->second, ground.fetched.entries, added->second);
+}
+
+/// @p selection against the diff as it stands now: a row it names that the
+/// diff no longer holds (the request gone, no longer changed or removed, the
+/// entry no longer added) is a `409`, and nothing is written.
+Refusable<SelectedRows>
+selected_rows (const McpApplySelection& selection, const ApplyGround& ground) {
+    const DiffRows diff = diff_rows (ground);
     SelectedRows rows;
     for (const auto& key : selection.added) {
-        if (!added.contains (key)) {
-            return stale (entry_label (key), "an added entry");
+        if (!diff.added.contains (key)) {
+            return stale_row (entry_label (key), "an added entry");
         }
         rows.added.push_back (key);
     }
     for (const auto& id : selection.changed) {
-        const auto change = changed.find (id);
-        if (change == changed.end ()) {
-            return stale ("Request '" + id + "'", "a changed entry");
+        const auto change = diff.changed.find (id);
+        if (change == diff.changed.end ()) {
+            return stale_row ("Request '" + id + "'", "a changed entry");
         }
         rows.changed.push_back (change->second);
     }
     for (const auto& id : selection.removed) {
-        if (!removed.contains (id)) {
-            return stale ("Request '" + id + "'", "a removed entry");
+        if (!diff.removed.contains (id)) {
+            return stale_row ("Request '" + id + "'", "a removed entry");
         }
         rows.removed.push_back (id);
+    }
+    for (const auto& rename : selection.renamed) {
+        auto change = confirmed_rename (rename, diff, ground);
+        if (!change) {
+            return std::unexpected (change.error ());
+        }
+        rows.renamed.push_back (std::move (*change));
     }
     return rows;
 }
@@ -1314,11 +1431,12 @@ void rename_call (nlohmann::json& body, const std::string& key) {
 }
 
 /**
- * The merge-patch one selected changed row writes: the fields @p change names
- * and nothing else (#3994). A description is the request's; a schema is its
- * `mcpTool`'s; a rename is the request's name, `mcpTool.name` and the call's
- * `params.name`. Arguments, headers, auth, elements and every other field a
- * person may have edited are not part of the patch.
+ * The merge-patch one selected changed row or confirmed rename writes: the
+ * fields @p change names and nothing else (#3994). A description is the
+ * request's; a schema is its `mcpTool`'s; a rename is the request's name,
+ * `mcpTool.name` and the call's `params.name`. Arguments, headers, auth,
+ * elements and every other field a person may have edited are not part of the
+ * patch.
  */
 nlohmann::json change_patch (const vayu::db::Request& stored,
 const vayu::core::McpChange& change,
@@ -1383,6 +1501,11 @@ ApplyPlan& plan) {
     const ListingDrafts drafts = listing_drafts (listing);
     for (const auto* change : selected.changed) {
         if (auto planned = plan_updated (db, *change, ground, drafts, plan); !planned) {
+            return planned;
+        }
+    }
+    for (const auto& rename : selected.renamed) {
+        if (auto planned = plan_updated (db, rename, ground, drafts, plan); !planned) {
             return planned;
         }
     }
@@ -1462,10 +1585,11 @@ const std::atomic<bool>* cancel) {
  * `server/discover` is best effort, for its `serverInfo.name`: a server that
  * answers `-32601` (a modern-era one with no such method) is read on, while a
  * version refusal or any other failure fails the import with what the reply
- * reader said. A legacy-era server's plain `400` opens a session first
- * (`initialize`, whose `serverInfo.name` names the collection, then
- * `notifications/initialized`), which every later call carries and a
- * best-effort `DELETE` ends. Then each included list method, every page.
+ * reader said. A legacy-era server's `400`, bare or carrying a JSON-RPC error
+ * (`is_legacy_refusal`), opens a session first (`initialize`, whose
+ * `serverInfo.name` names the collection, then `notifications/initialized`),
+ * which every later call carries and a best-effort `DELETE` ends. Then each
+ * included list method, every page.
  *
  * @param transport `resolve_transport_policy (db)`, required for the reason
  *                  `import_fetch`'s is.
@@ -1544,13 +1668,15 @@ const std::atomic<bool>* cancel) {
  * one transaction. The server is read before the database lock is taken, so a
  * slow server holds up no other write; the collection, its requests and the
  * diff are read again under the lock, and a selected row the diff no longer
- * holds refuses the whole apply.
+ * holds refuses the whole apply. A rename `select.renamed` confirms (#3997) is
+ * checked against the diff's removed and added tools.
  *
  * @return {http_status, json_body}: 200 `{collectionId, created, updated,
  *         deleted}`; 400 for a body that names no collection or a malformed
  *         selection, and every refusal of `POST /import/mcp`; 404 for an
  *         unknown collection; 409 for a collection no import of the URL built,
- *         or a selected row the diff no longer holds.
+ *         a selected row the diff no longer holds, or a rename of a removed
+ *         entry that is not a tool.
  */
 std::pair<int, nlohmann::json> import_mcp_apply_response (vayu::db::Database& db,
 const nlohmann::json& body,

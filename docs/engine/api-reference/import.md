@@ -439,7 +439,7 @@ The folders are children of the root, so the tree is run with **Include nested c
 
 ## POST /import/mcp/diff
 
-What importing an MCP server again would change about the collection an earlier import of it built (issue [#3842](https://github.com/athrvk/vayu/issues/3842)), so a renamed tool reads as a change rather than as a second collection.
+What importing an MCP server again would change about the collection an earlier import of it built (issue [#3842](https://github.com/athrvk/vayu/issues/3842)), so what the server changed can be applied to that collection rather than imported as a second one.
 Reads only - nothing is stored.
 
 **Request:** the body of [`POST /import/mcp`](#post-importmcp), validated the same way.
@@ -461,8 +461,11 @@ Any other request is not compared: a legacy-era server's `initialize`, `notifica
 A kind the request's `include` leaves out is not compared either, so a tools-only read reports none of a collection's resources or prompts removed.
 The listing side is the tree `POST /import/mcp` would build now, read by the same reader, so a field differs only when the server's answer differs from what the request holds; a description a person edited reads as changed.
 
-**A rename** is reported when an added tool and a removed tool are each the only one on their side with that `inputSchema`: one `changed` entry carrying `renamedFrom`, instead of an add and a remove.
-Two removed tools sharing the added one's schema are an add and two removes, since nothing tells them apart.
+**A rename is proposed, never decided** (issue [#3997](https://github.com/athrvk/vayu/issues/3997)).
+An added tool and a removed tool that are each the only one on their side with that `inputSchema` are offered as a `renameCandidates` entry, and both stay in `added` and `removed`.
+A tool with no `inputSchema` pairs the same way with another that has none.
+MCP gives a tool no identity but its name, so the pairing is a guess (two unrelated no-argument tools share a schema), and it is written only when the apply confirms it in [`select.renamed`](#post-importmcpapply).
+Two removed tools sharing the added one's schema propose nothing, since nothing tells them apart; the apply still accepts either pairing.
 
 **Response:** `200`
 ```json
@@ -472,11 +475,19 @@ Two removed tools sharing the added one's schema are an add and two removes, sin
       "collectionId": "col_...",
       "name": "my-server",
       "identical": false,
-      "added": [{ "kind": "tool", "key": "export", "name": "export" }],
-      "removed": [{ "kind": "resource", "key": "file:///a.txt", "name": "a", "requestId": "req_..." }],
+      "added": [
+        { "kind": "tool", "key": "export", "name": "export" },
+        { "kind": "tool", "key": "find", "name": "find" }
+      ],
+      "removed": [
+        { "kind": "resource", "key": "file:///a.txt", "name": "a", "requestId": "req_..." },
+        { "kind": "tool", "key": "search", "name": "search", "requestId": "req_1" }
+      ],
       "changed": [
-        { "kind": "tool", "key": "find", "name": "search", "requestId": "req_...", "fields": [], "renamedFrom": "search" },
         { "kind": "prompt", "key": "greet", "name": "greet", "requestId": "req_...", "fields": ["description"] }
+      ],
+      "renameCandidates": [
+        { "kind": "tool", "key": "find", "name": "search", "requestId": "req_1", "fields": [], "renamedFrom": "search" }
       ]
     }
   ]
@@ -489,9 +500,10 @@ Two removed tools sharing the added one's schema are an add and two removes, sin
 | `identical` | `added`, `removed` and `changed` are all empty. |
 | `added` | Listed entries no request claims, in listing order. `name` is the name an import would give the request. |
 | `removed` | Requests whose key the server no longer lists, with the stored `requestId` and `name`. |
-| `changed` | Requests whose key the server still lists and whose `fields` differ, in collection order. A rename adds `renamedFrom`, the key the request had; its `fields` may be empty. |
+| `changed` | Requests whose key the server still lists and whose `fields` differ, in collection order. |
+| `renameCandidates` | Proposed renames, in collection order: a `changed`-shaped entry pairing a `removed` request with an `added` tool, plus `renamedFrom`, the key the request has. Its `fields` may be empty. |
 
-A `changed` entry's `fields` are any of `description`, `inputSchema` and `outputSchema`, the last two a tool's `mcpTool` schemas; its `key` is the listing's, its `name` and `requestId` the stored request's.
+A `changed` or `renameCandidates` entry's `fields` are any of `description`, `inputSchema` and `outputSchema`, the last two a tool's `mcpTool` schemas; its `key` is the listing's, its `name` and `requestId` the stored request's.
 Two requests claiming one key are each compared; a key the server lists twice is its first entry.
 
 **Errors:** every error of `POST /import/mcp`, for the same reasons; nothing is compared until the listing is read.
@@ -511,7 +523,8 @@ The app's Import dialog calls it from **Update existing** ([MCP server import](.
   "select": {
     "added": [{ "kind": "tool", "key": "export" }],
     "changed": ["req_..."],
-    "removed": ["req_..."]
+    "removed": ["req_..."],
+    "renamed": [{ "requestId": "req_1", "key": "find" }]
   }
 }
 ```
@@ -522,12 +535,15 @@ The app's Import dialog calls it from **Update existing** ([MCP server import](.
 | `select.added` | Entries to create, each `{kind, key}` as the diff's `added` names it. |
 | `select.changed` | Request ids of the diff's `changed` rows to update. |
 | `select.removed` | Request ids of the diff's `removed` rows to delete. |
+| `select.renamed` | Renames to write, each `{requestId, key}`: a `removed` row's request id whose entry is a tool, and the `key` of an `added` tool. Any such pair is accepted, a `renameCandidates` entry or not. |
 
 `select` and each of its lists are optional, and an absent or `null` one selects nothing, so nothing is deleted that was not named.
-A list that is not an array, an entry of the wrong shape, an entry named twice (a request id across `changed` and `removed` included) or a member other than these three is a `400`, before the server is read.
+A list that is not an array, an entry of the wrong shape, an entry named twice or a member other than these four is a `400`, before the server is read.
+A request id counts once across `changed`, `removed` and `renamed`, and a tool key once across `added` and `renamed`, so a confirmed rename never also creates its new tool or deletes its old request.
 
 **The server is read first**, exactly as the diff reads it and before the database lock is taken, so a slow server holds up no other write.
 Then, under one lock, the collection, every request beneath it and the diff are read again, and each selected row is checked against the diff as it stands now: a request gone, no longer changed, no longer removed, or an entry no longer added is a `409` and **nothing is written**, valid rows included.
+A rename whose request is a removed resource or prompt is a `409` the same way: a rename pairs tools only.
 Diff again and choose from what it answers.
 
 **What each selected row writes:**
@@ -535,7 +551,8 @@ Diff again and choose from what it answers.
 | Row | Write |
 |-----|-------|
 | `added` | The request `POST /import/mcp` would build for the entry now, in the root's direct child folder its kind is filed under (`Tools`, `Resources`, `Prompts`). |
-| `changed` | The stored request, updated in place: its id is kept and it is never recreated. Only the fields the row's `fields` name are written, and a rename. |
+| `changed` | The stored request, updated in place: its id is kept and it is never recreated. Only the fields the row's `fields` name are written. |
+| `renamed` | The removed request, updated in place as a `changed` row is, renamed to the added tool, with every field the two differ in. Neither half is created or deleted. |
 | `removed` | The request and its saved examples, deleted. |
 
 A changed row writes `description` to the request's description, `inputSchema` and `outputSchema` to the body's `mcpTool` (a schema the server no longer states, or one a send would refuse, is removed from it).
@@ -556,13 +573,14 @@ A removed request is deleted, not moved to the trash, for the reason a sync's re
 }
 ```
 
+`updated` holds the request id of each changed row and each rename, in that order.
 An apply that selects nothing answers `200` with three empty lists.
 
 **Errors:**
 
 - `400` for a missing or empty `collectionId`, a malformed `select`, and every `400` of `POST /import/mcp`.
 - `404` `Collection '<id>' not found`.
-- `409` for a collection no import of `url` built (another URL in `mcpBaseUrl`, or not a root), and for a selected row the diff no longer holds.
+- `409` for a collection no import of `url` built (another URL in `mcpBaseUrl`, or not a root), for a selected row the diff no longer holds, and for a rename of a removed entry that is not a tool.
 - `413` and `502` as `POST /import/mcp` answers them, before anything is read from the database.
 - `500`, `503` or `507` for a storage failure ([A storage failure is not a 400](resource-writes.md#a-storage-failure-is-not-a-400)).
 

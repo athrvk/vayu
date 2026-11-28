@@ -83,16 +83,16 @@ std::vector<McpField> differing_fields (const McpEntry& stored, const McpEntry& 
     return fields;
 }
 
-/// The tools among @p indices of @p entries that carry an `inputSchema`,
-/// grouped by it. `dump` of an unordered `json` is canonical, so equal
-/// schemas share a group.
+/// The tools among @p indices of @p entries, grouped by `inputSchema`. `dump`
+/// of an unordered `json` is canonical, so equal schemas share a group, and a
+/// tool with none dumps `null`, a group no schema object joins.
 std::map<std::string, std::vector<std::size_t>> tools_by_schema (
 const std::vector<McpEntry>& entries,
 const std::vector<std::size_t>& indices) {
     std::map<std::string, std::vector<std::size_t>> groups;
     for (const std::size_t index : indices) {
         const McpEntry& entry = entries.at (index);
-        if (entry.kind == McpEntryKind::Tool && !entry.input_schema.is_null ()) {
+        if (entry.kind == McpEntryKind::Tool) {
             groups[entry.input_schema.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace)]
             .push_back (index);
         }
@@ -100,35 +100,23 @@ const std::vector<std::size_t>& indices) {
     return groups;
 }
 
-/// Moves each unambiguous rename out of `added` and `removed` into `changed`:
-/// an added and a removed tool that are each the only one on their side with
-/// that `inputSchema`.
-void pair_renames (const std::vector<McpEntry>& fetched,
+/// Proposes each added and removed tool that are the only one on their side
+/// with that `inputSchema` as a rename candidate, leaving both where they are.
+void propose_renames (const std::vector<McpEntry>& fetched,
 const std::vector<McpEntry>& stored,
 McpDiff& diff) {
     const auto added   = tools_by_schema (fetched, diff.added);
     const auto removed = tools_by_schema (stored, diff.removed);
-    std::set<std::size_t> renamed_added;
-    std::set<std::size_t> renamed_removed;
     for (const auto& [schema, added_tools] : added) {
         const auto removed_tools = removed.find (schema);
         if (added_tools.size () != 1 || removed_tools == removed.end () ||
         removed_tools->second.size () != 1) {
             continue;
         }
-        const std::size_t to   = added_tools.front ();
-        const std::size_t from = removed_tools->second.front ();
-        diff.changed.push_back (McpChange{ .stored = from,
-        .fetched                                   = to,
-        .fields  = differing_fields (stored.at (from), fetched.at (to)),
-        .renamed = true });
-        renamed_added.insert (to);
-        renamed_removed.insert (from);
+        diff.rename_candidates.push_back (mcp_rename_change (
+        stored, removed_tools->second.front (), fetched, added_tools.front ()));
     }
-    std::erase_if (
-    diff.added, [&] (std::size_t at) { return renamed_added.contains (at); });
-    std::erase_if (diff.removed,
-    [&] (std::size_t at) { return renamed_removed.contains (at); });
+    std::ranges::sort (diff.rename_candidates, {}, &McpChange::stored);
 }
 
 } // namespace
@@ -162,6 +150,16 @@ bool McpKinds::contains (McpEntryKind kind) const {
 
 bool McpDiff::identical () const {
     return added.empty () && removed.empty () && changed.empty ();
+}
+
+McpChange mcp_rename_change (const std::vector<McpEntry>& stored,
+std::size_t stored_index,
+const std::vector<McpEntry>& fetched,
+std::size_t fetched_index) {
+    return McpChange{ .stored = stored_index,
+        .fetched              = fetched_index,
+        .fields = differing_fields (stored.at (stored_index), fetched.at (fetched_index)),
+        .renamed = true };
 }
 
 std::optional<McpEntry>
@@ -255,8 +253,7 @@ const std::vector<McpEntry>& stored) {
         }
     }
     std::ranges::sort (diff.added);
-    pair_renames (fetched, stored, diff);
-    std::ranges::sort (diff.changed, {}, &McpChange::stored);
+    propose_renames (fetched, stored, diff);
     return diff;
 }
 

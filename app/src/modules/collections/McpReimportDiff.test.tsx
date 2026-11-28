@@ -11,7 +11,7 @@
 
 /**
  * The re-import report's per-row selection (#3994): added and changed rows start ticked, removed
- * rows never do, and a tick is reported as a new selection, not applied in place. The writes the
+ * rows and possible renames (#3997) never do, and a tick is reported as a new selection, not applied in place. The writes the
  * ticks lead to are the dialog's (`ImportModal.mcp.test.tsx`).
  */
 
@@ -27,16 +27,31 @@ const MATCH: ImportMcpDiffMatch = {
 	collectionId: "col_1",
 	name: "Acme tools",
 	identical: false,
-	added: [{ kind: "tool", key: "export", name: "export" }],
-	removed: [{ kind: "resource", key: "file:///a.txt", name: "a.txt", requestId: "req_9" }],
-	changed: [
+	added: [
+		{ kind: "tool", key: "export", name: "export" },
+		{ kind: "tool", key: "find", name: "find" },
+	],
+	removed: [
+		{ kind: "resource", key: "file:///a.txt", name: "a.txt", requestId: "req_9" },
+		{ kind: "tool", key: "search", name: "search", requestId: "req_5" },
+	],
+	renameCandidates: [
 		{
 			kind: "tool",
 			key: "find",
 			name: "search",
-			requestId: "req_1",
+			requestId: "req_5",
 			fields: [],
 			renamedFrom: "search",
+		},
+	],
+	changed: [
+		{
+			kind: "tool",
+			key: "lookup",
+			name: "lookup",
+			requestId: "req_1",
+			fields: ["description"],
 		},
 		{
 			kind: "prompt",
@@ -55,6 +70,7 @@ const SECOND: ImportMcpDiffMatch = {
 	added: [{ kind: "prompt", key: "hello", name: "hello" }],
 	changed: [],
 	removed: [],
+	renameCandidates: [],
 };
 
 /** Holds the ticks the way the dialog does, and reports each change it is given. */
@@ -91,9 +107,60 @@ describe("McpReimportDiff selection", () => {
 		render(<Harness matches={[MATCH]} />);
 
 		expect(box("export (tool)").checked).toBe(true);
-		expect(box("search → find (tool)").checked).toBe(true);
+		expect(box("find (tool)").checked).toBe(true);
+		expect(box("lookup (tool)").checked).toBe(true);
 		expect(box("greet (prompt)").checked).toBe(true);
 		expect(box("a.txt (resource)").checked).toBe(false);
+		expect(box("search (tool)").checked).toBe(false);
+	});
+
+	it("draws a possible rename as old → new, unticked, with a hint that says it is a guess", () => {
+		render(<Harness matches={[MATCH]} />);
+
+		expect(screen.getByText("Possible rename")).toBeInTheDocument();
+		expect(box("search → find (tool)").checked).toBe(false);
+		expect(screen.getByText(/A guess from a matching input schema/)).toHaveTextContent(
+			/renamed in place and keeps its arguments, assertions and examples.*Unticked, they stand as an added and a removed entry/
+		);
+		// The Changed hint does not mention a rename.
+		expect(screen.getByText(/Ticked ones are updated in place/)).not.toHaveTextContent(
+			/rename/
+		);
+	});
+
+	it("draws no list for a match with no candidate", () => {
+		render(<Harness matches={[SECOND]} />);
+
+		expect(screen.queryByText("Possible rename")).toBeNull();
+	});
+
+	it("reports a ticked rename, and shows its two halves unticked and untouchable until it is not", () => {
+		const onChange = vi.fn();
+		render(<Harness matches={[MATCH]} onChange={onChange} />);
+		fireEvent.click(box("a.txt (resource)"));
+
+		fireEvent.click(box("search → find (tool)"));
+
+		expect(box("find (tool)").checked).toBe(false);
+		expect(box("find (tool)").disabled).toBe(true);
+		expect(box("search (tool)").checked).toBe(false);
+		expect(box("search (tool)").disabled).toBe(true);
+		// Only the two halves: every other row is as it was.
+		expect(box("export (tool)").disabled).toBe(false);
+		expect(box("a.txt (resource)").checked).toBe(true);
+		const last = onChange.mock.calls[onChange.mock.calls.length - 1] as [string, McpSelection];
+		expect(buildMcpSelect(MATCH, last[1])).toEqual({
+			added: [{ kind: "tool", key: "export" }],
+			changed: ["req_1", "req_2"],
+			removed: ["req_9"],
+			renamed: [{ requestId: "req_5", key: "find" }],
+		});
+
+		fireEvent.click(box("search → find (tool)"));
+
+		expect(box("find (tool)").checked).toBe(true);
+		expect(box("find (tool)").disabled).toBe(false);
+		expect(box("search (tool)").disabled).toBe(false);
 	});
 
 	it("says what a tick does in each group, and that a removal is opt-in", () => {
@@ -128,9 +195,10 @@ describe("McpReimportDiff selection", () => {
 		const last = onChange.mock.calls[onChange.mock.calls.length - 1] as [string, McpSelection];
 		expect(last[0]).toBe("col_1");
 		expect(buildMcpSelect(MATCH, last[1])).toEqual({
-			added: [],
+			added: [{ kind: "tool", key: "find" }],
 			changed: ["req_1", "req_2"],
 			removed: ["req_9"],
+			renamed: [],
 		});
 	});
 
@@ -158,11 +226,7 @@ describe("McpReimportDiff selection", () => {
 	});
 
 	it("draws no box for a match that does not differ", () => {
-		render(
-			<Harness
-				matches={[{ ...MATCH, identical: true, added: [], changed: [], removed: [] }]}
-			/>
-		);
+		render(<Harness matches={[{ ...SECOND, identical: true, added: [] }]} />);
 
 		expect(screen.queryAllByRole("checkbox")).toEqual([]);
 	});

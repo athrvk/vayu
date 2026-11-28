@@ -175,8 +175,9 @@ See [import-collections/mcp-server.md](../import-collections/mcp-server.md).
 ## `McpReimportDiff.tsx`
 
 The preview's report on an MCP server that was imported before (issue [#3842](https://github.com/athrvk/vayu/issues/3842)): one block per matched collection, with its added, changed and removed counts stated in full, zeros included, and the entries under each.
-A renamed tool is one changed row reading `old → new`.
-Each row has a `Checkbox` (`size-target`, labelled `name (kind)`): added and changed start ticked and removed does not, as in the spec sync's Apply (#3994).
+A *Possible rename* list sits between Changed and Removed, its rows reading `old → new` (the diff's `renameCandidates`, a guess from an equal input schema, issue [#3997](https://github.com/athrvk/vayu/issues/3997)).
+Each row has a `Checkbox` (`size-target`, labelled `name (kind)`): added and changed start ticked and removed and a possible rename do not, as in the spec sync's Apply (#3994).
+Ticking a possible rename shows its added and removed halves unticked and disabled without changing their stored ticks, so unticking it restores them.
 It is controlled: the ticks and the update live in `useMcpReimport.ts`, which `ImportModal` calls, and `mcp-reimport-selection.ts` holds the defaults and `buildMcpSelect`, the `select` body of [`POST /import/mcp/apply`](../../engine/api-reference/import.md#post-importmcpapply).
 The footer's **Update existing** writes the ticks to the one matched collection beside **Import anyway** (a new collection, as before); with several matches each block carries its own button instead, passed in as `onUpdate`.
 A removal asks first through `DeleteConfirmDialog`, naming the count; the update sends the request the connect made (`BatchEntry.mcpRequest`, dropped with the entry), and a `409` keeps the ticks and says to connect again.

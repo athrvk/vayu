@@ -63,22 +63,30 @@ function serverTree(opts: { withToken?: boolean } = {}): ImportResult {
 	});
 }
 
-/** An earlier import of the server whose `search` tool is now listed as `find`. */
+/**
+ * An earlier import of the server whose `search` tool the diff guesses is now listed as `find`:
+ * both halves stay in `added` and `removed`, and the guess is its own entry.
+ */
 function renamedToolMatch(over: Partial<ImportMcpDiffMatch> = {}): ImportMcpDiffMatch {
 	return {
 		collectionId: "col_1",
 		name: "Acme tools",
 		identical: false,
-		added: [{ kind: "tool", key: "export", name: "export" }],
-		removed: [{ kind: "resource", key: "file:///a.txt", name: "a.txt", requestId: "req_9" }],
+		added: [
+			{ kind: "tool", key: "export", name: "export" },
+			{ kind: "tool", key: "find", name: "find" },
+		],
+		removed: [
+			{ kind: "tool", key: "search", name: "search", requestId: "req_5" },
+			{ kind: "resource", key: "file:///a.txt", name: "a.txt", requestId: "req_9" },
+		],
 		changed: [
 			{
 				kind: "tool",
-				key: "find",
-				name: "search",
+				key: "lookup",
+				name: "lookup",
 				requestId: "req_1",
-				fields: [],
-				renamedFrom: "search",
+				fields: ["description"],
 			},
 			{
 				kind: "prompt",
@@ -86,6 +94,16 @@ function renamedToolMatch(over: Partial<ImportMcpDiffMatch> = {}): ImportMcpDiff
 				name: "greet",
 				requestId: "req_2",
 				fields: ["description", "inputSchema"],
+			},
+		],
+		renameCandidates: [
+			{
+				kind: "tool",
+				key: "find",
+				name: "search",
+				requestId: "req_5",
+				fields: [],
+				renamedFrom: "search",
 			},
 		],
 		...over,
@@ -346,24 +364,30 @@ describe("ImportModal MCP server tab", () => {
 			expect(diff.mock.calls[0][1]?.signal).toBe(importMcp.mock.calls[0][1]?.signal);
 		});
 
-		it("shows a renamed tool as one change, beside what was added and removed", async () => {
+		it("shows a possible rename beside the two rows it pairs, which stay added and removed", async () => {
 			await connectWith([renamedToolMatch()]);
 
 			const found = within(report() as HTMLElement);
-			expect(found.getByText("1 added · 2 changed · 1 removed")).toBeInTheDocument();
+			expect(found.getByText("2 added · 2 changed · 2 removed")).toBeInTheDocument();
+			expect(found.getByText("Possible rename")).toBeInTheDocument();
 			expect(found.getByText("search → find")).toBeInTheDocument();
-			expect(found.getByText("tool - renamed")).toBeInTheDocument();
 			expect(found.getByText("prompt - description, input schema")).toBeInTheDocument();
 			expect(found.getByText("export")).toBeInTheDocument();
 			expect(found.getByText("a.txt")).toBeInTheDocument();
-			// One line for the rename: the old name is not also a removal and the new one an add.
-			expect(found.getAllByText(/search/)).toHaveLength(1);
-			expect(found.getAllByText(/find/)).toHaveLength(1);
+			// The guess consumes nothing: the new tool is an add and the old one a removal.
+			expect(found.getByText("find")).toBeInTheDocument();
+			expect(found.getByText("search")).toBeInTheDocument();
 		});
 
 		it("states every count, the zeros included, for a server that has not moved", async () => {
 			await connectWith([
-				renamedToolMatch({ identical: true, added: [], removed: [], changed: [] }),
+				renamedToolMatch({
+					identical: true,
+					added: [],
+					removed: [],
+					changed: [],
+					renameCandidates: [],
+				}),
 			]);
 
 			const found = within(report() as HTMLElement);
@@ -383,6 +407,7 @@ describe("ImportModal MCP server tab", () => {
 					added: [],
 					removed: [],
 					changed: [],
+					renameCandidates: [],
 					identical: true,
 				}),
 			]);
@@ -573,6 +598,7 @@ describe("ImportModal MCP server tab", () => {
 				added: [{ kind: "prompt", key: "hello", name: "hello" }],
 				changed: [],
 				removed: [],
+				renameCandidates: [],
 			});
 
 		let importMcpApply: ReturnType<typeof vi.spyOn>;
@@ -614,13 +640,16 @@ describe("ImportModal MCP server tab", () => {
 			expect(screen.queryByRole("button", { name: /Update existing/ })).toBeNull();
 		});
 
-		it("starts with added and changed rows ticked and the removed one not", async () => {
+		it("starts with added and changed rows ticked, and the removed one and the possible rename not", async () => {
 			await connectTo([renamedToolMatch()]);
 
 			expect(box("export (tool)").checked).toBe(true);
-			expect(box("search → find (tool)").checked).toBe(true);
+			expect(box("find (tool)").checked).toBe(true);
+			expect(box("lookup (tool)").checked).toBe(true);
 			expect(box("greet (prompt)").checked).toBe(true);
 			expect(box("a.txt (resource)").checked).toBe(false);
+			expect(box("search (tool)").checked).toBe(false);
+			expect(box("search → find (tool)").checked).toBe(false);
 		});
 
 		it("sends the connect's request, the collection and the ticks, then closes and says what landed", async () => {
@@ -636,9 +665,13 @@ describe("ImportModal MCP server tab", () => {
 				...lastPayload(importMcp),
 				collectionId: "col_1",
 				select: {
-					added: [{ kind: "tool", key: "export" }],
+					added: [
+						{ kind: "tool", key: "export" },
+						{ kind: "tool", key: "find" },
+					],
 					changed: ["req_1"],
 					removed: [],
+					renamed: [],
 				},
 			});
 			expect(sent().auth).toEqual({ mode: "bearer", token: "s3cret" });
@@ -653,10 +686,31 @@ describe("ImportModal MCP server tab", () => {
 			expect(refreshed).toContainEqual(queryKeys.requests.all);
 		});
 
+		it("sends a ticked possible rename as a rename, not also as the add and the removal it pairs", async () => {
+			await connectTo([renamedToolMatch()]);
+			// The removal is ticked first: once the rename is, it stands in for that row, so no
+			// request is deleted and the delete confirmation is not asked.
+			fireEvent.click(box("search (tool)"));
+			fireEvent.click(box("search → find (tool)"));
+
+			expect(box("find (tool)").checked).toBe(false);
+			expect(box("search (tool)").checked).toBe(false);
+			fireEvent.click(updateButton());
+
+			await waitFor(() => expect(importMcpApply).toHaveBeenCalledTimes(1));
+			expect(screen.queryByText(/Delete requests the server/)).toBeNull();
+			expect(sent().select).toEqual({
+				added: [{ kind: "tool", key: "export" }],
+				changed: ["req_1", "req_2"],
+				removed: [],
+				renamed: [{ requestId: "req_5", key: "find" }],
+			});
+		});
+
 		it("is off while nothing is ticked", async () => {
 			await connectTo([renamedToolMatch()]);
 
-			["export (tool)", "search → find (tool)", "greet (prompt)"].forEach((name) =>
+			["export (tool)", "find (tool)", "lookup (tool)", "greet (prompt)"].forEach((name) =>
 				fireEvent.click(box(name))
 			);
 
@@ -697,9 +751,13 @@ describe("ImportModal MCP server tab", () => {
 
 			await waitFor(() => expect(importMcpApply).toHaveBeenCalledTimes(1));
 			expect(sent().select).toEqual({
-				added: [{ kind: "tool", key: "export" }],
+				added: [
+					{ kind: "tool", key: "export" },
+					{ kind: "tool", key: "find" },
+				],
 				changed: ["req_1", "req_2"],
 				removed: ["req_9"],
+				renamed: [],
 			});
 		});
 
@@ -833,6 +891,7 @@ describe("ImportModal MCP server tab", () => {
 					added: [{ kind: "prompt", key: "hello" }],
 					changed: [],
 					removed: [],
+					renamed: [],
 				});
 			});
 		});

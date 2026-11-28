@@ -10,8 +10,8 @@
 /**
  * @file core/mcp_diff.hpp
  * @brief What importing an MCP server again would change about a collection an
- *        earlier import of it built (#3842), so a renamed tool reads as a
- *        change rather than a second collection.
+ *        earlier import of it built (#3842), so what the server changed is
+ *        applied to that collection rather than imported as a second one.
  *
  * **Identity is the entry's own, never its position.** A tool's request is the
  * tool its `mcpTool.name` names (else the `params.name` of its `tools/call`), a
@@ -27,10 +27,13 @@
  * therefore differs only when the server's answer differs from what the
  * collection holds, never because two readers disagree.
  *
- * **A rename is inferred, and only where it is unambiguous.** A tool no
- * request claims and a stored tool the server no longer lists are one tool
- * renamed when each is the only one on its side with that `inputSchema`; any
- * other pairing is an add and a remove, stated as such.
+ * **A rename is proposed, never decided** (#3997). MCP gives a tool no
+ * identity but its name, so an equal `inputSchema` is a guess: two unrelated
+ * no-argument tools share one. A tool no request claims and a stored tool the
+ * server no longer lists are offered as a rename candidate when each is the
+ * only one on its side with that `inputSchema` (no schema is a value like any
+ * other), and both stay in `added` and `removed`. Only a caller's confirmation
+ * makes a rename, and it may pair any removed tool with any added one.
  *
  * **Nothing here reads a socket or a row.** `POST /import/mcp/diff` fetches the
  * listing, finds the collections an import of the same URL built, and hands
@@ -110,7 +113,7 @@ enum class McpField : std::uint8_t { Description, InputSchema, OutputSchema };
 /// The wire spelling of @p field: `description`, `inputSchema` or `outputSchema`.
 [[nodiscard]] std::string_view mcp_field_name (McpField field);
 
-/// A stored request whose entry the server still lists, and what moved.
+/// A stored request paired with a listing entry, and what moved.
 struct McpChange {
     /// Index into the stored entries.
     std::size_t stored = 0;
@@ -118,7 +121,8 @@ struct McpChange {
     std::size_t fetched = 0;
     /// Every field that differs; empty for a rename that moved nothing else.
     std::vector<McpField> fields;
-    /// The stored entry's key is not the listing's: the tool was renamed.
+    /// The stored entry's key is not the listing's: a rename candidate, or a
+    /// rename a caller confirmed. Never set on a `changed` row.
     bool renamed = false;
 };
 
@@ -128,11 +132,25 @@ struct McpDiff {
     std::vector<std::size_t> added;
     /// Stored entries of a compared kind the listing no longer has, in stored order.
     std::vector<std::size_t> removed;
-    /// In stored order.
+    /// Stored requests whose key the listing still has and whose fields
+    /// differ, in stored order.
     std::vector<McpChange> changed;
+    /// Proposed renames, in stored order. Each pairs an index still in
+    /// `removed` with one still in `added`: a candidate consumes neither.
+    std::vector<McpChange> rename_candidates;
 
+    /// Nothing added, removed or changed; a candidate implies an add and a
+    /// remove, so it needs no term of its own.
     [[nodiscard]] bool identical () const;
 };
+
+/// The rename of `stored[stored_index]` to `fetched[fetched_index]`, with
+/// every field the two differ in. The one builder of a rename, for a
+/// candidate and for a pair a caller confirmed alike.
+[[nodiscard]] McpChange mcp_rename_change (const std::vector<McpEntry>& stored,
+std::size_t stored_index,
+const std::vector<McpEntry>& fetched,
+std::size_t fetched_index);
 
 /**
  * @brief Compare a collection's requests against the listing a server answers

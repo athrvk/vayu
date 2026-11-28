@@ -134,7 +134,10 @@ export function useMcpReimport(entry: BatchEntry | null): McpReimport {
 	const update = async (collectionId: string): Promise<McpApplied | null> => {
 		if (apply.isPending) return null;
 		const match = matches?.find((m) => m.collectionId === collectionId);
-		if (!match || selectionFor(match).removed.size === 0) return write(collectionId);
+		// Counted from what is sent: a removal a ticked rename stands in for deletes nothing.
+		if (!match || buildMcpSelect(match, selectionFor(match)).removed.length === 0) {
+			return write(collectionId);
+		}
 		patch({ confirming: collectionId });
 		return null;
 	};
@@ -147,7 +150,8 @@ export function useMcpReimport(entry: BatchEntry | null): McpReimport {
 		confirming: confirmingMatch
 			? {
 					collectionId: confirmingMatch.collectionId,
-					deleteCount: selectionFor(confirmingMatch).removed.size,
+					deleteCount: buildMcpSelect(confirmingMatch, selectionFor(confirmingMatch))
+						.removed.length,
 				}
 			: null,
 		cancelConfirm: () => patch({ confirming: null }),

@@ -448,6 +448,7 @@ describe("mcpBatchEntry (#3843)", () => {
 			added: [],
 			removed: [],
 			changed: [],
+			renameCandidates: [],
 		};
 
 		expect(mcpBatchEntry(result, REQUEST).existingMcp).toEqual([]);

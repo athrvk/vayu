@@ -32,6 +32,7 @@ const MATCH: ImportMcpDiffMatch = {
 	added: [],
 	removed: [],
 	changed: [],
+	renameCandidates: [],
 };
 
 beforeEach(() => {
