@@ -27,7 +27,8 @@
  * `LoadListPages::start_paging` and the session case sends page 2 with no
  * cookie; drop the `lines_for` copy in `take` and the next step loses the
  * page's cookie; drop `config_.cancel` and the Stop case waits out the page
- * timeout and reports it failed.
+ * timeout and reports it failed; leave the view on the received response in
+ * `start_paging` and the copy case reads no page time.
  */
 
 #include <gtest/gtest.h>
@@ -399,9 +400,9 @@ TEST_F (AssertSnapshotPagesLoadTest, APagesTimeCountsTowardTheScenarioStepsLaten
 
 // `includeScriptTime` adds the pipeline's own time, which holds the page sends:
 // the pages are already the step's, so they are taken out of it. A healthy
-// reading is `PAGE_DELAY` and a few milliseconds of pipeline; one that counted
-// the page twice is at least twice `PAGE_DELAY`. The bound sits between, with
-// `PAGE_DELAY` of headroom on either side.
+// reading is `PAGE_DELAY` (500 ms) and a few milliseconds of pipeline; one that
+// counted the page twice is at least twice that (1000 ms). The bound sits
+// halfway, 250 ms from either.
 TEST_F (AssertSnapshotPagesLoadTest, IncludeScriptTimeCountsAPageOnce) {
     constexpr std::chrono::milliseconds PAGE_DELAY{ 500 };
     mcp_->set_tools (three_tools (), 2);
@@ -411,7 +412,7 @@ TEST_F (AssertSnapshotPagesLoadTest, IncludeScriptTimeCountsAPageOnce) {
     const double delay_ms = static_cast<double> (PAGE_DELAY.count ());
     const json& latency = report.at ("scenario").at ("steps").at (0).at ("latency");
     EXPECT_GE (latency.value ("max", 0.0), delay_ms) << latency.dump ();
-    EXPECT_LT (latency.value ("max", 0.0), 2 * delay_ms) << latency.dump ();
+    EXPECT_LT (latency.value ("max", 0.0), 1.5 * delay_ms) << latency.dump ();
 }
 
 // Neither loop stop compares part of the list: each fails the assertion after
