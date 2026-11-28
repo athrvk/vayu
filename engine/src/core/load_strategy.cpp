@@ -33,6 +33,7 @@
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/snapshot_page_send.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/platform/platform.hpp"
@@ -894,17 +895,29 @@ const ResultAnnotations& annotations) {
 }
 
 /**
+ * What `run_request_elements_after_submission` leaves the completion: the
+ * think time, in ms, the submission's slot is still owed, and the response
+ * with every list page an `assert.snapshot` followed (#3824), which is
+ * recorded in the received response's place; nothing when no page was asked
+ * for.
+ */
+struct SubmissionAfterResult {
+    int64_t think_wait_ms = 0;
+    std::optional<vayu::Result<vayu::Response>> paged;
+};
+
+/**
  * Runs @p context's `requestElements` `step.after` and `step.between` elements
  * for one completed submission: `step.after` against the response,
  * `step.between` for `timer.think`'s non-blocking wait (#1594). The wait is
  * returned for the caller to reserve on a closed-loop @p context through
  * `reserve_think_wait`, there being no `VirtualUser::ready_at_ms` here; an
- * open-loop one skips the timer (#3541). Never blocks: it runs on an event-loop
- * worker, inside the curl completion drain.
- *
- * @return the think time, in ms, the submission's slot is still owed.
+ * open-loop one skips the timer (#3541). It runs on an event-loop worker,
+ * inside the curl completion drain, where nothing waits but a list page
+ * `assert.snapshot` sends (`vayu::http::LoadListPages`).
  */
-int64_t run_request_elements_after_submission (const std::shared_ptr<RunContext>& context,
+SubmissionAfterResult run_request_elements_after_submission (
+const std::shared_ptr<RunContext>& context,
 vayu::Request& request,
 const vayu::Response& response,
 vayu::http::routes::ScopeOverlay& overlay,
@@ -919,6 +932,7 @@ const ResultAnnotations& annotations) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     auto& received = const_cast<vayu::Response&> (response);
     std::optional<vayu::Response> unwrapped;
+    vayu::http::LoadListPages pages (context->script_send, response);
     vayu::core::ElementContext ctx{
         .request        = request,
         .response       = vayu::http::mcp_element_view (received, unwrapped),
@@ -928,13 +942,14 @@ const ResultAnnotations& annotations) {
             auto& engine = vayu::http::routes::script_engine_for_this_thread (
             context->step_script_config);
             auto scopes = overlay.materialize (context->lifecycle_scopes);
-            auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
+            auto script_ctx =
+            vayu::runtime::ScriptContext::for_test (request, pages.step ());
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             context->script_send.apply (script_ctx);
             bind_submission_identity (script_ctx, *context, annotations);
             nlohmann::json stream_events;
             vayu::http::bind_buffered_stream_events (
-            script_ctx, response, context->sse_limits, stream_events);
+            script_ctx, pages.step (), context->sse_limits, stream_events);
             script_ctx.record_metric = [context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);
@@ -971,6 +986,7 @@ const ResultAnnotations& annotations) {
         },
         .max_body_bytes = context->max_element_body_bytes,
     };
+    pages.bind (ctx);
 
     vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx,
     *context->step_elements, outcomes,
@@ -1019,12 +1035,15 @@ const ResultAnnotations& annotations) {
     [&context] (const vayu::core::CompiledElement& element) {
         return context->open_loop_timer_skip_reason (element);
     });
-    int64_t total_wait_ms = 0;
+    SubmissionAfterResult after;
     for (const auto& outcome : between_outcomes) {
-        total_wait_ms += outcome.waited_ms.value_or (0);
+        after.think_wait_ms += outcome.waited_ms.value_or (0);
         context->element_tallies.record (outcome);
     }
-    return total_wait_ms;
+    if (auto paged = pages.take ()) {
+        after.paged.emplace (std::move (*paged));
+    }
+    return after;
 }
 
 /// Hands @p request to the event loop and accounts for it, with @p annotations
@@ -1048,16 +1067,17 @@ std::shared_ptr<vayu::http::routes::ScopeOverlay> overlay) {
     [context, &db, annotations, opened_ms, sent_request = std::move (sent_request),
     overlay = std::move (overlay)] (size_t, const vayu::Result<vayu::Response>& result) {
         context->metrics_collector->close_open (opened_ms);
+        SubmissionAfterResult after;
         if (result.is_ok ()) {
-            int64_t wait_ms = 0;
             if (sent_request && overlay) {
-                wait_ms = run_request_elements_after_submission (
+                after = run_request_elements_after_submission (
                 context, *sent_request, result.value (), *overlay, annotations);
             }
-            context->reserve_think_wait (
-            std::max (wait_ms, context->honour_retry_after (result.value ())));
+            context->reserve_think_wait (std::max (
+            after.think_wait_ms, context->honour_retry_after (result.value ())));
         }
-        handle_result (context, db, result, annotations);
+        // Recorded with its list pages, when it followed any (#3824).
+        handle_result (context, db, after.paged ? *after.paged : result, annotations);
     });
     context->requests_sent++;
 }

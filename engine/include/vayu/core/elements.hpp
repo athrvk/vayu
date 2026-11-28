@@ -474,10 +474,12 @@ struct ElementContext {
     /// (#3824): sends @p page_request, a copy of `request` with `params.cursor`
     /// set, the way the step's own send went, and answers that reply's final
     /// JSON-RPC response text. The binder adds the page's time to the step's
-    /// response, so a step's latency is every page it read. Bound only where
-    /// the step's send has a blocking thread behind it (the design send, the
-    /// sequential run); unset, a paged list fails its assertion rather than
-    /// being compared on one page.
+    /// response, so a step's latency is every page it read. Bound on every
+    /// path but a streamed Send; under load the page blocks the event-loop
+    /// worker for its time, as an inline `pm.sendRequest` does, which
+    /// `blocking_allowed` does not govern (`vayu::http::LoadListPages`).
+    /// Unset, a paged list fails its assertion rather than being compared on
+    /// one page.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     ListPageSender send_list_page{};
 

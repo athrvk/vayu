@@ -57,4 +57,61 @@ Response* view) {
     return std::move (reply.response);
 }
 
+LoadListPages::LoadListPages (const runtime::ScriptSendInputs& route, const Response& received)
+: route_ (route), received_ (received) {
+}
+
+void LoadListPages::bind (core::ElementContext& ctx) {
+    ctx.send_list_page = [this, &ctx] (const Request& page_request) {
+        return send (ctx, page_request);
+    };
+}
+
+const Response& LoadListPages::step () const {
+    return paged_ ? *paged_ : received_;
+}
+
+double LoadListPages::page_ms () const {
+    return paged_ ? paged_->timing.total_ms - received_.timing.total_ms : 0.0;
+}
+
+std::optional<Response> LoadListPages::take () {
+    if (paged_ && jar_) {
+        paged_->cookie_lines = jar_->lines_for (config_.cookie_scope);
+    }
+    return std::exchange (paged_, std::nullopt);
+}
+
+std::expected<std::string, core::ListPageFailure>
+LoadListPages::send (core::ElementContext& ctx, const Request& page_request) {
+    Response& step = paged_ ? *paged_ : start_paging (ctx);
+    return send_list_page (config_, page_request, step, ctx.response);
+}
+
+// Deferred to the first page, so a completion that follows none copies neither
+// its response nor the run's transport policy.
+Response& LoadListPages::start_paging (core::ElementContext& ctx) {
+    Response& copy = paged_.emplace (received_);
+    // The view the elements read moves to the copy when it was the received
+    // response itself: the body is the same text, so a parse already made of
+    // it stands, and a later `assert.duration` reads the pages too.
+    if (ctx.response == &received_) {
+        ctx.response = &copy;
+    }
+    config_.default_headers    = route_.default_headers;
+    config_.transport          = route_.transport;
+    config_.max_response_bytes = route_.max_response_bytes;
+    config_.cancel             = route_.cancel;
+    // A step's own transfer carries the session as its request's cookie
+    // lines (`Request::track_cookies`), which a `Client` does not read: the
+    // pages carry it in a jar of their own, seeded with what the step's reply
+    // left.
+    if (ctx.request.track_cookies) {
+        CookieJar& jar = jar_.emplace ();
+        jar.store (config_.cookie_scope, received_.cookie_lines);
+        config_.cookie_jar = &jar;
+    }
+    return copy;
+}
+
 } // namespace vayu::http

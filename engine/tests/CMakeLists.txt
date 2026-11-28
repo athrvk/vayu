@@ -74,6 +74,7 @@ add_executable(vayu_tests
     ../src/http/server.cpp
     argument_rules_test.cpp
     ascii_case_test.cpp
+    assert_snapshot_pages_load_test.cpp
     assert_snapshot_pages_test.cpp
     auth_header_precedence_test.cpp
     auth_refresh_test.cpp
@@ -481,6 +482,7 @@ vayu_embed_windows_manifest(vayu_tests)
 # are 62s of the 179s added. The strace derivation above is what separates
 # them, so the list stays and so do both guards.
 set(vayu_scratch_database_suites
+    AssertSnapshotPagesLoadTest
     AuthRefreshTuningTest
     AuthResolverOAuth2Test
     ChangeFeedDatabaseTest

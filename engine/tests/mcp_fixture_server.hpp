@@ -341,6 +341,14 @@ class McpFixtureServer {
         settings_.hang_cursor_pages = true;
     }
 
+    /// Every list page asked for by a cursor from now on answers with
+    /// @p set_cookie as its `Set-Cookie`, for a step whose pages change the
+    /// session.
+    void set_cookie_on_cursor_pages (std::string set_cookie) {
+        std::lock_guard<std::mutex> lock (mutex_);
+        settings_.cursor_page_cookie = std::move (set_cookie);
+    }
+
     /// Calls answered so far.
     std::size_t requests () const {
         return requests_.load ();
@@ -406,6 +414,7 @@ class McpFixtureServer {
         bool legacy_names_version = true;
         std::set<std::string> hung_methods;
         bool hang_cursor_pages = false;
+        std::string cursor_page_cookie;
         std::set<std::string> unimplemented_methods;
     };
 
@@ -838,6 +847,10 @@ class McpFixtureServer {
         }
         if (settings.outcome == McpReplyOutcome::Result) {
             if (const auto known = known_method_frame (method, call, id, settings)) {
+                if (!settings.cursor_page_cookie.empty () &&
+                string_at (call, nlohmann::json::json_pointer ("/params/cursor"))) {
+                    res.set_header ("Set-Cookie", settings.cursor_page_cookie);
+                }
                 send_frame (res, *known, known_method_shape (method, call, settings));
                 return;
             }

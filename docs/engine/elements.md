@@ -387,7 +387,9 @@ It resends the step's own call with `params.cursor` set (a bare call gains `para
 Items are matched across pages as within one, so a server that moves an item to another page has not changed the list.
 Each page's time and bytes are added to the step's (`totalMs` and `wireMs`: a collection run's latency counts them, and a Send's `engineMs` leaves them out as network time), and the reply's `mcp` node counts the requests as `pages`, absent for one page ([the mcp reply](api-reference/request-body.md#the-mcp-reply)).
 A list is never compared on the pages read so far: the assertion fails with `<method> was not compared: <why>` when a page still names a `nextCursor` after `MAX_SNAPSHOT_PAGES` (100) pages, hands back a cursor already sent, takes the items past `MAX_SNAPSHOT_ITEMS` (10,000), holds no list, cannot be read, or fails as an `mcp` reply (`page 2: protocol failure: ...`).
-A Send and a collection run follow pages; a request of another body mode, and a path that cannot send from the element (a streamed Send, a load run), fail with that reason instead.
+A Send, a collection run and both load-run shapes follow pages; a request of another body mode, and a streamed Send, fail with that reason instead.
+Under load a page is part of its step and no submission of its own: its time is in that step's recorded latency and the run's, its bytes in the run's, and the run's request and iteration counts do not move; `includeScriptTime` leaves it out of the pipeline time it adds ([Load paths](#load-paths)), so it counts once.
+The event-loop worker that completed the step sends the page and waits for it, as for an inline script's `pm.sendRequest`, through the run's transport, default headers and `maxResponseBodyBytes`; a step that keeps cookies sends it with the virtual user's session and keeps what it set.
 A Stop, or the caller leaving, while a page is in flight is the run ending: the element reports `skipped` and records no test.
 
 A failure is one line, `tools/list changed: removed 'a'; added 'b'; 'c' differs at
@@ -692,16 +694,10 @@ strategy thread and each event-loop worker - are spawned fresh for that run and 
 it retains, so `vayu::http::routes::script_engine_for_this_thread` constructs one lazily on
 first use and is never stale, never shared across runs, and never a caller-visible lock.
 
-**`elements.includeScriptTime`.** A step's recorded latency is its transfer alone by default -
-an inline element runs after `Client::send`'s own timing already stopped and before
-`StepHistograms::record` - so opting a script in does not, by itself, change what the latency
-figures measure. Setting the run's `elements.includeScriptTime` folds the pipeline's own
-elapsed time back in for anyone who wants the scripted cost in the figures. It moves the step's
-histogram and the run's together (#2792): the scenario executor decides the figure once per
-completion and hands it to `StepHistograms` and, as `ResultAnnotations::script_ms`, to the run's
-latency histogram, so the run's `max` is never below a step's. What stays on the transfer is the
-stored trace's `totalMs` (it stays consistent with the phase breakdown beside it), the per-phase
-histograms and the `slow_threshold_ms` decision.
+**`elements.includeScriptTime`.** A step's recorded latency is its transfer alone by default, with any list pages an `assert.snapshot` followed ([a paged list](#kinds)) - an inline element runs after `Client::send`'s own timing already stopped and before `StepHistograms::record` - so opting a script in does not, by itself, change what the latency figures measure.
+Setting the run's `elements.includeScriptTime` folds the pipeline's own elapsed time back in for anyone who wants the scripted cost in the figures.
+It moves the step's histogram and the run's together (#2792): the scenario executor decides the figure once per completion and hands it to `StepHistograms` and, as `ResultAnnotations::script_ms`, to the run's latency histogram, so the run's `max` is never below a step's.
+What stays on the transfer and its list pages is the stored trace's `totalMs`, the per-phase histograms (the step's own transfer) and the `slow_threshold_ms` decision.
 
 **Per-step tallies.** `scenario.steps[i].elements[] = { id, kind, name?, origin?, required?,
 passed, failed, missing, error, skipped, deferred }` beside the existing `tests` node, one row per
