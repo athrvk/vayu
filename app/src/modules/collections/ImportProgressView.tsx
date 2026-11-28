@@ -17,6 +17,7 @@ import { pluralize } from "@/modules/dashboard/utils/format";
  * half the report: "Importing" during a two-minute download would lie about what takes the time.
  *
  * `connecting` is `reading` for a live server: one engine call with no figures to report.
+ * `signingIn` is the OAuth sign-in before it (#3983), a wait on the user's browser.
  *
  * `fetching` counts bytes and the rest count documents, hence a union rather than a `{done, total}`
  * with a label: bytes and files format differently, and `total` can be *unknown* for bytes, never
@@ -29,13 +30,23 @@ export type ImportProgress =
 	 * *name* shows, as a folder of large specs spends a real moment here.
 	 */
 	| { stage: "reading" }
-	| { stage: "connecting" }
+	| { stage: "signingIn" | "connecting" }
 	| { stage: "fetching"; received: number; total: number | null }
 	| { stage: "bundling" | "parsing" | "applying"; done: number; total: number };
 
+type FigurelessProgress = Extract<
+	ImportProgress,
+	{ stage: "reading" | "signingIn" | "connecting" }
+>;
+
+/** A stage with nothing to count. */
+function figureless(progress: ImportProgress): progress is FigurelessProgress {
+	return !("received" in progress) && !("done" in progress);
+}
+
 /** The figures under the bar - the part that proves a stalled bar has moved. */
 function detailOf(progress: ImportProgress): string {
-	if (progress.stage === "reading" || progress.stage === "connecting") return "";
+	if (figureless(progress)) return "";
 	if (progress.stage === "fetching") {
 		return progress.total === null
 			? `${formatBytes(progress.received)} received`
@@ -47,7 +58,7 @@ function detailOf(progress: ImportProgress): string {
 
 /** 0..1, or null when nothing stated a total to be a fraction of. */
 function fractionOf(progress: ImportProgress): number | null {
-	if (progress.stage === "reading" || progress.stage === "connecting") return null;
+	if (figureless(progress)) return null;
 	if (progress.stage === "fetching") {
 		return progress.total === null || progress.total === 0
 			? null

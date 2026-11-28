@@ -41,8 +41,15 @@ import {
 	type RefReport,
 } from "./ref-bundler";
 import { parseImport } from "./factory";
-import { UnrecognisedFormatError, type ImportOptions, type ImportResult } from "./types";
+import {
+	UnrecognisedFormatError,
+	type CollectionDraft,
+	type ImportOptions,
+	type ImportResult,
+} from "./types";
+import { IMPORT_MCP_TOKEN_VARIABLE } from "@/constants/import";
 import type { ImportFetchOptions, ImportMcpDiffMatch, ImportMcpRequest } from "@/types/api";
+import type { OAuth2Config } from "@/types";
 
 /**
  * What a folder pick will even look at. A folder is picked wholesale (`webkitdirectory` hands over
@@ -129,10 +136,16 @@ export interface BatchEntry {
 	/**
 	 * The request the connect sent, which `existingMcp` was computed from (#3994). An update sends
 	 * it again, so it writes against the listing the user was shown rather than whatever the form
-	 * holds by then. It carries the bearer token, so it lives and dies with the entry, which
+	 * holds by then. It carries a static bearer token, so it lives and dies with the entry, which
 	 * `resetTab` drops when the preview is dismissed or the dialog closes.
 	 */
 	mcpRequest?: ImportMcpRequest;
+	/**
+	 * The config an OAuth connect signed in with, as discovery filled it (#3983). Set, `mcpRequest`
+	 * carries no token: the access token expires, so an update asks the engine's cache for it again
+	 * rather than replaying the one the connect sent.
+	 */
+	mcpOAuth?: OAuth2Config;
 }
 
 /** How the batch reaches files the picked documents reference. */
@@ -221,11 +234,16 @@ export function entryLabel(entry: BatchEntry): string {
  * #3843). It has no document: `raw` is `null`, and the server URL stands where a file's name
  * would, so `entryLabel` names it. `existingMcp` is what the diff route found of an earlier
  * import of the same server, and `request` is what both calls were sent.
+ *
+ * With @p oauth (#3983) the token in `request` came from a sign-in, so the root the engine built
+ * around it (bearer `{{mcpToken}}` over an empty secret variable) becomes an OAuth 2.0 root on
+ * that sign-in's config, and the kept request drops the token.
  */
 export function mcpBatchEntry(
 	result: ImportResult,
 	request: ImportMcpRequest,
-	existingMcp: ImportMcpDiffMatch[] = []
+	existingMcp: ImportMcpDiffMatch[] = [],
+	oauth?: OAuth2Config
 ): BatchEntry {
 	const { url } = request;
 	return {
@@ -236,13 +254,33 @@ export function mcpBatchEntry(
 		sourceUrl: url,
 		raw: null,
 		unresolvedRefs: 0,
-		result,
+		result: oauth ? withSignedInRoots(result, oauth) : result,
 		error: null,
 		bundledInto: null,
 		included: true,
 		existingMcp,
-		mcpRequest: request,
+		...(oauth
+			? { mcpRequest: withoutAuth(request), mcpOAuth: oauth }
+			: { mcpRequest: request }),
 	};
+}
+
+/**
+ * Each root on @p config's OAuth 2.0 sign-in, without the token variable a bearer root reads. The
+ * config holds discovered endpoints and a client id, never a token: a run keys the cached token
+ * from it and refreshes it headless.
+ */
+function withSignedInRoots(result: ImportResult, config: OAuth2Config): ImportResult {
+	const signedIn = (root: CollectionDraft): CollectionDraft => {
+		const { [IMPORT_MCP_TOKEN_VARIABLE]: _token, ...variables } = root.variables;
+		return { ...root, auth: { mode: "oauth2", config }, variables };
+	};
+	return { ...result, collections: result.collections.map(signedIn) };
+}
+
+function withoutAuth(request: ImportMcpRequest): ImportMcpRequest {
+	const { auth: _auth, ...rest } = request;
+	return rest;
 }
 
 const NO_REFS: RefReport = { fetched: [], refused: [] };

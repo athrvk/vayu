@@ -11,7 +11,7 @@
 /**
  * `useImportMcpApplyMutation` (#3994): one engine call, and the tree refreshed only when it
  * landed. A refused apply (a 409 for a stale row) wrote nothing, so refetching after it would
- * show the same rows again.
+ * show the same rows again. An OAuth entry's token is fetched inside the mutation (#3983).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -20,12 +20,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useImportMcpApplyMutation } from "./import-mcp";
 import { queryKeys } from "./keys";
-import type { ImportMcpApplyRequest } from "@/types";
+import type { ImportMcpApplyRequest, OAuth2Config } from "@/types";
 
 const importMcpApply = vi.fn();
+const fetchOAuth2Token = vi.fn();
 
 vi.mock("@/services/api", () => ({
-	apiService: { importMcpApply: (...a: unknown[]) => importMcpApply(...a) },
+	apiService: {
+		importMcpApply: (...a: unknown[]) => importMcpApply(...a),
+		fetchOAuth2Token: (...a: unknown[]) => fetchOAuth2Token(...a),
+	},
 }));
 
 const PAYLOAD: ImportMcpApplyRequest = {
@@ -60,9 +64,10 @@ describe("useImportMcpApplyMutation", () => {
 		importMcpApply.mockResolvedValue(answer);
 		const { result, invalidate } = mutation();
 
-		await expect(result.current.mutateAsync(PAYLOAD)).resolves.toBe(answer);
+		await expect(result.current.mutateAsync({ payload: PAYLOAD })).resolves.toBe(answer);
 
 		expect(importMcpApply).toHaveBeenCalledWith(PAYLOAD);
+		expect(fetchOAuth2Token).not.toHaveBeenCalled();
 		const keys = invalidatedKeys(invalidate);
 		expect(keys).toContain(JSON.stringify(queryKeys.collections.all));
 		expect(keys).toContain(JSON.stringify(queryKeys.requests.all));
@@ -73,10 +78,49 @@ describe("useImportMcpApplyMutation", () => {
 		importMcpApply.mockRejectedValue(new Error("req_1 is no longer a changed entry"));
 		const { result, invalidate } = mutation();
 
-		await expect(result.current.mutateAsync(PAYLOAD)).rejects.toThrow(/no longer/);
+		await expect(result.current.mutateAsync({ payload: PAYLOAD })).rejects.toThrow(/no longer/);
 		await waitFor(() => expect(result.current.isError).toBe(true));
 
 		expect(importMcpApply).toHaveBeenCalledTimes(1);
 		expect(invalidate).not.toHaveBeenCalled();
+	});
+
+	describe("for an OAuth connect's entry", () => {
+		const OAUTH: OAuth2Config = {
+			grantType: "authorization_code",
+			discoverUrl: "https://mcp.example.com/mcp",
+			accessTokenUrl: "https://auth.example.com/token",
+			clientId: "registered-client",
+		};
+
+		it("sends the token the engine holds for the config now, as the bearer auth", async () => {
+			fetchOAuth2Token.mockResolvedValue({ accessToken: "fresh-token" });
+			importMcpApply.mockResolvedValue({
+				collectionId: "col_1",
+				created: [],
+				updated: [],
+				deleted: [],
+			});
+			const { result } = mutation();
+
+			await result.current.mutateAsync({ payload: PAYLOAD, oauth: OAUTH });
+
+			expect(fetchOAuth2Token).toHaveBeenCalledWith({ config: OAUTH });
+			expect(importMcpApply).toHaveBeenCalledWith({
+				...PAYLOAD,
+				auth: { mode: "bearer", token: "fresh-token" },
+			});
+		});
+
+		it("sends nothing when the token cannot be had", async () => {
+			fetchOAuth2Token.mockRejectedValue(new Error("OAuth 2.0 authorization required"));
+			const { result } = mutation();
+
+			await expect(
+				result.current.mutateAsync({ payload: PAYLOAD, oauth: OAUTH })
+			).rejects.toThrow(/authorization required/);
+
+			expect(importMcpApply).not.toHaveBeenCalled();
+		});
 	});
 });

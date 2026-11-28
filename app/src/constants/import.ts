@@ -15,6 +15,7 @@
  */
 export const IMPORT_STAGE_LABELS = {
 	reading: "Reading files",
+	signingIn: "Signing in to the server",
 	connecting: "Asking the server",
 	fetching: "Downloading",
 	bundling: "Resolving references",

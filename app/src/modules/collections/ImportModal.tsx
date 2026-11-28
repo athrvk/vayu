@@ -63,7 +63,14 @@ import { describeCarriedOver, describeCounts, importResultNotices } from "./impo
 import { NoticeList } from "./NoticeList";
 import { ImportClientCertificates } from "./ImportClientCertificates";
 import { ImportMcpForm } from "./ImportMcpForm";
-import { canConnectMcp, emptyMcpForm, existingMcpImports, mcpImportRequest } from "./import-mcp";
+import {
+	canConnectMcp,
+	emptyMcpForm,
+	existingMcpImports,
+	mcpImportRequest,
+	mcpOAuthBearer,
+	signInToMcpServer,
+} from "./import-mcp";
 import { McpReimportDiff } from "./McpReimportDiff";
 import { isEmptyMcpSelection } from "./mcp-reimport-selection";
 import {
@@ -592,20 +599,33 @@ export function ImportModal() {
 	 * preview, the notices and the apply are the other tabs' own from there. The collections an
 	 * earlier import of the server built are looked up before the preview opens, so a duplicate is
 	 * flagged before the user can import one; that lookup never fails the connect (#3842).
+	 *
+	 * An OAuth connect signs in first and sends the token the sign-in left in the engine's cache
+	 * (#3983); the sign-in is this tab's work, so a close or a new connect cancels it.
 	 */
 	const handleConnectMcp = async () => {
 		if (isBusy || !canConnectMcp(mcpForm)) return;
 		const at = supersede("mcp");
 		const abort = new AbortController();
 		inFlight.current.mcp = abort;
-		patchTab("mcp", at, { phase: "detecting", error: "", progress: { stage: "connecting" } });
-		const request = mcpImportRequest(mcpForm);
+		const signsIn = mcpForm.auth === "oauth";
+		patchTab("mcp", at, {
+			phase: "detecting",
+			error: "",
+			progress: { stage: signsIn ? "signingIn" : "connecting" },
+		});
+		let request = mcpImportRequest(mcpForm);
 		try {
+			const oauth = signsIn ? await signInToMcpServer(request.url, abort.signal) : undefined;
+			if (oauth) {
+				request = { ...request, auth: await mcpOAuthBearer(oauth) };
+				patchTab("mcp", at, { progress: { stage: "connecting" } });
+			}
 			const result = await apiService.importMcp(request, { signal: abort.signal });
 			const existing = await existingMcpImports(request, abort.signal);
 			patchTab("mcp", at, {
 				progress: null,
-				entries: [mcpBatchEntry(result, request, existing)],
+				entries: [mcpBatchEntry(result, request, existing, oauth)],
 				phase: "preview",
 			});
 		} catch (e) {

@@ -20,6 +20,8 @@
  * so a tick of an earlier comparison (a request id the next diff may name for another row) is never
  * carried over. The state holds the entry only while it is the one on screen, because the entry
  * carries the bearer token: a dismissed preview or a closed dialog drops it on the next render.
+ * An OAuth connect's entry keeps no token (#3983): its update asks the engine for the cached one,
+ * refreshed if it expired, so a token past its lifetime is never sent.
  */
 
 import { useState } from "react";
@@ -46,12 +48,19 @@ function freshState(comparison: BatchEntry | null): UpdateState {
 	return { comparison, selections: {}, error: null, confirming: null };
 }
 
+/** `POST /oauth2/token`'s refusal of a config with no token left to refresh. */
+const OAUTH2_INTERACTIVE_REQUIRED = "oauth2_interactive_required";
+
 /**
  * The line under the preview when an update did not land. A 409 is the engine saying the server's
  * listing no longer matches the comparison, and says nothing was written; what to do next is this
- * line's, since the answer to a stale diff is to compare again, not to press the button again.
+ * line's, since the answer to a stale diff is to compare again, not to press the button again. An
+ * OAuth entry's token fetch has a 409 of its own, answered by signing in again.
  */
 export function mcpUpdateFailureMessage(error: Error): string {
+	if (error instanceof ApiError && error.errorCode === OAUTH2_INTERACTIVE_REQUIRED) {
+		return "Couldn't update the collection - the sign-in to this server has run out. Nothing was written: dismiss this preview and connect again to sign in.";
+	}
 	const base = `Couldn't update the collection - ${error.message.replace(/\.$/, "")}`;
 	if (!(error instanceof ApiError) || error.statusCode !== 409) return base;
 	return `${base}. Nothing was written: dismiss this preview and connect again to compare, then choose from the new answer.`;
@@ -118,9 +127,12 @@ export function useMcpReimport(entry: BatchEntry | null): McpReimport {
 		let response: ImportMcpApplyResponse;
 		try {
 			response = await apply.mutateAsync({
-				...request,
-				collectionId,
-				select: buildMcpSelect(match, selectionFor(match)),
+				payload: {
+					...request,
+					collectionId,
+					select: buildMcpSelect(match, selectionFor(match)),
+				},
+				...(entry?.mcpOAuth ? { oauth: entry.mcpOAuth } : {}),
 			});
 		} catch (e) {
 			// The confirm stays open while the call runs, showing it, and closes on either answer.

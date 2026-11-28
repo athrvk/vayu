@@ -10,13 +10,32 @@
  * its primitives to list. Controlled: the dialog owns the state, because a tab switch must leave the
  * entered values in place and a reset must clear them, the token included. The token lives in this
  * state and nowhere else - no store, no query key, no log.
+ *
+ * The server is signed in to with a static bearer token or an OAuth sign-in at Connect (#3983).
+ * The sign-in opens the system browser through the desktop bridge, so without `electronAPI` the
+ * option is off and says why.
  */
 
 import type { KeyboardEvent } from "react";
-import { Button, Checkbox, Input, Label, LabelSwap, SecretInput } from "@/components/ui";
+import {
+	Button,
+	Checkbox,
+	DisabledHint,
+	Input,
+	Label,
+	LabelSwap,
+	SecretInput,
+	ToggleGroup,
+	ToggleGroupItem,
+} from "@/components/ui";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
 import { isCommitEnter } from "@/lib/keyboard";
-import { canConnectMcp, type McpFormState, type McpPrimitive } from "./import-mcp";
+import {
+	canConnectMcp,
+	type McpAuthChoice,
+	type McpFormState,
+	type McpPrimitive,
+} from "./import-mcp";
 
 const PRIMITIVES: readonly { key: McpPrimitive; label: string }[] = [
 	{ key: "tools", label: "Tools" },
@@ -32,7 +51,10 @@ interface ImportMcpFormProps {
 	busy: boolean;
 }
 
+const OAUTH_NEEDS_DESKTOP = "OAuth sign-in needs the Vayu desktop app.";
+
 export function ImportMcpForm({ form, onChange, onConnect, busy }: ImportMcpFormProps) {
+	const desktop = window.electronAPI !== undefined;
 	const connectable = canConnectMcp(form);
 	const commitOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
 		if (isCommitEnter(e) && connectable && !busy) onConnect();
@@ -78,16 +100,44 @@ export function ImportMcpForm({ form, onChange, onConnect, busy }: ImportMcpForm
 			</div>
 
 			<div className="space-y-1.5">
-				<Label htmlFor="import-mcp-token" className="text-xs">
-					Bearer token (optional)
-				</Label>
-				<SecretInput
-					id="import-mcp-token"
-					value={form.token}
-					onChange={(token) => onChange({ ...form, token })}
-					onKeyDown={commitOnEnter}
+				<span className="block text-xs font-medium">Authentication</span>
+				<ToggleGroup
+					size="sm"
+					aria-label="Authentication"
+					value={form.auth}
+					// Radix clears the value when the active segment is pressed again; one is always on.
+					onValueChange={(next) =>
+						next && onChange({ ...form, auth: next as McpAuthChoice })
+					}
 					disabled={busy}
-				/>
+				>
+					<ToggleGroupItem value="token">Bearer token</ToggleGroupItem>
+					<DisabledHint reason={!desktop && OAUTH_NEEDS_DESKTOP}>
+						<ToggleGroupItem value="oauth" disabled={!desktop}>
+							OAuth sign-in
+						</ToggleGroupItem>
+					</DisabledHint>
+				</ToggleGroup>
+				{form.auth === "token" ? (
+					<>
+						<Label htmlFor="import-mcp-token" className="sr-only">
+							Bearer token (optional)
+						</Label>
+						<SecretInput
+							id="import-mcp-token"
+							value={form.token}
+							onChange={(token) => onChange({ ...form, token })}
+							onKeyDown={commitOnEnter}
+							placeholder="Optional"
+							disabled={busy}
+						/>
+					</>
+				) : (
+					<p className="text-label text-muted-foreground">
+						Connect opens your browser to sign in. The collection keeps the sign-in
+						settings, never the token.
+					</p>
+				)}
 			</div>
 
 			<fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1 text-label text-muted-foreground">

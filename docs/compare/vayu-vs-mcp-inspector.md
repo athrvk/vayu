@@ -35,7 +35,7 @@ happens around it.
 | **CI gate on a run** | A thresholds block judges the run; the command line starts a run and does not exit on a verdict | Thresholds and baseline regression exit `10`\*\*\* |
 | **Per-call output** | Aggregates plus a bounded set of kept traces (failures, status exemplars, slowest, a sample); no record of every call | One NDJSON line per call from the CLI\*\*\* |
 | **Failure classes in reports** | `tool`, `protocol` and `transport` counts per run, compared run to run, each with its own budget | `isError` results counted apart from thrown errors\*\*\* |
-| **Authorization** | Request auth, plus a sign-in discovered from an MCP server URL and a Re-authorize offer in the request builder; a run never re-authorizes | Full OAuth flow, re-authorization and step-up\*\*\*\* |
+| **Authorization** | Request auth, plus a sign-in discovered from an MCP server URL (on a request or an import) and a Re-authorize offer in the request builder; a run never re-authorizes | Full OAuth flow, re-authorization and step-up\*\*\*\* |
 | **Scale-out** | One process on one machine | `--load-workers` child processes\*\*\* |
 
 \* **Source:** the Inspector's [overview](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector):
@@ -138,16 +138,17 @@ turn a verdict into an exit code ([CLI](../engine/cli.md#error-handling)).
 
 ## Importing a server
 
-The Import dialog's **MCP server** tab takes a server's URL, headers and an optional bearer token,
-asks the live server what it offers (`tools/list`, optionally `resources/list` and
+The Import dialog's **MCP server** tab takes a server's URL, headers and an optional bearer token
+or an OAuth sign-in discovered from the server URL, asks the live server what it offers (`tools/list`, optionally `resources/list` and
 `prompts/list`, following pagination) and previews a collection: one folder per primitive and
 one `mcp` request per listed entry. Nothing is stored until Import applies it, as on the other
 tabs. A tool's request carries its `mcpTool` (the name and `inputSchema`, so the `Mcp-Param-*`
 headers are derived), arguments drawn from the schema (the required properties only, each from
 its `const`, `default`, `example` or first `enum` member, else a typed stub) and an
 `assert.status` on `200`. The reply's own failures, a JSON-RPC error or a tool's `isError`,
-fail a step without an assertion. One limit: the dialog sends a static bearer token with no OAuth
-sign-in ([#3983](https://github.com/athrvk/vayu/issues/3983)). Detail:
+fail a step without an assertion. A signed-in import's root collection keeps the OAuth 2.0
+config the sign-in filled, never the token. One limit: the import does not step up a refused
+scope. Detail:
 [MCP server import](../app/import-collections/mcp-server.md) and
 [`POST /import/mcp`](../engine/api-reference/import.md#post-importmcp), the engine route
 behind it.

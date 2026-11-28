@@ -28,6 +28,9 @@ import {
 	type BatchIntake,
 } from "./batch";
 import { apiService } from "@/services/api";
+import type { ImportResult } from "./types";
+import { collection, result } from "@/modules/collections/import-preview.testkit";
+import type { OAuth2Config } from "@/types";
 import type { ImportMcpRequest } from "@/types/api";
 
 /**
@@ -476,6 +479,55 @@ describe("mcpBatchEntry (#3843)", () => {
 		await reparseBatch([entry], OPTS, onProgress);
 
 		expect(onProgress).not.toHaveBeenCalled();
+	});
+
+	describe("after an OAuth sign-in (#3983)", () => {
+		const SIGNED_IN: OAuth2Config = {
+			grantType: "authorization_code",
+			discoverUrl: URL,
+			accessTokenUrl: "https://auth.example.com/token",
+			clientId: "registered-client",
+			discoveredFields: ["accessTokenUrl", "clientId"],
+		};
+
+		/** The root the route builds for a token: bearer over an empty secret variable. */
+		function bearerTree(): ImportResult {
+			return result({
+				collections: [
+					collection({
+						name: "Acme tools",
+						variables: {
+							mcpBaseUrl: { value: URL, enabled: true },
+							mcpToken: { value: "", enabled: true, secret: true },
+						},
+						auth: { mode: "bearer", token: "{{mcpToken}}" },
+					}),
+				],
+				meta: { format: "MCP server" },
+			});
+		}
+
+		it("puts the root on the signed-in config and drops the token variable", () => {
+			const entry = mcpBatchEntry(bearerTree(), REQUEST, [], SIGNED_IN);
+			const [root] = entry.result?.collections ?? [];
+
+			expect(root.auth).toEqual({ mode: "oauth2", config: SIGNED_IN });
+			expect(Object.keys(root.variables)).toEqual(["mcpBaseUrl"]);
+		});
+
+		it("keeps the request without its token, and the config to fetch the next one from", () => {
+			const entry = mcpBatchEntry(bearerTree(), REQUEST, [], SIGNED_IN);
+
+			expect(entry.mcpRequest).toEqual({ url: URL });
+			expect(entry.mcpOAuth).toBe(SIGNED_IN);
+			expect(JSON.stringify(entry)).not.toContain("s3cret");
+		});
+
+		it("leaves a static token's tree as the engine built it", () => {
+			const tree = bearerTree();
+
+			expect(mcpBatchEntry(tree, REQUEST).result).toBe(tree);
+		});
 	});
 
 	it("is re-parsed alongside a file in the same batch, which is not skipped with it", async () => {
