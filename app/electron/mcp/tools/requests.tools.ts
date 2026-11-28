@@ -59,7 +59,7 @@ import {
 	type HeaderRowArg,
 } from "./header-rows.js";
 import { refuseRedactedHeaders, refuseRedactedUrl } from "./redacted-input.js";
-import { BINARY_FILE_ACCESS_TOKEN, GUARDED_WRITE_SENTENCE } from "../remedy.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const REQUEST_TOOLS: McpTool[] = [
 	{
@@ -92,9 +92,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					'Body type: json, text, graphql, jsonrpc, mcp, xml, form-data, x-www-form-urlencoded, binary (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A jsonrpc `body` may be the bare call object - the engine adds `"jsonrpc":"2.0"` and `"id":1` when it names no id, and sends a frame that already declares a string `"jsonrpc"` unchanged. `binary` sends one file as the whole body: pass `file` instead of `body` (`file` alone implies `binary`). The engine sends the path only once ' +
-						BINARY_FILE_ACCESS_TOKEN +
-						', because an agent cannot choose a file on their behalf. Form-data file parts are not supported here; author them in the app. A graphql `body` may be the bare query document, and the method decides how it travels: the `{"query": ...}` JSON envelope on POST, `query`/`operationName`/`variables` query parameters with no body on GET - so give a mutation `method` POST rather than leaving the GET a new request defaults to. An mcp `body` is one call to an MCP server (`{"method":"tools/call","params":{"name":...,"arguments":{...}}}`); the engine adds `params._meta`, Accept, MCP-Protocol-Version, Mcp-Method and Mcp-Name itself, so set no header by hand (Mcp-Param-* needs a tool only the app sets). An xml `body` is stored and sent verbatim as application/xml.'
+					'Body type: json, text, graphql, jsonrpc, mcp, xml, form-data, x-www-form-urlencoded, binary (default text). For the two form types, write `body` as `key=value&key=value`; it is split into form fields. A graphql, jsonrpc or xml `body` is sent as `run_request` describes: graphql goes as query parameters on GET, so a mutation needs `method` POST, not the GET default. `binary` sends one file as the whole body: pass `file` instead of `body` (`file` alone implies `binary`). Form-data file parts are not supported here; author them in the app. An mcp `body` is one call to an MCP server (`{"method":"tools/call","params":{"name":...,"arguments":{...}}}`); the engine adds `params._meta`, Accept, MCP-Protocol-Version, Mcp-Method and Mcp-Name itself, so set no header by hand (Mcp-Param-* needs a tool only the app sets).'
 				),
 			description: z.string().optional(),
 			auth: storedAuthInput(
@@ -172,7 +170,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 		description: (config) =>
 			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, stream text path, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). " +
 			GUARDED_WRITE_SENTENCE +
-			". Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it. `mockResponseMode`/`mockExampleId` set which saved example a mock server answers this request with (`mockExampleId: null` clears it) - get_mock_routes shows the effect once a mock is running." +
+			". Only the fields you pass change - anything you leave out keeps its stored value; `headers`, `auth` and `elements` each replace the stored value whole, and a script replaces just its own element." +
 			withheldPointer(config),
 		annotations: {
 			title: "Update saved request",
@@ -195,21 +193,22 @@ export const REQUEST_TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Body type for `body`: json, text, graphql, jsonrpc, mcp, xml, form-data, x-www-form-urlencoded, binary. Only meaningful alongside `body`, or alongside `file` for binary, which replaces the body with that file exactly as `create_request` describes - sent only once " +
-						BINARY_FILE_ACCESS_TOKEN +
-						". A jsonrpc or mcp `body` is completed engine-side exactly as `create_request` describes, and a graphql `body` travels by the same method-dependent rule that tool describes - the JSON envelope on POST, query parameters on GET; an xml `body` is stored and sent verbatim as application/xml. Form-data file parts are not supported here; a stored one is left alone unless `body` replaces the whole body."
+					asOn(
+						"create_request",
+						"only meaningful alongside `body` (or `file` for binary); a graphql `body` goes as query parameters on GET, so a mutation needs POST. A stored form-data file part is left alone unless `body` replaces the whole body."
+					)
 				),
 			description: z.string().optional().describe("New description."),
 			auth: storedAuthInput(
 				"this request",
-				"Replaces the stored block whole - send the mode and its credentials together. Leave it out to keep what is stored."
+				"Replaces the stored block whole - send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain)."
 			),
 			...requestSettingsInput("create_request"),
 			mockResponseMode: z
 				.enum(["first", "fixed", "random"])
 				.optional()
 				.describe(
-					"Which saved example a mock server answers with. 'fixed' requires mockExampleId. Takes effect the next time start_mock_server runs, like every other change to a saved example."
+					"Which saved example a mock server answers with. 'fixed' requires mockExampleId. Takes effect the next time start_mock_server runs, like every other change to a saved example; get_mock_routes shows it."
 				),
 			mockExampleId: z
 				.string()
