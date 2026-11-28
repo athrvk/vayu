@@ -40,9 +40,9 @@ send_list_page (const ClientConfig& config, const Request& page_request, Respons
  * `ElementContext::send_list_page` on a load run's completion, where the step's
  * response is the event loop's and read-only. The first page copies it and
  * every page's cost lands on the copy, which the completion records in the
- * received response's place: the pages are in that step's latency and bytes,
- * and are no submission of their own, so the run's request and iteration
- * counts do not move.
+ * received response's place: the pages are in that step's latency, and are
+ * no submission of their own, so the run's request and iteration counts do
+ * not move.
  *
  * A page leaves the way the run's `pm.sendRequest` does (`RunContext::script_send`):
  * the run's transport, default headers and body bound, refused rather than cut
