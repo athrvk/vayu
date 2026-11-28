@@ -17,7 +17,7 @@ namespace vayu::http {
 
 namespace {
 
-/// @p page's time and bytes added to @p step. Its engine cost leaves the page
+/// @p page's time added to @p step. Its engine cost leaves the page
 /// out as it leaves out the step's own wire time.
 void add_page_cost (Timing& step, const Timing& page) {
     step.total_ms += page.total_ms;
