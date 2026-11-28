@@ -18,8 +18,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <expected>
-#include <format>
 #include <optional>
 #include <string>
 #include <utility>
@@ -33,6 +31,7 @@
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/mcp_reply.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/http/snapshot_page_send.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/log_text.hpp"
@@ -1394,55 +1393,6 @@ const std::string& cookie_scope) {
     config.truncate_over_limit = true;
     config.cancel              = inputs.cancel;
     return config;
-}
-
-/// @p page's time and bytes added to @p step: a page is part of what the step
-/// does, so it counts toward the step's latency and its engine cost leaves it
-/// out as it leaves out the step's own wire time.
-void add_page_cost (vayu::Timing& step, const vayu::Timing& page) {
-    step.total_ms += page.total_ms;
-    step.wire_ms += page.wire_ms;
-    step.queue_wait_ms += page.queue_wait_ms;
-    step.bytes_down += page.bytes_down;
-    step.bytes_up += page.bytes_up;
-}
-
-/**
- * `ElementContext::send_list_page` for one step (#3824): @p page_request sent
- * through @p config, its reply read by the reply reader, and the final
- * JSON-RPC response's text answered. The page is counted on @p step's
- * `mcp_reply` and its cost added to @p step, and to @p view as well when the
- * elements read a copy (`mcp_element_view`), so a later `assert.duration`
- * reads the figure the trace stores.
- */
-std::expected<std::string, vayu::core::ListPageFailure> send_list_page (
-const vayu::http::ClientConfig& config,
-const vayu::Request& page_request,
-vayu::Response& step,
-vayu::Response* view) {
-    vayu::http::Client client (config);
-    auto sent                 = client.send (page_request);
-    const vayu::Response page = sent.is_error () ?
-    vayu::http::detail::error_response (sent.error ()) :
-    std::move (sent).value ();
-    if (step.mcp_reply) {
-        ++step.mcp_reply->pages;
-    }
-    add_page_cost (step.timing, page.timing);
-    if (view != nullptr && view != &step) {
-        add_page_cost (view->timing, page.timing);
-    }
-    if (page.error_code == vayu::ErrorCode::Cancelled) {
-        return std::unexpected (vayu::core::ListPageFailure{
-        .message = "the run ended while the page was in flight", .cancelled = true });
-    }
-    auto reply = vayu::http::read_mcp_reply (page_request, page);
-    if (reply.error_class) {
-        return std::unexpected (vayu::core::ListPageFailure{
-        .message = std::format (
-        "{} failure: {}", to_string (*reply.error_class), reply.message) });
-    }
-    return std::move (reply.response);
 }
 
 } // namespace
